@@ -245,7 +245,11 @@ export default function ChannelManagerPage() {
 
             <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6">
               <h2 className="font-semibold text-gray-950">{t("channels.markups")}</h2>
-              <p className="mt-1 text-sm text-gray-500">{t("channels.markupsDescription")}</p>
+              <p className="mt-1 text-sm text-gray-500">
+                {sharedBase
+                  ? "Each channel applies its own adjustment to the shared base rate."
+                  : "Vayada applies the markups below to your existing rate variants."}
+              </p>
               {sharedBase ? (
                 <p className="mt-4 text-sm text-gray-600">
                   Channel price adjustments are managed in channel settings.
@@ -353,15 +357,23 @@ export default function ChannelManagerPage() {
 
             <section className="rounded-xl border border-gray-200 bg-white p-5">
               <h2 className="font-semibold text-gray-950">{t("channels.connectedChannels")}</h2>
+              <button
+                type="button"
+                className="mt-2 text-sm text-primary-700 disabled:opacity-50"
+                disabled={busy || !connected || !modeAllowsChanges(snapshot.capabilityModes.iframe)}
+                onClick={() => void runCommand("channel refresh", channexService.refreshChannels)}
+              >
+                Refresh channel details
+              </button>
               {snapshot.channels.length === 0 ? (
                 <p className="mt-3 text-sm leading-6 text-gray-500">
                   {t("channels.noConnectedChannels")}
                 </p>
               ) : (
                 <ul className="mt-4 divide-y divide-gray-100">
-                  {snapshot.channels.map((channel) => (
+                  {snapshot.channels.map((channel, index) => (
                     <li
-                      key={channel.key}
+                      key={channel.externalChannelId ?? `${channel.key}:${index}`}
                       className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
                     >
                       <div>
@@ -369,6 +381,20 @@ export default function ChannelManagerPage() {
                           {channel.title || channel.application}
                         </p>
                         <p className="text-xs text-gray-500">{channel.application}</p>
+                        {sharedBase && (
+                          <p className="mt-1 text-xs text-gray-600">
+                            {channel.nativeRateModifiers == null
+                              ? "Adjustment details unavailable. Review channel settings."
+                              : channel.nativeRateModifiers.length === 0
+                                ? "No channel-wide price adjustment"
+                                : channel.nativeRateModifiers
+                                    .map(
+                                      (rule) =>
+                                        `${rule.operation.startsWith("decrease") ? "−" : "+"}${rule.value}${rule.operation.endsWith("percent") ? "%" : ` ${channel.currency ?? "(channel currency)"}`}`,
+                                    )
+                                    .join(" → ")}
+                          </p>
+                        )}
                       </div>
                       <span
                         className={`h-2.5 w-2.5 rounded-full ${channel.isActive ? "bg-green-500" : "bg-gray-300"}`}

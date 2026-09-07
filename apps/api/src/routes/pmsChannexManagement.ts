@@ -392,6 +392,7 @@ function isMutating(modes: ChannexManagementCapabilityModes, type: ChannexManage
     enable: "connection",
     disable: "connection",
     provision: "provisioning",
+    refresh_channels: "iframe",
     sync_ari: "ariSync",
     sync_bookings: "bookingSync",
     update_markups: "markups",

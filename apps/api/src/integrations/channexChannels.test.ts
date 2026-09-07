@@ -136,3 +136,49 @@ it("accepts an empty complete listing", async () => {
   const { instance } = provider(vi.fn<typeof fetch>().mockResolvedValue(Response.json(page([]))));
   expect(await instance.execute(job)).toMatchObject({ ok: true, channels: [] });
 });
+
+it.each([
+  [[], []],
+  [
+    [
+      ["increase_by_percent", "12"],
+      ["decrease_by_amount", "3.50"],
+    ],
+    [
+      { operation: "increase_by_percent", value: "12" },
+      { operation: "decrease_by_amount", value: "3.50" },
+    ],
+  ],
+  [[["unsupported_rule", "12"]], null],
+  [[["increase_by_percent", "not-a-number"]], null],
+])(
+  "preserves supported modifier order and marks unsupported details unavailable (%j)",
+  async (rules, expected) => {
+    const item = channel("native");
+    const { instance } = provider(
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json(
+          page([
+            {
+              ...item,
+              attributes: {
+                ...item.attributes,
+                currency: "EUR",
+                settings: {
+                  password: "must-not-be-exposed",
+                  derived_option: { rate: rules },
+                },
+              },
+            },
+          ]),
+        ),
+      ),
+    );
+    const result = await instance.execute(job);
+    expect(result).toMatchObject({
+      ok: true,
+      channels: [{ currency: "EUR", nativeRateModifiers: expected }],
+    });
+    expect(JSON.stringify(result)).not.toContain("must-not-be-exposed");
+  },
+);

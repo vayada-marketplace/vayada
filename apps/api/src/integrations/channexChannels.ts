@@ -45,6 +45,8 @@ export async function readChannexChannels(
         throw new Error("Invalid or out-of-scope Channex channel");
       const alias = code.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
       channels.set(item.id, {
+        nativeRateModifiers: nativeRateModifiers(attributes.settings),
+        currency: typeof attributes.currency === "string" ? attributes.currency : null,
         externalChannelId: item.id,
         providerCode: code,
         key:
@@ -63,6 +65,36 @@ export async function readChannexChannels(
     body = await fetchPage(page + 1);
   }
   throw new Error("Channex channel pagination exceeded the safety limit");
+}
+
+function nativeRateModifiers(settings: unknown): ChannexConnectedChannel["nativeRateModifiers"] {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+  const derived = (settings as Record<string, unknown>).derived_option;
+  if (derived == null) return [];
+  if (typeof derived !== "object" || Array.isArray(derived)) return null;
+  const rules = (derived as Record<string, unknown>).rate;
+  if (rules == null) return [];
+  if (!Array.isArray(rules) || rules.length > 20) return null;
+  const supported = [
+    "increase_by_percent",
+    "decrease_by_percent",
+    "increase_by_amount",
+    "decrease_by_amount",
+  ];
+  const result = [];
+  for (const rule of rules) {
+    if (
+      !Array.isArray(rule) ||
+      rule.length !== 2 ||
+      !supported.includes(rule[0]) ||
+      typeof rule[1] !== "string" ||
+      !/^\d+(?:\.\d+)?$/.test(rule[1]) ||
+      rule[1].length > 30
+    )
+      return null;
+    result.push({ operation: rule[0] as string, value: rule[1] });
+  }
+  return result;
 }
 
 function record(value: unknown): Record<string, unknown> {

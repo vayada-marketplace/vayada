@@ -189,6 +189,27 @@ describe("target Channex management plans", () => {
     });
   });
 
+  it("refreshes channel details without provisioning or rate writes", async () => {
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: new FakePool("provision"),
+      bookingRevisionHandoff: vi.fn(),
+    }).plan(job("refresh_channels"));
+    expect(plan.requests).toEqual([
+      {
+        method: "GET",
+        path: "/api/v1/channels",
+        query: {
+          "filter[property_id]": "external-1",
+          "pagination[limit]": "100",
+          "pagination[page]": "1",
+        },
+        capture: { kind: "channels" },
+      },
+    ]);
+    expect(plan.meals).toBeUndefined();
+  });
+
   it("rejects stale queued Vayada markup writes under shared pricing", async () => {
     const port = createPgChannexManagementPlanPort({
       connectionString: "postgresql://target",

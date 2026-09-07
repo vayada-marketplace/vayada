@@ -13,6 +13,7 @@ describe("PMS Channex management contract", () => {
       "enable",
       "disable",
       "provision",
+      "refresh_channels",
       "sync_ari",
       "sync_bookings",
       "update_markups",

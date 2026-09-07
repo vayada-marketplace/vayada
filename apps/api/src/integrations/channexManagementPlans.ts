@@ -143,6 +143,12 @@ async function basePlan(
       : { requests: [] };
   }
   if (!externalPropertyId) throw new Error("Channex connection is not enabled");
+  if (job.input.operationType === "refresh_channels")
+    return {
+      externalPropertyId,
+      requests: [channexRequests.listChannels(externalPropertyId)],
+      checkpoint: checkpoint(pool, job),
+    };
   if (job.input.operationType === "provision") {
     return provisioningPlan(
       pool,
