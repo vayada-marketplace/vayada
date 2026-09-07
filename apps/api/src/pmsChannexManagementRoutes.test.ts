@@ -26,6 +26,7 @@ const mutating: ChannexManagementCapabilityModes = {
 type Access = {
   authenticated?: boolean;
   permission?: boolean;
+  permissions?: Array<"pms.operations.read" | "pms.operations.manage">;
   entitlement?: "active" | "suspended" | "missing";
   linked?: boolean;
   relationship?: "operator" | "finance_manager";
@@ -108,6 +109,19 @@ describe("PMS Channex management command routes", () => {
     app = guarded.app;
     expect((await datePrice(app)).statusCode).toBe(409);
     expect(guarded.putDatePrice).not.toHaveBeenCalled();
+  });
+
+  it("denies recovery to a member with read-only PMS permission", async () => {
+    const harness = await testApp({ permissions: ["pms.operations.read"] });
+    app = harness.app;
+    const response = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+      headers: { authorization: "Bearer valid" },
+      payload: { round: 0 },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(harness.recoverAlert).not.toHaveBeenCalled();
   });
 
   it("authorizes property alert reads and recovery, and rejects another property", async () => {
@@ -347,7 +361,9 @@ function context(access: Access): RequestContext {
     selectedOrganization: { organizationId: "organization-1", kind: "hotel_group" },
     membership: {
       permissions:
-        access.permission === false ? [] : ["pms.operations.manage", "pms.operations.read"],
+        access.permission === false
+          ? []
+          : (access.permissions ?? ["pms.operations.manage", "pms.operations.read"]),
     },
     entitlements:
       entitlement === "missing"

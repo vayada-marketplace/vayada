@@ -408,7 +408,10 @@ it("refuses to verify empty successful responses or incident scope outside submi
     fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 })),
     plans: { plan: async () => plan },
   });
-  expect(await provider.execute(job("sync_ari"))).toMatchObject({ ok: false });
+  expect(await provider.execute(job("sync_ari"))).toMatchObject({
+    ok: false,
+    code: "provider_unavailable",
+  });
   expect(
     coversAlertScope(plan, { roomTypeId: "room", dateFrom: "2026-09-10", dateTo: "2026-09-10" }),
   ).toBe(true);
