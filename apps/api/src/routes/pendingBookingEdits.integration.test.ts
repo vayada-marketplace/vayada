@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createPgBookingLifecycleStore } from "../jobs/bookingLifecycle.js";
-import { loadBookingNotificationSnapshot } from "../jobs/bookingEmails.js";
+import {
+  enqueueBookingTransitionNotifications,
+  loadBookingNotificationSnapshot,
+} from "../jobs/bookingEmails.js";
 import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
 import { authorizeStripeBookingPayment } from "../domains/stripeBookingSettlement.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
@@ -14,6 +17,96 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
     const { pool, now, adapter, command, edit, url, intents, stripe } = fixture;
     it("returns edit eligibility immediately after pending checkout creation", () => {
       expect(fixture.created.booking).toMatchObject({ status: "pending", canEditRequest: true });
+    });
+
+    it("resolves only valid property host contacts and audits missing recipients once", async () => {
+      const client = await pool.connect();
+      const input = { propertyId, guestBookingId: fixture.created.booking.id };
+      try {
+        await client.query("BEGIN");
+        await client.query(`INSERT INTO hotel_catalog.properties
+          (id, public_id, display_name, profile_status, lifecycle_status)
+          VALUES ('95900000-0000-4000-8000-000000000099', 'other-host', 'Other', 'complete', 'active')`);
+        await client.query(
+          `INSERT INTO hotel_catalog.property_contact_channels
+          (property_id, channel_type, value, purpose, is_public, source_system) VALUES
+          ($1, 'email', 'creator@example.test', 'creator', TRUE, 'platform'),
+          ($1, 'email', 'invalid', 'operations', FALSE, 'platform'),
+          ($1, 'email', 'legacy@example.test', 'general', TRUE, 'booking'),
+          ('95900000-0000-4000-8000-000000000099', 'email', 'other@example.test', 'operations', FALSE, 'platform')`,
+          [propertyId],
+        );
+        expect((await loadBookingNotificationSnapshot(client, input))?.hostEmail).toBe(
+          "hotel@example.test",
+        );
+        await client.query(
+          `INSERT INTO hotel_catalog.property_contact_channels
+          (property_id, channel_type, value, purpose, is_public, source_system)
+          VALUES ($1, 'email', 'operations@example.test', 'operations', FALSE, 'platform')`,
+          [propertyId],
+        );
+        expect((await loadBookingNotificationSnapshot(client, input))?.hostEmail).toBe(
+          "operations@example.test",
+        );
+        await client.query(
+          `DELETE FROM hotel_catalog.property_contact_channels
+          WHERE property_id=$1 AND value IN ('operations@example.test', 'hotel@example.test')`,
+          [propertyId],
+        );
+        expect((await loadBookingNotificationSnapshot(client, input))?.hostEmail).toBe(
+          "legacy@example.test",
+        );
+        await client.query(
+          `DELETE FROM hotel_catalog.property_contact_channels
+          WHERE property_id=$1 AND value='legacy@example.test'`,
+          [propertyId],
+        );
+        expect((await loadBookingNotificationSnapshot(client, input))?.hostEmail).toBeNull();
+        const transition = {
+          eventType: "guest_booking.request_updated",
+          fromStatus: "pending_payment",
+          toStatus: "pending_payment",
+          revision: "missing-host-test",
+        };
+        for (let replay = 0; replay < 2; replay++) {
+          expect(
+            await enqueueBookingTransitionNotifications(client, {
+              ...input,
+              occurredAt: now.toISOString(),
+              transition,
+            }),
+          ).toEqual([]);
+        }
+        expect(
+          (
+            await client.query(
+              `SELECT id FROM platform.jobs WHERE property_id=$1
+          AND job_type='email.booking-host-request-updated'`,
+              [propertyId],
+            )
+          ).rows,
+        ).toHaveLength(0);
+        expect(
+          (
+            await client.query(
+              `SELECT redacted_payload FROM platform.product_audit_events
+          WHERE property_id=$1 AND action='booking.notification.missing_recipient'
+          AND redacted_payload #>> '{transition,revision}'='missing-host-test'`,
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            redacted_payload: expect.objectContaining({
+              outcome: "blocked",
+              reason: "host_recipient_missing",
+            }),
+          },
+        ]);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
 
     it("rejects missing credentials and invalid occupancy", async () => {
@@ -170,14 +263,17 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
           )
         ).rows,
       ).toEqual([{ quantity: 1 }]);
-      expect(
-        (
-          await pool.query(
-            `SELECT * FROM platform.jobs WHERE property_id=$1 AND job_type='email.booking-host-request-updated'`,
-            [propertyId],
-          )
-        ).rows,
-      ).toHaveLength(1);
+      const notifications = (
+        await pool.query(
+          `SELECT payload FROM platform.jobs WHERE property_id=$1 AND job_type='email.booking-host-request-updated'`,
+          [propertyId],
+        )
+      ).rows;
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].payload).toMatchObject({
+        to: "hotel@example.test",
+        recipientRole: "host",
+      });
       await expect(edit("quote", input)).rejects.toMatchObject({ statusCode: 409 });
     });
 

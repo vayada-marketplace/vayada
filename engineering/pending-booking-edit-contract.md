@@ -149,6 +149,13 @@ the original result without consuming inventory, promo usage, or notifications
 again. Reuse the VAY-930 booking email snapshot and queue; do not invoke its
 guest confirmation resend command or send a confirmed-booking email.
 
+Resolve the host recipient from the same property's valid operations email,
+then its canonical platform general email or legacy Booking general email.
+Never fall back to guest, creator, or unrelated account addresses. A missing
+host recipient records a revision-keyed `booking.notification.missing_recipient`
+audit with a blocked outcome; the guest edit still commits, but no invalid
+email job is created and notification delivery is not claimed.
+
 ## Required verification
 
 - End-to-end prefill and save for every editable field, including room count,
