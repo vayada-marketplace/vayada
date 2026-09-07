@@ -1,3 +1,4 @@
+import { stayRestrictionReplacement } from "../domains/pmsStayRestrictions.js";
 import {
   CHANNEX_MANAGEMENT_OPERATION_TYPES,
   type ChannexManagementCapabilityModes,
@@ -92,6 +93,45 @@ export async function registerPmsChannexManagementRoutes(
           operationType: "update_markups",
         }),
       );
+    },
+  );
+
+  app.get<{ Params: { propertyId: string } }>(
+    "/properties/:propertyId/channex/stay-restrictions",
+    async (request, reply) => {
+      enforcePmsChannexPolicy(request, request.params.propertyId, "pms.operations.read");
+      if (!options.repository.getStayRestrictions)
+        return reply.code(503).send({ code: "channex_commands_unavailable" });
+      return { rules: await options.repository.getStayRestrictions(request.params.propertyId) };
+    },
+  );
+  app.put<{ Params: { propertyId: string }; Body: unknown }>(
+    "/properties/:propertyId/channex/stay-restrictions",
+    async (request, reply) => {
+      const context = enforcePmsChannexPolicy(
+        request,
+        request.params.propertyId,
+        "pms.operations.manage",
+      );
+      if (options.capabilityModes.ariSync !== "mutating")
+        return reply.code(409).send({ code: "channex_capability_not_mutating" });
+      const body = request.body as Record<string, unknown> | null;
+      const parsed = stayRestrictionReplacement.safeParse(body?.restrictions);
+      if (!body || !isCommandIdentity(body.commandId, body.idempotencyKey) || !parsed.success)
+        return reply.code(400).send({ code: "invalid_stay_restrictions" });
+      if (!options.commandPort)
+        return reply.code(503).send({ code: "channex_commands_unavailable" });
+      const result = await options.commandPort.enqueue(context, request.params.propertyId, {
+        commandId: body.commandId as string,
+        idempotencyKey: body.idempotencyKey as string,
+        operationType: "sync_ari",
+        restrictions: parsed.data,
+      });
+      if (!result.ok && result.code === "invalid_stay_restrictions")
+        return reply.code(400).send(result);
+      if (!result.ok && result.code === "stay_restriction_scope_not_found")
+        return reply.code(404).send(result);
+      return sendCommandResult(reply, result);
     },
   );
 

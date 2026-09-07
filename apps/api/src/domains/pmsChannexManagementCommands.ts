@@ -1,3 +1,4 @@
+import type { StayRestrictionReplacement } from "./pmsStayRestrictions.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import type {
   ChannexManagementOperation,
@@ -10,6 +11,7 @@ export type PmsChannexManagementCommandInput = {
   operationType: ChannexManagementOperationType;
   /** Internal pricing-save reconciliation scope; never accepted from the public command body. */
   mealRatePlanId?: string;
+  restrictions?: StayRestrictionReplacement;
   restrictionsOnly?: boolean;
   markups?: Array<{ channel: string; markupPercent: number }>;
 };
@@ -18,7 +20,11 @@ export type PmsChannexManagementCommandResult =
   | { ok: true; operation: ChannexManagementOperation; replayed: boolean }
   | {
       ok: false;
-      code: "connection_required" | "idempotency_conflict";
+      code:
+        | "connection_required"
+        | "idempotency_conflict"
+        | "invalid_stay_restrictions"
+        | "stay_restriction_scope_not_found";
       message: string;
     };
 
