@@ -75,7 +75,12 @@ async function claim(
          correlation_id AS "correlationId", status, attempts_count AS "attemptsCount",
          max_attempts AS "maxAttempts", payload
        FROM platform.jobs
-       WHERE queue_name = $1 AND (
+       WHERE queue_name = $1 AND NOT EXISTS (
+         SELECT 1 FROM platform.jobs active
+         WHERE active.queue_name = $1 AND active.property_id = platform.jobs.property_id
+           AND active.id <> platform.jobs.id AND active.status = 'running'
+           AND active.locked_at > now() - ($2::bigint * interval '1 millisecond')
+       ) AND (
          (status = 'pending' AND run_after <= now())
          OR (status = 'running' AND locked_at <= now() - ($2::bigint * interval '1 millisecond'))
        )
@@ -85,6 +90,19 @@ async function claim(
     );
     const row = result.rows[0];
     if (!row) return null;
+    // Serialize claim decisions per property, including across worker instances.
+    const property = await client.query(
+      "SELECT id FROM hotel_catalog.properties WHERE id = $1::uuid FOR UPDATE SKIP LOCKED",
+      [row.propertyId],
+    );
+    if (!property.rows.length) return null;
+    const active = await client.query(
+      `SELECT id FROM platform.jobs WHERE queue_name = $1 AND property_id = $2::uuid
+         AND id <> $3::uuid AND status = 'running'
+         AND locked_at > now() - ($4::bigint * interval '1 millisecond')`,
+      [PMS_CHANNEX_MANAGEMENT_QUEUE, row.propertyId, row.jobId, LEASE_MS],
+    );
+    if (active.rows.length) return null;
     if (row.status === "running" && row.attemptsCount > 0) {
       await client.query(
         `UPDATE platform.job_attempts SET status = 'timed_out', finished_at = now(),

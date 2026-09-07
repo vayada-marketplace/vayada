@@ -870,6 +870,7 @@ const pmsGuestPolicySetupCommands =
         pricing: createPgPmsPricingCommandRepository({
           connectionString: targetDatabaseUrl,
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
+          channexMealSyncEnabled: config.channexManagement.capabilityModes.provisioning === "mutating",
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,
