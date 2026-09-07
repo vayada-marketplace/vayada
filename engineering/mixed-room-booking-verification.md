@@ -119,11 +119,21 @@ were available at the final inspection. Independent review is recorded separatel
 Stacked branches do not run the main-targeted full PR workflow until retargeted;
 full local validation above is not a claim of full-stack CI coverage.
 
-Deployed smoke has not run: the stack is unmerged. VAY-959 separately identified a
-canonical pay-at-property readiness mismatch (Finance persists `pay_at_property`,
-while checkout also requires `cash` or `manual_card`). The local synthetic fixture
-included `cash`; it does not validate or fix that deployed prerequisite. No shared
-deployed property, account, reservation or payment was changed for this work.
-After merge, verify the running API/frontend revisions, coordinate shared smoke
-fixtures and test the deployed flow. Keep VAY-910 In Progress until explicit
-acceptance.
+Full deployed mixed-room smoke remains pending: the feature stack and activation
+are not fully merged. The earlier pay-at-property readiness fix is included in
+the isolated test candidate `65cdd44ce39a83ff7ec418f2947c0efa008a8542`, verified
+on API task definition 10 and guest task definition 5. The actual synthetic hotel
+host reports that guest build. Preview admin remains revision 4, and ALB routing
+conditions/actions remain unchanged.
+
+Coordinated prerequisite smoke on that candidate confirmed pending-edit entry,
+prefill and cancel behavior, but price review returned an offer-unavailable 409.
+VAY-959 owns that investigation. VAY-1529 also found that legacy room adaptation
+selects an older offer and hides the canonical meal rate; its owner is repairing
+that path. Synthetic requests were withdrawn and the shared fixture restored by
+the smoke owners. These checks do not establish mixed-room acceptance.
+
+Continue merging the reviewed stack with required checks, deploy compatible
+consumers before activation, verify actual running revisions, and coordinate
+shared fixtures for the final mixed-room flow. Keep VAY-910 In Progress until
+explicit acceptance.
