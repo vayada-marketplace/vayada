@@ -90,6 +90,45 @@ describe("PMS Channex management command routes", () => {
     expect((await datePrice(app)).statusCode).toBe(statusCode);
     expect(harness.putDatePrice).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/reservations/booking-1/no-show-report`,
+          headers: { authorization: "Bearer valid" },
+          payload: { waivedFees: false, retry: false },
+        })
+      ).statusCode,
+    ).toBe(statusCode);
+    expect(harness.reportSubmit).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit fee choice and property-scoped authorization for reporting", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    const call = (payload: unknown, property = propertyId) =>
+      app!.inject({
+        method: "POST",
+        url: `/properties/${property}/reservations/booking-1/no-show-report`,
+        headers: { authorization: "Bearer valid" },
+        payload,
+      });
+    expect((await call({ retry: false })).statusCode).toBe(400);
+    expect((await call({ waivedFees: false, retry: false }, operationId)).statusCode).toBe(403);
+    expect(harness.reportSubmit).not.toHaveBeenCalled();
+    expect((await call({ waivedFees: false, retry: false })).statusCode).toBe(202);
+    expect(harness.reportSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ actor: { internalUserId: "actor-1" } }),
+      propertyId,
+      "booking-1",
+      false,
+      false,
+    );
+    await app.close();
+    const disabled = await testApp({}, { ...mutating, bookingSync: "observe_only" });
+    app = disabled.app;
+    expect((await call({ waivedFees: false, retry: false })).statusCode).toBe(409);
+    expect(disabled.reportSubmit).not.toHaveBeenCalled();
   });
 
   it("saves/removes validated date prices and honors the ARI cutover guard", async () => {
@@ -310,6 +349,16 @@ async function testApp(
   const app = Fastify({ logger: false });
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
   const enqueue = vi.fn<PmsChannexManagementCommandPort["enqueue"]>();
+  const reportSubmit = vi
+    .fn()
+    .mockResolvedValue({
+      eligible: true,
+      reason: null,
+      localNoShow: true,
+      status: "pending",
+      retryable: false,
+      waivedFees: false,
+    });
   enqueue.mockResolvedValue({ ok: true, operation: operation(), replayed: false });
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
@@ -350,8 +399,10 @@ async function testApp(
     },
     capabilityModes,
     commandPort: { enqueue, recoverAlert },
+    noShowReports: { get: vi.fn(), submit: reportSubmit },
+    noShowReportingEnabled: capabilityModes.bookingSync === "mutating",
   });
-  return { app, enqueue, putDatePrice, recoverAlert };
+  return { app, enqueue, putDatePrice, recoverAlert, reportSubmit };
 }
 
 function context(access: Access): RequestContext {
