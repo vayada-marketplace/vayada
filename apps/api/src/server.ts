@@ -113,7 +113,6 @@ import { createPgPropertySetupFinanceOwnerScopePort } from "./domains/propertySe
 import { createPgPropertySetupPmsOwnerRepository } from "./domains/propertySetupPmsOwnerRepository.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
 import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
-import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import {
   PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
@@ -886,7 +885,8 @@ const pmsGuestPolicySetupCommands =
         pricing: createPgPmsPricingCommandRepository({
           connectionString: targetDatabaseUrl,
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
-          channexMealSyncEnabled: config.channexManagement.capabilityModes.provisioning === "mutating",
+          channexMealSyncEnabled:
+            config.channexManagement.capabilityModes.provisioning === "mutating",
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,
@@ -1578,48 +1578,52 @@ const app = buildApp({
 });
 
 const creatorPlatformSyncConfig = config.creatorPlatformConnections?.sync;
-const creatorPlatformSyncWorker = config.backgroundWorkersEnabled && creatorPlatformSyncConfig?.enabled
-  ? startCreatorPlatformSyncWorker({
-      store: createPgCreatorPlatformSyncStore({ connectionString: targetDatabaseUrl }),
-      repository: createPgMarketplaceCreatorPlatformConnectionRepository({
+const creatorPlatformSyncWorker =
+  config.backgroundWorkersEnabled && creatorPlatformSyncConfig?.enabled
+    ? startCreatorPlatformSyncWorker({
+        store: createPgCreatorPlatformSyncStore({ connectionString: targetDatabaseUrl }),
+        repository: createPgMarketplaceCreatorPlatformConnectionRepository({
+          connectionString: targetDatabaseUrl,
+        }),
+        credentialVault: creatorPlatformConnectionRuntime.credentialVault,
+        adapters: creatorPlatformConnectionRuntime.adapters,
+        credentialSecretPrefix: creatorPlatformConnectionRuntime.credentialSecretPrefix,
+        workerId: `creator-platform-sync:${process.pid}`,
+        pollIntervalMs: creatorPlatformSyncConfig.pollIntervalMs,
+        syncIntervalMs: creatorPlatformSyncConfig.recurringIntervalMs,
+        batchSize: creatorPlatformSyncConfig.batchSize,
+        maxAttempts: creatorPlatformSyncConfig.maxAttempts,
+        minimumSpacingMs: creatorPlatformSyncConfig.minimumSpacingMs,
+        warn: (details, message) => app.log.warn(details, message),
+      })
+    : undefined;
+
+const staffRemovalWorker =
+  config.backgroundWorkersEnabled && staffInvitationRuntime
+    ? startStaffRemovalWorker({
+        repository: staffInvitationRuntime.removalJobRepository,
+        coordinator: staffInvitationRuntime.removal,
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
+
+const pmsInboxAssignmentReconciliationWorker =
+  config.backgroundWorkersEnabled && pmsInboxRuntime
+    ? startPmsInboxAssignmentReconciliationWorker({
         connectionString: targetDatabaseUrl,
-      }),
-      credentialVault: creatorPlatformConnectionRuntime.credentialVault,
-      adapters: creatorPlatformConnectionRuntime.adapters,
-      credentialSecretPrefix: creatorPlatformConnectionRuntime.credentialSecretPrefix,
-      workerId: `creator-platform-sync:${process.pid}`,
-      pollIntervalMs: creatorPlatformSyncConfig.pollIntervalMs,
-      syncIntervalMs: creatorPlatformSyncConfig.recurringIntervalMs,
-      batchSize: creatorPlatformSyncConfig.batchSize,
-      maxAttempts: creatorPlatformSyncConfig.maxAttempts,
-      minimumSpacingMs: creatorPlatformSyncConfig.minimumSpacingMs,
-      warn: (details, message) => app.log.warn(details, message),
-    })
-  : undefined;
+        workerId: `pms-inbox-assignment-reconciliation:${process.pid}`,
+        warn: (error, message) => app.log.warn({ error }, message),
+      })
+    : undefined;
 
-const staffRemovalWorker = config.backgroundWorkersEnabled && staffInvitationRuntime
-  ? startStaffRemovalWorker({
-      repository: staffInvitationRuntime.removalJobRepository,
-      coordinator: staffInvitationRuntime.removal,
-      warn: (error, message) => app.log.warn(error, message),
-    })
-  : undefined;
-
-const pmsInboxAssignmentReconciliationWorker = config.backgroundWorkersEnabled && pmsInboxRuntime
-  ? startPmsInboxAssignmentReconciliationWorker({
-      connectionString: targetDatabaseUrl,
-      workerId: `pms-inbox-assignment-reconciliation:${process.pid}`,
-      warn: (error, message) => app.log.warn({ error }, message),
-    })
-  : undefined;
-
-const pmsInboxFollowUpReleaseWorker = config.backgroundWorkersEnabled && pmsInboxRuntime
-  ? startPmsInboxFollowUpReleaseWorker({
-      connectionString: targetDatabaseUrl,
-      workerId: `pms-inbox-follow-up-release:${process.pid}`,
-      warn: (error, message) => app.log.warn({ error }, message),
-    })
-  : undefined;
+const pmsInboxFollowUpReleaseWorker =
+  config.backgroundWorkersEnabled && pmsInboxRuntime
+    ? startPmsInboxFollowUpReleaseWorker({
+        connectionString: targetDatabaseUrl,
+        workerId: `pms-inbox-follow-up-release:${process.pid}`,
+        warn: (error, message) => app.log.warn({ error }, message),
+      })
+    : undefined;
 
 const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
 app.addHook("onReady", async () => {
@@ -1631,13 +1635,14 @@ app.addHook("onClose", async () => {
   await postgresRuntime.close();
 });
 
-const bookingPublicationWorker = config.backgroundWorkersEnabled && bookingPublicationRuntime
-  ? startBookingPublicationWorker({
-      projector: bookingPublicationRuntime.projector,
-      workerId: `booking-publication:${process.pid}`,
-      warn: (error, message) => app.log.warn(error, message),
-    })
-  : undefined;
+const bookingPublicationWorker =
+  config.backgroundWorkersEnabled && bookingPublicationRuntime
+    ? startBookingPublicationWorker({
+        projector: bookingPublicationRuntime.projector,
+        workerId: `booking-publication:${process.pid}`,
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
 const bookingGuestPolicyProjectionWorker =
   config.apiRuntime === "next" && config.backgroundWorkersEnabled
     ? startBookingGuestPolicyProjectionWorker({
@@ -1794,25 +1799,7 @@ app.addHook("onClose", async () => {
   ]);
 });
 
-const channexAriSchedule =
-  channexManagementWorkerStore &&
-  config.backgroundWorkersEnabled &&
-  config.channexManagement.capabilityModes.ariSync === "mutating"
-    ? createPgChannexAriSchedule(targetDatabaseUrl)
-    : undefined;
-let activeChannexScheduleRun: Promise<unknown> | undefined;
-const scheduleChannexAri = () => {
-  if (!channexAriSchedule || activeChannexScheduleRun) return;
-  activeChannexScheduleRun = channexAriSchedule
-    .enqueue()
-    .catch((err: unknown) => app.log.warn({ err }, "Channex ARI scheduling failed"))
-    .finally(() => {
-      activeChannexScheduleRun = undefined;
-    });
-};
-const channexScheduleTimer = channexAriSchedule ? setInterval(scheduleChannexAri, 60_000) : undefined;
-channexScheduleTimer?.unref();
-scheduleChannexAri();
+// VAY-1546: automatic rate delivery resumes with the replacement pricing system.
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
   if (!config.backgroundWorkersEnabled) return;
@@ -1841,13 +1828,10 @@ channexManagementTimer?.unref();
 if (channexManagementWorkerStore) runChannexManagement();
 app.addHook("onClose", async () => {
   if (channexManagementTimer) clearInterval(channexManagementTimer);
-  if (channexScheduleTimer) clearInterval(channexScheduleTimer);
-  await activeChannexScheduleRun;
   await activeChannexManagementRun;
   await Promise.all([
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
-    channexAriSchedule?.close(),
     channexBookingRevisionStore?.close?.(),
   ]);
 });
