@@ -636,6 +636,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex`, (route) =>
     route.fulfill({ json: pmsWebChannexSnapshot }),
   );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex/alerts`, (route) =>
+    route.fulfill({ json: [] }),
+  );
   let inboxThread = { ...pmsWebInboxThread };
   let providerActionAccepted = false;
   let inboxTimeline: Array<Record<string, unknown>> = [

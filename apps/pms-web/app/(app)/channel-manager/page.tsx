@@ -8,6 +8,7 @@ import {
   ExclamationTriangleIcon,
   LinkIcon,
 } from "@heroicons/react/24/outline";
+import { OperationalAlerts } from "@/components/channel-manager/OperationalAlerts";
 import { useTranslation } from "@/lib/i18n";
 import { channexService } from "@/services/channex";
 import {
@@ -101,6 +102,11 @@ export default function ChannelManagerPage() {
           </div>
         )}
         {operation && <OperationBanner operation={operation} />}
+        <OperationalAlerts
+          key={snapshot.propertyId}
+          snapshot={snapshot}
+          openSettings={openConsole}
+        />
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
           <div className="space-y-5">
