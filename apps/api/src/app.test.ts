@@ -14438,7 +14438,7 @@ describe("vayada-api", () => {
             {
               propertyId: input.propertyId,
               threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
-              action: "booking_com_no_reply_needed" as const,
+              action: input.action ?? "booking_com_no_reply_needed",
               jobId,
               acceptedAt: "2026-09-03T11:00:00.000Z",
               attentionStateChanged: false as const,
@@ -14456,10 +14456,10 @@ describe("vayada-api", () => {
       pmsOperationsAllowedOrigins: ["https://pms.localhost"],
     });
     const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads/${threadId}/provider-actions/no-reply-needed`;
-    const post = (key?: string, payload?: unknown) =>
+    const post = (key?: string, payload: unknown = { expectedVersion: 4 }, closure = false) =>
       injectJson(app!, {
         method: "POST",
-        url,
+        url: closure ? url.replace("no-reply-needed", "close") : url,
         headers: {
           authorization: "Bearer valid-token",
           ...(key ? { "idempotency-key": key } : {}),
@@ -14491,6 +14491,9 @@ describe("vayada-api", () => {
     ] as const)
       await expect(post(key)).resolves.toMatchObject({ statusCode, body: { code } });
 
+    await expect(post("closure", { expectedVersion: 4 }, true)).resolves.toMatchObject({
+      statusCode: 202, body: { action: "channex_close" },
+    });
     const beforeInvalid = calls.length;
     await expect(post()).resolves.toMatchObject({
       statusCode: 400,
@@ -14571,6 +14574,12 @@ describe("vayada-api", () => {
         payload: "{",
       });
       expect(response.statusCode, candidate.name).toBe(candidate.status);
+      const closure = await app.inject({ method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
+        headers: { ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }), "idempotency-key": "closure" },
+        payload: { expectedVersion: 4 },
+      });
+      expect(closure.statusCode, candidate.name).toBe(candidate.status);
       await app.close();
       app = null;
     }
@@ -14858,7 +14867,7 @@ describe("vayada-api", () => {
     const base = `/api/pms/properties/${pmsPropertyId}/messaging`;
     for (const [path, payload] of [
       ["messages", { expectedThreadVersion: 4, text: "Test", attachmentMediaIds: [] }],
-      ["provider-actions/no-reply-needed", {}],
+      ["provider-actions/no-reply-needed", { expectedVersion: 4 }],
     ] as const) {
       for (const authorization of [undefined, "Bearer invalid-token", "Bearer valid-token"]) {
         const response = await injectJson(app, {

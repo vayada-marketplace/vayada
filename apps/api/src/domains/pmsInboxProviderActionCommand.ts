@@ -47,19 +47,24 @@ type PermissionRow = { permissionKey: string };
 type ThreadRow = {
   sourceThreadId: string;
   providerCapable: boolean;
+  version: string;
 };
 type ConnectionRow = { connectionStatus: string; messagingAppInstalled: boolean };
 type InsertedIdRow = { id: string };
 
-const OPERATION = "pms.inbox.provider.no_reply_needed";
+const operation = (input: Input) =>
+  input.action === "channex_close"
+    ? "pms.inbox.provider.close"
+    : "pms.inbox.provider.no_reply_needed";
+const action = (input: Input) => input.action ?? "booking_com_no_reply_needed";
 const JOB_TYPE = "pms.inbox.provider-action.deliver";
-const ACTION = "booking_com_no_reply_needed";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function createPgPmsInboxProviderActionPort(config: {
   connectionString: string;
   pool?: PmsInboxProviderActionPool;
   max?: number;
+  mutationEnabled?: boolean;
   now?: () => Date;
 }): PgPmsInboxProviderActionPort {
   if (!config.pool && !config.connectionString.trim())
@@ -74,15 +79,18 @@ export function createPgPmsInboxProviderActionPort(config: {
     async noReplyNeeded(rawInput) {
       const input = normalizeInput(rawInput);
       if (!input) return failure("validation_failed", "Inbox provider-action request is invalid.");
+      if (!config.mutationEnabled)
+        return failure("provider_action_unavailable", "Provider messaging mutations are disabled.");
       const acceptedAt = now();
       if (!Number.isFinite(acceptedAt.getTime()))
         throw new Error("PMS Inbox provider-action clock is invalid");
       const keyHash = sha256(input.idempotencyKey);
       const fingerprint = sha256(
         stableJson({
-          operation: OPERATION,
+          operation: operation(input),
           propertyId: input.propertyId,
           threadId: input.threadId,
+          expectedVersion: input.expectedVersion,
         }),
       );
       const client = await pool.connect();
@@ -109,12 +117,22 @@ export function createPgPmsInboxProviderActionPort(config: {
           );
         }
 
-        const thread = await lockThread(client, input.propertyId, input.threadId);
+        const thread = await lockThread(client, input);
         if (!thread)
           return await commitResult(
             client,
             idempotencyId,
             failure("thread_not_found", "Inbox thread was not found."),
+            acceptedAt,
+          );
+        if (Number(thread.version) !== input.expectedVersion)
+          return await commitResult(
+            client,
+            idempotencyId,
+            failure(
+              "thread_version_conflict",
+              "Conversation changed. Refresh and reapply the provider action.",
+            ),
             acceptedAt,
           );
         if (!thread.providerCapable || !(await lockProviderCapability(client, input.propertyId)))
@@ -123,13 +141,13 @@ export function createPgPmsInboxProviderActionPort(config: {
             idempotencyId,
             failure(
               "provider_action_unavailable",
-              "Booking.com no reply needed is unavailable for this conversation.",
+              "Provider action is unavailable for this conversation.",
             ),
             acceptedAt,
           );
 
         const providerIdempotencyReference = `vayada-no-reply-${sha256(
-          `${input.propertyId}:${input.threadId}:${keyHash}`,
+          `${input.propertyId}:${input.threadId}:${action(input)}:${keyHash}`,
         )}`;
         const eventId = await insertAcceptedEvent(
           client,
@@ -139,6 +157,42 @@ export function createPgPmsInboxProviderActionPort(config: {
           acceptedAt,
         );
         await insertAudit(client, input, eventId, idempotencyId, keyHash, acceptedAt);
+        const recovery = await client.query<InsertedIdRow>(
+          `UPDATE platform.jobs SET status = 'pending', run_after = $4, finished_at = NULL,
+             max_attempts = attempts_count + 5, updated_at = $4, payload = $5::jsonb,
+             job_metadata = job_metadata || '{"outcome":"pending","reason":null,"dispatched":false}'::jsonb
+           WHERE id = (SELECT id FROM platform.jobs WHERE property_id = $1 AND resource_id = $2
+             AND job_type = $3 AND payload->>'action' = $6 AND status = 'failed'
+             AND job_metadata->>'reason' IS DISTINCT FROM 'ambiguous_provider_outcome'
+             ORDER BY created_at DESC LIMIT 1) RETURNING id::text`,
+          [
+            input.propertyId,
+            input.threadId,
+            JOB_TYPE,
+            acceptedAt,
+            JSON.stringify(
+              deliveryPayload(input, thread.sourceThreadId, providerIdempotencyReference),
+            ),
+            action(input),
+          ],
+        );
+        if (recovery.rows[0])
+          return await commitResult(
+            client,
+            idempotencyId,
+            {
+              ok: true,
+              value: {
+                propertyId: input.propertyId,
+                threadId: input.threadId,
+                action: action(input),
+                jobId: recovery.rows[0].id,
+                acceptedAt: acceptedAt.toISOString(),
+                attentionStateChanged: false,
+              },
+            },
+            acceptedAt,
+          );
         const outboxId = await insertOutbox(
           client,
           input,
@@ -166,7 +220,7 @@ export function createPgPmsInboxProviderActionPort(config: {
             value: {
               propertyId: input.propertyId,
               threadId: input.threadId,
-              action: ACTION,
+              action: action(input),
               jobId,
               acceptedAt: acceptedAt.toISOString(),
               attentionStateChanged: false,
@@ -193,6 +247,10 @@ export function createPgPmsInboxProviderActionPort(config: {
 
 function normalizeInput(input: Input): Input | null {
   if (
+    !Number.isSafeInteger(input.expectedVersion) ||
+    input.expectedVersion < 1 ||
+    (input.action !== undefined &&
+      !["booking_com_no_reply_needed", "channex_close"].includes(input.action)) ||
     !UUID.test(input.propertyId) ||
     !UUID.test(input.threadId) ||
     !UUID.test(input.organizationId) ||
@@ -323,7 +381,7 @@ async function findReplay(
      WHERE operation_scope = 'pms' AND operation = $1 AND key_hash = $2
        AND tenant_scope = 'property' AND organization_id IS NULL AND property_id = $3::uuid
      FOR UPDATE`,
-    [OPERATION, keyHash, input.propertyId],
+    [operation(input), keyHash, input.propertyId],
   );
   const row = query.rows[0];
   if (!row) return null;
@@ -366,13 +424,13 @@ async function reserveIdempotency(
      ON CONFLICT (operation_scope, operation, key_hash, scope_key) DO NOTHING
      RETURNING id::text AS id`,
     [
-      OPERATION,
+      operation(input),
       keyHash,
       fingerprint,
       input.propertyId,
       input.audit.correlationId,
       acceptedAt,
-      JSON.stringify({ operation: OPERATION, requestId: input.audit.requestId }),
+      JSON.stringify({ operation: operation(input), requestId: input.audit.requestId }),
     ],
   );
   return query.rows[0]?.id ?? null;
@@ -380,30 +438,31 @@ async function reserveIdempotency(
 
 async function lockThread(
   client: PmsInboxProviderActionClient,
-  propertyId: string,
-  threadId: string,
+  input: Input,
 ): Promise<ThreadRow | null> {
   const query = await client.query<ThreadRow>(
-    `SELECT thread.source_thread_id AS "sourceThreadId",
+    `SELECT thread.version::text, thread.source_thread_id AS "sourceThreadId",
             (thread.source = 'channex'
              AND thread.delivery_channel = 'ota'
-             AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')
+             AND ($3 = 'channex_close' OR lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom'))
              AND BTRIM(thread.source_thread_id) <> ''
-             AND NOT EXISTS (
-               SELECT 1 FROM platform.jobs provider_action_job
-               WHERE provider_action_job.property_id = thread.property_id
-                 AND provider_action_job.resource_product = 'pms'
-                 AND provider_action_job.resource_type = 'message_thread'
-                 AND provider_action_job.resource_id = thread.id::text
-                 AND provider_action_job.job_type = $3
-                 AND provider_action_job.source_domain_event_id IS NOT NULL
-             )) AS "providerCapable"
+) AS "providerCapable"
      FROM pms.message_threads thread
      WHERE thread.property_id = $1::uuid AND thread.id = $2::uuid
      FOR UPDATE OF thread`,
-    [propertyId, threadId, JOB_TYPE],
+    [input.propertyId, input.threadId, action(input)],
   );
-  return query.rows[0] ?? null;
+  const thread = query.rows[0];
+  if (!thread) return null;
+  // A separate statement sees jobs committed while waiting for the thread lock.
+  const duplicate = await client.query(`SELECT 1 FROM platform.jobs
+    WHERE property_id = $1 AND resource_product = 'pms' AND resource_type = 'message_thread'
+      AND resource_id = $2 AND job_type = $3 AND source_domain_event_id IS NOT NULL
+      AND payload->>'action' = $4 AND (status IN ('pending', 'running')
+        OR job_metadata->>'reason' = 'ambiguous_provider_outcome'
+        OR (status <> 'failed' AND COALESCE(payload->>'expectedVersion', $5) = $5))`,
+    [input.propertyId, input.threadId, JOB_TYPE, action(input), thread.version]);
+  return { ...thread, providerCapable: thread.providerCapable && duplicate.rows.length === 0 };
 }
 
 async function lockProviderCapability(
@@ -438,12 +497,12 @@ async function insertAcceptedEvent(
        (source_system, event_key, event_type, occurred_at, tenant_scope, property_id,
         resource_product, resource_type, resource_id, actor_type, actor_user_id,
         correlation_id, causation_id, idempotency_key_hash, payload, event_metadata, privacy_scope)
-     VALUES ('pms', $1, 'pms.inbox.provider.no_reply_needed.accepted', $2::timestamptz,
+     VALUES ('pms', $1, '${operation(input)}.accepted', $2::timestamptz,
              'property', $3::uuid, 'pms', 'message_thread', $4::text, 'user', $5::uuid,
              $6, $7, $8, $9::jsonb, $10::jsonb, 'internal')
      RETURNING id::text AS id`,
     [
-      `pms.inbox.provider.no_reply_needed.accepted:thread:${input.threadId}:key:${keyHash}:v1`,
+      `${operation(input)}.accepted:thread:${input.threadId}:key:${keyHash}:v1`,
       acceptedAt,
       input.propertyId,
       input.threadId,
@@ -454,8 +513,10 @@ async function insertAcceptedEvent(
       JSON.stringify({
         propertyId: input.propertyId,
         threadId: input.threadId,
-        action: ACTION,
-        providerChannel: "booking.com",
+        action: action(input),
+        ...(action(input) === "booking_com_no_reply_needed"
+          ? { providerChannel: "booking.com" }
+          : {}),
       }),
       JSON.stringify({
         contractVersion: "native-guest-inbox.v2",
@@ -483,11 +544,11 @@ async function insertAudit(
         actor_user_id, target_resource_product, target_resource_type, target_resource_id,
         domain_event_id, idempotency_key_id, correlation_id, causation_id,
         redacted_payload, audit_metadata, retention_class, privacy_scope)
-     VALUES ($1, 'pms', 'pms.inbox.provider.no_reply_needed.accepted', $2::timestamptz,
+     VALUES ($1, 'pms', '${operation(input)}.accepted', $2::timestamptz,
              'property', $3::uuid, 'user', $4::uuid, 'pms', 'message_thread', $5::text,
              $6::uuid, $7::uuid, $8, $9, $10::jsonb, $11::jsonb, 'standard', 'internal')`,
     [
-      `pms.inbox.provider.no_reply_needed.accepted:thread:${input.threadId}:key:${keyHash}:v1`,
+      `${operation(input)}.accepted:thread:${input.threadId}:key:${keyHash}:v1`,
       acceptedAt,
       input.propertyId,
       input.actorUserId,
@@ -496,7 +557,7 @@ async function insertAudit(
       idempotencyId,
       input.audit.correlationId,
       input.audit.requestId,
-      JSON.stringify({ action: ACTION, providerChannel: "booking.com" }),
+      JSON.stringify({ action: action(input), provider: "channex" }),
       JSON.stringify({
         contractVersion: "native-guest-inbox.v2",
         actorMembershipId: input.actorMembershipId,
@@ -513,9 +574,12 @@ function deliveryPayload(
   return {
     propertyId: input.propertyId,
     threadId: input.threadId,
-    action: ACTION,
+    action: action(input),
     provider: "channex",
-    providerChannel: "booking.com",
+    expectedVersion: input.expectedVersion,
+    organizationId: input.organizationId,
+    actorUserId: input.actorUserId,
+    actorMembershipId: input.actorMembershipId,
     providerConversationId: sourceThreadId,
     providerIdempotencyReference,
   };
@@ -542,7 +606,7 @@ async function insertOutbox(
      RETURNING id::text AS id`,
     [
       eventId,
-      `${JOB_TYPE}:thread:${input.threadId}:key:${keyHash}:v1`,
+      `${JOB_TYPE}:${action(input)}:thread:${input.threadId}:key:${keyHash}:v1`,
       JOB_TYPE,
       input.propertyId,
       input.threadId,
@@ -582,7 +646,7 @@ async function insertJob(
              $10::jsonb, $11::jsonb, $5::timestamptz, $5::timestamptz)
      RETURNING id::text AS id`,
     [
-      `${JOB_TYPE}:thread:${input.threadId}:key:${keyHash}:v1`,
+      `${JOB_TYPE}:${action(input)}:thread:${input.threadId}:key:${keyHash}:v1`,
       JOB_TYPE,
       eventId,
       outboxId,
@@ -642,6 +706,7 @@ function parseStoredResult(value: unknown): Result | null {
     const code = String(error["code"]);
     if (
       ![
+        "thread_version_conflict",
         "validation_failed",
         "thread_not_found",
         "provider_action_unavailable",
@@ -658,7 +723,7 @@ function parseStoredResult(value: unknown): Result | null {
     !stored ||
     typeof stored["propertyId"] !== "string" ||
     typeof stored["threadId"] !== "string" ||
-    stored["action"] !== ACTION ||
+    !["booking_com_no_reply_needed", "channex_close"].includes(String(stored["action"])) ||
     typeof stored["jobId"] !== "string" ||
     !UUID.test(stored["jobId"]) ||
     typeof stored["acceptedAt"] !== "string" ||
@@ -673,6 +738,7 @@ function responseStatus(result: Result): number {
   if (result.ok) return 202;
   if (result.error.code === "thread_not_found") return 404;
   if (
+    result.error.code === "thread_version_conflict" ||
     result.error.code === "provider_action_unavailable" ||
     result.error.code === "idempotency_conflict"
   )

@@ -1275,6 +1275,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/messaging/threads/:threadId/notes",
     "/properties/:propertyId/messaging/threads/:threadId/assist",
     "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
+    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/close",
     "/properties/:propertyId/messaging/quick-replies",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/update",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/archive",
@@ -2356,7 +2357,8 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
           thread: redactInboxGuestContact(result.value.thread, canReadGuestContact),
-          availableProviderActions: result.value.availableProviderActions,
+          availableProviderActions: options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
+          providerActions: result.value.providerActions ?? [],
           timeline: result.value.timeline.map((item) => item.item),
           previousCursor: result.value.previousCursor,
         };
@@ -2597,47 +2599,54 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
-    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
-    { onRequest: inboxStaffCommandAuthorization(options) },
-    async (request, reply) => {
-      const input = parseInboxProviderAction(request);
-      if ("error" in input) return sendPmsOperationsError(reply, input.error);
-      if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
-      if (!options.inboxProviderActionPort)
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      const { propertyId, threadId } = request.params;
-      try {
-        const result = await options.inboxProviderActionPort.noReplyNeeded({
-          propertyId,
-          threadId,
-          ...inboxCommandActor(request.authContext!),
-          idempotencyKey: input.value.idempotencyKey,
-        });
-        if (!result.ok) return sendInboxProviderActionError(reply, result.error);
-        if (!validInboxProviderAction(result.value, propertyId, threadId))
-          throw new Error("Inbox provider-action scope mismatch");
-        return reply.code(202).send({
-          contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
-          propertyId: result.value.propertyId,
-          threadId: result.value.threadId,
-          action: result.value.action,
-          jobId: result.value.jobId,
-          acceptedAt: result.value.acceptedAt,
-          attentionStateChanged: result.value.attentionStateChanged,
-        });
-      } catch {
-        request.log.error("PMS Inbox provider action failed");
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      }
-    },
-  );
+  for (const providerAction of ["no-reply-needed", "close"] as const)
+    app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
+      `/properties/:propertyId/messaging/threads/:threadId/provider-actions/${providerAction}`,
+      { onRequest: inboxStaffCommandAuthorization(options) },
+      async (request, reply) => {
+        const input = parseInboxProviderAction(request);
+        if ("error" in input) return sendPmsOperationsError(reply, input.error);
+        if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
+        if (!options.inboxProviderActionPort)
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        const { propertyId, threadId } = request.params;
+        try {
+          const result = await options.inboxProviderActionPort.noReplyNeeded({
+            propertyId,
+            threadId,
+            expectedVersion: input.value.expectedVersion,
+            action: providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed",
+            ...inboxCommandActor(request.authContext!),
+            idempotencyKey: input.value.idempotencyKey,
+          });
+          if (!result.ok) return sendInboxProviderActionError(reply, result.error);
+          if (
+            !validInboxProviderAction(result.value, propertyId, threadId) ||
+            result.value.action !==
+              (providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed")
+          )
+            throw new Error("Inbox provider-action scope mismatch");
+          return reply.code(202).send({
+            contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
+            propertyId: result.value.propertyId,
+            threadId: result.value.threadId,
+            action: result.value.action,
+            jobId: result.value.jobId,
+            acceptedAt: result.value.acceptedAt,
+            attentionStateChanged: result.value.attentionStateChanged,
+          });
+        } catch {
+          request.log.error("PMS Inbox provider action failed");
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        }
+      },
+    );
 
   app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
     "/properties/:propertyId/messaging/threads/:threadId/read",
@@ -6188,14 +6197,19 @@ function parseInboxAssistance(request: FastifyRequest<{ Body: unknown }>):
 
 function parseInboxProviderAction(
   request: FastifyRequest<{ Body: unknown }>,
-): { value: { idempotencyKey: string } } | { error: PmsOperationsError } {
+): { value: { idempotencyKey: string; expectedVersion: number } } | { error: PmsOperationsError } {
   const idempotencyKey = singleIdempotencyKey(request);
   const body = request.body === undefined ? {} : objectBody(request.body);
-  if (!idempotencyKey || !body || Object.keys(body).length > 0)
+  if (
+    !idempotencyKey ||
+    !body ||
+    Object.keys(body).some((key) => key !== "expectedVersion") ||
+    !validInboxVersion(body.expectedVersion)
+  )
     return {
       error: invalidInboxStaffCommand("Inbox provider-action request is invalid."),
     };
-  return { value: { idempotencyKey } };
+  return { value: { idempotencyKey, expectedVersion: body.expectedVersion as number } };
 }
 
 function normalizedInboxQuickReplyFields(
@@ -6482,7 +6496,9 @@ function sendInboxProviderActionError(
   const statusCode =
     error.code === "thread_not_found"
       ? 404
-      : error.code === "provider_action_unavailable" || error.code === "idempotency_conflict"
+      : error.code === "thread_version_conflict" ||
+          error.code === "provider_action_unavailable" ||
+          error.code === "idempotency_conflict"
         ? 409
         : 400;
   return sendPmsOperationsError(reply, {
@@ -6675,7 +6691,7 @@ function validInboxProviderAction(
   return (
     value.propertyId === propertyId &&
     value.threadId === threadId &&
-    value.action === "booking_com_no_reply_needed" &&
+    ["booking_com_no_reply_needed", "channex_close"].includes(value.action) &&
     isUuid(value.jobId) &&
     isCanonicalInboxInstant(value.acceptedAt) &&
     value.attentionStateChanged === false
