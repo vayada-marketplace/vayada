@@ -170,3 +170,8 @@ Property default and individual affiliate commission GET/PATCH routes now return
 read or write commission rules or look up affiliate records. The authorization
 fallback still reads Booking Finance access. Old commission writer/contracts will
 be removed in a separate slice. Shared payouts, jobs, history and Python are unchanged.
+
+VAY-1500 follow-up removes the obsolete commission writer integration suite and
+exclusive affiliate-scope/clock wiring. Retirement tests retain throwing read/write
+probes; shared Finance and dispatcher tests remain. The route now depends only on
+Booking Finance access and pool cleanup. Writer removal follows separately.
