@@ -1482,7 +1482,6 @@ const app = buildApp({
   marketplaceAffiliateAdminRepository,
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
-    affiliateScope: marketplaceAffiliateAdminRepository,
   },
   marketplaceCreatorSelfServiceRepository,
   marketplaceCreatorPlatformConnections: {

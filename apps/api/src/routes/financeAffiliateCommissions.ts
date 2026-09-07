@@ -1,4 +1,3 @@
-import type { MarketplaceAffiliateAdminRepository } from "@vayada/domain-marketplace";
 import type { FinanceAffiliateCommissionRepository } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -7,9 +6,7 @@ import { enforceRoutePolicy } from "./policy.js";
 type PropertyParams = { propertyId: string };
 
 export type FinanceAffiliateCommissionRoutesOptions = {
-  repository: FinanceAffiliateCommissionRepository;
-  affiliateScope: Pick<MarketplaceAffiliateAdminRepository, "getAffiliate">;
-  now?: () => Date;
+  repository: Pick<FinanceAffiliateCommissionRepository, "getBookingFinanceAccess" | "close">;
 };
 
 export async function registerFinanceAffiliateCommissionRoutes(
