@@ -24,7 +24,7 @@ export function useChannexManager() {
       try {
         const next = await channexService.getSnapshot();
         setSnapshot(next);
-        setOperation(options?.preserveOperation ?? next.activeOperation);
+        setOperation(next.activeOperation ?? options?.preserveOperation ?? null);
         setMarkupDrafts(
           Object.fromEntries(
             next.markups.map(({ channel, markupPercent }) => [channel, String(markupPercent)]),
@@ -119,6 +119,20 @@ export function useChannexManager() {
   };
 
   const openConsole = async () => {
+    if (
+      snapshot?.connection.pricingStrategy === "shared_base" &&
+      (snapshot.sync.mapping.status !== "ok" ||
+        snapshot.sync.ari.status !== "ok" ||
+        !snapshot.sync.mapping.lastSuccessAt ||
+        !snapshot.sync.ari.lastSuccessAt ||
+        snapshot.sync.ari.lastSuccessAt < snapshot.sync.mapping.lastSuccessAt ||
+        snapshot.mappings.ratePlans.length === 0)
+    ) {
+      setActionError(
+        "Finish preparing base rates and synchronizing prices before opening channel settings. Retry provisioning or price sync below.",
+      );
+      return;
+    }
     setPendingAction("channel settings");
     setActionError("");
     const popup = window.open("about:blank", "_blank");

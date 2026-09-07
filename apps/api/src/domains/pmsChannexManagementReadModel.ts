@@ -168,6 +168,8 @@ export function createPgPmsChannexManagementReadRepository(config: {
               status: row.status,
               externalPropertyId: row.externalPropertyId,
               messagingAppInstalled: row.messagingAppInstalled,
+              pricingStrategy:
+                row.metadata.pricingStrategy === "shared_base" ? "shared_base" : "legacy_variants",
             }
           : {
               status: "disconnected",

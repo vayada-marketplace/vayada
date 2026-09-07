@@ -23,6 +23,7 @@ export type PmsChannexManagementCommandResult =
       ok: false;
       code:
         | "connection_required"
+        | "native_markup_required"
         | "idempotency_conflict"
         | "invalid_stay_restrictions"
         | "stay_restriction_scope_not_found";

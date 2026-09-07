@@ -80,6 +80,7 @@ export interface ChannexSnapshot {
     status: "connected" | "disconnected" | "suspended" | "degraded" | "setup_incomplete";
     externalPropertyId: string | null;
     messagingAppInstalled: boolean;
+    pricingStrategy?: "shared_base" | "legacy_variants";
   };
   mappings: {
     roomTypes: ChannexRoomTypeMapping[];

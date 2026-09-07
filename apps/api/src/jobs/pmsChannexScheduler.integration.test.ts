@@ -1,4 +1,7 @@
-import { applyPmsChannexManagementProgress } from "./pmsChannexManagementTargetState.js";
+import {
+  applyPmsChannexManagementProgress,
+  createPmsChannexManagementTargetState,
+} from "./pmsChannexManagementTargetState.js";
 import { randomUUID } from "node:crypto";
 
 import pg from "pg";
@@ -419,6 +422,42 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
         messaging: "observe_only",
         iframe: "observe_only",
       });
+    // Shared setup queues durable follow-ups once; repeat completion is harmless.
+    await admin.query(
+      `UPDATE pms.channel_connections SET connection_metadata = connection_metadata || '{"pricingStrategy":"shared_base"}'::jsonb WHERE id=$1::uuid`,
+      [connectionId],
+    );
+    const setup = createPmsChannexManagementTargetState();
+    for (const operationType of ["enable", "provision"] as const) {
+      const setupJob = {
+        ...forceResyncJob,
+        jobId: randomUUID(),
+        input: { ...forceResyncJob.input, operationType },
+      };
+      const setupClient = await admin.connect();
+      try {
+        for (let retry = 0; retry < 2; retry++)
+          await setup.succeed(setupClient, setupJob, { ok: true }, now);
+      } finally {
+        setupClient.release();
+      }
+      const next = operationType === "enable" ? "provision" : "sync_ari";
+      expect(
+        (
+          await admin.query(
+            `SELECT payload->>'operationType' AS operation FROM platform.jobs WHERE job_key=$1`,
+            [`channex.setup:${setupJob.jobId}:${next}`],
+          )
+        ).rows,
+      ).toEqual([{ operation: next }]);
+      await admin.query(`DELETE FROM platform.jobs WHERE job_key=$1`, [
+        `channex.setup:${setupJob.jobId}:${next}`,
+      ]);
+    }
+    await admin.query(
+      `UPDATE pms.channel_connections SET connection_metadata = connection_metadata - 'pricingStrategy' WHERE id=$1::uuid`,
+      [connectionId],
+    );
     await admin.query(
       `INSERT INTO pms.channel_sync_status (property_id,connection_id,sync_domain,status)
        VALUES ($1::uuid,$2::uuid,'ari','ok')`,

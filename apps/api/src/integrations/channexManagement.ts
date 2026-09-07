@@ -67,6 +67,8 @@ type ChannexRequest = {
 
 export type ChannexManagementActionPlan = {
   requests: ChannexRequest[];
+  newConnectionPricingStrategy?: "shared_base";
+  recoverSharedBaseCreation?: boolean;
   meals?: Array<{
     ratePlanId: string;
     channel: string;
@@ -153,6 +155,8 @@ export function createChannexManagementProvider(config: {
         (plan.ratePlanMappings ?? []).map((mapping) => [rateKey(mapping), mapping]),
       );
       let channels: ChannexConnectedChannel[] | undefined;
+      let pricingStrategy: "shared_base" | undefined;
+      let sharedBaseCreationIntent: boolean | undefined;
       for (const request of plan.requests) {
         if (
           shouldSkip(
@@ -265,10 +269,14 @@ export function createChannexManagementProvider(config: {
             if (request.capture?.kind === "property") {
               externalPropertyId = externalId;
               connectionStatus = "connected";
+              pricingStrategy = plan.newConnectionPricingStrategy;
             }
             if (request.capture?.kind === "property_list") {
               externalPropertyId = findByTitle(responseBody, request.capture.title)?.id;
-              if (externalPropertyId) connectionStatus = "connected";
+              if (externalPropertyId) {
+                connectionStatus = "connected";
+                if (plan.recoverSharedBaseCreation) pricingStrategy = "shared_base";
+              } else if (plan.newConnectionPricingStrategy) sharedBaseCreationIntent = true;
             }
             if (request.capture?.kind === "property_deleted") {
               externalPropertyId = undefined;
@@ -334,6 +342,8 @@ export function createChannexManagementProvider(config: {
               roomTypeMappings,
               ratePlanMappings,
               channels,
+              pricingStrategy,
+              sharedBaseCreationIntent,
             }),
           );
         } catch (error) {
@@ -389,6 +399,7 @@ export function createChannexManagementProvider(config: {
           roomTypeMappings,
           ratePlanMappings,
           channels,
+          pricingStrategy,
         }),
         ...(plan.verifyRecovery
           ? { alertRecoveryVerified: plan.recoveryScopeCovered !== false }
@@ -585,6 +596,8 @@ function progress(input: {
   roomTypeMappings: ReadonlyMap<string, ChannexRoomTypeMapping>;
   ratePlanMappings: ReadonlyMap<string, ChannexRatePlanMapping>;
   channels?: ChannexConnectedChannel[];
+  pricingStrategy?: "shared_base";
+  sharedBaseCreationIntent?: boolean;
 }): ChannexManagementProviderSuccess {
   return {
     ok: true,
@@ -595,6 +608,8 @@ function progress(input: {
     roomTypeMappings: [...input.roomTypeMappings.values()],
     ratePlanMappings: [...input.ratePlanMappings.values()],
     channels: input.channels,
+    pricingStrategy: input.pricingStrategy,
+    sharedBaseCreationIntent: input.sharedBaseCreationIntent,
   };
 }
 

@@ -175,6 +175,31 @@ describe("target Channex management plans", () => {
     expect(title).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
+  it("uses shared base variants and decimal currency only for explicitly shared connections", async () => {
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: new FakePool("provision", { pricingStrategy: "shared_base", baseRate: 120 }),
+      bookingRevisionHandoff: vi.fn(),
+    }).plan(job("provision"));
+    const creates = plan.requests.filter((request) => request.capture?.kind === "rate_plan");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]?.capture).toMatchObject({ channel: "direct" });
+    expect(creates[0]?.resolveBody?.(new Map([["room-1", "provider-room"]]))).toMatchObject({
+      rate_plan: { options: [{ rate: "120.00", occupancy: 1 }] },
+    });
+  });
+
+  it("rejects stale queued Vayada markup writes under shared pricing", async () => {
+    const port = createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: new FakePool("ari", { pricingStrategy: "shared_base" }),
+      bookingRevisionHandoff: vi.fn(),
+    });
+    await expect(port.plan(job("update_markups"))).rejects.toThrow(
+      "Manage channel price adjustments",
+    );
+  });
+
   it("orders missing or disabled rooms before dependent target rate plans", async () => {
     const db = new FakePool("provision");
     const port = createPgChannexManagementPlanPort({
@@ -351,6 +376,7 @@ class FakePool {
             externalPropertyId: "external-1",
             claimExternalPropertyId: "external-1",
             claimState: "active",
+            pricingStrategy: this.rateOverrides.pricingStrategy,
           },
         ];
       else rows = [{ externalPropertyId: null, claimExternalPropertyId: null, claimState: null }];

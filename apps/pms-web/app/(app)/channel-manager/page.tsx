@@ -66,6 +66,16 @@ export default function ChannelManagerPage() {
     );
   }
 
+  const sharedBase = snapshot.connection.pricingStrategy === "shared_base";
+  const baseReady =
+    snapshot.sync.mapping.status === "ok" &&
+    snapshot.sync.ari.status === "ok" &&
+    Boolean(
+      snapshot.sync.ari.lastSuccessAt &&
+      snapshot.sync.mapping.lastSuccessAt &&
+      snapshot.sync.ari.lastSuccessAt >= snapshot.sync.mapping.lastSuccessAt,
+    ) &&
+    snapshot.mappings.ratePlans.length > 0;
   const connected = ["connected", "degraded"].includes(snapshot.connection.status);
   const busy =
     Boolean(pendingAction) || Boolean(operation && !terminalChannexStatuses.has(operation.status));
@@ -102,6 +112,13 @@ export default function ChannelManagerPage() {
           </div>
         )}
         {operation && <OperationBanner operation={operation} />}
+        {sharedBase && (
+          <p className="mt-5 rounded-xl bg-blue-50 p-4 text-sm text-blue-900">
+            {baseReady
+              ? "Base rates are prepared. Open channel settings to map your OTA listings and activate each channel."
+              : "Preparing base rates and synchronizing prices and restrictions. Channel mapping and activation are separate steps."}
+          </p>
+        )}
         <OperationalAlerts
           key={snapshot.propertyId}
           snapshot={snapshot}
@@ -229,7 +246,11 @@ export default function ChannelManagerPage() {
             <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6">
               <h2 className="font-semibold text-gray-950">{t("channels.markups")}</h2>
               <p className="mt-1 text-sm text-gray-500">{t("channels.markupsDescription")}</p>
-              {channels.length === 0 ? (
+              {sharedBase ? (
+                <p className="mt-4 text-sm text-gray-600">
+                  Channel price adjustments are managed in channel settings.
+                </p>
+              ) : channels.length === 0 ? (
                 <p className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
                   {t("channels.connectForMarkups")}
                 </p>

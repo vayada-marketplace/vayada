@@ -21,6 +21,22 @@ async function applySuccess(
   now: Date,
 ) {
   await applyPmsChannexManagementProgress(client, job, result, now);
+  if (job.input.operationType === "enable" || job.input.operationType === "provision") {
+    const next = job.input.operationType === "enable" ? "provision" : "sync_ari";
+    await client.query(
+      `INSERT INTO platform.jobs(job_key,queue_name,job_type,max_attempts,tenant_scope,
+        property_id,resource_product,resource_type,resource_id,payload,job_metadata)
+       SELECT $2,'pms.channex.management','channex.'||$3,5,'property',property_id,
+         'pms','channex_connection',property_id::text,
+         jsonb_build_object('commandId',$4::text,'idempotencyKey',$2::text,'operationType',$3::text),
+         jsonb_build_object('source','shared-base-setup','parentJobId',$4::text)
+       FROM pms.channel_connections WHERE property_id=$1::uuid AND provider='channex'
+         AND connection_status IN ('connected','degraded')
+         AND connection_metadata->>'pricingStrategy'='shared_base'
+       ON CONFLICT(queue_name,job_key) DO NOTHING`,
+      [job.propertyId, `channex.setup:${job.jobId}:${next}`, next, job.jobId],
+    );
+  }
   if (job.input.operationType === "enable" || job.input.operationType === "disable") return;
   await applyConnectedSuccess(client, job, result, now);
 }
@@ -31,6 +47,12 @@ export async function applyPmsChannexManagementProgress(
   result: ChannexManagementProviderSuccess,
   now: Date,
 ) {
+  if (result.sharedBaseCreationIntent)
+    await client.query(
+      `UPDATE platform.jobs SET job_metadata = job_metadata || '{"sharedBaseCreationIntent":true}'::jsonb
+     WHERE id=$1::uuid AND property_id=$2::uuid`,
+      [job.jobId, job.propertyId],
+    );
   if (result.externalPropertyId) {
     await requireChannexBindingClaim(
       client,
@@ -50,12 +72,17 @@ export async function applyPmsChannexManagementProgress(
   if (connectionStatus === "connected") {
     await client.query(
       `INSERT INTO pms.channel_connections (
-         property_id, provider, connection_status, external_property_id
-       ) VALUES ($1::uuid, 'channex', 'connected', $2)
+         property_id, provider, connection_status, external_property_id, connection_metadata
+       ) VALUES ($1::uuid, 'channex', 'connected', $2, $4::jsonb)
        ON CONFLICT (property_id, provider) DO UPDATE SET connection_status = 'connected',
          external_property_id = COALESCE(EXCLUDED.external_property_id, pms.channel_connections.external_property_id),
          updated_at = $3::timestamptz`,
-      [job.propertyId, result.externalPropertyId ?? null, now.toISOString()],
+      [
+        job.propertyId,
+        result.externalPropertyId ?? null,
+        now.toISOString(),
+        JSON.stringify(result.pricingStrategy ? { pricingStrategy: result.pricingStrategy } : {}),
+      ],
     );
   }
   if (connectionStatus === "disconnected") {

@@ -57,6 +57,24 @@ describe("PMS Channex management command store", () => {
     expect(db.calls.at(-1)?.text).toBe("ROLLBACK");
   });
 
+  it("rejects shared-base markups before reserving or enqueuing", async () => {
+    const db = new FakeDb("shared");
+    const port = createPgPmsChannexManagementCommandPort({
+      connectionString: "postgresql://target",
+      pool: db.pool(),
+    });
+    expect(
+      await port.enqueue(context(), propertyId, {
+        commandId: "markup",
+        idempotencyKey: "markup",
+        operationType: "update_markups",
+        markups: [{ channel: "booking_com", markupPercent: 10 }],
+      }),
+    ).toMatchObject({ ok: false, code: "native_markup_required" });
+    expect(db.sql()).not.toContain("INSERT INTO platform.jobs");
+    expect(db.sql()).not.toContain("INSERT INTO platform.idempotency_keys");
+  });
+
   it("requires a target connection before dependent operations", async () => {
     const db = new FakeDb("disconnected");
     const port = createPgPmsChannexManagementCommandPort({
@@ -73,7 +91,7 @@ describe("PMS Channex management command store", () => {
   });
 });
 
-type Mode = "new" | "replay" | "conflict" | "disconnected";
+type Mode = "shared" | "new" | "replay" | "conflict" | "disconnected";
 
 class FakeDb {
   calls: Array<{ text: string; values?: readonly unknown[] }> = [];
@@ -94,6 +112,8 @@ class FakeDb {
 
   async query<T>(text: string, values?: unknown[]) {
     this.calls.push({ text, values });
+    if (text.includes("pricingStrategy"))
+      return rows<T>(this.mode === "shared" ? [{ id: "connection" }] : []);
     if (text.includes("FROM pms.channel_connections")) return rows<T>([]);
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
       this.fingerprint = String(values?.[2]);
