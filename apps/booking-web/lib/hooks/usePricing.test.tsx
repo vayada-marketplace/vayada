@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, createElement } from "react";
+import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RoomType } from "@/lib/types";
@@ -64,7 +64,10 @@ const input: PricingInputs = {
 let root: Root;
 let latest: ReturnType<typeof usePricing>;
 function Probe({ value }: { value: PricingInputs }) {
-  latest = usePricing(value);
+  const pricing = usePricing(value);
+  useEffect(() => {
+    latest = pricing;
+  });
   return null;
 }
 beforeEach(() => {
