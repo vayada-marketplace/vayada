@@ -4,7 +4,7 @@ import pg from "pg";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createPgChannexManagementPlanPort } from "./channexManagementPlans.js";
 import { createChannexManagementProvider } from "./channexManagement.js";
-import { pmsRoomStayRestrictionsAllow } from "../domains/pmsRoomSelectionConflicts.js";
+import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import { replaceStayRestrictions } from "../domains/pmsStayRestrictions.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -126,14 +126,16 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       }
     ).values;
   }
-  function allowed(checkIn: string, checkOut: string, ratePlanId = rate) {
-    return pmsRoomStayRestrictionsAllow(db, {
-      propertyId: property,
-      roomTypeId: room,
-      ratePlanId,
-      checkIn,
-      checkOut,
-    });
+  async function allowed(checkIn: string, checkOut: string, ratePlanId = rate) {
+    return (
+      (await pmsRoomStayRestrictionReason(db, {
+        propertyId: property,
+        roomTypeId: room,
+        ratePlanId,
+        checkIn,
+        checkOut,
+      })) === null
+    );
   }
   it("sends Friday arrival minimum, maximum, boundary closures and rate-scoped stop sell", async () => {
     await replaceStayRestrictions(db, property, {
