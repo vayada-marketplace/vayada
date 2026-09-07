@@ -12,6 +12,8 @@ import {
   BOOKING_PRICE_MAX_MINOR_UNITS,
   BOOKING_PRICE_V1_ALLOCATION_RULE,
   calculateBookingPrice,
+  createBookingNightlyRoomPriceResolver,
+  applyBookingPriceMarkup,
   formatBookingPriceMinorUnits,
   roundBookingPriceDecimalToMinorUnits,
   type BookingPriceCalculationInput,
@@ -512,5 +514,74 @@ describe("Booking decimal pricing", () => {
         "Booking price calculation input is invalid",
       );
     }
+  });
+});
+
+describe("canonical nightly room pricing for distribution", () => {
+  function resolver(sources = recurring(), base = "100.00") {
+    return createBookingNightlyRoomPriceResolver({
+      pricing: pricing(base),
+      recurringPricing: sources,
+      roomTypeId,
+      flexibleRatePlanId,
+      roomFactsRevision: 4,
+    });
+  }
+  it("resolves normal, weekend and seasonal dates before one markup", () => {
+    const evidence = structuredClone(recurring());
+    const weekend = evidence.sources.find((item) => item.sourceKind === "weekend_surcharge")!;
+    if (weekend.sourceKind !== "weekend_surcharge") throw new Error("fixture");
+    Object.assign(weekend, {
+      weekdays: ["saturday", "sunday"],
+      roomSurcharges: [{ ...roomBinding, amountDecimal: "40.00" }],
+    });
+    const resolve = resolver(evidence);
+    expect(
+      ["2026-09-07", "2026-09-12", "2026-08-04"].map((day) =>
+        applyBookingPriceMarkup(resolve(day), 10),
+      ),
+    ).toEqual(["110.00", "154.00", "198.00"]);
+    expect(
+      ["2026-09-07", "2026-09-12", "2026-08-04"].map((day) =>
+        applyBookingPriceMarkup(resolve(day), 0),
+      ),
+    ).toEqual(["100.00", "140.00", "180.00"]);
+    expect(
+      applyBookingPriceMarkup(
+        resolve("2026-08-08", { amountDecimal: "80.05", currency: "EUR" }),
+        10,
+      ),
+    ).toBe("88.06");
+  });
+  it("handles annual year boundaries, changed/disabled rules and removed date prices", () => {
+    const evidence = structuredClone(recurring());
+    const season = evidence.sources.find((item) => item.sourceKind === "season")!;
+    Object.assign(evidence.sources[1]!, { weekdays: ["saturday", "sunday"] });
+    Object.assign(season, { startMonthDay: "12-30", endMonthDay: "01-02" });
+    const resolve = resolver(evidence);
+    expect(["2026-12-29", "2026-12-30", "2027-01-01"].map((day) => resolve(day))).toEqual([
+      "10000",
+      "18000",
+      "18000",
+    ]);
+    expect(resolve("2027-01-01", { amountDecimal: "70.00", currency: "EUR" })).toBe("7000");
+    expect(resolve("2027-01-01")).toBe("18000");
+    Object.assign(season, { configuredState: "disabled", lifecycle: "disabled" });
+    expect(resolver(evidence)("2027-01-01")).toBe("10000");
+  });
+  it("fails closed on stale, invalid, ambiguous or wrong-currency sources", () => {
+    const evidence = structuredClone(recurring());
+    Object.assign(evidence.sources[0]!, { pricingCurrencyRevision: 1 });
+    expect(() => resolver(evidence)).toThrow(/invalid|stale/);
+    const duplicate = structuredClone(recurring());
+    (duplicate.sources as unknown[]).push({
+      ...duplicate.sources[0],
+      sourceId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(() => resolver(duplicate)("2026-08-04")).toThrow(/overlap|invalid|stale/);
+    expect(() => resolver()("2026-08-04", { amountDecimal: "80.00", currency: "USD" })).toThrow(
+      /currency/,
+    );
+    expect(() => resolver()("2026-02-30")).toThrow(/stay date/);
   });
 });
