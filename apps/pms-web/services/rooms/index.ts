@@ -1,4 +1,5 @@
 import {
+  type PmsMealPlan,
   parseFlexibleRatePlanCommandResult,
   parsePhysicalRoomUnitIdentity,
   parsePmsPricingSourceSnapshot,
@@ -66,6 +67,7 @@ export interface CanonicalRoomPricingSnapshot {
   expectedFlexibleRatePlanRevision: number;
   currency: string;
   baseAmountDecimal: string;
+  mealPlan?: PmsMealPlan;
   cancellationPolicy: string;
   freeCancellationDeadlineDays: number;
   flexibleCancellationType: "free" | "partial_refund";
@@ -121,6 +123,7 @@ export interface RoomType {
   minimumAdvanceDays: number;
   ratePaymentMethods: Record<string, string[]> | null;
   rateDepositSettings: Partial<Record<RatePlanKey, RateDepositSetting>> | null;
+  mealPlan?: PmsMealPlan;
   mealPlans: MealPlan[];
   createdAt: string;
   updatedAt: string;
@@ -169,6 +172,7 @@ export interface RoomTypeCreate {
   minimumAdvanceDays?: number;
   ratePaymentMethods?: Record<string, string[]> | null;
   rateDepositSettings?: Partial<Record<RatePlanKey, RateDepositSetting>> | null;
+  mealPlan?: PmsMealPlan;
   mealPlans?: MealPlan[];
 }
 
@@ -251,6 +255,7 @@ interface PmsPricingSourceResponse {
     sourceRoomFactsRevision: number;
     baseAmount: PmsOperationsMoney;
     cancellationTerms: Record<string, unknown>;
+    mealPlan?: PmsMealPlan;
   }>;
 }
 
@@ -523,6 +528,7 @@ function toRoomType(
     minimumAdvanceDays: 0,
     ratePaymentMethods: null,
     rateDepositSettings: null,
+    mealPlan: sourcePlan?.mealPlan ?? (canonicalPlan?.mealPlan === "breakfast" ? "breakfast" : "room_only"),
     mealPlans: [],
     createdAt: "",
     updatedAt: "",
@@ -534,6 +540,7 @@ function toRoomType(
       expectedFlexibleRatePlanRevision: sourcePlan?.flexibleRatePlanRevision ?? 0,
       currency,
       baseAmountDecimal: baseRate.toFixed(2),
+      mealPlan: room.mealPlan,
       cancellationPolicy: flexibleCancellation.cancellationPolicy,
       freeCancellationDeadlineDays: flexibleCancellation.freeCancellationDeadlineDays,
       flexibleCancellationType: flexibleCancellation.flexibleCancellationType,
@@ -649,6 +656,7 @@ export const roomsService = {
   },
 
   create: async (data: RoomTypeCreate) => {
+    validateMealInclusion(data);
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
     const stagedImages = (data.images ?? []).filter(
       (image): image is Exclude<RoomImageReference, string> & { pendingFile: File } =>
@@ -725,6 +733,7 @@ export const roomsService = {
   },
 
   update: async (id: string, data: RoomTypeUpdate) => {
+    validateMealInclusion(data);
     const propertyId = await resolveSelectedPmsPropertyId("updating room type");
     validateCanonicalRoomPricing(data);
     const pricingChanged = canonicalRoomPricingChanged(data);
@@ -1000,6 +1009,7 @@ async function ensureCanonicalFlexibleRatePlan(
   if (
     existing?.sourceRoomFactsRevision === roomFacts.roomFactsRevision &&
     existing.baseAmount.amountDecimal === roomType.baseRate.amountDecimal &&
+    (data.mealPlan === undefined || data.mealPlan === (existing.mealPlan ?? "room_only")) &&
     JSON.stringify(existing.cancellationTerms) === JSON.stringify(cancellationTerms)
   ) {
     return;
@@ -1012,6 +1022,7 @@ async function ensureCanonicalFlexibleRatePlan(
       expectedPricingCurrencyRevision: pricingSource.pricingCurrency.pricingCurrencyRevision,
       expectedFlexibleRatePlanRevision: existing?.flexibleRatePlanRevision ?? 0,
       baseAmountDecimal: roomType.baseRate.amountDecimal,
+      ...(data.mealPlan === undefined ? {} : { mealPlan: data.mealPlan }),
       cancellationTerms,
     },
     commandOptions("pms-flexible-rate-plan-upsert"),
@@ -1361,6 +1372,7 @@ async function loadCanonicalPricing(propertyId: string): Promise<PmsPricingSourc
 
 function hasCanonicalPricingChanges(data: RoomTypeUpdate): boolean {
   return [
+    "mealPlan",
     "baseRate",
     "currency",
     "seasons",
@@ -1422,6 +1434,7 @@ async function saveCanonicalRoomPricing(
     expectedPricingCurrencyRevision: pricingCurrencyRevision,
     expectedFlexibleRatePlanRevision: snapshot.expectedFlexibleRatePlanRevision,
     baseAmountDecimal,
+    ...(data.mealPlan === undefined ? {} : { mealPlan: data.mealPlan }),
     cancellationTerms,
   };
   const planResponse = await runCanonicalPricingCommand(
@@ -1443,6 +1456,15 @@ async function saveCanonicalRoomPricing(
     throw new Error("The pricing service returned a different room. Refresh and try again.");
   }
   return completedCommands;
+}
+
+function validateMealInclusion(data: RoomTypeCreate | RoomTypeUpdate): void {
+  if (Object.hasOwn(data, "mealPlan") && data.mealPlan !== "room_only" && data.mealPlan !== "breakfast") {
+    throw new Error("Choose room only or breakfast included.");
+  }
+  if (data.mealPlans?.length) {
+    throw new Error("Meal surcharge packages are unsupported. Choose the included meal on the standard rate.");
+  }
 }
 
 function validateCanonicalRoomPricing(data: RoomTypeUpdate): void {
@@ -1480,6 +1502,7 @@ function canonicalRoomPricingChanged(data: RoomTypeUpdate): boolean {
   }
   const cancellationType = data.flexibleCancellationType ?? snapshot.flexibleCancellationType;
   if (
+    (data.mealPlan !== undefined && data.mealPlan !== (snapshot.mealPlan ?? "room_only")) ||
     roomBaseAmount(data, snapshot.baseAmountDecimal) !== snapshot.baseAmountDecimal ||
     (data.cancellationPolicy ?? snapshot.cancellationPolicy) !== snapshot.cancellationPolicy ||
     cancellationType !== snapshot.flexibleCancellationType
@@ -1654,6 +1677,7 @@ export function roomTypeUpdateForm(r: RoomType): RoomTypeUpdate {
       r.nonRefundableCancellationPolicy || "Non-refundable from booking",
     minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
     ratePaymentMethods: r.ratePaymentMethods ?? null,
+    mealPlan: r.mealPlan ?? "room_only",
     mealPlans: r.mealPlans ?? [],
   };
 }
