@@ -12,6 +12,17 @@ without changing its SQL. A fresh isolated PostgreSQL 17 database applied
 database tests passed on that schema. The earlier local evidence below retains
 its original migration numbering.
 
+Latest release integration on 2026-09-07 uses main `1d87271ae`, including
+VAY-1528's canonical stay restrictions and the additive nightly pricing resolver.
+Mixed search resolves the exact offered rate plan and obtains the specific PMS
+restriction reason before the checkout loader applies its canonical guard. The
+reason query uses `pms.effective_stay_restrictions`, including disabled rules and
+stop-sell on every occupied night. No restriction guard is bypassed.
+Fresh isolated PostgreSQL 17 applied 0001–0166; 52 bundle, pending-edit and
+nightly-revenue tests passed, including middle-night stop-sell, disabled-rule and
+checkout-day exclusions. API/package build and independent integration review
+passed. Migration 0165 retains the reviewed SQL unchanged.
+
 ## Evidence
 
 | Check                                                      | Result                                                                                    |
