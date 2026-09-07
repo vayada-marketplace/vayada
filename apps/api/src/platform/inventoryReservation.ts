@@ -31,6 +31,7 @@ export type DirectBookingInventoryReservationPort = {
     checkOut: string;
     currency: string;
     occurredAt: Date;
+    replacingReservation?: InventoryReservationReceipt;
   }): Promise<PmsInventoryReservationBundle>;
   reserve(input: {
     transaction: InventoryReservationTransaction;
@@ -43,6 +44,8 @@ export type DirectBookingInventoryReservationPort = {
     roomCount: number;
     currency: string;
     occurredAt: Date;
+    /** Original hold released in this transaction by an authorized pending edit. */
+    replacingReservation?: InventoryReservationReceipt;
   }): Promise<InventoryReservationReceipt | null>;
   release(input: {
     transaction: InventoryReservationTransaction;

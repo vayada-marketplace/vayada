@@ -59,6 +59,7 @@ describe("target PMS inventory reservation adapter", () => {
       reservationInput.roomCount,
       reservationInput.currency,
       reservationInput.occurredAt.toISOString(),
+      [],
     ]);
     expect(calls[2]?.text).toContain("pms.direct_booking_inventory.reserve");
   });

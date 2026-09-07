@@ -25,6 +25,66 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       ).rejects.toMatchObject({ statusCode: 400 });
     });
 
+    it("preserves the original sold-out offer when repricing the reserved room", async () => {
+      const details = await edit("details", {});
+      await pool.query(
+        `UPDATE distribution.public_room_offer_snapshots SET available_rooms=0,
+          availability_status='sold_out',sellable_publicly=FALSE WHERE property_id=$1
+          AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
+        [propertyId],
+      );
+      await pool.query(
+        `INSERT INTO distribution.public_room_offer_snapshots
+          (property_id,room_type_id,stay_date,public_offer_key,available_rooms,
+           base_price_amount,currency,payment_options,freshness_status,rate_summary,
+           availability_status,sellable_publicly)
+          SELECT property_id,room_type_id,stay_date,'cheaper-flex',0,50,currency,
+            payment_options,freshness_status,rate_summary,'sold_out',FALSE
+          FROM distribution.public_room_offer_snapshots WHERE property_id=$1`,
+        [propertyId],
+      );
+      try {
+        const quote = await edit("quote", {
+          ...details.input,
+          revision: details.revision,
+          adults: 1,
+          addonIds: [],
+          addonQuantities: {},
+        });
+        expect(quote.totalAmount).toBe(200);
+        await pool.query(
+          `UPDATE distribution.public_room_offer_snapshots SET availability_status='closed'
+            WHERE property_id=$1 AND public_offer_key='vay-959-flex'`,
+          [propertyId],
+        );
+        await expect(
+          edit("quote", {
+            ...details.input,
+            revision: details.revision,
+            adults: 1,
+            addonIds: [],
+            addonQuantities: {},
+          }),
+        ).rejects.toMatchObject({ statusCode: 409 });
+      } finally {
+        await pool.query(
+          `DELETE FROM distribution.public_room_offer_snapshots WHERE property_id=$1 AND public_offer_key='cheaper-flex'`,
+          [propertyId],
+        );
+        await pool.query(
+          `UPDATE distribution.public_room_offer_snapshots SET available_rooms=1,
+            availability_status='limited',sellable_publicly=TRUE WHERE property_id=$1
+            AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
+          [propertyId],
+        );
+        await pool.query(
+          `UPDATE distribution.public_room_offer_snapshots SET availability_status='available'
+            WHERE property_id=$1 AND stay_date >= '2027-02-03'`,
+          [propertyId],
+        );
+      }
+    });
+
     it("rejects a pending edit when Finance disables its payment method", async () => {
       const details = await edit("details", {});
       const input = { ...details.input, revision: details.revision };
@@ -448,6 +508,80 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
           ])
         ).rows[0].edit_revision,
       ).toBe(details.revision);
+    });
+  },
+);
+
+describe.skipIf(!process.env["TEST_DATABASE_URL"])(
+  "sold-out setup readiness during pending edits",
+  () => {
+    const fixture = pendingEditFixture(1);
+    const { pool, edit } = fixture;
+    it("allows only the sold-out reason through quote, prepare and atomic replacement", async () => {
+      const details = await edit("details", {});
+      const input = {
+        ...details.input,
+        revision: details.revision,
+        adults: 1,
+        addonIds: [],
+        addonQuantities: {},
+      };
+      const original = (
+        await pool.query(
+          "SELECT booking_metadata->>'hostResponseDeadlineAt' deadline FROM booking.guest_bookings WHERE id=$1",
+          [fixture.created.booking.id],
+        )
+      ).rows[0];
+      const readiness = async (missing: string[]) =>
+        pool.query(
+          `UPDATE distribution.public_hotel_bookability_profiles
+        SET public_setup_completeness=jsonb_build_object('status','incomplete','missing',$2::jsonb)
+        WHERE property_id=$1`,
+          [propertyId, JSON.stringify(missing)],
+        );
+      await readiness(["sellable_availability"]);
+      await expect(
+        fixture.adapter.quoteBooking("vay-959-hotel", input, fixture.command()),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      const quote = await edit("quote", input);
+      expect(quote.totalAmount).toBe(200);
+      const prepareInput = {
+        ...input,
+        quoteId: quote.quoteId,
+        expectedTotalAmount: quote.totalAmount,
+      };
+      const prepared = await edit("prepare", prepareInput);
+      await readiness(["sellable_availability", "payment_methods"]);
+      await expect(edit("quote", input)).rejects.toMatchObject({ statusCode: 409 });
+      await expect(edit("prepare", prepareInput)).rejects.toMatchObject({ statusCode: 409 });
+      await expect(
+        edit("save", { revision: 0, attemptId: prepared.attemptId }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      await readiness(["sellable_availability"]);
+      const saved = await edit("save", { revision: 0, attemptId: prepared.attemptId });
+      expect(saved.booking).toMatchObject({
+        id: fixture.created.booking.id,
+        bookingReference: fixture.created.booking.bookingReference,
+        status: "pending",
+        adults: 1,
+      });
+      expect(
+        (
+          await pool.query(
+            "SELECT booking_metadata->>'hostResponseDeadlineAt' deadline FROM booking.guest_bookings WHERE id=$1",
+            [fixture.created.booking.id],
+          )
+        ).rows[0],
+      ).toEqual(original);
+      expect(
+        (
+          await pool.query(
+            `SELECT available_count FROM pms.inventory_days WHERE property_id=$1
+      AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ available_count: 0 }, { available_count: 0 }]);
     });
   },
 );

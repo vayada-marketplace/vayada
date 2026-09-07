@@ -41,6 +41,7 @@ export async function quoteTargetRoomSelection(
     requestedAt: Date;
     promotionSettings?: unknown;
     credits?: ReadonlyMap<string, { checkIn: string; checkOut: string; roomCount: number }>;
+    releasedSetupOffers?: ReadonlySet<string>;
   },
 ) {
   const selection = parseBookingRoomSelection(input.selection);
@@ -101,6 +102,7 @@ export async function quoteTargetRoomSelection(
       rateType: "",
       requestedAt: input.requestedAt,
       availabilityCredit: input.credits?.get(line.roomTypeId),
+      releasedSetupCredit: input.releasedSetupOffers?.has(line.publicOfferKey),
     });
     const promotion = bestBookingPromotion({
       settings: input.promotionSettings,
