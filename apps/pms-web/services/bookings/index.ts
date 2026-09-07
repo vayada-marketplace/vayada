@@ -1292,7 +1292,8 @@ export type HostBookingActionPreview = {
     inventory: "release" | "replace";
     payment: "no_payment_received" | "authorization_void";
     cancellationPolicy: {
-      type: "non_refundable" | "flexible";
+      type: "non_refundable" | "flexible" | "mixed_room";
+      lines?: { roomTypeId: string; roomName: string; roomCount: number; type: "non_refundable" | "flexible"; previousDeadline: string | null; newDeadline: string | null; timezone: string }[];
       previousDeadline: string | null;
       newDeadline: string | null;
       timezone: string;
