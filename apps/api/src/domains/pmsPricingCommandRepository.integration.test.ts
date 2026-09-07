@@ -1,3 +1,4 @@
+import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import {
   parsePmsPricingCurrency,
@@ -75,6 +76,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     mealSyncEnabled = true;
     await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
     await seedRoomType(roomTypeId, "Inclusive Suite");
+    await seedRoomType("16900000-0000-4000-8000-000000000009", "Unrelated room");
     await admin.query(
       `INSERT INTO pms.channel_binding_claims (property_id, provider, external_property_id, claim_state, claim_source)
       VALUES ($1, 'channex', 'provider-property', 'active', 'enable')`,
@@ -100,6 +102,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
       property_id: propertyId,
       payload: { operationType: "provision", mealRatePlanId: planId },
     });
+    const planner = createPgChannexManagementPlanPort({
+      connectionString: TEST_DATABASE_URL!,
+      bookingRevisionHandoff: async () => {},
+    });
+    try {
+      const plan = await planner.plan({
+        jobId: "meal-test",
+        propertyId,
+        correlationId: null,
+        attemptNumber: 1,
+        maxAttempts: 5,
+        input: jobs.rows[0].payload,
+      });
+      expect(plan.requests.filter((request) => request.capture?.kind === "room_type")).toHaveLength(1);
+      expect(plan.requests.filter((request) => request.capture?.kind === "rate_plan")).toHaveLength(3);
+      expect(plan.meals?.map((meal) => meal.mealType)).toEqual(["breakfast", "breakfast", "breakfast"]);
+    } finally {
+      await planner.close();
+    }
     expect(
       (
         await repository.upsertFlexibleRatePlan({

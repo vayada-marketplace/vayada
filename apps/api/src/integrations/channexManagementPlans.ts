@@ -212,7 +212,12 @@ async function provisioningPlan(
          ON connection.property_id = room.property_id AND connection.provider = 'channex'
        LEFT JOIN pms.channel_room_type_mappings mapping
          ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
-       WHERE room.property_id = $1::uuid AND room.active AND $2::uuid IS NULL
+       WHERE room.property_id = $1::uuid AND room.active
+         AND ($2::uuid IS NULL OR EXISTS (
+           SELECT 1 FROM pms.rate_plans selected_plan
+           WHERE selected_plan.id = $2::uuid AND selected_plan.property_id = room.property_id
+             AND selected_plan.room_type_id = room.id AND selected_plan.active
+         ))
          AND (mapping.id IS NULL OR mapping.status <> 'active')
        GROUP BY room.id ORDER BY room.sort_order, room.name`,
       [job.propertyId, job.input.mealRatePlanId ?? null],
