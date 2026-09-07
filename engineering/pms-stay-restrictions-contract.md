@@ -7,7 +7,11 @@ The existing TypeScript reservation checks in `pmsRoomSelectionConflicts.ts`,
 maximum stays on the **arrival date**. Seasonal snapshots are stored per date,
 but booking queries explicitly filter stay limits to check-in. Therefore send
 `min_stay_arrival`, and always reset `min_stay_through` to 1. Do not use Channex's
-property-dependent virtual `min_stay` field.
+property-dependent virtual `min_stay` field. Set property `settings.min_stay_type`
+to `arrival` on enable and ARI sync, as the [property API](https://docs.channex.io/api-v.1-documentation/hotels-collection)
+uses this to select minimum-stay values for channel mappings. Verify existing
+channel settings in deployed acceptance; Airbnb, for example, accepts only one
+minimum-stay type.
 
 Canonical sources are `pms.rate_rules` for the property and room, with a null
 rate-plan ID applying to every plan and a non-null ID applying only to that plan.
