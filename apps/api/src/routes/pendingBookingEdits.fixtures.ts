@@ -10,6 +10,12 @@ export async function seedProperty(admin: pg.Pool, capacity = 2): Promise<void> 
     [propertyId],
   );
   await admin.query(
+    `INSERT INTO hotel_catalog.property_contact_channels
+      (property_id, channel_type, value, purpose, is_public, source_system)
+     VALUES ($1, 'email', 'hotel@example.test', 'general', TRUE, 'platform')`,
+    [propertyId],
+  );
+  await admin.query(
     `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
        VALUES ($1::uuid, 'vay-959-hotel', 'canonical', 'active')`,
     [propertyId],
@@ -183,6 +189,7 @@ export async function cleanup(admin: pg.Pool): Promise<void> {
       "DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id = $1::uuid",
       "DELETE FROM booking.booking_settings WHERE property_id = $1::uuid",
       "DELETE FROM finance.payment_settings WHERE property_id = $1::uuid",
+      "DELETE FROM hotel_catalog.property_contact_channels WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_slugs WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_locations WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_public_profile_read_model WHERE property_id = $1::uuid",
