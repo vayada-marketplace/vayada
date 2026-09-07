@@ -13,6 +13,32 @@ const modes = {
 } as const;
 
 describe("PMS Channex management read model", () => {
+  it("keeps legacy cached channels without provider IDs readable", async () => {
+    const channels = [
+      { key: "booking_com", application: "BookingCom", title: null, isActive: true },
+    ];
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            status: "connected",
+            externalPropertyId: "property",
+            messagingAppInstalled: false,
+            metadata: { connectedChannels: channels },
+          },
+        ],
+      })
+      .mockResolvedValue({ rows: [] });
+    const repository = createPgPmsChannexManagementReadRepository({
+      connectionString: "postgres://target",
+      pool: { query, end: vi.fn() } as never,
+    });
+    expect(
+      (await repository.getSnapshot("00000000-0000-4000-8000-000000000001", modes)).channels,
+    ).toEqual(channels);
+  });
+
   it("returns a complete empty target snapshot for a disconnected property", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
     const repository = createPgPmsChannexManagementReadRepository({

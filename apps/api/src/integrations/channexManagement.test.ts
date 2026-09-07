@@ -184,9 +184,15 @@ describe("Channex management provider", () => {
           data: [
             {
               id: "channel-1",
-              attributes: { application: "BookingCom", title: "Booking.com", is_active: true },
+              attributes: {
+                application: "BookingCom",
+                title: "Booking.com",
+                is_active: true,
+                properties: ["external-property"],
+              },
             },
           ],
+          meta: { page: 1, limit: 100, total: 1 },
         }),
       ),
     });

@@ -1,3 +1,4 @@
+import { CHANNEX_MANAGED_RATE_CHANNELS_SQL } from "../domains/pmsChannexAriMapping.js";
 import type { PmsChannexManagementCommandInput } from "../domains/pmsChannexManagementCommands.js";
 import type {
   ChannexManagementJob,
@@ -89,8 +90,9 @@ export async function applyPmsChannexManagementProgress(
   }
   if (result.channels !== undefined) {
     await client.query(
-      `UPDATE pms.channel_connections SET
-         connection_metadata = connection_metadata || jsonb_build_object('connectedChannels', $2::jsonb),
+      `UPDATE pms.channel_connections AS connection SET
+         connection_metadata = connection_metadata || jsonb_build_object('connectedChannels', $2::jsonb,
+           'managedRateChannels', ${CHANNEX_MANAGED_RATE_CHANNELS_SQL}),
          updated_at = $3::timestamptz
        WHERE property_id = $1::uuid AND provider = 'channex'`,
       [job.propertyId, JSON.stringify(result.channels), now.toISOString()],
@@ -151,9 +153,6 @@ async function applyConnectedSuccess(
        messaging_app_installed = CASE WHEN $3 THEN TRUE ELSE messaging_app_installed END,
        last_booking_sync_at = CASE WHEN $4 = 'booking' THEN $5::timestamptz ELSE last_booking_sync_at END,
        last_ari_sync_at = CASE WHEN $4 = 'ari' THEN $5::timestamptz ELSE last_ari_sync_at END,
-       connection_metadata = CASE WHEN $6::boolean THEN
-         connection_metadata || jsonb_build_object('connectedChannels', $7::jsonb)
-         ELSE connection_metadata END,
        updated_at = $5::timestamptz
      WHERE property_id = $1::uuid AND provider = 'channex'`,
     [
@@ -162,8 +161,6 @@ async function applyConnectedSuccess(
       job.input.operationType === "install_messaging",
       domain,
       now.toISOString(),
-      result.channels !== undefined,
-      JSON.stringify(result.channels ?? []),
     ],
   );
   if (domain) await upsertSyncSuccess(client, job.propertyId, domain, now);
