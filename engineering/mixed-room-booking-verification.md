@@ -23,6 +23,16 @@ nightly-revenue tests passed, including middle-night stop-sell, disabled-rule an
 checkout-day exclusions. API/package build and independent integration review
 passed. Migration 0165 retains the reviewed SQL unchanged.
 
+Subsequent main `9572ea8f1` includes the guest-entrypoint and meal-display fixes.
+Main's operational-alert migration took 0165 before this stack merged, so only
+our pending adoption migration is now 0168; its SQL is byte-for-byte unchanged.
+VAY-1528 retains 0166/0167. A fresh PostgreSQL 17 database applied all 167
+available migrations (0001–0166 and 0168); all 53 focused database tests passed.
+The full workspace build and a final Booking Web build passed. Integration
+preserves authenticated editing and adds canonical breakfast/room-only text to
+every selection line; all three card tests passed. Browser review and final
+workspace typecheck are tracked separately from these completed checks.
+
 ## Evidence
 
 | Check                                                      | Result                                                                                    |
