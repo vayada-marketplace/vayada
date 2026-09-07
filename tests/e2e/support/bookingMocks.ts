@@ -237,7 +237,7 @@ const publicOffers = {
         },
         availableRooms: 2,
         refundable: true,
-        mealPlan: "Breakfast",
+        mealPlan: "breakfast",
         amenities: rooms[0].amenities,
         paymentOptions: ["card", "pay_at_property"],
         totals: {
@@ -265,7 +265,7 @@ const publicOffers = {
         },
         availableRooms: 2,
         refundable: false,
-        mealPlan: "Breakfast",
+        mealPlan: "breakfast",
         amenities: rooms[0].amenities,
         paymentOptions: ["card"],
         totals: {
@@ -293,7 +293,7 @@ const publicOffers = {
         },
         availableRooms: 0,
         refundable: true,
-        mealPlan: null,
+        mealPlan: "room_only",
         amenities: rooms[1].amenities,
         paymentOptions: ["card", "pay_at_property"],
         totals: {
@@ -451,10 +451,21 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     await route.fulfill({ json: rooms });
   });
 
-  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`, async (route) => {
-    await route.fulfill({ json: { addons, showAddonsStep: true, payAtPropertyEnabled: true,
-      onlineCardPayment: false, freeCancellationDays: 7, phoneRequired: true } });
-  });
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          addons,
+          showAddonsStep: true,
+          payAtPropertyEnabled: true,
+          onlineCardPayment: false,
+          freeCancellationDays: 7,
+          phoneRequired: true,
+        },
+      });
+    },
+  );
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/addons`, async (route) => {
     await route.fulfill({ json: addons });

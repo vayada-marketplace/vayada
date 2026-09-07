@@ -407,6 +407,10 @@ export function toLegacyRooms(
       remainingRooms: Math.max(0, flexible.availableRooms),
       features: displayRoom?.features || [],
       benefits: displayRoom?.benefits || [],
+      rateMealDescriptions: {
+        flexible: mealDescription(flexible.mealPlan),
+        nonrefundable: mealDescription(nonRefundable?.mealPlan),
+      },
       flexibleRateEnabled: Boolean(roomOffers.find((offer) => offer.refundable)),
       cancellationPolicy: flexible.policies.cancellation || undefined,
       ratePaymentMethods: {
@@ -476,4 +480,8 @@ function depositSettings(summary: string | null): { enabled: boolean; percentage
     enabled: true,
     percentage: percentage ? Number(percentage[1]) : null,
   };
+}
+
+function mealDescription(value: string | null | undefined): string | null {
+  return value === "breakfast" ? "Breakfast included" : value === "room_only" ? "Room only" : null;
 }

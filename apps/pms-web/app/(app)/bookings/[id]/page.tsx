@@ -2098,7 +2098,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     <HomeModernIcon className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{booking.roomName}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {booking.roomName}
+                      {booking.mealDescription && (
+                        <span className="block text-sm text-gray-600">
+                          {booking.mealDescription}
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-gray-500 truncate">
                       {row.roomNumber
                         ? t("bookings.detail.roomNumber", { number: row.roomNumber })

@@ -292,6 +292,9 @@ export default function MyBookingPageClient() {
                     ? `${booking.numberOfRooms}× `
                     : ""}
                   {booking.roomName}
+                  {booking.mealDescription && (
+                    <span className="block text-sm">{booking.mealDescription}</span>
+                  )}
                 </span>
               </div>
               <div className="flex justify-between py-3">

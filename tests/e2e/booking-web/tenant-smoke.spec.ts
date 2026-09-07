@@ -36,6 +36,12 @@ test.describe("booking-web tenant smoke", () => {
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
     await expect(page.getByText("Alpine Suite")).toBeVisible();
+    await expect(
+      page.locator("[data-rate-type]").filter({ hasText: "Breakfast included" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-rate-type="flexible"]').filter({ hasText: "Room only" }).first(),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();

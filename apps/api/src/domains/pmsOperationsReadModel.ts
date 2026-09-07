@@ -1,4 +1,7 @@
-import { projectBookingRoomSelection } from "./bookingRoomSelectionProjection.js";
+import {
+  bookedMealDescription,
+  projectBookingRoomSelection,
+} from "./bookingRoomSelectionProjection.js";
 import type { PropertyPlanReadModel } from "@vayada/domain-finance";
 import pg from "pg";
 
@@ -184,6 +187,7 @@ export type PmsOperationalReservation = {
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   privateNoteCount: number;
   additionalGuestCount: number;
+  mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: ReturnType<typeof projectBookingRoomSelection>["roomLines"];
   roomCount?: number;
@@ -1396,6 +1400,7 @@ function toPmsOperationalReservation(
       ? { bookedOffer: { roomTypeId: bookedRoomTypeId, roomName: bookedRoomName } }
       : {}),
     ...projectBookingRoomSelection(row.selectedRoomOffer),
+    mealDescription: bookedMealDescription(row.selectedRoomOffer),
     roomCount: Math.max(toInteger(row.roomCount), 1),
     pricing: {
       totalAmount: {

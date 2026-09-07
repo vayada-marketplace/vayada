@@ -141,6 +141,12 @@ describe("Booking Web public hotel adapter", () => {
 
     expect(toLegacyRooms(response)[0]?.amenities).toEqual(["Wi-Fi", "Air conditioning", "Balcony"]);
 
+    expect(toLegacyRooms(response)[0]).toMatchObject({
+      baseRate: 200,
+      rateMealDescriptions: { flexible: "Breakfast included", nonrefundable: null },
+    });
+    response.quote.offers[0].mealPlan = "room_only";
+    expect(toLegacyRooms(response)[0]?.rateMealDescriptions?.flexible).toBe("Room only");
     response.quote.offers[0].amenities = [];
     expect(toLegacyRooms(response)[0]?.amenities).toEqual([]);
   });

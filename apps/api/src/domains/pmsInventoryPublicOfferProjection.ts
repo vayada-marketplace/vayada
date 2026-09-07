@@ -210,7 +210,9 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
         WHEN rate_plan.rate_type = 'non_refundable' THEN 'Non-refundable.'
         ELSE profile.policies ->> 'cancellationSummary'
       END AS cancellation_summary,
-      rate_plan.meal_plan,
+      CASE WHEN rate_plan.pricing_contract_version = 'pms-pricing.v1'
+        THEN COALESCE(rate_plan.meal_plan, 'room_only')
+        ELSE rate_plan.meal_plan END AS meal_plan,
       rate_plan.currency,
       rate_plan.active AS rate_plan_active,
       GREATEST(

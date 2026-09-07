@@ -178,17 +178,30 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
   });
 
   it("omits inactive room rates from current pricing evidence without deleting their plans", async () => {
-    await repository.upsertPropertyPricingCurrency(currencyCommand("currency-active-evidence", 0, "EUR"));
+    await repository.upsertPropertyPricingCurrency(
+      currencyCommand("currency-active-evidence", 0, "EUR"),
+    );
     await seedRoomType(roomTypeId, "Retired test room");
-    const created = await repository.upsertFlexibleRatePlan(planCommand("plan-active-evidence", roomTypeId, 0, "100.00"));
+    const created = await repository.upsertFlexibleRatePlan(
+      planCommand("plan-active-evidence", roomTypeId, 0, "100.00"),
+    );
     expect(created.ok).toBe(true);
     const read = createPgPmsPricingReadModel({ connectionString: TEST_DATABASE_URL! });
     try {
       expect((await read.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(1);
-      await admin.query("UPDATE pms.room_types SET active = FALSE WHERE property_id = $1 AND id = $2", [propertyId, roomTypeId]);
+      await admin.query(
+        "UPDATE pms.room_types SET active = FALSE WHERE property_id = $1 AND id = $2",
+        [propertyId, roomTypeId],
+      );
       expect((await read.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(0);
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({ flexibleRatePlanId: planId });
-      const charges = await loadPmsMandatoryChargePricingSourceSnapshot(admin, propertyId, new Date(acceptedAt));
+      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
+        flexibleRatePlanId: planId,
+      });
+      const charges = await loadPmsMandatoryChargePricingSourceSnapshot(
+        admin,
+        propertyId,
+        new Date(acceptedAt),
+      );
       expect(charges?.sourceRevisions.flexibleRatePlans).toHaveLength(0);
     } finally {
       await read.close();
@@ -198,28 +211,73 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
   it("preserves inclusive total, stable identity and omitted meals; removes breakfast explicitly", async () => {
     await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
     await seedRoomType(roomTypeId, "Meal Suite");
-    const input = { ...planCommand("meal-create", roomTypeId, 0, "120.00"), mealPlan: "breakfast" as const };
+    const input = {
+      ...planCommand("meal-create", roomTypeId, 0, "120.00"),
+      mealPlan: "breakfast" as const,
+    };
     const created = await repository.upsertFlexibleRatePlan(input);
-    expect(created).toMatchObject({ ok: true, response: { flexibleRatePlan: {
-      flexibleRatePlanId: planId, mealPlan: "breakfast", baseAmount: { amountDecimal: "120.00", currency: "EUR" }
-    } } });
+    expect(created).toMatchObject({
+      ok: true,
+      response: {
+        flexibleRatePlan: {
+          flexibleRatePlanId: planId,
+          mealPlan: "breakfast",
+          baseAmount: { amountDecimal: "120.00", currency: "EUR" },
+        },
+      },
+    });
     expect(await repository.upsertFlexibleRatePlan(input)).toEqual(created);
-    expect(await repository.upsertFlexibleRatePlan({ ...input, mealPlan: "room_only" }))
-      .toMatchObject({ ok: false, error: { code: "idempotency_key_conflict" } });
+    expect(
+      await repository.upsertFlexibleRatePlan({ ...input, mealPlan: "room_only" }),
+    ).toMatchObject({ ok: false, error: { code: "idempotency_key_conflict" } });
+    const bookingId = "16900000-0000-4000-8000-000000000029";
+    const purchasedMeal = created.ok ? created.response.flexibleRatePlan.mealPlan : null;
+    await admin.query(
+      `INSERT INTO booking.guest_bookings
+      (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency,total_amount,balance_amount,booking_metadata)
+      VALUES ($1,$2,'VAY1529-MEAL','confirmed','2026-09-12','2026-09-13','EUR',120,120,$3::jsonb)`,
+      [
+        bookingId,
+        propertyId,
+        JSON.stringify({ selectedOffer: { rateSummary: { mealPlan: purchasedMeal } } }),
+      ],
+    );
     await repository.upsertFlexibleRatePlan(planCommand("meal-unrelated", roomTypeId, 1, "120.00"));
     const read = createPgPmsPricingReadModel({ connectionString: TEST_DATABASE_URL! });
     try {
       expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        flexibleRatePlanId: planId, mealPlan: "breakfast", flexibleRatePlanRevision: 2
+        flexibleRatePlanId: planId,
+        mealPlan: "breakfast",
+        flexibleRatePlanRevision: 2,
       });
-      await expect(admin.query("UPDATE pms.rate_plans SET meal_plan='half_board' WHERE id=$1", [planId])).rejects.toThrow();
-      await repository.upsertFlexibleRatePlan({ ...planCommand("meal-remove", roomTypeId, 2, "120.00"), mealPlan: "room_only" });
+      await expect(
+        admin.query("UPDATE pms.rate_plans SET meal_plan='half_board' WHERE id=$1", [planId]),
+      ).rejects.toThrow();
+      await repository.upsertFlexibleRatePlan({
+        ...planCommand("meal-remove", roomTypeId, 2, "120.00"),
+        mealPlan: "room_only",
+      });
       expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
-        flexibleRatePlanId: planId, mealPlan: "room_only", baseAmount: { amountDecimal: "120.00" }
+        flexibleRatePlanId: planId,
+        mealPlan: "room_only",
+        baseAmount: { amountDecimal: "120.00" },
       });
+      expect(
+        (
+          await admin.query(
+            "SELECT booking_metadata #>> '{selectedOffer,rateSummary,mealPlan}' AS meal FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0].meal,
+      ).toBe("breakfast");
       await admin.query("UPDATE pms.rate_plans SET meal_plan=NULL WHERE id=$1", [planId]);
-      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({ mealPlan: "room_only" });
-    } finally { await read.close(); }
+      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
+        mealPlan: "room_only",
+      });
+    } finally {
+      await admin.query("DELETE FROM booking.guest_bookings WHERE id=$1", [bookingId]);
+      await read.close();
+    }
   });
 
   it("creates exact currency/plan sources, replays once, and updates the stable plan by CAS", async () => {
