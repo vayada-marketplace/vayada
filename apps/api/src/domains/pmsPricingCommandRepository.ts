@@ -115,6 +115,7 @@ const PLAN_RETURNING = `
   source_room_facts_revision AS "sourceRoomFactsRevision",
   base_rate_amount::text AS "amountDecimal",
   currency::text AS currency,
+  meal_plan AS "mealPlan",
   cancellation_policy_snapshot AS "cancellationTerms",
   created_at AS "createdAt",
   updated_at AS "updatedAt"`;
@@ -510,7 +511,7 @@ async function upsertPlan(
     const updated = await client.query<PmsFlexibleRatePlanRow>(
       `UPDATE pms.rate_plans
        SET rate_type = 'flexible',
-           meal_plan = NULL,
+           meal_plan = COALESCE($11::text, meal_plan, 'room_only'),
            payment_policy = '{}'::jsonb,
            deposit_policy = '{}'::jsonb,
            cancellation_policy_snapshot = $4::jsonb,
@@ -538,6 +539,7 @@ async function upsertPlan(
         pricingCurrency.pricingCurrencyRevision,
         at.toISOString(),
         command.expectedFlexibleRatePlanRevision,
+        command.mealPlan ?? null,
       ],
     );
     if (!updated.rows[0]) throw new Error("PMS flexible pricing plan compare-and-set failed");
@@ -564,7 +566,7 @@ async function upsertPlan(
          flexible_rate_plan_revision, source_room_facts_revision,
          source_pricing_currency_revision, created_at, updated_at
        ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, $4, 'Flexible', 'flexible', NULL,
+         $1::uuid, $2::uuid, $3::uuid, $4, 'Flexible', 'flexible', $11,
          '{}'::jsonb, '{}'::jsonb, $5::jsonb, $6::numeric(15, 2), $7, TRUE,
          '${PMS_PRICING_CONTRACT_VERSION}', 1, $8, $9,
          $10::timestamptz, $10::timestamptz
@@ -581,6 +583,7 @@ async function upsertPlan(
         roomFactsRevision,
         pricingCurrency.pricingCurrencyRevision,
         at.toISOString(),
+        command.mealPlan ?? "room_only",
       ],
     );
     if (!inserted.rows[0]) throw new Error("PMS flexible pricing plan insert failed");
