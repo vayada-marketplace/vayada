@@ -253,14 +253,6 @@ export default function DashboardPage() {
       );
   };
 
-  const handleNoShow = async (bookingId: string) => {
-    await bookingsService.markNoShow(bookingId);
-    setBookings((prev) => prev.filter((b) => b.id !== bookingId));
-    if (!forecastIncludesToday) setTonightInventoryDate(null);
-    setInventoryRefresh((revision) => revision + 1);
-    setQuickView(null);
-  };
-
   const monthStartStr = useMemo(() => {
     return `${today.slice(0, 7)}-01`;
   }, [today]);
@@ -673,7 +665,6 @@ export default function DashboardPage() {
           today={today}
           mode={quickView.mode}
           onClose={() => setQuickView(null)}
-          onNoShow={handleNoShow}
         />
       )}
     </div>
@@ -690,7 +681,6 @@ function ArrivalQuickView({
   mode,
   today,
   onClose,
-  onNoShow,
 }: {
   booking: Booking;
   guests: BookingAdditionalGuest[];
@@ -699,11 +689,8 @@ function ArrivalQuickView({
   mode: "arrival" | "departure";
   today: string;
   onClose: () => void;
-  onNoShow?: (bookingId: string) => Promise<void>;
 }) {
   const { locale, t } = useTranslation();
-  const [noShowLoading, setNoShowLoading] = useState(false);
-  const [noShowError, setNoShowError] = useState<string | null>(null);
   const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
   const due = isPaid(booking) ? 0 : booking.totalAmount;
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
@@ -712,19 +699,6 @@ function ArrivalQuickView({
   const isFuture = eventDate > today;
   const isNotCheckedIn = !isFuture && isDeparture && isNotCheckedInDeparture(booking);
   const isCheckedOut = booking.status === "checked_out";
-
-  async function handleNoShow() {
-    if (!onNoShow) return;
-    setNoShowLoading(true);
-    setNoShowError(null);
-    try {
-      await onNoShow(booking.id);
-    } catch {
-      setNoShowError(t("dashboard.noShowError"));
-    } finally {
-      setNoShowLoading(false);
-    }
-  }
 
   return createPortal(
     <div
@@ -848,25 +822,18 @@ function ArrivalQuickView({
             {!isFuture &&
               (isNotCheckedIn ? (
                 <>
-                  {noShowError && (
-                    <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
-                      {noShowError}
-                    </p>
-                  )}
                   <Link
                     href={`/check-in/${booking.id}?next=checkout`}
                     className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
                   >
                     {t("dashboard.checkInNow")}
                   </Link>
-                  <button
-                    type="button"
-                    onClick={handleNoShow}
-                    disabled={noShowLoading}
+                  <Link
+                    href={`/bookings/${booking.id}`}
                     className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
                   >
-                    {noShowLoading ? t("dashboard.markingNoShow") : t("dashboard.markNoShow")}
-                  </button>
+                    {t("dashboard.reviewNoShow")}
+                  </Link>
                 </>
               ) : (
                 <Link

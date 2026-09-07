@@ -1,5 +1,6 @@
 "use client";
 
+import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
 import Link from "next/link";
 import { HostBookingActions } from "@/components/bookings/HostBookingActions";
@@ -2004,6 +2005,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {(booking.status === "confirmed" ||
+        ["booking_com", "channex", "booking.com"].includes(booking.channel.toLowerCase())) && (
+        <NoShowReporting
+          key={booking.id}
+          bookingId={booking.id}
+          canRecordLocal={booking.status === "confirmed"}
+          onChanged={() => {
+            void loadAll();
+          }}
+        />
+      )}
       <div className="space-y-6">
         {/* 2. Stay details */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">

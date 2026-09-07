@@ -3,6 +3,15 @@ import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsProper
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { CheckinStepType } from "@/services/settings";
 
+export type NoShowReport = {
+  eligible: boolean;
+  reason: string | null;
+  localNoShow: boolean;
+  status: "not_reported" | "pending" | "submitted" | "action_required";
+  retryable: boolean;
+  waivedFees: boolean | null;
+};
+
 export const HIDDEN_GUEST_CONTACT = "Hidden until you accept";
 
 export interface AssignedRoom {
@@ -986,6 +995,18 @@ export const bookingsService = {
       pmsOperationsRequestOptions,
     );
   },
+
+  getNoShowReport: async (id: string) =>
+    pmsOperationsClient.get<NoShowReport>(
+      await reservationEndpoint(id, "/no-show-report"),
+      pmsOperationsRequestOptions,
+    ),
+  reportNoShow: async (id: string, waivedFees: boolean, retry: boolean) =>
+    pmsOperationsClient.post<NoShowReport>(
+      await reservationEndpoint(id, "/no-show-report"),
+      { waivedFees, retry },
+      pmsOperationsRequestOptions,
+    ),
 
   markNoShow: async (id: string) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(

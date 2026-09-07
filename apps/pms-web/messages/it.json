@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Esamina mancata presentazione…",
+  "checkOut.reviewNoShow": "Esamina mancata presentazione…",
   "layout.header.signOut": "Esci",
   "layout.header.noProperties": "Nessuna struttura",
   "layout.header.user": "Utente",
