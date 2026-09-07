@@ -470,7 +470,11 @@ export default function InboxWorkspace() {
               }
             : response,
         );
-        if (!response.availableProviderActions.includes("booking_com_no_reply_needed")) {
+        if (
+          !(response.providerActions ?? []).some((action) =>
+            ["pending", "retrying"].includes(action.state),
+          )
+        ) {
           setProviderActionPendingThreads((current) => {
             if (!current.has(response.thread.id)) return current;
             const next = new Set(current);
@@ -519,7 +523,14 @@ export default function InboxWorkspace() {
         item.message.direction === "outbound" &&
         (item.message.delivery?.state === "queued" || item.message.delivery?.state === "retrying"),
     );
-    if (!deliveryPending && !providerActionPending) return;
+    if (
+      !deliveryPending &&
+      !providerActionPending &&
+      !(activeDetail?.providerActions ?? []).some((action) =>
+        ["pending", "retrying"].includes(action.state),
+      )
+    )
+      return;
     let cancelled = false;
     let timer = window.setTimeout(poll, 5_000);
     async function poll() {
@@ -530,7 +541,7 @@ export default function InboxWorkspace() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [activeDetail?.timeline, loadDetail, providerActionPending]);
+  }, [activeDetail?.timeline, activeDetail?.providerActions, loadDetail, providerActionPending]);
 
   useEffect(() => {
     if (!propertyId || accessDenied || listLoading || listAppending || detailLoading) return;
@@ -1160,7 +1171,7 @@ export default function InboxWorkspace() {
     }
   }
 
-  async function noReplyNeeded() {
+  async function noReplyNeeded(action: "no-reply-needed" | "close" = "no-reply-needed") {
     if (!propertyId || !detail || providerActionPending || mutationInFlight.current) return;
     const threadId = detail.thread.id;
     setProviderActionPendingThreads((current) => new Set(current).add(threadId));
@@ -1168,7 +1179,12 @@ export default function InboxWorkspace() {
       "provider-action",
       async () => {
         try {
-          await messagingService.providerNoReplyNeeded(propertyId, threadId);
+          await messagingService.providerNoReplyNeeded(
+            propertyId,
+            threadId,
+            detail.thread.version,
+            action,
+          );
         } catch (error) {
           if (inboxError(error).status !== null) {
             setProviderActionPendingThreads((current) => {
@@ -1289,7 +1305,16 @@ export default function InboxWorkspace() {
                 providerActionAvailable={activeDetail.availableProviderActions.includes(
                   "booking_com_no_reply_needed",
                 )}
-                providerActionPending={providerActionPending}
+                providerActionPending={
+                  providerActionPending ||
+                  (activeDetail.providerActions ?? []).some((action) =>
+                    ["pending", "retrying"].includes(action.state),
+                  )
+                }
+                providerCloseAvailable={activeDetail.availableProviderActions.includes(
+                  "channex_close",
+                )}
+                onProviderClose={() => void noReplyNeeded("close")}
                 onBack={closeThread}
                 onContext={() => setContextOpen(true)}
                 onDone={() => void markDone()}
@@ -1301,6 +1326,30 @@ export default function InboxWorkspace() {
                 onAssign={(id) => void assignThread(id)}
                 onNoReplyNeeded={() => void noReplyNeeded()}
               />
+              {(activeDetail.providerActions ?? []).map((outcome) => (
+                <p
+                  key={outcome.action}
+                  role="status"
+                  className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-700"
+                >
+                  {outcome.action === "channex_close"
+                    ? t("inbox.providerClosure")
+                    : t("inbox.providerNoReply")}
+                  :{" "}
+                  {outcome.state === "confirmed"
+                    ? t("inbox.providerConfirmed")
+                    : outcome.state === "pending"
+                      ? t("inbox.providerPending")
+                      : outcome.state === "retrying"
+                        ? t("inbox.providerRetrying")
+                        : outcome.reason === "ambiguous_provider_outcome"
+                          ? t("inbox.providerUncertain")
+                          : t("inbox.providerFailed")}
+                  {outcome.threadVersion !== activeDetail.thread.version &&
+                    t("inbox.providerChanged")}{" "}
+                  {t("inbox.providerLocalOnly")}
+                </p>
+              ))}
               <ForwardedConversationTimeline
                 ref={timelineRef}
                 timeline={activeDetail.timeline}
@@ -1710,6 +1759,8 @@ function ConversationHeader(
     selfMembershipId: string | null;
     mutationBusy: string | null;
     providerActionAvailable: boolean;
+    providerCloseAvailable: boolean;
+    onProviderClose: () => void;
     providerActionPending: boolean;
     onBack: () => void;
     onContext: () => void;
@@ -1819,7 +1870,7 @@ function ConversationHeader(
           <div
             className={cn(
               "relative ml-auto shrink-0",
-              !props.providerActionAvailable && "sm:hidden",
+              !props.providerActionAvailable && !props.providerCloseAvailable && "sm:hidden",
             )}
           >
             <button
@@ -1863,6 +1914,19 @@ function ConversationHeader(
                       ))}
                   </select>
                 </label>
+                {props.providerCloseAvailable && (
+                  <button
+                    type="button"
+                    disabled={props.providerActionPending}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      props.onProviderClose();
+                    }}
+                    className="min-h-11 w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:text-gray-400"
+                  >
+                    {t("inbox.providerClose")}
+                  </button>
+                )}
                 {props.providerActionAvailable && (
                   <>
                     <button
