@@ -167,3 +167,56 @@ function responseId(value: unknown): string | null {
   if (!data || typeof data !== "object" || !("id" in data)) return null;
   return typeof data.id === "string" && data.id.trim() ? data.id.trim() : null;
 }
+
+// These endpoints have no documented idempotency or conditional-mutation support.
+export function createChannexThreadAction(config: {
+  apiBaseUrl: string;
+  apiKey: string;
+  fetch?: typeof fetch;
+}) {
+  return async (input: {
+    action: "booking_com_no_reply_needed" | "channex_close";
+    providerConversationId: string;
+  }): Promise<PmsInboxDeliveryProviderResult> => {
+    const suffix = input.action === "channex_close" ? "close" : "no_reply_needed";
+    let response: Response;
+    try {
+      response = await (config.fetch ?? fetch)(
+        new URL(
+          `/api/v1/message_threads/${encodeURIComponent(input.providerConversationId)}/${suffix}`,
+          config.apiBaseUrl,
+        ),
+        {
+          method: "POST",
+          headers: { "user-api-key": config.apiKey },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+    } catch {
+      return { ok: false, failure: "ambiguous_provider_outcome" };
+    }
+    if (!response.ok)
+      return {
+        ok: false,
+        failure:
+          response.status === 429
+            ? "transient_provider_failure"
+            : response.status >= 500
+              ? "ambiguous_provider_outcome"
+              : [401, 403].includes(response.status)
+                ? "provider_configuration_unavailable"
+                : "provider_rejected",
+      };
+    if (input.action === "channex_close") {
+      const body = (await response.json().catch(() => null)) as {
+        data?: { id?: string; attributes?: { is_closed?: boolean } };
+      } | null;
+      if (
+        body?.data?.id !== input.providerConversationId ||
+        body.data.attributes?.is_closed !== true
+      )
+        return { ok: false, failure: "ambiguous_provider_outcome" };
+    }
+    return { ok: true, providerReference: input.providerConversationId };
+  };
+}

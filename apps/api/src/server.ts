@@ -171,7 +171,11 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
-import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
+import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
+import {
+  createChannexThreadAction,
+  createChannexMessageDelivery,
+} from "./integrations/channexMessageDelivery.js";
 import { createResendPmsInboxDelivery } from "./integrations/resendPmsInboxDelivery.js";
 import { createPgChannexManagementPlanPort } from "./integrations/channexManagementPlans.js";
 import { runPmsChannexManagementWorkerOnce } from "./jobs/pmsChannexManagementWorker.js";
@@ -723,6 +727,9 @@ const pmsInboxRuntime = pmsOperationsRepository
   ? createPmsInboxProductionRuntime({
       connectionString: targetDatabaseUrl,
       attachmentMediaAccessEnabled: Boolean(platformMediaRuntime),
+      providerMutationEnabled:
+        config.channexManagement.capabilityModes.messaging === "mutating" &&
+        Boolean(config.channexManagement.apiBaseUrl && config.channexManagement.apiKey),
     })
   : undefined;
 
@@ -2104,7 +2111,18 @@ const pmsInboxDeliveryWorker =
           ...(pmsInboxChannexDelivery ? { channex: pmsInboxChannexDelivery } : {}),
           ...(pmsInboxEmailDelivery ? { resend: pmsInboxEmailDelivery } : {}),
         },
-        relay: () => relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool }),
+        relay: async () => {
+          await relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool });
+          await runPmsInboxProviderActions(
+            pmsInboxDeliveryPool,
+            pmsInboxChannexDelivery
+              ? createChannexThreadAction({
+                  apiBaseUrl: config.channexManagement.apiBaseUrl!,
+                  apiKey: config.channexManagement.apiKey!,
+                })
+              : undefined,
+          );
+        },
         warn: (details, message) => app.log.warn(details, message),
       })
     : undefined;
