@@ -94,6 +94,69 @@ export async function registerPmsChannexManagementRoutes(
     },
   );
 
+  app.get<{ Params: { propertyId: string } }>(
+    "/properties/:propertyId/channex/alerts",
+    async (request, reply) => {
+      enforcePmsChannexPolicy(request, request.params.propertyId, "pms.operations.read");
+      if (!options.repository.getAlerts)
+        return reply.code(503).send({ code: "alerts_unavailable" });
+      return options.repository.getAlerts(request.params.propertyId);
+    },
+  );
+  app.post<{ Params: { propertyId: string; alertId: string }; Body: { round?: unknown } }>(
+    "/properties/:propertyId/channex/alerts/:alertId/:action",
+    async (request, reply) => {
+      const { propertyId, alertId, action } = request.params as {
+        propertyId: string;
+        alertId: string;
+        action: string;
+      };
+      const context = enforcePmsChannexPolicy(request, propertyId, "pms.operations.manage");
+      if (!/^[0-9a-f-]{36}$/i.test(alertId)) return reply.code(400).send({ code: "invalid_alert" });
+      if (action === "acknowledge") {
+        const found = await options.repository.acknowledgeAlert?.(
+          propertyId,
+          alertId,
+          context.actor.internalUserId,
+        );
+        return found ? { ok: true } : reply.code(404).send({ code: "alert_not_found" });
+      }
+      if (action !== "recover") return reply.code(404).send({ code: "action_not_found" });
+      const alerts = await options.repository.getAlerts?.(propertyId);
+      const alert = alerts?.find((item) => item.id === alertId);
+      if (!alert) return reply.code(404).send({ code: "alert_not_found" });
+      const booking = [
+        "booking_unmapped_room",
+        "booking_unmapped_rate",
+        "non_acked_booking",
+        "disconnected_channel",
+      ].includes(alert.eventType);
+      const ari = ["rate_error", "sync_error", "sync_warning", "disconnected_channel"].includes(
+        alert.eventType,
+      );
+      if (
+        (booking && options.capabilityModes.bookingSync !== "mutating") ||
+        (ari && options.capabilityModes.ariSync !== "mutating")
+      )
+        return reply.code(409).send({ code: "channex_capability_not_mutating" });
+      if (
+        !Number.isInteger(request.body?.round) ||
+        Number(request.body.round) < 0 ||
+        Number(request.body.round) >= 3
+      )
+        return reply.code(400).send({ code: "invalid_recovery_round" });
+      if (!options.commandPort?.recoverAlert)
+        return reply.code(503).send({ code: "recovery_unavailable" });
+      const result = await options.commandPort.recoverAlert(
+        context,
+        propertyId,
+        alertId,
+        Number(request.body.round),
+      );
+      return reply.code(result.ok ? 202 : 409).send(result);
+    },
+  );
+
   app.get<{ Params: { propertyId: string; operationId: string } }>(
     "/properties/:propertyId/channex/operations/:operationId",
     async (request, reply) => {

@@ -1,3 +1,4 @@
+import { listChannexAlerts, type ChannexAlert } from "./channexOperationalAlerts.js";
 import {
   CHANNEX_MANAGEMENT_CONTRACT_VERSION,
   type ChannexConnectedChannel,
@@ -42,6 +43,8 @@ export type PmsChannexManagementReadRepository = {
     capabilityModes: ChannexManagementCapabilityModes,
   ): Promise<ChannexManagementSnapshot>;
   getOperation(propertyId: string, operationId: string): Promise<ChannexManagementOperation | null>;
+  getAlerts?(propertyId: string): Promise<ChannexAlert[]>;
+  acknowledgeAlert?(propertyId: string, alertId: string, userId: string): Promise<boolean>;
   close?(): Promise<void>;
 };
 
@@ -61,6 +64,14 @@ export function createPgPmsChannexManagementReadRepository(config: {
           [propertyId],
         )
       ).rows;
+    },
+    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId),
+    async acknowledgeAlert(propertyId, alertId, userId) {
+      const result = await pool.query(
+        `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
+        [propertyId, alertId, userId],
+      );
+      return result.rows.length === 1;
     },
     async getSnapshot(propertyId, capabilityModes) {
       const [connection, roomMappings, rateMappings, syncRows, activeOperation] = await Promise.all(
