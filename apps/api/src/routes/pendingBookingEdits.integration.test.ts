@@ -12,6 +12,10 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
   () => {
     const fixture = pendingEditFixture();
     const { pool, now, adapter, command, edit, url, intents, stripe } = fixture;
+    it("returns edit eligibility immediately after pending checkout creation", () => {
+      expect(fixture.created.booking).toMatchObject({ status: "pending", canEditRequest: true });
+    });
+
     it("rejects missing credentials and invalid occupancy", async () => {
       await expect(
         adapter.editRequest!("vay-959-hotel", fixture.created.booking.id, "details", {}, command()),
