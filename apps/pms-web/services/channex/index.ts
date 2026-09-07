@@ -3,6 +3,7 @@ import {
   pmsOperationsRequestOptions,
 } from "@/services/api/pmsOperationsClient";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import type { ChannexInventoryRule } from "@vayada/domain-pms-channex";
 
 export type ChannexCapabilityMode = "observe_only" | "mutating";
 export type ChannexOperationType =
@@ -12,6 +13,7 @@ export type ChannexOperationType =
   | "sync_ari"
   | "sync_bookings"
   | "update_markups"
+  | "update_inventory_rules"
   | "install_messaging";
 export type ChannexOperationStatus =
   | "queued"
@@ -67,6 +69,7 @@ export interface ChannexRatePlanMapping {
 }
 
 export interface ConnectedChannel {
+  externalChannelId?: string;
   key: string;
   application: string;
   title: string | null;
@@ -74,6 +77,7 @@ export interface ConnectedChannel {
 }
 
 export interface ChannexSnapshot {
+  inventoryRules?: { rules: ChannexInventoryRule[]; operation: ChannexOperation | null };
   contractVersion: "pms-channex-management.v1";
   propertyId: string;
   connection: {
@@ -124,6 +128,17 @@ function identity(operationType: ChannexOperationType) {
 }
 
 export const channexService = {
+  async updateInventoryRules(
+    rules: ChannexInventoryRule[],
+    expectedOperationId: string | null,
+    commandId: string,
+  ) {
+    return pmsOperationsClient.put<ChannexOperation>(
+      await endpoint("updating channel inventory rules", "channex/inventory-rules"),
+      { rules, expectedOperationId, commandId, idempotencyKey: `inventory-rules:${commandId}` },
+      pmsOperationsRequestOptions,
+    );
+  },
   async getSnapshot() {
     return pmsOperationsClient.get<ChannexSnapshot>(
       await endpoint("loading channel management"),
