@@ -91,3 +91,14 @@ write followed by a failed refresh without falsely reporting that the write fail
 Historical handed-off receipts remain capacity-protecting unless an append-only,
 property-scoped successor record or a linked terminal booking proves release.
 Missing Booking metadata alone must never free inventory.
+
+### Built-in flexible policy evidence
+
+New room creation stores the built-in “Free until 7 days before” policy with the
+canonical seven-day deadline and full-booking after-deadline/no-show penalties.
+Both the room form and repository fallback use the same default. Public-offer
+projection and checkout retain those fields in the booked snapshot, allowing host
+date previews to move the frozen deadline with check-in. Custom prose and partial
+refund policies are not inferred or rewritten. Existing rate plans and frozen
+bookings are not backfilled: an unstructured historical snapshot still fails closed;
+future test bookings require an explicitly configured canonical rate policy.
