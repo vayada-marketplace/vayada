@@ -1,3 +1,5 @@
+# An acquire timeout also bounds asyncpg's connection reset on release.
+# command_timeout alone leaves pool waits unbounded after a database restart.
 import asyncpg
 
 from app.config import settings
@@ -26,25 +28,25 @@ class Database:
     @classmethod
     async def execute(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.execute(query, *args)
 
     @classmethod
     async def fetch(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetch(query, *args)
 
     @classmethod
     async def fetchrow(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchrow(query, *args)
 
     @classmethod
     async def fetchval(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchval(query, *args)
 
 
@@ -71,19 +73,19 @@ class AuthDatabase:
     @classmethod
     async def execute(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.execute(query, *args)
 
     @classmethod
     async def fetchrow(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchrow(query, *args)
 
     @classmethod
     async def fetchval(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchval(query, *args)
 
 
@@ -110,23 +112,23 @@ class BookingEngineDatabase:
     @classmethod
     async def execute(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.execute(query, *args)
 
     @classmethod
     async def fetch(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetch(query, *args)
 
     @classmethod
     async def fetchrow(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchrow(query, *args)
 
     @classmethod
     async def fetchval(cls, query: str, *args):
         pool = await cls.get_pool()
-        async with pool.acquire() as conn:
+        async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
             return await conn.fetchval(query, *args)

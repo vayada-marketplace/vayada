@@ -1,3 +1,4 @@
+from app.config import settings
 from app.database import Database
 
 
@@ -109,7 +110,10 @@ class PaymentRepository:
         refund_currency: str,
     ) -> dict | None:
         pool = await Database.get_pool()
-        async with pool.acquire() as conn, conn.transaction():
+        async with (
+            pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn,
+            conn.transaction(),
+        ):
             current = await conn.fetchrow("SELECT * FROM payments WHERE id = $1", payment_id)
             if not current:
                 return None
