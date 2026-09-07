@@ -4,8 +4,10 @@ import {
   PMS_WEB_RESERVATION_ID as B,
   mockPmsWebAuthenticatedSession,
   mockPmsWebTargetRoutes,
-  pmsWebReservation,
+  pmsWebReservation as baseReservation,
 } from "../support/pmsWebMocks";
+
+const pmsWebReservation = { ...baseReservation, source: "booking_com" };
 
 for (const report of [false, true]) {
   test(`records a no-show with ${report ? "explicit reporting and fee choice" : "local-only choice"}`, async ({
@@ -185,4 +187,26 @@ test("does not deny reporting after submission succeeds but refreshed status fai
   ).toBeVisible();
   await expect(page.getByText(/Booking.com has not been notified/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report no-show to Booking.com" })).toHaveCount(0);
+});
+
+test("blocks a retry when the persisted fee choice is unavailable", async ({ page }) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  await page.route(`**/api/pms/properties/${P}/reservations/${B}/no-show-report`, (route) =>
+    route.fulfill({
+      json: {
+        eligible: true,
+        reason: null,
+        localNoShow: true,
+        status: "action_required",
+        retryable: true,
+        waivedFees: null,
+      },
+    }),
+  );
+  await page.goto(`/bookings/${B}`);
+  await expect(page.getByText("Reporting needs attention.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry delivery with the same fee choice" }),
+  ).toHaveCount(0);
 });
