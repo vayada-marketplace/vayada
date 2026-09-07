@@ -36,6 +36,7 @@ export type PmsChannexManagementJobRow = {
 };
 
 export type PmsChannexManagementReadRepository = {
+  getStayRestrictions?(propertyId: string): Promise<unknown[]>;
   getSnapshot(
     propertyId: string,
     capabilityModes: ChannexManagementCapabilityModes,
@@ -53,6 +54,14 @@ export function createPgPmsChannexManagementReadRepository(config: {
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
 
   return {
+    async getStayRestrictions(propertyId) {
+      return (
+        await pool.query(
+          `SELECT * FROM pms.rate_rules WHERE property_id=$1::uuid ORDER BY room_type_id,starts_on,id`,
+          [propertyId],
+        )
+      ).rows;
+    },
     async getSnapshot(propertyId, capabilityModes) {
       const [connection, roomMappings, rateMappings, syncRows, activeOperation] = await Promise.all(
         [
