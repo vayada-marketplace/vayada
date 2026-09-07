@@ -158,3 +158,15 @@ The integrated account destination and service cutover remain VAY-1498 work; con
 Finance cleanup remains VAY-1500 work. Keep VAY-1499 In Progress until required validation
 and explicit acceptance are complete. Do not delete the retained continuity boundary
 merely because the standalone source has been removed.
+
+## VAY-1500 commission configuration retirement
+
+The user confirms no real customers use the new TypeScript system and authorizes
+its affiliate cleanup. Real-customer link/balance fixtures are not a prerequisite
+for this source retirement; preserve stored records and shared Finance.
+
+Property default and individual affiliate commission GET/PATCH routes now return
+410/no-store after the existing property Finance authorization checks. They do not
+read or write commission rules or look up affiliate records. The authorization
+fallback still reads Booking Finance access. Old commission writer/contracts will
+be removed in a separate slice. Shared payouts, jobs, history and Python are unchanged.
