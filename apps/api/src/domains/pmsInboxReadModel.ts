@@ -2,6 +2,8 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import type {
   PmsInboxAttachment,
+  PmsInboxProviderActionOutcome,
+  PmsInboxProviderAction,
   PmsInboxDirectBooking,
   PmsInboxEmailReplyRoute,
   PmsInboxEmailReplyRouteReadPort,
@@ -67,6 +69,7 @@ type ThreadRow = {
   lastMessageHasAttachments: boolean;
   otaConnectionReady: boolean;
   providerActionAvailable: boolean;
+  providerActions?: PmsInboxProviderActionOutcome[];
 };
 
 type TimelineRow = {
@@ -129,17 +132,17 @@ const THREAD_COLUMNS = `thread.id::text, thread.version::text, thread.attention_
                   AND connection.connection_status IN ('connected', 'degraded')
                   AND connection.messaging_app_installed) AS "otaConnectionReady",
         COALESCE((thread.source = 'channex' AND thread.delivery_channel = 'ota'
-          AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')
-          AND BTRIM(thread.source_thread_id) <> ''
-          AND NOT EXISTS (
-            SELECT 1 FROM platform.jobs provider_action_job
-            WHERE provider_action_job.property_id = thread.property_id
-              AND provider_action_job.resource_product = 'pms'
-              AND provider_action_job.resource_type = 'message_thread'
-              AND provider_action_job.resource_id = thread.id::text
-              AND provider_action_job.job_type = 'pms.inbox.provider-action.deliver'
-              AND provider_action_job.source_domain_event_id IS NOT NULL
-          )), FALSE) AS "providerActionAvailable"`;
+          AND BTRIM(thread.source_thread_id) <> ''), FALSE) AS "providerActionAvailable",
+        COALESCE((SELECT jsonb_agg(result) FROM (
+          SELECT DISTINCT ON (job.payload->>'action') job.payload->>'action' AS action,
+            CASE WHEN job.status IN ('pending', 'running') THEN COALESCE(job.job_metadata->>'outcome', 'pending')
+              ELSE COALESCE(job.job_metadata->>'outcome', 'held') END AS state,
+            job.job_metadata->>'reason' AS reason, (job.payload->>'expectedVersion')::bigint AS "threadVersion"
+          FROM platform.jobs job WHERE job.property_id = thread.property_id
+            AND job.resource_product = 'pms' AND job.resource_type = 'message_thread' AND job.resource_id = thread.id::text
+            AND job.job_type = 'pms.inbox.provider-action.deliver' AND job.source_domain_event_id IS NOT NULL
+          ORDER BY job.payload->>'action', job.created_at DESC, job.id DESC
+        ) result), '[]'::jsonb) AS "providerActions"`;
 
 const THREAD_FROM = `FROM pms.message_threads thread
   LEFT JOIN booking.guest_bookings booking
@@ -373,9 +376,30 @@ export function createPgPmsInboxReadPort(config: {
         value: {
           propertyId: input.propertyId,
           thread: toSummary(threadRow, emailRoutes.get(threadRow.id)),
+          providerActions: threadRow.providerActions ?? [],
           availableProviderActions:
-            threadRow.providerActionAvailable && threadRow.otaConnectionReady
-              ? (["booking_com_no_reply_needed"] as const)
+            config.providerMutationEnabled && threadRow.providerActionAvailable && threadRow.otaConnectionReady
+              ? (
+                  [
+                    "channex_close",
+                    ...(["booking.com", "booking_com", "bookingcom"].includes(
+                      threadRow.providerChannel?.trim().toLowerCase() ?? "",
+                    )
+                      ? ["booking_com_no_reply_needed"]
+                      : []),
+                  ] as PmsInboxProviderAction[]
+                ).filter(
+                  (action) =>
+                    !(threadRow.providerActions ?? []).some(
+                      (outcome) =>
+                        outcome.action === action &&
+                        (["pending", "retrying"].includes(outcome.state) ||
+                          outcome.reason === "ambiguous_provider_outcome" ||
+                          (outcome.state === "confirmed" &&
+                            (outcome.threadVersion === null ||
+                              outcome.threadVersion === Number(threadRow.version)))),
+                    ),
+                )
               : [],
           timeline: [...rows].reverse().map((row) => ({
             propertyId: input.propertyId,
