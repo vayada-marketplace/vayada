@@ -29,7 +29,11 @@ export default function RegisterPage() {
       await authService.register(data);
       const status = await checkPmsSetupStatus();
 
-      if (!status || !status.setupComplete) {
+      if (!status) {
+        throw new Error(t("auth.register.unexpectedError"));
+      }
+
+      if (!status.setupComplete) {
         localStorage.setItem("pmsSetupComplete", "false");
         router.push("/setup");
       } else {

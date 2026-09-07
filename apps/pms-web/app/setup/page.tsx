@@ -20,6 +20,10 @@ export default function PmsSetupPage() {
 
       // If setup is already complete, go to dashboard
       const status = await checkPmsSetupStatus();
+      if (!status) {
+        router.replace("/login");
+        return;
+      }
       if (status?.setupComplete) {
         localStorage.setItem("pmsSetupComplete", "true");
         router.replace("/dashboard");

@@ -28,7 +28,11 @@ function LoginContent() {
       // Check PMS setup status
       const status = await checkPmsSetupStatus();
 
-      if (!status || !status.registered || !status.setupComplete) {
+      if (!status) {
+        throw new Error(t("auth.login.unexpectedError"));
+      }
+
+      if (!status.registered || !status.setupComplete) {
         localStorage.setItem("pmsSetupComplete", "false");
         router.push("/setup");
         return;
