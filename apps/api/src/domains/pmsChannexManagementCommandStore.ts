@@ -2,6 +2,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import { buildChannexManagementJobKey } from "@vayada/domain-pms-channex";
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
 
 import type {
   PmsChannexManagementCommandInput,
@@ -70,7 +71,7 @@ async function enqueue(
        ) VALUES (
          'pms', $1, $2, $3, 'in_progress', 'property', $4::uuid, $5,
          $6::timestamptz + interval '15 minutes', $6::timestamptz + interval '24 hours',
-         jsonb_build_object('commandId', $7, 'operationType', $8)
+         jsonb_build_object('commandId', $7::text, 'operationType', $8::text)
        ) ON CONFLICT (operation_scope, operation, key_hash, scope_key) DO NOTHING
        RETURNING id::text AS id`,
       [
@@ -89,6 +90,15 @@ async function enqueue(
       await client.query(replay.ok ? "COMMIT" : "ROLLBACK");
       return replay;
     }
+    if (input.operationType === "update_inventory_rules") {
+      const error = input.inventoryRules
+        ? await validateInventoryRules(client, propertyId, input.inventoryRules)
+        : "Inventory rules are required.";
+      if (error) {
+        await client.query("ROLLBACK");
+        return { ok: false, code: "invalid_inventory_rules", message: error };
+      }
+    }
     const job = await client.query<PmsChannexManagementJobRow>(
       `INSERT INTO platform.jobs (
          job_key, queue_name, job_type, status, max_attempts, tenant_scope, property_id,
@@ -97,7 +107,7 @@ async function enqueue(
        ) VALUES (
          $1, $2, $3, 'pending', $4, 'property', $5::uuid,
          'pms', 'channex_connection', $5, $6, $7, $8::jsonb,
-         jsonb_build_object('requestFingerprintHash', $9, 'acceptedBy', $10)
+         jsonb_build_object('requestFingerprintHash', $9::text, 'acceptedBy', $10::text)
        ) RETURNING id::text AS "operationId", property_id::text AS "propertyId", status,
          attempts_count AS "attemptsMade", max_attempts AS "maxAttempts",
          run_after AS "runAfter", created_at AS "acceptedAt", payload, job_metadata AS metadata`,
@@ -116,6 +126,17 @@ async function enqueue(
     );
     const row = job.rows[0];
     if (!row) throw new Error("Channex management job was not created");
+    if (input.inventoryRules) {
+      await client.query(
+        `UPDATE pms.channel_connections SET connection_metadata =
+        connection_metadata || jsonb_build_object('inventoryRules', $2::jsonb), updated_at = now()
+        WHERE property_id = $1::uuid AND provider = 'channex'`,
+        [
+          propertyId,
+          JSON.stringify({ rules: input.inventoryRules.rules, operationId: row.operationId }),
+        ],
+      );
+    }
     await client.query(
       `UPDATE platform.idempotency_keys
        SET idempotency_metadata = idempotency_metadata || jsonb_build_object('jobId', $2::text)
@@ -183,7 +204,7 @@ async function insertAcceptedAudit(
      ) VALUES (
        $1, 'pms', $2, $3::timestamptz, 'property', $4::uuid,
        'user', $5::uuid, 'pms', 'channex_connection', $4, $6::uuid, $7, $8,
-       jsonb_build_object('operationType', $9), jsonb_build_object('source', 'pms-web')
+       jsonb_build_object('operationType', $9::text), jsonb_build_object('source', 'pms-web')
      ) ON CONFLICT (product, audit_key) DO NOTHING`,
     [
       `channex.management.accepted:${jobId}`,
@@ -203,7 +224,7 @@ async function hasConnection(client: Client, propertyId: string): Promise<boolea
   const result = await client.query(
     `SELECT 1 FROM pms.channel_connections
      WHERE property_id = $1::uuid AND provider = 'channex'
-       AND connection_status IN ('connected', 'degraded') FOR SHARE`,
+       AND connection_status IN ('connected', 'degraded') FOR UPDATE`,
     [propertyId],
   );
   return Boolean(result.rows[0]);
@@ -216,6 +237,7 @@ function requiresConnection(type: PmsChannexManagementCommandInput["operationTyp
 function fingerprintPayload(input: PmsChannexManagementCommandInput) {
   return {
     operationType: input.operationType,
+    ...(input.inventoryRules ? { inventoryRules: input.inventoryRules } : {}),
     markups: input.markups
       ? [...input.markups].sort((a, b) => a.channel.localeCompare(b.channel))
       : [],

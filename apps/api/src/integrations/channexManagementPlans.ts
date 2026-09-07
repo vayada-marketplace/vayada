@@ -23,7 +23,7 @@ type Pool = {
     text: string,
     values?: unknown[],
   ): Promise<{ rows: T[] }>;
-  connect(): Promise<Pick<Pool, "query"> & { release(): void }>;
+  connect(): Promise<Pick<Pool, "query"> & { release(error?: Error | boolean): void }>;
   end(): Promise<void>;
 };
 type PropertyRow = {
@@ -96,6 +96,38 @@ export function createPgChannexManagementPlanPort(config: {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
   return {
+    async withPropertyLock(job, work) {
+      const client = await pool.connect();
+      let locked = false;
+      try {
+        const result = await client.query<{ locked: boolean }>(
+          "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+          [`channex.management:${job.propertyId}`],
+        );
+        locked = result.rows[0]?.locked === true;
+        if (!locked)
+          throw new Error("Another Channex operation is running for this property. Retry shortly.");
+        const lockedPool: Pool = {
+          query: client.query.bind(client),
+          connect: async () => ({ query: client.query.bind(client), release() {} }),
+          end: async () => {},
+        };
+        return await work(
+          await plan(lockedPool, config.bookingRevisionHandoff, job, config.now?.() ?? new Date()),
+        );
+      } finally {
+        try {
+          if (locked)
+            await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+              `channex.management:${job.propertyId}`,
+            ]);
+        } catch (error) {
+          client.release(true);
+          throw error;
+        }
+        client.release();
+      }
+    },
     plan: (job) => plan(pool, config.bookingRevisionHandoff, job, config.now?.() ?? new Date()),
     async close() {
       await pool.end();
@@ -126,6 +158,35 @@ async function plan(
       : { requests: [] };
   }
   if (!externalPropertyId) throw new Error("Channex connection is not enabled");
+  if (job.input.operationType === "update_inventory_rules") {
+    const state = await pool.query<{
+      rules: import("@vayada/domain-pms-channex").ChannexInventoryRule[];
+    }>(
+      `SELECT connection_metadata -> 'inventoryRules' -> 'rules' AS rules
+       FROM pms.channel_connections WHERE property_id = $1::uuid AND provider = 'channex'`,
+      [job.propertyId],
+    );
+    const mappings = await pool.query<{ id: string; externalId: string }>(
+      `SELECT mapping.room_type_id::text AS id, mapping.external_room_type_id AS "externalId"
+       FROM pms.channel_room_type_mappings mapping JOIN pms.channel_connections connection
+         ON connection.id = mapping.connection_id AND connection.property_id = mapping.property_id
+         AND connection.provider = 'channex'
+       JOIN pms.room_types room ON room.id = mapping.room_type_id AND room.property_id = mapping.property_id
+       WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active`,
+      [job.propertyId],
+    );
+    if (!state.rows[0]?.rules) throw new Error("Desired inventory rules are missing");
+    return {
+      requests: [],
+      externalPropertyId,
+      inventoryRules: {
+        propertyId: job.propertyId,
+        externalPropertyId,
+        rules: state.rows[0].rules,
+        roomMappings: Object.fromEntries(mappings.rows.map((row) => [row.id, row.externalId])),
+      },
+    };
+  }
   if (job.input.operationType === "provision") {
     return provisioningPlan(pool, job, externalPropertyId);
   }

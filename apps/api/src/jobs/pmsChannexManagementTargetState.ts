@@ -61,7 +61,7 @@ export async function applyPmsChannexManagementProgress(
     await client.query(
       `UPDATE pms.channel_connections SET connection_status = 'disconnected',
          external_property_id = NULL, messaging_app_installed = FALSE,
-         connection_metadata = connection_metadata - 'connectedChannels',
+         connection_metadata = connection_metadata - 'connectedChannels' - 'inventoryRules',
          updated_at = $2::timestamptz
        WHERE property_id = $1::uuid AND provider = 'channex'`,
       [job.propertyId, now.toISOString()],

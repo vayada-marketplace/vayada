@@ -9,13 +9,14 @@ export type PmsChannexManagementCommandInput = {
   idempotencyKey: string;
   operationType: ChannexManagementOperationType;
   markups?: Array<{ channel: string; markupPercent: number }>;
+  inventoryRules?: import("@vayada/domain-pms-channex").ChannexInventoryRulesInput;
 };
 
 export type PmsChannexManagementCommandResult =
   | { ok: true; operation: ChannexManagementOperation; replayed: boolean }
   | {
       ok: false;
-      code: "connection_required" | "idempotency_conflict";
+      code: "connection_required" | "idempotency_conflict" | "invalid_inventory_rules";
       message: string;
     };
 
