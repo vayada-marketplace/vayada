@@ -44,6 +44,9 @@ export interface LoginResponse {
 function storeToken(token: string, expiresIn: number): void {
   if (typeof window === "undefined") return;
 
+  // Hotel context belongs to the previous session, even when the account is the same.
+  localStorage.removeItem("selectedHotelId");
+  localStorage.removeItem("pmsSetupComplete");
   localStorage.setItem(TOKEN_KEY, token);
   const expiresAt = Date.now() + expiresIn * 1000;
   localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString());
@@ -80,6 +83,8 @@ function storeUserData(data: {
 function clearAuthData(): void {
   if (typeof window === "undefined") return;
 
+  localStorage.removeItem("selectedHotelId");
+  localStorage.removeItem("pmsSetupComplete");
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EXPIRES_AT_KEY);
   localStorage.removeItem("userId");
