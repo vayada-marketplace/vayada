@@ -33,9 +33,17 @@ export function createPgChannelDatePrices(connectionString: string): ChannelDate
   ];
   return {
     async get(scope) {
-      return (await pool.query<ChannelDatePrice>(select, params(scope))).rows[0] ?? null;
+      const row = (await pool.query<ChannelDatePrice>(select, params(scope))).rows[0];
+      return row ? publicPrice(row) : null;
     },
     async put(context, command) {
+      command = {
+        ...command,
+        propertyId: command.propertyId.toLowerCase(),
+        roomTypeId: command.roomTypeId.toLowerCase(),
+        ratePlanId: command.ratePlanId.toLowerCase(),
+        commandId: command.commandId.toLowerCase(),
+      };
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
@@ -52,7 +60,7 @@ export function createPgChannelDatePrices(connectionString: string): ChannelDate
           current.currency === command.currency
         ) {
           await client.query("COMMIT");
-          return current;
+          return publicPrice(current);
         }
         if (
           (current?.revision ?? 0) !== command.expectedRevision ||
@@ -122,4 +130,8 @@ export function createPgChannelDatePrices(connectionString: string): ChannelDate
       await pool.end();
     },
   };
+}
+
+function publicPrice({ amountDecimal, currency, revision }: ChannelDatePrice): ChannelDatePrice {
+  return { amountDecimal, currency, revision };
 }

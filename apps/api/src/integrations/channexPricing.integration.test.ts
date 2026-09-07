@@ -102,5 +102,21 @@ describe.skipIf(!url)("saved Channex pricing", () => {
         )
       ).rows[0].count,
     ).toBe(3);
+    const concurrent = { ...command, expectedRevision: 3, commandId: randomUUID().toUpperCase() };
+    const writes = await Promise.all([
+      prices.put(context, concurrent),
+      prices.put(context, {
+        ...concurrent,
+        ratePlanId: ratePlanId.toUpperCase(),
+        commandId: randomUUID(),
+      }),
+    ]);
+    expect(writes.filter(Boolean)).toHaveLength(1);
+    if (writes[0]) expect(await prices.put(context, concurrent)).toEqual(writes[0]);
+    expect(await prices.get(scope)).toEqual({
+      amountDecimal: "80.05",
+      currency: "EUR",
+      revision: 4,
+    });
   });
 });
