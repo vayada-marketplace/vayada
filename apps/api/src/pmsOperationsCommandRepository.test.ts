@@ -435,6 +435,12 @@ describe("PMS operations command repository", () => {
     expect(replay).toEqual({ ...duplicated, replayed: true });
     expect(target.roomTypes).toHaveLength(2);
     expect(
+      target.calls.find(
+        ({ text }) =>
+          text.includes("INSERT INTO pms.rate_rules") && text.includes("SELECT rule.property_id"),
+      )?.text,
+    ).toContain("rule.enabled, rule.stop_sell");
+    expect(
       target.calls.filter(
         ({ text }) =>
           text.includes("INSERT INTO pms.room_types") &&

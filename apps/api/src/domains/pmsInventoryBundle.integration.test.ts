@@ -5,6 +5,7 @@ import { createTargetMixedCheckoutQuote } from "../routes/bookingWebMixedSnapsho
 import {
   targetBookingHostActionPrimitives as bookingOwner,
   redeemTargetPromo,
+  loadTargetCheckoutOffer,
   enqueuePmsReservationHandoff,
   issueTargetBookingConfirmationToken,
   loadTargetBooking,
@@ -302,7 +303,6 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     ],
     ["available_rooms=0", "available_rooms=2"],
     ["freshness_status='stale'", "freshness_status='fresh'"],
-    ["rate_summary='{\"minStayNights\":3}'::jsonb", "rate_summary='{\"minStayNights\":1}'::jsonb"],
     ["payment_options=ARRAY['card']", "payment_options=ARRAY['pay_at_property']"],
   ])("rejects invalid per-night evidence (%s)", async (change, restore) => {
     await pool.query(
@@ -385,6 +385,53 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
         .toMatchObject({ blocked: true });
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
+  it.each([
+    "min_stay_nights",
+    "max_stay_nights",
+    "closed_to_arrival",
+    "closed_to_departure",
+    "stop_sell",
+  ])("ordinary checkout and atomic single-room reservation enforce %s", async (column) => {
+    const date = column === "closed_to_departure" ? input.checkOut : input.checkIn;
+    const value = column === "min_stay_nights" ? 3 : column === "max_stay_nights" ? 1 : true;
+    await pool.query(
+      `INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,${column})
+        VALUES($1,$2,'stay_restriction',$3,$3,$4)`,
+      [propertyId, rooms[0], date, value],
+    );
+    const offerInput = {
+      ...input,
+      adults: 1,
+      children: 0,
+      roomCount: 1,
+      nights: 2,
+      roomTypeId: rooms[0]!,
+      rateType: "",
+      requestedAt: input.occurredAt,
+    };
+    try {
+      await expect(loadTargetCheckoutOffer(pool, offerInput)).rejects.toMatchObject({
+        statusCode: 409,
+      });
+      expect(
+        await transaction((client) =>
+          port.reserve({
+            ...input,
+            transaction: client,
+            quoteSessionId: randomUUID(),
+            roomTypeId: rooms[0]!,
+            publicOfferKey: rooms[0]!,
+            roomCount: 1,
+          }),
+        ),
+      ).toBeNull();
+      expect(await inventory()).toEqual([2, 2, 2, 2]);
+    } finally {
+      await pool.query("DELETE FROM pms.rate_rules WHERE property_id=$1", [propertyId]);
+    }
+    expect(await loadTargetCheckoutOffer(pool, offerInput)).toMatchObject({ roomTypeId: rooms[0] });
+  });
+
   it("persists the full selection, prices add-ons once, and rejects quote selection tampering", async () => {
     const property = {
       propertyId,

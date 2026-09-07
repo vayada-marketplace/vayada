@@ -25,13 +25,7 @@ export async function pmsRoomStayRestrictionsAllow(
   },
 ): Promise<boolean> {
   const result = await transaction.query<{ blocked: boolean }>(
-    `SELECT EXISTS(SELECT 1 FROM pms.rate_rules rule
-      WHERE property_id=$1::uuid AND room_type_id=$2::uuid
-        AND (rate_plan_id IS NULL OR rate_plan_id=$3::uuid)
-        AND (($4::date BETWEEN starts_on AND ends_on AND EXTRACT(DOW FROM $4::date)::int=ANY(days_of_week)
-          AND (closed_to_arrival OR min_stay_nights>($5::date-$4::date) OR max_stay_nights<($5::date-$4::date)))
-          OR ($5::date BETWEEN starts_on AND ends_on AND EXTRACT(DOW FROM $5::date)::int=ANY(days_of_week)
-            AND closed_to_departure))) AS blocked`,
+    `SELECT NOT pms.stay_restrictions_allow($1::uuid,$2::uuid,$3::uuid,$4::date,$5::date) AS blocked`,
     [input.propertyId, input.roomTypeId, input.ratePlanId, input.checkIn, input.checkOut],
   );
   return result.rows[0]?.blocked === false;

@@ -1509,10 +1509,8 @@ describe("Booking Web public bootstrap parity", () => {
       "jsonb_agg(offer.payment_options ORDER BY offer.stay_date)->0",
     );
     expect(offerRead?.text).not.toContain("array_agg(offer.payment_options");
-    expect(offerRead?.text).toContain("offer.rate_summary ->> 'minStayNights'");
-    expect(offerRead?.text).toContain("offer.rate_summary ->> 'maxStayNights'");
-    expect(offerRead?.text).toContain("<= $11::int");
-    expect(offerRead?.text).toContain(">= $11::int");
+    expect(offerRead?.text).toContain("pms.stay_restrictions_allow");
+    expect(offerRead?.text).toContain("offer.rate_plan_id,$2::date,$3::date");
     const quoteWrite = calls.find((call) =>
       call.text.includes("INSERT INTO booking.quote_sessions"),
     );

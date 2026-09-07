@@ -247,7 +247,7 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
       WHERE rule.property_id = inventory.property_id
         AND rule.room_type_id = inventory.room_type_id
         AND rule.rate_plan_id = rate_plan.id
-        AND rule.rule_type = 'season'
+        AND rule.rule_type = 'season' AND rule.enabled
         AND inventory.stay_date BETWEEN rule.starts_on AND rule.ends_on
       ORDER BY rule.starts_on DESC, rule.id
       LIMIT 1

@@ -10,6 +10,7 @@ export type PmsChannexManagementCommandInput = {
   operationType: ChannexManagementOperationType;
   /** Internal pricing-save reconciliation scope; never accepted from the public command body. */
   mealRatePlanId?: string;
+  restrictionsOnly?: boolean;
   markups?: Array<{ channel: string; markupPercent: number }>;
 };
 
