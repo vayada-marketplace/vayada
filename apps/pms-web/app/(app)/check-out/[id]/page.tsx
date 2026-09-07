@@ -23,23 +23,7 @@ type InspectionDraft = {
 
 function NotCheckedInPage({ booking }: { booking: Booking }) {
   const { t } = useTranslation();
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const isConfirmed = booking.status === "confirmed";
-
-  async function handleNoShow() {
-    if (!isConfirmed) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await bookingsService.markNoShow(booking.id);
-      router.push("/dashboard");
-    } catch {
-      setError(t("checkOut.noShowError"));
-      setLoading(false);
-    }
-  }
 
   return (
     <main className="p-4 md:p-6">
@@ -47,11 +31,7 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {t("checkOut.notCheckedInDescription")}
         </div>
-        {error && (
-          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </p>
-        )}
+
         <div className="flex flex-col gap-3 sm:flex-row">
           {isConfirmed && (
             <Link
@@ -62,14 +42,12 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
             </Link>
           )}
           {isConfirmed && (
-            <button
-              type="button"
-              onClick={handleNoShow}
-              disabled={loading}
+            <Link
+              href={`/bookings/${booking.id}`}
               className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
             >
-              {loading ? t("checkOut.markingNoShow") : t("checkOut.markNoShow")}
-            </button>
+              {t("checkOut.markNoShow")}
+            </Link>
           )}
           <Link
             href="/dashboard"
