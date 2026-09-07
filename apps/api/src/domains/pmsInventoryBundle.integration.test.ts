@@ -616,6 +616,43 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       }
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
+  it("prefers canonical flexible price and meals without changing exact-offer selection", async () => {
+    const client = await pool.connect();
+    await client.query("BEGIN");
+    try {
+      const ratePlanId = randomUUID();
+      const key = `${rooms[0]}:onb15-flex-${ratePlanId}`;
+      await client.query(`INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES($1,$2,$3,$4,'Flexible','flexible',120,'EUR')`,
+        [ratePlanId, propertyId, rooms[0], `ONB15-FLEX-${ratePlanId}`]);
+      await client.query(`UPDATE distribution.public_room_offer_snapshots
+        SET rate_summary='{"refundable":true}' WHERE property_id=$1 AND room_type_id=$2`, [propertyId, rooms[0]]);
+      await client.query(`INSERT INTO distribution.public_room_offer_snapshots
+        (property_id,room_type_id,rate_plan_id,stay_date,public_offer_key,available_rooms,base_price_amount,
+         currency,payment_options,freshness_status,occupancy,rate_summary)
+        SELECT property_id,room_type_id,$3,stay_date,$4,2,120,'EUR',payment_options,'fresh',occupancy,
+          '{"refundable":true,"mealPlan":"breakfast"}'
+        FROM distribution.public_room_offer_snapshots WHERE property_id=$1 AND room_type_id=$2`,
+        [propertyId, rooms[0], ratePlanId, key]);
+      const request = { ...input, adults: 1, children: 0, roomCount: 1, nights: 2,
+        roomTypeId: rooms[0]!, rateType: "flexible", requestedAt: input.occurredAt };
+      expect(await loadTargetCheckoutOffer(client, request)).toMatchObject({
+        publicOfferKey: key, roomTotal: "240.00", rateSummary: { mealPlan: "breakfast" },
+      });
+      expect(await loadTargetCheckoutOffer(client, { ...request, exactPublicOfferKey: rooms[0]! }))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+      expect(await loadTargetCheckoutOffer(client, { ...request,
+        availabilityCredit: { checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 1 } }))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+      expect(await loadTargetCheckoutOffer(client, { ...request, rateType: ratePlanId }))
+        .toMatchObject({ publicOfferKey: key });
+      await client.query(`UPDATE distribution.public_room_offer_snapshots SET sellable_publicly=false
+        WHERE property_id=$1 AND public_offer_key=$2`, [propertyId, key]);
+      expect(await loadTargetCheckoutOffer(client, request))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+
   it.each([
     "min_stay_nights",
     "max_stay_nights",

@@ -28,3 +28,19 @@ PUT/read contracts. VAY-1530 consumes this contract for Channex.
 
 This is a single inclusive flexible offer, not a parallel room-only/breakfast
 package builder. Noncanonical plans and Python APIs are outside this contract.
+
+## Flexible offer selection
+
+The single flexible-rate guest card and an ordinary checkout request for
+`flexible` (or an unspecified rate) prefer the eligible canonical flexible
+public offer over coexisting legacy flexible offers for new checkouts, even when the legacy rate
+is cheaper. Its stable public key is
+`<roomTypeId>:onb15-flex-<flexibleRatePlanId>`, derived from the canonical
+`ONB15-FLEX-<flexibleRatePlanId>` code. Price, meals and checkout must select the
+same offer. Nonrefundable selection and legacy fallback remain unchanged.
+Explicit rate-plan IDs and exact public-offer keys continue to constrain the
+selection; historical booking snapshots are not reinterpreted or migrated.
+All existing availability, occupancy, freshness and stay-rule gates still apply.
+
+Edit paths carrying server-issued reservation availability credit retain their
+existing ordering; this selection change does not migrate historical bookings.
