@@ -130,8 +130,11 @@ describe("target Channex management plans", () => {
       pool: db,
       bookingRevisionHandoff: vi.fn(),
     }).plan(input);
-    expect(plan.requests).toHaveLength(1);
-    expect(plan.requests[0]?.body).toMatchObject({ values: [{ min_stay_arrival: 3 }] });
+    expect(plan.requests).toHaveLength(2);
+    expect(plan.requests[0]?.body).toEqual({
+      property: { settings: { min_stay_type: "arrival" } },
+    });
+    expect(plan.requests[1]?.body).toMatchObject({ values: [{ min_stay_arrival: 3 }] });
     expect(JSON.stringify(plan.requests)).not.toContain('"rate":');
     expect(db.sql()).not.toContain("WITH pricing_currency");
   });

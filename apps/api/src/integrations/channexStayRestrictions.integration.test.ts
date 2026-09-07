@@ -20,7 +20,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       throw new Error("Local test database required");
     db = new pg.Client({ connectionString: url });
     await db.connect();
-    await db.query("BEGIN");
+    await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     [property, room, rate, otherRate, connection] = Array.from({ length: 5 }, () => randomUUID());
     await db.query(
       "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Restriction Test')",
@@ -86,7 +86,12 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
     correlationId: null,
     attemptNumber: 1,
     maxAttempts: 5,
-    input: { operationType: "sync_ari" as const, commandId: "test", idempotencyKey: "test" },
+    input: {
+      operationType: "sync_ari" as const,
+      restrictionsOnly: true,
+      commandId: "test",
+      idempotencyKey: "test",
+    },
   });
   function port() {
     return createPgChannexManagementPlanPort({
@@ -94,7 +99,20 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       now: () => new Date("2026-09-10T11:00:00Z"),
       pool: {
         query: db.query.bind(db),
-        connect: async () => ({ query: db.query.bind(db), release() {} }),
+        connect: async () => ({
+          // Keep planner transactions inside the rollback-only fixture transaction.
+          query: (sql: string, parameters?: unknown[]) =>
+            db.query(
+              sql.startsWith("BEGIN")
+                ? "SAVEPOINT planner"
+                : ({
+                    COMMIT: "RELEASE SAVEPOINT planner",
+                    ROLLBACK: "ROLLBACK TO SAVEPOINT planner",
+                  }[sql] ?? sql),
+              parameters,
+            ),
+          release() {},
+        }),
         end: async () => {},
       },
       bookingRevisionHandoff: vi.fn(),
@@ -128,13 +146,13 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       ],
     });
     const rows = await values();
+    expect(rows.every((row) => !("rate" in row))).toBe(true);
     expect(rows.find((r) => r.rate_plan_id === rate && r.date_from === "2026-09-11")).toMatchObject(
       {
         property_id: property,
         min_stay_arrival: 3,
         min_stay_through: 1,
         max_stay: 14,
-        rate: 100,
         stop_sell: false,
       },
     );
