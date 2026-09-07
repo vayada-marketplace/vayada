@@ -6,8 +6,6 @@ import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from "@heroicons/reac
 import {
   RoomTypeCreate,
   RoomTypeUpdate,
-  MealPlan,
-  MealPlanCode,
   PartialRefundTier,
   RateDepositSetting,
   RoomSeason,
@@ -908,9 +906,7 @@ export default function RoomTypeForm({
   const [nonRefundableCancellationPolicy, setNonRefundableCancellationPolicy] = useState(
     form.nonRefundableCancellationPolicy || "Non-refundable from booking",
   );
-  const [mealPlans, setMealPlans] = useState<MealPlan[]>(
-    (form.mealPlans || []).map((m) => ({ ...m, chargePer: m.chargePer ?? "room" })),
-  );
+  const [mealPlan, setMealPlan] = useState<"room_only" | "breakfast">(form.mealPlan ?? "room_only");
   const [expandedOccupancy, setExpandedOccupancy] = useState<Record<number, boolean>>({});
   const [dailyRates, setDailyRates] = useState<Record<string, number>>(form.dailyRates || {});
   const [editingDay, setEditingDay] = useState<string | null>(null);
@@ -987,7 +983,7 @@ export default function RoomTypeForm({
       nonRefundableEnabled,
       nonRefundableDiscount,
       nonRefundableCancellationPolicy,
-      mealPlans,
+      mealPlan,
       dailyRates,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1004,7 +1000,7 @@ export default function RoomTypeForm({
     nonRefundableEnabled,
     nonRefundableDiscount,
     nonRefundableCancellationPolicy,
-    mealPlans,
+    mealPlan,
     dailyRates,
   ]);
 
@@ -1029,37 +1025,6 @@ export default function RoomTypeForm({
     setDismissedPriceWarnings({});
     setConfirmUnusualPricesOpen(false);
   }, [form.currency]);
-
-  const MEAL_PLAN_OPTIONS: { code: MealPlanCode; labelKey: string }[] = [
-    { code: 1, labelKey: "rooms.form.mealBreakfast" },
-    { code: 3, labelKey: "rooms.form.mealHalfBoard" },
-    { code: 4, labelKey: "rooms.form.mealFullBoard" },
-    { code: 9, labelKey: "rooms.form.mealAllInclusive" },
-  ];
-  const MEAL_PLAN_LABEL_KEY: Record<MealPlanCode, string> = {
-    1: "rooms.form.mealBreakfast",
-    3: "rooms.form.mealHalfBoard",
-    4: "rooms.form.mealFullBoard",
-    9: "rooms.form.mealAllInclusive",
-  };
-  // Standard occupancy used when projecting per-person surcharges in the
-  // pricing preview. Keeps the preview footnote ("Calculated for 2 guests")
-  // honest; the server multiplies by max_occupancy when actually pushing rates.
-  const PREVIEW_GUESTS = 2;
-  const addMealPlan = () => {
-    const used = new Set(mealPlans.map((m) => m.code));
-    const next = MEAL_PLAN_OPTIONS.find((o) => !used.has(o.code))?.code;
-    if (next === undefined) return;
-    setMealPlans((prev) => [...prev, { code: next, surcharge: 0, chargePer: "room" }]);
-  };
-  const removeMealPlan = (idx: number) => {
-    setMealPlans((prev) => prev.filter((_, i) => i !== idx));
-  };
-  const updateMealPlan = (idx: number, patch: Partial<MealPlan>) => {
-    setMealPlans((prev) => prev.map((m, i) => (i === idx ? { ...m, ...patch } : m)));
-  };
-  const projectedSurcharge = (mp: MealPlan): number =>
-    mp.chargePer === "person" ? mp.surcharge * PREVIEW_GUESTS : mp.surcharge;
 
   const MONTHS = Array.from({ length: 12 }, (_, month) =>
     new Intl.DateTimeFormat(locale, { month: "short" }).format(new Date(2024, month, 1)),
@@ -2932,205 +2897,23 @@ export default function RoomTypeForm({
               </div>
             </div>
 
-            {/* Section 4: Meal plans */}
-            <div>
-              <div className="flex items-start gap-3 mb-2">
-                <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  4
-                </span>
-                <div>
-                  <h3 className="text-[13px] font-semibold text-gray-900">
-                    {t("rooms.form.mealPlansTitle")}
-                  </h3>
-                  <p className="text-[11px] text-gray-400">
-                    {t("rooms.form.mealPlansDescription")}
-                  </p>
-                </div>
-              </div>
-              <div className="ml-4 md:ml-9 space-y-2.5">
-                {mealPlans.map((mp, idx) => {
-                  const symbol = getCurrencySymbol(form.currency || "EUR");
-                  const usedCodes = new Set(
-                    mealPlans.map((m, i) => (i === idx ? null : m.code)).filter((c) => c !== null),
-                  );
-                  const availableOptions = MEAL_PLAN_OPTIONS.filter(
-                    (o) => o.code === mp.code || !usedCodes.has(o.code),
-                  );
-                  const label = t(MEAL_PLAN_LABEL_KEY[mp.code]);
-                  const projected = projectedSurcharge(mp);
-                  const baseSeasonRate = parseFloat(seasons[0]?.rate || "") || form.baseRate || 0;
-                  return (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3"
-                    >
-                      {/* Header row: toggle, type dropdown, delete */}
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => removeMealPlan(idx)}
-                          aria-label={t("rooms.form.deactivateMealPlan")}
-                          className="relative w-10 h-[22px] rounded-full bg-primary-500 shrink-0 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1"
-                        >
-                          <span className="absolute top-[2px] left-[20px] w-[18px] h-[18px] rounded-full bg-white shadow" />
-                        </button>
-                        <select
-                          value={mp.code}
-                          onChange={(e) =>
-                            updateMealPlan(idx, {
-                              code: parseInt(e.target.value, 10) as MealPlanCode,
-                            })
-                          }
-                          className="flex-1 max-w-[260px] px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-[12px] font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 appearance-none"
-                          style={{ ...SELECT_ARROW_STYLE, backgroundPosition: "right 10px center" }}
-                        >
-                          {availableOptions.map((o) => (
-                            <option key={o.code} value={o.code}>
-                              {t(o.labelKey)}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => removeMealPlan(idx)}
-                          className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-white transition-colors"
-                          aria-label={t("rooms.form.removeMealPlan")}
-                        >
-                          <svg
-                            className="w-4 h-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                            <path d="M10 11v6" />
-                            <path d="M14 11v6" />
-                          </svg>
-                        </button>
-                      </div>
-
-                      {/* Surcharge + Charge per */}
-                      <div className="flex flex-wrap items-end gap-4">
-                        <div className="flex-1 min-w-[200px]">
-                          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">
-                            {t("rooms.form.surcharge")}
-                          </div>
-                          <div className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
-                            <span className="text-[11px] text-gray-500">{symbol}</span>
-                            <input
-                              type="number"
-                              min={0}
-                              step={1}
-                              value={mp.surcharge}
-                              onChange={(e) =>
-                                updateMealPlan(idx, {
-                                  surcharge: Math.max(0, parseFloat(e.target.value) || 0),
-                                })
-                              }
-                              className="w-[100px] px-1 text-[12px] font-semibold text-gray-900 bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <span className="text-[10px] text-gray-400">
-                              / {t(`rooms.form.chargePer${mp.chargePer}`)} / {t("common.night")}
-                            </span>
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">
-                            {t("rooms.form.chargePer")}
-                          </div>
-                          <div className="inline-flex bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            {(["person", "room"] as const).map((unit) => (
-                              <button
-                                key={unit}
-                                type="button"
-                                onClick={() => updateMealPlan(idx, { chargePer: unit })}
-                                className={`px-4 py-1.5 text-[11px] font-medium capitalize transition-colors ${mp.chargePer === unit ? "bg-primary-500 text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                              >
-                                {t(`rooms.form.chargePer${unit}`)}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Pricing preview table */}
-                      {seasons.length > 0 && baseSeasonRate > 0 && mp.surcharge > 0 && (
-                        <div className="rounded-lg bg-white border border-gray-100 overflow-hidden">
-                          <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-                            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                              {t("rooms.form.mealPricingPreview")}
-                            </div>
-                          </div>
-                          <table className="w-full text-[11px]">
-                            <thead>
-                              <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                                <th className="px-3 py-2">{t("rooms.form.seasonColumn")}</th>
-                                <th className="px-3 py-2 text-right">{t("rooms.form.roomOnly")}</th>
-                                <th className="px-3 py-2 text-right">{label}</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {seasons.map((s, sIdx) => {
-                                const base = parseFloat(s.rate || "") || form.baseRate || 0;
-                                const withMeal = base + projected;
-                                return (
-                                  <tr key={sIdx} className="border-t border-gray-100">
-                                    <td className="px-3 py-2 text-gray-700">
-                                      {s.name || t("rooms.form.seasonNumber", { number: sIdx + 1 })}
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-gray-500">
-                                      {symbol}
-                                      {base.toLocaleString()}
-                                    </td>
-                                    <td className="px-3 py-2 text-right font-semibold text-gray-900">
-                                      {symbol}
-                                      {withMeal.toLocaleString()}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100">
-                            {t("rooms.form.mealPricingFootnote", {
-                              guests: PREVIEW_GUESTS,
-                              label,
-                              surcharge: `${symbol}${mp.surcharge.toLocaleString()}`,
-                              unit: t(`rooms.form.chargePer${mp.chargePer}`),
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {mealPlans.length < MEAL_PLAN_OPTIONS.length && (
-                  <button
-                    type="button"
-                    onClick={addMealPlan}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-primary-600 hover:bg-primary-50 transition-colors"
-                  >
-                    <svg
-                      className="w-3.5 h-3.5"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                    {t("rooms.form.addMealPlan")}
-                  </button>
-                )}
-              </div>
+            <div className="space-y-2">
+              <label htmlFor="included-meal" className="text-[13px] font-semibold text-gray-900">
+                Included meal — standard flexible rate
+              </label>
+              <select
+                id="included-meal"
+                value={mealPlan}
+                onChange={(event) => setMealPlan(event.target.value as "room_only" | "breakfast")}
+                className="block w-full max-w-sm rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+              >
+                <option value="room_only">Room only</option>
+                <option value="breakfast">Breakfast included</option>
+              </select>
+              <p className="text-xs text-gray-500">
+                Breakfast is included in the room price you set above. The total price stays
+                unchanged. Optional breakfast add-ons are charged separately and are not enabled here.
+              </p>
             </div>
 
             {/* Section 5: Weekend surcharge */}

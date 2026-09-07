@@ -980,6 +980,7 @@ test.describe("pms-web smoke", () => {
     const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "pms-web-operations");
     const roomTypeId = "22222222-2222-4222-8222-222222222222";
     let savedRate = "180.00";
+    let savedMeal = "room_only";
     let canonicalPlanRevision = 0;
     let savedPlanBody: Record<string, unknown> | undefined;
     let roomReads = 0;
@@ -998,7 +999,7 @@ test.describe("pms-web smoke", () => {
                 code: "ONB15-FLEX",
                 name: "Flexible",
                 rateType: "flexible",
-                mealPlan: null,
+                mealPlan: savedMeal,
                 baseRate: { amountDecimal: savedRate, currency: "EUR" },
                 active: true,
               },
@@ -1059,6 +1060,7 @@ test.describe("pms-web smoke", () => {
                     sourceRoomFactsRevision: 3,
                     baseAmount: { amountDecimal: savedRate, currency: "EUR" },
                     cancellationTerms: {},
+                    mealPlan: savedMeal,
                   },
                 ],
         },
@@ -1068,7 +1070,8 @@ test.describe("pms-web smoke", () => {
       `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/room-types/${roomTypeId}/flexible-rate-plan`,
       (route) => {
         savedPlanBody = route.request().postDataJSON() as Record<string, unknown>;
-        savedRate = "125.00";
+        savedRate = String(savedPlanBody.baseAmountDecimal);
+        savedMeal = String(savedPlanBody.mealPlan ?? savedMeal);
         canonicalPlanRevision = 1;
         return route.fulfill({
           json: {
@@ -1079,6 +1082,7 @@ test.describe("pms-web smoke", () => {
               sourceRoomFactsRevision: 3,
               baseAmount: { amountDecimal: savedRate, currency: "EUR" },
               cancellationTerms: {},
+                    mealPlan: savedMeal,
             },
           },
         });
@@ -1093,7 +1097,9 @@ test.describe("pms-web smoke", () => {
     ).toBeDisabled();
     await expect(page.getByText("Currency is managed in property pricing settings.")).toBeVisible();
     const rateTable = page.getByText("Set rates per season").locator("xpath=../..");
-    await rateTable.getByRole("spinbutton").first().fill("125");
+    await rateTable.getByRole("spinbutton").first().fill("120");
+    await page.getByLabel("Included meal — standard flexible rate").selectOption("breakfast");
+    await expect(page.getByLabel("Included meal — standard flexible rate").locator("option")).toHaveCount(2);
     const readsBeforeLanguageChange = roomReads;
     await page.getByRole("button", { name: "PO", exact: true }).click();
     await page.getByRole("button", { name: /^Language/ }).click();
@@ -1104,17 +1110,22 @@ test.describe("pms-web smoke", () => {
     await page.getByRole("button", { name: "🇬🇧 English", exact: true }).click();
     await expect(page.getByRole("button", { name: "Pricing & Rates" })).toBeVisible();
     expect(roomReads).toBe(readsBeforeLanguageChange);
-    await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("125");
+    await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("120");
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect(page.getByText("Room type updated successfully")).toBeVisible();
     expect(savedPlanBody).toMatchObject({
       expectedRoomFactsRevision: 3,
       expectedPricingCurrencyRevision: 4,
       expectedFlexibleRatePlanRevision: 0,
-      baseAmountDecimal: "125.00",
+      baseAmountDecimal: "120.00",
+      mealPlan: "breakfast",
     });
     await page.getByRole("button", { name: "Pricing & Rates" }).click();
-    await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("125");
+    await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("120");
+    await page.reload();
+    await page.getByRole("button", { name: "Pricing & Rates" }).click();
+    await expect(page.getByLabel("Included meal — standard flexible rate")).toHaveValue("breakfast");
+    await expect(rateTable.getByRole("spinbutton").first()).toHaveValue("120");
     await assertNoLegacyCalls();
     await assertHealthy();
   });
