@@ -417,6 +417,8 @@
     "retry": "Retry"
   },
   "roomSelection": {
+    "breakfastIncluded": "Breakfast included",
+    "roomOnly": "Room only",
     "accommodation": "Accommodation for {count} guests",
     "perRoomTerms": "Cancellation terms apply to each room.",
     "roomNumber": "Room {number}",
@@ -427,6 +429,7 @@
     "unavailable": "This accommodation selection is no longer available. Please search again.",
     "choose": "Choose this accommodation",
     "selectedAccommodation": "Selected accommodation",
-    "partyChanged": "Your guest count has changed. Choose accommodation with an allocation for every guest before reviewing the price."
+    "partyChanged": "Your guest count has changed. Choose accommodation with an allocation for every guest before reviewing the price.",
+    "editRequest": "Edit request"
   }
 }

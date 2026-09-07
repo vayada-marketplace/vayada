@@ -413,6 +413,8 @@
     "retry": "Reintentar"
   },
   "roomSelection": {
+    "breakfastIncluded": "Desayuno incluido",
+    "roomOnly": "Solo alojamiento",
     "accommodation": "Alojamiento para {count} huéspedes",
     "perRoomTerms": "Las condiciones de cancelación se aplican a cada habitación.",
     "roomNumber": "Habitación {number}",
@@ -423,6 +425,7 @@
     "unavailable": "Esta selección ya no está disponible. Busca de nuevo.",
     "choose": "Elegir este alojamiento",
     "selectedAccommodation": "Alojamiento seleccionado",
-    "partyChanged": "El número de huéspedes ha cambiado. Elija un alojamiento con una plaza para cada huésped antes de revisar el precio."
+    "partyChanged": "El número de huéspedes ha cambiado. Elija un alojamiento con una plaza para cada huésped antes de revisar el precio.",
+    "editRequest": "Editar solicitud"
   }
 }
