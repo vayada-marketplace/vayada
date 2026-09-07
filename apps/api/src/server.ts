@@ -108,6 +108,7 @@ import { createPgPmsRoomPublicationReadModel } from "./domains/pmsRoomPublicatio
 import { createPgPropertySetupFinanceOwnerScopePort } from "./domains/propertySetupFinanceOwnerScope.js";
 import { createPgPropertySetupPmsOwnerRepository } from "./domains/propertySetupPmsOwnerRepository.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
+import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import {
   PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
@@ -1277,6 +1278,7 @@ const app = buildApp({
         repository: pmsChannexManagementRepository,
         noShowReports: noShowReportPool ? createNoShowReportingStore(noShowReportPool) : undefined,
         noShowReportingEnabled,
+        datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
         commandPort: pmsChannexManagementCommandPort,
         iframeSessionPort: pmsChannexIframeSessionPort,

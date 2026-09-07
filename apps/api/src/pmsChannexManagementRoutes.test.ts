@@ -70,7 +70,28 @@ describe("PMS Channex management command routes", () => {
         })
       ).statusCode,
     ).toBe(statusCode);
+    expect((await datePrice(app)).statusCode).toBe(statusCode);
+    expect(harness.putDatePrice).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("saves/removes validated date prices and honors the ARI cutover guard", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    expect((await datePrice(app)).statusCode).toBe(200);
+    expect(harness.putDatePrice).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ amountDecimal: "80.00", expectedRevision: 0 }),
+    );
+    expect((await datePrice(app, { amountDecimal: null })).statusCode).toBe(200);
+    for (const amountDecimal of ["0.00", "-1.00", "1.005", 100]) {
+      expect((await datePrice(app, { amountDecimal })).statusCode).toBe(400);
+    }
+    await app.close();
+    const guarded = await testApp({}, { ...mutating, ariSync: "observe_only" });
+    app = guarded.app;
+    expect((await datePrice(app)).statusCode).toBe(409);
+    expect(guarded.putDatePrice).not.toHaveBeenCalled();
   });
 
   it("queues an authorized command and preserves actor context", async () => {
@@ -235,12 +256,16 @@ async function testApp(
     if (request.headers.authorization !== "Bearer valid" || access.authenticated === false) return;
     request.authContext = context(access);
   });
+  const putDatePrice = vi
+    .fn()
+    .mockResolvedValue({ amountDecimal: "80.00", currency: "EUR", revision: 1 });
   await app.register(registerPmsChannexManagementRoutes, {
+    datePrices: { put: putDatePrice, get: vi.fn().mockResolvedValue(null), close: vi.fn() },
     repository: repository(),
     capabilityModes,
     commandPort: { enqueue },
   });
-  return { app, enqueue };
+  return { app, enqueue, putDatePrice };
 }
 
 function context(access: Access): RequestContext {
@@ -312,5 +337,20 @@ function command(app: ReturnType<typeof Fastify>) {
     url: `/properties/${propertyId}/channex/commands`,
     headers: { authorization: "Bearer valid" },
     payload: { commandId: "command-1", idempotencyKey: "key-1", operationType: "enable" },
+  });
+}
+
+function datePrice(app: ReturnType<typeof Fastify>, override: Record<string, unknown> = {}) {
+  return app.inject({
+    method: "PUT",
+    headers: { authorization: "Bearer valid" },
+    url: `/properties/${propertyId}/channex/room-types/${operationId}/rate-plans/${operationId}/date-prices/2026-12-31`,
+    payload: {
+      commandId: operationId,
+      expectedRevision: 0,
+      amountDecimal: "80.00",
+      currency: "EUR",
+      ...override,
+    },
   });
 }
