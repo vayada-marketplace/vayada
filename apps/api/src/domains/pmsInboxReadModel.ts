@@ -177,6 +177,7 @@ export function createPgPmsInboxReadPort(config: {
   connectionString: string;
   emailReplyRoutes: PmsInboxEmailReplyRouteReadPort;
   attachmentMediaAccessEnabled: boolean;
+  providerMutationEnabled?: boolean;
   pool?: PmsInboxReadPool;
   max?: number;
 }): PmsInboxReadPort {

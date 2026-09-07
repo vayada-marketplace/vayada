@@ -26,6 +26,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
   const command = createPgPmsInboxProviderActionPort({
     connectionString: URL ?? "postgresql://integration-test-disabled",
     max: 4,
+    mutationEnabled: true,
     now: () => new Date(NOW),
   });
 
@@ -80,7 +81,10 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
         threadId: THREAD,
         action: "booking_com_no_reply_needed",
         provider: "channex",
-        providerChannel: "booking.com",
+        expectedVersion: 4,
+        organizationId: ORGANIZATION,
+        actorUserId: ACTOR,
+        actorMembershipId: MEMBERSHIP,
         providerConversationId: SOURCE_CONVERSATION,
         providerIdempotencyReference: expect.stringMatching(/^vayada-no-reply-[0-9a-f]{64}$/),
       },
@@ -116,7 +120,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       ok: false,
       error: {
         code: "provider_action_unavailable",
-        message: "Booking.com no reply needed is unavailable for this conversation.",
+        message: "Provider action is unavailable for this conversation.",
       },
     });
     expect((await state()).counts).toEqual({
@@ -137,7 +141,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       ok: false,
       error: {
         code: "provider_action_unavailable",
-        message: "Booking.com no reply needed is unavailable for this conversation.",
+        message: "Provider action is unavailable for this conversation.",
       },
     });
     await admin.query(
@@ -201,6 +205,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       command.noReplyNeeded({
         ...action("concurrent-conflict"),
         threadId: OTHER_THREAD,
+        expectedVersion: 1,
       }),
     ]);
     expect([first, second].filter((result) => result.ok)).toHaveLength(1);
@@ -340,7 +345,12 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
          (job_key, queue_name, job_type, tenant_scope, property_id,
           resource_product, resource_type, resource_id)
        VALUES ($1, $2, $2, 'property', $3::uuid, 'pms', 'message_thread', $4::text)`,
-      [`${JOB_TYPE}:thread:${THREAD}:key:${keyHash}:v1`, JOB_TYPE, PROPERTY, THREAD],
+      [
+        `${JOB_TYPE}:booking_com_no_reply_needed:thread:${THREAD}:key:${keyHash}:v1`,
+        JOB_TYPE,
+        PROPERTY,
+        THREAD,
+      ],
     );
     await expect(command.noReplyNeeded(action(key))).rejects.toThrow(
       "PMS Inbox provider-action command failed",
@@ -361,7 +371,10 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       ok: false,
       error: { code: "validation_failed", message: "Inbox provider-action request is invalid." },
     });
-    const owned = createPgPmsInboxProviderActionPort({ connectionString: URL! });
+    const owned = createPgPmsInboxProviderActionPort({
+      connectionString: URL!,
+      mutationEnabled: true,
+    });
     await owned.close();
     await expect(owned.noReplyNeeded(action("after-close"))).rejects.toThrow();
   });
@@ -370,6 +383,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     return {
       propertyId: PROPERTY,
       threadId: THREAD,
+      expectedVersion: 4,
       organizationId: ORGANIZATION,
       actorUserId: ACTOR,
       actorMembershipId: MEMBERSHIP,
