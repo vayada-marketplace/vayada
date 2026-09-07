@@ -59,6 +59,9 @@ type RateRow = {
   markupPercent: number;
   defaultOccupancy: number;
   externalRoomTypeId: string | null;
+  externalRatePlanId: string | null;
+  mealPlan: string | null;
+  pricingContractVersion: string | null;
 };
 type AriRow = {
   mappingMissing: boolean;
@@ -210,13 +213,20 @@ async function provisioningPlan(
        LEFT JOIN pms.channel_room_type_mappings mapping
          ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
        WHERE room.property_id = $1::uuid AND room.active
+         AND ($2::uuid IS NULL OR EXISTS (
+           SELECT 1 FROM pms.rate_plans selected_plan
+           WHERE selected_plan.id = $2::uuid AND selected_plan.property_id = room.property_id
+             AND selected_plan.room_type_id = room.id AND selected_plan.active
+         ))
          AND (mapping.id IS NULL OR mapping.status <> 'active')
        GROUP BY room.id ORDER BY room.sort_order, room.name`,
-      [job.propertyId],
+      [job.propertyId, job.input.mealRatePlanId ?? null],
     ),
     pool.query<RateRow>(
       `SELECT plan.room_type_id::text AS "roomTypeId", room.name AS "roomTypeName",
-         plan.id::text AS "ratePlanId",
+         plan.id::text AS "ratePlanId", plan.meal_plan AS "mealPlan",
+         plan.pricing_contract_version AS "pricingContractVersion",
+         CASE WHEN mapping.status = 'active' THEN mapping.external_rate_plan_id END AS "externalRatePlanId",
          plan.name, plan.currency, 'per_room' AS "sellMode", plan.base_rate_amount::float8 AS "baseRate",
          channel.key AS channel, channel.label AS "channelLabel", 0::float8 AS "markupPercent",
          LEAST(2, GREATEST(1, COALESCE((room.occupancy_limits ->> 'maxAdults')::integer, 2))) AS "defaultOccupancy",
@@ -234,18 +244,32 @@ async function provisioningPlan(
          ON room_mapping.connection_id = connection.id AND room_mapping.room_type_id = plan.room_type_id
            AND room_mapping.status = 'active'
        WHERE plan.property_id = $1::uuid AND plan.active
-         AND (mapping.id IS NULL OR mapping.status <> 'active')
+         AND ($2::uuid IS NULL OR plan.id = $2::uuid)
        ORDER BY plan.name, channel.key`,
-      [job.propertyId],
+      [job.propertyId, job.input.mealRatePlanId ?? null],
     ),
   ]);
   const roomIds = new Set(rooms.rows.map(({ roomTypeId }) => roomTypeId));
   const plannedRates = rates.rows.map((rate) => ({
     ...rate,
     providerTitle: providerRateTitle(rate),
+    mealType: canonicalMeal(rate),
   }));
   return {
     externalPropertyId,
+    meals: plannedRates.flatMap((rate) =>
+      rate.mealType
+        ? [
+            {
+              ratePlanId: rate.ratePlanId,
+              channel: rate.channel,
+              mealType: rate.mealType,
+              externalRatePlanId: rate.externalRatePlanId ?? undefined,
+              externalRoomTypeId: rate.externalRoomTypeId ?? undefined,
+            },
+          ]
+        : [],
+    ),
     requests: [
       ...rooms.rows.flatMap((room) => {
         const title = providerTitle(room.name, room.roomTypeId);
@@ -270,6 +294,7 @@ async function provisioningPlan(
         ];
       }),
       ...plannedRates
+        .filter((rate) => !rate.externalRatePlanId)
         .filter(
           ({ roomTypeId, externalRoomTypeId }) =>
             roomIds.has(roomTypeId) || Boolean(externalRoomTypeId),
@@ -300,7 +325,7 @@ async function provisioningPlan(
               options: [
                 { occupancy: rate.defaultOccupancy, is_primary: true, rate: rate.baseRate },
               ],
-              meal_type: "room_only",
+              ...(rate.mealType ? { meal_type: rate.mealType } : {}),
             },
           }),
         ]),
@@ -433,6 +458,13 @@ function checkpoint(pool: Pool, job: ChannexManagementJob) {
       client.release();
     }
   };
+}
+
+function canonicalMeal(rate: RateRow): "room_only" | "breakfast" | null {
+  if (rate.mealPlan === "room_only" || rate.mealPlan === "breakfast") return rate.mealPlan;
+  if (rate.mealPlan == null)
+    return rate.pricingContractVersion === "pms-pricing.v1" ? "room_only" : null;
+  throw new Error(`Unsupported configured meal inclusion for rate ${rate.ratePlanId}`);
 }
 
 function providerTitle(title: string, identity: string) {

@@ -1,3 +1,4 @@
+import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -46,6 +47,7 @@ export type PmsPricingCommandPool = {
 export type PmsPricingCommandRepositoryConfig = {
   connectionString: string;
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
+  channexMealSyncEnabled?: boolean;
   max?: number;
   pool?: PmsPricingCommandPool;
   now?: () => Date;
@@ -218,6 +220,20 @@ export function createPgPmsPricingCommandRepository(
             acceptedAt,
           )
         : null;
+      if (
+        config.channexMealSyncEnabled &&
+        domainEventId &&
+        worked.change?.resourceType === "flexible_rate_plan" &&
+        command.audit.actor.kind === "user"
+      ) {
+        await enqueueChannexMealChange(client, {
+          propertyId: command.propertyId,
+          ratePlanId: worked.change.resourceId,
+          eventId: domainEventId,
+          actorUserId: command.audit.actor.userId,
+          correlationId: command.audit.correlationId ?? command.audit.requestId,
+        });
+      }
       await recordAudit(
         client,
         command,

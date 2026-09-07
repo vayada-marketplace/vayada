@@ -79,6 +79,65 @@ describe("target Channex management plans", () => {
     );
   });
 
+  it.each([
+    ["breakfast", "pms-pricing.v1", "breakfast"],
+    ["room_only", "pms-pricing.v1", "room_only"],
+    [null, "pms-pricing.v1", "room_only"],
+    [null, null, undefined],
+  ])(
+    "provisions canonical meal %s without changing inclusive prices",
+    async (mealPlan, pricingContractVersion, expected) => {
+      const plan = await createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("provision", { mealPlan, pricingContractVersion, baseRate: 120 }),
+        bookingRevisionHandoff: vi.fn(),
+      }).plan(job("provision"));
+      const creates = plan.requests.filter((request) => request.capture?.kind === "rate_plan");
+      for (const request of creates) {
+        const body = request.resolveBody?.(new Map([["room-1", "provider-room"]])) as {
+          rate_plan: Record<string, unknown>;
+        };
+        expect(body.rate_plan.meal_type).toBe(expected);
+        expect(body.rate_plan.options).toEqual([{ occupancy: 1, is_primary: true, rate: 120 }]);
+      }
+      expect(plan.meals).toHaveLength(expected ? 3 : 0);
+    },
+  );
+
+  it("sends the inclusive 120 rate with a single 10 percent channel adjustment", async () => {
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: new FakePool("ari", { rate: 120, channel: "booking_com", markupPercent: 10 }),
+      bookingRevisionHandoff: vi.fn(),
+      now: () => new Date("2026-08-14T09:00:00Z"),
+    }).plan(job("sync_ari"));
+    expect(
+      plan.requests.find((request) => request.path === "/api/v1/restrictions")?.body,
+    ).toMatchObject({ values: [{ rate: 132 }] });
+  });
+
+  it("reconciles mapped plans in place and rejects unsupported local meals", async () => {
+    const port = (mealPlan: string) =>
+      createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("provision", {
+          mealPlan,
+          externalRatePlanId: "mapped-rate",
+          externalRoomTypeId: "mapped-room",
+        }),
+        bookingRevisionHandoff: vi.fn(),
+      });
+    const plan = await port("breakfast").plan(job("provision"));
+    expect(plan.requests.filter((request) => request.capture?.kind === "rate_plan")).toEqual([]);
+    expect(plan.meals?.[0]).toMatchObject({
+      externalRatePlanId: "mapped-rate",
+      mealType: "breakfast",
+    });
+    await expect(port("unknown").plan(job("provision"))).rejects.toThrow(
+      "Unsupported configured meal",
+    );
+  });
+
   it("preserves provider identity when truncating long Unicode titles", async () => {
     const db = new FakePool("unicode");
     const port = createPgChannexManagementPlanPort({
@@ -233,7 +292,10 @@ type Mode =
   | "ari_disabled";
 class FakePool {
   private calls: string[] = [];
-  constructor(private readonly mode: Mode) {}
+  constructor(
+    private readonly mode: Mode,
+    private readonly rateOverrides: Record<string, unknown> = {},
+  ) {}
   sql() {
     return this.calls.join("\n");
   }
@@ -321,6 +383,7 @@ class FakePool {
           markupPercent: 0,
           defaultOccupancy: 1,
           externalRoomTypeId: null,
+          ...this.rateOverrides,
         })),
       );
     } else if (text.includes("FROM pms.inventory_days"))
@@ -333,6 +396,7 @@ class FakePool {
           rate: 100,
           channel: "airbnb",
           markupPercent: 10,
+          ...this.rateOverrides,
         },
       ];
     return { rows: rows as T[] };
