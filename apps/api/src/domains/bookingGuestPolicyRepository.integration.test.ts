@@ -12,6 +12,9 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createBookingGuestPolicyCurrentOwnerEvidenceAdapter } from "./bookingGuestPolicyCurrentOwnerEvidence.js";
+import { createPgBookingGuestPolicyCatalogProjectionPort } from "./bookingGuestPolicyCatalogProjection.js";
+import { createBookingGuestPolicyProjectionHandler } from "./bookingGuestPolicyProjectionHandler.js";
+import { createBookingGuestPolicyOutboxProjector } from "./bookingGuestPolicyProjectionRuntime.js";
 import {
   createPgBookingGuestPolicyRepository,
   type BookingGuestPolicyRepositoryPool,
@@ -52,6 +55,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
     max: 6,
     now: () => new Date(acceptedAt),
     scopeAuthorization,
+  });
+  const projectionPool = new pg.Pool({
+    connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
+    max: 4,
   });
   const currentOwnerEvidence = createBookingGuestPolicyCurrentOwnerEvidenceAdapter({
     booking: repository,
@@ -101,6 +108,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
 
   afterAll(async () => {
     await repository.close();
+    await projectionPool.end();
     await cleanup();
     await admin.end();
   });
@@ -525,6 +533,195 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
     await expect(counts()).resolves.toMatchObject({ receipts: "1" });
   });
 
+  it("projects only the current policy event and cancels stale revisions", async () => {
+    await seedCatalogPolicy("14:00", "10:00");
+    const stale = await repository.persistGuestPolicy(command("projection-stale", 0));
+    const current = await repository.persistGuestPolicy(
+      command("projection-current", 1, {
+        checkInTime: "16:00",
+        checkInUntil: "23:00",
+        checkOutFrom: "07:00",
+      }),
+    );
+    if (!stale.ok || !current.ok) throw new Error("Expected two guest-policy revisions");
+    const catalog = createPgBookingGuestPolicyCatalogProjectionPort({ pool: projectionPool });
+    const staleProjection = await repository.getGuestPolicyPublicProjection({
+      organizationId,
+      propertyId,
+      revisionId: stale.revision.revisionId,
+      guestPolicyRevision: stale.revision.revision,
+      outboxEventId: stale.revision.outboxEventId,
+    });
+    if (!staleProjection) throw new Error("Expected the stale projection to remain readable");
+    await expect(
+      catalog.projectApprovedGuestPolicy({
+        outboxEventId: stale.revision.outboxEventId,
+        projection: staleProjection,
+      }),
+    ).resolves.toEqual({ outcome: "malformed" });
+
+    const projector = createBookingGuestPolicyOutboxProjector({
+      pool: projectionPool,
+      handler: createBookingGuestPolicyProjectionHandler({
+        read: repository,
+        receipts: repository,
+        catalog,
+      }),
+      now: () => new Date("2026-08-04T20:01:00.000Z"),
+    });
+
+    await expect(projector.runBatch({ limit: 10, workerId: "guest-policy-test" })).resolves.toEqual(
+      {
+        processed: 2,
+        applied: 1,
+        conflicts: 0,
+        canceled: 1,
+        retrying: 0,
+        deadLettered: 0,
+      },
+    );
+    const state = await admin.query<{
+      revision: number;
+      status: string;
+      checkInTime: string;
+      checkInUntil: string | null;
+      checkOutFrom: string | null;
+      checkOutTime: string;
+      cancellationSummary: string;
+      policyRevision: string;
+      receipts: string;
+    }>(
+      `SELECT revision.guest_policy_revision AS revision,
+              outbox.status,
+              to_char(policy.check_in_time, 'HH24:MI') AS "checkInTime",
+              to_char(policy.check_in_until, 'HH24:MI') AS "checkInUntil",
+              to_char(policy.check_out_from, 'HH24:MI') AS "checkOutFrom",
+              to_char(policy.check_out_time, 'HH24:MI') AS "checkOutTime",
+              policy.cancellation_summary AS "cancellationSummary",
+              owner.revision::text AS "policyRevision",
+              (SELECT count(*)::text FROM booking.guest_policy_projection_receipts
+                WHERE property_id = $1::uuid) AS receipts
+         FROM booking.guest_policy_revisions revision
+         JOIN platform.outbox_events outbox ON outbox.id = revision.outbox_event_id
+         JOIN hotel_catalog.property_policy_summaries policy ON policy.property_id = revision.property_id
+         JOIN hotel_catalog.property_owner_revisions owner
+           ON owner.property_id = revision.property_id AND owner.owner_key = 'hotel_catalog.policy'
+        WHERE revision.property_id = $1::uuid
+        ORDER BY revision.guest_policy_revision`,
+      [propertyId],
+    );
+    expect(state.rows).toEqual([
+      {
+        revision: 1,
+        status: "canceled",
+        checkInTime: "16:00",
+        checkInUntil: "23:00",
+        checkOutFrom: "07:00",
+        checkOutTime: "11:00",
+        cancellationSummary: "Unrelated Catalog policy",
+        policyRevision: "2",
+        receipts: "1",
+      },
+      {
+        revision: 2,
+        status: "published",
+        checkInTime: "16:00",
+        checkInUntil: "23:00",
+        checkOutFrom: "07:00",
+        checkOutTime: "11:00",
+        cancellationSummary: "Unrelated Catalog policy",
+        policyRevision: "2",
+        receipts: "1",
+      },
+    ]);
+    await expect(projector.runBatch({ limit: 10 })).resolves.toMatchObject({ processed: 0 });
+  });
+
+  it("records a profile conflict without overwriting Catalog policy", async () => {
+    await seedCatalogPolicy("14:00", "10:00");
+    const created = await repository.persistGuestPolicy(
+      command("projection-conflict", 0, { checkInTime: "16:00" }),
+    );
+    if (!created.ok) throw new Error("Expected a guest-policy revision");
+    await admin.query("UPDATE hotel_catalog.properties SET profile_revision = 8 WHERE id = $1", [
+      propertyId,
+    ]);
+    const projector = createBookingGuestPolicyOutboxProjector({
+      pool: projectionPool,
+      handler: createBookingGuestPolicyProjectionHandler({
+        read: repository,
+        receipts: repository,
+        catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: projectionPool }),
+      }),
+      now: () => new Date("2026-08-04T20:01:00.000Z"),
+    });
+
+    await expect(projector.runBatch({ limit: 1 })).resolves.toMatchObject({
+      processed: 1,
+      conflicts: 1,
+      applied: 0,
+    });
+    await expect(
+      repository.getCurrentGuestPolicy({ organizationId, propertyId }),
+    ).resolves.toMatchObject({
+      projectionReceipt: {
+        outcome: "source_revision_conflict",
+        observedCatalogProfileRevision: "profile:8",
+      },
+    });
+    const policy = await admin.query<{ checkInTime: string; status: string }>(
+      `SELECT to_char(policy.check_in_time, 'HH24:MI') AS "checkInTime", outbox.status
+         FROM hotel_catalog.property_policy_summaries policy
+         JOIN platform.outbox_events outbox ON outbox.property_id = policy.property_id
+        WHERE policy.property_id = $1::uuid`,
+      [propertyId],
+    );
+    expect(policy.rows[0]).toEqual({ checkInTime: "14:00", status: "published" });
+  });
+
+  it("retries a transient projection failure without advancing the receipt", async () => {
+    const created = await repository.persistGuestPolicy(command("projection-retry", 0));
+    if (!created.ok) throw new Error("Expected a guest-policy revision");
+    let currentTime = new Date("2026-08-04T20:01:00.000Z");
+    let catalogCalls = 0;
+    const projector = createBookingGuestPolicyOutboxProjector({
+      pool: projectionPool,
+      handler: createBookingGuestPolicyProjectionHandler({
+        read: repository,
+        receipts: repository,
+        catalog: {
+          async projectApprovedGuestPolicy() {
+            catalogCalls += 1;
+            return catalogCalls === 1
+              ? { outcome: "unavailable", errorSource: "system" }
+              : { outcome: "applied", catalogPolicyProjectionRevision: 9 };
+          },
+        },
+      }),
+      now: () => currentTime,
+      retryDelayMs: 1_000,
+    });
+
+    await expect(projector.runBatch({ limit: 1 })).resolves.toMatchObject({
+      processed: 1,
+      retrying: 1,
+    });
+    await expect(counts()).resolves.toMatchObject({ receipts: "0" });
+    currentTime = new Date("2026-08-04T20:01:02.000Z");
+    await expect(projector.runBatch({ limit: 1 })).resolves.toMatchObject({
+      processed: 1,
+      applied: 1,
+      retrying: 0,
+    });
+    await expect(counts()).resolves.toMatchObject({ receipts: "1" });
+    const outbox = await admin.query<{ status: string; attempts: number }>(
+      `SELECT status, attempts_count AS attempts FROM platform.outbox_events
+        WHERE id = $1::uuid`,
+      [created.revision.outboxEventId],
+    );
+    expect(outbox.rows[0]).toEqual({ status: "published", attempts: 2 });
+  });
+
   async function counts() {
     const result = await admin.query<{
       revisions: string;
@@ -581,6 +778,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
       await admin.query("DELETE FROM platform.idempotency_keys WHERE property_id = $1", [
         propertyId,
       ]);
+      await admin.query(
+        "DELETE FROM hotel_catalog.property_policy_summaries WHERE property_id = $1",
+        [propertyId],
+      );
+      await admin.query(
+        "DELETE FROM hotel_catalog.property_owner_revisions WHERE property_id = $1",
+        [propertyId],
+      );
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = $1", [propertyId]);
       await admin.query("DELETE FROM identity.organizations WHERE id = $1", [organizationId]);
       await admin.query("DELETE FROM identity.users WHERE id = $1", [actorUserId]);
@@ -606,6 +811,21 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
        VALUES ($1::uuid, 'guest-policy-hotel', 'Guest Policy Hotel')`,
       [propertyId],
+    );
+  }
+
+  async function seedCatalogPolicy(checkInTime: string, checkOutTime: string): Promise<void> {
+    await admin.query(
+      `UPDATE hotel_catalog.properties SET profile_revision = 7 WHERE id = $1::uuid`,
+      [propertyId],
+    );
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_policy_summaries
+         (property_id, check_in_time, check_out_time, cancellation_summary,
+          policy_source_owner, updated_at)
+       VALUES ($1::uuid, $2::time, $3::time, 'Unrelated Catalog policy',
+               'booking', $4::timestamptz)`,
+      [propertyId, checkInTime, checkOutTime, acceptedAt],
     );
   }
 });
