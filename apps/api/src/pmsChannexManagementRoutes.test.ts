@@ -26,6 +26,7 @@ const mutating: ChannexManagementCapabilityModes = {
 type Access = {
   authenticated?: boolean;
   permission?: boolean;
+  permissions?: Array<"pms.operations.read" | "pms.operations.manage">;
   entitlement?: "active" | "suspended" | "missing";
   linked?: boolean;
   relationship?: "operator" | "finance_manager";
@@ -70,6 +71,22 @@ describe("PMS Channex management command routes", () => {
         })
       ).statusCode,
     ).toBe(statusCode);
+    for (const [method, path] of [
+      ["GET", "alerts"],
+      ["POST", `alerts/${operationId}/recover`],
+      ["POST", `alerts/${operationId}/acknowledge`],
+    ] as const) {
+      expect(
+        (
+          await app.inject({
+            method,
+            url: `/properties/${propertyId}/channex/${path}`,
+            headers: { authorization: "Bearer valid" },
+            ...(method === "POST" ? { payload: { round: 0 } } : {}),
+          })
+        ).statusCode,
+      ).toBe(statusCode);
+    }
     expect((await datePrice(app)).statusCode).toBe(statusCode);
     expect(harness.putDatePrice).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
@@ -92,6 +109,48 @@ describe("PMS Channex management command routes", () => {
     app = guarded.app;
     expect((await datePrice(app)).statusCode).toBe(409);
     expect(guarded.putDatePrice).not.toHaveBeenCalled();
+  });
+
+  it("denies recovery to a member with read-only PMS permission", async () => {
+    const harness = await testApp({ permissions: ["pms.operations.read"] });
+    app = harness.app;
+    const response = await app.inject({
+      method: "POST",
+      url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+      headers: { authorization: "Bearer valid" },
+      payload: { round: 0 },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(harness.recoverAlert).not.toHaveBeenCalled();
+  });
+
+  it("authorizes property alert reads and recovery, and rejects another property", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/properties/${propertyId}/channex/alerts`,
+          headers: { authorization: "Bearer valid" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const recover = (scope = propertyId) =>
+      app!.inject({
+        method: "POST",
+        url: `/properties/${scope}/channex/alerts/${operationId}/recover`,
+        headers: { authorization: "Bearer valid" },
+        payload: { round: 0 },
+      });
+    expect((await recover()).statusCode).toBe(202);
+    expect((await recover(operationId)).statusCode).toBe(403);
+    expect(harness.recoverAlert).toHaveBeenCalledTimes(1);
+    await app.close();
+    const blocked = await testApp({}, { ...mutating, ariSync: "observe_only" });
+    app = blocked.app;
+    expect((await recover()).statusCode).toBe(409);
+    expect(blocked.recoverAlert).not.toHaveBeenCalled();
   });
 
   it("queues an authorized command and preserves actor context", async () => {
@@ -249,6 +308,7 @@ async function testApp(
   capabilityModes: ChannexManagementCapabilityModes = mutating,
 ) {
   const app = Fastify({ logger: false });
+  const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
   const enqueue = vi.fn<PmsChannexManagementCommandPort["enqueue"]>();
   enqueue.mockResolvedValue({ ok: true, operation: operation(), replayed: false });
   app.decorateRequest("authContext", null);
@@ -261,11 +321,37 @@ async function testApp(
     .mockResolvedValue({ amountDecimal: "80.00", currency: "EUR", revision: 1 });
   await app.register(registerPmsChannexManagementRoutes, {
     datePrices: { put: putDatePrice, get: vi.fn().mockResolvedValue(null), close: vi.fn() },
-    repository: repository(),
+    repository: {
+      ...repository(),
+      getAlerts: async () => [
+        {
+          id: operationId,
+          eventType: "sync_error",
+          impact: {
+            bookingId: null,
+            revisionId: null,
+            channelId: null,
+            channel: null,
+            roomTypeId: null,
+            ratePlanId: null,
+            dateFrom: null,
+            dateTo: null,
+            errorType: null,
+          },
+          firstOccurredAt: "2026-09-01T00:00:00Z",
+          lastOccurredAt: "2026-09-01T00:00:00Z",
+          acknowledgedAt: null,
+          resolvedAt: null,
+          recoveryRound: 0,
+          occurrences: 1,
+          recovery: [],
+        },
+      ],
+    },
     capabilityModes,
-    commandPort: { enqueue },
+    commandPort: { enqueue, recoverAlert },
   });
-  return { app, enqueue, putDatePrice };
+  return { app, enqueue, putDatePrice, recoverAlert };
 }
 
 function context(access: Access): RequestContext {
@@ -274,7 +360,10 @@ function context(access: Access): RequestContext {
     actor: { internalUserId: "actor-1" },
     selectedOrganization: { organizationId: "organization-1", kind: "hotel_group" },
     membership: {
-      permissions: access.permission === false ? [] : ["pms.operations.manage"],
+      permissions:
+        access.permission === false
+          ? []
+          : (access.permissions ?? ["pms.operations.manage", "pms.operations.read"]),
     },
     entitlements:
       entitlement === "missing"
