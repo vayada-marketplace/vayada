@@ -2648,12 +2648,9 @@ export async function loadTargetCheckoutConfig(
   return result.rows[0] ?? null;
 }
 
-function serializeTargetCheckoutConfig(
-  property: TargetCheckoutPropertyRow,
-  row: TargetCheckoutConfigRow | null,
-): Record<string, unknown> {
+export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow | null): string[] {
   const depositPolicy = objectValue(row?.depositPolicy);
-  const methods = targetCheckoutSupportedPaymentMethods(row?.acceptedMethods).filter((method) => {
+  return targetCheckoutSupportedPaymentMethods(row?.acceptedMethods).filter((method) => {
     if (method === "card") return row?.onlineCardReady === true;
     if (method === "bank_transfer") {
       return row?.bankTransferReady === true;
@@ -2661,6 +2658,14 @@ function serializeTargetCheckoutConfig(
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+function serializeTargetCheckoutConfig(
+  property: TargetCheckoutPropertyRow,
+  row: TargetCheckoutConfigRow | null,
+): Record<string, unknown> {
+  const depositPolicy = objectValue(row?.depositPolicy);
+  const methods = targetCheckoutReadyPaymentMethods(row);
   const refundPolicy = objectValue(row?.refundPolicy);
   return {
     hotelName: property.displayName,
