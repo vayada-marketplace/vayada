@@ -13,6 +13,7 @@ export type PmsChannexManagementCommandInput = {
   mealRatePlanId?: string;
   restrictions?: StayRestrictionReplacement;
   restrictionsOnly?: boolean;
+  recoveryAlertId?: string;
   markups?: Array<{ channel: string; markupPercent: number }>;
 };
 
@@ -34,5 +35,11 @@ export type PmsChannexManagementCommandPort = {
     propertyId: string,
     input: PmsChannexManagementCommandInput,
   ): Promise<PmsChannexManagementCommandResult>;
+  recoverAlert?(
+    context: RequestContext,
+    propertyId: string,
+    alertId: string,
+    round: number,
+  ): Promise<{ ok: boolean; code?: string }>;
   close?(): Promise<void>;
 };
