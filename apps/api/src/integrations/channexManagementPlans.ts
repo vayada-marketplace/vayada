@@ -189,6 +189,7 @@ async function enablePlan(
           latitude: property.latitude,
           longitude: property.longitude,
           timezone: property.timezone,
+          settings: { min_stay_type: "arrival" },
         }),
       ),
     ],
@@ -417,18 +418,19 @@ async function ariPlan(
   return {
     externalPropertyId,
     requests: [
-      ...(job.input.restrictionsOnly
-        ? []
-        : [
-            channexRequests.updateProperty(externalPropertyId, {
-              settings: {
+      channexRequests.updateProperty(externalPropertyId, {
+        settings: {
+          min_stay_type: "arrival",
+          ...(job.input.restrictionsOnly
+            ? {}
+            : {
                 cut_off_time:
                   policy.enabled && policy.cutoffLocalTime ? `${policy.cutoffLocalTime}:00` : null,
                 cut_off_days: policy.enabled ? (policy.cutoffLocalTime ? 0 : null) : 1,
-              },
-            }),
-            channexRequests.availability(availability),
-          ]),
+              }),
+        },
+      }),
+      ...(job.input.restrictionsOnly ? [] : [channexRequests.availability(availability)]),
       channexRequests.restrictions(
         result.rows.map((row) => ({
           property_id: externalPropertyId,

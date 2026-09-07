@@ -219,7 +219,9 @@ describe("target Channex management plans", () => {
       "/api/v1/restrictions",
     ]);
     expect(ari.requests[0]?.body).toEqual({
-      property: { settings: { cut_off_time: "18:00:00", cut_off_days: 0 } },
+      property: {
+        settings: { min_stay_type: "arrival", cut_off_time: "18:00:00", cut_off_days: 0 },
+      },
     });
     expect(ari.requests[1]?.body).toMatchObject({ values: [{ availability: 0 }] });
     expect(ari.requests[2]?.body).toMatchObject({ values: [{ rate: 120 }] });
@@ -244,7 +246,7 @@ describe("target Channex management plans", () => {
       now: () => new Date("2026-08-15T10:00:00Z"),
     }).plan(job("sync_ari"));
     expect(disabled.requests[0]?.body).toEqual({
-      property: { settings: { cut_off_time: null, cut_off_days: 1 } },
+      property: { settings: { min_stay_type: "arrival", cut_off_time: null, cut_off_days: 1 } },
     });
 
     db = new FakePool("connected");

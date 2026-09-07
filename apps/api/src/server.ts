@@ -669,6 +669,7 @@ const channexManagementWorkerStore = channexManagementProvider
   ? createPgPmsChannexManagementWorkerStore({
       connectionString: targetDatabaseUrl,
       targetState: createPmsChannexManagementTargetState(),
+      ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
     })
   : undefined;
 
