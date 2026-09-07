@@ -9,6 +9,7 @@ import { findTargetRoomCombinationOffers } from "../routes/bookingRoomCombinatio
 import { pendingBookingEdit } from "../routes/pendingBookingEdits.js";
 import { createTargetMixedCheckoutQuote } from "../routes/bookingWebMixedSnapshot.js";
 import {
+  createTargetBookingWebCheckoutAdapter,
   targetBookingHostActionPrimitives as bookingOwner,
   redeemTargetPromo,
   loadTargetCheckoutOffer,
@@ -662,6 +663,30 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     expect(await loadTargetCheckoutOffer(pool, offerInput)).toMatchObject({ roomTypeId: rooms[0] });
   });
 
+  it("requires explicit checkout activation and quotes the complete selection through the adapter", async () => {
+    const client = await pool.connect();
+    const adapter = (enabled = false) => createTargetBookingWebCheckoutAdapter({ connectionString: url!,
+      mixedRoomSelectionsEnabled: enabled, inventoryReservationPort: port, now: () => input.occurredAt,
+      pool: { query: client.query.bind(client) } as unknown as pg.Pool });
+    const disabled = adapter();
+    const enabled = adapter(true);
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO hotel_catalog.property_locations(property_id, timezone) VALUES($1,'Europe/Athens')", [propertyId]);
+      await client.query("UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1", [propertyId]);
+      await client.query("UPDATE distribution.public_hotel_bookability_profiles SET capabilities='{\"paymentMethods\":[\"pay_at_property\"]}' WHERE property_id=$1", [propertyId]);
+      const request = { checkIn: input.checkIn, checkOut: input.checkOut, roomSelection: selection,
+        adults: 5, children: 1, numberOfRooms: 3, addonIds: [addonId], paymentMethod: "pay_at_property" };
+      await expect(disabled.quoteBooking(propertyId, request)).rejects.toMatchObject({ statusCode: 400 });
+      expect(await enabled.quoteBooking(propertyId, request)).toMatchObject({ roomSelection: selection,
+        roomLines: [expect.objectContaining({ roomCount: 2 }), expect.objectContaining({ roomCount: 1 })],
+        numberOfRooms: 3, totalAmount: 610.25, addonTotal: 10.25 });
+      await expect(enabled.quoteBooking(propertyId, { ...request, adults: 6 })).rejects.toMatchObject({
+        statusCode: 400,
+        message: "Room allocations must match the requested guests and room count.",
+      });
+    } finally { await disabled.close?.(); await enabled.close?.(); await client.query("ROLLBACK"); client.release(); }
+  });
   it("persists the full selection, prices add-ons once, and rejects quote selection tampering", async () => {
     const property = {
       propertyId,
