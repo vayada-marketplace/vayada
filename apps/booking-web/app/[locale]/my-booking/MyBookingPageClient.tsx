@@ -11,7 +11,8 @@ import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingService, CancelPreview } from "@/services/api/booking";
-import { Booking } from "@/lib/types";
+import { Link } from "@/i18n/navigation";
+import type { BookingLookupResponse } from "@/services/api/booking";
 import { readLastBooking } from "@/lib/storage/bookingDraft";
 
 export default function MyBookingPageClient() {
@@ -22,7 +23,7 @@ export default function MyBookingPageClient() {
   const searchParams = useSearchParams();
   const [reference, setReference] = useState("");
   const [email, setEmail] = useState("");
-  const [booking, setBooking] = useState<Booking | null>(null);
+  const [booking, setBooking] = useState<BookingLookupResponse | null>(null);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState("");
   const { slug } = useSlug();
@@ -320,6 +321,17 @@ export default function MyBookingPageClient() {
                 </span>
               </div>
             </div>
+
+            {isPending && booking.canEditRequest && booking.confirmationToken &&
+              (!booking.hostResponseDeadline ||
+                Date.parse(booking.hostResponseDeadline) > Date.now()) && (
+                <Link
+                  href={`/booking/${encodeURIComponent(booking.bookingReference)}/edit-request?token=${encodeURIComponent(booking.confirmationToken)}`}
+                  className="block w-full mt-6 py-3 border-2 border-gray-300 text-gray-900 text-center font-semibold rounded-full hover:bg-gray-50"
+                >
+                  Edit Request
+                </Link>
+              )}
 
             {/* Cancel / Withdraw Button */}
             {canCancel && (

@@ -1911,9 +1911,16 @@ export function createTargetBookingWebCheckoutAdapter(
             "create",
           );
         }
+        const responseBooking = await loadTargetBooking(
+          client,
+          property.propertyId,
+          booking.publicReference,
+          null,
+          sha256Hex(confirmation.token),
+        );
         const body = {
           bookingReference: booking.publicReference,
-          booking: serializeTargetBooking(booking),
+          booking: serializeTargetBooking(responseBooking),
           clientSecret: cardPayment?.clientSecret ?? null,
           xenditInvoiceUrl: null,
           paymentMethod: quote.paymentMethod,

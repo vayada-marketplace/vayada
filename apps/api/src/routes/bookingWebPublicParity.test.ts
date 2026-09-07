@@ -1822,8 +1822,9 @@ describe("Booking Web public bootstrap parity", () => {
               ],
             };
           }
-          if (text.includes("SELECT * FROM booking_row")) {
-            bookingWriteValues = values;
+          if (text.includes("SELECT * FROM booking_row") || text.includes('AS "canEditRequest"')) {
+            if (text.includes("SELECT * FROM booking_row")) bookingWriteValues = values;
+            values = bookingWriteValues;
             return {
               rows: [
                 {
@@ -2736,7 +2737,7 @@ describe("Booking Web public bootstrap parity", () => {
             ],
           };
         }
-        if (text.includes("INSERT INTO booking.guest_bookings")) {
+        if (text.includes("INSERT INTO booking.guest_bookings") || text.includes('AS "canEditRequest"')) {
           return {
             rows: [
               {
