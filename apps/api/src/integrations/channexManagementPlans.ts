@@ -65,6 +65,7 @@ type RateRow = {
 };
 type AriRow = {
   mappingMissing: boolean;
+  restrictions: Record<string, number | boolean>;
   stayDate: string;
   available: number;
   externalRoomTypeId: string;
@@ -358,7 +359,6 @@ async function ariPlan(
   const policy = policyResult.rows[0];
   if (!policy?.timezone) throw new Error("Canonical property timezone is unavailable");
   const from = propertyLocalClock(now, policy.timezone).date;
-  const fallbackThrough = addDays(from, 365);
   const result = await pool.query<AriRow>(
     `SELECT inventory.stay_date::text AS "stayDate",
        ${CHANNEX_ARI_MAPPING_MISSING_SQL} AS "mappingMissing",
@@ -367,7 +367,8 @@ async function ariPlan(
        room_mapping.external_room_type_id AS "externalRoomTypeId",
        rate_mapping.external_rate_plan_id AS "externalRatePlanId",
        plan.base_rate_amount::float8 AS rate, rate_mapping.channel,
-       rate_mapping.markup_percent::float8 AS "markupPercent"
+       rate_mapping.markup_percent::float8 AS "markupPercent",
+       to_jsonb(restrictions) AS restrictions
      FROM pms.inventory_days inventory
      JOIN pms.channel_connections connection
        ON connection.property_id = inventory.property_id AND connection.provider = 'channex'
@@ -378,14 +379,15 @@ async function ariPlan(
        ON rate_mapping.connection_id = connection.id AND rate_mapping.room_type_id = inventory.room_type_id
        AND rate_mapping.status = 'active'
      LEFT JOIN pms.rate_plans plan ON plan.id = rate_mapping.rate_plan_id
-     LEFT JOIN pms.inventory_materialization_coverage coverage
-       ON coverage.property_id = inventory.property_id
+       AND plan.property_id = inventory.property_id AND plan.room_type_id = inventory.room_type_id
+     LEFT JOIN LATERAL pms.effective_stay_restrictions(
+       inventory.property_id, inventory.room_type_id, plan.id, inventory.stay_date
+     ) restrictions ON TRUE
      WHERE inventory.property_id = $1::uuid
        AND ${CHANNEX_ARI_ACTIVE_ROOM_SQL}
-       AND inventory.stay_date BETWEEN $2::date
-         AND GREATEST($3::date, COALESCE(coverage.coverage_through, $3::date))
+       AND inventory.stay_date >= $2::date
      ORDER BY inventory.stay_date`,
-    [job.propertyId, from, fallbackThrough],
+    [job.propertyId, from],
   );
   if (result.rows.some((row) => row.mappingMissing)) throw new ChannexAriMappingMissingError();
   const overrides = new Map(
@@ -415,33 +417,36 @@ async function ariPlan(
   return {
     externalPropertyId,
     requests: [
-      channexRequests.updateProperty(externalPropertyId, {
-        settings: {
-          cut_off_time:
-            policy.enabled && policy.cutoffLocalTime ? `${policy.cutoffLocalTime}:00` : null,
-          cut_off_days: policy.enabled ? (policy.cutoffLocalTime ? 0 : null) : 1,
-        },
-      }),
-      channexRequests.availability(availability),
+      ...(job.input.restrictionsOnly
+        ? []
+        : [
+            channexRequests.updateProperty(externalPropertyId, {
+              settings: {
+                cut_off_time:
+                  policy.enabled && policy.cutoffLocalTime ? `${policy.cutoffLocalTime}:00` : null,
+                cut_off_days: policy.enabled ? (policy.cutoffLocalTime ? 0 : null) : 1,
+              },
+            }),
+            channexRequests.availability(availability),
+          ]),
       channexRequests.restrictions(
         result.rows.map((row) => ({
           property_id: externalPropertyId,
           rate_plan_id: row.externalRatePlanId,
+          ...row.restrictions,
           date_from: row.stayDate,
           date_to: row.stayDate,
-          rate: roundCurrency(
-            row.rate * (1 + (overrides.get(row.channel) ?? row.markupPercent) / 100),
-          ),
+          ...(job.input.restrictionsOnly
+            ? {}
+            : {
+                rate: roundCurrency(
+                  row.rate * (1 + (overrides.get(row.channel) ?? row.markupPercent) / 100),
+                ),
+              }),
         })),
       ),
     ],
   };
-}
-
-function addDays(value: string, days: number): string {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
 
 function checkpoint(pool: Pool, job: ChannexManagementJob) {

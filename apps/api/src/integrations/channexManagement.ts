@@ -160,6 +160,14 @@ export function createChannexManagementProvider(config: {
           }
           if (response.status !== 204) {
             const responseBody = response.status === 404 ? undefined : await response.json();
+            if (request.path === "/api/v1/restrictions" && hasAriWarnings(responseBody)) {
+              return {
+                ok: false,
+                code: "provider_rejected",
+                message: "Channex rejected one or more ARI values",
+                providerRequestId: lastRequestId,
+              };
+            }
             if (request.path === "/api/v1/booking_revisions/feed") {
               revisions = dataList(responseBody);
             }
@@ -691,3 +699,14 @@ export const channexRequests = {
     capture: { kind: "channels" },
   }),
 };
+
+function hasAriWarnings(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(
+    ([key, item]) =>
+      ((key === "warning" || key === "warnings" || key === "errors") &&
+        item != null &&
+        (typeof item !== "object" || Object.keys(item).length > 0)) ||
+      hasAriWarnings(item),
+  );
+}

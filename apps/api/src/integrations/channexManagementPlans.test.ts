@@ -226,8 +226,8 @@ describe("target Channex management plans", () => {
     expect(db.sql()).toContain("rate_mapping.connection_id = connection.id");
     expect(db.sql()).toContain("connection.provider = 'channex'");
     expect(db.sql()).toContain("COALESCE(inventory.rate_gate_open, TRUE)");
-    expect(db.sql()).toContain("pms.inventory_materialization_coverage");
-    expect(db.sql()).toContain("GREATEST($3::date, COALESCE(coverage.coverage_through, $3::date))");
+    expect(db.sql()).toContain("inventory.stay_date >= $2::date");
+    expect(db.sql()).toContain("pms.effective_stay_restrictions");
 
     const rateGated = await createPgChannexManagementPlanPort({
       connectionString: "postgresql://target",

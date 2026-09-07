@@ -117,6 +117,7 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
            WHERE offer.property_id = $1::uuid
              AND offer.room_type_id::text = $2
              AND offer.public_offer_key = $3
+             AND pms.stay_restrictions_allow(offer.property_id,offer.room_type_id,offer.rate_plan_id,$4::date,$5::date)
              AND offer.stay_date >= $4::date
              AND offer.stay_date < $5::date
              AND $6::integer >= 1
@@ -139,17 +140,7 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
            HAVING COUNT(DISTINCT offer.stay_date) = ($5::date - $4::date)
               AND BOOL_AND(offer.available_rooms >= $6::integer)
               AND BOOL_AND(inventory.available_count >= $6::integer)
-              AND COALESCE(
-                MAX(NULLIF(offer.rate_summary ->> 'minStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date),
-                1
-              ) <= ($5::date - $4::date)
-              AND (
-                MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date) IS NULL
-                OR MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date) >= ($5::date - $4::date)
-              )
+
          ),
          pms_inventory_reserved AS (
            UPDATE pms.inventory_days inventory

@@ -50,6 +50,23 @@ describe("Channex management provider", () => {
     });
   });
 
+  it("reports a partially rejected ARI response even with HTTP success", async () => {
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "test",
+      plans: { plan: async () => ({ requests: [channexRequests.restrictions([])] }) },
+      fetch: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          response(200, { data: [], warnings: [{ warning: { max_stay: ["invalid"] } }] }),
+        ),
+    });
+    expect(await provider.execute(job("sync_ari"))).toMatchObject({
+      ok: false,
+      code: "provider_rejected",
+    });
+  });
+
   it("hands pulled booking revisions to the existing intake owner", async () => {
     const handoff = vi.fn();
     const provider = createChannexManagementProvider({

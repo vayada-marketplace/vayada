@@ -3837,12 +3837,12 @@ async function copyLegacyRoomTypePricing(
        property_id, room_type_id, rate_plan_id, rule_type, starts_on, ends_on,
        days_of_week, min_stay_nights, max_stay_nights, closed_to_arrival,
        closed_to_departure, price_delta_amount, price_delta_percent,
-       rule_payload, created_at, updated_at
+       rule_payload, enabled, stop_sell, created_at, updated_at
      )
      SELECT rule.property_id, $3::uuid, target_plan.id, rule.rule_type,
             rule.starts_on, rule.ends_on, rule.days_of_week, rule.min_stay_nights,
             rule.max_stay_nights, rule.closed_to_arrival, rule.closed_to_departure,
-            rule.price_delta_amount, rule.price_delta_percent, rule.rule_payload,
+            rule.price_delta_amount, rule.price_delta_percent, rule.rule_payload, rule.enabled, rule.stop_sell,
             $4::timestamptz, $4::timestamptz
      FROM pms.rate_rules rule
      LEFT JOIN pms.rate_plans source_plan

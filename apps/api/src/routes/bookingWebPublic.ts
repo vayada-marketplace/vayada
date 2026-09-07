@@ -3158,6 +3158,7 @@ export async function loadTargetCheckoutOffer(
          )
          OR offer.rate_plan_id::text = $9
        )
+       AND pms.stay_restrictions_allow(offer.property_id,offer.room_type_id,offer.rate_plan_id,$2::date,$3::date)
      GROUP BY
        offer.public_offer_key,
        offer.room_type_id,
@@ -3174,17 +3175,7 @@ export async function loadTargetCheckoutOffer(
             ELSE 0
           END
         ) >= $7::int
-        AND COALESCE(
-          MAX(NULLIF(offer.rate_summary ->> 'minStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date),
-          1
-        ) <= $11::int
-        AND (
-          MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date) IS NULL
-          OR MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date) >= $11::int
-        )
+
      ORDER BY SUM(offer.base_price_amount), offer.public_offer_key
      LIMIT 1`,
     [
