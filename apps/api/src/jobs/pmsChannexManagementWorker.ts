@@ -18,6 +18,7 @@ export type ChannexManagementJob = {
 
 export type ChannexManagementProviderSuccess = {
   ok: true;
+  alertRecoveryVerified?: boolean;
   providerRequestId?: string;
   externalPropertyId?: string;
   connectionStatus?: "connected" | "disconnected";

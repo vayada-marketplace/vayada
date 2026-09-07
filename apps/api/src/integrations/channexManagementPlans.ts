@@ -107,7 +107,7 @@ export function createPgChannexManagementPlanPort(config: {
   };
 }
 
-async function plan(
+async function basePlan(
   pool: Pool,
   handoff: ChannexBookingRevisionHandoff,
   job: ChannexManagementJob,
@@ -523,4 +523,85 @@ function roundCurrency(value: number) {
 function required(value: string) {
   if (!value.trim()) throw new Error("Channex connectionString must not be empty");
   return value;
+}
+
+async function plan(
+  pool: Pool,
+  handoff: ChannexBookingRevisionHandoff,
+  job: ChannexManagementJob,
+  now: Date,
+): Promise<ChannexManagementActionPlan> {
+  const result = await basePlan(pool, handoff, job, now);
+  if (!job.input.recoveryAlertId) return result;
+  const alert = (
+    await pool.query<{
+      eventType: string;
+      channelId: string | null;
+      impact: Record<string, string | null>;
+    }>(
+      `SELECT alert.event_type AS "eventType",alert.impact->>'channelId' AS "channelId",alert.impact FROM pms.channel_operational_alerts alert JOIN pms.channel_connections connection ON connection.id=alert.connection_id AND connection.binding_generation=alert.binding_generation WHERE alert.id=$1::uuid AND alert.property_id=$2::uuid AND connection.external_property_id=$3`,
+      [job.input.recoveryAlertId, job.propertyId, result.externalPropertyId],
+    )
+  ).rows[0];
+  if (!alert) throw new Error("Alert connection is no longer owned by this property");
+  if (alert.eventType === "disconnected_channel" && !alert.channelId)
+    throw new Error("Channel identity is unknown; contact support");
+  result.verifyRecovery = true;
+  result.recoveryScopeCovered =
+    alert.eventType === "disconnected_channel" || coversAlertScope(result, alert.impact);
+  if (alert.channelId) result.recoveryChannelId = alert.channelId;
+  if (result.bookingRevisionHandoff) {
+    const ingest = result.bookingRevisionHandoff;
+    result.bookingRevisionHandoff = async (revisions) => {
+      // Keep exact revision identities across attempts after acknowledged feed entries disappear.
+      const ids = revisions
+        .map((value) => String((value as { id?: unknown })?.id ?? ""))
+        .filter(Boolean);
+      await pool.query(
+        `UPDATE platform.jobs SET job_metadata=job_metadata || jsonb_build_object('recoveryRevisionIds',(SELECT COALESCE(jsonb_agg(DISTINCT entries.value),'[]'::jsonb) FROM jsonb_array_elements_text(COALESCE(job_metadata->'recoveryRevisionIds','[]'::jsonb)||$2::jsonb) AS entries(value))) WHERE id=$1::uuid`,
+        [job.jobId, JSON.stringify(ids)],
+      );
+      await ingest(revisions);
+      const pending = (
+        await pool.query<{ pending: boolean }>(
+          `SELECT EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(parent.job_metadata->'recoveryRevisionIds','[]'::jsonb)) AS expected(revision_id) WHERE NOT EXISTS(SELECT 1 FROM platform.jobs child WHERE child.job_type='channex.ingest-booking' AND child.payload->>'propertyId'=$2 AND child.payload->>'providerPropertyId'=$3 AND child.payload->>'revision'=expected.revision_id AND child.status='succeeded')) AS pending FROM platform.jobs parent WHERE parent.id=$1::uuid`,
+          [job.jobId, job.propertyId, result.externalPropertyId],
+        )
+      ).rows[0];
+      if (!pending || pending.pending)
+        throw new Error(
+          "Booking revisions are still processing. Recovery will retry automatically.",
+        );
+    };
+  }
+  return result;
+}
+
+export function coversAlertScope(
+  plan: ChannexManagementActionPlan,
+  impact: Record<string, string | null>,
+): boolean {
+  const from = impact.dateFrom,
+    to = impact.dateTo;
+  if (!from || !to || (!impact.roomTypeId && !impact.ratePlanId)) return false;
+  const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+  if (!Number.isInteger(days) || days < 0 || days > 365) return false;
+  for (let offset = 0; offset <= days; offset++) {
+    const date = new Date(Date.parse(from) + offset * 86_400_000).toISOString().slice(0, 10);
+    for (const [field, id, path] of [
+      ["room_type_id", impact.roomTypeId, "/api/v1/availability"],
+      ["rate_plan_id", impact.ratePlanId, "/api/v1/restrictions"],
+    ] as const) {
+      if (!id) continue;
+      const covered = plan.requests.some(
+        (request) =>
+          request.path === path &&
+          ((request.body as { values?: Array<Record<string, unknown>> })?.values ?? []).some(
+            (value) => value[field] === id && value.date_from === date && value.date_to === date,
+          ),
+      );
+      if (!covered) return false;
+    }
+  }
+  return true;
 }
