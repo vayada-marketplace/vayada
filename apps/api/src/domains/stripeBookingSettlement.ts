@@ -482,6 +482,11 @@ export async function captureDirectNightlyRevenueEvidence(
         const lines = offer["roomLines"];
         if (!selection || !Array.isArray(lines) || lines.length !== selection.lines.length)
           throw new Error("Mixed nightly revenue evidence is unavailable.");
+        if (
+          selection.lines.reduce((count, line) => count + line.guests.length, 0) !==
+          locked.rows[0]?.roomCount
+        )
+          throw new Error("Mixed nightly revenue evidence does not match.");
         for (const [index, line] of selection.lines.entries()) {
           const saved = record(lines[index]);
           if (

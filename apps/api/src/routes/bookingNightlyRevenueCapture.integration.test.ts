@@ -128,6 +128,16 @@ describe.skipIf(!DATABASE_URL)("direct nightly revenue capture (PostgreSQL)", ()
     await expect(
       captureDirectNightlyRevenueEvidence(client, invalid, { required: true }),
     ).rejects.toThrow();
+    for (const roomCount of [2, 4]) {
+      await client.query("UPDATE booking.guest_bookings SET room_count=$1 WHERE id=$2", [
+        roomCount,
+        id,
+      ]);
+      await expect(
+        captureDirectNightlyRevenueEvidence(client, mixed, { required: true }),
+      ).rejects.toThrow("Mixed nightly revenue evidence does not match.");
+    }
+    await client.query("UPDATE booking.guest_bookings SET room_count=3 WHERE id=$1", [id]);
     expect(
       (
         await client.query(
