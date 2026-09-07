@@ -16,7 +16,7 @@ before accepting its reply state. API examples are not publication guarantees.
 [Channex's app guide](https://help.channex.io/en/articles/9979352-messaging-reviews-app)
 lists Booking.com, Airbnb and Expedia and requires the property's Messages &
 Reviews app. Composer preflight reads the review to check access, channel,
-visibility and existing response. Missing/unknown visibility or response flags
+visibility, expiry and existing response. Missing/unknown visibility, expiry or response flags
 are unavailable. A disconnected local mapping is unavailable.
 
 [Booking.com](https://developers.booking.com/connectivity/docs/review-api/reply-to-review)
@@ -68,7 +68,18 @@ records. [Channex Airbnb staging](https://docs.channex.io/guides/test-accounts-f
 uses live listings and does not document non-public guest-review testing.
 No real guest review or response was published during validation.
 
-VAY-1533 is separate: Channex's guest-review example does not establish eligible
-opportunity discovery, exact eligibility fields or post-timeout read-back. An
-incoming review, `is_replied` or `is_hidden` must not be treated as a verified
-host-to-guest submission receipt. Those missing contracts still need confirmation.
+## Current application evidence
+
+Channex's [public application bundle](https://app.channex.io/assets/index-DbfRKpdY.js)
+was inspected on 2026-09-07. Its public-response UI reads `reply.reply`,
+`is_replied`, `is_expired` and content, and requires content on all supported
+channels. The adapter accepts both this object shape and the string shape in
+older examples. `reply.guest_review` must never become a public reply body.
+Provider-confirmed existing responses remain visible even after expiry.
+
+The same application exposes guest-review forms for hidden review records,
+checks expiry and `reply.guest_review`, and refreshes GET review after submission.
+These observations narrow VAY-1533's implementation to provider-exposed hidden
+opportunities. They do not establish that Channex exposes every eligible stay
+before the guest reviews it. VAY-1533 must represent that discovery limitation
+explicitly and keep guest-review receipts separate from public replies.

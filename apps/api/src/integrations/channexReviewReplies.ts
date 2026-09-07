@@ -51,7 +51,8 @@ export function createChannexReviewReplies(config: {
             content?: string;
             is_hidden?: boolean;
             is_replied?: boolean;
-            reply?: string;
+            is_expired?: boolean;
+            reply?: string | { reply?: string; guest_review?: unknown };
           };
           relationships?: { property?: { data?: { id?: string } } };
         };
@@ -65,8 +66,10 @@ export function createChannexReviewReplies(config: {
           reason: "provider_identity_mismatch",
         };
       const review = data.attributes;
-      if (review?.is_replied === true || review?.reply?.trim())
-        return { state: "accepted", ...(review.reply?.trim() ? { replyBody: review.reply } : {}) };
+      const reply = typeof review?.reply === "string" ? review.reply : review?.reply?.reply;
+      const replyBody = typeof reply === "string" && reply.trim() ? reply : undefined;
+      if (review?.is_replied === true || replyBody)
+        return { state: "accepted", ...(replyBody ? { replyBody } : {}) };
       if (writing) return { state: "uncertain", reason: "confirmation_missing" };
       const channel = review?.ota?.replace(/[^a-z0-9]/gi, "").toLowerCase();
       const reason = !["bookingcom", "airbnb", "expedia"].includes(channel ?? "")
@@ -75,9 +78,11 @@ export function createChannexReviewReplies(config: {
           ? "confirmation_missing"
           : review?.is_hidden !== false
             ? "review_visibility_unconfirmed"
-            : channel === "bookingcom" && !review?.content?.trim()
-              ? "score_only_review"
-              : undefined;
+            : review?.is_expired !== false
+              ? "review_unavailable"
+              : !review?.content?.trim()
+                ? "score_only_review"
+                : undefined;
       return reason ? { state: "unavailable", reason } : { state: "ready" };
     } catch {
       return { state: writing ? "uncertain" : "unavailable", reason: "provider_unreachable" };

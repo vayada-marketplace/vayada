@@ -5,7 +5,13 @@ const identity = { reviewId: "review-1", externalPropertyId: "property-1" };
 const data = {
   id: identity.reviewId,
   relationships: { property: { data: { id: identity.externalPropertyId } } },
-  attributes: { ota: "BookingCom", content: "Great", is_hidden: false, is_replied: false },
+  attributes: {
+    ota: "BookingCom",
+    content: "Great",
+    is_hidden: false,
+    is_replied: false,
+    is_expired: false,
+  },
 };
 function setup(response: unknown, status = 200) {
   const request = vi
@@ -42,10 +48,21 @@ describe("Channex reply contract", () => {
     [{ ...data.attributes, content: "" }, "unavailable"],
     [{ ...data.attributes, is_hidden: true }, "unavailable"],
     [{ ...data.attributes, is_replied: true }, "accepted"],
+    [{ ...data.attributes, is_expired: true }, "unavailable"],
+    [{ ...data.attributes, is_expired: undefined }, "unavailable"],
+    [{ ...data.attributes, ota: "Airbnb", content: "" }, "unavailable"],
+    [{ ...data.attributes, reply: { guest_review: { public_review: "Good guest" } } }, "ready"],
   ])("checks current channel eligibility", async (attributes, state) => {
     expect((await setup({ data: { ...data, attributes } }).provider.check(identity)).state).toBe(
       state,
     );
+  });
+  it("reads current object-shaped public replies", async () => {
+    const attributes = { ...data.attributes, reply: { reply: "Thanks", guest_review: {} } };
+    expect(await setup({ data: { ...data, attributes } }).provider.check(identity)).toEqual({
+      state: "accepted",
+      replyBody: "Thanks",
+    });
   });
   it.each([401, 403, 404, 422, 429, 500, 502])(
     "classifies HTTP %s without a retry",
