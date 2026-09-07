@@ -97,6 +97,17 @@ complete room details in guest lookup. Host browser fixtures separately verify
 three unassigned stays, the combined total, both named cancellation policies,
 date-change pricing and idempotent retry.
 
+## Current-main release verification
+
+The remaining stack integrates main `7153aa340`, including structured cancellation
+defaults and the guest-policy projection worker. Full workspace build and
+typecheck passed. A fresh isolated PostgreSQL 17 database applied all migrations
+0001–0170; 58 focused bundle, pending-edit, nightly-revenue and Channex restriction
+tests passed across the completed runs. The newly merged restriction test now
+uses the detailed restriction-reason helper introduced by #1690, preserving all
+existing allow/block assertions. Independent integration review found no
+regression in the cancellation/worker changes or this test adaptation.
+
 ## Stack and release constraints
 
 Implementation starts at [#1657](https://github.com/vayada-marketplace/vayada/pull/1657)
