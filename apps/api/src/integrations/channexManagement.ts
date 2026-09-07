@@ -1,3 +1,8 @@
+import {
+  ChannexMealSyncError,
+  reconcileChannexMeals,
+  type ChannexMeal,
+} from "./channexMealSync.js";
 import type {
   ChannexConnectedChannel,
   ChannexRatePlanMapping,
@@ -61,6 +66,13 @@ type ChannexRequest = {
 
 export type ChannexManagementActionPlan = {
   requests: ChannexRequest[];
+  meals?: Array<{
+    ratePlanId: string;
+    channel: string;
+    mealType: ChannexMeal["mealType"];
+    externalRatePlanId?: string;
+    externalRoomTypeId?: string;
+  }>;
   externalPropertyId?: string;
   roomTypeMappings?: ChannexRoomTypeMapping[];
   ratePlanMappings?: ChannexRatePlanMapping[];
@@ -234,6 +246,38 @@ export function createChannexManagementProvider(config: {
         } catch (error) {
           return failure(isTimeout(error) ? "timeout" : "provider_unavailable", error);
         }
+      }
+      try {
+        const meals = (plan.meals ?? []).map((meal) => {
+          const mapping = ratePlanMappings.get(rateKey(meal));
+          const externalRatePlanId = meal.externalRatePlanId ?? mapping?.externalRatePlanId;
+          const externalRoomTypeId = meal.externalRoomTypeId ?? mapping?.externalRoomTypeId;
+          if (!externalRatePlanId || !externalRoomTypeId)
+            throw new ChannexMealSyncError("Missing Channex meal rate mapping");
+          return { externalRatePlanId, externalRoomTypeId, mealType: meal.mealType };
+        });
+        await reconcileChannexMeals(externalPropertyId!, meals, async (method, path, body) => {
+          await input?.onProgress?.();
+          const response = await fetcher(new URL(path, `${apiBaseUrl}/`), {
+            method,
+            headers: { "content-type": "application/json", "user-api-key": apiKey },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: AbortSignal.timeout(30_000),
+          });
+          lastRequestId = response.headers.get("x-request-id") ?? lastRequestId;
+          if (!response.ok) throw response;
+          return response.status === 204 ? undefined : response.json();
+        });
+      } catch (error) {
+        if (error instanceof Response) return responseFailure(error, lastRequestId);
+        return failure(
+          error instanceof ChannexMealSyncError
+            ? "invalid_state"
+            : isTimeout(error)
+              ? "timeout"
+              : "provider_unavailable",
+          error,
+        );
       }
       if (plan.bookingRevisionHandoff) {
         try {
