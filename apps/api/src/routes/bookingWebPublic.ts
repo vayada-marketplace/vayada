@@ -373,8 +373,6 @@ export type BookingHotelChangeRequestRepository = {
 };
 
 export type BookingWebAffiliateAdapter = {
-  checkEmail(slug: string, email: string): Promise<unknown>;
-  register(slug: string, request: BookingWebAffiliateRequest): Promise<unknown>;
   createStripeConnectLink(
     slug: string,
     affiliateId: string,
@@ -6033,12 +6031,6 @@ export function resolveTargetCheckoutAmountSnapshot(
 
 export function createUnavailableBookingWebAffiliateAdapter(): BookingWebAffiliateAdapter {
   return {
-    async checkEmail() {
-      throw createHttpError(404, "Booking Web affiliate adapter is not configured.");
-    },
-    async register() {
-      throw createHttpError(404, "Booking Web affiliate adapter is not configured.");
-    },
     async createStripeConnectLink() {
       throw createHttpError(404, "Booking Web affiliate adapter is not configured.");
     },
