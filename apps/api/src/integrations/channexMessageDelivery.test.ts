@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChannexMessageDelivery } from "./channexMessageDelivery.js";
+import {
+  createChannexThreadAction,
+  createChannexMessageDelivery,
+} from "./channexMessageDelivery.js";
 
 describe("Channex guest-message delivery", () => {
   it("uploads attachments and sends one Channex message per attachment", async () => {
@@ -130,3 +133,61 @@ function json(id: string): Response {
     headers: { "content-type": "application/json" },
   });
 }
+
+describe("Channex provider actions", () => {
+  it.each(["booking_com_no_reply_needed", "channex_close"] as const)(
+    "posts %s without sending a message",
+    async (action) => {
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ data: { id: "thread", attributes: { is_closed: true } } })),
+        );
+      await expect(
+        createChannexThreadAction({
+          apiBaseUrl: "https://channex.test",
+          apiKey: "test-key",
+          fetch: request,
+        })({ action, providerConversationId: "thread" }),
+      ).resolves.toEqual({ ok: true, providerReference: "thread" });
+      expect(String(request.mock.calls[0]![0])).toBe(
+        `https://channex.test/api/v1/message_threads/thread/${action === "channex_close" ? "close" : "no_reply_needed"}`,
+      );
+      expect(request.mock.calls[0]![1]).toMatchObject({
+        method: "POST",
+        headers: { "user-api-key": "test-key" },
+      });
+      expect(request.mock.calls[0]![1]?.body).toBeUndefined();
+    },
+  );
+  it.each([
+    [429, "transient_provider_failure"],
+    [500, "ambiguous_provider_outcome"],
+    [403, "provider_configuration_unavailable"],
+    [422, "provider_rejected"],
+  ] as const)("classifies HTTP %s", async (status, failure) => {
+    const execute = createChannexThreadAction({
+      apiBaseUrl: "https://channex.test",
+      apiKey: "test-key",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status })),
+    });
+    await expect(
+      execute({ action: "channex_close", providerConversationId: "thread" }),
+    ).resolves.toEqual({ ok: false, failure });
+  });
+  it("holds timeout and malformed confirmation", async () => {
+    for (const request of [
+      vi.fn<typeof fetch>().mockRejectedValue(new Error("timeout")),
+      vi.fn<typeof fetch>().mockResolvedValue(new Response("{}")),
+    ]) {
+      const execute = createChannexThreadAction({
+        apiBaseUrl: "https://channex.test",
+        apiKey: "test-key",
+        fetch: request,
+      });
+      await expect(
+        execute({ action: "channex_close", providerConversationId: "thread" }),
+      ).resolves.toEqual({ ok: false, failure: "ambiguous_provider_outcome" });
+    }
+  });
+});
