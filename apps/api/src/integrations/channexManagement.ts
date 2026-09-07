@@ -98,12 +98,16 @@ export function createChannexManagementProvider(config: {
   apiKey: string;
   plans: ChannexManagementPlanPort;
   fetch?: typeof fetch;
+  canSyncAri?: boolean;
 }): ChannexManagementProvider {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
   const fetcher = config.fetch ?? fetch;
   return {
     async execute(job, input) {
+      if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
+        return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
+      }
       let plan: ChannexManagementActionPlan;
       try {
         plan = await config.plans.plan(job);
