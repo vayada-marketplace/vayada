@@ -6,6 +6,7 @@
     "name": "pms"
   },
   "scripts": {
+    "prebuild": "npm --workspace @vayada/domain-pms-channex run build",
     "dev": "next dev -p ${PORT:-3004}",
     "build": "next build",
     "start": "next start -p 3004",
