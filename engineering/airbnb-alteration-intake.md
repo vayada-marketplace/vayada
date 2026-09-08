@@ -46,3 +46,33 @@ Real Airbnb end-to-end acceptance still needs sanctioned provider fixtures and
 an authorized connection; shared Booking.com/OpenChannel fixtures do not qualify.
 
 Provider reference: [Channex Airbnb API](https://docs.channex.io/api-v.1-documentation/airbnb-api#alteration-request).
+
+## Durable decision coordinator
+
+One immutable intent is stored in `requested_changes.channex.decision`, with the
+staff user, request correlation and acceptance time. The canonical change status
+and booking remain untouched; provider acknowledgement is a separate state.
+An opposite intent is rejected even if the caller uses a different HTTP retry key.
+
+A PostgreSQL session advisory lock serializes each local request; a concurrent
+caller gets an in-progress result instead of occupying a waiting connection. Before sending,
+the coordinator holds the active binding and confirmed booking locks, and (for
+acceptance) the property inventory lock while running a required availability
+preflight. The preflight must validate canonical inventory freshness, mapping and
+whole-booking allocation evidence, including linked-room consequences; missing
+or unsupported evidence rejects acceptance. There is no default allow callback.
+
+A dedicated journal pool on the same target database commits `sendStartedAt` before the transport is
+invoked, while the first retains the binding/booking/inventory locks. It must be separate from the worker pool so saturated workers cannot starve
+their own durable writes. A crash or uncertain
+response after this marker permits readback only, never another automatic POST.
+Even a pre-read failure after the marker is conservative: reconcile, do not resend.
+No database transaction rolls back the durable marker after an outbound attempt.
+
+The adapter's actual outcome is stored independently from intent. An earlier
+opposite provider decision is displayed as that actual decision, not success for
+the staff action. Unresolved/read failures preserve an unknown delivery state.
+Canonical application remains owned by revision/reconciliation processing.
+
+This coordinator has no runtime registration. Its availability port, protected
+route wiring, background readback and PMS rendering are activation requirements.
