@@ -421,3 +421,4 @@ export type {
   PmsRoomOperatingEligibilityReadPort,
 } from "./roomOperatingEligibility.js";
 export * from "./replacementPricing.js";
+export * from "./replacementPricingConfiguration.js";
