@@ -74,5 +74,22 @@ opposite provider decision is displayed as that actual decision, not success for
 the staff action. Unresolved/read failures preserve an unknown delivery state.
 Canonical application remains owned by revision/reconciliation processing.
 
-This coordinator has no runtime registration. Its availability port, protected
-route wiring, background readback and PMS rendering are activation requirements.
+This coordinator has no runtime registration. Protected route wiring, background
+readback, authoritative revision application and PMS rendering are activation requirements.
+
+## Availability preflight
+
+The read-only preflight uses the existing receipt/adoption-aware PMS occupancy
+query. It requires a confirmed Airbnb booking with complete channel assignments,
+active same-property room mappings, complete current calendar/coverage and room
+revisions, and matching canonical occupancy for every proposed night. Credit is
+only the booking's own active assignments on the same room type and overlapping
+night. Multiple proposed rooms of one type require multiple units. Missing or
+stale evidence is an error, never assumed capacity. Closed, blocked and limited
+capacity remain enforced. No room, booking or inventory counts are updated.
+
+Linked inventory is explicitly unsupported for acceptance in this first guard,
+including moving out of a linked type. Its causal blocks require group-wide
+recalculation before approval can safely be enabled. The coordinator uses this
+concrete guard by default; test ports may replace it. Runtime wiring and real
+provider evidence remain outstanding.
