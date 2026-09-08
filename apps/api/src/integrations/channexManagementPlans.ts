@@ -102,13 +102,33 @@ export type ChannexBookingRevisionHandoff = (input: {
 export function createPgChannexManagementPlanPort(config: {
   connectionString: string;
   bookingRevisionHandoff: ChannexBookingRevisionHandoff;
+  stagingMealsPropertyId?: string;
   pool?: Pool;
   now?: () => Date;
 }): ChannexManagementPlanPort & { close(): Promise<void> } {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
   return {
-    plan: (job) => plan(pool, config.bookingRevisionHandoff, job, config.now?.() ?? new Date()),
+    plan: async (job) => {
+      const result = await plan(
+        pool,
+        config.bookingRevisionHandoff,
+        job,
+        config.now?.() ?? new Date(),
+      );
+      if (
+        config.stagingMealsPropertyId === job.propertyId &&
+        job.input.operationType === "provision" &&
+        job.input.mealRatePlanId
+      ) {
+        const meals =
+          result.meals?.filter((meal) => meal.externalRatePlanId && meal.externalRoomTypeId) ?? [];
+        if (!meals.length)
+          throw new Error("Staging meal reconciliation requires an existing mapped rate");
+        return { ...result, requests: [], meals };
+      }
+      return result;
+    },
     async close() {
       await pool.end();
     },

@@ -117,6 +117,32 @@ describe("api config", () => {
       );
   });
 
+  it("requires explicit opt-in and retains isolation for scoped meal processing", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+      PMS_CHANNEX_STAGING_MEALS_ENABLED: "true",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingMealsEnabled).toBe(true);
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_MEALS_ENABLED: "false" },
+      { PMS_CHANNEX_PROVISIONING_MODE: "observe_only" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      ...["CONNECTION", "BOOKING_SYNC", "MARKUPS", "MESSAGING", "IFRAME"].map((capability) => ({
+        [`PMS_CHANNEX_${capability}_MODE`]: "mutating",
+      })),
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow();
+  });
+
   it("rejects Channex mutation without provider config or target ownership", () => {
     expect(() => loadConfig({ PMS_CHANNEX_ARI_SYNC_MODE: "mutating" })).toThrow(
       "Mutating PMS Channex capabilities require CHANNEX_API_BASE_URL and CHANNEX_API_KEY",
