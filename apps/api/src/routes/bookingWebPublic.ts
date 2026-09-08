@@ -5151,7 +5151,11 @@ async function loadTargetChangeRequestForHotelById(
      ${forUpdate ? "FOR UPDATE OF change_request" : ""}`,
     [propertyId, bookingId, changeRequestId],
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  if (row && Object.prototype.hasOwnProperty.call(row.requestedChanges, "channex")) {
+    throw createHttpError(409, "Airbnb change requests require a provider decision.");
+  }
+  return row ?? null;
 }
 
 async function loadChangeRequestById(
