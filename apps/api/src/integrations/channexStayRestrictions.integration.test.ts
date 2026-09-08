@@ -236,7 +236,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         )
       ).rows[0].n,
     ).toBeGreaterThan(0);
-  });
+    // Several full-horizon recomputations share the populated CI database.
+  }, 15_000);
   it("scopes refresh and claims to one property and leaves other operations untouched", async () => {
     const otherProperty = randomUUID();
     await db.query(
