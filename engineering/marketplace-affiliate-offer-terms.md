@@ -44,3 +44,20 @@ Marketplace, PMS and Booking Admin reuse the same commands and reads.
 The next slices add authorized reference resolution and versioned persistence, then
 existing offer command/read integration and denial tests. This slice intentionally
 has no route, database migration, link creation, provider integration or payment effect.
+
+## Draft revision storage (VAY-1501, second slice)
+
+Migration 0173 adds `marketplace.affiliate_offer_terms_drafts`. Each append-only row
+belongs to the existing offer/property/organization tuple and records its author,
+request ID and creation time. A unique offer/revision pair prevents duplicate
+revision numbers. Updating, deleting or truncating drafts is rejected by the database;
+changing terms means inserting a new revision. No existing offers are backfilled.
+
+These rows are drafts, not accepted agreements or published terms. Destination and
+Finance policy IDs remain unresolved references: storage does not certify their
+existence, property scope or readiness. No active/published flag is available here.
+The future publication command must resolve both through their owning domains,
+authorize the actor on every attempt, check the expected current revision under an
+offer lock, and atomically record idempotency and audit evidence. An accepted terms
+version will bind the verified draft to a program and effective time; it cannot
+reinterpret an old draft as approval. This schema does not implement those commands.
