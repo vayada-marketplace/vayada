@@ -97,9 +97,9 @@ complete room details in guest lookup. Host browser fixtures separately verify
 three unassigned stays, the combined total, both named cancellation policies,
 date-change pricing and idempotent retry.
 
-## Current-main release verification
+## Earlier local release verification
 
-The remaining stack integrates main `7153aa340`, including structured cancellation
+At that checkpoint, the remaining stack integrated main `7153aa340`, including structured cancellation
 defaults and the guest-policy projection worker. Full workspace build and
 typecheck passed. A fresh isolated PostgreSQL 17 database applied all migrations
 0001–0170; 58 focused bundle, pending-edit, nightly-revenue and Channex restriction
@@ -130,21 +130,37 @@ were available at the final inspection. Independent review is recorded separatel
 Stacked branches do not run the main-targeted full PR workflow until retargeted;
 full local validation above is not a claim of full-stack CI coverage.
 
-Full deployed mixed-room smoke remains pending: the feature stack and activation
-are not fully merged. The earlier pay-at-property readiness fix is included in
-the isolated test candidate `65cdd44ce39a83ff7ec418f2947c0efa008a8542`, verified
-on API task definition 10 and guest task definition 5. The actual synthetic hotel
-host reports that guest build. Preview admin remains revision 4, and ALB routing
-conditions/actions remain unchanged.
+All prerequisite PRs through #1704 are merged. Activation #1705 remains draft;
+full deployed mixed-room acceptance is still pending. Actual next-environment
+consumer versions were verified from running task digests and Git ancestry:
+Booking Web261 at b9b0816a, Booking Admin387 and PMS437 at b5d3a516, and API886
+at f77ebb5d. This establishes the consumer deployment order, not mixed-room smoke.
 
-Coordinated prerequisite smoke on that candidate confirmed pending-edit entry,
-prefill and cancel behavior, but price review returned an offer-unavailable 409.
-VAY-959 owns that investigation. VAY-1529 also found that legacy room adaptation
-selects an older offer and hides the canonical meal rate; its owner is repairing
-that path. Synthetic requests were withdrawn and the shared fixture restored by
-the smoke owners. These checks do not establish mixed-room acceptance.
+The earlier publication, canonical meal and pending-edit notification blockers
+were repaired and their bounded deployed smokes passed with restoration. Do not
+repeat those completed prerequisite checks without a relevant change.
 
-Continue merging the reviewed stack with required checks, deploy compatible
-consumers before activation, verify actual running revisions, and coordinate
-shared fixtures for the final mixed-room flow. Keep VAY-910 In Progress until
-explicit acceptance.
+The shared synthetic route has since advanced to canary15, source0118fd1f,
+digest1a8a49909ac5cf864eb9a2f3b0866e30e39b19679ebcde748d82dde442774b7d.
+It contains scoped Channex restrictions and meal delivery, not this activation.
+Guest7/admin4 remain older isolated frontends. Any later approved canary rollout
+must preserve both staging flags, the exact synthetic property/secret scope,
+existing route conditions and disabled global workers. Coordinate fixture leases
+before deploying or mutating; the meal owner released its lease after restoration.
+
+The restored synthetic baseline is plan13, mandatory confirmation6, guest
+policy21 and Catalog12, with readiness ready, eight reservations and two original
+season rules preserved. No real booking, payment or OTA mapping belongs in this
+validation. Booking.com presentation remains a separate unverified capability.
+
+The draft now integrates main31c544230, including scoped Channex worker/meal
+configuration, inventory-rule reconciliation and the midnight policy correction.
+No runtime flag, shared fixture or customer route was activated by that rebase.
+Continue with isolated mixed-room validation and explicit release acceptance;
+keep VAY-910 In Progress until acceptance is recorded.
+
+The latest rebase passed the API production build and 137 focused tests covering
+configuration, Channex inventory rules, Booking public parity and guest policy.
+Independent integration review found no regression; the activation production
+diff remains the two explicit mixed-room runtime flags. Fresh PR CI is required
+for this rebased revision.
