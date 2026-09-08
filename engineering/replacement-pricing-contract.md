@@ -58,3 +58,48 @@ own restriction policy switches to inherit, never silently resets to unrestricte
 Exact/nonexistent dates, duplicate rows, cycles and overlapping seasons fail.
 Terms revisions reference full cancellation/payment/deposit terms supplied by
 owners; this snapshot does not pretend a terms ID validates the policy contents.
+
+## Booking evidence and owner inputs (VAY-1556)
+
+`parseReplacementStay` validates public selection shape, real stay dates, guest
+ages and exact fields. PMS validates actual capacity and selected offer scope.
+Booking binds all selections to a deterministic request key and seven owner
+revisions. Each revision covers the complete selected input set, not one row;
+owner adapters must atomically read consistent snapshots and verify tenant scope.
+`replacementEvidenceStatus` checks trusted evaluator output for staleness and
+money conservation. It is NOT a parser or authorization check for client quotes.
+Checkout must load server-stored evidence and revalidate all owner revisions,
+availability and promotional usage under its reservation transaction. Persistence
+stores immutable copies of accepted evidence; amendments create new records.
+
+PMS owns configuration. Booking owns cancellation terms, promotions, add-ons and
+accepted stay evidence. Finance supplies payment capability and deposit readiness;
+mandatory-charge owners supply confirmed totals/basis evidence (including zero).
+FX owner supplies observed/expiry evidence and positive rational conversion rates;
+no missing cross-currency pair becomes 1:1. Ratios convert source minor units to
+target minor units, including scale differences; round half-up per component.
+Owner port inputs are validated domain objects, not untrusted JSON. Their future
+adapters must validate policy ranges, windows, scope, FX pair coverage, tax bases
+and evidence references before returning them. Merely matching opaque IDs is not
+proof of payment readiness, cancellation meaning, or mandatory-charge correctness.
+
+Last-minute tiers use the smallest qualifying throughDaysBeforeArrival, property
+local booking/check-in dates, hotel enablement plus room inherit/disable/override.
+Promos use independent inclusive booking and arrival windows; stay window means
+check-in. Empty roomTypeIds selects none; null selects all. No stacking compares
+independent eligible totals (tie: last-minute). Stacking applies last-minute to
+room, then code to room plus eligible add-ons. Meals/mandatory charges are excluded
+from that promo basis. NR adjustments apply to room including guest supplements
+before meals; NR-only starts at its configured price. Deposits use the final total.
+Amendments preserve the original discount amount, capped at the new eligible basis.
+Tax/charge owners determine discount effects before confirming charge evidence;
+included taxes are annotations, not additive lines. Additive charges enter totals
+once; collection timing is reflected in dueNow/dueLater. Terms and FX snapshots
+remain attached to accepted evidence. No evidence is sent as provider IDs or raw
+configuration pools to public consumers.
+
+The executable examples assert agreed minor-unit arithmetic (184.50, 510, 315,
+80 vs 72, and 108/252). They deliberately do not claim an implemented evaluator,
+calendar precedence, promotion eligibility, FX feed, checkout or OTA integration.
+VAY-1542 must run these same expected outcomes against the real evaluator and add
+eligibility, calendar, restriction, child allocation, zero and overflow scenarios.
