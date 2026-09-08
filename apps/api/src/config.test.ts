@@ -89,6 +89,34 @@ describe("api config", () => {
     });
   });
 
+  it("allows only isolated staging restrictions with the background workers disabled", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingRestrictionsPropertyId).toBe(
+      base.PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID,
+    );
+    for (const invalid of [
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "invalid" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { API_BACKGROUND_WORKERS_ENABLED: undefined },
+      { PMS_CHANNEX_ARI_SYNC_MODE: "observe_only" },
+      ...["CONNECTION", "PROVISIONING", "BOOKING_SYNC", "MARKUPS", "MESSAGING", "IFRAME"].map(
+        (capability) => ({ [`PMS_CHANNEX_${capability}_MODE`]: "mutating" }),
+      ),
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow(
+        "Scoped Channex restrictions require",
+      );
+  });
+
   it("rejects Channex mutation without provider config or target ownership", () => {
     expect(() => loadConfig({ PMS_CHANNEX_ARI_SYNC_MODE: "mutating" })).toThrow(
       "Mutating PMS Channex capabilities require CHANNEX_API_BASE_URL and CHANNEX_API_KEY",
@@ -946,11 +974,12 @@ describe("api config", () => {
   });
 });
 
-
 describe("API background worker configuration", () => {
   it("defaults to enabled and allows a request-only staging API", () => {
     expect(loadConfig({}).backgroundWorkersEnabled).toBe(true);
-    expect(loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "false" }).backgroundWorkersEnabled).toBe(false);
+    expect(loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "false" }).backgroundWorkersEnabled).toBe(
+      false,
+    );
     expect(() => loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "invalid" })).toThrow();
   });
 });

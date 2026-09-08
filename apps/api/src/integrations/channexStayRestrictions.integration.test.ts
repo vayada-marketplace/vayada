@@ -236,7 +236,82 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         )
       ).rows[0].n,
     ).toBeGreaterThan(0);
+    // Several full-horizon recomputations share the populated CI database.
+  }, 15_000);
+  it("scopes refresh and claims to one property and leaves other operations untouched", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1::uuid,'channex',$1::text,'active','repair')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1::uuid,'channex','connected',$1::text)",
+      [otherProperty],
+    );
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'outside')", [otherProperty]);
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'full-ari')", [property]);
+    await db.query(
+      "UPDATE platform.jobs SET payload=payload-'restrictionsOnly', priority=100 WHERE property_id=$1",
+      [property],
+    );
+    const before = (
+      await db.query("SELECT * FROM platform.jobs WHERE property_id=ANY($1::uuid[]) ORDER BY id", [
+        [property, otherProperty],
+      ])
+    ).rows;
+    const worker = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      stagingRestrictionsPropertyId: property,
+      targetState: { succeed: vi.fn(), fail: vi.fn() },
+      pool: {
+        end: async () => {},
+        connect: async () => ({
+          release() {},
+          query: ((text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT scoped_worker",
+                  COMMIT: "RELEASE SAVEPOINT scoped_worker",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT scoped_worker",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            )) as pg.PoolClient["query"],
+        }),
+      },
+    });
+    const claimed = await worker.claim({ workerId: "scoped", now: new Date() });
+    expect(claimed).toMatchObject({
+      propertyId: property,
+      input: { operationType: "sync_ari", restrictionsOnly: true },
+    });
+    expect(
+      (
+        await db.query("SELECT * FROM platform.jobs WHERE id=ANY($1::uuid[]) ORDER BY id", [
+          before.map((row) => row.id),
+        ])
+      ).rows,
+    ).toEqual(before);
+    expect(
+      (
+        await db.query(
+          "SELECT count(*)::int n FROM platform.jobs WHERE property_id=$1 AND job_key LIKE '%full:%'",
+          [otherProperty],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(await worker.claim({ workerId: "scoped", now: new Date() })).toBeNull();
   });
+
   it("delivers automatic changes and daily full sync through guarded, serialized durable jobs", async () => {
     const pool = {
       end: async () => {},

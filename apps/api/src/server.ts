@@ -677,6 +677,7 @@ const channexManagementWorkerStore = channexManagementProvider
       connectionString: targetDatabaseUrl,
       targetState: createPmsChannexManagementTargetState(),
       ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
+      stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
     })
   : undefined;
 
@@ -1815,7 +1816,8 @@ channexScheduleTimer?.unref();
 scheduleChannexAri();
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
-  if (!config.backgroundWorkersEnabled) return;
+  if (!config.backgroundWorkersEnabled && !config.channexManagement.stagingRestrictionsPropertyId)
+    return;
   if (!channexManagementWorkerStore || !channexManagementProvider || activeChannexManagementRun) {
     return;
   }
