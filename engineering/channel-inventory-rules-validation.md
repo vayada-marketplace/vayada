@@ -30,20 +30,24 @@ Local verification on 2026-09-07, based on main
   retained the existing queue, metadata, permission and UI patterns with no new
   external dependency.
 
-## Not yet verified
+## Real Booking.com staging verification — 2026-09-08
 
-No Channex staging API credentials or designated synthetic provider property were
-available in the configured local environment. Provider acceptance, offset
-clamping, inventory-driven updates, cap replenishment and removal restoration
-have **not** been observed against Channex or a connected OTA. The official API
-and behavior guides establish the intended contract, not live enforcement.
+Compiled Vayada reconciliation ran against Channex and sanctioned Booking.com
+hotel 5868189. Channel logs contain OTA_HotelAvailNotifRQ BookingLimit values
+and HTTP200 OTA_HotelAvailNotifRS Success acknowledgements:
 
-The normal local launcher stopped because existing Docker containers belong to
-another checkout. Those containers and reusable next-environment accounts,
-property and bookings were not changed. The browser used a separate portless
-process; the Postgres test used its own disposable container.
+- Offset2: 10 → 8, 2 → 0; inventory changing to10 sent8.
+- Cap3: 10 → 3, 2 → 2; inventory1 sent1, then inventory10 sent3.
+- Close-out: all selected dates sent0; removal restored10 and2.
+- Rule edits retained provider identity. Dates were bounded to October13–16;
+  the only canonical provider inventory change was October15, restored to2.
+- Final readback confirms baseline10/2, empty rules, active channel and unchanged
+  weekday stop-sell. No reservation, payment or message was submitted.
 
-Keep the stack in draft until bounded Channex staging verification records all
-three rule types at 10 and 2 available rooms, inventory changes, editing/removal
-and restoration. Use synthetic staging inventory only and restore test rules;
-do not create real reservations or make production provider changes.
+Sanitized evidence: local `vayada-testing/evidence/vay1531-channex/delivery-results.json`.
+Events cda1ee98 (offset), 3f00c66d (cap), 184e8ff8/b500ebd7 (inventory changes),
+e3eb5c44 (close-out), 071ed0eb (restoration) each received Success.
+
+This verifies provider delivery and acknowledgement, not Booking.com storefront
+presentation, a sales-quota scenario using bookings, or a second active OTA.
+Deployed PMS UI/queue/worker smoke remains a post-merge acceptance check.
