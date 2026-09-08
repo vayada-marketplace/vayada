@@ -204,3 +204,17 @@ mutation types and job-key exports. Shared property dispatch and provider-attemp
 evidence encoding remain intact, including nullable historical affiliate metadata.
 Platform manual mark-paid still checks the historical affiliate queue directly;
 this cleanup neither deletes queued records nor releases in-flight payment guards.
+
+## VAY-1500 affiliate fee-split retirement
+
+The next bounded change removes the obsolete affiliate argument, affiliate commission
+result and affiliate-only fee branch from the pure calculatePayoutSplit contract.
+Source search found only tests calling this helper. It retains the shared property
+calculation: fixed plans charge zero platform fee; commission plans use the direct
+booking or channel-manager rate, with existing rounding and validation.
+
+BillingConfigReadModel, stored affiliate fee metadata, Booking checkout snapshots,
+migrations, payout history and operational Finance APIs remain unchanged. Their
+retained fields are financial evidence, not authorization to calculate new affiliate
+commissions using the retired product rules. New earning calculations belong to the
+accepted Marketplace affiliate agreement/booking/commission design.
