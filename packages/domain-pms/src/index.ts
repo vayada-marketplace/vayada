@@ -420,3 +420,4 @@ export type {
   PmsRoomOperatingEligibility,
   PmsRoomOperatingEligibilityReadPort,
 } from "./roomOperatingEligibility.js";
+export * from "./replacementPricing.js";
