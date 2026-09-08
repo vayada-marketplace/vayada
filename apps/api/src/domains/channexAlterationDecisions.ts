@@ -6,6 +6,8 @@ import type {
 } from "../integrations/channexRequestDecisions.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
+import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const inputSchema = z.object({
   propertyId: uuid,
@@ -45,7 +47,7 @@ export async function decideChannexAlteration(
     pool: pg.Pool;
     journalPool: pg.Pool;
     provider: Provider;
-    assertAvailability: (
+    assertAvailability?: (
       transaction: pg.PoolClient,
       input: {
         propertyId: string;
@@ -180,7 +182,7 @@ export async function decideChannexAlteration(
       )
         throw new Error("alteration_booking_snapshot_changed");
       if (input.action === "accept")
-        await config.assertAvailability(client, {
+        await (config.assertAvailability ?? assertChannexAlterationAvailability)(client, {
           propertyId: input.propertyId,
           bookingId: input.bookingId,
           changes: row.changes,

@@ -198,6 +198,18 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     expect(provider.resolve).not.toHaveBeenCalled();
     expect(config.assertAvailability).not.toHaveBeenCalled();
   });
+  it("defaults to the real availability guard before sending", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const { assertAvailability: _testOverride, ...config } = ports();
+    await expect(decideChannexAlteration(config, input(requestId))).rejects.toThrow(
+      "alteration_assignment_evidence_incomplete",
+    );
+    expect(config.provider.resolve).not.toHaveBeenCalled();
+    expect(await journal(requestId)).toMatchObject({
+      deliveryState: "queued",
+      sendStartedAt: null,
+    });
+  });
   it("fails closed on availability and allows a safe retry before any send", async () => {
     const { requestId } = await persistChannexAlteration(pool, scope, event());
     const config = ports(),
