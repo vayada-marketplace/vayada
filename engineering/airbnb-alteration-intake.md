@@ -110,3 +110,19 @@ Missing money and guest counts remain null inside this projection. Provider IDs,
 actor IDs and raw payloads are omitted. Direct-booking response semantics remain.
 Staff controls must use server-provided allowed actions; absent runtime wiring
 shows disabled actions and directs staff to Airbnb without implying success.
+
+## Background provider readback
+
+A bounded batch reads due pending provider requests using the existing rows and
+the same advisory lock as staff decisions. It rechecks the active binding,
+generation and canonical booking mapping before each provider GET. Ownership or
+shutdown stops work before reading and before committing. No background POST is
+permitted. Persist a five-minute next check after reads and a fifteen-minute
+retry after failures; competing batches recheck eligibility under the lock.
+
+Store observations separately from staff intent, without inventing an actor for
+decisions made in Airbnb. Declined/withdrawn observations close the local request
+and preserve the booking. Acceptance remains pending/awaiting confirmation until
+authoritative revision application is proven. A contradictory terminal observation
+is an evidence conflict; preserve the earlier outcome and retry later. Runtime
+registration and authoritative revision/assignment application remain gated.

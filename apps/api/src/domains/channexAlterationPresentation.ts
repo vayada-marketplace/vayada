@@ -16,7 +16,8 @@ export function presentChannexAlteration(
     decision = object(provider["decision"]);
   const action =
     decision["action"] === "accept" || decision["action"] === "decline" ? decision["action"] : null;
-  const outcome = decision["providerState"];
+  const observed = provider["providerState"];
+  const outcome = observed && observed !== "pending" ? observed : decision["providerState"];
   const state = !binding.safeParse(provider).success
     ? "unavailable"
     : status === "accepted"

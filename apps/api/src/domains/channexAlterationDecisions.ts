@@ -92,7 +92,11 @@ export async function decideChannexAlteration(
       decision = journalSchema.parse(metadata["decision"]);
       if (decision.action !== input.action) throw new Error("alteration_decision_conflict");
     } else {
-      if (row.status !== "pending") throw new Error("alteration_not_pending");
+      if (
+        row.status !== "pending" ||
+        (metadata["providerState"] && metadata["providerState"] !== "pending")
+      )
+        throw new Error("alteration_not_pending");
       decision = {
         action: input.action,
         actorUserId: input.actorUserId,

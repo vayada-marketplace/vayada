@@ -7,6 +7,8 @@ import {
 } from "./channexAlterationIntake.js";
 
 import { decideChannexAlteration } from "./channexAlterationDecisions.js";
+import { runChannexAlterationReadback } from "../jobs/channexAlterations.js";
+import { presentChannexAlteration } from "./channexAlterationPresentation.js";
 
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
@@ -131,6 +133,220 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       )
     ).rows[0].decision;
   }
+  async function readbackRow(id: string) {
+    return (
+      await pool.query(
+        `SELECT status,requested_changes AS changes,decided_at
+      FROM booking.booking_change_requests WHERE id=$1`,
+        [id],
+      )
+    ).rows[0];
+  }
+  async function makeDue(id: string) {
+    await pool.query(
+      `UPDATE booking.booking_change_requests
+      SET requested_changes=requested_changes #- '{channex,readback}' WHERE id=$1`,
+      [id],
+    );
+  }
+  it.each(["declined", "withdrawn", "accepted"] as const)(
+    "reads external %s without inventing staff intent or mutating the booking",
+    async (state) => {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const before = (
+        await pool.query(`SELECT * FROM booking.guest_bookings WHERE id=$1`, [booking])
+      ).rows;
+      const provider = { read: vi.fn(async () => ({ ok: true as const, state })) };
+      const config = { pool, provider, ownsMutation: () => true };
+      expect(await runChannexAlterationReadback(config)).toMatchObject({ refreshed: 1 });
+      const row = await readbackRow(requestId);
+      expect(row.status).toBe(
+        state === "accepted" ? "pending" : state === "withdrawn" ? "canceled" : "declined",
+      );
+      expect(row.changes.channex.decision).toBeUndefined();
+      expect(presentChannexAlteration(row.changes, true, row.status)).toMatchObject({
+        state: state === "accepted" ? "awaiting_confirmation" : state,
+        allowedActions: [],
+      });
+      expect(
+        (await pool.query(`SELECT * FROM booking.guest_bookings WHERE id=$1`, [booking])).rows,
+      ).toEqual(before);
+      expect(await runChannexAlterationReadback(config)).toMatchObject({ refreshed: 0 });
+      expect(provider.read).toHaveBeenCalledTimes(1);
+      await expect(decideChannexAlteration(ports(), input(requestId))).rejects.toThrow(
+        "alteration_not_pending",
+      );
+    },
+  );
+  it("reconciles unknown sends by GET, preserving the original staff intent", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    config.provider.resolve.mockRejectedValueOnce(new Error("lost response"));
+    await expect(decideChannexAlteration(config, input(requestId))).rejects.toThrow(
+      "lost response",
+    );
+    const original = await journal(requestId);
+    const provider = {
+      read: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+    };
+    await runChannexAlterationReadback({ pool, provider, ownsMutation: () => true });
+    expect(await journal(requestId)).toEqual({
+      ...original,
+      providerState: "declined",
+      deliveryState: "resolved",
+    });
+    expect(config.provider.resolve).toHaveBeenCalledTimes(1);
+    expect((await readbackRow(requestId)).status).toBe("declined");
+  });
+  it("backs off failed reads and rejects contradictory terminal observations", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const provider = {
+      read: vi.fn(async () => ({ ok: true as const, state: "accepted" as const })),
+    };
+    const config = { pool, provider, ownsMutation: () => true };
+    provider.read.mockRejectedValueOnce(new Error("network failure"));
+    expect(await runChannexAlterationReadback(config)).toMatchObject({ deferred: 1 });
+    const failed = await readbackRow(requestId);
+    expect(Date.parse(failed.changes.channex.readback.nextCheckAt) - Date.now()).toBeGreaterThan(
+      14 * 60_000,
+    );
+    await runChannexAlterationReadback(config);
+    expect(provider.read).toHaveBeenCalledTimes(1);
+    await makeDue(requestId);
+    await runChannexAlterationReadback(config);
+    await makeDue(requestId);
+    expect(
+      await runChannexAlterationReadback({
+        ...config,
+        provider: {
+          read: async () => ({ ok: true, state: "pending" }),
+        },
+      }),
+    ).toMatchObject({ deferred: 1 });
+    const conflict = await readbackRow(requestId);
+    expect(conflict.changes.channex.providerState).toBe("accepted");
+    expect(conflict.changes.channex.readback.failure).toBe("provider_resolution_conflict");
+  });
+  it("skips staff-held locks and never reads a replaced binding", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const client = await pool.connect();
+    const config = { pool, provider: ports().provider, ownsMutation: () => true };
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        `channex-alteration-decision:${requestId}`,
+      ]);
+      expect(await runChannexAlterationReadback(config)).toMatchObject({ skipped: 1 });
+      expect(config.provider.read).not.toHaveBeenCalled();
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    await pool.query(
+      `UPDATE booking.booking_change_requests SET requested_changes=jsonb_set(requested_changes,
+      '{channex,bindingGeneration}',to_jsonb($2::text)) WHERE id=$1`,
+      [requestId, randomUUID()],
+    );
+    expect(await runChannexAlterationReadback(config)).toMatchObject({ deferred: 1 });
+    expect(config.provider.read).not.toHaveBeenCalled();
+  });
+  it("preserves a staff-confirmed outcome after an earlier pending background observation", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    await runChannexAlterationReadback({ ...config, ownsMutation: () => true });
+    await decideChannexAlteration(config, input(requestId));
+    await makeDue(requestId);
+    expect(
+      await runChannexAlterationReadback({
+        ...config,
+        ownsMutation: () => true,
+        provider: { read: async () => ({ ok: true, state: "declined" }) },
+      }),
+    ).toMatchObject({ deferred: 1 });
+    expect((await journal(requestId)).providerState).toBe("accepted");
+    expect((await readbackRow(requestId)).status).toBe("pending");
+  });
+  it("can clarify an unknown resolution without reopening the request", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    await runChannexAlterationReadback({
+      pool,
+      ownsMutation: () => true,
+      provider: {
+        read: async () => ({ ok: true, state: "resolved_unknown" }),
+      },
+    });
+    await makeDue(requestId);
+    await runChannexAlterationReadback({
+      pool,
+      ownsMutation: () => true,
+      provider: {
+        read: async () => ({ ok: true, state: "pending" }),
+      },
+    });
+    expect((await readbackRow(requestId)).changes.channex.providerState).toBe("resolved_unknown");
+    await makeDue(requestId);
+    expect(
+      await runChannexAlterationReadback({
+        pool,
+        ownsMutation: () => true,
+        provider: {
+          read: async () => ({ ok: true, state: "declined" }),
+        },
+      }),
+    ).toMatchObject({ refreshed: 1 });
+    expect((await readbackRow(requestId)).status).toBe("declined");
+  });
+  it("serializes overlapping background batches and rechecks the persisted due time", async () => {
+    await persistChannexAlteration(pool, scope, event());
+    let release!: () => void, entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const config = {
+      pool,
+      ownsMutation: () => true,
+      provider: {
+        read: vi.fn(async () => {
+          entered();
+          await gate;
+          return { ok: true as const, state: "pending" as const };
+        }),
+      },
+    };
+    const first = runChannexAlterationReadback(config);
+    await started;
+    try {
+      expect(await runChannexAlterationReadback(config)).toMatchObject({ skipped: 1 });
+    } finally {
+      release();
+      await first;
+    }
+    await runChannexAlterationReadback(config);
+    expect(config.provider.read).toHaveBeenCalledTimes(1);
+  });
+  it("stops without storing observations when mutation ownership is lost during a read", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    let owns = true;
+    const config = {
+      pool,
+      ownsMutation: () => owns,
+      provider: {
+        read: vi.fn(async () => {
+          owns = false;
+          return { ok: true as const, state: "declined" as const };
+        }),
+      },
+    };
+    await runChannexAlterationReadback(config);
+    const row = await readbackRow(requestId);
+    expect(row.status).toBe("pending");
+    expect(row.changes.channex.readback).toBeUndefined();
+    await runChannexAlterationReadback(config);
+    expect(config.provider.read).toHaveBeenCalledTimes(1);
+  });
   it("dispatches staff decisions through the provider coordinator and returns safe state", async () => {
     const { requestId } = await persistChannexAlteration(pool, scope, event());
     const config = ports(),
