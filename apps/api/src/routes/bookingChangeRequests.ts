@@ -31,7 +31,27 @@ export async function registerBookingChangeRequestRoutes(
     "/hotels/:hotelId/reservations/:bookingId/change-request",
     async (request) => {
       enforceBookingChangePolicy(request, request.params.hotelId, "read");
-      return repository.findLatestChangeRequest(request.params.hotelId, request.params.bookingId);
+      const result = await repository.findLatestChangeRequest(
+        request.params.hotelId,
+        request.params.bookingId,
+      );
+      if (
+        result &&
+        typeof result === "object" &&
+        "providerRequest" in result &&
+        result.providerRequest &&
+        typeof result.providerRequest === "object"
+      ) {
+        try {
+          enforceBookingChangePolicy(request, request.params.hotelId, "write");
+        } catch {
+          return {
+            ...result,
+            providerRequest: { ...result.providerRequest, allowedActions: [], refreshAction: null },
+          };
+        }
+      }
+      return result;
     },
   );
 

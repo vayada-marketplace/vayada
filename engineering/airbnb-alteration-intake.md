@@ -93,3 +93,20 @@ including moving out of a linked type. Its causal blocks require group-wide
 recalculation before approval can safely be enabled. The coordinator uses this
 concrete guard by default; test ports may replace it. Runtime wiring and real
 provider evidence remain outstanding.
+
+## Staff API and presentation
+
+The existing protected Booking change-request routes remain the staff boundary.
+When the checkout adapter receives an explicitly configured `airbnbAlterations`
+port, provider-owned rows dispatch to the durable coordinator before direct-booking
+logic. The port is absent in server runtime until reconciliation/cutover is ready.
+Property plus booking plus request identity are resolved from storage; browser
+provider identifiers are never accepted. Existing `enforceRoutePolicy` applies.
+
+Responses add a sanitized `providerRequest` projection. Provider acknowledgement
+is `awaiting_confirmation`, not an applied booking change. Unknown sends offer
+only same-intent readback. Queued intents permit only the original decision.
+Missing money and guest counts remain null inside this projection. Provider IDs,
+actor IDs and raw payloads are omitted. Direct-booking response semantics remain.
+Staff controls must use server-provided allowed actions; absent runtime wiring
+shows disabled actions and directs staff to Airbnb without implying success.
