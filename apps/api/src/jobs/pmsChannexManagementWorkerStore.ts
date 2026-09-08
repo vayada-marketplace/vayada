@@ -52,6 +52,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   pool?: Pool;
   ariSyncMutating?: boolean;
   stagingRestrictionsPropertyId?: string;
+  stagingMealsEnabled?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -63,6 +64,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         input,
         config.ariSyncMutating ?? true,
         config.stagingRestrictionsPropertyId ?? null,
+        config.stagingMealsEnabled ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     succeed: (job, result, input) => complete(pool, config.targetState, job, result, input),
@@ -79,6 +81,7 @@ async function claim(
   input: { workerId: string; now: Date },
   ariSyncMutating: boolean,
   stagingRestrictionsPropertyId: string | null,
+  stagingMealsEnabled: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
     if (ariSyncMutating)
@@ -99,7 +102,9 @@ async function claim(
        FROM platform.jobs
        WHERE queue_name = $1
          AND ($4::uuid IS NULL OR (property_id = $4::uuid
-           AND payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb))
+           AND ((payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
+             OR ($5::boolean AND payload->>'operationType' = 'provision'
+               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
@@ -112,7 +117,13 @@ async function claim(
        )
        ORDER BY priority DESC, run_after, created_at
        FOR UPDATE SKIP LOCKED LIMIT 1`,
-      [PMS_CHANNEX_MANAGEMENT_QUEUE, LEASE_MS, ariSyncMutating, stagingRestrictionsPropertyId],
+      [
+        PMS_CHANNEX_MANAGEMENT_QUEUE,
+        LEASE_MS,
+        ariSyncMutating,
+        stagingRestrictionsPropertyId,
+        stagingMealsEnabled,
+      ],
     );
     const row = result.rows[0];
     if (!row) return null;

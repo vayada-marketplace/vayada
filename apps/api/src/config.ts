@@ -74,6 +74,7 @@ export type ChannexManagementConfig = {
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
   stagingRestrictionsPropertyId?: string;
+  stagingMealsEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -556,6 +557,13 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     env,
     "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
   );
+  const stagingMealsEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_MEALS_ENABLED", false);
+  if (
+    stagingMealsEnabled &&
+    (!stagingRestrictionsPropertyId || capabilityModes.provisioning !== "mutating")
+  ) {
+    throw new Error("Scoped Channex meals require a staging property and mutating provisioning");
+  }
   if (
     stagingRestrictionsPropertyId &&
     (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -565,7 +573,10 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true) ||
       capabilityModes.ariSync !== "mutating" ||
       Object.entries(capabilityModes).some(
-        ([name, mode]) => name !== "ariSync" && mode === "mutating",
+        ([name, mode]) =>
+          name !== "ariSync" &&
+          !(stagingMealsEnabled && name === "provisioning") &&
+          mode === "mutating",
       ))
   ) {
     throw new Error(
@@ -607,6 +618,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     apiKey,
     bookingMutationOwner,
     stagingRestrictionsPropertyId,
+    stagingMealsEnabled,
     workerEnabled,
     capabilityModes,
   };

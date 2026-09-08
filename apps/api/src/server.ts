@@ -644,6 +644,8 @@ const channexManagementPlans =
   channexCommandsMutating && config.channexManagement.workerEnabled
     ? createPgChannexManagementPlanPort({
         connectionString: targetDatabaseUrl,
+        stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
+          ? config.channexManagement.stagingRestrictionsPropertyId : undefined,
         bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
           if (!channexBookingRevisionStore) {
             if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
@@ -678,6 +680,7 @@ const channexManagementWorkerStore = channexManagementProvider
       targetState: createPmsChannexManagementTargetState(),
       ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
       stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
+      stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
     })
   : undefined;
 
@@ -888,6 +891,7 @@ const pmsGuestPolicySetupCommands =
           connectionString: targetDatabaseUrl,
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
           channexMealSyncEnabled: config.channexManagement.capabilityModes.provisioning === "mutating",
+          channexMealSyncPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,

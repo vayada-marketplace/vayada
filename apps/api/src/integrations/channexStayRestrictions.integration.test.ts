@@ -312,6 +312,105 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
     expect(await worker.claim({ workerId: "scoped", now: new Date() })).toBeNull();
   });
 
+  it("reconciles only established staging meal mappings without provisioning variants", async () => {
+    await db.query(
+      "UPDATE pms.rate_plans SET meal_plan='breakfast' WHERE id=$1",
+      [rate],
+    );
+    const planner = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      stagingMealsPropertyId: property,
+      bookingRevisionHandoff: async () => {},
+      pool: { query: db.query.bind(db), end: async () => {} } as unknown as pg.Pool,
+    });
+    const input = {
+      ...job(),
+      input: {
+        operationType: "provision" as const,
+        mealRatePlanId: rate,
+        commandId: randomUUID(),
+        idempotencyKey: "staging-meal",
+        actorUserId: randomUUID(),
+      },
+    };
+    const plan = await planner.plan(input);
+    expect(plan.requests).toEqual([]);
+    expect(plan.meals).toEqual([
+      expect.objectContaining({
+        ratePlanId: rate,
+        channel: "direct",
+        externalRatePlanId: rate,
+        mealType: "breakfast",
+      }),
+    ]);
+    await db.query("DELETE FROM pms.channel_rate_plan_mappings WHERE rate_plan_id=$1", [rate]);
+    await expect(planner.plan(input)).rejects.toThrow("requires an existing mapped rate");
+  });
+
+  it("claims only explicitly scoped meal jobs when opted in", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    const jobs = [
+      [otherProperty, { operationType: "provision", mealRatePlanId: rate }],
+      [property, { operationType: "provision" }],
+      [property, { operationType: "provision", mealRatePlanId: "invalid" }],
+      [property, { operationType: "sync_bookings", mealRatePlanId: rate }],
+      [property, { operationType: "provision", mealRatePlanId: rate }],
+    ] as const;
+    const ids: string[] = [];
+    for (const [owner, payload] of jobs) {
+      const id = randomUUID();
+      ids.push(id);
+      await db.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','property',$2,$3::jsonb)`,
+        [id, owner, JSON.stringify(payload)],
+      );
+    }
+    const worker = (enabled: boolean) =>
+      createPgPmsChannexManagementWorkerStore({
+        connectionString: url!,
+        ariSyncMutating: false,
+        stagingRestrictionsPropertyId: property,
+        stagingMealsEnabled: enabled,
+        targetState: { succeed: vi.fn(), fail: vi.fn() },
+        pool: {
+          end: async () => {},
+          connect: async () => ({
+            release() {},
+            query: ((text: string, values?: unknown[]) =>
+              db.query(
+                (
+                  {
+                    BEGIN: "SAVEPOINT meal_worker",
+                    COMMIT: "RELEASE SAVEPOINT meal_worker",
+                    ROLLBACK: "ROLLBACK TO SAVEPOINT meal_worker",
+                  } as Record<string, string>
+                )[text] ?? text,
+                values,
+              )) as pg.PoolClient["query"],
+          }),
+        },
+      });
+    expect(await worker(false).claim({ workerId: "meals", now: new Date() })).toBeNull();
+    const claimed = await worker(true).claim({ workerId: "meals", now: new Date() });
+    expect(claimed).toMatchObject({
+      jobId: ids[4],
+      propertyId: property,
+      input: { operationType: "provision", mealRatePlanId: rate },
+    });
+    expect(
+      (
+        await db.query("SELECT status FROM platform.jobs WHERE id=ANY($1::uuid[])", [
+          ids.slice(0, 4),
+        ])
+      ).rows,
+    ).toEqual(Array.from({ length: 4 }, () => ({ status: "pending" })));
+  });
+
   it("delivers automatic changes and daily full sync through guarded, serialized durable jobs", async () => {
     const pool = {
       end: async () => {},
