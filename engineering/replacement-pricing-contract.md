@@ -14,7 +14,8 @@ Amounts are bounded to 18 digits for validation; calculation overflow must fail.
 Do not pass these objects to old scale-2 interfaces without explicit conversion.
 
 One room-price mode per offer: flat, occupancy table, included-guests adjustments,
-or per-person. Unknown/extra fields fail. Switching modes replaces the entire
+or per-person, consistently across base/month/season rows. Explicit final date
+overrides are the exception and may intentionally flatten the price. Unknown/extra fields fail. Switching modes replaces the entire
 price object; inactive fields cannot silently survive as active rules. Occupancy
 arrays encode exactly one row for each adult-equivalent count 1..adultCapacity.
 Equal amounts at different occupancies are legal; sparse/missing rows are not.
