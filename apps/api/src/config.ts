@@ -73,6 +73,7 @@ export type ChannexManagementConfig = {
   apiKey?: string;
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
+  stagingRestrictionsPropertyId?: string;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -551,6 +552,26 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   };
   const apiBaseUrl = readOptionalEnv(env, "CHANNEX_API_BASE_URL");
   const apiKey = readOptionalEnv(env, "CHANNEX_API_KEY");
+  const stagingRestrictionsPropertyId = readOptionalEnv(
+    env,
+    "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
+  );
+  if (
+    stagingRestrictionsPropertyId &&
+    (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      stagingRestrictionsPropertyId,
+    ) ||
+      apiBaseUrl !== "https://staging.channex.io" ||
+      readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true) ||
+      capabilityModes.ariSync !== "mutating" ||
+      Object.entries(capabilityModes).some(
+        ([name, mode]) => name !== "ariSync" && mode === "mutating",
+      ))
+  ) {
+    throw new Error(
+      "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -585,6 +606,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     apiBaseUrl,
     apiKey,
     bookingMutationOwner,
+    stagingRestrictionsPropertyId,
     workerEnabled,
     capabilityModes,
   };
