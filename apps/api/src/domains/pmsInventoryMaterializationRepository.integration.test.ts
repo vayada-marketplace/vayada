@@ -19,6 +19,9 @@ import {
   type PmsInventoryMaterializationRepository,
 } from "./pmsInventoryMaterializationRepository.js";
 
+import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
+
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const ACCEPTED_AT = new Date("2026-08-04T09:00:00.000Z");
 
@@ -55,6 +58,106 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
   afterAll(async () => {
     await Promise.all(repositories.map((repository) => repository.close()));
     await admin.end();
+  });
+
+  it("checks Airbnb alterations against real materialization and canonical assignments", async () => {
+    const fixture = await createFixture(admin, repositories, [2]);
+    const { propertyId, roomTypeId } = fixture;
+    const connectionId = randomUUID(),
+      externalRoom = randomUUID(),
+      bookingId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.rooms(property_id,room_type_id,room_number)
+      VALUES($1,$2,'A'),($1,$2,'B')`,
+      [propertyId, roomTypeId],
+    );
+    await admin.query(
+      `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status)
+      VALUES($1,$2,'channex','connected')`,
+      [connectionId, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+      VALUES($1,$2,$3,$4)`,
+      [propertyId, connectionId, roomTypeId, externalRoom],
+    );
+    expect(
+      await fixture.repository.materializeInventory(
+        materializationCommand(fixture, "airbnb-materialized", 1, "2026-08-04", "2026-08-06"),
+      ),
+    ).toMatchObject({ ok: true, outcome: "applied" });
+    await admin.query(`UPDATE pms.inventory_days SET rate_gate_open=TRUE, inventory_revision=inventory_revision+1, generated_pricing_source_fingerprint=repeat('a',64) WHERE property_id=$1`, [
+      propertyId,
+    ]);
+    async function book(id: string, from: string, to: string) {
+      await admin.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,room_count,currency)
+        VALUES($1::uuid,$2,$1::text,'airbnb','confirmed',$3,$4,2,'EUR')`,
+        [id, propertyId, from, to],
+      );
+      await admin.query(
+        `INSERT INTO pms.operational_booking_assignments(property_id,guest_booking_id,room_type_id,position,source,check_in,check_out,stay_evidence_kind,adults,children,room_id)
+        VALUES($1,$2,$3,1,'channel',$4,$5,'exact',1,0,(SELECT id FROM pms.rooms WHERE property_id=$1 AND room_number='A')),($1,$2,$3,2,'channel',$4,$5,'exact',1,0,(SELECT id FROM pms.rooms WHERE property_id=$1 AND room_number='B'))`,
+        [propertyId, id, roomTypeId, from, to],
+      );
+      await admin.query("BEGIN");
+      try {
+        await reconcilePmsOccupiedInventory(
+          admin,
+          propertyId,
+          [{ roomTypeId, checkIn: from, checkOut: to }],
+          ACCEPTED_AT.toISOString(),
+        );
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+    }
+    await book(bookingId, "2026-08-04", "2026-08-06");
+    const input = {
+      propertyId,
+      bookingId,
+      changes: {
+        requestedCheckIn: "2026-08-04",
+        requestedCheckOut: "2026-08-06",
+        rooms: [{ roomTypeId: externalRoom }, { roomTypeId: externalRoom }],
+        channex: { connectionId },
+      },
+    };
+    async function check() {
+      await admin.query("BEGIN");
+      try {
+        const beforeCheck = await admin.query(`SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,[propertyId]);
+        await assertChannexAlterationAvailability(admin, input);
+        expect((await admin.query(`SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,[propertyId])).rows).toEqual(beforeCheck.rows);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    }
+    const before = await admin.query(
+      `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+      [propertyId],
+    );
+    await expect(check()).resolves.toBeUndefined();
+    expect(
+      (
+        await admin.query(
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          [propertyId],
+        )
+      ).rows,
+    ).toEqual(before.rows);
+    input.changes.requestedCheckOut = "2026-08-07";
+    await expect(check()).resolves.toBeUndefined();
+    await book(randomUUID(), "2026-08-06", "2026-08-07");
+    await expect(check()).rejects.toThrow("alteration_rooms_unavailable");
+    input.changes.requestedCheckOut = "2026-08-06";
+    await admin.query(
+      `UPDATE pms.room_types SET room_facts_revision=room_facts_revision+1 WHERE id=$1`,
+      [roomTypeId],
+    );
+    await expect(check()).rejects.toThrow("alteration_inventory_not_current");
   });
 
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {
@@ -188,19 +291,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       materializationCommand(fixture, "initial-full", 1, "2026-08-04", "2026-08-07"),
     );
     await activateCalendarRevision(admin, fixture, 2);
-    await expect(fixture.repository.materializeInventory(
-      materializationCommand(fixture, "partial-new", 2, "2026-08-04", "2026-08-05"),
-    )).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "partial-new", 2, "2026-08-04", "2026-08-05"),
+      ),
+    ).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
     const retained = await readFirstDay(admin, fixture);
     const command = materializationCommand(fixture, "finish-new", 2, "2026-08-04", "2026-08-07");
     const completed = await fixture.repository.materializeInventory(command);
     expect(completed).toMatchObject({ ok: true, outcome: "rematerialized", changedDayCount: 2 });
     await expect(fixture.repository.materializeInventory(command)).resolves.toEqual(completed);
     await expect(readFirstDay(admin, fixture)).resolves.toEqual(retained);
-    await expect(fixture.repository.getInventoryLaunchReadiness({
-      propertyId: fixture.propertyId,
-      requiredCoverage: { from: "2026-08-04", through: "2026-08-07" },
-    })).resolves.toMatchObject({ ready: true, blockers: [] });
+    await expect(
+      fixture.repository.getInventoryLaunchReadiness({
+        propertyId: fixture.propertyId,
+        requiredCoverage: { from: "2026-08-04", through: "2026-08-07" },
+      }),
+    ).resolves.toMatchObject({ ready: true, blockers: [] });
   });
 
   it("stop-sells newly extended dates for an existing linked cause", async () => {
