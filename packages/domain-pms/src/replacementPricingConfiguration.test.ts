@@ -46,6 +46,17 @@ describe("replacement configuration", () => {
     expect(pricingDate("2024-02-29")).toBe(true);
     expect(pricingDate("2026-02-29")).toBe(false);
   });
+  it("keeps base/month/season modes consistent but permits explicit final date overrides", () => {
+    const input = configurationFixture();
+    const flat = { mode: "flat", amountMinor: "14000" };
+    const calendar = { base: price, months: [], seasons: [], weekdays: [], dates: [] };
+    const parse = (c: unknown) => parsePricingConfiguration({ ...input,
+      offers: [{ ...input.offers[0], price: { kind: "independent", calendar: c } }] });
+    expect(parse({ ...calendar, months: [{ month: 7, price: flat }] })).toBeNull();
+    expect(parse({ ...calendar, base: null, months: [{ month: 7, price }],
+      seasons: [{ name: "Winter", tier: "high", from: "12-01", through: "12-31", price: flat }] })).toBeNull();
+    expect(parse({ ...calendar, dates: [{ date: "2026-07-01", price: flat }] })).not.toBeNull();
+  });
   it("counts adult-equivalent children and physical capacity separately", () => {
     const parsed = parsePricingConfiguration(configurationFixture())!;
     const valid = (adults: number, childAgesAtCheckIn: number[]) => validPricingGuests({ adults, childAgesAtCheckIn }, parsed.capacity, parsed.children);

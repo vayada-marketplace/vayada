@@ -76,7 +76,9 @@ function validCalendar(value: unknown, capacity: number): value is PricingCalend
       if (matches) covered.add(day);
     }
   }
-  return true;
+  const modes = new Set([...(value.base === null ? [] : [value.base as RoomPrice]),
+    ...months.map((r) => r.price), ...seasons.map((r) => r.price)].map((price) => price.mode));
+  return modes.size <= 1;
 }
 function validRestrictionRules(r: unknown): boolean {
   if (!pricingObject(r)) return false;
