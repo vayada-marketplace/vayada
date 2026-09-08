@@ -1,3 +1,4 @@
+import { presentChannexAlteration } from "../domains/channexAlterationPresentation.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import {
   bookedMealDescription,
@@ -1450,6 +1451,11 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
+  airbnbAlterations?: { decide(input: {
+    propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
+    action: "accept" | "decline"; correlationId: string;
+  }): Promise<unknown> };
   /** Enable only after all mixed selection consumers have passed cutover validation. */
   mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
@@ -1524,6 +1530,39 @@ export function createTargetBookingWebCheckoutAdapter(
       connectionString: config.connectionString,
       max: config.max,
     });
+
+  async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
+    action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
+    if (!config.airbnbAlterations) return null;
+    const load = async () => (await pool.query<TargetChangeRequestRow>(
+      `SELECT change.id::text AS id,change.guest_booking_id::text AS "guestBookingId",change.status,
+       change.requested_changes AS "requestedChanges",change.decision_note AS "decisionNote",
+       change.decided_at AS "decidedAt",change.created_at AS "createdAt"
+       FROM booking.booking_change_requests change JOIN booking.guest_bookings booking
+         ON booking.id=change.guest_booking_id
+       WHERE booking.property_id=$1::uuid AND (booking.id::text=$2 OR booking.public_reference=$2)
+         AND change.id=$3::uuid AND change.request_type='date_change'
+         AND change.requested_changes ? 'channex'`,[propertyId,bookingId,changeRequestId],
+    )).rows[0];
+    const request = await load();
+    if (!request) return null;
+    try {
+      await config.airbnbAlterations.decide({propertyId,bookingId:request.guestBookingId,
+        changeRequestId,actorUserId:context.actorUserId,action,correlationId:context.correlationId ?? context.requestId});
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      if (code !== "alteration_decision_in_progress") {
+        const message = code === "alteration_rooms_unavailable" ? "The requested rooms are no longer available."
+          : code === "alteration_decision_conflict" ? "A different decision has already been recorded."
+          : code === "alteration_linked_inventory_unsupported" ? "This change involves linked rooms and needs to be handled in Airbnb."
+          : "The Airbnb decision could not be confirmed. Refresh the request before trying again.";
+        throw createHttpError(409,message);
+      }
+    }
+    const updated = await load();
+    if (!updated) throw createHttpError(409,"The Airbnb change request is no longer available.");
+    return serializeTargetChangeRequest(updated,true);
+  }
 
   const editCleanupTimer = setInterval(() => {
     void releaseAbandonedBookingEdits(pool, config).catch(() =>
@@ -1604,9 +1643,11 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
-      return result ? serializeTargetChangeRequest(result) : null;
+      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations)) : null;
     },
     async acceptChangeRequest(propertyId, bookingId, changeRequestId, context) {
+      const provider = await providerDecision(propertyId, bookingId, changeRequestId, "accept", context);
+      if (provider) return provider;
       return withTargetCheckoutTransaction(pool, async (client) => {
         const decision = await reserveTargetBookingChangeDecision(client, {
           propertyId,
@@ -1731,6 +1772,8 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async declineChangeRequest(propertyId, bookingId, changeRequestId, note, context) {
+      const provider = await providerDecision(propertyId, bookingId, changeRequestId, "decline", context);
+      if (provider) return provider;
       return withTargetCheckoutTransaction(pool, async (client) => {
         const decision = await reserveTargetBookingChangeDecision(client, {
           propertyId,
@@ -4983,9 +5026,10 @@ async function insertTargetChangeRequest(
   return changeRequest;
 }
 
-function serializeTargetChangeRequest(row: TargetChangeRequestRow): Record<string, unknown> {
+function serializeTargetChangeRequest(row: TargetChangeRequestRow, providerEnabled = false): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
+    providerRequest: presentChannexAlteration(snapshot, providerEnabled && row.status === "pending", row.status),
     ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,

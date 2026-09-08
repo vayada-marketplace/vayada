@@ -8,6 +8,9 @@ import {
 
 import { decideChannexAlteration } from "./channexAlterationDecisions.js";
 
+import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
+
 const url = process.env["TEST_DATABASE_URL"];
 if (url && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(url).pathname))
   throw new Error("Refusing non-test database");
@@ -128,6 +131,38 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       )
     ).rows[0].decision;
   }
+  it("dispatches staff decisions through the provider coordinator and returns safe state", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      connectionString: url!,
+      pool,
+      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      airbnbAlterations: { decide: (value) => decideChannexAlteration(config, value) },
+    });
+    try {
+      expect(await adapter.findLatestChangeRequest(property, booking)).toMatchObject({
+        providerRequest: { state: "pending", allowedActions: ["accept", "decline"] },
+      });
+      expect(
+        await adapter.acceptChangeRequest(property, booking, requestId, {
+          actorUserId: command.actorUserId,
+          requestId: "staff-request",
+          correlationId: "staff-request",
+          idempotencyKey: "staff-request",
+          fingerprint: "unused-provider-fingerprint",
+          occurredAt: new Date(),
+        }),
+      ).toMatchObject({
+        status: "pending",
+        providerRequest: { state: "awaiting_confirmation", allowedActions: [] },
+      });
+      expect(config.provider.resolve).toHaveBeenCalledOnce();
+    } finally {
+      await adapter.close?.();
+    }
+  });
   it("commits intent and send marker before sending without applying the booking", async () => {
     const { requestId } = await persistChannexAlteration(pool, scope, event());
     const config = ports(),
