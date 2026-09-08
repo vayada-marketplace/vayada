@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   persistChannexAlteration,
   type ChannexAlterationScope,
 } from "./channexAlterationIntake.js";
+
+import { decideChannexAlteration } from "./channexAlterationDecisions.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 if (url && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(url).pathname))
   throw new Error("Refusing non-test database");
 describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
   const pool = new pg.Pool({ connectionString: url, max: 4 });
+  const journalPool = new pg.Pool({ connectionString: url, max: 2 });
   const property = randomUUID(),
     connection = randomUUID(),
     generation = randomUUID();
@@ -95,6 +98,177 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     await pool.query(`DELETE FROM pms.channel_binding_claims WHERE property_id=$1`, [property]);
     await pool.query(`DELETE FROM hotel_catalog.properties WHERE id=$1`, [property]);
     await pool.end();
+    await journalPool.end();
+  });
+  const input = (changeRequestId: string, action: "accept" | "decline" = "accept") => ({
+    propertyId: property,
+    bookingId: booking,
+    changeRequestId,
+    actorUserId: randomUUID(),
+    action,
+    correlationId: "alteration-decision-test",
+  });
+  function ports() {
+    return {
+      pool,
+      journalPool,
+      assertAvailability: vi.fn(async () => {}),
+      provider: {
+        read: vi.fn(async () => ({ ok: true as const, state: "pending" as const })),
+        resolve: vi.fn(async () => ({ ok: true as const, state: "accepted" as const })),
+      },
+    };
+  }
+  async function journal(id: string) {
+    return (
+      await pool.query(
+        `SELECT requested_changes->'channex'->'decision' AS decision
+      FROM booking.booking_change_requests WHERE id=$1`,
+        [id],
+      )
+    ).rows[0].decision;
+  }
+  it("commits intent and send marker before sending without applying the booking", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    const before = (
+      await pool.query(`SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1`, [
+        booking,
+      ])
+    ).rows;
+    config.provider.resolve.mockImplementation(async () => {
+      expect(await journal(requestId)).toMatchObject({
+        action: "accept",
+        actorUserId: command.actorUserId,
+        deliveryState: "unknown",
+        sendStartedAt: expect.any(String),
+      });
+      return { ok: true, state: "accepted" };
+    });
+    expect(await decideChannexAlteration(config, command)).toMatchObject({
+      providerState: "accepted",
+      deliveryState: "resolved",
+    });
+    expect(config.assertAvailability).toHaveBeenCalledOnce();
+    expect(await decideChannexAlteration(config, command)).toMatchObject({
+      providerState: "accepted",
+    });
+    expect(config.provider.resolve).toHaveBeenCalledOnce();
+    await expect(
+      decideChannexAlteration(config, { ...command, action: "decline" }),
+    ).rejects.toThrow("alteration_decision_conflict");
+    expect(
+      (
+        await pool.query(`SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1`, [
+          booking,
+        ])
+      ).rows,
+    ).toEqual(before);
+  });
+  it("never resends after a crashed provider call", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    config.provider.resolve.mockRejectedValueOnce(new Error("simulated crash"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("simulated crash");
+    expect(await journal(requestId)).toMatchObject({
+      deliveryState: "unknown",
+      sendStartedAt: expect.any(String),
+    });
+    expect(await decideChannexAlteration(config, command)).toMatchObject({
+      deliveryState: "unknown",
+      providerState: "pending",
+    });
+    expect(config.provider.resolve).toHaveBeenCalledOnce();
+  });
+  it("preserves actual opposite provider resolution without sending", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    const provider = {
+      ...config.provider,
+      read: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+    };
+    expect(await decideChannexAlteration({ ...config, provider }, input(requestId))).toMatchObject({
+      action: "accept",
+      providerState: "declined",
+      deliveryState: "resolved",
+      sendStartedAt: null,
+    });
+    expect(provider.resolve).not.toHaveBeenCalled();
+    expect(config.assertAvailability).not.toHaveBeenCalled();
+  });
+  it("fails closed on availability and allows a safe retry before any send", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    config.assertAvailability.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("unavailable");
+    expect(config.provider.resolve).not.toHaveBeenCalled();
+    expect(await journal(requestId)).toMatchObject({
+      deliveryState: "queued",
+      sendStartedAt: null,
+    });
+    await decideChannexAlteration(config, command);
+    expect(config.provider.resolve).toHaveBeenCalledOnce();
+  });
+  it("denies cross-property commands without contacting the provider", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    await expect(
+      decideChannexAlteration(config, { ...input(requestId), propertyId: randomUUID() }),
+    ).rejects.toThrow("alteration_not_found");
+    expect(config.provider.read).not.toHaveBeenCalled();
+    expect(await journal(requestId)).toBeNull();
+  });
+  it("does not bypass binding checks during readback", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    config.provider.resolve.mockRejectedValueOnce(new Error("crash"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("crash");
+    await pool.query(`UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1`, [
+      connection,
+      randomUUID(),
+    ]);
+    config.provider.read.mockClear();
+    try {
+      await expect(decideChannexAlteration(config, command)).rejects.toThrow(
+        "alteration_connection_or_booking_changed",
+      );
+      expect(config.provider.read).not.toHaveBeenCalled();
+    } finally {
+      await pool.query(`UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1`, [
+        connection,
+        generation,
+      ]);
+    }
+  });
+  it("commits the send marker with every worker connection occupied", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const singleWorkerPool = new pg.Pool({ connectionString: url, max: 1 });
+    try {
+      expect(
+        await decideChannexAlteration({ ...ports(), pool: singleWorkerPool }, input(requestId)),
+      ).toMatchObject({ deliveryState: "resolved", providerState: "accepted" });
+    } finally {
+      await singleWorkerPool.end();
+    }
+  });
+  it("concurrent callers cannot send twice", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    const results = await Promise.allSettled([
+      decideChannexAlteration(config, command),
+      decideChannexAlteration(config, {
+        ...command,
+        changeRequestId: command.changeRequestId.toUpperCase(),
+      }),
+      decideChannexAlteration(config, command),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).not.toHaveLength(0);
+    expect(config.provider.resolve).toHaveBeenCalledOnce();
   });
   it("stores a sanitized proposal without changing the booking and deduplicates concurrent delivery", async () => {
     const before = (
