@@ -996,8 +996,6 @@ export type SettleManualCheckoutChargePayload = {
 export type PayoutSplitResult = {
   /** Share retained by the Vayada platform. */
   platformFee: FinanceDecimalAmount;
-  /** Commission paid to the affiliate referrer (0 when no affiliate). */
-  affiliateCommission: FinanceDecimalAmount;
   /** Net amount transferred to the property. */
   propertyPayout: FinanceDecimalAmount;
 };
@@ -1028,11 +1026,6 @@ export type PayoutSplitInput = {
    * the legacy Channex-sourced channel name.
    */
   channel: FinanceBookingChannel;
-  affiliate?: {
-    affiliateId: string;
-    /** Agreed commission rate for this affiliate in percent. */
-    commissionPercent: number;
-  } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -1511,18 +1504,9 @@ export interface FinanceCommandBus {
 const KNOWN_DIRECT_CHANNELS: ReadonlySet<FinanceBookingChannel> = new Set(["direct"]);
 
 /**
- * Calculate the billing split for a booking.
- *
- * Fee matrix:
- *   Fixed plan: 0% on non-affiliate bookings.
- *               affiliatePlatformFeePercent on affiliate bookings.
- *   Commission plan: bookingEngineFeePercent on direct bookings.
- *                    channelManagerFeePercent on OTA/channel bookings.
- *                    Affiliate bookings do NOT add affiliatePlatformFeePercent
- *                    (channel fee already covers the platform cut).
- *
- * Affiliate commission is additive — paid by the property on top of the
- * platform fee, regardless of plan.
+ * Calculate the property's billing split for a booking.
+ * Fixed plans charge no platform fee. Commission plans use bookingEngineFeePercent
+ * for direct bookings and channelManagerFeePercent for OTA/channel bookings.
  */
 export function calculatePayoutSplit(input: PayoutSplitInput): PayoutSplitResult {
   const total = parseDecimalAmount(input.totalAmount);
@@ -1534,28 +1518,19 @@ export function calculatePayoutSplit(input: PayoutSplitInput): PayoutSplitResult
     platformFeePct = isChannelBooking
       ? config.channelManagerFeePercent
       : config.bookingEngineFeePercent;
-  } else if (input.affiliate) {
-    platformFeePct = config.affiliatePlatformFeePercent;
   }
   platformFeePct = clampPercent(platformFeePct, "platformFeePct");
-
-  const affiliateCommissionPct = input.affiliate
-    ? clampPercent(input.affiliate.commissionPercent, "affiliate.commissionPercent")
-    : 0;
 
   // Use integer-cent arithmetic to avoid floating-point accumulation errors.
   const centsTotal = Math.round(total * 100);
   const platformFeeCents = Math.round((centsTotal * platformFeePct) / 100);
-  const affiliateCommissionCents = Math.round((centsTotal * affiliateCommissionPct) / 100);
-  const propertyPayoutCents = centsTotal - platformFeeCents - affiliateCommissionCents;
+  const propertyPayoutCents = centsTotal - platformFeeCents;
 
   const platformFee = round2(platformFeeCents / 100);
-  const affiliateCommission = round2(affiliateCommissionCents / 100);
   const propertyPayout = round2(propertyPayoutCents / 100);
 
   return {
     platformFee: String(platformFee),
-    affiliateCommission: String(affiliateCommission),
     propertyPayout: String(propertyPayout),
   };
 }
