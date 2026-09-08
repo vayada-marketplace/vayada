@@ -2,6 +2,11 @@ name: Deploy Next TypeScript API
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to shared next after building (disable for isolated staging)"
+        type: boolean
+        default: true
   push:
     branches:
       - main
@@ -60,12 +65,13 @@ jobs:
             API_RUNTIME=next
             APPLICATION_RELEASE=${{ github.sha }}
           tags: |
-            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}.dkr.ecr.{1}.amazonaws.com/{2}:next-latest', env.AWS_ACCOUNT_ID, env.AWS_REGION, env.ECR_REPOSITORY) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Dispatch deploy to platform
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
