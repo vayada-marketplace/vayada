@@ -580,6 +580,30 @@ describe("target booking date-change lifecycle", () => {
     expect(inventory.state).toEqual({ releases: 1, reserves: 1 });
   });
 
+  it.each(["accept", "decline"] as const)("blocks direct %s of provider alterations", async (decision) => {
+    const pool = new LifecyclePool();
+    const inventory = inventoryPort();
+    pool.changeRequest = {
+      id: changeId, guestBookingId: bookingId, status: "pending",
+      requestedChanges: { channex: { eventId: "provider-event" } },
+      decisionNote: null, decidedAt: null, createdAt: "2026-07-22T10:00:00.000Z",
+    };
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      connectionString: "postgres://unused", pool: pool as never, inventoryReservationPort: inventory.port,
+    });
+    const context = {
+      ...decisionCommand({ bookingId, changeRequestId: changeId, decision,
+        note: null, idempotencyKey: `provider-${decision}`, requestId: `provider-${decision}` }),
+      actorUserId: "6fdb0d6a-aafb-44ee-83b0-2b070c33d46e",
+    };
+    await expect(decision === "accept"
+      ? adapter.acceptChangeRequest(propertyId, bookingId, changeId, context)
+      : adapter.declineChangeRequest(propertyId, bookingId, changeId, null, context)
+    ).rejects.toMatchObject({ statusCode: 409, message: "Airbnb change requests require a provider decision." });
+    expect(pool.changeRequest.status).toBe("pending");
+    expect(inventory.state).toEqual({ releases: 0, reserves: 0 });
+  });
+
   it("binds decline replay to the exact request and normalized decision note", async () => {
     const pool = new LifecyclePool();
     const inventory = inventoryPort();
