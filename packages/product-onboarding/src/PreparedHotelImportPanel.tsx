@@ -46,14 +46,23 @@ export function PreparedHotelImportPanel({
   const [results, setResults] = useState<ImportItemResult[]>([]);
   const endpoint = `/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/import`;
   const generation = useRef(0);
-  const load = useCallback(async () => {
-    const currentGeneration = generation.current;
-    const next = await client.get<PreparedImportResponse>(endpoint);
-    if (generation.current !== currentGeneration) return;
-    setState(next);
-    setDraft(next.import?.data ?? null);
-    setSelected([]);
-  }, [client, endpoint]);
+  const load = useCallback(
+    async (preserveSourceId?: string) => {
+      const currentGeneration = generation.current;
+      const next = await client.get<PreparedImportResponse>(endpoint);
+      if (generation.current !== currentGeneration) return;
+      setState(next);
+      if (preserveSourceId && next.import?.sourceId === preserveSourceId) {
+        setSelected((current) =>
+          current.filter((item) => next.import?.results[item]?.status !== "applied"),
+        );
+      } else {
+        setDraft(next.import?.data ?? null);
+        setSelected([]);
+      }
+    },
+    [client, endpoint],
+  );
   useEffect(() => {
     let active = true;
     generation.current += 1;
@@ -138,7 +147,7 @@ export function PreparedHotelImportPanel({
       setResults(response.items);
       if (response.items.some((item) => item.status === "failed"))
         setError("Some items could not be saved. Review the results below before retrying.");
-      await load();
+      await load(state.import.sourceId);
       if (generation.current === currentGeneration) onSaved?.();
     } catch (error) {
       if (generation.current !== currentGeneration) return;

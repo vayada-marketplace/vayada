@@ -1,5 +1,6 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PreparedRoomEditor } from "./PreparedHotelEditor";
 import {
   PreparedHotelImportPanel,
   type PreparedImportClient,
@@ -38,6 +39,57 @@ async function mount(client: PreparedImportClient, propertyId = "a") {
   });
 }
 describe("prepared import review", () => {
+  it("preserves failed and skipped room edits while refreshing successful results", async () => {
+    const initial = response();
+    initial.canImportRooms = true;
+    initial.import!.data.property = {};
+    initial.import!.data.rooms = ["a", "b", "c"].map((id) => ({
+      id,
+      name: id,
+      description: "",
+      maxGuests: null,
+      maxAdults: null,
+      maxChildren: null,
+      bedType: "",
+      bedQuantity: null,
+      bathroomType: "",
+      sizeSquareMetres: null,
+    }));
+    const refreshed = structuredClone(initial);
+    refreshed.import!.results["room:a"] = { itemId: "room:a", status: "applied" };
+    const get = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(refreshed);
+    const post = vi.fn().mockResolvedValue({
+      items: [
+        { itemId: "room:a", status: "applied" },
+        { itemId: "room:b", status: "failed", message: "Retry" },
+      ],
+    });
+    await mount({ get, post });
+    await act(async () => button("Review prepared hotel data").props.onClick());
+    for (const index of [1, 2]) {
+      const editor = renderer.root.findAllByType(PreparedRoomEditor)[index];
+      await act(async () => editor.props.onChange({ ...editor.props.room, maxGuests: 3 }));
+    }
+    for (const index of [0, 1])
+      await act(async () =>
+        renderer.root.findAllByProps({ type: "checkbox" })[index].props.onChange(),
+      );
+    await act(async () => button("Save selected items").props.onClick());
+    expect(
+      renderer.root.findAllByType(PreparedRoomEditor).map((editor) => editor.props.room.maxGuests),
+    ).toEqual([3, 3]);
+    await act(async () => button("Save selected items").props.onClick());
+    expect(
+      post.mock.calls[1][1].data.rooms.map((room: { id: string; maxGuests: number }) => [
+        room.id,
+        room.maxGuests,
+      ]),
+    ).toEqual([["b", 3]]);
+    await act(async () => button("Refresh").props.onClick());
+    expect(
+      renderer.root.findAllByType(PreparedRoomEditor).map((editor) => editor.props.room.maxGuests),
+    ).toEqual([null, null]);
+  });
   it("writes only explicitly selected fields", async () => {
     const get = vi.fn().mockResolvedValue(response());
     const post = vi.fn().mockResolvedValue({ items: [] });

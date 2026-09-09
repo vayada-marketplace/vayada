@@ -148,9 +148,23 @@ async function fixture(
       headers: { authorization: "Bearer test" },
       payload: { sourceId, data: patch, expectedProfileRevision: 1 },
     });
-  return { app, post, find, apply, update, create, bind, list, source };
+  return { app, post, find, apply, update, create, bind, list, source, profile };
 }
 describe("prepared import routes", () => {
+  it("preserves the published map when importing only a timezone", async () => {
+    const f = await fixture();
+    Object.assign(f.profile.profile.location, {
+      latitude: 52.52,
+      longitude: 13.405,
+      geoPublic: true,
+      mapDisplayMode: "exact",
+    });
+    const before = { ...f.profile.profile.location };
+    const result = await f.post({ ...data, property: { timezone: "Europe/Paris" }, rooms: [] });
+    expect(result.statusCode).toBe(200);
+    expect(f.update).toHaveBeenCalledOnce();
+    expect(f.profile.profile.location).toEqual({ ...before, timezone: "Europe/Paris" });
+  });
   it.each([
     "actor",
     "membership",
