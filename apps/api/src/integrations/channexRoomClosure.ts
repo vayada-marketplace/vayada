@@ -19,8 +19,9 @@ export async function verifyChannexRoomClosure(
     )
   ).rows[0]?.locked;
   if (!locked) throw new Error("channex_closure_operation_in_flight");
-  // Connection commands validate while holding this row. Worker claims hold the property row.
-  await client.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE", [
+  // SHARE excludes worker claims (FOR UPDATE) without upgrading past other
+  // PMS commands' authorization SHARE locks while holding facts/unit locks.
+  await client.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR SHARE", [
     scope.propertyId,
   ]);
   const connections = (
