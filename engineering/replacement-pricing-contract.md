@@ -72,6 +72,14 @@ Checkout must load server-stored evidence and revalidate all owner revisions,
 availability and promotional usage under its reservation transaction. Persistence
 stores immutable copies of accepted evidence; amendments create new records.
 
+Add-on selections preserve quantity and explicit service dates; null means the
+owner-defined whole-stay/default schedule. Dates must fall from arrival through
+departure inclusive (departure services are legal); owners additionally enforce
+unit-specific rules such as excluding checkout for nightly charges. Flexible
+cancellation reuses the existing validated full terms contract, including partial
+refund tiers, no-show penalty and descriptive text, rather than reducing it to
+one deadline. Selected add-on dates are part of the immutable request binding.
+
 PMS owns configuration. Booking owns cancellation terms, promotions, add-ons and
 accepted stay evidence. Finance supplies payment capability and deposit readiness;
 mandatory-charge owners supply confirmed totals/basis evidence (including zero).

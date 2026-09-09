@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { isMinorAmount, isPositiveMinor, pricingCurrencyScale, pricingDate, pricingInteger,
+import { parseFlexibleCancellationTerms, type FlexibleCancellationTerms, isMinorAmount, isPositiveMinor, pricingCurrencyScale, pricingDate, pricingInteger,
   pricingKeys, pricingObject, type PricingConfiguration, type PricingGuests } from "@vayada/domain-pms";
 
 export type ReplacementStay = Readonly<{
   propertyId: string; checkIn: string; checkOut: string; currency: string;
   rooms: readonly Readonly<{ selectionId: string; roomTypeId: string; offerId: string; guests: PricingGuests }>[];
-  addons: readonly Readonly<{ id: string; quantity: number }>[]; promoCode: string | null;
+  addons: readonly Readonly<{ id: string; quantity: number; dates: readonly string[] | null }>[]; promoCode: string | null;
 }>;
 export type PricingSourceRevisions = Readonly<{
   pms: string; terms: string; promotions: string; addons: string; charges: string; finance: string; fx: string;
@@ -22,8 +22,7 @@ export type ReplacementPromotionPolicy = Readonly<{
 }>;
 export type ReplacementOfferTerms = Readonly<{
   roomTypeId: string; offerId: string; revision: string;
-  cancellation: { kind: "non_refundable" } | { kind: "flexible"; freeUntilDaysBeforeArrival: number;
-    latePenalty: { kind: "percentage"; basisPoints: number } | { kind: "first_nights"; nights: number } };
+  cancellation: { kind: "non_refundable" } | { kind: "flexible"; terms: FlexibleCancellationTerms };
   payment: { kind: "full" } | { kind: "deposit"; basisPoints: number; balanceDaysBeforeArrival: number };
 }>;
 export type ReplacementAddon = Readonly<{ id: string; amountMinor: string;
@@ -60,9 +59,7 @@ const nonempty = (v: unknown): v is string => typeof v === "string" && v.length 
 function validTerms(t: ReplacementOfferTerms): boolean {
   const c = t.cancellation, p = t.payment;
   return nonempty(t.roomTypeId) && nonempty(t.offerId) && nonempty(t.revision) &&
-    (c.kind === "non_refundable" || (c.kind === "flexible" && pricingInteger(c.freeUntilDaysBeforeArrival) &&
-      (c.latePenalty.kind === "percentage" ? pricingInteger(c.latePenalty.basisPoints) && c.latePenalty.basisPoints <= 10000 :
-        c.latePenalty.kind === "first_nights" && pricingInteger(c.latePenalty.nights, 1)))) &&
+    (c.kind === "non_refundable" || (c.kind === "flexible" && parseFlexibleCancellationTerms(c.terms) !== null)) &&
     (p.kind === "full" || (p.kind === "deposit" && pricingInteger(p.basisPoints, 1) && p.basisPoints <= 10000 && pricingInteger(p.balanceDaysBeforeArrival)));
 }
 function validFx(f: ReplacementFx, now: number): boolean {
@@ -82,7 +79,11 @@ export function parseReplacementStay(value: unknown): ReplacementStay | null {
         !pricingKeys(r.guests, ["adults", "childAgesAtCheckIn"]) || !pricingInteger(r.guests.adults, 1) ||
         !Array.isArray(r.guests.childAgesAtCheckIn) || !Array.from(r.guests.childAgesAtCheckIn).every((age) => pricingInteger(age) && age <= 17)) return null;
   }
-  for (const a of Array.from(value.addons)) if (!pricingObject(a) || !pricingKeys(a, ["id", "quantity"]) || !nonempty(a.id) || !pricingInteger(a.quantity, 1)) return null;
+  for (const a of Array.from(value.addons)) {
+    if (!pricingObject(a) || !pricingKeys(a, ["id", "quantity", "dates"]) || !nonempty(a.id) || !pricingInteger(a.quantity, 1)) return null;
+    if (a.dates !== null && (!Array.isArray(a.dates) || !a.dates.length || new Set(a.dates).size !== a.dates.length ||
+        !Array.from(a.dates).every((date) => pricingDate(date) && date >= (value.checkIn as string) && date <= (value.checkOut as string)))) return null;
+  }
   if (new Set(value.rooms.map((r) => r.selectionId)).size !== value.rooms.length || new Set(value.addons.map((a) => a.id)).size !== value.addons.length) return null;
   return structuredClone(value) as ReplacementStay;
 }
@@ -91,7 +92,7 @@ export function replacementStayKey(stay: ReplacementStay): string {
   return createHash("sha256").update(JSON.stringify([stay.propertyId, stay.checkIn, stay.checkOut, stay.currency,
     stay.rooms.map((r) => [r.selectionId, r.roomTypeId, r.offerId, r.guests.adults, [...r.guests.childAgesAtCheckIn].sort((a, b) => a - b)])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    stay.addons.map((a) => [a.id, a.quantity]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), stay.promoCode])).digest("hex");
+    stay.addons.map((a) => [a.id, a.quantity, a.dates === null ? null : [...a.dates].sort()]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), stay.promoCode])).digest("hex");
 }
 /** Arithmetic/staleness check on trusted evaluator output, NOT client quote authorization. */
 export function replacementEvidenceStatus(e: ReplacementPricingEvidence, stay: ReplacementStay,
