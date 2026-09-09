@@ -10,6 +10,7 @@ import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManag
 import { createPmsChannexManagementTargetState } from "../jobs/pmsChannexManagementTargetState.js";
 import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
 import type { ChannexInventoryRule } from "@vayada/domain-pms-channex";
+import { verifyChannexRoomClosure } from "../integrations/channexRoomClosure.js";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 describe.skipIf(!connectionString)("inventory rules durable Postgres path (mock Channex)", () => {
@@ -124,6 +125,87 @@ describe.skipIf(!connectionString)("inventory rules durable Postgres path (mock 
       plans.close(),
       store.close?.(),
     ]);
+  });
+  it("holds the provider lock through closure readback and rejects an in-flight owner", async () => {
+    const client = await db.connect(),
+      contender = await db.connect(),
+      rate = randomUUID();
+    const config = {
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic-test-key",
+      workerEnabled: false,
+      stagingRestrictionsPropertyId: propertyId,
+      bookingMutationOwner: "target" as const,
+      capabilityModes: {
+        connection: "observe_only",
+        provisioning: "observe_only",
+        ariSync: "observe_only",
+        bookingSync: "observe_only",
+        markups: "observe_only",
+        messaging: "observe_only",
+        iframe: "observe_only",
+      } as const,
+    };
+    const scope = { propertyId, roomTypeId: roomId, from: "2026-09-09", through: "2026-09-09" };
+    const fetcher: typeof fetch = async (url) => {
+      if (String(url).includes("/rate_plans?"))
+        return Response.json({
+          data: [
+            {
+              id: rate,
+              relationships: {
+                property: { data: { id: externalPropertyId } },
+                room_type: { data: { id: roomId } },
+              },
+            },
+          ],
+          meta: { total: 1 },
+        });
+      if (String(url).includes("/channels?"))
+        return Response.json({ data: [], meta: { total: 0 } });
+      return Response.json({
+        data: String(url).includes("/availability?")
+          ? { [roomId]: { [scope.from]: 0 } }
+          : { [rate]: { [scope.from]: { stop_sell: true } } },
+      });
+    };
+    try {
+      await client.query("BEGIN");
+      await contender.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [
+        `channex.management:${propertyId}`,
+      ]);
+      await expect(verifyChannexRoomClosure(client, config, scope, fetcher)).rejects.toThrow(
+        "operation_in_flight",
+      );
+      await contender.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [
+        `channex.management:${propertyId}`,
+      ]);
+      await client.query(
+        `INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,base_rate_amount,currency)
+        VALUES ($1,$2,$3,'closure','Closure',100,'EUR')`,
+        [rate, propertyId, roomId],
+      );
+      await client.query(
+        `INSERT INTO pms.channel_rate_plan_mappings
+        (property_id,connection_id,room_type_id,rate_plan_id,channel,external_room_type_id,external_rate_plan_id,status)
+        SELECT $1::uuid,id,$2::uuid,$3::uuid,'direct',$2::text,$3::text,'active'
+        FROM pms.channel_connections WHERE property_id=$1::uuid`,
+        [propertyId, roomId, rate],
+      );
+      await verifyChannexRoomClosure(client, config, scope, fetcher);
+      expect(
+        (
+          await contender.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked", [
+            `channex.management:${propertyId}`,
+          ])
+        ).rows[0].locked,
+      ).toBe(false);
+    } finally {
+      await client.query("ROLLBACK");
+      await contender.query("SELECT pg_advisory_unlock_all()");
+      client.release();
+      contender.release();
+    }
   });
   it("commits state and jobs together, replays once, prevents lost edits, and retries latest desired removal", async () => {
     const rule: ChannexInventoryRule = {
