@@ -4,6 +4,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { saveMarketplaceAffiliateDraft } from "./marketplaceAffiliateDraftCommand.js";
+import { createPgMarketplaceAffiliateDraftRepository } from "./marketplaceAffiliateDraftRepository.js";
 
 const databaseUrl = process.env["TEST_DATABASE_URL"];
 const id = (n: number) => `15010000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -61,6 +62,7 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
   const databaseName = `vay1501_test_${randomUUID().replaceAll("-", "")}`;
   const admin = new pg.Client({ connectionString: databaseUrl });
   let pool: pg.Pool;
+  let isolatedConnectionString: string;
   beforeAll(async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(databaseUrl!).pathname.slice(1)))
       throw new Error("Requires isolated test database");
@@ -68,6 +70,7 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     await admin.query(`CREATE DATABASE ${databaseName}`);
     const isolatedUrl = new URL(databaseUrl!);
     isolatedUrl.pathname = `/${databaseName}`;
+    isolatedConnectionString = isolatedUrl.toString();
     pool = new pg.Pool({ connectionString: isolatedUrl.toString(), max: 3 });
   });
   beforeEach(async () => {
@@ -111,6 +114,33 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     expectedRevision: 0,
     idempotencyKey: "save-1",
     terms,
+  });
+
+  it("reads only the latest draft in the requested hotel scope", async () => {
+    const repository = createPgMarketplaceAffiliateDraftRepository(isolatedConnectionString);
+    try {
+      await expect(repository.read(id(4), id(3), id(2))).resolves.toEqual({
+        revision: 0,
+        draft: null,
+      });
+      await repository.save(input());
+      await repository.save({
+        ...input(),
+        expectedRevision: 1,
+        idempotencyKey: "second",
+        terms: { ...terms, attributionWindowDays: 30 },
+      });
+      await expect(repository.read(id(4), id(3), id(2))).resolves.toMatchObject({
+        revision: 2,
+        draft: { terms: { ...terms, attributionWindowDays: 30 } },
+      });
+      await expect(repository.read(id(99), id(3), id(2))).resolves.toBeNull();
+      await expect(repository.read(id(4), id(99), id(2))).resolves.toBeNull();
+      await pool.query("UPDATE marketplace.marketplace_offers SET offer_status='archived'");
+      await expect(repository.read(id(4), id(3), id(2))).resolves.toBeNull();
+    } finally {
+      await repository.close();
+    }
   });
 
   it("replays original results after later revisions without another row", async () => {

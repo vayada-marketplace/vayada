@@ -74,3 +74,15 @@ include offer scope; a changed actor, organization, revision or payload conflict
 Retained completed keys replay the original draft even after later revisions.
 No HTTP route or publication is wired in this slice; callers must never construct
 the context from request-body identity fields or reuse a cached context across requests.
+
+## Hotel draft HTTP adapter (fourth slice)
+
+`GET` and `PUT /api/marketplace/properties/:propertyId/offers/:offerId/affiliate-draft`
+use canonical UUIDs and the existing hotel profile and offer authorization scopes.
+Responses are private (`no-store`). GET returns `{ revision: 0, draft: null }` until
+the first draft; otherwise it returns the latest revision and draft ID/terms.
+PUT accepts only `{ expectedRevision, terms }` and one `Idempotency-Key` header.
+Creation returns 201, replay 200, malformed input 422, unavailable scope 404 and
+revision/key conflicts 409. Authentication/authorization failures remain 401/403.
+The server mounts this draft-only adapter; it exposes no publication command and
+does not make terms creator-visible. The Marketplace editing interface is next.
