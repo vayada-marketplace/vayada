@@ -13,6 +13,7 @@ import { buildApp } from "../app.js";
 import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import {
   enqueueChannexAlterationScan,
+  scheduleChannexAlterationScans,
   runChannexAlterationIntake,
 } from "../jobs/channexAlterationIntake.js";
 
@@ -196,6 +197,7 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
         )
       ).rows;
       expect(JSON.stringify(receipts)).not.toContain("Private Test Guest");
+      expect(await schedule()).toBe(0);
       expect(await runChannexAlterationIntake(scanPorts())).toMatchObject({ processed: 1 });
       expect(
         (
@@ -281,6 +283,200 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
   async function scanDue() {
     await pool.query(`UPDATE platform.jobs SET run_after=now() WHERE property_id=$1`, [property]);
   }
+  const schedule = () =>
+    scheduleChannexAlterationScans({ pool, propertyIds: [property], ownsMutation: () => true });
+  async function agePeriodicScan() {
+    await pool.query(
+      "UPDATE platform.jobs SET created_at=now()-interval '16 minutes',job_key=job_key || ':aged' WHERE property_id=$1",
+      [property],
+    );
+  }
+  it("periodically recovers requests without a webhook and resumes at page one", async () => {
+    expect(await schedule()).toBe(1);
+    expect(await scanRow()).toMatchObject({ job_metadata: { page: 1, trigger: "periodic" } });
+    const config = scanPorts();
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ processed: 1 });
+    expect(config.provider.read).toHaveBeenCalledWith(externalProperty, scope.eventId, undefined);
+    expect(await schedule()).toBe(0);
+    await agePeriodicScan();
+    expect(await schedule()).toBe(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT job_metadata FROM platform.jobs WHERE property_id=$1 AND status='pending'",
+          [property],
+        )
+      ).rows,
+    ).toEqual([{ job_metadata: { page: 1, trigger: "periodic" } }]);
+    await runChannexAlterationIntake(config);
+    expect(
+      (
+        await pool.query(
+          "SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1",
+          [booking],
+        )
+      ).rows,
+    ).toHaveLength(1);
+  });
+  it("deduplicates simultaneous scheduler ticks", async () => {
+    const results = await Promise.all([schedule(), schedule(), schedule()]);
+    expect(results.reduce((total, count) => total + count, 0)).toBe(1);
+    expect(
+      (await pool.query("SELECT id FROM platform.jobs WHERE property_id=$1", [property])).rows,
+    ).toHaveLength(1);
+  });
+  it("preserves an existing webhook scan cursor and its delayed retry", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    await pool.query(
+      `UPDATE platform.jobs SET job_metadata='{"page":3}',run_after=now()+interval '5 minutes',created_at=now()-interval '1 hour' WHERE property_id=$1`,
+      [property],
+    );
+    expect(await schedule()).toBe(0);
+    expect(await scanRow()).toMatchObject({ job_metadata: { page: 3 } });
+  });
+  it("retains dead-letter history and limits fresh recovery scans to the cadence", async () => {
+    await schedule();
+    await pool.query(
+      "UPDATE platform.jobs SET status='dead_lettered',finished_at=now() WHERE property_id=$1",
+      [property],
+    );
+    expect(await schedule()).toBe(0);
+    await agePeriodicScan();
+    expect(await schedule()).toBe(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT status FROM platform.jobs WHERE property_id=$1 ORDER BY created_at",
+          [property],
+        )
+      ).rows,
+    ).toEqual([{ status: "dead_lettered" }, { status: "pending" }]);
+  });
+  it("scopes cadence to the current binding generation", async () => {
+    await schedule();
+    const replacement = randomUUID();
+    await pool.query("UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1", [
+      connection,
+      replacement,
+    ]);
+    try {
+      expect(await schedule()).toBe(1);
+      expect(
+        (
+          await pool.query(
+            "SELECT payload->>'bindingGeneration' AS generation FROM platform.jobs WHERE property_id=$1 ORDER BY created_at",
+            [property],
+          )
+        ).rows,
+      ).toEqual([{ generation }, { generation: replacement }]);
+    } finally {
+      await pool.query("UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1", [
+        connection,
+        generation,
+      ]);
+    }
+  });
+  it("requires an enabled connected property and current ownership", async () => {
+    expect(
+      await scheduleChannexAlterationScans({ pool, propertyIds: [], ownsMutation: () => true }),
+    ).toBe(0);
+    expect(
+      await scheduleChannexAlterationScans({
+        pool,
+        propertyIds: [randomUUID()],
+        ownsMutation: () => true,
+      }),
+    ).toBe(0);
+    expect(
+      await scheduleChannexAlterationScans({
+        pool,
+        propertyIds: [property],
+        ownsMutation: () => false,
+      }),
+    ).toBe(0);
+    expect(
+      await scheduleChannexAlterationScans({
+        pool,
+        propertyIds: [property],
+        ownsMutation: () => true,
+        signal: AbortSignal.abort(),
+      }),
+    ).toBe(0);
+    await pool.query(
+      "UPDATE pms.channel_connections SET connection_status='degraded' WHERE id=$1",
+      [connection],
+    );
+    try {
+      expect(await schedule()).toBe(0);
+    } finally {
+      await pool.query(
+        "UPDATE pms.channel_connections SET connection_status='connected' WHERE id=$1",
+        [connection],
+      );
+    }
+    expect(await scanRow()).toBeUndefined();
+  });
+  it("bounds each batch and schedules remaining enabled properties on later ticks", async () => {
+    const otherProperty = randomUUID(),
+      otherConnection = randomUUID(),
+      otherExternal = randomUUID();
+    await pool.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Periodic fixture')",
+      [otherProperty],
+    );
+    try {
+      await pool.query(
+        "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair')",
+        [otherProperty, otherExternal],
+      );
+      await pool.query(
+        "INSERT INTO pms.channel_connections(id,property_id,provider,connection_status,external_property_id) VALUES($1,$2,'channex','connected',$3)",
+        [otherConnection, otherProperty, otherExternal],
+      );
+      const options = {
+        pool,
+        propertyIds: [property, otherProperty],
+        ownsMutation: () => true,
+        limit: 1,
+      };
+      expect(await scheduleChannexAlterationScans(options)).toBe(1);
+      expect(await scheduleChannexAlterationScans(options)).toBe(1);
+      expect(await scheduleChannexAlterationScans(options)).toBe(0);
+    } finally {
+      await pool.query("DELETE FROM platform.jobs WHERE property_id=$1", [otherProperty]);
+      await pool.query("DELETE FROM pms.channel_connections WHERE id=$1", [otherConnection]);
+      await pool.query("DELETE FROM pms.channel_binding_claims WHERE property_id=$1", [
+        otherProperty,
+      ]);
+      await pool.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [otherProperty]);
+    }
+  });
+  it("skips a locked binding without waiting for another worker", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM pms.channel_connections WHERE id=$1 FOR UPDATE", [
+        connection,
+      ]);
+      expect(await schedule()).toBe(0);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(await schedule()).toBe(1);
+  });
+  it("rolls back newly queued scans if ownership is lost before commit", async () => {
+    const ownsMutation = vi
+      .fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    expect(
+      await scheduleChannexAlterationScans({ pool, propertyIds: [property], ownsMutation }),
+    ).toBe(0);
+    expect(await scanRow()).toBeUndefined();
+    expect(await schedule()).toBe(1);
+  });
   it("durably scans a binding, re-fetches events and deduplicates triggering delivery", async () => {
     const trigger = randomUUID();
     await enqueueChannexAlterationScan(pool, scope, trigger);
