@@ -11,8 +11,9 @@ const evidence = (): ReplacementPricingEvidence => ({ version: "pricing.v2", req
   lines: [{ id: "room", selectionId: "r1", kind: "room", amountMinor: "40000" },
     { id: "promo", selectionId: "r1", kind: "discount", amountMinor: "4000" }],
   totalMinor: "36000", dueNowMinor: "10800", dueLaterMinor: "25200",
-  terms: [{ roomTypeId: "double", offerId: "flex", revision: "t1", cancellation: { kind: "flexible", freeUntilDaysBeforeArrival: 7,
-    latePenalty: { kind: "percentage", basisPoints: 10000 } }, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }],
+  terms: [{ roomTypeId: "double", offerId: "flex", revision: "t1", cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7,
+    afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount", flexibleCancellationType: "partial_refund",
+    partialRefundTiers: [{ minDaysBeforeCheckIn: 30, refundPercent: 75 }, { minDaysBeforeCheckIn: 14, refundPercent: 50 }] } }, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } }],
   fx: [], paymentCapabilityEvidenceId: "finance-1", mandatoryChargeEvidenceId: "charges-1" });
 const now = new Date("2026-09-08T00:05:00Z");
 
@@ -21,7 +22,7 @@ describe("replacement stay and evidence contracts", () => {
     const input = stay(); const parsed = parseReplacementStay(input)!;
     expect(parsed).toEqual(input); expect(parsed.rooms).not.toBe(input.rooms);
     for (const change of [{ checkOut: "2026-10-01" }, { checkIn: "2026-02-30" }, { currency: "ZZZ" },
-      { rooms: [] }, { rooms: [...input.rooms, ...input.rooms] }, { providerId: "channex" }, { addons: [{ id: "a", quantity: 0 }] },
+      { rooms: [] }, { rooms: [...input.rooms, ...input.rooms] }, { providerId: "external-provider" }, { addons: [{ id: "a", quantity: 0 }] },
       { rooms: [{ ...input.rooms[0], guests: { adults: 0, childAgesAtCheckIn: [] } }] },
       { rooms: [{ ...input.rooms[0], guests: { adults: 1, childAgesAtCheckIn: [null] } }] }]) {
       expect(parseReplacementStay({ ...input, ...change })).toBeNull();
@@ -31,11 +32,29 @@ describe("replacement stay and evidence contracts", () => {
     const input = stay(); const key = replacementStayKey(input);
     expect(replacementStayKey({ ...input, rooms: [{ ...input.rooms[0], guests: { adults: 2, childAgesAtCheckIn: [8, 1] } }] })).toBe(key);
     for (const next of [{ ...input, propertyId: "p2" }, { ...input, currency: "USD" }, { ...input, promoCode: "SUMMER" },
-      { ...input, checkOut: "2026-10-05" }, { ...input, addons: [{ id: "bed", quantity: 1 }] },
+      { ...input, checkOut: "2026-10-05" }, { ...input, addons: [{ id: "bed", quantity: 1, dates: null }] },
       { ...input, rooms: [{ ...input.rooms[0], offerId: "nr" }] },
       { ...input, rooms: [{ ...input.rooms[0], guests: { adults: 2, childAgesAtCheckIn: [1, 9] } }] }]) {
       expect(replacementStayKey(next)).not.toBe(key);
     }
+  });
+  it("preserves dated add-ons in the request binding and rejects invalid dates", () => {
+    const input = stay();
+    const selected = (dates: string[] | null) => ({ ...input, addons: [{ id: "tour", quantity: 2, dates }] });
+    expect(parseReplacementStay(selected(["2026-10-02"]))).not.toBeNull();
+    expect(replacementStayKey(selected(["2026-10-02"]))).not.toBe(replacementStayKey(selected(["2026-10-03"])));
+    for (const dates of [[], ["2026-09-30"], ["2026-10-05"], ["2026-02-30"], ["2026-10-02", "2026-10-02"]]) {
+      expect(parseReplacementStay(selected(dates))).toBeNull();
+    }
+  });
+  it("retains full legacy cancellation tiers and rejects duplicate deadlines", () => {
+    const e = evidence(); const c = e.terms[0].cancellation;
+    expect(c.kind === "flexible" && c.terms.partialRefundTiers).toEqual([
+      { minDaysBeforeCheckIn: 30, refundPercent: 75 }, { minDaysBeforeCheckIn: 14, refundPercent: 50 }]);
+    if (c.kind !== "flexible") throw new Error("fixture");
+    const invalid = { ...e, terms: [{ ...e.terms[0], cancellation: { ...c, terms: { ...c.terms,
+      partialRefundTiers: [{ minDaysBeforeCheckIn: 14, refundPercent: 75 }, { minDaysBeforeCheckIn: 14, refundPercent: 50 }] } } }] };
+    expect(replacementEvidenceStatus(invalid, stay(), revisions, now)).toBe("invalid");
   });
   it("requires each owner revision and expires exactly at the boundary", () => {
     expect(replacementEvidenceStatus(evidence(), stay(), revisions, now)).toBe("current");
