@@ -29,8 +29,8 @@ explicitly classified accommodation amount; a total-only booking cannot be treat
 as commissionable accommodation revenue.
 
 Implemented layers cover policy validation, immutable storage and authorized save
-and approval commands. Persisted policy resolution, HTTP adapters and the hotel editor
-follow. Refund/no-show handling, discount
+and approval commands, plus persisted exact-version resolution. HTTP adapters and the
+hotel editor follow. Refund/no-show handling, discount
 allocation, payer, platform fees, currency conversion, rounding of earned amounts
 and payout scheduling remain outside this contract; no settlement calculator or
 earning activation is introduced. Existing accepted agreements must retain their
@@ -62,8 +62,7 @@ Repeated actor/property/key/input requests return the original version; changed
 input under that key fails. Saving another explicit rate creates another draft
 version, without replacing an approved version or changing existing agreements.
 Save does not approve the commission component. The separate approval command below
-records that decision. No HTTP route is exposed yet; persisted resolution and the
-editor follow. Additional product adapters
+records that decision. No HTTP route is exposed yet; editor integration follows. Additional product adapters
 must use their own explicit authorization boundary with the same Finance storage.
 
 ## Approving an exact version
@@ -77,3 +76,15 @@ replay the original result; reusing the key for another version or actor conflic
 A different key for an already-approved version returns already_approved, preserving
 the first approval evidence. Approval covers only the commission component; it does
 not publish an offer, activate a link or authorize earnings or payout.
+
+## Resolving stored policy references
+
+Finance exposes an internal read operation for an exact property/version pair. It
+loads the immutable rate and matching approval together, validates the stored fixed
+model and basis, and delegates to the domain resolver. An unapproved version stays
+unavailable even if another version is approved. An unknown version or a version
+from another property returns not_found without revealing the other hotel's data.
+Malformed identifiers also return not_found before querying. Database failures
+propagate rather than masquerading as missing policy. The operation accepts a pool
+or transaction client; authorized callers supply the canonical property from their
+resource scope. It is not a public read endpoint or a publication/settlement gate.
