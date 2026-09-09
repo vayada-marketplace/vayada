@@ -49,3 +49,17 @@ actor authorization. Future commands must verify hotel ownership/permission and
 write idempotency/audit evidence atomically before recording approval. Approving this
 commission component does not publish offers or establish booking/settlement eligibility.
 No existing drafts or historical Finance records are backfilled or reinterpreted.
+
+## Saving a chosen rate
+
+The first internal save entry point serves the Marketplace hotel editor. A fresh
+RequestContext must grant marketplace.profile.manage, an active hotel-profile
+entitlement and an owner/operator link to the canonical property. The transaction
+rechecks and locks the persisted organization link and enabled property before
+creating a Finance-owned version. It records author, organization and request.
+Repeated actor/property/key/input requests return the original version; changed
+input under that key fails. Saving another explicit rate creates another draft
+version, without replacing an approved version or changing existing agreements.
+Save does not approve the commission component. No HTTP route is exposed yet;
+approval, persisted resolution and the editor follow. Additional product adapters
+must use their own explicit authorization boundary with the same Finance storage.

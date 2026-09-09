@@ -180,6 +180,7 @@ jobs:
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
+          src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsPhysicalRoomUnitReconcileRepository.integration.test.ts
