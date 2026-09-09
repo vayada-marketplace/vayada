@@ -14,6 +14,99 @@ import type {
 const fixedNow = new Date("2026-06-11T12:00:00.000Z");
 
 describe("target provider webhook routes", () => {
+  it("observes ambiguous alteration ownership without queuing a scan", async () => {
+    const store = createMemoryProviderWebhookStore();
+    store.resolveChannexPropertyId = async () => {
+      throw new Error("Ambiguous Channex property ownership");
+    };
+    const app = buildApp({
+      logger: false,
+      providerWebhooks: {
+        secrets: { channex: "secret" },
+        store,
+        modes: { channex: "mutating" },
+        channexAlterationPromotionEnabled: true,
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/webhooks/channex",
+        headers: { "x-vayada-webhook-token": "secret" },
+        payload: { event: "alteration_request", property_id: "provider-property" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().status).toBe("observed");
+      expect(store.jobs).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+  it.each([
+    [false, true, true, "observed"],
+    [true, false, true, "observed"],
+    [true, true, false, "observed"],
+    [true, true, true, "promoted"],
+  ])(
+    "gates alteration scans: enabled=%s mapped=%s consistent=%s",
+    async (enabled, mapped, consistent, status) => {
+      const store = createMemoryProviderWebhookStore(
+        mapped ? { "provider-property": "canonical-property" } : {},
+      );
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { channex: "secret" },
+          store,
+          modes: { channex: "mutating" },
+          channexAlterationPromotionEnabled: enabled,
+        },
+      });
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/webhooks/channex",
+          headers: { "x-vayada-webhook-token": "secret" },
+          payload: {
+            event: "alteration_request",
+            property_id: "provider-property",
+            payload: {
+              property_id: consistent ? "provider-property" : "different-property",
+              guest_name: "private-guest",
+            },
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json().status).toBe(status);
+        expect(store.jobs).toHaveLength(status === "promoted" ? 1 : 0);
+        expect(JSON.stringify(store.receipts[0]!.rawPayload)).not.toContain("private-guest");
+      } finally {
+        await app.close();
+      }
+    },
+  );
+  it("requires the existing webhook secret before recording alteration notifications", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { channex: "secret" },
+        store,
+        modes: { channex: "mutating" },
+        channexAlterationPromotionEnabled: true,
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/webhooks/channex",
+        headers: { "x-vayada-webhook-token": "wrong" },
+        payload: { event: "alteration_request", property_id: "provider-property" },
+      });
+      expect(response.statusCode).toBe(401);
+      expect(store.receipts).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
   it.each([
     ["booking", true, 0, 200, "ignored_booking_notification"],
     ["booking", false, 0, 400, null],
