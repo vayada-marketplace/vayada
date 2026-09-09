@@ -164,3 +164,27 @@ This helper supplies only the identity portion of the required storage guard.
 It does not validate room configurations, Booking terms, Finance readiness,
 mandatory charges or FX evidence. Those owner adapters and route-policy checks
 remain mandatory before exposing pricing commands. No routes are wired here.
+
+## Booking offer terms owner (VAY-1561)
+
+Booking owns immutable replacement offer terms and a current pointer scoped by
+property, room and offer. This is the single writer for replacement commercial
+terms, independent of retired pricing-shaped guest-policy bundles. Preserve the
+full cancellation policy and requested payment/deposit schedule from the agreed
+`ReplacementOfferTerms` contract. These settings express the offer's requested
+schedule; Finance still owns capability and deposit readiness approval. Saving
+terms cannot authorize payment execution or imply publication readiness.
+
+The command uses real transaction-bound identity authorization and a PMS-owned
+room-scope adapter, then compares the expected current revision. Server-issued
+revision IDs, request identity, current pointer and audit/outbox effects commit
+together. Old terms remain immutable when an offer changes. The Booking read
+port accepts exact property/room/offer/revision references derived from the
+complete proposed pricing snapshot, under the caller's authorized property
+transaction. Missing or superseded references fail; callers cannot replace
+those references with an empty client-supplied list. Accepted bookings continue
+using their frozen evidence rather than requiring current policy versions.
+
+No HTTP route, editor, Finance approval or complete publication guard is wired
+by this owner-storage slice. Replacement preview/publication consumes this owner
+port together with all other required owner evidence before becoming available.
