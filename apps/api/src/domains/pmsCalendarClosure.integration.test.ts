@@ -1,5 +1,6 @@
 import { readPmsRoomClosureState } from "./pmsRoomClosureState.js";
 import { retireClosingRoomUnits } from "./pmsRoomClosureUnits.js";
+import { appendRoomClosureCalendar, closeRoomClosureInventory } from "./pmsRoomClosureCalendar.js";
 import { createPgPmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import {
   parseUpsertPmsOperatingCalendarCommand,
@@ -182,15 +183,44 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
         `INSERT INTO pms.room_type_closures
         (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
          expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
-        VALUES ($1,$2,$3,$4,3,5,1,2,'2026-08-04',$5,$6)`,
-        [propertyId, roomTypeA, closureScope.commandId, "c".repeat(64), acceptedAt, actorUserId],
+        VALUES ($1,$2,$3,$4,3,5,1,2,'2026-08-05',$5,$6)`,
+        [
+          propertyId,
+          roomTypeA,
+          closureScope.commandId,
+          "c".repeat(64),
+          "2026-08-05T10:00:00.000Z",
+          actorUserId,
+        ],
       );
       await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow("remain protected");
-      await admin.query(
-        `UPDATE pms.inventory_days SET status='closed',available_count=0,
-        closure_source_revision=1,inventory_revision=inventory_revision+1
-        WHERE property_id=$1 AND room_type_id=$2 AND stay_date>='2026-08-04'`,
-        [propertyId, roomTypeA],
+      const selectedBefore = (
+        await admin.query(
+          "SELECT * FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date",
+          [propertyId, roomTypeA],
+        )
+      ).rows;
+      expect(selectedBefore.map((day) => day.status)).toEqual(["open", "open", "open"]);
+      expect(await closeRoomClosureInventory(admin, closureScope)).toBe(2);
+      expect(await closeRoomClosureInventory(admin, closureScope)).toBe(0);
+      const selectedAfter = (
+        await admin.query(
+          "SELECT * FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date",
+          [propertyId, roomTypeA],
+        )
+      ).rows;
+      expect(selectedAfter).toEqual(
+        selectedBefore.map((day, index) =>
+          index === 0
+            ? day
+            : {
+                ...day,
+                status: "closed",
+                available_count: 0,
+                closure_source_revision: 1,
+                inventory_revision: day.inventory_revision + 1,
+              },
+        ),
       );
       const retired = await retireClosingRoomUnits(admin, closureScope);
       expect(retired).toEqual({
@@ -216,6 +246,110 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow(
         "requires its receipt",
       );
+      const beforeDays = (
+        await admin.query(
+          "SELECT to_jsonb(day) AS value FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+          [propertyId],
+        )
+      ).rows;
+      const beforeCoverage = (
+        await admin.query(
+          "SELECT * FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+          [propertyId],
+        )
+      ).rows[0];
+      const events = {
+        idempotencyId: randomUUID(),
+        domainEventId: randomUUID(),
+        outboxEventId: randomUUID(),
+      };
+      await admin.query(
+        `INSERT INTO platform.idempotency_keys
+        (id,operation_scope,operation,key_hash,request_fingerprint_hash,tenant_scope,property_id,expires_at)
+        VALUES ($1,'pms','room_type.close',$2,$2,'property',$3,now()+interval '1 day')`,
+        [events.idempotencyId, "d".repeat(64), propertyId],
+      );
+      await admin.query(
+        `INSERT INTO platform.domain_events
+        (id,source_system,event_key,event_type,occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+        VALUES ($1::uuid,'pms',$1::text,'pms.room_type.closed',now(),'property',$2,'pms','room_type',$3,$4)`,
+        [
+          events.domainEventId,
+          propertyId,
+          roomTypeA,
+          JSON.stringify({ commandId: closureScope.commandId }),
+        ],
+      );
+      await admin.query(
+        `INSERT INTO platform.outbox_events
+        (id,domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id)
+        VALUES ($1::uuid,$2,$1::text,'distribution.inventory-projection','pms.inventory.projection_refresh_requested','property',$3)`,
+        [events.outboxEventId, events.domainEventId, propertyId],
+      );
+      await seedChannelConnection();
+      await admin.query("SAVEPOINT incomplete");
+      await admin.query(
+        "DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-06'",
+        [propertyId, roomTypeB],
+      );
+      await expect(appendRoomClosureCalendar(admin, closureScope, events)).rejects.toThrow(
+        "coverage is incomplete",
+      );
+      await admin.query("ROLLBACK TO SAVEPOINT incomplete");
+      expect(await appendRoomClosureCalendar(admin, closureScope, events)).toEqual({
+        calendarRevision: 2,
+      });
+      // Validate deferred calendar constraints before rollback, not merely the INSERTs.
+      await admin.query("SET CONSTRAINTS ALL IMMEDIATE");
+      const afterDays = (
+        await admin.query(
+          "SELECT to_jsonb(day) AS value FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+          [propertyId],
+        )
+      ).rows;
+      expect(afterDays).toEqual(
+        beforeDays.map(({ value }) => ({
+          value:
+            value.room_type_id === roomTypeA
+              ? value
+              : {
+                  ...value,
+                  calendar_revision: 2,
+                  generated_source_revision: 2,
+                  inventory_revision: value.inventory_revision + 1,
+                },
+        })),
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT * FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows[0],
+      ).toMatchObject({
+        organization_id: beforeCoverage.organization_id,
+        coverage_from: beforeCoverage.coverage_from,
+        coverage_through: beforeCoverage.coverage_through,
+        calendar_revision: 2,
+        materialized_revision: 2,
+        room_type_count: 1,
+        expected_day_count: 3,
+        materialized_day_count: 3,
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM platform.jobs WHERE property_id=$1 AND queue_name='pms.channex.management'",
+            [propertyId],
+          )
+        ).rows[0].count,
+      ).toBe(0);
+      const successor = await admin.query(
+        "SELECT room_type_id::text FROM pms.operating_calendar_room_bindings WHERE property_id=$1 AND calendar_revision=2",
+        [propertyId],
+      );
+      expect(successor.rows).toEqual([{ room_type_id: roomTypeB }]);
     } finally {
       await admin.query("ROLLBACK");
     }
@@ -246,6 +380,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       error: { code: "room_type_set_conflict", currentRoomTypeIds: [roomTypeB] },
     });
     const next = command("remaining", { expectedCalendarRevision: 1 });
+    await seedChannelConnection();
     expect(
       await repository.upsertOperatingCalendar({
         ...next,
@@ -265,7 +400,28 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       sourceConflicts: [],
     });
     expect((await roomEvidence.getRoomTypeFacts(propertyId, roomTypeA))?.lifecycle).toBe("active");
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM platform.jobs WHERE property_id=$1 AND queue_name='pms.channex.management'",
+          [propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
   });
+  async function seedChannelConnection(): Promise<void> {
+    const externalId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+      VALUES ($1,'channex',$2,'active','enable')`,
+      [propertyId, externalId],
+    );
+    await admin.query(
+      `INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id)
+      VALUES ($1,'channex','connected',$2)`,
+      [propertyId, externalId],
+    );
+  }
   async function seedAuthorizedProperty(): Promise<void> {
     await admin.query(
       `INSERT INTO identity.users (id, email, name, status)
@@ -363,7 +519,7 @@ function command(
     propertyId,
     expectedCalendarRevision: 0,
     expectedPropertyProfileRevision: 7,
-    schedule: { mode: "recurring", periods: [{ startsOn: "11-01", endsOn: "03-31" }] },
+    schedule: { mode: "recurring", periods: [{ startsOn: "07-01", endsOn: "03-31" }] },
     defaultMinimumStayNights: 2,
     roomTypeLimits: [
       {
