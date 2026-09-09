@@ -32,6 +32,34 @@ describe("replacement room-night calculator", () => {
       adjustments: [{ kind: "fixed", deltaMinor: "-3000" }, { kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "2500" }] } });
     expect(total(c, request(1)).totalMinor).toBe("10000"); expect(total(c, request(3)).totalMinor).toBe("15500");
   });
+  it("preserves included-guest deltas through season, weekday and date replacements", () => {
+    const price = (baseMinor: string) => ({ mode: "included_guests" as const, baseGuests: 2, baseMinor,
+      adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }, { kind: "fixed" as const, deltaMinor: "2500" }] });
+    const seasonal = { base: price("10000"), seasons: [{ name: "Summer", tier: "high", from: "07-01", through: "08-31", price: price("18000") }] };
+    const weekday = { ...seasonal, weekdays: [{ day: 4, adjustment: { kind: "fixed" as const, deltaMinor: "2000" } }] };
+    for (const [adults, season, weekend, date] of [[1, "15000", "17000", "9000"], [2, "18000", "20000", "12000"], [3, "20500", "22500", "14500"]] as const) {
+      expect(total(calendar(seasonal), request(adults)).totalMinor).toBe(season);
+      expect(total(calendar(weekday), request(adults)).totalMinor).toBe(weekend);
+      expect(total(calendar({ ...weekday, dates: [{ date: "2026-07-31", price: price("12000") }] }), request(adults)).totalMinor).toBe(date);
+    }
+  });
+  it("excludes parent meals, leaves independent NR prices unchanged and handles percentage guest rows", () => {
+    const c = fixture();
+    expect(total({ ...c, offers: [{ ...c.offers[0], meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "5000" } } }, c.offers[1]] }, request(2, "nr")).totalMinor).toBe("11700");
+    expect(total({ ...c, offers: [{ ...c.offers[0], id: "nr", termsRevision: "t2" }] }, request(2, "nr")).totalMinor).toBe("13000");
+    const config = calendar({ base: { mode: "included_guests", baseGuests: 2, baseMinor: "1001", adjustments: [
+      { kind: "percentage", basisPoints: -1000 }, { kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 2500 }] } });
+    expect(total(config, request(1)).totalMinor).toBe("901"); expect(total(config, request(3)).totalMinor).toBe("1251");
+  });
+  it("matches leap-day seasons only on leap day and uses date restrictions above seasons", () => {
+    const c = calendar({ base: { mode: "flat", amountMinor: "10000" }, seasons: [{ name: "Leap day", tier: "high", from: "02-29", through: "02-29", price: { mode: "flat", amountMinor: "18000" } }] });
+    expect(total(c, { ...request(), checkIn: "2024-02-28", checkOut: "2024-03-02" }).totalMinor).toBe("38000");
+    expect(total(c, { ...request(), checkIn: "2026-02-28", checkOut: "2026-03-01" }).totalMinor).toBe("10000");
+    const policy = own(); if (policy.kind !== "own") throw new Error("fixture");
+    const restrictions = { ...policy, seasons: [{ from: "07-01", through: "08-31", rules: { ...policy.rules, stopSell: true } }] };
+    expect(calculateReplacementRoomStay({ ...c, offers: [{ ...c.offers[0], restrictions }] }, request())).toMatchObject({ reason: "restriction" });
+    expect(total({ ...c, offers: [{ ...c.offers[0], restrictions: { ...restrictions, dates: [{ date: "2026-07-31", rules: policy.rules }] } }] }).totalMinor).toBe("10000");
+  });
   it("resolves month boundaries and final overrides without duplicate weekday increases", () => {
     const base = { mode: "flat", amountMinor: "10000" } as const;
     expect(total(calendar({ base, months: [{ month: 7, price: { mode: "flat", amountMinor: "12000" } }] }),
