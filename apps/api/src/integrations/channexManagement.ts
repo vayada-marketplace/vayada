@@ -91,7 +91,7 @@ export type ChannexManagementActionPlan = {
 export type ChannexManagementPlanPort = {
   withPropertyLock?<T>(
     job: ChannexManagementJob,
-    work: (plan: ChannexManagementActionPlan) => Promise<T>,
+    work: (preparePlan: () => Promise<ChannexManagementActionPlan>) => Promise<T>,
   ): Promise<T>;
   plan(job: ChannexManagementJob): Promise<ChannexManagementActionPlan>;
 };
@@ -116,14 +116,14 @@ export function createChannexManagementProvider(config: {
     async execute(
       job: ChannexManagementJob,
       input?: Parameters<ChannexManagementProvider["execute"]>[1],
-      preparedPlan?: ChannexManagementActionPlan,
+      preparedPlan?: () => Promise<ChannexManagementActionPlan>,
     ): ReturnType<ChannexManagementProvider["execute"]> {
       if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
         return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
       }
       let plan: ChannexManagementActionPlan;
       try {
-        plan = preparedPlan ?? (await config.plans.plan(job));
+        plan = await (preparedPlan ? preparedPlan() : config.plans.plan(job));
       } catch (error) {
         return failure(
           error instanceof ChannexAriMappingMissingError ? "mapping_missing" : "invalid_state",

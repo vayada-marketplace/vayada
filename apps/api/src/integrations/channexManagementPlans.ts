@@ -145,7 +145,7 @@ export function createPgChannexManagementPlanPort(config: {
           connect: async () => ({ query: client.query.bind(client), release() {} }),
           end: async () => {},
         };
-        return await work(await preparePlan(lockedPool, job));
+        return await work(() => preparePlan(lockedPool, job));
       } finally {
         try {
           if (locked)
