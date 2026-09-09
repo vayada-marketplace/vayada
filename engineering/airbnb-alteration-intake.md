@@ -190,6 +190,20 @@ existing importer. Enqueue the existing channel-manager, public-bookability and
 calendar outbox events for the affected date range in that transaction. Preserve
 guest payments; do not capture/refund or rewrite folios.
 
+Until the OTA nightly-revenue correction producer is integrated, a change to
+any booking facts must stop before application if that booking
+already has nightly revenue evidence, Finance payment records or folios. Finance
+owns this read-only guard; the importer retains its booking row lock through the
+check and commit. Return `alteration_finance_reconciliation_required` through the
+existing retry/dead-letter diagnostics and leave the request awaiting confirmation.
+Do not acknowledge the provider revision or partially change inventory/booking.
+An unchanged total does not establish unchanged per-night revenue or tax evidence.
+For bookings without existing financial records, preserve the existing balance
+when the total is unchanged. This is a temporary fail-closed
+guard, not completed Finance reconciliation: activation still requires an atomic
+OTA nightly-revenue/commission correction integration with source freshness,
+including reductions and room-type changes, without rewriting issued folios.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical

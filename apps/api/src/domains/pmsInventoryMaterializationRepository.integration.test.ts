@@ -513,6 +513,122 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await admin.query("ROLLBACK");
     }
+    for (const evidence of ["revenue", "payment", "folio"]) {
+      await admin.query("BEGIN");
+      try {
+        await admin.query(
+          "UPDATE booking.guest_bookings SET total_amount=25,balance_amount=15 WHERE id=$1",
+          [bookingId],
+        );
+        const change = await prepareRevision("2026-08-07");
+        if (evidence === "revenue") {
+          await admin.query(
+            "INSERT INTO booking.nightly_revenue_room_scopes(property_id,room_type_id) VALUES($1,$2)",
+            [propertyId, roomTypeId],
+          );
+          await admin.query(
+            `INSERT INTO booking.nightly_revenue_evidence(property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,command_key)
+            VALUES($1,$2,$3,'2026-08-04','2026-08-04','EUR',25,1,'room_night','confirmed','ota','exact',1,$4)`,
+            [propertyId, bookingId, roomTypeId, randomUUID()],
+          );
+        } else if (evidence === "payment") {
+          await admin.query(
+            "INSERT INTO finance.payments(property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,'deposit','paid',10,'EUR')",
+            [propertyId, bookingId],
+          );
+        } else {
+          await admin.query(
+            "INSERT INTO finance.folios(property_id,guest_booking_id) VALUES($1,$2)",
+            [propertyId, bookingId],
+          );
+        }
+        async function financialSnapshot() {
+          return (
+            await admin.query(
+              `SELECT
+            (SELECT jsonb_agg(to_jsonb(row)) FROM booking.nightly_revenue_evidence row WHERE guest_booking_id=$1) AS revenue,
+            (SELECT jsonb_agg(to_jsonb(row)) FROM finance.payments row WHERE guest_booking_id=$1) AS payments,
+            (SELECT jsonb_agg(to_jsonb(row)) FROM finance.folios row WHERE guest_booking_id=$1) AS folios`,
+              [bookingId],
+            )
+          ).rows;
+        }
+        const beforeFinance = await financialSnapshot();
+        const beforeInventory = (
+          await admin.query(
+            "SELECT to_jsonb(day) FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+            [propertyId],
+          )
+        ).rows;
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, change.revision),
+        ).rejects.toThrow("alteration_finance_reconciliation_required");
+        expect(
+          (
+            await admin.query(
+              "SELECT check_out::text,total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+              [bookingId],
+            )
+          ).rows[0],
+        ).toEqual({ check_out: "2026-08-06", total_amount: "25.00", balance_amount: "15.00" });
+        expect(
+          (
+            await admin.query("SELECT status FROM booking.booking_change_requests WHERE id=$1", [
+              change.requestId,
+            ])
+          ).rows[0].status,
+        ).toBe("pending");
+        expect(
+          (
+            await admin.query(
+              "SELECT to_jsonb(day) FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual(beforeInventory);
+        expect(await financialSnapshot()).toEqual(beforeFinance);
+        // Even an unchanged total cannot attest to unchanged nightly/tax evidence.
+        change.revision.attributes.departure_date = "2026-08-06";
+        await admin.query(
+          `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"requestedCheckOut":"2026-08-06"}'::jsonb WHERE id=$1`,
+          [change.requestId],
+        );
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, change.revision),
+        ).rejects.toThrow("alteration_finance_reconciliation_required");
+        expect(
+          (
+            await admin.query(
+              "SELECT adults,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+              [bookingId],
+            )
+          ).rows[0],
+        ).toEqual({ adults: 1, balance_amount: "15.00" });
+        expect(await financialSnapshot()).toEqual(beforeFinance);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    }
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        "UPDATE booking.guest_bookings SET total_amount=25,balance_amount=15 WHERE id=$1",
+        [bookingId],
+      );
+      const change = await prepareRevision("2026-08-06");
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).resolves.toBe(true);
+      expect(
+        (
+          await admin.query("SELECT balance_amount::text FROM booking.guest_bookings WHERE id=$1", [
+            bookingId,
+          ])
+        ).rows[0].balance_amount,
+      ).toBe("15.00");
+    } finally {
+      await admin.query("ROLLBACK");
+    }
     // Application assertions run before rollback, against actual materialized inventory.
     await admin.query("BEGIN");
     try {
@@ -699,6 +815,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       [applied.requestId],
     );
     await admin.query(`UPDATE platform.jobs SET run_after=now() WHERE id=$1`, [jobId]);
+    const financePayment = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [financePayment, propertyId, bookingId],
+    );
+    try {
+      expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
+      expect(acknowledgements).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' AS code FROM platform.jobs WHERE id=$1",
+            [jobId],
+          )
+        ).rows[0].code,
+      ).toBe("alteration_finance_reconciliation_required");
+    } finally {
+      await admin.query("DELETE FROM finance.payments WHERE id=$1", [financePayment]);
+    }
+    await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
     const trigger = `alteration_fail_${bookingId.replaceAll("-", "")}`;
     await admin.query(
       `CREATE FUNCTION pms.${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.property_id='${propertyId}'::uuid THEN RAISE EXCEPTION 'synthetic mapping failure'; END IF; RETURN NEW; END$$; CREATE TRIGGER ${trigger} BEFORE INSERT ON pms.channel_booking_mappings FOR EACH ROW EXECUTE FUNCTION pms.${trigger}()`,
