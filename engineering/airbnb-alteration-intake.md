@@ -144,6 +144,17 @@ Periodic full rescans are required at activation because offset pagination can
 shift while Airbnb creates requests. Neither webhook triggering nor scheduling
 is activated until the complete booking-revision workflow is ready.
 
+The internal periodic scheduler requires an explicit property allowlist and
+current mutation ownership. For each connected, actively claimed binding, queue
+a fresh page-one scan at most once per fifteen minutes. Skip a binding while any
+scan for its current generation is pending/running; preserve that scan's cursor
+and retries. Completed and dead-lettered scans remain historical evidence. A new
+binding generation has its own cadence and must not inherit old scan suppression.
+Use database time, existing jobs and connection/claim locks for concurrent scheduler
+deduplication. Recheck eligibility after acquiring locks and ownership before commit.
+Process a bounded batch; repeated calls can cover the rest of the allowlist. This
+adds a callable scheduler, not a runtime timer or an enabled provider subscription.
+
 The existing authenticated webhook route has an explicit, default-off alteration
 promotion gate. It minimizes retained notification content, uses a versioned
 property-scoped scan receipt identity (separate from older unsupported receipts),
