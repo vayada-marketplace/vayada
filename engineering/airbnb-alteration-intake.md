@@ -170,9 +170,17 @@ existing importer. Enqueue the existing channel-manager, public-bookability and
 calendar outbox events for the affected date range in that transaction. Preserve
 guest payments; do not capture/refund or rewrite folios.
 
-The first application slice supports unchanged room count/types and pre-arrival
-assignments only. Preserve assigned physical rooms only when their proposed stay
-has no assignment/block conflict. Unsupported room changes, linked inventory,
+Application supports room count/type changes for pre-arrival channel assignments.
+Match slots by provider room position. Retain physical rooms and rate plans only
+for an active slot whose room type is unchanged and whose new stay has no physical
+assignment/block conflict. Changed types and added slots become pending assignments
+without a physical room or rate plan; staff allocate them through the existing PMS.
+Release removed slots without deleting their history. A later increase may reuse
+only a slot released by this alteration workflow, never a canceled/manual slot.
+Use one version above every prior slot version for active and newly released slots,
+so booking-wide staff commands can use a single optimistic version. Reconcile both old and new room types,
+including all three inventory refresh destinations, in the import transaction.
+Linked inventory,
 missing materialization and in-house stays require review and block application.
 Those limitations remain activation gates, alongside finance-source freshness
 validation, periodic scans and sanctioned provider end-to-end evidence.

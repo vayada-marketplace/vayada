@@ -139,38 +139,62 @@ export async function applyChannexAlterationRevision(
     booking.total !== changes["oldTotal"] ||
     booking.adults !== changes["oldAdults"] ||
     booking.children !== changes["oldChildren"] ||
-    booking.currency !== revision.currency ||
-    booking.roomCount !== revision.rooms.length
+    booking.currency !== revision.currency
   )
     throw new Error("alteration_revision_original_changed");
   const assignments = await client.query<{
     id: string;
     position: number;
     roomTypeId: string;
-    externalId: string;
+    source: string;
+    releasedByAlteration: boolean;
     roomId: string | null;
     status: string;
     version: string | null;
   }>(
     `SELECT assignment.id,assignment.position,assignment.room_type_id AS "roomTypeId",assignment.room_id AS "roomId",
-       assignment.assignment_status AS status,assignment.assignment_payload->>'version' AS version,mapping.external_room_type_id AS "externalId"
-     FROM pms.operational_booking_assignments assignment JOIN pms.channel_room_type_mappings mapping
-       ON mapping.property_id=assignment.property_id AND mapping.room_type_id=assignment.room_type_id
-       AND mapping.connection_id=$3 AND mapping.status='active'
+       assignment.assignment_status AS status,assignment.assignment_payload->>'version' AS version,assignment.source,
+       assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb AS "releasedByAlteration"
+     FROM pms.operational_booking_assignments assignment
      WHERE assignment.property_id=$1 AND assignment.guest_booking_id=$2
-       AND assignment.assignment_status NOT IN ('released','canceled') ORDER BY assignment.position FOR UPDATE OF assignment`,
-    [scope.propertyId, scope.bookingId, scope.connectionId],
+       ORDER BY assignment.position FOR UPDATE OF assignment`,
+    [scope.propertyId, scope.bookingId],
   );
+  const active = assignments.rows.filter((item) => !["released", "canceled"].includes(item.status));
   if (
-    assignments.rows.length !== revision.rooms.length ||
-    assignments.rows.some(
+    active.length !== booking.roomCount ||
+    active.some(
       (item, index) =>
-        item.position !== index + 1 ||
-        item.externalId !== revision.rooms[index]!.room_type_id ||
-        !["pending", "assigned"].includes(item.status),
+        item.position !== index + 1 || !["pending", "assigned"].includes(item.status),
+    ) ||
+    assignments.rows.some(
+      (item) =>
+        item.position <= revision.rooms.length &&
+        !active.includes(item) &&
+        !(item.status === "released" && item.source === "channel" && item.releasedByAlteration),
     )
   )
     throw new Error("alteration_revision_assignment_unsupported");
+  const mappings = await client.query<{ externalId: string; roomTypeId: string }>(
+    `SELECT external_room_type_id AS "externalId",room_type_id AS "roomTypeId"
+     FROM pms.channel_room_type_mappings WHERE property_id=$1 AND connection_id=$2
+       AND status='active' AND external_room_type_id=ANY($3::text[]) FOR SHARE`,
+    [scope.propertyId, scope.connectionId, revision.rooms.map((item) => item.room_type_id)],
+  );
+  const desired = revision.rooms.map((item, index) => {
+    const matches = mappings.rows.filter((mapping) => mapping.externalId === item.room_type_id);
+    if (matches.length !== 1) throw new Error("alteration_room_mapping_unavailable");
+    const assignment = assignments.rows.find((row) => row.position === index + 1);
+    return {
+      roomTypeId: matches[0]!.roomTypeId,
+      occupancy: item.occupancy,
+      assignment,
+      retain:
+        !!assignment &&
+        active.includes(assignment) &&
+        assignment.roomTypeId === matches[0]!.roomTypeId,
+    };
+  });
   await assertChannexAlterationAvailability(client, {
     propertyId: scope.propertyId,
     bookingId: scope.bookingId,
@@ -187,35 +211,84 @@ export async function applyChannexAlterationRevision(
     [
       scope.propertyId,
       scope.bookingId,
-      assignments.rows.map((item) => item.roomId).filter(Boolean),
+      desired
+        .filter((item) => item.retain)
+        .map((item) => item.assignment!.roomId)
+        .filter(Boolean),
       revision.arrival_date,
       revision.departure_date,
     ],
   );
   if (physicalConflict.rows.length) throw new Error("alteration_revision_physical_room_conflict");
   const updatedAt = new Date().toISOString();
-  for (const [index, assignment] of assignments.rows.entries()) {
-    const occupancy = revision.rooms[index]!.occupancy;
-    const priorVersion = /^reservation-v(\d+)$/.exec(assignment.version ?? "");
-    const version = `reservation-v${priorVersion ? BigInt(priorVersion[1]!) + 1n : 1n}`;
+  const versions = assignments.rows.map((item) => {
+    const prior = /^reservation-v(\d+)$/.exec(item.version ?? "");
+    return prior ? BigInt(prior[1]!) : 0n;
+  });
+  const version = `reservation-v${versions.reduce((max, value) => (value > max ? value : max), 0n) + 1n}`;
+  for (const assignment of active.filter((item) => item.position > desired.length)) {
     await client.query(
-      `UPDATE pms.operational_booking_assignments SET check_in=$2,check_out=$3,adults=$4,children=$5,
-      assignment_payload=assignment_payload || jsonb_build_object('channexRevisionId',$6::text,'version',$8::text),updated_at=$7 WHERE id=$1`,
+      `UPDATE pms.operational_booking_assignments SET assignment_status='released',
+       assignment_payload=assignment_payload || $2::jsonb,updated_at=$3 WHERE id=$1`,
       [
         assignment.id,
-        revision.arrival_date,
-        revision.departure_date,
-        occupancy.adults,
-        occupancy.children,
-        revision.id,
+        JSON.stringify({
+          channexRevisionId: revision.id,
+          channexAlterationReleased: true,
+          version,
+        }),
         updatedAt,
-        version,
       ],
     );
   }
+  for (const [index, item] of desired.entries()) {
+    const payload = JSON.stringify({
+      channexRevisionId: revision.id,
+      version,
+    });
+    if (item.assignment) {
+      await client.query(
+        `UPDATE pms.operational_booking_assignments SET room_type_id=$2,check_in=$3,check_out=$4,adults=$5,children=$6,
+         room_id=CASE WHEN $7 THEN room_id ELSE NULL END,rate_plan_id=CASE WHEN $7 THEN rate_plan_id ELSE NULL END,
+         assigned_at=CASE WHEN $7 THEN assigned_at ELSE NULL END,
+         assignment_status=CASE WHEN $7 THEN assignment_status ELSE 'pending' END,stay_evidence_kind='exact',
+         assignment_payload=(assignment_payload - 'channexAlterationReleased') || $8::jsonb,updated_at=$9 WHERE id=$1`,
+        [
+          item.assignment.id,
+          item.roomTypeId,
+          revision.arrival_date,
+          revision.departure_date,
+          item.occupancy.adults,
+          item.occupancy.children,
+          item.retain,
+          payload,
+          updatedAt,
+        ],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO pms.operational_booking_assignments(property_id,guest_booking_id,room_type_id,position,
+         source,channel,external_reservation_id,check_in,check_out,stay_evidence_kind,adults,children,assignment_payload,updated_at)
+         VALUES($1,$2,$3,$4,'channel','airbnb',$5,$6,$7,'exact',$8,$9,$10::jsonb,$11)`,
+        [
+          scope.propertyId,
+          scope.bookingId,
+          item.roomTypeId,
+          index + 1,
+          revision.booking_id,
+          revision.arrival_date,
+          revision.departure_date,
+          item.occupancy.adults,
+          item.occupancy.children,
+          payload,
+          updatedAt,
+        ],
+      );
+    }
+  }
   await client.query(
     `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=$7::numeric,
-    balance_amount=CASE WHEN payment_status='unpaid' THEN $7::numeric ELSE balance_amount END,updated_at=$8 WHERE id=$1 AND property_id=$2`,
+    balance_amount=CASE WHEN payment_status='unpaid' THEN $7::numeric ELSE balance_amount END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
     [
       scope.bookingId,
       scope.propertyId,
@@ -225,19 +298,24 @@ export async function applyChannexAlterationRevision(
       revision.rooms.reduce((n, item) => n + item.occupancy.children, 0),
       revision.amount,
       updatedAt,
+      desired.length,
     ],
   );
   await reconcilePmsOccupiedInventory(
     client,
     scope.propertyId,
-    assignments.rows.flatMap((item) => [
-      { roomTypeId: item.roomTypeId, checkIn: booking.checkIn, checkOut: booking.checkOut },
-      {
+    [
+      ...active.map((item) => ({
+        roomTypeId: item.roomTypeId,
+        checkIn: booking.checkIn,
+        checkOut: booking.checkOut,
+      })),
+      ...desired.map((item) => ({
         roomTypeId: item.roomTypeId,
         checkIn: revision.arrival_date,
         checkOut: revision.departure_date,
-      },
-    ]),
+      })),
+    ],
     updatedAt,
   );
   await client.query(
@@ -251,7 +329,7 @@ export async function applyChannexAlterationRevision(
   )
     .toISOString()
     .slice(0, 10);
-  for (const roomTypeId of new Set(assignments.rows.map((item) => item.roomTypeId))) {
+  for (const roomTypeId of new Set([...active, ...desired].map((item) => item.roomTypeId))) {
     const key = `channex.alteration.applied:${request.id}:${revision.id}:${roomTypeId}`;
     const payload = JSON.stringify({
       propertyId: scope.propertyId,
