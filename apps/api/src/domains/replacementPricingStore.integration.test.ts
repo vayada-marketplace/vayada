@@ -16,9 +16,11 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     let policy = "1", conversion = false;
     const sources = () => ({ room: "1", guest: policy, currency: "1", terms: "1", finance: "1" });
     const store = createReplacementPricingStore(pool, {
-      async lock(client, candidate) {
+      async lock(client, candidate, proposed) {
         if (candidate.organizationId !== organizationId || candidate.actorUserId !== actorUserId || candidate.propertyId !== propertyId) return null;
-        await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 FOR SHARE", [propertyId]);
+        const owned = (await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 FOR SHARE", [propertyId])).rows.map((r) => r.id);
+        if (proposed && (proposed.ownerReferences.terms !== "terms-1" ||
+          proposed.rooms.some((r) => !owned.includes(r.roomTypeId) || r.offers.some((o) => o.termsRevision !== "terms-1")))) return null;
         return sources();
       },
       async allowCurrencyChange(_client, _scope, before, after) {
@@ -44,7 +46,7 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     for (const table of ["domain_events", "product_audit_events", "outbox_events"]) {
       expect((await pool.query(`SELECT count(*)::int AS count FROM platform.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(1);
     }
-    await expect(f.store.save(f.scope, { ...command, snapshot: { ...command.snapshot, ownerReferences: { terms: "changed" } } })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(f.store.save(f.scope, { ...command, snapshot: { ...command.snapshot, rooms: [] } })).rejects.toMatchObject({ code: "idempotency_conflict" });
   });
   it("serializes competing writes and rolls back a failed effect without moving the head", async () => {
     const f = await fixture();
@@ -91,6 +93,27 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
       rooms: [{ ...input.rooms[0], roomTypeId: other.snapshot(1).rooms[0].roomTypeId }] } })).rejects.toThrow();
     expect(await f.store.read(f.scope)).toBeNull();
     expect((await pool.query("SELECT count(*)::int AS count FROM platform.domain_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
+  });
+  it("validates draft room and terms references before storing any data", async () => {
+    const f = await fixture(), other = await fixture(), input = f.snapshot(1), room = input.rooms[0];
+    const draft = { draftId: randomUUID(), expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: input };
+    for (const invalid of [
+      { ...input, ownerReferences: { terms: "foreign-terms" } },
+      { ...input, rooms: [{ ...room, roomTypeId: other.snapshot(1).rooms[0].roomTypeId }] },
+      { ...input, rooms: [{ ...room, offers: [{ ...room.offers[0], termsRevision: "foreign-terms" }] }] },
+    ]) await expect(f.store.saveDraft(f.scope, { ...draft, snapshot: invalid })).rejects.toMatchObject({ code: "denied" });
+    expect(await f.store.readDraft(f.scope, draft.draftId)).toBeNull();
+  });
+  it("serializes equivalent mixed-case UUIDs during competing initial draft writes", async () => {
+    const f = await fixture();
+    const draft = { draftId: randomUUID(), expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) };
+    const results = await Promise.allSettled([
+      f.store.saveDraft(f.scope, draft),
+      f.store.saveDraft({ ...f.scope, propertyId: f.scope.propertyId.toUpperCase() }, { ...draft, snapshot: { ...draft.snapshot, rooms: [] } }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({ reason: { code: "stale" } });
+    expect(await f.store.readDraft(f.scope, draft.draftId)).toMatchObject({ revision: 1 });
   });
   it("requires conversion owner approval and atomically replaces currency and all room snapshots", async () => {
     const f = await fixture(); await f.store.save(f.scope, f.command());

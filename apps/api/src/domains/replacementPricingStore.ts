@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject,
   type PricingConfiguration } from "@vayada/domain-pms";
 import type { Pool, PoolClient } from "pg";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 export type PricingStorageScope = Readonly<{ propertyId: string; organizationId: string; actorUserId: string }>;
 export type PricingStorageSources = Readonly<Record<string, string>>;
@@ -9,8 +10,9 @@ export type PricingStorageSnapshot = Readonly<{ currency: string; rooms: readonl
   ownerReferences: PricingStorageSources }>;
 export type StoredPricingRevision = PricingStorageSnapshot & Readonly<{ revision: number; sources: PricingStorageSources }>;
 export interface PricingStorageGuard {
-  /** Authenticate scope and lock room/guest/currency/owner sources until this transaction ends. No default allow. */
-  lock(client: PoolClient, scope: PricingStorageScope): Promise<PricingStorageSources | null>;
+  /** Authenticate scope; validate every proposed room/owner/terms reference against its owner;
+   * lock the validated sources until transaction end. proposed=null for reads. No default allow. */
+  lock(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot | null): Promise<PricingStorageSources | null>;
   /** Verify complete conversion of every room AND owner-owned amount, with authoritative FX evidence. */
   allowCurrencyChange(client: PoolClient, scope: PricingStorageScope, before: StoredPricingRevision,
     after: PricingStorageSnapshot): Promise<boolean>;
@@ -34,13 +36,13 @@ function snapshot(value: unknown, propertyId: string, revision: number): Pricing
 }
 /** Infrastructure primitive only. Routes/preview/publication orchestration belong to VAY-1541. */
 export function createReplacementPricingStore(pool: Pool, guard: PricingStorageGuard) {
-  async function transaction<T>(scope: PricingStorageScope, work: (client: PoolClient, sources: PricingStorageSources) => Promise<T>): Promise<T> {
+  async function transaction<T>(scope: PricingStorageScope, proposed: PricingStorageSnapshot | null, work: (client: PoolClient, sources: PricingStorageSources) => Promise<T>): Promise<T> {
     if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid)) return fail("invalid");
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('pms-inventory:' || $1,0))", [scope.propertyId]);
-      const sources = await guard.lock(client, scope);
+      await lockPmsInventoryMutationScope(client, scope.propertyId);
+      const sources = await guard.lock(client, scope, proposed);
       if (!sources) return fail("denied");
       if (!references(sources)) return fail("invalid");
       const result = await work(client, sources);
@@ -70,19 +72,19 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
   }
   return {
     read(scope: PricingStorageScope) {
-      scope = structuredClone(scope);
-      return transaction(scope, async (client, sources) => {
+      scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
+      return transaction(scope, null, async (client, sources) => {
         const result = await current(client, scope.propertyId);
         return result && { ...result, stale: canonical(result.sources) !== canonical(sources) };
       });
     },
     save(scope: PricingStorageScope, input: { requestId: string; expectedRevision: number; sources: PricingStorageSources; snapshot: unknown }) {
-      scope = structuredClone(scope);
+      scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!text(input.requestId) || input.requestId.length > 200 || !pricingInteger(input.expectedRevision) || input.expectedRevision >= 2147483647 || !references(input.sources)) return Promise.reject(new PricingStorageError("invalid"));
       const next = snapshot(input.snapshot, scope.propertyId, input.expectedRevision + 1);
       const command = structuredClone({ ...input, snapshot: next });
       const hash = createHash("sha256").update(canonical({ ...command, scope })).digest("hex");
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, next, async (client, sources) => {
         const prior = (await client.query("SELECT revision,request_hash FROM pms.pricing_v2_revisions WHERE property_id=$1 AND request_id=$2", [scope.propertyId, command.requestId])).rows[0];
         if (prior) { if (prior.request_hash !== hash) return fail("idempotency_conflict"); return { revision: prior.revision as number, replayed: true }; }
         if (canonical(sources) !== canonical(command.sources)) return fail("stale");
@@ -102,11 +104,11 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       });
     },
     saveDraft(scope: PricingStorageScope, input: { draftId: string; expectedDraftRevision: number; baseRevision: number; sources: PricingStorageSources; snapshot: unknown }) {
-      scope = structuredClone(scope);
+      scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision) || input.expectedDraftRevision >= 2147483647 || !pricingInteger(input.baseRevision) || input.baseRevision >= 2147483647 || !references(input.sources)) return Promise.reject(new PricingStorageError("invalid"));
       const next = snapshot(input.snapshot, scope.propertyId, input.baseRevision + 1);
       const command = structuredClone({ ...input, snapshot: next });
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, next, async (client, sources) => {
         if (canonical(sources) !== canonical(command.sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== command.baseRevision) return fail("stale");
         const previous = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, command.draftId])).rows[0];
         if (previous?.draft_revision === command.expectedDraftRevision + 1 && previous.base_revision === command.baseRevision && canonical(previous.snapshot) === canonical(next) && canonical(previous.source_revisions) === canonical(sources)) return previous.draft_revision as number;
@@ -122,9 +124,9 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       });
     },
     readDraft(scope: PricingStorageScope, draftId: string) {
-      scope = structuredClone(scope);
+      scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!uuid(draftId)) return Promise.reject(new PricingStorageError("invalid"));
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, null, async (client, sources) => {
         const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, draftId])).rows[0];
         return draft ? { snapshot: snapshot(draft.snapshot, scope.propertyId, draft.base_revision + 1), revision: draft.draft_revision as number,
           baseRevision: draft.base_revision as number, stale: canonical(draft.source_revisions) !== canonical(sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== draft.base_revision } : null;
