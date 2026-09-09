@@ -1,3 +1,5 @@
+import { recordPmsRoomClosureEvents } from "./pmsRoomClosureEvents.js";
+import { lockPmsManageScope } from "./pmsManageScope.js";
 import { readPmsRoomClosureState } from "./pmsRoomClosureState.js";
 import { retireClosingRoomUnits } from "./pmsRoomClosureUnits.js";
 import { appendRoomClosureCalendar, closeRoomClosureInventory } from "./pmsRoomClosureCalendar.js";
@@ -174,6 +176,21 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
     await admin.query("BEGIN");
     try {
       const closureScope = { propertyId, roomTypeId: roomTypeA, commandId: randomUUID() };
+      expect(
+        await lockPmsManageScope(
+          admin,
+          { organizationId, propertyId, actorUserId },
+          new Date(acceptedAt),
+        ),
+      ).toBe(true);
+      expect(
+        await lockPmsManageScope(
+          admin,
+          { organizationId: randomUUID(), propertyId, actorUserId },
+          new Date(acceptedAt),
+        ),
+      ).toBe(false);
+
       await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow(
         "requires its receipt",
       );
@@ -267,34 +284,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           [propertyId],
         )
       ).rows[0];
-      const events = {
-        idempotencyId: randomUUID(),
-        domainEventId: randomUUID(),
-        outboxEventId: randomUUID(),
-      };
       await admin.query(
         `INSERT INTO platform.idempotency_keys
         (id,operation_scope,operation,key_hash,request_fingerprint_hash,tenant_scope,property_id,expires_at)
         VALUES ($1,'pms','room_type.close',$2,$2,'property',$3,now()+interval '1 day')`,
-        [events.idempotencyId, "d".repeat(64), propertyId],
+        [closureScope.commandId, "d".repeat(64), propertyId],
       );
-      await admin.query(
-        `INSERT INTO platform.domain_events
-        (id,source_system,event_key,event_type,occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
-        VALUES ($1::uuid,'pms',$1::text,'pms.room_type.closed',now(),'property',$2,'pms','room_type',$3,$4)`,
-        [
-          events.domainEventId,
-          propertyId,
-          roomTypeA,
-          JSON.stringify({ commandId: closureScope.commandId }),
-        ],
+      const events = await recordPmsRoomClosureEvents(
+        admin,
+        { organizationId, propertyId, roomTypeId: roomTypeA, actorUserId },
+        {
+          idempotencyId: closureScope.commandId,
+          keyHash: "d".repeat(64),
+          requestId: "closure-test",
+        },
+        { calendarRevision: 2, cutoffDate: "2026-08-05", phase: "publication_refresh_required" },
+        new Date("2026-08-05T10:00:00.000Z"),
       );
-      await admin.query(
-        `INSERT INTO platform.outbox_events
-        (id,domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id)
-        VALUES ($1::uuid,$2,$1::text,'distribution.inventory-projection','pms.inventory.projection_refresh_requested','property',$3)`,
-        [events.outboxEventId, events.domainEventId, propertyId],
-      );
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM platform.product_audit_events WHERE domain_event_id=$1",
+            [events.domainEventId],
+          )
+        ).rows[0].count,
+      ).toBe(1);
       await seedChannelConnection();
       await admin.query("SAVEPOINT incomplete");
       await admin.query(
