@@ -1,3 +1,5 @@
+import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
+import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
 import {
   PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS,
@@ -584,6 +586,132 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       available_rooms: 2,
       base_price_amount: "100.00",
     });
+  });
+
+  it("omits closing rooms from Channex provisioning and ARI while retaining their mappings", async () => {
+    const otherRoom = randomUUID(),
+      connectionId = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types(id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES ($1,'Europe/Vienna')",
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+      VALUES ($1::uuid,'channex',$1::text,'active','enable')`,
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO pms.channel_connections(id,property_id,provider,external_property_id,connection_status)
+      VALUES ($1,$2::uuid,'channex',$2::text,'connected')`,
+      [connectionId, propertyId],
+    );
+    const rateIds = new Map<string, string>();
+    for (const room of [roomTypeId, otherRoom]) {
+      const planId = randomUUID();
+      rateIds.set(room, planId);
+      await db.query(
+        `INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES ($1,$2,$3,'flexible','Flexible','flexible',100,'EUR')`,
+        [planId, propertyId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+        VALUES ($1,$2,$3::uuid,$3::text)`,
+        [propertyId, connectionId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,external_rate_plan_id,channel,external_room_type_id)
+        VALUES ($1,$2,$3::uuid,$4::uuid,$4::text,'direct',$3::text)`,
+        [propertyId, connectionId, room, planId],
+      );
+      await db.query(
+        `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,'2026-09-10',1,1,'open')`,
+        [propertyId, room],
+      );
+    }
+    const port = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      bookingRevisionHandoff: async () => {},
+      now: () => new Date("2026-09-09T12:00:00Z"),
+    });
+    const job = (operationType: "provision" | "sync_ari") => ({
+      jobId: randomUUID(),
+      propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType,
+        restrictionsOnly: true,
+      },
+    });
+    try {
+      expect(JSON.stringify(await port.plan(job("provision")))).toContain(roomTypeId);
+      await close(db);
+      const provision = JSON.stringify(await port.plan(job("provision")));
+      expect(provision).not.toContain(roomTypeId);
+      expect(provision).toContain(otherRoom);
+      const ari = JSON.stringify(await port.plan(job("sync_ari")));
+      expect(ari).not.toContain(rateIds.get(roomTypeId)!);
+      expect(ari).toContain(rateIds.get(otherRoom)!);
+      expect(
+        (
+          await db.query(
+            `SELECT status FROM pms.channel_room_type_mappings
+        WHERE property_id=$1 AND room_type_id=$2`,
+            [propertyId, roomTypeId],
+          )
+        ).rows,
+      ).toEqual([{ status: "active" }]);
+      const channelId = randomUUID();
+      await db.query(
+        `UPDATE pms.channel_connections SET connection_metadata=$2::jsonb WHERE id=$1`,
+        [
+          connectionId,
+          JSON.stringify({
+            connectedChannels: [
+              { key: "booking_com", externalChannelId: channelId, isActive: true },
+            ],
+          }),
+        ],
+      );
+      const rulesFor = (room: string) => ({
+        expectedOperationId: null,
+        rules: [
+          {
+            id: randomUUID(),
+            type: "availability_offset" as const,
+            value: 2,
+            channelIds: [channelId],
+            roomTypeIds: [room],
+            startDate: "2026-09-10",
+            endDate: "2026-09-11",
+            days: ["th" as const],
+          },
+        ],
+      });
+      expect(await validateInventoryRules(db, propertyId, rulesFor(roomTypeId))).toMatch(
+        /active mapped room types/,
+      );
+      expect(await validateInventoryRules(db, propertyId, rulesFor(otherRoom))).toBeNull();
+      await db.query(
+        `UPDATE pms.channel_room_type_mappings SET status='disabled'
+        WHERE property_id=$1 AND room_type_id=$2`,
+        [propertyId, roomTypeId],
+      );
+      const retry = await port.plan(job("provision"));
+      expect(JSON.stringify(retry)).not.toContain(roomTypeId);
+      expect(JSON.stringify(retry)).toContain(otherRoom);
+    } finally {
+      await port.close();
+    }
   });
 
   it("serializes competing closure receipts to one winner", async () => {
