@@ -147,6 +147,7 @@ type BookingWebPromoValidationRequest = {
   bookingTotal?: number;
 };
 type BookingWebAttributionClickRequest = {
+  clickId?: string;
   referralCode?: string;
   referral_code?: string;
   sessionId?: string;
@@ -191,6 +192,7 @@ export type BookingWebAttributionSink = {
 };
 
 export type BookingWebAffiliateClickEvent = {
+  clickId?: string;
   slug: string;
   referralCode: string;
   sessionId?: string;
@@ -919,8 +921,16 @@ export async function registerBookingWebPublicRoutes(
       if (!referralCode) {
         throw createHttpError(400, "Referral code is required.");
       }
+      const clickId = request.body?.clickId;
+      if (
+        clickId !== undefined &&
+        (typeof clickId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clickId))
+      ) {
+        throw createHttpError(400, "Invalid click ID.");
+      }
       if (options.attributionSink) {
         await options.attributionSink.recordAffiliateClick({
+          clickId,
           slug: request.params.slug,
           referralCode,
           sessionId: firstString(request.body?.sessionId, request.body?.session_id),
