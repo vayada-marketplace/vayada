@@ -130,37 +130,59 @@ were available at the final inspection. Independent review is recorded separatel
 Stacked branches do not run the main-targeted full PR workflow until retargeted;
 full local validation above is not a claim of full-stack CI coverage.
 
-All prerequisite PRs through #1704 are merged. Activation #1705 remains draft;
-full deployed mixed-room acceptance is still pending. Actual next-environment
-consumer versions were verified from running task digests and Git ancestry:
-Booking Web261 at b9b0816a, Booking Admin387 and PMS437 at b5d3a516, and API886
-at f77ebb5d. This establishes the consumer deployment order, not mixed-room smoke.
+All prerequisite PRs through #1704 and corrective PRs #1791/#1806 are merged.
+Activation #1705 remains draft, rebased onto main `9eee464232606ea78987fc34c1e0ee89c15d84f3`.
+Its production diff remains the two explicit mixed-room runtime flags; no broad
+activation or human release acceptance has occurred.
 
-The earlier publication, canonical meal and pending-edit notification blockers
-were repaired and their bounded deployed smokes passed with restoration. Do not
-repeat those completed prerequisite checks without a relevant change.
+## Deployed synthetic verification, 2026-09-09
 
-The shared synthetic route has since advanced to canary15, source0118fd1f,
-digest1a8a49909ac5cf864eb9a2f3b0866e30e39b19679ebcde748d82dde442774b7d.
-It contains scoped Channex restrictions and meal delivery, not this activation.
-Guest7/admin4 remain older isolated frontends. Any later approved canary rollout
-must preserve both staging flags, the exact synthetic property/secret scope,
-existing route conditions and disabled global workers. Coordinate fixture leases
-before deploying or mutating; the meal owner released its lease after restoration.
+The isolated API runs canary 20, source `c2eedb466e5894902fa5cd30e10e3293910ee9ea`,
+digest `bd25c9ccc389e4d0f8ef26e148a5989ef51380dd2b26d91d8a44b6f4a71b7d6e`.
+The corrected guest runs guest 9, merged source `9eee464232606ea78987fc34c1e0ee89c15d84f3`,
+digest `ddc38a1aa63149a51e7a8f242963f3d7c9bd3932be822b5f5a8467500c94ecb2`.
+Actual running task digests and completed rollouts were checked before testing.
+The first guest rollout stopped before mutation because a delayed same-source
+build replaced the image tag; the final build digest was verified before retry.
 
-The restored synthetic baseline is plan13, mandatory confirmation6, guest
-policy21 and Catalog12, with readiness ready, eight reservations and two original
-season rules preserved. No real booking, payment or OTA mapping belongs in this
-validation. Booking.com presentation remains a separate unverified capability.
+One existing synthetic room and one explicitly authorized mapped synthetic room
+provided four-adult capacity for September 21–22. Guest search, details, payment,
+confirmation and lookup preserved both room names, individual policies, one
+reference and the EUR 200 total. No online payment or real stay was created.
+PMS displayed both stays. A host date-change preview rejected an overlap with
+the preserved September 20 reservation, without changing the booking.
 
-The draft now integrates main31c544230, including scoped Channex worker/meal
-configuration, inventory-rule reconciliation and the midnight policy correction.
-No runtime flag, shared fixture or customer route was activated by that rebase.
-Continue with isolated mixed-room validation and explicit release acceptance;
-keep VAY-910 In Progress until acceptance is recorded.
+The first confirmed test was canceled through the supported PMS preview/apply
+flow. Guest cancellation correctly rejected its unverifiable legacy policy
+snapshot, although the UI hid the 409 reason. A pending test then passed complete
+selection prefill, special-request quote/save and guest withdrawal. The deployed
+four-to-three guest change exposed missing held-room allocation controls;
+#1806 added those controls with nine unit and ten mocked browser checks,
+production build, required CI and independent/CodeRabbit review passing.
 
-The latest rebase passed the API production build and 137 focused tests covering
-configuration, Channex inventory rules, Booking public parity and guest policy.
-Independent integration review found no regression; the activation production
-diff remains the two explicit mixed-room runtime flags. Fresh PR CI is required
-for this rebased revision.
+The corrected deployed editor now passes four-to-three guest reallocation,
+quote and save: one adult in the new room, two in the original room, both exact
+room/rate identities, EUR 200 and the same reference. PMS lists three guests
+under both rooms. Guest withdrawal passed and instant acceptance was restored.
+The final inventory cleanup proof is recorded with the local smoke ledger.
+These deployed checks cover two room types; the broader combinations, races
+and negative cases retain their separately labeled local/database coverage above.
+
+## Remaining release constraints
+
+The new room's supported retirement-impact reports one active physical unit,
+two future open inventory days and four publication references. Last-unit
+retirement is blocked while the canonical calendar binds that room; no supported
+room-only close/unbind path was found. Preserve the room until that prerequisite
+is resolved. Do not change the whole-property schedule or bypass guards.
+An independently reviewed exact-two-row mapping-disable maintenance template is
+prepared but unexecuted; it requires supported closure/publication prerequisites,
+a fresh exclusive lease, same-image worker pause and zero pending/in-flight work.
+Keep provider records closed/zero and preserve original mappings and reservations.
+
+Request-mode pay-at-property copy still incorrectly promises instant confirmation;
+guest cancellation obscures the safe legacy-policy rejection reason. Both are
+recorded follow-ups. Booking.com mapping remains separately blocked and no OTA
+acceptance is claimed. Preserve scoped Channex restrictions/meals and disabled
+global workers; coordinate any later inventory-worker scope rollout with its owner.
+Keep VAY-910 In Progress until remaining release work and explicit acceptance.
