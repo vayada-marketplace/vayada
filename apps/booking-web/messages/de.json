@@ -429,7 +429,10 @@
     "unavailable": "Diese Unterkunftsauswahl ist nicht mehr verfügbar. Bitte suche erneut.",
     "choose": "Diese Unterkunft wählen",
     "selectedAccommodation": "Ausgewählte Unterkunft",
-    "partyChanged": "Die Gästezahl hat sich geändert. Wählen Sie vor der Preisprüfung eine Unterkunft mit einer Zuteilung für alle Gäste.",
-    "editRequest": "Anfrage bearbeiten"
+    "partyChanged": "Ihre Gästezahl hat sich geändert. Aktualisieren Sie die Gäste pro Zimmer oder wählen Sie eine andere Unterkunft, bevor Sie den Preis prüfen.",
+    "editRequest": "Anfrage bearbeiten",
+    "allocateGuests": "Gäste pro Zimmer",
+    "allocationAdults": "Erwachsene",
+    "allocationChildren": "Kinder"
   }
 }
