@@ -1,3 +1,5 @@
+import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createHash, randomUUID } from "node:crypto";
 import { runChannexBookingJobs } from "../jobs/channexBookings.js";
 import { applyChannexAlterationRevision } from "./channexAlterationRevision.js";
@@ -385,6 +387,65 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           )
         ).rows[0].assigned_count,
       ).toBe(0);
+      // Run the actual booking-wide command in a nested transaction, then restore the fixture.
+      await admin.query("SAVEPOINT before_no_show");
+      const commands = createTargetPmsOperationsCommandRepository({
+        connectionString: TEST_DATABASE_URL!,
+        readRepository: createTargetPmsOperationsReadRepository({
+          connectionString: TEST_DATABASE_URL!,
+          pool: admin,
+        }),
+        pool: {
+          end: async () => {},
+          connect: async () => ({
+            release() {},
+            query: <T extends pg.QueryResultRow>(text: string, values?: readonly unknown[]) =>
+              admin.query<T>(
+                text === "BEGIN"
+                  ? "SAVEPOINT operational_command"
+                  : text === "COMMIT"
+                    ? "RELEASE SAVEPOINT operational_command"
+                    : text === "ROLLBACK"
+                      ? "ROLLBACK TO SAVEPOINT operational_command"
+                      : text,
+                values ? [...values] : undefined,
+              ),
+          }),
+        },
+      });
+      const commandId = randomUUID();
+      expect(
+        await commands.executeNoShowCommand({
+          propertyId,
+          guestBookingId: bookingId,
+          commandId,
+          idempotencyKey: commandId,
+          expectedVersion: "reservation-v5",
+          audit: {
+            actor: {
+              kind: "user",
+              userId: fixture.actorUserId,
+              organizationId: fixture.organizationId,
+            },
+            requestId: commandId,
+            reason: "Synthetic alteration regression",
+            requestedAt: ACCEPTED_AT.toISOString(),
+          },
+        }),
+      ).toMatchObject({ ok: true });
+      expect(
+        (
+          await admin.query(
+            "SELECT position,assignment_payload->>'operationalStatus' AS status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+            [bookingId],
+          )
+        ).rows,
+      ).toEqual([
+        { position: 1, status: "no_show" },
+        { position: 2, status: null },
+        { position: 3, status: null },
+      ]);
+      await admin.query("ROLLBACK TO SAVEPOINT before_no_show");
       // Unrelated canceled slots cannot be revived by a count increase.
       await admin.query(
         "UPDATE pms.operational_booking_assignments SET assignment_status='canceled' WHERE guest_booking_id=$1 AND position=3",

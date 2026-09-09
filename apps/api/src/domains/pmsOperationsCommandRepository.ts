@@ -7416,6 +7416,8 @@ async function findAssignmentsForOperationalCommand(
       AND booking.property_id = assignment.property_id
      WHERE assignment.property_id = $1::uuid
        AND assignment.guest_booking_id = $2::uuid
+       AND NOT (assignment.assignment_status = 'released'
+         AND assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
        AND (
          ($3::uuid IS NOT NULL AND assignment.id = $3::uuid)
          OR ($3::uuid IS NULL)
