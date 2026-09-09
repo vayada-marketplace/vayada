@@ -605,7 +605,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
-  if (durableCommandsMutating && !workerEnabled) {
+  // A validated isolated staging scope may retain queued commands while its worker is paused.
+  if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   }
   if (capabilityModes.bookingSync === "mutating" && bookingMutationOwner !== "target") {
