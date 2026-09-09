@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -272,7 +273,14 @@ async function applyCommand(
       result: failure({ code: "calendar_revision_conflict", currentRevision }),
     };
   }
-  const factsBeforeUnitLocks = await readRoomFacts(roomEvidence, command.propertyId);
+  const operatingIds = new Set(
+    (await readPmsRoomOperatingEligibility(client, command.propertyId))
+      .filter((room) => room.state === "operating")
+      .map((room) => room.roomTypeId),
+  );
+  const factsBeforeUnitLocks = (await readRoomFacts(roomEvidence, command.propertyId)).filter(
+    (room) => operatingIds.has(room.roomTypeId),
+  );
   const activeIdsBeforeUnitLocks = factsBeforeUnitLocks
     .filter(({ lifecycle }) => lifecycle === "active")
     .map(({ roomTypeId }) => roomTypeId);
@@ -284,7 +292,9 @@ async function applyCommand(
     await lockPmsPhysicalRoomUnitMutationScope(client, command.propertyId, roomTypeId);
   }
   const facts = await readRoomFacts(roomEvidence, command.propertyId);
-  const activeFacts = facts.filter(({ lifecycle }) => lifecycle === "active");
+  const activeFacts = facts.filter(
+    ({ lifecycle, roomTypeId }) => lifecycle === "active" && operatingIds.has(roomTypeId),
+  );
   if (activeFacts.length === 0) return { result: failure({ code: "active_room_type_set_empty" }) };
   const activeIds = activeFacts.map(({ roomTypeId }) => roomTypeId);
   if (!sameStrings(activeIds, commandIds)) {
