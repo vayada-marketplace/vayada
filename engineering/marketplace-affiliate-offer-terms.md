@@ -61,3 +61,16 @@ authorize the actor on every attempt, check the expected current revision under 
 offer lock, and atomically record idempotency and audit evidence. An accepted terms
 version will bind the verified draft to a program and effective time; it cannot
 reinterpret an old draft as approval. This schema does not implement those commands.
+
+## Draft save operation (third slice)
+
+The application operation accepts a freshly resolved trusted `RequestContext` on
+every call, including retries. Existing Marketplace profile permission, active
+hotel-profile entitlement and both profile/offer owner or operator links are required.
+An offer row lock serializes saves; the supplied expected revision must match the
+latest draft. The draft's author/request/time are its immutable audit evidence.
+The draft and completed `platform.idempotency_keys` response commit together. Keys
+include offer scope; a changed actor, organization, revision or payload conflicts.
+Retained completed keys replay the original draft even after later revisions.
+No HTTP route or publication is wired in this slice; callers must never construct
+the context from request-body identity fields or reuse a cached context across requests.
