@@ -41,7 +41,9 @@ export async function validateInventoryRules(
     JOIN pms.channel_connections connection ON connection.id = mapping.connection_id
       AND connection.property_id = mapping.property_id AND connection.provider = 'channex'
     JOIN pms.room_types room ON room.id = mapping.room_type_id AND room.property_id = mapping.property_id
-    WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active`,
+    WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active
+      AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+        WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)`,
     [propertyId],
   );
   if (
