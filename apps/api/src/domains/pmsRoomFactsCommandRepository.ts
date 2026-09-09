@@ -121,6 +121,7 @@ const MANAGE_PERMISSION = "pms.operations.manage";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const EXPECTED_INBOUND_FOREIGN_KEYS = new Set([
+  "pms.room_type_closures:room_type_closures_room_type_id_property_id_fkey:pms.room_types",
   "pms.rooms:fk_pms_rooms_room_type_property:pms.room_types",
   "pms.rate_plans:fk_pms_rate_plans_room_type_property:pms.room_types",
   "pms.rate_rules:fk_pms_rate_rules_room_type_property:pms.room_types",
@@ -976,6 +977,7 @@ async function inspectDeleteReferences(
        pms.recurring_pricing_source_room_values,
        pms.room_blocks,
        pms.room_type_media,
+       pms.room_type_closures,
        pms.rooms,
        platform.jobs,
        platform.outbox_events
@@ -1107,6 +1109,9 @@ async function inspectDeleteReferences(
           WHERE mapping.property_id = $1::uuid AND mapping.room_type_id = $2::uuid)
        )::bigint AS "channelReferenceCount",
        (
+         (SELECT count(*) FROM pms.room_type_closures closure
+          WHERE closure.property_id=$1::uuid AND closure.room_type_id=$2::uuid)
+         +
          (SELECT count(*)
           FROM pms.room_types room_type
           WHERE room_type.property_id = $1::uuid
