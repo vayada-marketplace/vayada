@@ -26,6 +26,7 @@ type PgProviderWebhookStoreConfig = {
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">;
   stripePaymentProvider?: Pick<StripeBookingPaymentProvider, "retrievePaymentIntent">;
 };
+class AlterationBindingUnavailable extends Error {}
 
 export function createPgProviderWebhookStore(
   config: PgProviderWebhookStoreConfig,
@@ -292,6 +293,8 @@ export async function promoteReceipt(
     };
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof AlterationBindingUnavailable)
+      return { status: "observed", receiptId: input.receiptId, jobIds: [] };
     throw error;
   } finally {
     client.release();
@@ -654,6 +657,25 @@ async function insertOrFindJob(
   domainEventId: string,
 ): Promise<string> {
   const scope = promotionScope(input);
+  const alteration =
+    input.provider === "channex" && input.normalizedPreview.jobType === "channex.scan-alterations";
+  let alterationBinding: { connectionId: string; bindingGeneration: string } | undefined;
+  if (alteration) {
+    if (!scope.propertyId) throw new AlterationBindingUnavailable();
+    const result = await client.query<{ connectionId: string; bindingGeneration: string }>(
+      `SELECT connection.id AS "connectionId",connection.binding_generation AS "bindingGeneration"
+       FROM pms.channel_connections connection
+       JOIN pms.channel_binding_claims claim ON claim.property_id=connection.property_id
+         AND claim.provider='channex' AND claim.external_property_id=connection.external_property_id
+         AND claim.claim_state='active'
+       WHERE connection.property_id=$1 AND connection.external_property_id=$2
+         AND connection.provider='channex' AND connection.connection_status='connected'
+       FOR SHARE OF connection,claim`,
+      [scope.propertyId, input.normalizedPreview.payload["providerPropertyId"]],
+    );
+    if (result.rows.length !== 1) throw new AlterationBindingUnavailable();
+    alterationBinding = result.rows[0]!;
+  }
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO platform.jobs
        (
@@ -688,12 +710,14 @@ async function insertOrFindJob(
       hashForKey(input.normalizedPreview.jobKey),
       JSON.stringify({
         ...domainEventPayload(input),
+        ...alterationBinding,
         receiptId: input.receiptId,
         receiptKey: input.receiptKey,
       }),
       JSON.stringify({
         provider: input.provider,
         source: "target_provider_webhook_intake",
+        ...(alteration ? { page: 1 } : {}),
         ...(scope.propertyId ? { propertyId: scope.propertyId } : {}),
       }),
     ],
@@ -723,7 +747,9 @@ function promotionScope(
 } {
   const propertyId = input.normalizedPreview.payload["propertyId"];
   return input.provider === "channex" &&
-    input.normalizedPreview.jobType === "channex.ingest-message" &&
+    ["channex.ingest-message", "channex.scan-alterations"].includes(
+      input.normalizedPreview.jobType,
+    ) &&
     input.normalizedPreview.payload["propertyOwnerResolved"] === true &&
     typeof propertyId === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(propertyId)

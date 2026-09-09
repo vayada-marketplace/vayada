@@ -9,6 +9,8 @@ import {
 import { decideChannexAlteration } from "./channexAlterationDecisions.js";
 import { runChannexAlterationReadback } from "../jobs/channexAlterations.js";
 import { presentChannexAlteration } from "./channexAlterationPresentation.js";
+import { buildApp } from "../app.js";
+import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import {
   enqueueChannexAlterationScan,
   runChannexAlterationIntake,
@@ -120,12 +122,94 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     correlationId: "alteration-decision-test",
   });
   async function clearScanJobs() {
-    await pool.query(
-      `DELETE FROM platform.job_attempts WHERE job_id IN (SELECT id FROM platform.jobs WHERE property_id=$1)`,
-      [property],
-    );
-    await pool.query(`DELETE FROM platform.jobs WHERE property_id=$1`, [property]);
+    const cleanup = await pool.connect();
+    try {
+      await cleanup.query("BEGIN");
+      // Only fixture teardown bypasses append-only audit deletion guards.
+      await cleanup.query("SET LOCAL session_replication_role=replica");
+      await cleanup.query(
+        `DELETE FROM platform.job_attempts WHERE job_id IN (SELECT id FROM platform.jobs WHERE property_id=$1)`,
+        [property],
+      );
+      await cleanup.query(`DELETE FROM platform.jobs WHERE property_id=$1`, [property]);
+      await cleanup.query(`DELETE FROM platform.external_webhook_events WHERE property_id=$1`, [
+        property,
+      ]);
+      await cleanup.query(`DELETE FROM platform.domain_events WHERE property_id=$1`, [property]);
+      await cleanup.query(
+        `DELETE FROM platform.idempotency_keys WHERE idempotency_metadata->>'receiptKey' LIKE $1`,
+        [`webhook:channex:alteration_request:${externalProperty}:%`],
+      );
+      await cleanup.query("COMMIT");
+    } catch (error) {
+      await cleanup.query("ROLLBACK");
+      throw error;
+    } finally {
+      cleanup.release();
+    }
   }
+  it("routes an authenticated alteration notification through real receipts, jobs and request intake", async () => {
+    const store = createPgProviderWebhookStore({ connectionString: url! });
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { channex: "synthetic-webhook-secret" },
+        modes: { channex: "mutating" },
+        channexAlterationPromotionEnabled: true,
+        store,
+      },
+    });
+    try {
+      const request = {
+        method: "POST" as const,
+        url: "/webhooks/channex",
+        headers: { "x-vayada-webhook-token": "synthetic-webhook-secret" },
+        payload: {
+          event: "alteration_request",
+          property_id: externalProperty,
+          payload: { id: "numeric-provider-alteration-id", guest_name: "Private Test Guest" },
+        },
+      };
+      expect((await app.inject(request)).json()).toMatchObject({ status: "promoted" });
+      expect((await app.inject(request)).json()).toMatchObject({ status: "duplicate" });
+      const jobs = (
+        await pool.query(
+          `SELECT payload,job_metadata,tenant_scope FROM platform.jobs WHERE property_id=$1`,
+          [property],
+        )
+      ).rows;
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({
+        tenant_scope: "property",
+        payload: {
+          propertyId: property,
+          providerPropertyId: externalProperty,
+          connectionId: connection,
+          bindingGeneration: generation,
+        },
+        job_metadata: { page: 1 },
+      });
+      expect(JSON.stringify(jobs)).not.toContain("Private Test Guest");
+      const receipts = (
+        await pool.query(
+          `SELECT raw_payload FROM platform.external_webhook_events WHERE property_id=$1`,
+          [property],
+        )
+      ).rows;
+      expect(JSON.stringify(receipts)).not.toContain("Private Test Guest");
+      expect(await runChannexAlterationIntake(scanPorts())).toMatchObject({ processed: 1 });
+      expect(
+        (
+          await pool.query(
+            `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+            [booking],
+          )
+        ).rows,
+      ).toHaveLength(1);
+    } finally {
+      await app.close();
+      await store.close?.();
+    }
+  });
   function scanPorts() {
     return {
       pool,
@@ -137,6 +221,55 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       },
     };
   }
+  it.each(["degraded", "disconnected"])(
+    "keeps %s binding notifications observed without a scan",
+    async (status) => {
+      const store = createPgProviderWebhookStore({ connectionString: url! });
+      const app = buildApp({
+        logger: false,
+        providerWebhooks: {
+          secrets: { channex: "synthetic-webhook-secret" },
+          modes: { channex: "mutating" },
+          channexAlterationPromotionEnabled: true,
+          store,
+        },
+      });
+      try {
+        await pool.query(`UPDATE pms.channel_connections SET connection_status=$2 WHERE id=$1`, [
+          connection,
+          status,
+        ]);
+        const response = await app.inject({
+          method: "POST",
+          url: "/webhooks/channex",
+          headers: { "x-vayada-webhook-token": "synthetic-webhook-secret" },
+          payload: {
+            event: "alteration_request",
+            property_id: externalProperty,
+            payload: { id: "synthetic" },
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({ status: "observed", jobIds: [] });
+        expect(await scanRow()).toBeUndefined();
+        expect(
+          (
+            await pool.query(
+              `SELECT delivery_status FROM platform.external_webhook_events WHERE property_id=$1`,
+              [property],
+            )
+          ).rows,
+        ).toEqual([{ delivery_status: "observed" }]);
+      } finally {
+        await pool.query(
+          `UPDATE pms.channel_connections SET connection_status='connected' WHERE id=$1`,
+          [connection],
+        );
+        await app.close();
+        await store.close?.();
+      }
+    },
+  );
   async function scanRow() {
     return (
       await pool.query(

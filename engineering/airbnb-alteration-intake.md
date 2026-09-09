@@ -143,3 +143,11 @@ The scan must validate ownership and binding before provider reads and commit.
 Periodic full rescans are required at activation because offset pagination can
 shift while Airbnb creates requests. Neither webhook triggering nor scheduling
 is activated until the complete booking-revision workflow is ready.
+
+The existing authenticated webhook route has an explicit, default-off alteration
+promotion gate. It minimizes retained notification content, uses a versioned
+property-scoped scan receipt identity (separate from older unsupported receipts),
+and promotes through the existing receipt/domain-event/job transaction. That
+transaction captures the connected binding generation under lock; the browser or
+notification cannot supply it. Unresolved or inconsistent ownership stays observed.
+Server runtime does not enable the gate or start either alteration worker yet.
