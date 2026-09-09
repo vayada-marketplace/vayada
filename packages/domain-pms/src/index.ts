@@ -415,3 +415,8 @@ export type RoomInventoryReadPort = {
 export * from "./roomAssignmentOptimization.js";
 
 export * from "./physicalRoomManagement.js";
+
+export type {
+  PmsRoomOperatingEligibility,
+  PmsRoomOperatingEligibilityReadPort,
+} from "./roomOperatingEligibility.js";

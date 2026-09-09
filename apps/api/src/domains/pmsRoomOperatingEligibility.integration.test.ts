@@ -1,0 +1,196 @@
+import { randomUUID } from "node:crypto";
+import pg from "pg";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
+
+const url = process.env["TEST_DATABASE_URL"];
+describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
+  const db = new pg.Client({ connectionString: url });
+  let propertyId: string, roomTypeId: string, actorId: string;
+  beforeAll(async () => {
+    if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname))
+      throw new Error("Test database required");
+    await db.connect();
+  });
+  afterAll(async () => {
+    await db.end();
+  });
+  beforeEach(async () => {
+    propertyId = randomUUID();
+    roomTypeId = randomUUID();
+    actorId = randomUUID();
+    await db.query(
+      "INSERT INTO identity.users (id,email,name,status) VALUES ($1,$2,'Closure test','active')",
+      [actorId, `${actorId}@example.test`],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.properties (id,public_id,display_name) VALUES ($1::uuid,$1::text,'Closure test')",
+      [propertyId],
+    );
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Closure test',true)",
+      [roomTypeId, propertyId],
+    );
+  });
+  const close = (
+    client: pg.Client,
+    commandId = randomUUID(),
+    property = propertyId,
+    room = roomTypeId,
+  ) =>
+    client.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+     VALUES ($1,$2,$3,$4,1,1,7,8,'2026-09-09','2026-09-09T01:00:00Z',$5)`,
+      [property, room, commandId, "a".repeat(64), actorId],
+    );
+
+  it("keeps canonical facts active while excluding a closing room, retaining its receipt after retirement", async () => {
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+    ]);
+    const commandId = randomUUID();
+    await close(db, commandId);
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      {
+        propertyId,
+        roomTypeId,
+        state: "closing",
+        closureCommandId: commandId,
+        cutoffDate: "2026-09-09",
+      },
+    ]);
+    expect(
+      (await db.query("SELECT active FROM pms.room_types WHERE id=$1", [roomTypeId])).rows,
+    ).toEqual([{ active: true }]);
+    await db.query("UPDATE pms.room_types SET active=false WHERE id=$1", [roomTypeId]);
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      {
+        propertyId,
+        roomTypeId,
+        state: "inactive",
+        closureCommandId: commandId,
+        cutoffDate: "2026-09-09",
+      },
+    ]);
+  });
+
+  it("enforces property ownership in storage and never returns another property's rooms", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties (id,public_id,display_name) VALUES ($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    await expect(close(db, randomUUID(), otherProperty)).rejects.toMatchObject({ code: "23503" });
+    expect(await readPmsRoomOperatingEligibility(db, otherProperty)).toEqual([]);
+    expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("operating");
+  });
+
+  it("rejects receipt rewrites and reusing a command for a different room", async () => {
+    const commandId = randomUUID();
+    await close(db, commandId);
+    await expect(
+      db.query("UPDATE pms.room_type_closures SET cutoff_date='2026-09-10' WHERE property_id=$1", [
+        propertyId,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      db.query("DELETE FROM pms.room_type_closures WHERE property_id=$1", [propertyId]),
+    ).rejects.toMatchObject({ code: "23514" });
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await expect(close(db, commandId, propertyId, otherRoom)).rejects.toMatchObject({
+      code: "23505",
+    });
+  });
+
+  it("shares the caller's transaction and rolls eligibility back with an aborted closure", async () => {
+    await db.query("BEGIN");
+    try {
+      await close(db);
+      expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("closing");
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("operating");
+  });
+
+  it("rejects invalid receipt evidence and preserves an unrelated operating room", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await close(db);
+    expect(
+      (await readPmsRoomOperatingEligibility(db, propertyId)).find(
+        (row) => row.roomTypeId === otherRoom,
+      ),
+    ).toMatchObject({ state: "operating", closureCommandId: null });
+    for (const [column, value] of [
+      ["request_fingerprint", "invalid"],
+      ["expected_room_facts_revision", "0"],
+      ["expected_room_units_revision", "0"],
+      ["previous_calendar_revision", "0"],
+      ["closed_calendar_revision", "10"],
+    ]) {
+      // Column names and values are fixed test cases, never caller input.
+      await expect(
+        db.query(
+          `INSERT INTO pms.room_type_closures
+        SELECT property_id,$1::uuid,$2::uuid,
+          ${column === "request_fingerprint" ? "'invalid'" : "request_fingerprint"},
+          ${column === "expected_room_facts_revision" ? value : "expected_room_facts_revision"},
+          ${column === "expected_room_units_revision" ? value : "expected_room_units_revision"},
+          ${column === "previous_calendar_revision" ? value : "previous_calendar_revision"},
+          ${column === "closed_calendar_revision" ? value : "closed_calendar_revision"},
+          cutoff_date,accepted_at,actor_user_id
+        FROM pms.room_type_closures WHERE property_id=$3`,
+          [otherRoom, randomUUID(), propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+
+  it("serializes competing closure receipts to one winner", async () => {
+    const competitor = new pg.Client({ connectionString: url });
+    await competitor.connect();
+    const winningCommand = randomUUID();
+    try {
+      await db.query("BEGIN");
+      await close(db, winningCommand);
+      const competitorPid = competitor.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      const loser = close(competitor).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const pid = (await competitorPid).rows[0]!.pid;
+      const deadline = Date.now() + 3_000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const waits = await db.query("SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked", [
+          pid,
+        ]);
+        if (waits.rows[0]?.blocked) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await db.query("COMMIT");
+      expect(await loser).toMatchObject({ code: "23505" });
+      expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.closureCommandId).toBe(
+        winningCommand,
+      );
+    } finally {
+      await db.query("ROLLBACK");
+      await competitor.end();
+    }
+  });
+});
