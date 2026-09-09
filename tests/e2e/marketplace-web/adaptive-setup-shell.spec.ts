@@ -1,3 +1,5 @@
+import { mockAdaptiveSetupOwnerReads } from "../support/adaptiveSetupOwnerReads";
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
   createAdaptiveHotelSetupStatusMock,
   mockHotelSetupPrerequisites,
@@ -339,7 +341,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     await expect(page).toHaveURL(originUrl);
   });
 
-  test("Exit setup is keyboard accessible and preserves a Marketplace return target", async ({
+  test("Exit setup is keyboard accessible and hands a Marketplace entrant to incomplete PMS setup", async ({
     page,
     baseURL,
   }) => {
@@ -354,6 +356,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
       }),
     );
     const returnTo = "/marketplace?view=creators";
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
 
     await page.goto(setupUrl(baseURL, { returnTo }));
     await expect(
@@ -368,18 +371,20 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     await expect(exit).toBeFocused();
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/marketplace\?view=creators$/);
+    await expect(page).toHaveURL(destination);
   });
 
   for (const target of [
     {
       product: "booking" as const,
-      origin: "http://admin.booking.localhost:3003",
       label: "Booking Admin",
     },
-    { product: "pms" as const, origin: "http://pms.localhost:3004", label: "PMS" },
+    { product: "pms" as const, label: "PMS" },
   ]) {
-    test(`Exit setup preserves the ${target.label} return route`, async ({ page, baseURL }) => {
+    test(`Exit setup hands a ${target.label} entrant to incomplete PMS setup`, async ({
+      page,
+      baseURL,
+    }) => {
       await primeBrowserState(page);
       await mockAuthSession(page);
       await mockPropertySetupRoute(
@@ -390,9 +395,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
           resumeStepId: "booking_design",
         }),
       );
-      await page.route(`${target.origin}/**`, async (route) => {
-        await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html>" });
-      });
+      const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
 
       await page.goto(
         setupUrl(baseURL, {
@@ -406,9 +409,31 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
 
       await page.getByRole("button", { name: "Exit setup", exact: true }).click();
 
-      await expect(page).toHaveURL(`${target.origin}/dashboard?from=setup`);
+      await expect(page).toHaveURL(destination);
     });
   }
+
+  test("Exit setup preserves the PMS calendar recovery destination", async ({ page, baseURL }) => {
+    await primeBrowserState(page);
+    await mockAuthSession(page);
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["hotel_operations"],
+        resumeStepId: "calendar",
+      }),
+    );
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId, "/settings#calendar");
+    const url = new URL(
+      setupUrl(baseURL, { returnProduct: "pms", returnTo: "/settings#calendar" }),
+    );
+    url.searchParams.set("recovery", "pms-calendar");
+    await page.goto(url.toString());
+    await expect(page.getByRole("heading", { name: "Open your calendar", level: 1 })).toBeVisible();
+    await page.getByRole("button", { name: "Exit setup", exact: true }).click();
+    await expect(page).toHaveURL(destination);
+  });
 
   test("shows an accessible Retry action and recovers after an initial 503", async ({
     page,
@@ -421,7 +446,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
       createPropertySetupRouteMock({
         propertyId,
         selectedTracks: ["hotel_operations"],
-        resumeStepId: "rooms",
+        resumeStepId: "review",
       }),
       { failuresBeforeSuccess: 1, failureDetail: "Setup is temporarily unavailable." },
     );
@@ -438,10 +463,8 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
     const assertHealthyAfterRecovery = watchPageHealth(page, testInfo);
     await page.keyboard.press("Enter");
 
-    await expect(
-      page.getByRole("heading", { name: "Add your room types", level: 1 }),
-    ).toBeVisible();
-    await expect(page.getByText("Step 3 of 8")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Review and launch", level: 1 })).toBeVisible();
+    await expect(page.getByText("Step 8 of 8")).toBeVisible();
     expect(routeMock.requestCount).toBe(2);
     await assertHealthyAfterRecovery();
   });
@@ -530,6 +553,7 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
 });
 
 async function primeBrowserState(page: Page) {
+  await mockAdaptiveSetupOwnerReads(page);
   await mockHotelSetupPrerequisites(
     page,
     createAdaptiveHotelSetupStatusMock({
@@ -627,9 +651,14 @@ function watchForbiddenSetupCalls(page: Page) {
 
 function isForbiddenSetupCall(request: Request): boolean {
   const pathname = new URL(request.url()).pathname;
+  if (request.method() === "OPTIONS") return false;
+  const writesOwner = request.method() !== "GET";
   return (
     /^\/api\/hotel-setup\/(?:tracks|property-types|handoffs)(?:\/|$)/.test(pathname) ||
-    /^\/api\/hotel-setup\/properties\/[^/]+\/(?:profile|public-profile)(?:\/|$)/.test(pathname) ||
-    /^\/api\/(?:booking|finance|marketplace|pms|distribution)\//.test(pathname)
+    (writesOwner &&
+      /^\/api\/hotel-setup\/properties\/[^/]+\/(?:profile|public-profile)(?:\/|$)/.test(
+        pathname,
+      )) ||
+    (writesOwner && /^\/api\/(?:booking|finance|marketplace|pms|distribution)\//.test(pathname))
   );
 }

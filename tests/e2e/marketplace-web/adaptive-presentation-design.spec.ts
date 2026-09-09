@@ -1,3 +1,4 @@
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
   createAdaptiveHotelSetupStatusMock,
   mockHotelSetupPrerequisites,
@@ -123,19 +124,7 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
     await primeBrowserState(page);
     await mockAuthSession(page);
     const api = await mockAdaptiveApis(page);
-    const destination = new URL("/handoff", baseURL).toString() + "#code=" + "a".repeat(32);
-    await page.route("**/auth/handoff/create", async (route) => {
-      expect(route.request().postDataJSON()).toMatchObject({
-        sourceSurface: "marketplace-web",
-        targetSurface: "pms-web",
-        routingHints: { propertyId },
-        targetPath: `/dashboard?setup=incomplete&propertyId=${propertyId}`,
-      });
-      await route.fulfill({ status: 200, json: { destination } });
-    });
-    await page.route("**/handoff", (route) =>
-      route.fulfill({ status: 200, contentType: "text/html", body: "<h1>PMS handoff</h1>" }),
-    );
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
     api.failNextDraft = "network";
 
     await page.goto(setupUrl(baseURL));
