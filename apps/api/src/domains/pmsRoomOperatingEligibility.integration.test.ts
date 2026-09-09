@@ -1,3 +1,8 @@
+import { createPmsMandatoryChargePricingSourceSnapshot } from "@vayada/domain-pms";
+import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
+import { createPgPmsRecurringPricingReadModel } from "./pmsRecurringPricingReadModel.js";
+import { createPgPropertySetupPmsOwnerRepository } from "./propertySetupPmsOwnerRepository.js";
+import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -203,6 +208,95 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
         { room: roomTypeId, day: "2026-09-09", status: "closed", available_count: 0 },
       ]),
     );
+  });
+
+  it("excludes closing-room pricing from publication sources but retains the canonical plan", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      "INSERT INTO pms.property_pricing_settings (property_id,currency) VALUES ($1,'EUR')",
+      [propertyId],
+    );
+    for (const room of [roomTypeId, otherRoom])
+      await db.query(
+        `INSERT INTO pms.rate_plans
+      (property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,pricing_contract_version,
+       flexible_rate_plan_revision,source_room_facts_revision,source_pricing_currency_revision,cancellation_policy_snapshot)
+      VALUES ($1,$2::uuid,$2::text,'Flexible','flexible',100,'EUR','pms-pricing.v1',1,1,1,
+        '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":7,"afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}')`,
+        [propertyId, room],
+      );
+    await db.query(
+      `UPDATE pms.room_types SET room_facts_revision=1,
+      description='Test room',category='suite',occupancy_limits='{"total":2,"adults":2,"children":0}',
+      room_attributes='{"beds":[{"type":"queen","quantity":1}],"bedrooms":1,"bathrooms":1,"bathroomType":"private","size":{"value":30,"unit":"sqm"}}'
+      WHERE property_id=$1`,
+      [propertyId],
+    );
+    const organizationId = randomUUID();
+    await db.query(
+      `INSERT INTO identity.organizations (id,kind,name,slug,status)
+      VALUES ($1::uuid,'hotel_group','Closure test',$1::text,'active')`,
+      [organizationId],
+    );
+    await db.query(
+      `INSERT INTO identity.organization_resource_links
+      (organization_id,product,resource_type,resource_id,relationship,status)
+      VALUES ($1,'pms','pms_property',$2,'owner','active')`,
+      [organizationId, propertyId],
+    );
+    await db.query(
+      `INSERT INTO identity.product_entitlements
+      (organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id)
+      VALUES ($1,'pms','property-management','active','pms','pms_property',$2)`,
+      [organizationId, propertyId],
+    );
+    const setup = createPgPropertySetupPmsOwnerRepository({ connectionString: url! });
+    const recurring = createPgPmsRecurringPricingReadModel({ connectionString: url! });
+    const pricing = createPgPmsPricingReadModel({ connectionString: url! });
+    try {
+      expect((await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(
+        2,
+      );
+      expect((await setup.getRoomOwnerSnapshot({ organizationId, propertyId })).rooms).toHaveLength(
+        2,
+      );
+      const original = await pricing.getFlexibleRatePlan(propertyId, roomTypeId);
+      await close(db);
+      expect(
+        (await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans.map(
+          (plan) => plan.roomTypeId,
+        ),
+      ).toEqual([otherRoom]);
+      expect(await pricing.getFlexibleRatePlan(propertyId, roomTypeId)).toEqual(original);
+      const roomSnapshot = await setup.getRoomOwnerSnapshot({ organizationId, propertyId });
+      expect(roomSnapshot.rooms.map((room) => room.roomTypeId)).toEqual([otherRoom]);
+      const publicationSource = createPmsMandatoryChargePricingSourceSnapshot({
+        rooms: roomSnapshot.rooms.map((room) => ({
+          roomTypeId: room.roomTypeId,
+          roomFactsRevision: room.roomFactsRevision,
+          occupancy: room.facts.occupancy,
+        })),
+        pricing: (await pricing.getPricingSourceSnapshot(propertyId))!,
+        recurringPricing: (await recurring.getRecurringPricingBookingEvidence(propertyId))!,
+      });
+      const confirmationSource = await loadPmsMandatoryChargePricingSourceSnapshot(
+        db,
+        propertyId,
+        new Date(),
+      );
+      expect(confirmationSource?.serializedPayload).toBe(publicationSource.serializedPayload);
+      expect(
+        (await db.query("SELECT active FROM pms.room_types WHERE id=$1", [roomTypeId])).rows,
+      ).toEqual([{ active: true }]);
+    } finally {
+      await pricing.close();
+      await recurring.close();
+      await setup.close();
+    }
   });
 
   it("serializes competing closure receipts to one winner", async () => {
