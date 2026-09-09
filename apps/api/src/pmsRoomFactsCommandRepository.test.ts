@@ -543,6 +543,10 @@ class RecordingClient implements PmsRoomFactsCommandClient {
       );
     }
     if (sql.includes("pg_advisory_xact_lock")) return result<T>();
+    if (sql.includes("LEFT JOIN pms.room_type_closures"))
+      return result<T>([
+        { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+      ]);
     if (sql.includes("FROM platform.idempotency_keys") && sql.includes("FOR UPDATE")) {
       const idempotency = this.options.idempotencyReads
         ? this.options.idempotencyReads[this.idempotencyReadIndex++]
