@@ -2,6 +2,16 @@
 
 VAY-1547. Accepted direction: 2026-09-07. Implementation: VAY-1548 → VAY-1549 → VAY-1550.
 
+## Replacement pricing scope — 2026-09-09
+
+The approved delete-first rebuild supersedes the older TypeScript calculator
+compatibility and per-property migration requirements below. Preserve provider
+identities and mappings; keep pricing-dependent provisioning unavailable until
+replacement contracts, evaluation and export are integrated. Independent discovery
+and native modifier display can proceed. The historical evidence below does not
+prove replacement launch readiness. Current integration boundaries and launch
+checks are in [the replacement launch checklist](channex-shared-pricing-migration.md).
+
 ## Decision
 
 New connections use shared canonical Channex base rates and Channex-native
