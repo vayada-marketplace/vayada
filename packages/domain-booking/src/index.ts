@@ -173,6 +173,7 @@ export type BookingReservationReadModel = {
   bookingReference: string;
   roomTypeId: string;
   roomName: string;
+  roomLines?: Array<{ roomTypeId: string; roomName: string; roomCount: number }>;
   roomMaxOccupancy: number;
   guestFirstName: string;
   guestLastName: string;
@@ -656,3 +657,5 @@ function isRetryableFailure(error: PmsReservationError): boolean {
 
 export * from "./conversionFunnel.js";
 export * from "./bookingPromotions.js";
+
+export * from "./roomCombinationSearch.js";

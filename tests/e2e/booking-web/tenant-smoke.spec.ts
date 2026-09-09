@@ -1,9 +1,42 @@
 import { expect, test, type Page } from "@playwright/test";
 import publicBookabilityCases from "../../../engineering/fixtures/public-bookability/cases.json";
-import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
+  test("shows canonical breakfast pricing when an older cheaper flexible offer comes first", async ({
+    page,
+  }) => {
+    await mockBookingApis(page);
+    const canonical = {
+      ...publicOffers.quote.offers[0],
+      offerId: "alpine-suite:onb15-flex-canonical",
+      ratePlanId: "canonical",
+      totals: { ...publicOffers.quote.offers[0].totals, roomTotal: 360, grandTotal: 360 },
+    };
+    const legacy = {
+      ...canonical,
+      offerId: "alpine-suite:flex",
+      ratePlanId: "legacy",
+      mealPlan: null,
+      totals: { ...canonical.totals, roomTotal: 300, grandTotal: 300 },
+    };
+    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, (route) =>
+      route.fulfill({
+        json: { ...publicOffers, quote: { ...publicOffers.quote, offers: [legacy, canonical] } },
+      }),
+    );
+    await page.goto("/");
+    const rate = page
+      .locator('[data-rate-type="flexible"]')
+      .filter({ hasText: "Breakfast included" });
+    await expect(rate).toBeVisible();
+    await expect(rate).toContainText("€120");
+    await expect(rate).not.toContainText("€100");
+    await page.getByRole("button", { name: /Select This Rate/i }).click();
+    await expect(page).toHaveURL(/rateType=flexible/);
+  });
+
   for (const width of [1280, 390]) {
     test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
       page,
@@ -36,6 +69,12 @@ test.describe("booking-web tenant smoke", () => {
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
     await expect(page.getByText("Alpine Suite")).toBeVisible();
+    await expect(
+      page.locator("[data-rate-type]").filter({ hasText: "Breakfast included" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-rate-type="flexible"]').filter({ hasText: "Room only" }).first(),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();

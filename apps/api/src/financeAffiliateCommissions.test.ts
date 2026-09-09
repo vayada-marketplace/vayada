@@ -5,26 +5,15 @@ import type {
   RequestContext,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
-import type {
-  FinanceAffiliateCommissionCommand,
-  FinanceAffiliateCommissionRepository,
-  FinanceAffiliateCommissionResult,
-  FinanceAffiliateCommissionView,
-} from "@vayada/domain-finance";
-import type { MarketplaceAffiliateAdminRecord } from "@vayada/domain-marketplace";
 import Fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  registerFinanceAffiliateCommissionRoutes,
-  type FinanceAffiliateCommissionRoutesOptions,
-} from "./routes/financeAffiliateCommissions.js";
+import { registerFinanceAffiliateCommissionRoutes } from "./routes/financeAffiliateCommissions.js";
 
 const propertyId = "12780000-0000-4000-8000-000000000101";
 const otherPropertyId = "12780000-0000-4000-8000-000000000102";
 const actorUserId = "12780000-0000-4000-8000-000000000103";
 const affiliateId = "aff_vay_1278";
-const now = "2026-08-13T21:00:00.000Z";
 
 type AuthOptions = {
   permissions?: PermissionKey[];
@@ -36,103 +25,29 @@ describe("Finance affiliate commission routes", () => {
   const apps: Array<Awaited<ReturnType<typeof testApp>>> = [];
   afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 
-  it("reads property defaults and property-scoped affiliate overrides", async () => {
-    const ports = fakePorts();
-    const app = await testApp(ports);
-    apps.push(app);
-    const property = await injectJson<FinanceAffiliateCommissionView>(app, {
-      method: "GET",
-      url: `/api/finance/properties/${propertyId}/affiliate-commission`,
-      headers: authHeader,
-    });
-    const affiliate = await injectJson<FinanceAffiliateCommissionView>(app, {
-      method: "GET",
-      url: `/api/finance/properties/${propertyId}/affiliates/${affiliateId}/commission`,
-      headers: authHeader,
-    });
-
-    expect(property.statusCode).toBe(200);
-    expect(property.body.defaultPercentageRate).toBe("7.5");
-    expect(affiliate.statusCode).toBe(200);
-    expect(affiliate.body.overridePercentageRate).toBe("12");
-    expect(ports.calls.scope).toEqual([[propertyId, affiliateId]]);
-    expect(ports.calls.get).toEqual([[propertyId], [propertyId, affiliateId]]);
-  });
-
-  it("sends default and nullable override commands with server-owned audit fields", async () => {
-    const ports = fakePorts();
-    const app = await testApp(ports);
-    apps.push(app);
-    await injectJson(app, {
-      method: "PATCH",
-      url: `/api/finance/properties/${propertyId}/affiliate-commission`,
-      headers: authHeader,
-      payload: { commandId: "default-command", idempotencyKey: "default-key", percentageRate: "8" },
-    });
-    await injectJson(app, {
-      method: "PATCH",
-      url: `/api/finance/properties/${propertyId}/affiliates/${affiliateId}/commission`,
-      headers: authHeader,
-      payload: {
-        commandId: "override-command",
-        idempotencyKey: "override-key",
-        percentageRate: null,
-      },
-    });
-
-    expect(ports.calls.set).toEqual([
-      {
-        propertyId,
-        affiliateId: null,
-        commandId: "default-command",
-        idempotencyKey: "default-key",
-        percentageRate: "8",
-        actorUserId,
-        occurredAt: now,
-      },
-      {
-        propertyId,
-        affiliateId,
-        commandId: "override-command",
-        idempotencyKey: "override-key",
-        percentageRate: null,
-        actorUserId,
-        occurredAt: now,
-      },
-    ]);
-  });
-
-  it("maps idempotency conflicts without hiding the response contract", async () => {
-    const app = await testApp(fakePorts({ result: { outcome: "idempotency_conflict" } }));
-    apps.push(app);
-    const response = await injectJson<{ code: string }>(app, {
-      method: "PATCH",
-      url: `/api/finance/properties/${propertyId}/affiliate-commission`,
-      headers: authHeader,
-      payload: { commandId: "command", idempotencyKey: "key", percentageRate: "8" },
-    });
-    expect(response.statusCode).toBe(409);
-    expect(response.body.code).toBe("idempotency_conflict");
-  });
-
-  it.each([
-    { percentageRate: null, code: "invalid_percentage_rate" },
-    { percentageRate: "100.0001", code: "invalid_percentage_rate" },
-    { percentageRate: "10.12345", code: "invalid_percentage_rate" },
-  ])("rejects invalid default rate $percentageRate", async ({ percentageRate, code }) => {
-    const ports = fakePorts();
-    const app = await testApp(ports);
-    apps.push(app);
-    const response = await injectJson<{ code: string }>(app, {
-      method: "PATCH",
-      url: `/api/finance/properties/${propertyId}/affiliate-commission`,
-      headers: authHeader,
-      payload: { commandId: "command", idempotencyKey: "key", percentageRate },
-    });
-    expect(response.statusCode).toBe(422);
-    expect(response.body.code).toBe(code);
-    expect(ports.calls.set).toEqual([]);
-  });
+  it.each(["GET", "PATCH"] as const)(
+    "retires %s on both commission routes without reading or writing rules",
+    async (method) => {
+      const ports = fakePorts();
+      const app = await testApp(ports);
+      apps.push(app);
+      for (const path of ["affiliate-commission", `affiliates/${affiliateId}/commission`]) {
+        const response = await app.inject({
+          method,
+          url: `/api/finance/properties/${propertyId}/${path}`,
+          headers: authHeader,
+          ...(method === "PATCH"
+            ? { payload: { commandId: "retired", idempotencyKey: "retired", percentageRate: "8" } }
+            : {}),
+        });
+        expect(response.statusCode).toBe(410);
+        expect(response.json()).toEqual({ code: "affiliate_commission_configuration_retired" });
+        expect(response.headers["cache-control"]).toBe("no-store");
+      }
+      expect(ports.calls.get).toEqual([]);
+      expect(ports.calls.set).toEqual([]);
+    },
+  );
 
   it.each([
     {
@@ -142,6 +57,22 @@ describe("Finance affiliate commission routes", () => {
       status: 401,
       code: "unauthenticated",
       financeAccess: "missing" as const,
+    },
+    {
+      name: "with invalid authentication",
+      headers: { authorization: "Bearer invalid-token" },
+      auth: {},
+      status: 401,
+      code: "unauthenticated",
+      financeAccess: "missing" as const,
+    },
+    {
+      name: "without a property link",
+      headers: authHeader,
+      auth: { links: [] },
+      status: 403,
+      code: "missing_resource_access",
+      financeAccess: "active" as const,
     },
     {
       name: "without permission",
@@ -179,14 +110,19 @@ describe("Finance affiliate commission routes", () => {
     const ports = fakePorts({ financeAccess });
     const app = await testApp(ports, auth);
     apps.push(app);
-    const response = await injectJson<{ code: string }>(app, {
-      method: "GET",
-      url: `/api/finance/properties/${propertyId}/affiliate-commission`,
-      headers,
-    });
-    expect(response.statusCode).toBe(status);
-    expect(response.body.code).toBe(code);
+    for (const method of ["GET", "PATCH"] as const) {
+      for (const path of ["affiliate-commission", `affiliates/${affiliateId}/commission`]) {
+        const response = await injectJson<{ code: string }>(app, {
+          method,
+          url: `/api/finance/properties/${propertyId}/${path}`,
+          headers,
+        });
+        expect(response.statusCode).toBe(status);
+        expect(response.body.code).toBe(code);
+      }
+    }
     expect(ports.calls.get).toEqual([]);
+    expect(ports.calls.set).toEqual([]);
   });
 
   it("accepts the PMS property-management entitlement", async () => {
@@ -200,7 +136,7 @@ describe("Finance affiliate commission routes", () => {
       url: `/api/finance/properties/${propertyId}/affiliate-commission`,
       headers: authHeader,
     });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(410);
     expect(ports.calls.financeAccess).toEqual([]);
   });
 
@@ -213,73 +149,33 @@ describe("Finance affiliate commission routes", () => {
       url: `/api/finance/properties/${propertyId}/affiliate-commission`,
       headers: authHeader,
     });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(410);
     expect(ports.calls.financeAccess).toEqual([[propertyId, "org-vay-1278"]]);
-  });
-
-  it("returns not found before Finance reads an affiliate from another property", async () => {
-    const ports = fakePorts({ affiliate: null });
-    const app = await testApp(ports);
-    apps.push(app);
-    const response = await injectJson<{ code: string }>(app, {
-      method: "GET",
-      url: `/api/finance/properties/${propertyId}/affiliates/other-affiliate/commission`,
-      headers: authHeader,
-    });
-    expect(response.statusCode).toBe(404);
-    expect(response.body.code).toBe("affiliate_not_found");
-    expect(ports.calls.get).toEqual([]);
   });
 });
 
-type FakePorts = FinanceAffiliateCommissionRoutesOptions & {
-  calls: {
-    get: unknown[];
-    set: FinanceAffiliateCommissionCommand[];
-    scope: unknown[];
-    financeAccess: unknown[];
-  };
-};
-
-function fakePorts(
-  options: {
-    result?: FinanceAffiliateCommissionResult;
-    affiliate?: MarketplaceAffiliateAdminRecord | null;
-    financeAccess?: "active" | "inactive" | "missing";
-  } = {},
-): FakePorts {
-  const calls: FakePorts["calls"] = { get: [], set: [], scope: [], financeAccess: [] };
+function fakePorts(options: { financeAccess?: "active" | "inactive" | "missing" } = {}) {
+  const calls = { get: [] as unknown[], set: [] as unknown[], financeAccess: [] as unknown[] };
   return {
     calls,
     repository: {
-      async getCommission(...input) {
+      // Guards against accidentally restoring access to the retired methods.
+      getCommission: vi.fn((...input: unknown[]) => {
         calls.get.push(input);
-        return commissionView(input[1] ?? null);
-      },
-      async setCommission(command) {
-        calls.set.push(command);
-        return (
-          options.result ?? {
-            outcome: "applied",
-            commandId: command.commandId,
-            commission: commissionView(command.affiliateId),
-          }
-        );
-      },
-      async getBookingFinanceAccess(...input) {
+        throw new Error("retired read");
+      }),
+      setCommission: vi.fn((...input: unknown[]) => {
+        calls.set.push(input);
+        throw new Error("retired write");
+      }),
+      async getBookingFinanceAccess(...input: [string, string]) {
         calls.financeAccess.push(input);
         return options.financeAccess ?? "active";
       },
-    } satisfies FinanceAffiliateCommissionRepository,
-    affiliateScope: {
-      async getAffiliate(...input) {
-        calls.scope.push(input);
-        return options.affiliate === undefined ? affiliateRecord() : options.affiliate;
-      },
     },
-    now: () => new Date(now),
   };
 }
+type FakePorts = ReturnType<typeof fakePorts>;
 
 async function testApp(ports: FakePorts, auth: AuthOptions = {}) {
   const app = Fastify({ logger: false });
@@ -299,35 +195,6 @@ async function testApp(ports: FakePorts, auth: AuthOptions = {}) {
     ...ports,
   });
   return app;
-}
-
-function commissionView(targetAffiliateId: string | null): FinanceAffiliateCommissionView {
-  return {
-    contractVersion: "finance-affiliate-commission.v1",
-    propertyId,
-    affiliateId: targetAffiliateId,
-    defaultPercentageRate: "7.5",
-    overridePercentageRate: targetAffiliateId ? "12" : null,
-    effectivePercentageRate: targetAffiliateId ? "12" : "7.5",
-    updatedAt: now,
-  };
-}
-
-function affiliateRecord(): MarketplaceAffiliateAdminRecord {
-  return {
-    contractVersion: "marketplace-affiliate-admin.v1",
-    affiliateId,
-    propertyId,
-    referralCode: "VAY1278",
-    displayName: "Ada Affiliate",
-    contactEmail: "ada@example.test",
-    socialMedia: null,
-    affiliateType: "creator",
-    lifecycleStatus: "approved",
-    applicationSource: "collaboration",
-    appliedAt: now,
-    updatedAt: now,
-  };
 }
 
 function pmsEntitlement(status: ProductEntitlement["status"] = "active"): ProductEntitlement {

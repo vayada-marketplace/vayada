@@ -159,3 +159,33 @@ test("can remove a retired selection", async ({ page }) => {
   await expect.poll(() => quoted?.addonIds).toEqual([]);
   expect(quoted.addonQuantities).toEqual({});
 });
+
+for (const state of [
+  { status: "pending", canEditRequest: true, visible: true },
+  { status: "pending", canEditRequest: false, visible: false },
+  { status: "confirmed", canEditRequest: true, visible: false },
+  { status: "cancelled", canEditRequest: true, visible: false },
+  { status: "pending", canEditRequest: true, visible: false, confirmationToken: "" },
+  { status: "pending", canEditRequest: true, visible: false, hostResponseDeadline: "2020-01-01T00:00:00Z" },
+]) {
+  test(`My Booking edit entry: ${state.status}, eligible=${state.canEditRequest}, ${JSON.stringify(state)}`, async ({ page }) => {
+    await mockBookingApis(page);
+    await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
+      route.fulfill({ json: { ...booking, confirmationToken: token, ...state } }),
+    );
+    await page.route("**/bookings/*/edit/details", (route) =>
+      route.fulfill({ json: { booking, revision: 0, input } }),
+    );
+    await page.goto("/en/my-booking?reference=VAY-959&email=ada%40example.test");
+    await expect(page.getByText("Booking Found", { exact: true })).toBeVisible();
+    const edit = page.getByRole("link", { name: "Edit Request", exact: true });
+    if (state.visible) {
+      await expect(edit).toBeVisible();
+      await edit.click();
+      await expect(page).toHaveURL(new RegExp(`/booking/VAY-959/edit-request\\?token=${token}$`));
+      await expect(page.getByLabel("Check-in", { exact: true })).toHaveValue(input.checkIn);
+    } else {
+      await expect(edit).toHaveCount(0);
+    }
+  });
+}

@@ -1,3 +1,4 @@
+import { DEFAULT_FLEXIBLE_CANCELLATION_POLICY } from "../domains/pmsDefaultCancellationPolicy.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
   BookingAdditionalGuestCreateCommand,
@@ -5117,6 +5118,20 @@ function roomTypeFlexibleCancellationPolicy(
   const amountPercent = optionalNonNegativeInteger(raw.partialRefundAmountPercent) ?? 50;
   if (windowDays < 1 || windowDays > 365 || amountPercent < 1 || amountPercent > 99) {
     return { error: `${action} partial-refund defaults are invalid.` };
+  }
+  const text = optionalStringField(raw.cancellationPolicy);
+  if (
+    cancellationType === "free" &&
+    tiers.length === 0 &&
+    (text === undefined || text === DEFAULT_FLEXIBLE_CANCELLATION_POLICY.text)
+  ) {
+    return {
+      value: {
+        ...DEFAULT_FLEXIBLE_CANCELLATION_POLICY,
+        partialRefundCancelWindowDays: windowDays,
+        partialRefundAmountPercent: amountPercent,
+      },
+    };
   }
   return {
     value: {

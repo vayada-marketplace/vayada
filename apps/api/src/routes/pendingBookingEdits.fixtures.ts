@@ -2,11 +2,17 @@ import type pg from "pg";
 export const propertyId = "95900000-0000-4000-8000-000000000001";
 export const roomTypeId = "95900000-0000-4000-8000-000000000002";
 export const addonId = "95900000-0000-4000-8000-000000000003";
-export async function seedProperty(admin: pg.Pool): Promise<void> {
+export async function seedProperty(admin: pg.Pool, capacity = 2): Promise<void> {
   await admin.query(
     `INSERT INTO hotel_catalog.properties
          (id, public_id, display_name, profile_status, lifecycle_status)
        VALUES ($1::uuid, 'vay-959-hotel', 'VAY-959 Hotel', 'complete', 'active')`,
+    [propertyId],
+  );
+  await admin.query(
+    `INSERT INTO hotel_catalog.property_contact_channels
+      (property_id, channel_type, value, purpose, is_public, source_system)
+     VALUES ($1, 'email', 'hotel@example.test', 'general', TRUE, 'platform')`,
     [propertyId],
   );
   await admin.query(
@@ -69,24 +75,24 @@ export async function seedProperty(admin: pg.Pool): Promise<void> {
     [roomTypeId, propertyId],
   );
   // prettier-ignore
-  await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; INSERT INTO pms.operating_calendar_revisions (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at) VALUES (gen_random_uuid(),'${propertyId}',1,'pms-operating-calendar.v1',1,'Europe/Athens','year_round',0,1,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now()); INSERT INTO pms.operating_calendar_room_bindings (property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) VALUES ('${propertyId}',1,'${roomTypeId}',1,1,2,2); COMMIT;`);
+  await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; INSERT INTO pms.operating_calendar_revisions (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at) VALUES (gen_random_uuid(),'${propertyId}',1,'pms-operating-calendar.v1',1,'Europe/Athens','year_round',0,1,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now()); INSERT INTO pms.operating_calendar_room_bindings (property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) VALUES ('${propertyId}',1,'${roomTypeId}',1,1,${capacity},${capacity}); COMMIT;`);
   await admin.query(
     `INSERT INTO pms.inventory_days
          (property_id,room_type_id,stay_date,total_count,available_count,calendar_revision,
           inventory_revision,generated_sellable_limit_count,effective_sellable_limit_count,
           generated_source_revision,channel_source_revision,manual_source_revision,block_source_revision,booking_source_revision)
-       SELECT $1::uuid,$2::uuid,stay_date,2,2,1,1,2,2,1,0,0,0,0
+       SELECT $1::uuid,$2::uuid,stay_date,$3,$3,1,1,$3,$3,1,0,0,0,0
        FROM unnest(ARRAY[DATE '2027-02-01', DATE '2027-02-02', DATE '2027-02-03', DATE '2027-02-04']) AS stay_date`,
-    [propertyId, roomTypeId],
+    [propertyId, roomTypeId, capacity],
   );
   await admin.query(
     `INSERT INTO distribution.public_room_offer_snapshots
          (property_id, room_type_id, stay_date, public_offer_key, available_rooms,
           base_price_amount, currency, payment_options, freshness_status)
-       SELECT $1::uuid, $2::uuid, stay_date, 'vay-959-flex', 2,
+       SELECT $1::uuid, $2::uuid, stay_date, 'vay-959-flex', $3,
               100, 'EUR', ARRAY['pay_at_property'], 'fresh'
        FROM unnest(ARRAY[DATE '2027-02-01', DATE '2027-02-02', DATE '2027-02-03', DATE '2027-02-04']) AS stay_date`,
-    [propertyId, roomTypeId],
+    [propertyId, roomTypeId, capacity],
   );
   await admin.query(
     `UPDATE distribution.public_room_offer_snapshots SET rate_summary='{"rateType":"flexible"}'::jsonb WHERE property_id=$1::uuid`,
@@ -183,6 +189,7 @@ export async function cleanup(admin: pg.Pool): Promise<void> {
       "DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id = $1::uuid",
       "DELETE FROM booking.booking_settings WHERE property_id = $1::uuid",
       "DELETE FROM finance.payment_settings WHERE property_id = $1::uuid",
+      "DELETE FROM hotel_catalog.property_contact_channels WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_slugs WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_locations WHERE property_id = $1::uuid",
       "DELETE FROM hotel_catalog.property_public_profile_read_model WHERE property_id = $1::uuid",

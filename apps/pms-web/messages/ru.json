@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Проверить незаезд…",
+  "checkOut.reviewNoShow": "Проверить незаезд…",
   "layout.header.signOut": "Выйти",
   "layout.header.noProperties": "Нет объектов",
   "layout.header.user": "Пользователь",

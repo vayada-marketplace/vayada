@@ -71,7 +71,41 @@ export interface Hotel {
   instantBook?: boolean;
 }
 
+export type RoomSelectionLine = {
+  roomTypeId: string;
+  publicOfferKey: string;
+  guests: { adults: number; children: number }[];
+};
+export type RoomSelection = {
+  contractVersion: "booking-room-selection.v1";
+  lines: RoomSelectionLine[];
+};
+export type SelectedRoomLine = RoomSelectionLine & {
+  roomName: string;
+  roomCount: number;
+  ratePlanId?: string | null;
+  rateSummary: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  totals: Record<string, string>;
+};
+export interface RoomSelectionSnapshot {
+  roomSelection?: RoomSelection;
+  roomLines?: SelectedRoomLine[];
+}
+export type RoomCombination = {
+  roomSelection: RoomSelection;
+  roomLines: SelectedRoomLine[];
+  expiresAt: string;
+  totalAmount: number;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+};
+
 export interface RoomType {
+  rateMealDescriptions?: { flexible: string | null; nonrefundable: string | null };
+  combination?: RoomCombination;
   id: string;
   name: string;
   category?: string;
@@ -124,7 +158,8 @@ export interface SearchParams {
   rooms: number;
 }
 
-export interface Booking {
+export interface Booking extends RoomSelectionSnapshot {
+  mealDescription?: string | null;
   canEditRequest?: boolean;
   id: string;
   bookingReference: string;

@@ -51,7 +51,7 @@ async def run_migrations():
     from pathlib import Path
 
     pool = await Database.get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id SERIAL PRIMARY KEY,

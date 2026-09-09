@@ -1,3 +1,4 @@
+import { recordChannexAlert } from "../domains/channexOperationalAlerts.js";
 import { createHash } from "node:crypto";
 import type { FinanceStripeConnectProvider } from "@vayada/domain-finance";
 import pg from "pg";
@@ -46,7 +47,7 @@ export function createPgProviderWebhookStore(
            WHERE provider = 'channex' AND external_property_id = $1
              AND connection_status IN ('connected', 'degraded')
          ) ownership
-         ORDER BY property_id LIMIT 2`,
+         ORDER BY "propertyId" LIMIT 2`,
         [externalPropertyId],
       );
       if (result.rows.length > 1) throw new Error("Ambiguous Channex property ownership");
@@ -115,6 +116,7 @@ async function recordReceipt(
 
     const row = inserted.rows[0];
     if (row) {
+      await recordChannexAlert(client, input, row.id);
       await insertOrTouchIdempotencyKey(client, {
         operation: "external_webhook_receipt",
         keyHash: input.receiptKeyHash,
@@ -147,6 +149,7 @@ async function recordReceipt(
           existing.delivery_status as ProviderWebhookReceiptResult["lifecycleStatus"],
       };
     }
+    await recordChannexAlert(client, input, existing.id);
     await insertOrTouchIdempotencyKey(client, {
       operation: "external_webhook_receipt",
       keyHash: input.receiptKeyHash,

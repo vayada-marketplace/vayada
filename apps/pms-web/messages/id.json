@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Tinjau ketidakhadiran…",
+  "checkOut.reviewNoShow": "Tinjau ketidakhadiran…",
   "layout.header.signOut": "Keluar",
   "layout.header.noProperties": "Tidak ada properti",
   "layout.header.user": "Pengguna",

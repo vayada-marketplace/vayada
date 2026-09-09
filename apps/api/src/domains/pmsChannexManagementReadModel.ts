@@ -1,3 +1,4 @@
+import { listChannexAlerts, type ChannexAlert } from "./channexOperationalAlerts.js";
 import {
   CHANNEX_MANAGEMENT_CONTRACT_VERSION,
   type ChannexConnectedChannel,
@@ -36,11 +37,14 @@ export type PmsChannexManagementJobRow = {
 };
 
 export type PmsChannexManagementReadRepository = {
+  getStayRestrictions?(propertyId: string): Promise<unknown[]>;
   getSnapshot(
     propertyId: string,
     capabilityModes: ChannexManagementCapabilityModes,
   ): Promise<ChannexManagementSnapshot>;
   getOperation(propertyId: string, operationId: string): Promise<ChannexManagementOperation | null>;
+  getAlerts?(propertyId: string): Promise<ChannexAlert[]>;
+  acknowledgeAlert?(propertyId: string, alertId: string, userId: string): Promise<boolean>;
   close?(): Promise<void>;
 };
 
@@ -53,6 +57,22 @@ export function createPgPmsChannexManagementReadRepository(config: {
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
 
   return {
+    async getStayRestrictions(propertyId) {
+      return (
+        await pool.query(
+          `SELECT * FROM pms.rate_rules WHERE property_id=$1::uuid ORDER BY room_type_id,starts_on,id`,
+          [propertyId],
+        )
+      ).rows;
+    },
+    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId),
+    async acknowledgeAlert(propertyId, alertId, userId) {
+      const result = await pool.query(
+        `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
+        [propertyId, alertId, userId],
+      );
+      return result.rows.length === 1;
+    },
     async getSnapshot(propertyId, capabilityModes) {
       const [connection, roomMappings, rateMappings, syncRows, activeOperation] = await Promise.all(
         [

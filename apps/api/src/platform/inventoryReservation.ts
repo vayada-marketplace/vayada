@@ -31,6 +31,7 @@ export type DirectBookingInventoryReservationPort = {
     checkOut: string;
     currency: string;
     occurredAt: Date;
+    replacingReservation?: InventoryReservationReceipt;
   }): Promise<PmsInventoryReservationBundle>;
   reserve(input: {
     transaction: InventoryReservationTransaction;
@@ -43,6 +44,8 @@ export type DirectBookingInventoryReservationPort = {
     roomCount: number;
     currency: string;
     occurredAt: Date;
+    /** Original hold released in this transaction by an authorized pending edit. */
+    replacingReservation?: InventoryReservationReceipt;
   }): Promise<InventoryReservationReceipt | null>;
   release(input: {
     transaction: InventoryReservationTransaction;
@@ -51,6 +54,15 @@ export type DirectBookingInventoryReservationPort = {
     occurredAt: Date;
     requireReserved?: boolean;
   }): Promise<void>;
+  /** Verify a complete reserved bundle against the current booking selection and stay. */
+  bundleAvailabilityCredits?(input: {
+    transaction: InventoryReservationTransaction;
+    propertyId: string;
+    reservation: PmsInventoryReservationBundle;
+    lines: readonly { roomTypeId: string; publicOfferKey: string; roomCount: number }[];
+    checkIn: string;
+    checkOut: string;
+  }): Promise<Map<string, { checkIn: string; checkOut: string; roomCount: number }> | null>;
   selectionAvailabilityCredits?(input: {
     transaction: InventoryReservationTransaction;
     propertyId: string;

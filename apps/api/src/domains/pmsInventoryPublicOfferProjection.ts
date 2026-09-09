@@ -210,7 +210,9 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
         WHEN rate_plan.rate_type = 'non_refundable' THEN 'Non-refundable.'
         ELSE profile.policies ->> 'cancellationSummary'
       END AS cancellation_summary,
-      rate_plan.meal_plan,
+      CASE WHEN rate_plan.pricing_contract_version = 'pms-pricing.v1'
+        THEN COALESCE(rate_plan.meal_plan, 'room_only')
+        ELSE rate_plan.meal_plan END AS meal_plan,
       rate_plan.currency,
       rate_plan.active AS rate_plan_active,
       GREATEST(
@@ -247,7 +249,7 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
       WHERE rule.property_id = inventory.property_id
         AND rule.room_type_id = inventory.room_type_id
         AND rule.rate_plan_id = rate_plan.id
-        AND rule.rule_type = 'season'
+        AND rule.rule_type = 'season' AND rule.enabled
         AND inventory.stay_date BETWEEN rule.starts_on AND rule.ends_on
       ORDER BY rule.starts_on DESC, rule.id
       LIMIT 1

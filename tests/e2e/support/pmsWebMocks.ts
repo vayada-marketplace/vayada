@@ -236,6 +236,19 @@ export async function mockPmsWebAuthenticatedSession(
 }
 
 export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
+  await page.route("**/api/pms/properties/*/reservations/*/no-show-report", (route) =>
+    route.fulfill({
+      json: {
+        eligible: false,
+        reason: "Booking.com reporting is disabled in this environment.",
+        localNoShow: false,
+        status: "not_reported",
+        retryable: false,
+        waivedFees: null,
+      },
+    }),
+  );
+
   await page.route("**/api/identity/staff/members", (route) =>
     route.fulfill({
       json: {
@@ -635,6 +648,9 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
   });
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex`, (route) =>
     route.fulfill({ json: pmsWebChannexSnapshot }),
+  );
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex/alerts`, (route) =>
+    route.fulfill({ json: [] }),
   );
   let inboxThread = { ...pmsWebInboxThread };
   let providerActionAccepted = false;

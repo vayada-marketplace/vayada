@@ -130,6 +130,32 @@ describe("PMS pricing command contract", () => {
     }
   });
 
+  it("validates meal inclusion and fingerprints explicit changes separately from omission", () => {
+    const input = {
+      organizationId,
+      propertyId,
+      roomTypeId,
+      idempotencyKey: "meal",
+      audit: audit(),
+      expectedRoomFactsRevision: 1,
+      expectedPricingCurrencyRevision: 1,
+      expectedFlexibleRatePlanRevision: 0,
+      baseAmountDecimal: "120.00",
+      cancellationTerms: cancellationTerms(),
+    };
+    const omitted = parseUpsertFlexibleRatePlanCommand(input)!;
+    for (const mealPlan of ["room_only", "breakfast"]) {
+      const command = parseUpsertFlexibleRatePlanCommand({ ...input, mealPlan })!;
+      expect(command.mealPlan).toBe(mealPlan);
+      expect(serializeFlexibleRatePlanFingerprint(command)).not.toBe(
+        serializeFlexibleRatePlanFingerprint(omitted),
+      );
+    }
+    for (const mealPlan of [null, "", "half_board", 1, undefined]) {
+      expect(parseUpsertFlexibleRatePlanCommand({ ...input, mealPlan })).toBeNull();
+    }
+  });
+
   it("parses a flexible plan without accepting a second currency or coupled behavior", () => {
     const command = parseUpsertFlexibleRatePlanCommand({
       organizationId,

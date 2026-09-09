@@ -127,6 +127,25 @@ function identity(operationType: ChannexOperationType) {
   return { commandId, idempotencyKey: `${operationType}:${commandId}`, operationType };
 }
 
+export interface ChannexAlert {
+  id: string;
+  eventType: string;
+  impact: Record<string, string | null>;
+  firstOccurredAt: string;
+  lastOccurredAt: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  recoveryRound: number;
+  occurrences: number;
+  recovery: {
+    status: string;
+    verified?: boolean;
+    attemptsMade: number;
+    maxAttempts: number;
+    retryAfter: string | null;
+  }[];
+}
+
 export const channexService = {
   async updateInventoryRules(
     rules: ChannexInventoryRule[],
@@ -136,6 +155,22 @@ export const channexService = {
     return pmsOperationsClient.put<ChannexOperation>(
       await endpoint("updating channel inventory rules", "channex/inventory-rules"),
       { rules, expectedOperationId, commandId, idempotencyKey: `inventory-rules:${commandId}` },
+      pmsOperationsRequestOptions,
+    );
+  },
+  async getAlerts() {
+    return pmsOperationsClient.get<ChannexAlert[]>(
+      await endpoint("loading channel alerts", "channex/alerts"),
+      pmsOperationsRequestOptions,
+    );
+  },
+  async alertAction(alertId: string, action: "acknowledge" | "recover", round: number) {
+    return pmsOperationsClient.post(
+      await endpoint(
+        "recovering a channel alert",
+        `channex/alerts/${encodeURIComponent(alertId)}/${action}`,
+      ),
+      { round },
       pmsOperationsRequestOptions,
     );
   },
