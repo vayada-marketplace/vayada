@@ -33,6 +33,7 @@ import {
 import type {
   AdaptiveHotelSetupStatus,
   CreatePropertyProfileRequest,
+  PreparedHotelImport,
   PropertyProfileContact,
   PropertyProfilePatch,
   PropertyProfileResponse,
@@ -97,6 +98,8 @@ export type SharedFirstRunContinueInput = {
 };
 
 export type SharedFirstRunPropertySetupWizardProps = {
+  initialProfileSuggestions?: PreparedHotelImport["property"];
+  propertyCreateIdempotencyKey?: string;
   api: SharedHotelSetupApi;
   entryProduct: SharedHotelSetupEntryProduct;
   initialPropertyId?: string | null;
@@ -347,6 +350,8 @@ export default function SharedFirstRunPropertySetupWizard({
   propertyLaunchSettingsApi,
   onPropertySelected,
   renderAfterHotelDetails,
+  initialProfileSuggestions,
+  propertyCreateIdempotencyKey,
   onExit,
 }: SharedFirstRunPropertySetupWizardProps) {
   const labels = { ...DEFAULT_PRODUCT_LABELS, ...productLabels };
@@ -362,7 +367,10 @@ export default function SharedFirstRunPropertySetupWizard({
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<SharedPropertyTypeOption[] | null>(
     null,
   );
-  const [draft, setDraft] = useState<ProfileDraft>(() => newPropertyDraft());
+  const [draft, setDraft] = useState<ProfileDraft>(() => ({
+    ...newPropertyDraft(),
+    ...initialProfileSuggestions,
+  }));
   const [launchSettings, setLaunchSettings] = useState<PropertyLaunchSettings>(() =>
     propertyLaunchSettingsDefaults(""),
   );
@@ -377,6 +385,8 @@ export default function SharedFirstRunPropertySetupWizard({
   const profileHeading = useRef<HTMLHeadingElement>(null);
   const trackCommandKey = useRef<string | null>(null);
   const createPropertyCommandKey = useRef<string | null>(null);
+  const usePreparedProperty =
+    !forceCreateProperty && status?.propertySelection.availableProperties.length === 0;
   const logoUploadKey = useRef<string | null>(null);
   const logoAssignmentKey = useRef<string | null>(null);
   const profileSaveInFlight = useRef(false);
@@ -481,7 +491,10 @@ export default function SharedFirstRunPropertySetupWizard({
         setDraft(
           nextProfile
             ? draftFromProfile(nextProfile, publicProfile, unconfirmedPendingLogo)
-            : newPropertyDraft(),
+            : {
+                ...newPropertyDraft(),
+                ...(usePreparedProperty ? initialProfileSuggestions : undefined),
+              },
         );
         setLaunchSettings(
           existingLaunchSettings ??
@@ -503,6 +516,8 @@ export default function SharedFirstRunPropertySetupWizard({
   }, [
     api,
     profileReloadToken,
+    initialProfileSuggestions,
+    usePreparedProperty,
     propertyLaunchSettingsApi,
     view.profileMode,
     view.screen,
@@ -562,7 +577,8 @@ export default function SharedFirstRunPropertySetupWizard({
       } else {
         const profile = createProfileFromDraft(draft);
         const idempotencyKey = (createPropertyCommandKey.current = idempotencyKeyForRetry(
-          createPropertyCommandKey.current,
+          createPropertyCommandKey.current ??
+            (usePreparedProperty ? (propertyCreateIdempotencyKey ?? null) : null),
         ));
         try {
           saved = await api.createPropertyProfile(profile, idempotencyKey);
@@ -572,6 +588,16 @@ export default function SharedFirstRunPropertySetupWizard({
             throw createError;
           }
 
+          if (
+            usePreparedProperty &&
+            propertyCreateIdempotencyKey &&
+            code === "idempotency_key_conflict"
+          ) {
+            setError(
+              "This invitation already created a hotel. Reload setup to review its saved details before making changes.",
+            );
+            return;
+          }
           const createdPropertyId = setupErrorPropertyId(createError);
           if (!createdPropertyId) throw createError;
           saved = await api.getPropertyProfile(createdPropertyId);
@@ -767,6 +793,7 @@ export default function SharedFirstRunPropertySetupWizard({
           properties={status.propertySelection.availableProperties}
           onSelect={handleSelectProperty}
           onAdd={() => {
+            createPropertyCommandKey.current = null;
             setDraft(newPropertyDraft());
             setLaunchSettings(propertyLaunchSettingsDefaults(""));
             setLaunchSettingsTouched(false);
@@ -799,7 +826,11 @@ export default function SharedFirstRunPropertySetupWizard({
           propertyTypeOptions={propertyTypeOptions ?? []}
           pageHeadingRef={profileHeading}
           onChange={(nextDraft) => {
-            if (view.profileMode === "create") createPropertyCommandKey.current = null;
+            if (
+              view.profileMode === "create" &&
+              (!usePreparedProperty || !propertyCreateIdempotencyKey)
+            )
+              createPropertyCommandKey.current = null;
             if (nextDraft.logoFile !== draft.logoFile) {
               logoUploadKey.current = null;
               logoAssignmentKey.current = null;

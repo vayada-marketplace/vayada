@@ -24,6 +24,7 @@ import { authService } from "@/services/auth";
 import {
   sharedAccountProfileImageUploader,
   sharedHotelSetupApi,
+  sharedSetupClient,
 } from "@/services/api/sharedHotelSetupClient";
 import { hotelOperationsSetupApi } from "@/services/api/hotelOperationsSetupClient";
 import {
@@ -34,6 +35,11 @@ import {
 } from "@/services/auth/sessionStore";
 import { AdaptiveRoomAuthoringSetupController } from "./adaptive/rooms/AdaptiveRoomAuthoringSetupController";
 import { SetupTaskFormRouter } from "./SetupTaskFormRouter";
+
+import {
+  PreparedHotelImportPanel,
+  type PreparedImportResponse,
+} from "@vayada/product-onboarding/PreparedHotelImportPanel";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://pms.vayada.com";
 const BOOKING_ADMIN_URL =
@@ -55,6 +61,8 @@ export function SharedHotelSetupPage({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [preparedSource, setPreparedSource] = useState<PreparedImportResponse["import"]>(null);
+  const [checkingPrepared, setCheckingPrepared] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [handoffError, setHandoffError] = useState<string | null>(null);
@@ -94,6 +102,27 @@ export function SharedHotelSetupPage({
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!authorized) return;
+    let active = true;
+    void sharedSetupClient
+      .get<PreparedImportResponse>("/api/hotel-setup/imports/prepared", {
+        signal: AbortSignal.timeout(5000),
+      })
+      .then((response) => {
+        if (active) setPreparedSource(response.import);
+      })
+      .catch(() => {
+        /* Optional suggestions never prevent manual setup. */
+      })
+      .finally(() => {
+        if (active) setCheckingPrepared(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authorized]);
 
   const entryProduct = useMemo(
     () =>
@@ -196,7 +225,7 @@ export function SharedHotelSetupPage({
     );
   };
 
-  if (checkingAuth || !authorized) {
+  if (checkingAuth || !authorized || checkingPrepared) {
     return (
       <div
         className="flex min-h-screen items-center justify-center bg-gray-50 px-6"
@@ -268,25 +297,51 @@ export function SharedHotelSetupPage({
   }
 
   return (
-    <SharedFirstRunPropertySetupWizard
-      api={sharedHotelSetupApi}
-      entryProduct={entryProduct}
-      initialPropertyId={initialPropertyId}
-      returnTo={returnTo}
-      initialAddProperty={initialAddProperty}
-      propertyLaunchSettingsApi={PROPERTY_LAUNCH_SETTINGS_API}
-      onContinue={handleContinue}
-      onPropertySelected={handlePropertySelected}
-      renderAfterHotelDetails={
-        adaptiveShellEnabled
-          ? (propertyId) => (
-              <AdaptiveSetupHandoff propertyId={propertyId} onExit={() => handleExit(propertyId)} />
-            )
-          : undefined
-      }
-      renderTaskForm={(context: SharedSetupTaskFormContext) => <SetupTaskFormRouter {...context} />}
-      onExit={handleExit}
-    />
+    <>
+      {initialPropertyId && !initialAddProperty && (
+        <div className="mx-auto max-w-4xl px-6">
+          <PreparedHotelImportPanel
+            key={initialPropertyId}
+            client={sharedSetupClient}
+            propertyId={initialPropertyId}
+          />
+        </div>
+      )}
+      <SharedFirstRunPropertySetupWizard
+        initialProfileSuggestions={
+          !initialAddProperty && !preparedSource?.propertyId
+            ? preparedSource?.data.property
+            : undefined
+        }
+        propertyCreateIdempotencyKey={
+          !initialAddProperty && preparedSource
+            ? `prepared-property:${preparedSource.sourceId}`
+            : undefined
+        }
+        api={sharedHotelSetupApi}
+        entryProduct={entryProduct}
+        initialPropertyId={initialPropertyId}
+        returnTo={returnTo}
+        initialAddProperty={initialAddProperty}
+        propertyLaunchSettingsApi={PROPERTY_LAUNCH_SETTINGS_API}
+        onContinue={handleContinue}
+        onPropertySelected={handlePropertySelected}
+        renderAfterHotelDetails={
+          adaptiveShellEnabled
+            ? (propertyId) => (
+                <AdaptiveSetupHandoff
+                  propertyId={propertyId}
+                  onExit={() => handleExit(propertyId)}
+                />
+              )
+            : undefined
+        }
+        renderTaskForm={(context: SharedSetupTaskFormContext) => (
+          <SetupTaskFormRouter {...context} />
+        )}
+        onExit={handleExit}
+      />
+    </>
   );
 }
 
