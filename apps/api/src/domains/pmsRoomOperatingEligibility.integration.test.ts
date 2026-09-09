@@ -1,3 +1,11 @@
+import {
+  createProductReadinessResult,
+  createReadyProductReadinessEvidence,
+} from "@vayada/domain-hotels";
+import {
+  createPgDistributionBookingPublicationProjection,
+  BookingPublicationRoomClosureConflictError,
+} from "./distributionBookingPublicationProjection.js";
 import { createPmsMandatoryChargePricingSourceSnapshot } from "@vayada/domain-pms";
 import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
 import { createPgPmsRecurringPricingReadModel } from "./pmsRecurringPricingReadModel.js";
@@ -296,6 +304,143 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       await pricing.close();
       await recurring.close();
       await setup.close();
+    }
+  });
+
+  it("fences activation of pre-closure content and preserves the remaining-room publication", async () => {
+    await db.query("UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1", [
+      propertyId,
+    ]);
+    const projection = createPgDistributionBookingPublicationProjection({ connectionString: url! });
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    const result = await createProductReadinessResult({
+      contractVersion: "onboarding-product-readiness.v1",
+      propertyId,
+      product: "booking",
+      status: "ready",
+      sourceManifest: {
+        contractVersion: "onboarding-source-manifest.v1",
+        propertyId,
+        sources: [
+          {
+            ownerDomain: "pms",
+            entityType: "room_type",
+            entityId: roomTypeId,
+            revision: "1",
+          },
+        ],
+      },
+      groups: [
+        {
+          groupId: "booking.rooms",
+          status: "ready",
+          steps: [
+            {
+              owningStepId: "rooms",
+              status: "ready",
+              entities: [
+                {
+                  source: {
+                    ownerDomain: "pms",
+                    entityType: "room_type",
+                    entityId: roomTypeId,
+                    revision: "1",
+                  },
+                  status: "ready",
+                  blockers: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      evaluatedAt: new Date().toISOString(),
+    });
+    const readiness = await createReadyProductReadinessEvidence(result, {
+      propertyId,
+      product: "booking",
+    });
+    const append = (rooms: { roomTypeId: string }[] | null) =>
+      projection.appendRevision({
+        propertyId,
+        readiness,
+        publicContent: { rooms },
+        builtByUserId: actorId,
+        builtAt: new Date().toISOString(),
+      });
+    try {
+      const stale = await append([{ roomTypeId }, { roomTypeId: otherRoom }]);
+      const previous = await projection.activate({
+        propertyId,
+        revisionId: stale.revisionId,
+        expectedActiveRevisionId: null,
+        activatedByUserId: actorId,
+      });
+      const malformed = await append(null);
+      const current = await append([{ roomTypeId: otherRoom }]);
+      await db.query("BEGIN");
+      try {
+        await db.query(
+          "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
+          [propertyId],
+        );
+        const pending = projection
+          .activate({
+            propertyId,
+            revisionId: stale.revisionId,
+            expectedActiveRevisionId: previous.revisionId,
+            activatedByUserId: actorId,
+          })
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+        const deadline = Date.now() + 3000;
+        let blocked = false;
+        while (Date.now() < deadline) {
+          const waits = await db.query(
+            `SELECT EXISTS(SELECT 1 FROM pg_locks
+            WHERE locktype='advisory' AND classid=hashtext('booking.publication')::oid
+              AND objid=hashtext($1::uuid::text)::oid AND NOT granted) AS blocked`,
+            [propertyId],
+          );
+          if (waits.rows[0]?.blocked) {
+            blocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        await close(db);
+        await db.query("COMMIT");
+        expect(await pending).toBeInstanceOf(BookingPublicationRoomClosureConflictError);
+        expect(await projection.getActive(propertyId)).toEqual(previous);
+      } finally {
+        await db.query("ROLLBACK");
+      }
+      const active = await projection.activate({
+        propertyId,
+        revisionId: current.revisionId,
+        expectedActiveRevisionId: previous.revisionId,
+        activatedByUserId: actorId,
+      });
+      for (const revision of [stale, malformed]) {
+        await expect(
+          projection.activate({
+            propertyId,
+            revisionId: revision.revisionId,
+            expectedActiveRevisionId: active.revisionId,
+            activatedByUserId: actorId,
+          }),
+        ).rejects.toBeInstanceOf(BookingPublicationRoomClosureConflictError);
+        expect(await projection.getActive(propertyId)).toEqual(active);
+      }
+    } finally {
+      await projection.close?.();
     }
   });
 
