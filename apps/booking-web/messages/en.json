@@ -429,7 +429,10 @@
     "unavailable": "This accommodation selection is no longer available. Please search again.",
     "choose": "Choose this accommodation",
     "selectedAccommodation": "Selected accommodation",
-    "partyChanged": "Your guest count has changed. Choose accommodation with an allocation for every guest before reviewing the price.",
-    "editRequest": "Edit request"
+    "partyChanged": "Your guest count has changed. Update the guests in each room or choose other accommodation before reviewing the price.",
+    "editRequest": "Edit request",
+    "allocateGuests": "Guests in each room",
+    "allocationAdults": "Adults",
+    "allocationChildren": "Children"
   }
 }
