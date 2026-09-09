@@ -1,3 +1,8 @@
+import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
+import {
+  PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS,
+  createTargetPmsInventoryPublicOfferProjection,
+} from "./pmsInventoryPublicOfferProjection.js";
 import {
   createProductReadinessResult,
   createReadyProductReadinessEvidence,
@@ -442,6 +447,143 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
     } finally {
       await projection.close?.();
     }
+  });
+
+  it("atomically suppresses only closing-room offers and keeps them closed during re-projection", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+      (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+      VALUES ($1::uuid,$1::text,'Closure test',$1::text,'en',ARRAY['en'],'complete')`,
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+      (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,
+       default_currency,supported_currencies,profile_status)
+      VALUES ($1::uuid,$1::text,$1::text,'https://example.test/hotel','https://example.test',
+        'Europe/Vienna','EUR',ARRAY['EUR'],'public')`,
+      [propertyId],
+    );
+    for (const room of [roomTypeId, otherRoom]) {
+      await db.query(
+        `INSERT INTO pms.rate_plans (property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES ($1,$2,'flexible','Flexible','flexible',100,'EUR')`,
+        [propertyId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.inventory_days
+        (property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,'2026-09-10',2,2,'open')`,
+        [propertyId, room],
+      );
+    }
+    const project = () =>
+      db.query(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [propertyId, "2026-09-09T12:00:00Z"]);
+    const offers = async () =>
+      (
+        await db.query(
+          `SELECT * FROM distribution.public_room_offer_snapshots
+      WHERE property_id=$1 ORDER BY room_type_id`,
+          [propertyId],
+        )
+      ).rows;
+    await project();
+    const before = await offers();
+    expect(before).toHaveLength(2);
+    await expect(suppressClosingRoomOffers(db, { propertyId, roomTypeId })).rejects.toThrow(
+      "requires a PMS room closure receipt",
+    );
+    await db.query("BEGIN");
+    try {
+      await close(db);
+      expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+        suppressedOfferDays: 1,
+      });
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect(await offers()).toEqual(before);
+    const eventId = randomUUID();
+    await db.query(
+      `INSERT INTO platform.domain_events
+      (id,source_system,event_key,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,occurred_at)
+      VALUES ($1,'pms',$2,'pms.inventory.projection_refresh_requested','property',$3::uuid,'pms','inventory',$3::text,now())`,
+      [eventId, randomUUID(), propertyId],
+    );
+    await db.query(
+      `INSERT INTO platform.outbox_events
+      (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id)
+      VALUES ($1,$2,'distribution.inventory-projection','pms.inventory.projection_refresh_requested','property',$3::uuid,'pms','inventory',$3::text)`,
+      [eventId, randomUUID(), propertyId],
+    );
+    const worker = createTargetPmsInventoryPublicOfferProjection({
+      connectionString: url!,
+      now: () => new Date("2026-09-09T12:00:00Z"),
+    });
+    await db.query("BEGIN");
+    try {
+      await db.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))",
+        [propertyId],
+      );
+      const pending = worker.projectPending({ propertyId });
+      const deadline = Date.now() + 3000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const waits =
+          await db.query(`SELECT EXISTS(SELECT 1 FROM pg_locks waiter JOIN pg_locks holder
+          USING(locktype,database,classid,objid,objsubid)
+          WHERE holder.pid=pg_backend_pid() AND holder.granted AND NOT waiter.granted
+            AND holder.locktype='advisory') AS blocked`);
+        if (waits.rows[0]?.blocked) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await close(db);
+      expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+        suppressedOfferDays: 1,
+      });
+      expect((await offers()).find((row) => row.room_type_id === otherRoom)).toEqual(
+        before.find((row) => row.room_type_id === otherRoom),
+      );
+      await db.query("COMMIT");
+      expect(await pending).toMatchObject({ profileAvailable: true, projectedOfferDays: 2 });
+    } finally {
+      await db.query("ROLLBACK");
+      await worker.close?.();
+    }
+    const suppressed = await offers();
+
+    expect(suppressed.find((row) => row.room_type_id === roomTypeId)).toMatchObject({
+      availability_status: "closed",
+      sellable_publicly: false,
+      available_rooms: 0,
+    });
+    expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+      suppressedOfferDays: 0,
+    });
+    // Deliberately retain stale open inventory: eligibility independently prevents resurrection.
+    await project();
+    const after = await offers();
+    expect(after.find((row) => row.room_type_id === roomTypeId)).toMatchObject({
+      availability_status: "closed",
+      sellable_publicly: false,
+      available_rooms: 0,
+    });
+    expect(after.find((row) => row.room_type_id === otherRoom)).toMatchObject({
+      availability_status: "available",
+      sellable_publicly: true,
+      available_rooms: 2,
+      base_price_amount: "100.00",
+    });
   });
 
   it("serializes competing closure receipts to one winner", async () => {
