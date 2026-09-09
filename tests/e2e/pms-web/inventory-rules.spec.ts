@@ -132,3 +132,48 @@ test("edits all inventory rule types, exposes failures, retries and removes (moc
   expect(rules).toEqual([]);
   expect(submissions).toBe(5);
 });
+
+test("blocks inventory edits when its pending operation differs from the page operation", async ({
+  page,
+}) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const base = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex`;
+  await page.unroute(base);
+  await page.route(base, (route) =>
+    route.fulfill({
+      json: {
+        ...pmsWebChannexSnapshot,
+        activeOperation: null,
+        inventoryRules: {
+          rules: [
+            {
+              id: "rule",
+              type: "close_out",
+              value: null,
+              channelIds: ["channel"],
+              roomTypeIds: ["room"],
+              startDate: "2026-10-01",
+              endDate: "2026-10-02",
+              days: ["thu", "fri"],
+            },
+          ],
+          operation: {
+            operationId: "pending-inventory",
+            operationType: "update_inventory_rules",
+            status: "queued",
+            attemptsMade: 0,
+            maxAttempts: 5,
+            lastError: null,
+          },
+        },
+      },
+    }),
+  );
+  await page.goto("/channel-manager");
+  const panel = page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "Channel inventory rules" }) });
+  await expect(panel.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Remove", exact: true })).toBeDisabled();
+});
