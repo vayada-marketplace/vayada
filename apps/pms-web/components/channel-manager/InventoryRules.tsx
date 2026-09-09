@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { INVENTORY_RULE_DAYS, type ChannexInventoryRule } from "@vayada/domain-pms-channex";
+import { terminalChannexStatuses } from "@/lib/channel-manager/useChannexManager";
 import { channexService, type ChannexSnapshot } from "@/services/channex";
 import { channelManagerButtonClass as buttonClass, OperationBanner } from "./ChannelManagerUi";
 
@@ -27,7 +28,7 @@ export function InventoryRules({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const submission = useRef<{ payload: string; id: string } | null>(null);
-  const busy = disabled || saving;
+  const busy = disabled || saving || Boolean(operation && !terminalChannexStatuses.has(operation.status));
   const channels = snapshot.channels.filter(
     (channel) => channel.isActive && channel.externalChannelId,
   );
@@ -46,7 +47,7 @@ export function InventoryRules({
     );
 
   async function save(next: ChannexInventoryRule[]) {
-    if (saving) return;
+    if (busy) return;
     setSaving(true);
     setError("");
     const expectedOperationId = operation?.operationId ?? null;
@@ -185,7 +186,11 @@ export function InventoryRules({
               setError("Select at least one channel, room type and weekday.");
               return;
             }
-            void save([...rules.filter((rule) => rule.id !== draft.id), draft]);
+            void save(
+              rules.some((rule) => rule.id === draft.id)
+                ? rules.map((rule) => (rule.id === draft.id ? draft : rule))
+                : [...rules, draft],
+            );
           }}
         >
           <fieldset disabled={busy} className="space-y-4">
