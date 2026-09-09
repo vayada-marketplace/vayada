@@ -108,6 +108,10 @@ export async function enqueueBookingLifecycleEmailJob(
   const recipientRole = input.recipient?.role ?? "guest";
   const to = normalizeEmail(input.recipient ? input.recipient.email : input.booking.guestEmail);
 
+  if (recipientRole === "host" && !to) {
+    throw new Error("A valid host notification recipient is required.");
+  }
+
   const jobType = bookingLifecycleEmailJobType(input.kind);
   const eventType = `booking.notification.${input.kind}_requested`;
   const transition = input.transition ?? legacyTransition(input.kind);
@@ -342,9 +346,11 @@ export async function loadBookingNotificationSnapshot(
          AND contact.channel_type = 'email'
          AND (
            contact.purpose = 'operations'
-           OR (contact.purpose = 'general' AND contact.source_system = 'booking')
+           OR (contact.purpose = 'general' AND contact.source_system IN ('platform', 'booking'))
          )
+         AND trim(contact.value) ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$'
        ORDER BY (contact.purpose = 'operations') DESC,
+                (contact.source_system = 'platform') DESC,
                 contact.updated_at DESC,
                 contact.id
        LIMIT 1
@@ -367,6 +373,46 @@ export async function enqueueBookingTransitionNotifications(
   const notifications = notificationsForTransition(input.transition, booking);
   const enqueued: BookingLifecycleEmailEnqueueResult[] = [];
   for (const notification of notifications) {
+    if (notification.role === "host" && !normalizeEmail(booking.hostEmail)) {
+      const key = bookingLifecycleEmailJobKey(
+        notification.kind,
+        booking.guestBookingId,
+        "host",
+        input.transition,
+      );
+      await queryable.query(
+        `INSERT INTO platform.product_audit_events (
+           audit_key, product, action, action_version, occurred_at,
+           tenant_scope, property_id, actor_type, actor_user_id,
+           target_resource_product, target_resource_type, target_resource_id,
+           correlation_id, causation_id, redacted_payload,
+           private_payload, audit_metadata, retention_class, privacy_scope
+         ) VALUES (
+           $1, 'booking', 'booking.notification.missing_recipient', 1, $2::timestamptz,
+           'property', $3::uuid, $4, $5::uuid,
+           'booking', 'guest_booking', $6,
+           $7, $8, $9::jsonb, '{}'::jsonb, '{}'::jsonb, 'guest_pii', 'confidential'
+         ) ON CONFLICT (product, audit_key) DO NOTHING`,
+        [
+          `booking.email.missing-recipient:${key}`,
+          input.occurredAt,
+          booking.propertyId,
+          input.actor?.type ?? "system",
+          input.actor?.userId ?? null,
+          booking.guestBookingId,
+          input.correlationId ?? null,
+          input.causationId ?? null,
+          JSON.stringify({
+            outcome: "blocked",
+            reason: "host_recipient_missing",
+            recipientRole: "host",
+            notificationType: notification.kind,
+            transition: input.transition,
+          }),
+        ],
+      );
+      continue;
+    }
     const queued = await enqueueBookingLifecycleEmailJob(queryable, {
       kind: notification.kind,
       guestMessage: input.guestMessage,

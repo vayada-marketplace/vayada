@@ -1,5 +1,5 @@
 import { trackEvent } from "./tracking";
-import { Booking } from "@/lib/types";
+import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
 export interface BookingRequestResponse {
@@ -27,6 +27,8 @@ export interface BookingLookupResponse extends Booking {
 }
 
 export type BookingCreateRequest = {
+  roomSelection?: RoomSelection;
+  currency?: string;
   roomTypeId: string;
   guestFirstName: string;
   guestLastName: string;
@@ -54,7 +56,7 @@ export type BookingCreateRequest = {
   balanceAmount?: number;
 };
 
-export interface BookingQuote {
+export interface BookingQuote extends RoomSelectionSnapshot {
   promotion?: { name: string; discountAmount: number; discountPercent: number } | null;
   promotionDiscount?: number;
   quoteId?: string;
@@ -154,6 +156,8 @@ export const bookingService = {
   async quote(
     slug: string,
     data: {
+      roomSelection?: RoomSelection;
+      currency?: string;
       roomTypeId: string;
       guestFirstName: string;
       guestLastName: string;

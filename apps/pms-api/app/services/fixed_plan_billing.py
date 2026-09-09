@@ -319,7 +319,7 @@ async def cancel_at_period_end(hotel_id: str) -> datetime | None:
 async def sync_subscription_price(payment_settings: dict) -> None:
     hotel_id = str(payment_settings["hotel_id"])
     pool = await Database.get_pool()
-    async with pool.acquire() as connection:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as connection:
         locked = await connection.fetchval(
             "SELECT pg_try_advisory_lock(hashtextextended($1, 1084))",
             hotel_id,

@@ -1,6 +1,10 @@
 import { bookingRoomSelectionParty, parseBookingRoomSelection } from "@vayada/domain-booking";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
-import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
+import type {
+  DirectBookingInventoryReservationPort,
+  InventoryReservationReceipt,
+} from "../platform/inventoryReservation.js";
+import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import {
   createHttpError,
@@ -20,6 +24,7 @@ export async function reserveTargetMixedBooking(
   property: TargetCheckoutPropertyRow,
   quote: TargetCheckoutQuoteSnapshot,
   now: Date,
+  replacingReservation?: InventoryReservationReceipt,
 ) {
   const selection = parseBookingRoomSelection(quote.selectedOfferSnapshot["roomSelection"]);
   const savedLines = quote.selectedOfferSnapshot["roomLines"];
@@ -49,6 +54,12 @@ export async function reserveTargetMixedBooking(
     checkOut: quote.checkOut,
     currency: quote.currency,
     requestedAt: now,
+    releasedSetupOffers: await releasedPmsReservationOfferKeys(
+      pool,
+      property.propertyId,
+      replacingReservation,
+      now,
+    ),
     promotionSettings: config?.promotionSettings,
     today: new Intl.DateTimeFormat("en-CA", {
       timeZone: property.timezone ?? "UTC",
@@ -103,5 +114,6 @@ export async function reserveTargetMixedBooking(
     checkOut: quote.checkOut,
     currency: quote.currency,
     occurredAt: now,
+    replacingReservation,
   });
 }

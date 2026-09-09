@@ -919,6 +919,66 @@ describe.skipIf(!TEST_DATABASE_URL)("canonical property profile repository", () 
     });
   });
 
+  it.each([
+    { methods: ["pay_at_property"], enabled: true, complete: true },
+    { methods: ["pay_at_property", "cash"], enabled: true, complete: true },
+    { methods: ["pay_at_property"], enabled: false, complete: false },
+    { methods: ["cash", "manual_card"], enabled: true, complete: false },
+    { methods: ["card"], enabled: true, complete: false },
+    { methods: ["bank_transfer"], enabled: true, complete: false },
+    { methods: ["paypal"], enabled: true, complete: false },
+    { methods: [], enabled: true, complete: false },
+  ])(
+    "evaluates payment readiness for $methods with enabled=$enabled",
+    async ({ methods, enabled, complete }) => {
+      const key = `payment-readiness-${methods.join("-")}-${enabled}`;
+      const created = await repository.createPropertyProfile({
+        organizationId,
+        idempotencyKey: key,
+        correlationId: key,
+        profile,
+      });
+      try {
+        await client.query(
+          `INSERT INTO finance.payment_settings (
+           property_id, payments_enabled, accepted_methods, default_currency,
+           requires_manual_review
+         ) VALUES ($1::uuid, $2, $3::text[], 'EUR', FALSE)`,
+          [created.propertyId, enabled, methods],
+        );
+        const payment = (
+          await repository.getHotelSetupStatus({
+            organizationId,
+            propertyIds: [created.propertyId],
+          })
+        ).properties[0]!.taskFacts.payment;
+        expect(payment.readiness).toBe(complete ? "complete" : "actionable");
+        expect(payment.ownerProgress).toBe(
+          complete
+            ? "owner_complete"
+            : enabled && methods.length > 0
+              ? "in_progress"
+              : "not_started",
+        );
+        expect(payment.reasonCodes).toEqual(
+          complete
+            ? []
+            : [
+                !enabled
+                  ? "payments_not_enabled"
+                  : methods.length === 0
+                    ? "missing_accepted_payment_method"
+                    : "no_supported_checkout_payment_method",
+              ],
+        );
+      } finally {
+        await client.query("DELETE FROM finance.payment_settings WHERE property_id = $1::uuid", [
+          created.propertyId,
+        ]);
+      }
+    },
+  );
+
   async function cleanup(): Promise<void> {
     await client.query("BEGIN");
     try {

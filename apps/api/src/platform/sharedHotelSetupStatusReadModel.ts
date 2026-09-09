@@ -1883,10 +1883,7 @@ function adaptiveHotelSetupFactsSql(): string {
       COALESCE(
         payment.payments_enabled
         AND (
-          (
-            'pay_at_property' = ANY(payment.accepted_methods)
-            AND payment.accepted_methods && ARRAY['cash', 'manual_card']::text[]
-          )
+          'pay_at_property' = ANY(payment.accepted_methods)
           OR (
             'bank_transfer' = ANY(payment.accepted_methods)
             AND EXISTS (SELECT 1 FROM finance.bank_transfer_destinations destination

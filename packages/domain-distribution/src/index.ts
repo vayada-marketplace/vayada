@@ -13,6 +13,7 @@ export const PUBLIC_BOOKABILITY_STATUSES = ["bookable", "unavailable", "stale", 
 
 export const PUBLIC_BOOKABILITY_REASON_CODES = [
   "sold_out",
+  "stay_restricted",
   "payment_disabled",
   "min_stay_not_met",
   "max_stay_exceeded",
@@ -285,7 +286,28 @@ export type PublicBookabilityMoneyTotals = {
   grandTotal: number;
 };
 
+/** Public projection of Booking's versioned selection; contains no inventory receipt data. */
+export type PublicBookabilityRoomSelection = {
+  contractVersion: "booking-room-selection.v1";
+  lines: readonly {
+    roomTypeId: string;
+    publicOfferKey: string;
+    guests: readonly { adults: number; children: number }[];
+  }[];
+};
+export type PublicBookabilityRoomLine = PublicBookabilityRoomSelection["lines"][number] & {
+  roomName: string;
+  roomCount: number;
+  ratePlanId: string | null;
+  rateSummary: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  totals: Record<string, string>;
+};
+
 export type PublicBookabilityOffer = {
+  roomSelection?: PublicBookabilityRoomSelection;
+  roomLines?: PublicBookabilityRoomLine[];
+  expiresAt?: string;
   offerId: string;
   roomTypeId: string;
   ratePlanId?: string | null;
@@ -686,6 +708,7 @@ function buildQuoteUnavailableReasons(
     offers.length === 0 &&
     !reasons.some((reason) =>
       [
+        "stay_restricted",
         "min_stay_not_met",
         "max_stay_exceeded",
         "same_day_cutoff_passed",

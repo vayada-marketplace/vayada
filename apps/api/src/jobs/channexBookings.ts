@@ -6,7 +6,7 @@ const QUEUE = "pms.channex.webhooks",
   TYPE = "channex.ingest-booking",
   LEASE_MS = 5 * 60_000;
 // prettier-ignore
-type Payload={propertyId:string;providerPropertyId:string;channelBookingId:string;revision:string;revisionSource:"webhook_hint"|"revision_feed";pullRequired:boolean;rawPayload:Record<string,unknown>};
+type Payload={recoveryAlertId?:string;propertyId:string;providerPropertyId:string;channelBookingId:string;revision:string;revisionSource:"webhook_hint"|"revision_feed";pullRequired:boolean;rawPayload:Record<string,unknown>};
 // prettier-ignore
 type Job=Payload&{id:string;correlationId:string|null;attempt:number;maxAttempts:number;workerId:string;handledRevisions:Record<string,unknown>;invalidPayload?:true};
 // prettier-ignore
@@ -48,7 +48,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
@@ -99,6 +99,11 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
     return text(attributes.booking_id)===job.channelBookingId&&(job.revision==="unknown"||text(item.id)===job.revision||text(attributes.revision)===job.revision||text(attributes.revision_number)===job.revision);
   });
   if (found.length) return found;
+  if(job.recoveryAlertId){
+    const response=record(await providerRequest(options,`/api/v1/booking_revisions/${encodeURIComponent(job.revision)}`,"GET"));
+    if(!response.data)throw new Failure("revision_not_available",true);
+    return [record(response.data)];
+  }
   if(durablyHandled(job)||await converged(pool,job))return [];
   throw new Failure("revision_not_available", true);
 }
@@ -190,7 +195,7 @@ async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure):Promise<k
       code = failure?.code ?? null;
     const finished=await client.query(
       `UPDATE platform.jobs SET status=$3,run_after=COALESCE($4::timestamptz,run_after),finished_at=CASE WHEN $3::text='pending' THEN NULL ELSE $5::timestamptz END,
-         locked_at=NULL,locked_by=NULL,updated_at=$5::timestamptz,job_metadata=(job_metadata-'lastErrorCode')||jsonb_strip_nulls(jsonb_build_object('lastErrorCode',$6::text))
+         locked_at=NULL,locked_by=NULL,updated_at=$5::timestamptz,job_metadata=(job_metadata-'lastErrorCode')||jsonb_strip_nulls(jsonb_build_object('lastErrorCode',$6::text,'alertRecoveryVerified',CASE WHEN payload ? 'recoveryAlertId' AND $3='succeeded' THEN true ELSE NULL END))
        WHERE id=$1::uuid AND attempts_count=$2 AND status='running' AND locked_by=$7 RETURNING id`,
       [job.id,job.attempt,status,retryAt,now,code,job.workerId],
     );
@@ -230,7 +235,7 @@ async function expire(client:pg.PoolClient,row:{id:string;propertyId:string|null
 
 // prettier-ignore
 function parsePayload(value:unknown,propertyId:string,resourceId:string):Payload{
-  const payload=record(value),rawPayload=record(payload.rawPayload),parsed={propertyId:text(payload.propertyId),providerPropertyId:text(payload.providerPropertyId),channelBookingId:text(payload.channelBookingId),revision:text(payload.revision),revisionSource:text(payload.revisionSource),pullRequired:payload.pullRequired===true,rawPayload};
+  const payload=record(value),rawPayload=record(payload.rawPayload),parsed={...(text(payload.recoveryAlertId)?{recoveryAlertId:text(payload.recoveryAlertId)}:{}),propertyId:text(payload.propertyId),providerPropertyId:text(payload.providerPropertyId),channelBookingId:text(payload.channelBookingId),revision:text(payload.revision),revisionSource:text(payload.revisionSource),pullRequired:payload.pullRequired===true,rawPayload};
   if(!parsed.propertyId||parsed.propertyId!==propertyId||!parsed.providerPropertyId||!parsed.channelBookingId||parsed.channelBookingId!==resourceId||!parsed.revision||parsed.revisionSource!==(parsed.pullRequired?"webhook_hint":"revision_feed")||typeof payload.pullRequired!=="boolean"||!Object.keys(rawPayload).length)throw new Failure("invalid_job_payload",false);
   return parsed as Payload;
 }
@@ -302,5 +307,29 @@ async function transaction<T>(pool:pg.Pool,run:(client:pg.PoolClient)=>Promise<T
     throw error;
   } finally {
     client.release();
+  }
+}
+
+async function validateAlertRevision(pool: pg.Pool, job: Job, item: Record<string, unknown>) {
+  const alert = (
+    await pool.query<{ eventType: string }>(
+      `SELECT event_type AS "eventType" FROM pms.channel_operational_alerts alert JOIN pms.channel_connections connection ON connection.id=alert.connection_id AND connection.binding_generation=alert.binding_generation WHERE alert.id=$1::uuid AND alert.property_id=$2::uuid AND connection.external_property_id=$3`,
+      [job.recoveryAlertId, job.propertyId, job.providerPropertyId],
+    )
+  ).rows[0];
+  if (!alert) throw new Failure("connection_not_owned", false);
+  const attributes = record(item.attributes);
+  if (text(item.id) !== job.revision) throw new Failure("revision_not_available", false);
+  if (alert.eventType.startsWith("booking_unmapped")) {
+    const rooms = Array.isArray(attributes.rooms) ? attributes.rooms.map(record) : [];
+    if (
+      !rooms.length ||
+      rooms.some(
+        (room) =>
+          !text(room.room_type_id) ||
+          (alert.eventType === "booking_unmapped_rate" && !text(room.rate_plan_id)),
+      )
+    )
+      throw new Failure("mapping_missing", false);
   }
 }

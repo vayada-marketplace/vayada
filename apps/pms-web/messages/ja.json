@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "ノーショーを確認…",
+  "checkOut.reviewNoShow": "ノーショーを確認…",
   "layout.header.signOut": "ログアウト",
   "layout.header.noProperties": "施設なし",
   "layout.header.user": "ユーザー",

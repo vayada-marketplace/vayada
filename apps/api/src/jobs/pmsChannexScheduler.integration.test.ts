@@ -55,6 +55,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     ]),
   );
 
+  // This scenario materializes multiple long horizons; allow CI to finish before the next test starts.
   it("paginates canonical property settings without Channex and reselects changed sources", async () => {
     const incompletePropertyId = await seedIncompleteProperty(admin, 0);
     const first = await seedProperty(admin, 1, {
@@ -898,7 +899,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
         [exhaustedJob.jobKey],
       ),
     ).toMatchObject({ rows: [{ status: "dead_lettered", reason: "max_attempts_exhausted" }] });
-  });
+  }, 30_000);
 
   it("skips unverified labels and no-ops a queued job when label readiness changes", async () => {
     const property = await seedProperty(admin, 21, {

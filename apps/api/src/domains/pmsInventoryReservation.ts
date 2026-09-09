@@ -117,13 +117,25 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
            WHERE offer.property_id = $1::uuid
              AND offer.room_type_id::text = $2
              AND offer.public_offer_key = $3
+             AND pms.stay_restrictions_allow(offer.property_id,offer.room_type_id,offer.rate_plan_id,$4::date,$5::date)
              AND offer.stay_date >= $4::date
              AND offer.stay_date < $5::date
              AND $6::integer >= 1
              AND profile.public_visibility = 'public_safe'
              AND profile.profile_status = 'public'
              AND profile.freshness_status = 'fresh'
-             AND profile.public_setup_completeness ->> 'status' = 'ready'
+             AND (profile.public_setup_completeness ->> 'status' = 'ready'
+               OR (profile.public_setup_completeness ->> 'status' = 'incomplete'
+                 AND profile.public_setup_completeness -> 'missing' = '["sellable_availability"]'::jsonb
+                 AND EXISTS (
+                   SELECT 1 FROM pms.inventory_reservation_receipts receipt
+                   JOIN pms.inventory_reservation_statuses status USING(receipt_id)
+                   WHERE receipt.receipt_id=ANY($9::uuid[]) AND receipt.property_id=$1::uuid
+                     AND receipt.room_type_id::text=$2 AND receipt.public_offer_key=$3
+                     AND receipt.room_count>0 AND receipt.receipt_owner='pms'
+                     AND receipt.contract_version='pms-inventory-reservation-lifecycle.v1'
+                     AND status.lifecycle_state='released' AND status.released_at=$8::timestamptz
+                 )))
              AND (profile.expires_at IS NULL OR profile.expires_at > $8::timestamptz)
              AND offer.public_visibility = 'public_safe'
              AND offer.currency = $7
@@ -139,17 +151,7 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
            HAVING COUNT(DISTINCT offer.stay_date) = ($5::date - $4::date)
               AND BOOL_AND(offer.available_rooms >= $6::integer)
               AND BOOL_AND(inventory.available_count >= $6::integer)
-              AND COALESCE(
-                MAX(NULLIF(offer.rate_summary ->> 'minStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date),
-                1
-              ) <= ($5::date - $4::date)
-              AND (
-                MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date) IS NULL
-                OR MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-                  FILTER (WHERE offer.stay_date = $4::date) >= ($5::date - $4::date)
-              )
+
          ),
          pms_inventory_reserved AS (
            UPDATE pms.inventory_days inventory
@@ -218,6 +220,7 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
           input.roomCount,
           input.currency,
           input.occurredAt.toISOString(),
+          replacementReceiptIds(input.replacingReservation),
         ],
       );
       if (result.rows[0]?.reserved !== true) return null;
@@ -417,6 +420,35 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
       }
     },
 
+    async bundleAvailabilityCredits(input) {
+      const bundle = parsePmsInventoryReservationBundle(input.reservation);
+      if (!bundle || bundle.receipts.length !== input.lines.length ||
+          new Set(input.lines.map((line) => line.roomTypeId)).size !== input.lines.length) return null;
+      const result = await input.transaction.query<ReceiptScopeRow>(
+        `SELECT receipt.quote_session_id AS "quoteSessionId",receipt.room_type_id::text AS "roomTypeId",
+           receipt.public_offer_key AS "publicOfferKey",receipt.check_in::text AS "checkIn",
+           receipt.check_out::text AS "checkOut",receipt.room_count AS "roomCount"
+         FROM pms.inventory_reservation_receipts receipt
+         JOIN pms.inventory_reservation_statuses status USING(receipt_id)
+         WHERE receipt.receipt_id=ANY($1::uuid[]) AND receipt.property_id=$2::uuid
+           AND receipt.check_in=$3::date AND receipt.check_out=$4::date
+           AND receipt.receipt_owner='pms' AND receipt.contract_version=$5
+           AND status.lifecycle_state='reserved'
+           AND (SELECT count(*) FROM pms.inventory_reservation_receipts complete
+             WHERE complete.property_id=receipt.property_id AND complete.quote_session_id=receipt.quote_session_id)=cardinality($1::uuid[])`,
+        [bundle.receipts.map((receipt) => receipt.receiptId), input.propertyId,
+          input.checkIn, input.checkOut, PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION],
+      );
+      if (result.rows.length !== input.lines.length ||
+          new Set(result.rows.map((row) => row.roomTypeId)).size !== input.lines.length ||
+          new Set(result.rows.map((row) => row.quoteSessionId)).size !== 1 ||
+          result.rows.some((row) => !input.lines.some((line) =>
+            line.roomTypeId === row.roomTypeId && line.publicOfferKey === row.publicOfferKey && line.roomCount === row.roomCount))) return null;
+      return new Map(result.rows.map((row) => [row.roomTypeId, {
+        checkIn: row.checkIn, checkOut: row.checkOut, roomCount: row.roomCount,
+      }]));
+    },
+
     async selectionAvailabilityCredits(input) {
       const result = await input.transaction.query<{
         roomTypeId: string;
@@ -463,6 +495,33 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
 }
 
 type Transaction = Parameters<DirectBookingInventoryReservationPort["reserve"]>[0]["transaction"];
+
+function replacementReceiptIds(reservation?: InventoryReservationReceipt): string[] {
+  if (!reservation) return [];
+  if (isOpaqueReceipt(reservation)) return [reservation.receiptId];
+  return parsePmsInventoryReservationBundle(reservation)?.receipts.map((receipt) => receipt.receiptId) ?? [];
+}
+
+/** Readiness-only credit after release; never adds inventory to the live offer. */
+export async function releasedPmsReservationOfferKeys(
+  transaction: Transaction,
+  propertyId: string,
+  reservation: InventoryReservationReceipt | undefined,
+  releasedAt: Date,
+): Promise<ReadonlySet<string>> {
+  const ids = replacementReceiptIds(reservation);
+  if (!ids.length) return new Set();
+  const result = await transaction.query<{ publicOfferKey: string }>(
+    `SELECT receipt.public_offer_key AS "publicOfferKey"
+     FROM pms.inventory_reservation_receipts receipt
+     JOIN pms.inventory_reservation_statuses status USING(receipt_id)
+     WHERE receipt.receipt_id=ANY($1::uuid[]) AND receipt.property_id=$2::uuid
+       AND receipt.receipt_owner='pms' AND receipt.contract_version=$3
+       AND receipt.room_count>0 AND status.lifecycle_state='released' AND status.released_at=$4::timestamptz`,
+    [ids, propertyId, PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION, releasedAt.toISOString()],
+  );
+  return new Set(result.rows.map((row) => row.publicOfferKey));
+}
 
 type ReceiptScopeRow = {
   quoteSessionId: string;

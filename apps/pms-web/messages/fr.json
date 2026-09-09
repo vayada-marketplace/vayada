@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Examiner la non-présentation…",
+  "checkOut.reviewNoShow": "Examiner la non-présentation…",
   "layout.header.signOut": "Se deconnecter",
   "layout.header.noProperties": "Aucun etablissement",
   "layout.header.user": "Utilisateur",

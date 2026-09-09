@@ -1,7 +1,22 @@
+import { publicRoomCombinationOffer } from "../routes/bookingPublicCombinationProjection.js";
+import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
+import { createTargetPublicHotelQuoteRepository, serializePublicHotelQuoteProjection } from "../routes/aiHotelQuotes.js";
+import { createBookingHostActions } from "./bookingHostActions.js";
+import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
+import { withPmsHostDateCredit, preparePmsHostDateAmendment, completePmsHostDateAmendment } from "./pmsHostDateAmendment.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { findTargetRoomCombinationOffers } from "../routes/bookingRoomCombinationOffers.js";
+import { pendingBookingEdit } from "../routes/pendingBookingEdits.js";
 import { createTargetMixedCheckoutQuote } from "../routes/bookingWebMixedSnapshot.js";
 import {
+  createTargetBookingWebCheckoutAdapter,
+  targetBookingHostActionPrimitives as bookingOwner,
   redeemTargetPromo,
+  loadTargetCheckoutOffer,
   enqueuePmsReservationHandoff,
+  issueTargetBookingConfirmationToken,
+  loadTargetBooking,
+  sha256Hex,
   serializeTargetBooking,
   serializeTargetCheckoutQuote,
   resolveTargetCancellationPreview,
@@ -68,6 +83,10 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       await client.query(
         `INSERT INTO hotel_catalog.properties (id,public_id,display_name)
         VALUES ($1::uuid,$1::text,'Mixed room test')`,
+        [propertyId],
+      );
+      await client.query(
+        "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose,status) VALUES($1::uuid,$1::text,'canonical','active')",
         [propertyId],
       );
       await client.query(
@@ -148,7 +167,19 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
   afterAll(async () => {
     await transaction(async (client) => {
       await client.query("SET LOCAL session_replication_role=replica");
+      for (const table of ["booking.booking_guests", "booking.booking_status_events"])
+        await client.query(
+          `DELETE FROM ${table} WHERE guest_booking_id IN (SELECT id FROM booking.guest_bookings WHERE property_id=$1)`,
+          [propertyId],
+        );
       for (const table of [
+        "platform.jobs",
+        "platform.product_audit_events",
+        "booking.pending_booking_edit_attempts",
+        "booking.booking_addon_selections",
+        "booking.direct_booking_summary_read_model",
+        "booking.guest_bookings",
+        "booking.checkout_contexts",
         "booking.promo_applications",
         "booking.promo_definitions",
         "booking.quote_sessions",
@@ -171,6 +202,7 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
         "pms.room_blocks",
         "distribution.public_hotel_bookability_profiles",
         "hotel_catalog.property_public_profile_read_model",
+        "hotel_catalog.property_slugs",
       ])
         await client.query(`DELETE FROM ${table} WHERE property_id=$1`, [propertyId]);
       await client.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [propertyId]);
@@ -198,6 +230,167 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       today: "2027-01-01",
       requestedAt: input.occurredAt,
     });
+  const search = (adults = 5, children = 1, maxCandidates?: number) =>
+    findTargetRoomCombinationOffers(pool, {
+      ...input, adults, children, today: "2027-01-01", requestedAt: input.occurredAt,
+      paymentMethods: ["pay_at_property"], maxCandidates,
+    });
+  it("discovers and reprices complete selections from canonical full-stay evidence", async () => {
+    const result = await search();
+    expect(result.complete).toBe(true);
+    expect(result.eligibleOfferCount).toBe(2);
+    expect(result.options[0]?.party).toEqual({ adults: 5, children: 1, rooms: 3 });
+    expect(result.options[0]?.lines).toHaveLength(2);
+    expect(result.options[0]?.totals.totalAmount).toBe("600.00");
+    expect(result.options[0]?.paymentOptions).toEqual(["pay_at_property"]);
+    expect(result.options[0]?.expiresAt).toBe("2027-01-01T10:15:00.000Z");
+    const offer = publicRoomCombinationOffer(result.options[0]!, "https://example.test/en/book?checkIn=2027-02-01&checkOut=2027-02-03&adults=5&children=1");
+    const serialized = serializePublicHotelQuoteProjection({
+      contractVersion: "public-bookability.v1", generatedAt: input.occurredAt.toISOString(), publicVisibility: "public_safe",
+      request: { hotelSlug: propertyId, checkIn: input.checkIn, checkOut: input.checkOut, nights: 2,
+        adults: 5, children: 1, rooms: 1, currency: "EUR", locale: "en" },
+      status: "bookable", unavailableReasons: [], dataSources: ["booking", "pms"],
+      freshness: { status: "fresh", generatedAt: input.occurredAt.toISOString(), sources: [] },
+      quote: { quoteId: "test", quoteHash: "test", expiresAt: offer.expiresAt!, priceGuarantee: "expires_at", offers: [offer] },
+    }).quote!.offers[0]!;
+    expect(serialized.roomSelection).toEqual(result.options[0]!.selection);
+    expect(serialized.roomLines).toHaveLength(2);
+    expect(serialized.totals.grandTotal).toBe(600);
+    expect(JSON.stringify(serialized)).not.toMatch(/sourceFreshness|receiptId|available_rooms/);
+    expect(new URL(serialized.bookingUrl).searchParams.get("room")).toBe(serialized.offerId);
+    expect(new URL(serialized.bookingUrl).searchParams.get("rooms")).toBe("3");
+    expect(publicRoomCombinationOffer(result.options[0]!, "https://example.test/en/book").offerId).toBe(serialized.offerId);
+
+    expect((await search(4, 0)).options.every((option) => option.lines.length === 1)).toBe(true);
+    expect(await search(9, 0)).toMatchObject({ complete: true, eligibleOfferCount: 2, options: [], unavailableReasons: [{ code: "occupancy_unavailable" }] });
+    expect(await search(5, 1, 1)).toMatchObject({ complete: false, eligibleOfferCount: 0, options: [], unavailableReasons: [{ code: "unavailable_data" }] });
+  });
+  it.each([
+    ["available_rooms=0, availability_status='sold_out', sellable_publicly=false", "sold_out", true],
+    ["expires_at='2026-12-31'", "stale_data", false],
+    ["rate_summary='{\"minStayNights\":3}'", "min_stay_not_met", true],
+    ["rate_summary='{\"maxStayNights\":1}'", "max_stay_exceeded", true],
+    ["rate_summary='{\"minStayNights\":\"unknown\"}'", "unavailable_data", false],
+    ["payment_options=ARRAY['card']", "payment_disabled", true],
+  ] as const)("preserves availability reasons for %s", async (update, code, complete) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`UPDATE distribution.public_room_offer_snapshots SET ${update} WHERE property_id=$1`, [propertyId]);
+      expect(await findTargetRoomCombinationOffers(client, { ...input, adults: 5, children: 1,
+        today: "2027-01-01", requestedAt: input.occurredAt, paymentMethods: ["pay_at_property"] }))
+        .toMatchObject({ complete, options: [], unavailableReasons: [{ code }] });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("distinguishes incompatible methods across otherwise sufficient room types", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("UPDATE distribution.public_room_offer_snapshots SET payment_options=ARRAY['card'] WHERE property_id=$1 AND room_type_id=$2", [propertyId, rooms[0]]);
+      expect(await findTargetRoomCombinationOffers(client, { ...input, adults: 5, children: 1,
+        today: "2027-01-01", requestedAt: input.occurredAt, paymentMethods: ["card", "pay_at_property"] }))
+        .toMatchObject({ complete: true, options: [], unavailableReasons: [{ code: "payment_disabled" }] });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it.each([["min_stay_nights", 3, "min_stay_not_met"], ["max_stay_nights", 1, "max_stay_exceeded"]] as const)
+    ("preserves canonical PMS %s restrictions", async (column, value, code) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,${column}) VALUES($1,$2,'stay_restriction',$3,$3,$4)`, [propertyId, rooms[0], input.checkIn, value]);
+      expect(await findTargetRoomCombinationOffers(client, { ...input, adults: 5, children: 1,
+        today: "2027-01-01", requestedAt: input.occurredAt, paymentMethods: ["pay_at_property"] }))
+        .toMatchObject({ complete: true, options: [], unavailableReasons: [{ code }] });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it.each([
+    ["2027-02-02", true, "stay_restricted"],
+    ["2027-02-02", false, null],
+    ["2027-02-03", true, null],
+  ] as const)("evaluates canonical stop-sell on %s (enabled=%s)", async (day, enabled, reason) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,stop_sell,enabled)
+        VALUES($1,$2,'stay_restriction',$3,$3,true,$4)`, [propertyId, rooms[0], day, enabled]);
+      const result = await findTargetRoomCombinationOffers(client, { ...input, adults: 5, children: 1,
+        today: "2027-01-01", requestedAt: input.occurredAt, paymentMethods: ["pay_at_property"] });
+      if (reason) expect(result).toMatchObject({ complete: true, options: [], unavailableReasons: [{ code: reason }] });
+      else expect(result.options.length).toBeGreaterThan(0);
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("routes complete public selections only behind the gate and binds links and expiry", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("UPDATE distribution.public_hotel_bookability_profiles SET expires_at='2027-01-01T10:05:00Z' WHERE property_id=$1", [propertyId]);
+      await client.query("INSERT INTO hotel_catalog.property_locations(property_id, timezone) VALUES($1,'Europe/Athens')", [propertyId]);
+      const fixture = structuredClone(PUBLIC_BOOKABILITY_FIXTURES.find((item) => item.caseId === "bookable")!.profile);
+      Object.assign(fixture.hotel, { propertyId, slug: propertyId, timezone: "Europe/Athens", bookingBaseUrl: "https://example.test" });
+      const queries: string[] = [];
+      const failures: string[] = [];
+      const repository = (enabled = false) => createTargetPublicHotelQuoteRepository({ connectionString: url!,
+        mixedRoomSelectionsEnabled: enabled, now: () => input.occurredAt,
+        profileRepository: { async findProfileBySlug() { return fixture; } },
+        pool: { async query(text, values) { queries.push(text); try { return await client.query(text, values ? [...values] : undefined); } catch (error) { failures.push(String(error)); throw error; } }, async end() {} },
+      });
+      const request = { check_in: input.checkIn, check_out: input.checkOut, adults: "5", children: "1", rooms: "1", currency: "EUR", locale: "en" };
+      expect(await repository().findQuoteBySlug(propertyId, request)).toMatchObject({ status: "unavailable", unavailableReasons: [{ code: "occupancy_unavailable" }] });
+      queries.length = 0;
+      const projection = serializePublicHotelQuoteProjection((await repository(true).findQuoteBySlug(propertyId, request))!);
+      expect(failures).toEqual([]);
+      expect(projection.unavailableReasons).toEqual([]);
+      expect(projection.status).toBe("bookable");
+      expect(projection.quote!.expiresAt).toBe("2027-01-01T10:05:00.000Z");
+      expect(projection.quote!.offers[0].roomLines).toHaveLength(2);
+      expect(projection.quote!.offers[0].totals.grandTotal).toBe(600);
+      expect(queries.some((query) => query.includes("public_quote_read_models"))).toBe(false);
+      const link = new URL(projection.deepLink!.url);
+      expect(Object.fromEntries(link.searchParams)).toMatchObject({ checkIn: input.checkIn, checkOut: input.checkOut, adults: "5", children: "1", rooms: "3", room: projection.quote!.offers[0].offerId });
+      const fourRooms = await repository(true).findQuoteBySlug(propertyId, { ...request, rooms: "4" });
+      expect(fourRooms?.status).toBe("bookable");
+      expect(fourRooms?.quote?.offers.every((offer) => offer.roomLines!.reduce((sum, line) => sum + line.roomCount, 0) >= 4)).toBe(true);
+      await client.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [propertyId]);
+      expect(await repository(true).findQuoteBySlug(propertyId, request)).toMatchObject({ status: "unavailable", unavailableReasons: [{ code: "payment_disabled" }] });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("uses the minimum occupancy over every night and requires every explicit bound", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("UPDATE distribution.public_room_offer_snapshots SET occupancy=jsonb_set(occupancy,'{maxAdults}','1') WHERE property_id=$1 AND stay_date='2027-02-02'", [propertyId]);
+      const run = () => findTargetRoomCombinationOffers(client, { ...input, adults: 5, children: 0,
+        today: "2027-01-01", requestedAt: input.occurredAt, paymentMethods: ["pay_at_property"] });
+      expect(await run()).toMatchObject({ complete: true, eligibleOfferCount: 2, options: [] });
+      await client.query("UPDATE distribution.public_room_offer_snapshots SET occupancy=occupancy-'maxChildren' WHERE property_id=$1", [propertyId]);
+      expect(await run()).toMatchObject({ complete: false, eligibleOfferCount: 0, options: [] });
+      for (const bound of ['"unknown"', '99999999999999999999999999999']) {
+        await client.query("UPDATE distribution.public_room_offer_snapshots SET occupancy=jsonb_set(occupancy,'{maxChildren}',$2::jsonb) WHERE property_id=$1", [propertyId, bound]);
+        expect(await run()).toMatchObject({ complete: false, eligibleOfferCount: 0, options: [] });
+      }
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("credits complete reserved bundles without assuming receipt order or an original quote UUID", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const reservation = await port.reserveBundle!({ ...input, transaction: client, quoteSessionId: `change-request:${randomUUID()}` });
+      const base = { ...input, transaction: client, reservation: { ...reservation, receipts: [...reservation.receipts].reverse() } };
+      expect(await port.bundleAvailabilityCredits!(base)).toEqual(new Map(rooms.map((id) => [id, { checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 2 }])));
+      expect(await port.bundleAvailabilityCredits!({ ...base, propertyId: randomUUID() })).toBeNull();
+      expect(await port.bundleAvailabilityCredits!({ ...base, checkOut: "2027-02-04" })).toBeNull();
+      expect(await port.bundleAvailabilityCredits!({ ...base, lines: input.lines.map((line) => ({ ...line, roomCount: 1 })) })).toBeNull();
+      expect(await port.bundleAvailabilityCredits!({ ...base, lines: [input.lines[0]!], reservation: { ...reservation, receipts: [reservation.receipts[0]!] } })).toBeNull();
+      await client.query("SAVEPOINT duplicate_type");
+      // Corrupt only this transaction's synthetic receipt to exercise a shape the normal bundle writer forbids.
+      await client.query("SET LOCAL session_replication_role=replica");
+      await client.query("UPDATE pms.inventory_reservation_receipts SET room_type_id=$2::text::uuid,public_offer_key=$2::text WHERE receipt_id=$1", [reservation.receipts[1]!.receiptId, rooms[0]]);
+      expect(await port.bundleAvailabilityCredits!(base)).toBeNull();
+      await client.query("ROLLBACK TO SAVEPOINT duplicate_type");
+      await port.release({ ...input, transaction: client, reservation });
+      expect(await port.bundleAvailabilityCredits!(base)).toBeNull();
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
   it("quotes six guests using actual per-room caps and exact full-stay combined prices", async () => {
     await pool.query(
       "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=100.01 WHERE property_id=$1",
@@ -223,7 +416,6 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     ],
     ["available_rooms=0", "available_rooms=2"],
     ["freshness_status='stale'", "freshness_status='fresh'"],
-    ["rate_summary='{\"minStayNights\":3}'::jsonb", "rate_summary='{\"minStayNights\":1}'::jsonb"],
     ["payment_options=ARRAY['card']", "payment_options=ARRAY['pay_at_property']"],
   ])("rejects invalid per-night evidence (%s)", async (change, restore) => {
     await pool.query(
@@ -232,6 +424,9 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     );
     try {
       await expect(quote()).rejects.toMatchObject({ statusCode: 409 });
+      const code = change.startsWith("occupancy=") ? "unavailable_data" : change.startsWith("freshness_status=") ? "stale_data"
+        : change.startsWith("available_rooms=") ? "sold_out" : change.startsWith("rate_summary=") ? "min_stay_not_met" : "payment_disabled";
+      expect(await search()).toMatchObject({ complete: !["unavailable_data", "stale_data"].includes(code), options: [], unavailableReasons: [{ code }] });
     } finally {
       await pool.query(
         `UPDATE distribution.public_room_offer_snapshots SET ${restore} WHERE property_id=$1 AND room_type_id=$2`,
@@ -250,11 +445,285 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       );
       try {
         await expect(quote()).rejects.toMatchObject({ statusCode: 409 });
+        expect(await search()).toMatchObject({ complete: true, options: [], unavailableReasons: [{ code: "stay_restricted" }] });
       } finally {
         await pool.query("DELETE FROM pms.rate_rules WHERE property_id=$1", [propertyId]);
       }
     },
   );
+  it.each(["host", "guest"])("retains every room line when confirmed dates change through %s decisions", async (source) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const property = { propertyId, displayName: "Mixed room test", defaultLocale: "en", timezone: "Europe/Athens" };
+      const request = { checkIn: input.checkIn, checkOut: input.checkOut, roomSelection: selection,
+        adults: 5, children: 1, numberOfRooms: 3, paymentMethod: "pay_at_property", email: "mixed@example.test" };
+      const context = { operation: "change", requestId: randomUUID(), correlationId: randomUUID(),
+        idempotencyKey: randomUUID(), fingerprint: randomUUID(), occurredAt: input.occurredAt, actorUserId: randomUUID() };
+      await client.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'active')", [context.actorUserId, `${context.actorUserId}@example.test`]);
+      await client.query(`UPDATE distribution.public_room_offer_snapshots SET public_policy=jsonb_build_object(
+        'type','free_until_days_before_arrival','freeCancellationDeadlineDays',CASE WHEN room_type_id=$2 THEN 3 ELSE 7 END,
+        'afterDeadlinePenalty','full_booking_amount','noShowPenalty','full_booking_amount') WHERE property_id=$1`, [propertyId, rooms[0]]);
+      const quote = await createTargetMixedCheckoutQuote(client, property, request, input.occurredAt);
+      const created = await createTargetGuestBooking(client, port, property, { ...request, expectedTotalAmount: quote.totalAmount }, context, quote, null, null, null);
+      await client.query("UPDATE booking.guest_bookings SET lifecycle_status='confirmed' WHERE id=$1", [created.guestBookingId]);
+      const booking = await bookingOwner.loadBooking(client, propertyId, created.guestBookingId, true);
+      const preview = await bookingOwner.previewDates(client, port, property, booking, { checkIn: "2027-02-02", checkOut: input.checkOut }, input.occurredAt);
+      expect(preview).toMatchObject({ blocked: false, newTotal: 300 });
+      const selectedOffer = preview.pricingSnapshot!["selectedOffer"] as Record<string, unknown>;
+      expect(selectedOffer["roomSelection"]).toEqual(selection);
+      expect(selectedOffer["roomLines"]).toHaveLength(2);
+      await client.query("SAVEPOINT changed_policy");
+      await client.query("UPDATE distribution.public_room_offer_snapshots SET public_policy='{\"type\":\"non_refundable\"}' WHERE property_id=$1 AND room_type_id=$2", [propertyId, rooms[1]]);
+      const changed = await bookingOwner.previewDates(client, port, property, booking, { checkIn: "2027-02-02", checkOut: input.checkOut }, input.occurredAt);
+      expect(changed.newTotal).toBe(preview.newTotal);
+      expect(() => bookingOwner.assertDatesUnchanged(preview, changed)).toThrow("submit a new request");
+      await client.query("ROLLBACK TO SAVEPOINT changed_policy");
+      expect(() => bookingOwner.assertDatesUnchanged(preview, preview)).not.toThrow();
+      const oldReceipt = booking.bookingMetadata as { inventoryReservation: PmsInventoryReservationBundle };
+      await port.release({ transaction: client, propertyId, reservation: oldReceipt.inventoryReservation, occurredAt: input.occurredAt });
+      const revision = randomUUID();
+      const receipt = await bookingOwner.reserveDates(port, selectedOffer, { transaction: client, propertyId,
+        quoteSessionId: `${source === "host" ? "host-edit" : "change-request"}:${revision}`, roomTypeId: rooms[0]!, publicOfferKey: rooms[0]!,
+        checkIn: preview.requestedCheckIn, checkOut: preview.requestedCheckOut, roomCount: 3, currency: "EUR", occurredAt: input.occurredAt });
+      expect(receipt && "receipts" in receipt && receipt.receipts.length).toBe(2);
+      if (source === "guest") await client.query(`INSERT INTO booking.booking_change_requests
+        (id,guest_booking_id,request_type,requested_by,status,requested_changes)
+        VALUES($1,$2,'date_change','guest','pending',$3::jsonb)`, [revision, booking.guestBookingId, JSON.stringify(preview)]);
+      const updated = await bookingOwner.applyDates(client, { booking, changeRequest: source === "host" ? { id: revision, hostEdit: true } : {
+        id: revision, guestBookingId: booking.guestBookingId, status: "pending", requestedChanges: preview,
+        decisionNote: null, decidedAt: null, createdAt: input.occurredAt,
+      },
+        preview, selectedOffer, inventoryReservation: { ...receipt! }, context });
+      expect(updated.publicReference).toBe(created.publicReference);
+      expect(updated.roomCount).toBe(3);
+      expect(updated.totalAmount).toBe("300.00");
+      expect(serializeTargetBooking(updated)["roomLines"]).toHaveLength(2);
+      const pms = await createTargetPmsOperationsReadRepository({ connectionString: url!, pool: client })
+        .findReservationByGuestBookingId(propertyId, updated.guestBookingId);
+      expect(pms?.roomLines?.map((line) => line.totals["totalAmount"])).toEqual(["200.00", "100.00"]);
+      // A subsequent change must credit the latest bundle, not the original checkout quote.
+      expect(await bookingOwner.previewDates(client, port, property, updated, { checkIn: input.checkIn, checkOut: input.checkOut }, input.occurredAt))
+        .toMatchObject({ blocked: false, newTotal: 600 });
+      expect(await bookingOwner.previewDates(client, port, property, { ...updated, paymentStatus: "paid" }, { checkIn: input.checkIn, checkOut: input.checkOut }, input.occurredAt))
+        .toMatchObject({ blocked: true });
+      const assign = async () => {
+        const receipts = (await client.query("SELECT receipt_id,room_type_id FROM pms.inventory_reservation_receipts WHERE property_id=$1 AND quote_session_id=$2", [propertyId, `${source === "host" ? "host-edit" : "change-request"}:${revision}`])).rows;
+        let position = 0;
+        for (const line of selection.lines) for (const guest of line.guests) {
+          const roomId = randomUUID();
+          await client.query("INSERT INTO pms.rooms(id,property_id,room_type_id,room_number) VALUES($1::uuid,$2,$3,$1::text)", [roomId, propertyId, line.roomTypeId]);
+          await client.query(`INSERT INTO pms.operational_booking_assignments
+            (property_id,guest_booking_id,room_type_id,position,assignment_status,source,stay_evidence_kind,
+             check_in,check_out,adults,children,assignment_payload,assigned_at,room_id)
+            VALUES($1,$2,$3,$4,'pending','direct_booking','exact',$5,$6,$7,$8,$9::jsonb,$10,$11)`,
+            [propertyId, booking.guestBookingId, line.roomTypeId, ++position, updated.checkIn, updated.checkOut,
+              guest.adults, guest.children, JSON.stringify({ inventoryReservation: {
+                contractVersion: "pms-inventory-reservation-lifecycle.v1", owner: "pms",
+                receiptId: receipts.find((row) => row.room_type_id === line.roomTypeId)!.receipt_id,
+              } }), input.occurredAt, roomId]);
+        }
+        await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      };
+      await client.query("SAVEPOINT unproven_decision");
+      if (source === "guest") await client.query("UPDATE booking.booking_change_requests SET status='declined' WHERE id=$1", [revision]);
+      await expect(assign()).rejects.toMatchObject({ constraint: "chk_pms_direct_booking_receipt_handoff_scope" });
+      await client.query("ROLLBACK TO SAVEPOINT unproven_decision");
+      if (source === "host") await client.query(`INSERT INTO booking.host_action_previews
+        (id,property_id,guest_booking_id,actor_user_id,booking_revision,action,request,impact,created_at,expires_at)
+        VALUES($1,$2,$3,$4,'test','edit_dates',$5::jsonb,'{}',$6,$6::timestamptz+interval '10 minutes')`,
+        [revision, propertyId, booking.guestBookingId, context.actorUserId,
+          JSON.stringify({ checkIn: updated.checkIn, checkOut: updated.checkOut }), input.occurredAt]);
+      await assign();
+      expect((await client.query("SELECT lifecycle_state FROM pms.inventory_reservation_statuses WHERE receipt_id=ANY($1::uuid[])", [(receipt as PmsInventoryReservationBundle).receipts.map((item) => item.receiptId)])).rows.map((row) => row.lifecycle_state))
+        .toEqual(["handed_off", "handed_off"]);
+      if (source === "host") {
+        await client.query("SET CONSTRAINTS ALL DEFERRED");
+        const wrapped = withPmsHostDateCredit(port);
+        const held = receipt as PmsInventoryReservationBundle;
+        const creditRequest = { transaction: client, propertyId, reservation: held,
+          lines: selection.lines.map((line) => ({ ...line, roomCount: line.guests.length })),
+          checkIn: updated.checkIn, checkOut: updated.checkOut };
+        expect((await wrapped.bundleAvailabilityCredits!(creditRequest))?.size).toBe(2);
+        expect(await wrapped.bundleAvailabilityCredits!({ ...creditRequest,
+          reservation: { ...held, receipts: held.receipts.slice(0, 1) } })).toBeNull();
+        const nextAt = new Date(input.occurredAt.getTime() + 1000);
+        const nextPreview = await bookingOwner.previewDates(client, wrapped, property, updated,
+          { checkIn: input.checkIn, checkOut: input.checkOut }, nextAt);
+        expect(nextPreview).toMatchObject({ blocked: false, newTotal: 600 });
+        const nextId = randomUUID();
+        await client.query(`INSERT INTO booking.host_action_previews
+          (id,property_id,guest_booking_id,actor_user_id,booking_revision,action,request,impact,created_at,expires_at)
+          VALUES($1,$2,$3,$4,'test','edit_dates',$5::jsonb,'{}',$6,$6::timestamptz+interval '10 minutes')`,
+          [nextId, propertyId, booking.guestBookingId, context.actorUserId,
+            JSON.stringify({ checkIn: input.checkIn, checkOut: input.checkOut }), nextAt]);
+        const nextOffer = nextPreview.pricingSnapshot!["selectedOffer"] as Record<string, unknown>;
+        await client.query("SAVEPOINT failed_amendment");
+        await preparePmsHostDateAmendment(client, { propertyId, bookingId: booking.guestBookingId,
+          previewId: nextId, receipt: held, occurredAt: nextAt });
+        await wrapped.release({ transaction: client, propertyId, reservation: held, occurredAt: nextAt });
+        await client.query("UPDATE distribution.public_room_offer_snapshots SET available_rooms=0 WHERE property_id=$1 AND room_type_id=$2", [propertyId, rooms[1]]);
+        await expect(bookingOwner.reserveDates(wrapped, nextOffer, { transaction: client, propertyId,
+          quoteSessionId: `host-edit:${nextId}`, roomTypeId: rooms[0]!, publicOfferKey: rooms[0]!,
+          checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 3, currency: "EUR", occurredAt: nextAt })).rejects.toMatchObject({ statusCode: 409 });
+        await client.query("ROLLBACK TO SAVEPOINT failed_amendment");
+        expect((await client.query("SELECT assignment_status,check_in::text FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position", [booking.guestBookingId])).rows)
+          .toEqual(Array.from({ length: 3 }, () => ({ assignment_status: "pending", check_in: updated.checkIn })));
+        const amendment = await preparePmsHostDateAmendment(client, { propertyId,
+          bookingId: booking.guestBookingId, previewId: nextId, receipt: held, occurredAt: nextAt });
+        expect(amendment).toHaveLength(2);
+        await wrapped.release({ transaction: client, propertyId, reservation: held, occurredAt: nextAt });
+        const nextReceipt = await bookingOwner.reserveDates(wrapped, nextOffer, { transaction: client, propertyId,
+          quoteSessionId: `host-edit:${nextId}`, roomTypeId: rooms[0]!, publicOfferKey: rooms[0]!,
+          checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 3, currency: "EUR", occurredAt: nextAt });
+        await bookingOwner.applyDates(client, { booking: updated, changeRequest: { id: nextId, hostEdit: true },
+          preview: nextPreview, selectedOffer: nextOffer, inventoryReservation: { ...nextReceipt! }, context: { ...context, occurredAt: nextAt } });
+        await completePmsHostDateAmendment(client, { propertyId, bookingId: booking.guestBookingId,
+          previewId: nextId, previous: amendment, receipt: nextReceipt!, checkIn: input.checkIn,
+          checkOut: input.checkOut, occurredAt: nextAt });
+        await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+        expect((await client.query("SELECT count(*) FROM pms.inventory_reservation_successors WHERE property_id=$1", [propertyId])).rows[0].count).toBe("2");
+        expect((await client.query("SELECT assignment_status,check_in::text FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position", [booking.guestBookingId])).rows)
+          .toEqual(Array.from({ length: 3 }, () => ({ assignment_status: "pending", check_in: input.checkIn })));
+        expect((await client.query("SELECT available_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY room_type_id,stay_date", [propertyId])).rows.map((row) => row.available_count))
+          .toEqual([0, 0, 1, 1]);
+        await client.query("SET CONSTRAINTS ALL DEFERRED");
+        // Run the actual owner action transaction inside this fixture's outer rollback.
+        const nestedPool = { connect: async () => ({
+          query: (sql: string, values?: unknown[]) => client.query(
+            sql === "BEGIN" ? "SAVEPOINT owner_action" : sql === "COMMIT" ? "RELEASE SAVEPOINT owner_action" :
+              sql === "ROLLBACK" ? "ROLLBACK TO SAVEPOINT owner_action" : sql, values), release() {},
+        }) } as unknown as pg.Pool;
+        const actions = createBookingHostActions({ pool: nestedPool, inventory: wrapped,
+          guards: targetBookingHostActionGuards, now: () => new Date(nextAt.getTime() + 1000) });
+        const scope = { propertyId, bookingId: booking.guestBookingId, actorUserId: context.actorUserId };
+        const hostPreview = await actions.preview(scope, { action: "edit_dates", reason: "Synthetic mixed host test",
+          checkIn: "2027-02-02", checkOut: input.checkOut });
+        expect(hostPreview.impact.cancellationPolicy).toMatchObject({ type: "mixed_room", lines: [
+          { previousDeadline: "2027-01-29", newDeadline: "2027-01-30" },
+          { previousDeadline: "2027-01-25", newDeadline: "2027-01-26" },
+        ] });
+        expect(await actions.apply(scope, hostPreview.previewId, randomUUID())).toMatchObject({ lifecycleStatus: "confirmed" });
+        await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+        const final = await bookingOwner.loadBooking(client, propertyId, booking.guestBookingId);
+        expect(final.totalAmount).toBe("300.00");
+        expect(serializeTargetBooking(final)["roomLines"]).toHaveLength(2);
+        const finalSnapshot = final.bookingMetadata as { policySnapshot: { lines: { totals: { totalAmount: string } }[] };
+          selectedOffer: { publicPolicy: { lines: { totals: { totalAmount: string } }[] }; roomLines: { totals: { totalAmount: string } }[] } };
+        const amounts = finalSnapshot.selectedOffer.roomLines.map((line) => line.totals.totalAmount);
+        expect(finalSnapshot.selectedOffer.publicPolicy.lines.map((line) => line.totals.totalAmount)).toEqual(amounts);
+        expect(finalSnapshot.policySnapshot.lines.map((line) => line.totals.totalAmount)).toEqual(amounts);
+      }
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("prefers canonical flexible price and meals without changing exact-offer selection", async () => {
+    const client = await pool.connect();
+    await client.query("BEGIN");
+    try {
+      const ratePlanId = randomUUID();
+      const key = `${rooms[0]}:onb15-flex-${ratePlanId}`;
+      await client.query(`INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES($1,$2,$3,$4,'Flexible','flexible',120,'EUR')`,
+        [ratePlanId, propertyId, rooms[0], `ONB15-FLEX-${ratePlanId}`]);
+      await client.query(`UPDATE distribution.public_room_offer_snapshots
+        SET rate_summary='{"refundable":true}' WHERE property_id=$1 AND room_type_id=$2`, [propertyId, rooms[0]]);
+      await client.query(`INSERT INTO distribution.public_room_offer_snapshots
+        (property_id,room_type_id,rate_plan_id,stay_date,public_offer_key,available_rooms,base_price_amount,
+         currency,payment_options,freshness_status,occupancy,rate_summary)
+        SELECT property_id,room_type_id,$3,stay_date,$4,2,120,'EUR',payment_options,'fresh',occupancy,
+          '{"refundable":true,"mealPlan":"breakfast"}'
+        FROM distribution.public_room_offer_snapshots WHERE property_id=$1 AND room_type_id=$2`,
+        [propertyId, rooms[0], ratePlanId, key]);
+      const request = { ...input, adults: 1, children: 0, roomCount: 1, nights: 2,
+        roomTypeId: rooms[0]!, rateType: "flexible", requestedAt: input.occurredAt };
+      expect(await loadTargetCheckoutOffer(client, request)).toMatchObject({
+        publicOfferKey: key, roomTotal: "240.00", rateSummary: { mealPlan: "breakfast" },
+      });
+      expect(await loadTargetCheckoutOffer(client, { ...request, exactPublicOfferKey: rooms[0]! }))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+      expect(await loadTargetCheckoutOffer(client, { ...request,
+        availabilityCredit: { checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 1 } }))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+      expect(await loadTargetCheckoutOffer(client, { ...request, rateType: ratePlanId }))
+        .toMatchObject({ publicOfferKey: key });
+      await client.query(`UPDATE distribution.public_room_offer_snapshots SET sellable_publicly=false
+        WHERE property_id=$1 AND public_offer_key=$2`, [propertyId, key]);
+      expect(await loadTargetCheckoutOffer(client, request))
+        .toMatchObject({ publicOfferKey: rooms[0], roomTotal: "200.00" });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+
+  it.each([
+    "min_stay_nights",
+    "max_stay_nights",
+    "closed_to_arrival",
+    "closed_to_departure",
+    "stop_sell",
+  ])("ordinary checkout and atomic single-room reservation enforce %s", async (column) => {
+    const date = column === "closed_to_departure" ? input.checkOut : input.checkIn;
+    const value = column === "min_stay_nights" ? 3 : column === "max_stay_nights" ? 1 : true;
+    await pool.query(
+      `INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,${column})
+        VALUES($1,$2,'stay_restriction',$3,$3,$4)`,
+      [propertyId, rooms[0], date, value],
+    );
+    const offerInput = {
+      ...input,
+      adults: 1,
+      children: 0,
+      roomCount: 1,
+      nights: 2,
+      roomTypeId: rooms[0]!,
+      rateType: "",
+      requestedAt: input.occurredAt,
+    };
+    try {
+      await expect(loadTargetCheckoutOffer(pool, offerInput)).rejects.toMatchObject({
+        statusCode: 409,
+      });
+      expect(
+        await transaction((client) =>
+          port.reserve({
+            ...input,
+            transaction: client,
+            quoteSessionId: randomUUID(),
+            roomTypeId: rooms[0]!,
+            publicOfferKey: rooms[0]!,
+            roomCount: 1,
+          }),
+        ),
+      ).toBeNull();
+      expect(await inventory()).toEqual([2, 2, 2, 2]);
+    } finally {
+      await pool.query("DELETE FROM pms.rate_rules WHERE property_id=$1", [propertyId]);
+    }
+    expect(await loadTargetCheckoutOffer(pool, offerInput)).toMatchObject({ roomTypeId: rooms[0] });
+  });
+
+  it("requires explicit checkout activation and quotes the complete selection through the adapter", async () => {
+    const client = await pool.connect();
+    const adapter = (enabled = false) => createTargetBookingWebCheckoutAdapter({ connectionString: url!,
+      mixedRoomSelectionsEnabled: enabled, inventoryReservationPort: port, now: () => input.occurredAt,
+      pool: { query: client.query.bind(client) } as unknown as pg.Pool });
+    const disabled = adapter();
+    const enabled = adapter(true);
+    try {
+      await client.query("BEGIN");
+      await client.query("INSERT INTO hotel_catalog.property_locations(property_id, timezone) VALUES($1,'Europe/Athens')", [propertyId]);
+      await client.query("UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1", [propertyId]);
+      await client.query("UPDATE distribution.public_hotel_bookability_profiles SET capabilities='{\"paymentMethods\":[\"pay_at_property\"]}' WHERE property_id=$1", [propertyId]);
+      const request = { checkIn: input.checkIn, checkOut: input.checkOut, roomSelection: selection,
+        adults: 5, children: 1, numberOfRooms: 3, addonIds: [addonId], paymentMethod: "pay_at_property" };
+      await expect(disabled.quoteBooking(propertyId, request)).rejects.toMatchObject({ statusCode: 400 });
+      expect(await enabled.quoteBooking(propertyId, request)).toMatchObject({ roomSelection: selection,
+        roomLines: [expect.objectContaining({ roomCount: 2 }), expect.objectContaining({ roomCount: 1 })],
+        numberOfRooms: 3, totalAmount: 610.25, addonTotal: 10.25 });
+      await expect(enabled.quoteBooking(propertyId, { ...request, adults: 6 })).rejects.toMatchObject({
+        statusCode: 400,
+        message: "Room allocations must match the requested guests and room count.",
+      });
+    } finally { await disabled.close?.(); await enabled.close?.(); await client.query("ROLLBACK"); client.release(); }
+  });
   it("persists the full selection, prices add-ons once, and rejects quote selection tampering", async () => {
     const property = {
       propertyId,
@@ -784,6 +1253,218 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     await expect(reserveLines([input.lines[1]!])).rejects.toMatchObject({ statusCode: 409 });
     expect(await inventory()).toEqual([0, 0, 2, 2]);
     await release(first);
+    expect(await inventory()).toEqual([2, 2, 2, 2]);
+  });
+  it("edits mixed to single and back through prepare/save with atomic failure recovery", async () => {
+    await pool.query(
+      `UPDATE distribution.public_room_offer_snapshots SET rate_summary=rate_summary || '{"rateType":"flexible","refundable":true}'::jsonb WHERE property_id=$1`,
+      [propertyId],
+    );
+    let now = new Date(input.occurredAt.getTime() + 10000);
+    const context = () => {
+      now = new Date(now.getTime() + 1000);
+      const key = randomUUID();
+      return {
+        operation: "edit",
+        requestId: key,
+        correlationId: key,
+        idempotencyKey: key,
+        fingerprint: key,
+        occurredAt: now,
+      };
+    };
+    const property = {
+      propertyId,
+      displayName: "Mixed room test",
+      defaultLocale: "en",
+      timezone: "Europe/Athens",
+    };
+    const request = {
+      roomTypeId: rooms[0],
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      roomSelection: selection,
+      adults: 5,
+      children: 1,
+      numberOfRooms: 3,
+      paymentMethod: "pay_at_property",
+      email: "mixed@example.test",
+    };
+    const original = await transaction(async (client) => {
+      const command = context();
+      const quote = await createTargetMixedCheckoutQuote(client, property, request, now);
+      const booking = await createTargetGuestBooking(
+        client,
+        port,
+        property,
+        { ...request, expectedTotalAmount: quote.totalAmount },
+        command,
+        quote,
+        null,
+        null,
+        null,
+      );
+      await enqueuePmsReservationHandoff(client, propertyId, booking, command, "create");
+      return {
+        booking,
+        token: (await issueTargetBookingConfirmationToken(client, booking, now)).token,
+      };
+    });
+    const config = {
+      connectionString: url!,
+      inventoryReservationPort: port,
+      now: () => now,
+      mixedRoomSelectionsEnabled: true,
+    };
+    const edit = (action: string, body: Record<string, unknown>, command = context()) =>
+      pendingBookingEdit(
+        pool,
+        config,
+        propertyId,
+        original.booking.guestBookingId,
+        action,
+        { ...body, confirmationToken: original.token },
+        command,
+      ) as Promise<any>;
+    const details = await edit("details", {});
+    expect(details.input.roomSelection).toEqual(selection);
+    const single = {
+      ...details.input,
+      roomSelection: undefined,
+      promoCode: "EDIT50",
+      rateType: "",
+      revision: 0,
+      roomTypeId: rooms[1],
+      adults: 2,
+      children: 0,
+      numberOfRooms: 1,
+    };
+    await pool.query(
+      "INSERT INTO booking.promo_definitions(property_id,code,discount_type,discount_value) VALUES($1,'EDIT50','fixed',50)",
+      [propertyId],
+    );
+    const singleQuote = await edit("quote", single);
+    const singleAttempt = await edit("prepare", {
+      ...single,
+      quoteId: singleQuote.quoteId,
+      expectedTotalAmount: singleQuote.totalAmount,
+    });
+    await pool.query(
+      "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=101 WHERE property_id=$1 AND room_type_id=$2",
+      [propertyId, rooms[1]],
+    );
+    await expect(
+      edit("save", { revision: 0, attemptId: singleAttempt.attemptId }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect((await edit("details", {})).revision).toBe(0);
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=100 WHERE property_id=$1 AND room_type_id=$2",
+      [propertyId, rooms[1]],
+    );
+    await pool.query(
+      `INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,closed_to_arrival)
+         VALUES($1,$2,'arrival_departure_restriction',$3,$3,true)`,
+      [propertyId, rooms[1], single.checkIn],
+    );
+    await expect(
+      edit("save", { revision: 0, attemptId: singleAttempt.attemptId }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query("DELETE FROM pms.rate_rules WHERE property_id=$1", [propertyId]);
+    await pool.query(
+      "UPDATE booking.promo_definitions SET discount_value=5 WHERE property_id=$1 AND code='EDIT50'",
+      [propertyId],
+    );
+    await expect(edit("save", { revision: 0, attemptId: singleAttempt.attemptId })).rejects.toThrow(
+      "Promo discount changed",
+    );
+    expect((await edit("details", {})).revision).toBe(0);
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      "UPDATE booking.promo_definitions SET discount_value=50 WHERE property_id=$1 AND code='EDIT50'",
+      [propertyId],
+    );
+    const first = await edit("save", { revision: 0, attemptId: singleAttempt.attemptId });
+    expect(first.booking.bookingReference).toBe(original.booking.publicReference);
+    expect(await inventory()).toEqual([2, 2, 1, 1]);
+    const nextDetails = await edit("details", {});
+    const mixed = { ...nextDetails.input, ...request, revision: 1 };
+    config.mixedRoomSelectionsEnabled = false;
+    await expect(edit("quote", mixed)).rejects.toThrow("Mixed room booking edits are not available");
+    config.mixedRoomSelectionsEnabled = true;
+    const mixedQuote = await edit("quote", mixed);
+    const mixedAttempt = await edit("prepare", {
+      ...mixed,
+      quoteId: mixedQuote.quoteId,
+      expectedTotalAmount: mixedQuote.totalAmount,
+    });
+    await pool.query(
+      "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=101 WHERE property_id=$1 AND room_type_id=$2",
+      [propertyId, rooms[1]],
+    );
+    await expect(
+      edit("save", { revision: 1, attemptId: mixedAttempt.attemptId }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(await inventory()).toEqual([2, 2, 1, 1]);
+    expect((await edit("details", {})).revision).toBe(1);
+    await pool.query(
+      "UPDATE distribution.public_room_offer_snapshots SET base_price_amount=100 WHERE property_id=$1 AND room_type_id=$2",
+      [propertyId, rooms[1]],
+    );
+    config.mixedRoomSelectionsEnabled = false;
+    await expect(edit("save", { revision: 1, attemptId: mixedAttempt.attemptId })).rejects.toThrow(
+      "Mixed room booking edits are not available",
+    );
+    config.mixedRoomSelectionsEnabled = true;
+    const command = context();
+    const second = await edit("save", { revision: 1, attemptId: mixedAttempt.attemptId }, command);
+    expect(await edit("save", { revision: 1, attemptId: mixedAttempt.attemptId }, command)).toEqual(
+      second,
+    );
+    expect(second.booking.bookingReference).toBe(original.booking.publicReference);
+    expect(second.booking.roomSelection).toEqual(selection);
+    expect((await pool.query("SELECT current_uses FROM booking.promo_definitions WHERE property_id=$1 AND code='EDIT50'", [propertyId])).rows).toEqual([{current_uses: 1}]);
+    expect(second.booking.hostResponseDeadline).toBe(first.booking.hostResponseDeadline);
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      `UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness=
+        '{"status":"incomplete","missing":["sellable_availability"]}' WHERE property_id=$1`,
+      [propertyId],
+    );
+    const retained = await edit("details", {});
+    const retainedInput = { ...retained.input, revision: retained.revision };
+    const retainedQuote = await edit("quote", retainedInput);
+    const retainedAttempt = await edit("prepare", {
+      ...retainedInput,
+      quoteId: retainedQuote.quoteId,
+      expectedTotalAmount: retainedQuote.totalAmount,
+    });
+    const retainedSave = await edit("save", {
+      revision: retained.revision,
+      attemptId: retainedAttempt.attemptId,
+    });
+    expect(retainedSave.booking.roomSelection).toEqual(selection);
+    expect(retainedSave.booking.bookingReference).toBe(original.booking.publicReference);
+    expect(retainedSave.booking.hostResponseDeadline).toBe(first.booking.hostResponseDeadline);
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      `UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness='{"status":"ready"}' WHERE property_id=$1`,
+      [propertyId],
+    );
+    const final = await loadTargetBooking(
+      pool,
+      propertyId,
+      original.booking.guestBookingId,
+      null,
+      sha256Hex(original.token),
+    );
+    const reservation = (final.bookingMetadata as Record<string, unknown>)[
+      "inventoryReservation"
+    ] as PmsInventoryReservationBundle;
+    await transaction((client) =>
+      port.release({ transaction: client, propertyId, reservation, occurredAt: now }),
+    );
     expect(await inventory()).toEqual([2, 2, 2, 2]);
   });
   it("cannot combine two room types selling the same linked space", async () => {

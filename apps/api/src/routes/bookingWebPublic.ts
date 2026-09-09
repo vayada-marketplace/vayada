@@ -1,8 +1,14 @@
-import { projectBookingRoomSelection } from "../domains/bookingRoomSelectionProjection.js";
+import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
+import {
+  bookedMealDescription,
+  projectBookingRoomSelection,
+} from "../domains/bookingRoomSelectionProjection.js";
+import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import { pendingBookingEdit } from "./pendingBookingEdits.js";
-import type { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
+import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import {
+  createTargetMixedCheckoutQuote,
   allocateMixedQuoteDiscount,
   mixedSelectionOffer,
   mixedSelectionPromotion,
@@ -56,10 +62,12 @@ import {
   stripeAmountMinor,
   stripeApplicationFeeMinor,
 } from "../domains/stripeMoney.js";
+import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
   type DirectBookingInventoryReservationPort,
+  type InventoryReservationReceipt,
 } from "../platform/inventoryReservation.js";
 import {
   serializePublicHotelQuoteProjection,
@@ -1442,6 +1450,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Enable only after all mixed selection consumers have passed cutover validation. */
+  mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
   connectionString: string;
   inventoryReservationPort: DirectBookingInventoryReservationPort;
@@ -1625,6 +1635,7 @@ export function createTargetBookingWebCheckoutAdapter(
         }
         const property = await loadTargetPropertyById(client, propertyId);
         const requested = targetDateChangeRequestFromSnapshot(changeRequest.requestedChanges);
+        await lockPmsInventoryMutationScope(client, propertyId);
         const preview = await previewTargetDateChange(
           client,
           config.inventoryReservationPort,
@@ -1659,7 +1670,7 @@ export function createTargetBookingWebCheckoutAdapter(
         if (!roomTypeId || !publicOfferKey) {
           throw createHttpError(409, "The requested room offer is no longer available.");
         }
-        const reservation = await config.inventoryReservationPort.reserve({
+        const reservation = await reserveTargetDateSelection(config.inventoryReservationPort, selectedOffer, {
           transaction: client,
           propertyId,
           quoteSessionId: `change-request:${changeRequest.id}`,
@@ -1830,6 +1841,8 @@ export function createTargetBookingWebCheckoutAdapter(
           request,
           context.occurredAt,
         );
+        if (quote.selectedOfferSnapshot["roomSelection"] !== undefined && !config.mixedRoomSelectionsEnabled)
+          throw createHttpError(409, "Room selection checkout is not available.");
         if (quote.selectedOfferSnapshot["editBookingId"])
           throw createHttpError(409, "Use the request editor to save this quote.");
         const billingConfigReadPort = config.billingConfigReadPortFactory?.(client);
@@ -1907,9 +1920,16 @@ export function createTargetBookingWebCheckoutAdapter(
             "create",
           );
         }
+        const responseBooking = await loadTargetBooking(
+          client,
+          property.propertyId,
+          booking.publicReference,
+          null,
+          sha256Hex(confirmation.token),
+        );
         const body = {
           bookingReference: booking.publicReference,
-          booking: serializeTargetBooking(booking),
+          booking: serializeTargetBooking(responseBooking),
           clientSecret: cardPayment?.clientSecret ?? null,
           xenditInvoiceUrl: null,
           paymentMethod: quote.paymentMethod,
@@ -1941,11 +1961,13 @@ export function createTargetBookingWebCheckoutAdapter(
           );
           if (reservation.status === "replay") return reservation.body;
         }
-        const quote = await createTargetCheckoutQuote(
+        if (request["roomSelection"] !== undefined && !config.mixedRoomSelectionsEnabled)
+          throw createHttpError(400, "Room selection checkout is not available.");
+        const quote = await (request["roomSelection"] !== undefined ? createTargetMixedCheckoutQuote : createTargetCheckoutQuote)(
           executor,
           property,
           request,
-          context?.occurredAt ?? new Date(),
+          context?.occurredAt ?? config.now?.() ?? new Date(),
         );
         const body = serializeTargetCheckoutQuote(quote);
         if (context) {
@@ -2634,12 +2656,9 @@ export async function loadTargetCheckoutConfig(
   return result.rows[0] ?? null;
 }
 
-function serializeTargetCheckoutConfig(
-  property: TargetCheckoutPropertyRow,
-  row: TargetCheckoutConfigRow | null,
-): Record<string, unknown> {
+export function targetCheckoutReadyPaymentMethods(row: TargetCheckoutConfigRow | null): string[] {
   const depositPolicy = objectValue(row?.depositPolicy);
-  const methods = targetCheckoutSupportedPaymentMethods(row?.acceptedMethods).filter((method) => {
+  return targetCheckoutSupportedPaymentMethods(row?.acceptedMethods).filter((method) => {
     if (method === "card") return row?.onlineCardReady === true;
     if (method === "bank_transfer") {
       return row?.bankTransferReady === true;
@@ -2647,6 +2666,14 @@ function serializeTargetCheckoutConfig(
     if (method === "paypal") return isValidPaymentEmail(depositPolicy["paypalEmail"]);
     return true;
   });
+}
+
+function serializeTargetCheckoutConfig(
+  property: TargetCheckoutPropertyRow,
+  row: TargetCheckoutConfigRow | null,
+): Record<string, unknown> {
+  const depositPolicy = objectValue(row?.depositPolicy);
+  const methods = targetCheckoutReadyPaymentMethods(row);
   const refundPolicy = objectValue(row?.refundPolicy);
   return {
     hotelName: property.displayName,
@@ -2693,6 +2720,7 @@ export async function createTargetCheckoutQuote(
     bookingId: string;
     revision: number;
     availabilityCredit?: { checkIn: string; checkOut: string; roomCount: number };
+    exactPublicOfferKey?: string;
   },
   mixed?: Awaited<ReturnType<typeof quoteTargetRoomSelection>>,
 ): Promise<TargetCheckoutQuoteSnapshot> {
@@ -2742,6 +2770,7 @@ export async function createTargetCheckoutQuote(
         rateType,
         requestedAt,
         availabilityCredit: edit?.availabilityCredit,
+        exactPublicOfferKey: edit?.exactPublicOfferKey,
       });
   const addonRequest = parseTargetCheckoutAddonRequest(request);
   const addonPurchases = await resolveTargetCheckoutAddonPurchases(pool, {
@@ -3064,6 +3093,8 @@ export async function loadTargetCheckoutOffer(
       checkOut: string;
       roomCount: number;
     };
+    /** Server-verified receipt released for this replacement; does not add inventory. */
+    releasedSetupCredit?: boolean;
   },
 ): Promise<TargetCheckoutQuoteOfferRow> {
   const result = await pool.query<TargetCheckoutQuoteOfferRow>(
@@ -3106,7 +3137,10 @@ export async function loadTargetCheckoutOffer(
        AND profile.public_visibility = 'public_safe'
        AND profile.profile_status = 'public'
        AND profile.freshness_status = 'fresh'
-       AND profile.public_setup_completeness ->> 'status' = 'ready'
+       AND (profile.public_setup_completeness ->> 'status' = 'ready'
+         OR (($14::int > 0 OR $17::boolean)
+           AND profile.public_setup_completeness ->> 'status' = 'incomplete'
+           AND profile.public_setup_completeness -> 'missing' = '["sellable_availability"]'::jsonb))
        AND (profile.expires_at IS NULL OR profile.expires_at > $10::timestamptz)
        AND offer.public_visibility = 'public_safe'
        AND offer.stay_date >= $2::date
@@ -3154,6 +3188,7 @@ export async function loadTargetCheckoutOffer(
          )
          OR offer.rate_plan_id::text = $9
        )
+       AND pms.stay_restrictions_allow(offer.property_id,offer.room_type_id,offer.rate_plan_id,$2::date,$3::date)
      GROUP BY
        offer.public_offer_key,
        offer.room_type_id,
@@ -3170,18 +3205,12 @@ export async function loadTargetCheckoutOffer(
             ELSE 0
           END
         ) >= $7::int
-        AND COALESCE(
-          MAX(NULLIF(offer.rate_summary ->> 'minStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date),
-          1
-        ) <= $11::int
-        AND (
-          MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date) IS NULL
-          OR MAX(NULLIF(offer.rate_summary ->> 'maxStayNights', '')::integer)
-            FILTER (WHERE offer.stay_date = $2::date) >= $11::int
-        )
-     ORDER BY SUM(offer.base_price_amount), offer.public_offer_key
+
+     ORDER BY CASE
+       WHEN $9 IN ('', 'flexible') AND $16::text IS NULL AND $14::int = 0
+         AND offer.public_offer_key = offer.room_type_id::text || ':onb15-flex-' || offer.rate_plan_id::text
+       THEN 0 ELSE 1 END,
+       SUM(offer.base_price_amount), offer.public_offer_key
      LIMIT 1`,
     [
       input.propertyId,
@@ -3200,6 +3229,7 @@ export async function loadTargetCheckoutOffer(
       input.availabilityCredit?.roomCount ?? 0,
       input.maximumRoomGuests ?? null,
       input.exactPublicOfferKey ?? null,
+      input.releasedSetupCredit ?? false,
     ],
   );
   const offer = result.rows[0];
@@ -3211,7 +3241,7 @@ export async function loadTargetCheckoutOffer(
     objectValue(offer.profileCapabilities),
   );
   if (paymentOptions.length === 0) {
-    throw createHttpError(409, "Checkout payment methods are no longer available. Please refresh.");
+    throw Object.assign(createHttpError(409, "Checkout payment methods are no longer available. Please refresh."), { availabilityReason: "payment_disabled" });
   }
   return { ...offer, paymentOptions };
 }
@@ -3302,7 +3332,17 @@ export async function loadTargetCheckoutQuoteSnapshot(
            AND profile.public_visibility = 'public_safe'
            AND profile.profile_status = 'public'
            AND profile.freshness_status = 'fresh'
-           AND profile.public_setup_completeness ->> 'status' = 'ready'
+           AND (profile.public_setup_completeness ->> 'status' = 'ready'
+             OR (profile.public_setup_completeness ->> 'status' = 'incomplete'
+               AND profile.public_setup_completeness -> 'missing' = '["sellable_availability"]'::jsonb
+               AND EXISTS (
+                 SELECT 1 FROM pms.pending_booking_edit_receipts credit
+                 WHERE credit.property_id = booking.quote_sessions.property_id
+                   AND credit.guest_booking_id::text = booking.quote_sessions.selected_offer_snapshot ->> 'editBookingId'
+                   AND credit.room_type_id::text = booking.quote_sessions.selected_offer_snapshot ->> 'roomTypeId'
+                   AND credit.public_offer_key = booking.quote_sessions.selected_offer_snapshot ->> 'publicOfferKey'
+                   AND credit.room_count > 0
+               )))
            AND (profile.expires_at IS NULL OR profile.expires_at > $3::timestamptz)
            AND profile.default_currency = booking.quote_sessions.currency
            AND profile.capabilities -> 'paymentMethods' ?
@@ -3557,6 +3597,84 @@ export function serializeTargetCheckoutQuote(
   };
 }
 
+/** Pending edits may replace a bundle with a legacy single-type selection. */
+export async function revalidateTargetSingleEditQuote(
+  pool: BookingWebQueryExecutor,
+  property: TargetCheckoutPropertyRow,
+  quote: TargetCheckoutQuoteSnapshot,
+  now: Date,
+  replacingReservation: InventoryReservationReceipt,
+): Promise<void> {
+  if (quote.selectedOfferSnapshot["roomSelection"] !== undefined) return;
+  await lockPmsInventoryMutationScope(pool, property.propertyId);
+  const saved = quote.selectedOfferSnapshot;
+  const settings = await loadTargetCheckoutConfig(pool, property.propertyId);
+  const unavailable = () =>
+    createHttpError(409, "Room selection changed. Please refresh the checkout quote.");
+  if ((settings?.defaultCurrency ?? "EUR") !== quote.currency) throw unavailable();
+  const releasedOffers = await releasedPmsReservationOfferKeys(
+    pool,
+    property.propertyId,
+    replacingReservation,
+    now,
+  );
+  const offer = await loadTargetCheckoutOffer(pool, {
+    propertyId: property.propertyId,
+    checkIn: quote.checkIn,
+    checkOut: quote.checkOut,
+    currency: quote.currency,
+    adults: quote.adults,
+    children: quote.children,
+    roomCount: quote.roomCount,
+    nights: dateRange(quote.checkIn, quote.checkOut).length,
+    roomTypeId: String(saved["roomTypeId"]),
+    rateType: String(saved["rateType"] ?? ""),
+    exactPublicOfferKey: String(saved["publicOfferKey"]),
+    releasedSetupCredit: releasedOffers.has(String(saved["publicOfferKey"])),
+    requestedAt: now,
+  });
+  if (
+    await pmsRoomStayRestrictionReason(pool, {
+      propertyId: property.propertyId,
+      roomTypeId: offer.roomTypeId,
+      ratePlanId: offer.ratePlanId,
+      checkIn: quote.checkIn,
+      checkOut: quote.checkOut,
+    })
+  )
+    throw unavailable();
+  for (const key of ["ratePlanId", "rateSummary", "publicPolicy"] as const)
+    if (stableJson(saved[key]) !== stableJson(offer[key])) throw unavailable();
+  for (const key of ["roomTotal", "taxesAndFees", "discounts"] as const)
+    if (moneyToCents(quote.totals[key] as string) !== moneyToCents(offer[key])) throw unavailable();
+  const nightlyPayments = offer.nightlyPaymentOptions ?? [offer.paymentOptions];
+  if (
+    !quote.paymentMethod ||
+    !Array.isArray(nightlyPayments) ||
+    !nightlyPayments.every(
+      (options: unknown) => Array.isArray(options) && options.includes(quote.paymentMethod),
+    )
+  )
+    throw unavailable();
+  const automatic = bestBookingPromotion({
+    settings: settings?.promotionSettings,
+    roomTypeId: offer.roomTypeId,
+    today: targetPropertyDateOnly(property.timezone, now),
+    nights: targetNightlyRoomAmounts(
+      offer.promotionNightlyRoomAmounts ?? offer.nightlyRoomAmounts,
+      quote.checkIn,
+      quote.checkOut,
+    ),
+    roomTotal: Math.max(0, Number(offer.roomTotal) - Number(offer.discounts)),
+    roomCount: quote.roomCount,
+  });
+  const promotion =
+    automatic && automatic.discountAmount > Number(quote.totals["promoDiscount"] ?? 0)
+      ? automatic
+      : undefined;
+  if (stableJson(saved["promotion"]) !== stableJson(promotion)) throw unavailable();
+}
+
 export async function createTargetGuestBooking(
   pool: BookingWebQueryExecutor,
   inventoryReservationPort: DirectBookingInventoryReservationPort,
@@ -3590,6 +3708,7 @@ export async function createTargetGuestBooking(
           property,
           quote,
           context.occurredAt,
+          existing ? inventoryReservationReceiptFromBookingMetadata(existing.bookingMetadata, property.propertyId) ?? undefined : undefined,
         )
       : await inventoryReservationPort.reserve({
           transaction: pool,
@@ -3602,6 +3721,9 @@ export async function createTargetGuestBooking(
           roomCount: quote.roomCount,
           currency: quote.currency,
           occurredAt: context.occurredAt,
+          replacingReservation: existing
+            ? inventoryReservationReceiptFromBookingMetadata(existing.bookingMetadata, property.propertyId) ?? undefined
+            : undefined,
         });
   if (!inventoryReservation) {
     throw createHttpError(409, "Checkout quote inventory is no longer available. Please refresh.");
@@ -4495,6 +4617,7 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
   const totalAmount = Number(decimalString(booking.totalAmount));
   return {
     ...projectBookingRoomSelection(selectedOffer),
+    mealDescription: bookedMealDescription(selectedOffer),
     canEditRequest: booking.canEditRequest ?? false,
     id: booking.guestBookingId,
     guestBookingId: booking.guestBookingId,
@@ -4629,23 +4752,35 @@ async function previewTargetDateChange(
   if (!publicOfferKey || !roomTypeId) {
     return blocked("The original room offer cannot be changed online. Contact the property.");
   }
-  const availabilityCredit = await targetInventoryAvailabilityCredit(
-    inventoryReservationPort,
-    pool,
-    booking,
-    property.propertyId,
-    roomTypeId,
-    publicOfferKey,
+  const selection = parseBookingRoomSelection(selectedOffer["roomSelection"]);
+  if (selectedOffer["roomSelection"] !== undefined && !selection)
+    return blocked("The original room selection cannot be changed online.");
+  const reservation = inventoryReservationReceiptFromBookingMetadata(booking.bookingMetadata, property.propertyId);
+  const credits = selection && reservation && "receipts" in reservation
+    ? await inventoryReservationPort.bundleAvailabilityCredits?.({
+        transaction: pool, propertyId: property.propertyId, reservation,
+        checkIn: dateOnly(booking.checkIn), checkOut: dateOnly(booking.checkOut),
+        lines: selection.lines.map((line) => ({ ...line, roomCount: line.guests.length })),
+      }) : null;
+  const availabilityCredit = selection ? undefined : await targetInventoryAvailabilityCredit(
+    inventoryReservationPort, pool, booking, property.propertyId, roomTypeId, publicOfferKey,
   );
-  if (!availabilityCredit) {
+  if (selection ? !credits : !availabilityCredit)
     return blocked("This booking's inventory reservation cannot be changed online.");
-  }
   const rateType = canonicalTargetCheckoutRateType(
     stringValue(selectedOffer["rateType"]) ?? publicOfferKey,
   );
 
   try {
-    const offer = await loadTargetCheckoutOffer(pool, {
+    const promotionSettings = await loadTargetCheckoutConfig(pool, property.propertyId);
+    const mixed = selection ? await quoteTargetRoomSelection(pool, {
+      propertyId: property.propertyId, selection, checkIn, checkOut, currency: booking.currency,
+      today: targetPropertyDateOnly(property.timezone, requestedAt), requestedAt,
+      promotionSettings: promotionSettings?.promotionSettings, credits: credits!,
+    }) : null;
+    if (mixed && !mixed.paymentOptions.includes("pay_at_property"))
+      return blocked("The original payment method is no longer available for every room.");
+    const offer = mixed ? mixedSelectionOffer(mixed) : await loadTargetCheckoutOffer(pool, {
       propertyId: property.propertyId,
       checkIn,
       checkOut,
@@ -4665,8 +4800,7 @@ async function previewTargetDateChange(
     const roomTotal = moneyNumber(offer.roomTotal) ?? 0;
     const taxesAndFees = moneyNumber(offer.taxesAndFees) ?? 0;
     const discounts = moneyNumber(offer.discounts) ?? 0;
-    const promotionSettings = await loadTargetCheckoutConfig(pool, property.propertyId);
-    const promotion = bestBookingPromotion({
+    const promotion = mixed ? mixedSelectionPromotion(mixed) : bestBookingPromotion({
       settings: promotionSettings?.promotionSettings,
       roomTypeId: offer.roomTypeId,
       today: targetPropertyDateOnly(property.timezone, requestedAt),
@@ -4680,8 +4814,13 @@ async function previewTargetDateChange(
     });
     const promotionDiscount = promotion?.discountAmount ?? 0;
     const newTotal = roundMoney(roomTotal + taxesAndFees - discounts - promotionDiscount);
+    const roomLines = mixed ? allocateMixedQuoteDiscount(mixed.lines, 0, 0).lines : undefined;
     const refreshedSelectedOffer = {
       ...selectedOffer,
+      ...(mixed ? { roomSelection: mixed.selection, roomLines,
+        roomName: String(objectValue(offer.roomSummary)["name"]),
+        paymentOptions: mixed.paymentOptions,
+      } : {}),
       promotion,
       publicOfferKey: offer.publicOfferKey,
       roomTypeId: offer.roomTypeId,
@@ -4690,7 +4829,10 @@ async function previewTargetDateChange(
       roomSummary: objectValue(offer.roomSummary),
       rateSummary: objectValue(offer.rateSummary),
       occupancy: objectValue(offer.occupancy),
-      publicPolicy: objectValue(offer.publicPolicy),
+      publicPolicy: roomLines ? { type: "mixed_room", lines: roomLines.map((line) => ({
+        roomTypeId: line.roomTypeId, publicOfferKey: line.publicOfferKey, roomCount: line.guests.length,
+        policy: line.offer.publicPolicy, rateSummary: line.offer.rateSummary, totals: line.totals,
+      })) } : objectValue(offer.publicPolicy),
       nightlyRoomAmounts: targetNightlyRoomAmounts(offer.nightlyRoomAmounts, checkIn, checkOut),
       sourceFreshness: objectValue(offer.sourceFreshness),
       generatedAt: toIsoDateTime(offer.generatedAt),
@@ -4844,6 +4986,7 @@ async function insertTargetChangeRequest(
 function serializeTargetChangeRequest(row: TargetChangeRequestRow): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
+    ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,
     status: publicTargetChangeRequestStatus(row.status),
@@ -4878,7 +5021,7 @@ function serializeTargetDateChangePreview(
   preview: TargetDateChangePreview,
 ): Record<string, unknown> {
   const { pricingSnapshot: _pricingSnapshot, ...publicPreview } = preview;
-  return publicPreview;
+  return { ...publicPreview, ...projectBookingRoomSelection(_pricingSnapshot?.["selectedOffer"]) };
 }
 
 export async function loadTargetHotelBooking(
@@ -5069,12 +5212,30 @@ function assertTargetDateChangePriceUnchanged(
   const snapshot = objectValue(snapshotValue);
   const submittedTotal = moneyNumber(snapshot["newTotal"]);
   const currency = stringValue(snapshot["currency"]);
-  if (submittedTotal !== preview.newTotal || currency !== preview.currency) {
+  const submittedOffer = objectValue(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]);
+  const currentOffer = objectValue(preview.pricingSnapshot?.["selectedOffer"]);
+  const selectionChanged = (submittedOffer["roomSelection"] !== undefined || currentOffer["roomSelection"] !== undefined) &&
+    stableJson(projectBookingRoomSelection(submittedOffer)) !== stableJson(projectBookingRoomSelection(currentOffer));
+  if (submittedTotal !== preview.newTotal || currency !== preview.currency || selectionChanged) {
     throw createHttpError(
       409,
       "The price for the requested dates changed. Ask the guest to submit a new request.",
     );
   }
+}
+
+async function reserveTargetDateSelection(
+  port: DirectBookingInventoryReservationPort,
+  selectedOffer: Record<string, unknown>,
+  input: Parameters<DirectBookingInventoryReservationPort["reserve"]>[0],
+) {
+  if (selectedOffer["roomSelection"] === undefined) return port.reserve(input);
+  const selection = parseBookingRoomSelection(selectedOffer["roomSelection"]);
+  if (!selection || !port.reserveBundle)
+    throw createHttpError(409, "The complete room selection is unavailable.");
+  return port.reserveBundle({ ...input,
+    lines: selection.lines.map((line) => ({ ...line, roomCount: line.guests.length })),
+  });
 }
 
 async function applyAcceptedTargetDateChange(
@@ -5092,7 +5253,9 @@ async function applyAcceptedTargetDateChange(
   const metadata = {
     ...objectValue(input.booking.bookingMetadata),
     selectedOffer: input.selectedOffer,
+    ...(input.selectedOffer["roomSelection"] ? { policySnapshot: input.selectedOffer["publicPolicy"] } : {}),
     inventoryReservation: input.inventoryReservation,
+    inventoryQuoteSessionId: `${hostEdit ? "host-edit" : "change-request"}:${input.changeRequest.id}`,
     [hostEdit ? "lastHostEditPreviewId" : "lastAcceptedChangeRequestId"]: input.changeRequest.id,
   };
   const result = await pool.query<TargetBookingRow>(
@@ -5402,7 +5565,7 @@ export async function redeemTargetPromo(
   if (validationMessage) throw createHttpError(409, validationMessage);
   const selection = parseBookingRoomSelection(quote.selectedOfferSnapshot["roomSelection"]);
   if (
-    selection &&
+    (selection || quote.selectedOfferSnapshot["editBookingId"]) &&
     (snapshot["discountType"] !== promo.discountType ||
       moneyToCents(snapshot["discountValue"] as string) !== moneyToCents(promo.discountValue))
   ) {
@@ -5428,11 +5591,18 @@ export async function redeemTargetPromo(
       WHERE property_id = $1::uuid AND id = $2::uuid`,
     [property.propertyId, promoDefinitionId, occurredAt.toISOString()],
   );
-  await pool.query(
+  const redemption = await pool.query(
     `INSERT INTO booking.promo_applications (
        property_id, guest_booking_id, promo_definition_id, promo_code,
        application_status, discount_amount, currency, metadata
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'applied', $5::numeric, $6, $7::jsonb)`,
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'applied', $5::numeric, $6, $7::jsonb)
+     ON CONFLICT (guest_booking_id) WHERE guest_booking_id IS NOT NULL DO UPDATE SET
+       promo_definition_id=EXCLUDED.promo_definition_id,promo_code=EXCLUDED.promo_code,
+       application_status='applied',discount_amount=EXCLUDED.discount_amount,
+       currency=EXCLUDED.currency,metadata=EXCLUDED.metadata
+     WHERE booking.promo_applications.property_id=EXCLUDED.property_id
+       AND booking.promo_applications.application_status='reversed'
+     RETURNING id`,
     [
       property.propertyId,
       booking.guestBookingId,
@@ -5443,6 +5613,7 @@ export async function redeemTargetPromo(
       JSON.stringify({ quoteReference: quote.publicQuoteReference }),
     ],
   );
+  if (redemption.rows.length !== 1) throw createHttpError(409, "Promo redemption changed. Please refresh.");
 }
 
 export async function reverseTargetPromoRedemption(
@@ -7060,7 +7231,7 @@ function assertTargetSameDayBookingOpen(
   }
 }
 
-function canonicalTargetCheckoutRateType(value: string | null | undefined): string {
+export function canonicalTargetCheckoutRateType(value: string | null | undefined): string {
   const normalized = (value ?? "flexible").trim().toLowerCase();
   if (
     normalized === "nonrefundable" ||
@@ -7190,6 +7361,8 @@ export const targetBookingHostActionPrimitives = {
   loadProperty: loadTargetPropertyById,
   previewDates: previewTargetDateChange,
   applyDates: applyAcceptedTargetDateChange,
+  reserveDates: reserveTargetDateSelection,
+  assertDatesUnchanged: assertTargetDateChangePriceUnchanged,
   reserveCommand: reserveTargetCheckoutCommand,
   recordCommand: recordTargetCheckoutCommand,
   reversePromo: reverseTargetPromoRedemption,

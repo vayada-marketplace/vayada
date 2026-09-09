@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "No-show bekijken…",
+  "checkOut.reviewNoShow": "No-show bekijken…",
   "layout.header.signOut": "Uitloggen",
   "layout.header.noProperties": "Geen accommodaties",
   "layout.header.user": "Gebruiker",
