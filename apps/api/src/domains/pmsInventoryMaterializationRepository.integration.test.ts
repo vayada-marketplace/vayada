@@ -399,8 +399,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           end: async () => {},
           connect: async () => ({
             release() {},
-            query: (text, values) =>
-              admin.query(
+            query: <T extends pg.QueryResultRow>(text: string, values?: readonly unknown[]) =>
+              admin.query<T>(
                 text === "BEGIN"
                   ? "SAVEPOINT operational_command"
                   : text === "COMMIT"
@@ -408,7 +408,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
                     : text === "ROLLBACK"
                       ? "ROLLBACK TO SAVEPOINT operational_command"
                       : text,
-                values,
+                values ? [...values] : undefined,
               ),
           }),
         },
@@ -428,6 +428,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
               organizationId: fixture.organizationId,
             },
             requestId: commandId,
+            reason: "Synthetic alteration regression",
             requestedAt: ACCEPTED_AT.toISOString(),
           },
         }),
