@@ -128,4 +128,63 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     f.allowConversion(); await f.store.save(f.scope, command);
     expect(await f.store.read(f.scope)).toMatchObject({ currency: "USD", revision: 2, rooms: [{ currency: "USD" }] });
   });
+  it("binds publication to saved draft contents and replays its receipt after later edits", async () => {
+    const f = await fixture(), draftId = randomUUID();
+    const draft = { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) };
+    await f.store.saveDraft(f.scope, draft);
+    expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ sources: f.sources() });
+    const publish = { ...f.command(), draft: { id: draftId, revision: 1 } };
+    expect(await f.store.save(f.scope, publish)).toEqual({ revision: 1, replayed: false });
+    await f.store.saveDraft(f.scope, { ...draft, expectedDraftRevision: 1, baseRevision: 1, snapshot: f.snapshot(2) });
+    expect(await f.store.save(f.scope, { ...publish, draft: { ...publish.draft, id: draftId.toUpperCase() } })).toEqual({ revision: 1, replayed: true });
+    await expect(f.store.save(f.scope, { ...publish, draft: { id: draftId, revision: 2 } })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
+  });
+  it("rejects missing, mismatched, edited and foreign drafts without publication effects", async () => {
+    const f = await fixture(), other = await fixture(), draftId = randomUUID();
+    const draft = { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) };
+    await f.store.saveDraft(f.scope, draft);
+    const publish = { ...f.command(), draft: { id: draftId, revision: 1 } };
+    for (const input of [
+      { ...publish, draft: { id: randomUUID(), revision: 1 } },
+      { ...publish, draft: { id: draftId, revision: 2 } },
+      { ...publish, snapshot: { ...publish.snapshot, rooms: [] } },
+      { ...publish, sources: { ...publish.sources, guest: "wrong" } },
+      { ...publish, expectedRevision: 1, snapshot: f.snapshot(2) },
+    ]) await expect(f.store.save(f.scope, input)).rejects.toMatchObject({ code: "stale" });
+    await expect(other.store.save(other.scope, { ...other.command(), draft: publish.draft })).rejects.toMatchObject({ code: "stale" });
+    await f.store.saveDraft(f.scope, { ...draft, expectedDraftRevision: 1, snapshot: { ...draft.snapshot, rooms: [] } });
+    await expect(f.store.save(f.scope, publish)).rejects.toMatchObject({ code: "stale" });
+    expect(await f.store.read(f.scope)).toBeNull();
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
+  });
+  it("serializes draft edits and publication of the reviewed version", async () => {
+    const f = await fixture(), draftId = randomUUID();
+    const draft = { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) };
+    await f.store.saveDraft(f.scope, draft);
+    const results = await Promise.allSettled([
+      f.store.save(f.scope, { ...f.command(), draft: { id: draftId, revision: 1 } }),
+      f.store.saveDraft(f.scope, { ...draft, expectedDraftRevision: 1, snapshot: { ...draft.snapshot, rooms: [] } }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({ reason: { code: "stale" } });
+    const active = await f.store.read(f.scope);
+    if (active) expect(active.rooms).toEqual(draft.snapshot.rooms);
+    else expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 2, snapshot: { rooms: [] } });
+  });
+  it("rolls back bound publication effects and preserves the draft for another request", async () => {
+    const f = await fixture(), draftId = randomUUID();
+    await f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) });
+    const publish = { ...f.command(), draft: { id: draftId, revision: 1 } };
+    const key = `pricing.v2:${f.scope.propertyId}:pricing.v2.revised:${publish.requestId}`;
+    await pool.query(`INSERT INTO platform.product_audit_events
+      (audit_key,product,action,occurred_at,tenant_scope,property_id,target_resource_product,target_resource_type,target_resource_id)
+      VALUES($1,'pms','fixture',now(),'property',$2::uuid,'pms','pricing_revision',$2::text)`, [key, f.scope.propertyId]);
+    await expect(f.store.save(f.scope, publish)).rejects.toThrow();
+    expect(await f.store.read(f.scope)).toBeNull();
+    expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 1, stale: false });
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
+    expect(await f.store.save(f.scope, { ...publish, requestId: randomUUID() })).toEqual({ revision: 1, replayed: false });
+  });
+
 });
