@@ -63,15 +63,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
   });
 
   it("checks Airbnb alterations against real materialization and canonical assignments", async () => {
-    const fixture = await createFixture(admin, repositories, [2]);
+    const additionalType = randomUUID(),
+      additionalExternal = randomUUID();
+    const fixture = await createFixture(admin, repositories, [2], [additionalType]);
     const { propertyId, roomTypeId } = fixture;
     const connectionId = randomUUID(),
       externalRoom = randomUUID(),
       bookingId = randomUUID();
     await admin.query(
       `INSERT INTO pms.rooms(property_id,room_type_id,room_number)
-      VALUES($1,$2,'A'),($1,$2,'B')`,
-      [propertyId, roomTypeId],
+      VALUES($1,$2,'A'),($1,$2,'B'),($1,$3,'C'),($1,$3,'D')`,
+      [propertyId, roomTypeId, additionalType],
     );
     await admin.query(
       `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status)
@@ -80,8 +82,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     );
     await admin.query(
       `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
-      VALUES($1,$2,$3,$4)`,
-      [propertyId, connectionId, roomTypeId, externalRoom],
+      VALUES($1,$2,$3,$4),($1,$2,$5,$6)`,
+      [propertyId, connectionId, roomTypeId, externalRoom, additionalType, additionalExternal],
     );
     expect(
       await fixture.repository.materializeInventory(
@@ -132,14 +134,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       await admin.query("BEGIN");
       try {
         const beforeCheck = await admin.query(
-          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         );
         await assertChannexAlterationAvailability(admin, input);
         expect(
           (
             await admin.query(
-              `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+              `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
               [propertyId],
             )
           ).rows,
@@ -149,14 +151,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       }
     }
     const before = await admin.query(
-      `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+      `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
       [propertyId],
     );
     await expect(check()).resolves.toBeUndefined();
     expect(
       (
         await admin.query(
-          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         )
       ).rows,
@@ -239,6 +241,161 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       };
       return { scope, revision, requestId, revisionId, providerBookingId };
     }
+    // Count/type changes use real materialization and preserve slot history.
+    await admin.query("BEGIN");
+    try {
+      const change = await prepareRevision("2026-08-06");
+      const ratePlan = randomUUID();
+      await admin.query(
+        "INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,currency) VALUES($1,$2,$3,'AIRBNB','Airbnb','EUR')",
+        [ratePlan, propertyId, roomTypeId],
+      );
+      await admin.query(
+        "UPDATE pms.operational_booking_assignments SET rate_plan_id=$2,assignment_status='assigned',assigned_at=now() WHERE guest_booking_id=$1",
+        [bookingId, ratePlan],
+      );
+      const originalSlots = (
+        await admin.query(
+          "SELECT id,room_id FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+          [bookingId],
+        )
+      ).rows;
+      async function changeRooms(externalTypes: ReturnType<typeof randomUUID>[]) {
+        const original = (
+          await admin.query(
+            "SELECT check_in::text,check_out::text,total_amount::text,adults,children FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0];
+        change.revision.id = randomUUID();
+        change.revision.attributes.rooms = externalTypes.map((room_type_id) => ({
+          room_type_id,
+          occupancy: { adults: 1, children: 0 },
+        }));
+        await admin.query(
+          `UPDATE booking.booking_change_requests SET status='pending',requested_changes=requested_changes || $2::jsonb WHERE id=$1`,
+          [
+            change.requestId,
+            JSON.stringify({
+              oldCheckIn: original.check_in,
+              oldCheckOut: original.check_out,
+              oldTotal: original.total_amount,
+              oldAdults: original.adults,
+              oldChildren: original.children,
+              rooms: externalTypes.map((roomTypeId) => ({ roomTypeId, adults: 1, children: 0 })),
+            }),
+          ],
+        );
+        return applyChannexAlterationRevision(admin, change.scope, change.revision);
+      }
+      await expect(changeRooms([externalRoom])).resolves.toBe(true);
+      let slots = (
+        await admin.query(
+          "SELECT id,room_id,assignment_status,assignment_payload FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+          [bookingId],
+        )
+      ).rows;
+      expect(slots[0].room_id).toBe(originalSlots[0].room_id);
+      expect(slots[1]).toMatchObject({
+        id: originalSlots[1].id,
+        assignment_status: "released",
+        assignment_payload: { channexAlterationReleased: true },
+      });
+      await expect(changeRooms([externalRoom, externalRoom])).resolves.toBe(true);
+      slots = (
+        await admin.query(
+          "SELECT id,room_id,assignment_status,assignment_payload FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+          [bookingId],
+        )
+      ).rows;
+      expect(slots[1]).toMatchObject({
+        id: originalSlots[1].id,
+        room_id: null,
+        assignment_status: "pending",
+        assignment_payload: { version: "reservation-v2" },
+      });
+      expect(slots[1].assignment_payload.channexAlterationReleased).toBeUndefined();
+      // A third room of the same type exceeds capacity, even with own-booking credit.
+      await expect(changeRooms([externalRoom, externalRoom, externalRoom])).rejects.toThrow(
+        "alteration_rooms_unavailable",
+      );
+      await expect(changeRooms([externalRoom, externalRoom, additionalExternal])).resolves.toBe(
+        true,
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT DISTINCT assignment_payload->>'version' AS version FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 AND assignment_status<>'released'",
+            [bookingId],
+          )
+        ).rows,
+      ).toEqual([{ version: "reservation-v3" }]);
+      expect(
+        (
+          await admin.query("SELECT room_count FROM booking.guest_bookings WHERE id=$1", [
+            bookingId,
+          ])
+        ).rows[0].room_count,
+      ).toBe(3);
+      await expect(changeRooms([additionalExternal, externalRoom])).resolves.toBe(true);
+      slots = (
+        await admin.query(
+          "SELECT id,room_id,room_type_id,rate_plan_id,assigned_at,assignment_status FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+          [bookingId],
+        )
+      ).rows;
+      expect(slots[0]).toMatchObject({
+        id: originalSlots[0].id,
+        room_id: null,
+        room_type_id: additionalType,
+        rate_plan_id: null,
+        assigned_at: null,
+        assignment_status: "pending",
+      });
+      expect(slots[2].assignment_status).toBe("released");
+      expect(
+        (
+          await admin.query(
+            "SELECT room_type_id,assigned_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date='2026-08-04' ORDER BY room_type_id",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual(
+        [roomTypeId, additionalType]
+          .sort()
+          .map((room_type_id) => ({ room_type_id, assigned_count: 1 })),
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1 AND outbox_key LIKE $2",
+            [propertyId, `channex.alteration.applied:${change.requestId}:${change.revision.id}:%`],
+          )
+        ).rows[0].count,
+      ).toBe(6);
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).resolves.toBe(false);
+      await expect(changeRooms([additionalExternal])).resolves.toBe(true);
+      expect(
+        (
+          await admin.query(
+            "SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-04'",
+            [propertyId, roomTypeId],
+          )
+        ).rows[0].assigned_count,
+      ).toBe(0);
+      // Unrelated canceled slots cannot be revived by a count increase.
+      await admin.query(
+        "UPDATE pms.operational_booking_assignments SET assignment_status='canceled' WHERE guest_booking_id=$1 AND position=3",
+        [bookingId],
+      );
+      await expect(
+        changeRooms([additionalExternal, externalRoom, additionalExternal]),
+      ).rejects.toThrow("alteration_revision_assignment_unsupported");
+    } finally {
+      await admin.query("ROLLBACK");
+    }
     // Application assertions run before rollback, against actual materialized inventory.
     await admin.query("BEGIN");
     try {
@@ -310,8 +467,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       expect(
         (
           await admin.query(
-            `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date='2026-08-06'`,
-            [propertyId],
+            `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-06'`,
+            [propertyId, roomTypeId],
           )
         ).rows[0].assigned_count,
       ).toBe(2);
@@ -325,7 +482,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ).toEqual({ status: "accepted", revision: revisionId });
       const after = (
         await admin.query(
-          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         )
       ).rows;
@@ -341,7 +498,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       expect(
         (
           await admin.query(
-            `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+            `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
             [propertyId],
           )
         ).rows,
@@ -467,7 +624,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).toBe(0);
     const appliedInventory = (
       await admin.query(
-        `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+        `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
         [propertyId],
       )
     ).rows;
@@ -477,7 +634,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(
       (
         await admin.query(
-          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         )
       ).rows,
@@ -982,6 +1139,7 @@ async function createFixture(
   admin: pg.Client,
   repositories: PmsInventoryMaterializationRepository[],
   startingLimits: readonly number[],
+  additionalRoomTypes: readonly string[] = [],
 ): Promise<Fixture> {
   const organizationId = randomUUID();
   const propertyId = randomUUID();
@@ -1008,6 +1166,12 @@ async function createFixture(
     [roomTypeId, propertyId],
   );
 
+  for (const id of additionalRoomTypes) {
+    await admin.query(
+      "INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Additional room')",
+      [id, propertyId],
+    );
+  }
   const configurations = new Map<number, PmsOperatingCalendarConfigurationSnapshot>();
   for (let index = 0; index < startingLimits.length; index += 1) {
     const revision = index + 1;
@@ -1016,6 +1180,7 @@ async function createFixture(
       roomTypeId,
       revision,
       startingLimit: startingLimits[index]!,
+      additionalRoomTypes,
     });
     configurations.set(revision, configuration);
     if (revision === 1) {
@@ -1026,6 +1191,7 @@ async function createFixture(
         actorUserId,
         revision,
         startingLimit: startingLimits[index]!,
+        additionalRoomTypes,
       });
     }
   }
@@ -1068,11 +1234,12 @@ async function createFixture(
   };
   const roomCapacity: RoomCapacityReadPort = {
     async getRoomTypeCapacity(requestedPropertyId, requestedRoomTypeId) {
-      return requestedPropertyId === propertyId && requestedRoomTypeId === roomTypeId
+      return requestedPropertyId === propertyId &&
+        [roomTypeId, ...additionalRoomTypes].includes(requestedRoomTypeId)
         ? {
             contractVersion: "pms-room-facts.v1",
             propertyId,
-            roomTypeId,
+            roomTypeId: requestedRoomTypeId,
             roomUnitsRevision: capacityState.revision,
             activeUnitCount: capacityState.count,
             capturedAt: ACCEPTED_AT.toISOString(),
@@ -1155,6 +1322,7 @@ function configurationSnapshot(input: {
   roomTypeId: string;
   revision: number;
   startingLimit: number;
+  additionalRoomTypes?: readonly string[];
 }): PmsOperatingCalendarConfigurationSnapshot {
   const parsed = parsePmsOperatingCalendarConfigurationSnapshot(
     {
@@ -1170,15 +1338,15 @@ function configurationSnapshot(input: {
           revision: "profile:1",
         },
         propertyTimeZone: "Europe/Berlin",
-        roomBindings: [
-          {
-            roomTypeId: input.roomTypeId,
+        roomBindings: [input.roomTypeId, ...(input.additionalRoomTypes ?? [])]
+          .sort()
+          .map((roomTypeId) => ({
+            roomTypeId,
             sourceRoomFactsRevision: 1,
             sourceRoomUnitsRevision: 1,
             physicalCapacityCount: 2,
             startingSellableLimitCount: input.startingLimit,
-          },
-        ],
+          })),
       },
       schedule: { mode: "year_round", periods: [] },
       defaultMinimumStayNights: 1,
@@ -1204,6 +1372,7 @@ async function seedCalendarRevision(
     actorUserId: string;
     revision: number;
     startingLimit: number;
+    additionalRoomTypes?: readonly string[];
   },
 ): Promise<void> {
   const idempotencyId = randomUUID();
@@ -1258,7 +1427,7 @@ async function seedCalendarRevision(
          created_by_user_id, created_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3, 'pms-operating-calendar.v1', 1,
-         'Europe/Berlin', 'year_round', 0, 1, 1, $4::uuid, $5::uuid,
+         'Europe/Berlin', 'year_round', 0, $9, 1, $4::uuid, $5::uuid,
          $6::uuid, $7::uuid, $8::timestamptz, $8::timestamptz
        )`,
       [
@@ -1270,16 +1439,19 @@ async function seedCalendarRevision(
         outboxId,
         input.actorUserId,
         ACCEPTED_AT.toISOString(),
+        1 + (input.additionalRoomTypes?.length ?? 0),
       ],
     );
-    await admin.query(
-      `INSERT INTO pms.operating_calendar_room_bindings (
+    for (const roomTypeId of [input.roomTypeId, ...(input.additionalRoomTypes ?? [])]) {
+      await admin.query(
+        `INSERT INTO pms.operating_calendar_room_bindings (
          property_id, calendar_revision, room_type_id,
          source_room_facts_revision, source_room_units_revision,
          physical_capacity_count, starting_sellable_limit_count
        ) VALUES ($1::uuid, $2, $3::uuid, 1, 1, 2, $4)`,
-      [input.propertyId, input.revision, input.roomTypeId, input.startingLimit],
-    );
+        [input.propertyId, input.revision, roomTypeId, input.startingLimit],
+      );
+    }
     await admin.query("COMMIT");
   } catch (error) {
     await admin.query("ROLLBACK");
