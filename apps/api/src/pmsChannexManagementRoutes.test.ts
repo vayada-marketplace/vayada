@@ -89,6 +89,21 @@ describe("PMS Channex management command routes", () => {
     }
     expect((await datePrice(app)).statusCode).toBe(statusCode);
     expect(harness.putDatePrice).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/properties/${propertyId}/channex/inventory-rules`,
+          headers: { authorization: "Bearer valid" },
+          payload: {
+            commandId: "rule-command",
+            idempotencyKey: "rule-key",
+            expectedOperationId: null,
+            rules: [],
+          },
+        })
+      ).statusCode,
+    ).toBe(statusCode);
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(
       (
@@ -282,6 +297,60 @@ describe("PMS Channex management command routes", () => {
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts rule replacement only through the guarded inventory route", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    const request = {
+      method: "PUT" as const,
+      url: `/properties/${propertyId}/channex/inventory-rules`,
+      headers: { authorization: "Bearer valid" },
+      payload: {
+        commandId: "rules",
+        idempotencyKey: "rules",
+        expectedOperationId: null,
+        rules: [],
+      },
+    };
+    expect((await app.inject(request)).statusCode).toBe(202);
+    expect(harness.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
+      commandId: "rules",
+      idempotencyKey: "rules",
+      operationType: "update_inventory_rules",
+      inventoryRules: { expectedOperationId: null, rules: [] },
+    });
+    expect(
+      (await app.inject({ ...request, url: `/properties/${operationId}/channex/inventory-rules` }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          payload: { ...request.payload, expectedOperationId: "invalid" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          url: `/properties/${propertyId}/channex/commands`,
+          payload: {
+            commandId: "rules",
+            idempotencyKey: "rules",
+            operationType: "update_inventory_rules",
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    await app.close();
+    const observe = await testApp({}, { ...mutating, ariSync: "observe_only" });
+    app = observe.app;
+    expect((await app.inject(request)).statusCode).toBe(409);
+    expect(observe.enqueue).not.toHaveBeenCalled();
+  });
+
   it("validates restriction scope and queues explicit empty resets", async () => {
     const harness = await testApp();
     app = harness.app;
@@ -349,16 +418,14 @@ async function testApp(
   const app = Fastify({ logger: false });
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
   const enqueue = vi.fn<PmsChannexManagementCommandPort["enqueue"]>();
-  const reportSubmit = vi
-    .fn()
-    .mockResolvedValue({
-      eligible: true,
-      reason: null,
-      localNoShow: true,
-      status: "pending",
-      retryable: false,
-      waivedFees: false,
-    });
+  const reportSubmit = vi.fn().mockResolvedValue({
+    eligible: true,
+    reason: null,
+    localNoShow: true,
+    status: "pending",
+    retryable: false,
+    waivedFees: false,
+  });
   enqueue.mockResolvedValue({ ok: true, operation: operation(), replayed: false });
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {

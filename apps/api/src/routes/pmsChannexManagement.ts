@@ -1,3 +1,4 @@
+import { parseInventoryRules } from "@vayada/domain-pms-channex";
 import { stayRestrictionReplacement } from "../domains/pmsStayRestrictions.js";
 import {
   NoShowReportingConflict,
@@ -265,6 +266,34 @@ export async function registerPmsChannexManagementRoutes(
         await options.commandPort.enqueue(context, request.params.propertyId, {
           ...input,
           operationType: "update_markups",
+        }),
+      );
+    },
+  );
+
+  app.put<{ Params: { propertyId: string }; Body: unknown }>(
+    "/properties/:propertyId/channex/inventory-rules",
+    async (request, reply) => {
+      const context = enforcePmsChannexPolicy(
+        request,
+        request.params.propertyId,
+        "pms.operations.manage",
+      );
+      const body = request.body as Record<string, unknown> | null;
+      const inventoryRules = parseInventoryRules(body);
+      if (!body || !inventoryRules || !isCommandIdentity(body.commandId, body.idempotencyKey))
+        return reply.code(400).send({ code: "invalid_inventory_rules" });
+      if (options.capabilityModes.ariSync !== "mutating")
+        return reply.code(409).send({ code: "channex_capability_not_mutating" });
+      if (!options.commandPort)
+        return reply.code(503).send({ code: "channex_commands_unavailable" });
+      return sendCommandResult(
+        reply,
+        await options.commandPort.enqueue(context, request.params.propertyId, {
+          commandId: body.commandId as string,
+          idempotencyKey: body.idempotencyKey as string,
+          operationType: "update_inventory_rules",
+          inventoryRules,
         }),
       );
     },
