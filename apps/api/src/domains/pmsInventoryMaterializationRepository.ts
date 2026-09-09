@@ -373,12 +373,51 @@ async function executeMaterialization(
             acceptedAt,
           );
         }
+        const priorRevision = coverage ? positiveInteger(coverage.calendarRevision) : null;
+        const previousConfiguration =
+          priorRevision !== null && priorRevision < exact.calendarRevision
+            ? await loadPmsOperatingCalendarConfigurationByRevision(
+                client,
+                command.propertyId,
+                priorRevision,
+                config.propertyProfileEvidence,
+              )
+            : null;
+        const previousRooms = new Set(
+          previousConfiguration?.sourceInputs.roomBindings.map((binding) => binding.roomTypeId),
+        );
+        // Adding a room must fill the retained horizon before coverage advances;
+        // otherwise a later extension cannot distinguish missing new rows from corruption.
+        const partialRoomAddition =
+          coverage &&
+          previousConfiguration &&
+          exact.sourceInputs.roomBindings.some(
+            (binding) => !previousRooms.has(binding.roomTypeId),
+          ) &&
+          (command.horizon.from > requireDatabaseDate(coverage.coverageFrom) ||
+            command.horizon.through < requireDatabaseDate(coverage.coverageThrough));
+        if (
+          (priorRevision !== null &&
+            priorRevision < exact.calendarRevision &&
+            !previousConfiguration) ||
+          partialRoomAddition
+        ) {
+          return finalizeMaterialization(
+            client,
+            command,
+            reservation,
+            keyHash,
+            failure("inventory_invariant_violation"),
+            acceptedAt,
+          );
+        }
         const plan = planPmsInventoryMaterialization({
           propertyId: command.propertyId,
           configurationSource: command.configurationSource,
           configuration: exact,
           horizon: command.horizon,
           currentDays,
+          ...(previousConfiguration ? { previousConfiguration } : {}),
         });
         if (!plan.ok) {
           const generatedRevision = maxGeneratedRevision(currentDays);

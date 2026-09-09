@@ -107,6 +107,68 @@ function currentDay(
 }
 
 describe("PMS inventory materialization planner", () => {
+  it("materializes newly configured rooms without losing existing reservations", () => {
+    const previousConfiguration = {
+      ...configuration,
+      calendarRevision: 1,
+      source: { ...source, revision: "calendar:1" },
+      sourceInputs: {
+        ...configuration.sourceInputs,
+        roomBindings: [configuration.sourceInputs.roomBindings[0]!],
+      },
+    };
+    const currentDays = ["2026-12-19", "2026-12-20", "2026-12-21"].map((date) =>
+      currentDay(ROOM_A, date, {
+        calendarRevision: 1,
+        sourceRevisions: { generated: 1, channel: 0, manual: 0, block: 0, booking: 1 },
+        assignedCount: 1,
+        availableCount: date === "2026-12-19" ? 0 : 7,
+      }),
+    );
+    const result = planPmsInventoryMaterialization({
+      ...baseInput,
+      previousConfiguration,
+      currentDays,
+    });
+    expect(result).toMatchObject({ ok: true, outcome: "rematerialized" });
+    if (!result.ok) return;
+    expect(result.days).toHaveLength(6);
+    expect(
+      result.days.filter((day) => day.roomTypeId === ROOM_A).map((day) => day.assignedCount),
+    ).toEqual([1, 1, 1]);
+    expect(
+      result.days.filter((day) => day.roomTypeId === ROOM_B).map((day) => day.availableCount),
+    ).toEqual([0, 2, 2]);
+    expect(
+      planPmsInventoryMaterialization({ ...baseInput, currentDays: result.days }),
+    ).toMatchObject({ ok: true, outcome: "unchanged" });
+    // An old binding with missing rows remains corrupt, including with historical evidence.
+    expect(
+      planPmsInventoryMaterialization({
+        ...baseInput,
+        currentDays,
+        previousConfiguration: {
+          ...previousConfiguration,
+          sourceInputs: configuration.sourceInputs,
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "current_day_coverage_gap" } });
+    expect(
+      planPmsInventoryMaterialization({
+        ...baseInput,
+        previousConfiguration,
+        currentDays: [...currentDays, currentDay(ROOM_B, "2026-12-19")],
+      }),
+    ).toMatchObject({ ok: false, error: { code: "current_day_coverage_gap" } });
+    expect(
+      planPmsInventoryMaterialization({
+        ...baseInput,
+        currentDays,
+        previousConfiguration: configuration,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "configuration_scope_mismatch" } });
+  });
+
   it("applies the full horizon with UTC civil dates and code-unit ordering", () => {
     const result = planPmsInventoryMaterialization(baseInput);
     expect(result.ok).toBe(true);
