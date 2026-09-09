@@ -19,8 +19,8 @@ describe.skipIf(!connectionString)("replacement pricing storage constraints", ()
       await client.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Room',100,'EUR')", [room, property]);
       await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1),($2)", [property, other]);
       for (const p of [property, other]) await client.query(`INSERT INTO pms.pricing_v2_revisions
-        (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id)
-        VALUES($1,1,'EUR','{}','{}','request',$2,$3)`, [p, "a".repeat(64), actor]);
+        (property_id,revision,room_count,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id)
+        VALUES($1,1,$4,'EUR','{}','{}','request',$2,$3)`, [p, "a".repeat(64), actor, p === property ? 1 : 0]);
       const config = { version: "pricing.v2", propertyId: property, roomTypeId: room, revision: 1, currency: "EUR",
         capacity: { adults: 2, total: 2, children: 0 }, offers: [{ price: { mode: "flat", amountMinor: "10000" } }] };
       const insert = (p: string, c: unknown) => client.query(`INSERT INTO pms.pricing_v2_rooms
@@ -35,6 +35,13 @@ describe.skipIf(!connectionString)("replacement pricing storage constraints", ()
       await rejects(() => insert(property, { ...config, offers: [{ amountMinor: 100.5 }] }));
       await rejects(() => insert(property, { ...config, capacity: { adults: 0, total: 2, children: 0 } }));
       await insert(property, config);
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      const secondRoom = randomUUID();
+      await client.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Second',100,'EUR')", [secondRoom, property]);
+      await rejects(() => client.query(`INSERT INTO pms.pricing_v2_rooms
+        (property_id,revision,room_type_id,currency,configuration) VALUES($1,1,$2,'EUR',$3)`,
+        [property, secondRoom, JSON.stringify({ ...config, roomTypeId: secondRoom })]));
+      await rejects(() => client.query("UPDATE pms.pricing_v2_heads SET revision=99 WHERE property_id=$1", [property]));
       await rejects(() => insert(property, config));
       await rejects(() => client.query("UPDATE pms.pricing_v2_rooms SET configuration='{}' WHERE property_id=$1", [property]));
       await rejects(() => client.query("DELETE FROM pms.pricing_v2_revisions WHERE property_id=$1", [property]));

@@ -6,6 +6,7 @@ CREATE TABLE pms.pricing_v2_heads (
 CREATE TABLE pms.pricing_v2_revisions (
   property_id UUID NOT NULL REFERENCES pms.pricing_v2_heads(property_id),
   revision INTEGER NOT NULL CHECK (revision > 0),
+  room_count INTEGER NOT NULL CHECK (room_count >= 0),
   currency TEXT NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   source_revisions JSONB NOT NULL CHECK (jsonb_typeof(source_revisions) = 'object'),
   owner_references JSONB NOT NULL CHECK (jsonb_typeof(owner_references) = 'object'),
@@ -80,3 +81,25 @@ CREATE TRIGGER pricing_v2_revisions_immutable BEFORE UPDATE OR DELETE ON pms.pri
   FOR EACH ROW EXECUTE FUNCTION pms.pricing_v2_immutable();
 CREATE TRIGGER pricing_v2_rooms_immutable BEFORE UPDATE OR DELETE ON pms.pricing_v2_rooms
   FOR EACH ROW EXECUTE FUNCTION pms.pricing_v2_immutable();
+
+-- Deferred checks allow one transaction to construct a complete revision, then seal it.
+CREATE FUNCTION pms.pricing_v2_complete() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pms.pricing_v2_revisions r WHERE r.property_id=NEW.property_id
+    AND r.revision=NEW.revision AND r.room_count <> (SELECT count(*) FROM pms.pricing_v2_rooms c
+      WHERE c.property_id=r.property_id AND c.revision=r.revision)) THEN
+    RAISE EXCEPTION 'Incomplete or extended pricing revision' USING ERRCODE='23514';
+  END IF;
+  IF TG_TABLE_NAME='pricing_v2_heads' AND NEW.revision > 0 AND NOT EXISTS
+    (SELECT 1 FROM pms.pricing_v2_revisions WHERE property_id=NEW.property_id AND revision=NEW.revision) THEN
+    RAISE EXCEPTION 'Missing pricing head revision' USING ERRCODE='23503';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER pricing_v2_revision_complete AFTER INSERT ON pms.pricing_v2_revisions
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION pms.pricing_v2_complete();
+CREATE CONSTRAINT TRIGGER pricing_v2_room_complete AFTER INSERT ON pms.pricing_v2_rooms
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION pms.pricing_v2_complete();
+CREATE CONSTRAINT TRIGGER pricing_v2_head_complete AFTER INSERT OR UPDATE ON pms.pricing_v2_heads
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION pms.pricing_v2_complete();
