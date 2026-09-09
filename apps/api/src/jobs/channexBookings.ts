@@ -1,3 +1,5 @@
+import { applyChannexAlterationRevision } from "../domains/channexAlterationRevision.js";
+import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import type { BookingChannel } from "@vayada/domain-booking";
 import { createHash } from "node:crypto";
 import pg from "pg";
@@ -20,7 +22,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal},
+  options:{apiBaseUrl:string;apiKey:string;applyAirbnbAlterations?:boolean;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal},
 ): Promise<Counters> {
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
     counters: Counters = { succeeded: 0, retryScheduled: 0, deadLettered: 0 };
@@ -48,12 +50,12 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,options.applyAirbnbAlterations ?? false,()=>active(options));await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
     if(error instanceof LeaseLost)throw error;
-    const failure=error instanceof Failure?error:new Failure(pgCode(error)?"write_unavailable":"handler_failed",true);
+    const failure=error instanceof Failure?error:error instanceof Error&&/^alteration_[a-z_]{1,80}$/.test(error.message)?new Failure(error.message,true):new Failure(pgCode(error)?"write_unavailable":"handler_failed",true);
     return finish(pool, job, failure);
   }
 }
@@ -109,9 +111,10 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
 }
 
 // prettier-ignore
-async function persist(pool:pg.Pool,job:Job,revision:Revision):Promise<boolean>{
+async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void):Promise<boolean>{
   return transaction(pool, async (client) => {
     await fence(client,job);
+    if(applyAlterations)await lockPmsInventoryMutationScope(client,job.propertyId);
     const connection = (
       await client.query<{id:string;bindingGeneration:string}>(
         `SELECT id::text,binding_generation::text AS "bindingGeneration" FROM pms.channel_connections WHERE property_id=$1::uuid
@@ -138,6 +141,8 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision):Promise<boolean>{
     if(newest&&revision.insertedAt&&revision.insertedAt<newest){await recordHandled(client,job,revision,"stale");return true}
     let guestBookingId = mappings[0]?.guestBookingId;
     if(!guestBookingId&&revision.status==="canceled"){await client.query(`INSERT INTO pms.channel_booking_revision_tombstones(connection_id,property_id,binding_generation,external_booking_id,authoritative_revision_id,inserted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::timestamptz) ON CONFLICT(connection_id,binding_generation,external_booking_id) DO UPDATE SET authoritative_revision_id=EXCLUDED.authoritative_revision_id,inserted_at=EXCLUDED.inserted_at,resolved_at=NULL,created_at=now(),retention_expires_at=now()+interval '90 days',updated_at=now()`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId,revision.id,revision.insertedAt]);await recordHandled(client,job,revision,"ignored");return true}
+    const isModified=(text(record(record(rawRevision).attributes).status)??text(record(rawRevision).status))?.toLowerCase()==="modified";
+    const alterationApplied=Boolean(applyAlterations&&isModified&&guestBookingId&&await applyChannexAlterationRevision(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerPropertyId:job.providerPropertyId},rawRevision));
     if (!guestBookingId) {
       guestBookingId = (
         await client.query<{id:string}>(
@@ -155,7 +160,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision):Promise<boolean>{
         [guestBookingId,revision.firstName??"Guest",revision.lastName??"",revision.email,revision.phone],
       );
     } else {
-      await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
+      if(!alterationApplied)await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
            adults=$6,children=$7,room_count=$8,currency=$9,total_amount=$10::numeric,
            balance_amount=CASE WHEN payment_status='unpaid' THEN $10::numeric ELSE balance_amount END,updated_at=now()
          WHERE id=$1::uuid AND property_id=$2::uuid`:`UPDATE booking.guest_bookings SET lifecycle_status='canceled',updated_at=now() WHERE id=$1::uuid AND property_id=$2::uuid`,
@@ -178,7 +183,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision):Promise<boolean>{
     );
     else await client.query("UPDATE pms.channel_booking_mappings SET external_revision_id=$3,last_synced_at=now(),mapping_metadata=mapping_metadata||($4::jsonb-'providerSource'),updated_at=now() WHERE connection_id=$1::uuid AND external_booking_id=$2",[connection[0]!.id,job.channelBookingId,revision.id,metadata]);
     await client.query("UPDATE pms.channel_booking_revision_tombstones SET resolved_at=COALESCE(resolved_at,now()),updated_at=now() WHERE connection_id=$1::uuid AND binding_generation=$2::uuid AND external_booking_id=$3 AND resolved_at IS NULL",[connection[0]!.id,connection[0]!.bindingGeneration,job.channelBookingId]);await client.query("UPDATE pms.channel_connections SET last_booking_sync_at=now(),updated_at=now() WHERE id=$1::uuid",[connection[0]!.id]);
-    await recordHandled(client,job,revision,"applied");return false;
+    await recordHandled(client,job,revision,"applied");if(applyAlterations)assertActive();return false;
   });
 }
 
