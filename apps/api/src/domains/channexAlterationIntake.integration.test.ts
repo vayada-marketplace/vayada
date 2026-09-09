@@ -9,6 +9,10 @@ import {
 import { decideChannexAlteration } from "./channexAlterationDecisions.js";
 import { runChannexAlterationReadback } from "../jobs/channexAlterations.js";
 import { presentChannexAlteration } from "./channexAlterationPresentation.js";
+import {
+  enqueueChannexAlterationScan,
+  runChannexAlterationIntake,
+} from "../jobs/channexAlterationIntake.js";
 
 import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
@@ -80,6 +84,7 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     );
   });
   beforeEach(async () => {
+    await clearScanJobs();
     await pool.query(`DELETE FROM booking.booking_change_requests WHERE guest_booking_id=$1`, [
       booking,
     ]);
@@ -92,6 +97,7 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     };
   });
   afterAll(async () => {
+    await clearScanJobs();
     await pool.query(`DELETE FROM booking.booking_change_requests WHERE guest_booking_id=$1`, [
       booking,
     ]);
@@ -112,6 +118,175 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     actorUserId: randomUUID(),
     action,
     correlationId: "alteration-decision-test",
+  });
+  async function clearScanJobs() {
+    await pool.query(
+      `DELETE FROM platform.job_attempts WHERE job_id IN (SELECT id FROM platform.jobs WHERE property_id=$1)`,
+      [property],
+    );
+    await pool.query(`DELETE FROM platform.jobs WHERE property_id=$1`, [property]);
+  }
+  function scanPorts() {
+    return {
+      pool,
+      ownsMutation: () => true,
+      limit: 1,
+      provider: {
+        list: vi.fn(async () => ({ eventIds: [scope.eventId], hasMore: false })),
+        read: vi.fn(async () => event()),
+      },
+    };
+  }
+  async function scanRow() {
+    return (
+      await pool.query(
+        `SELECT id,status,attempts_count,job_metadata FROM platform.jobs WHERE property_id=$1`,
+        [property],
+      )
+    ).rows[0];
+  }
+  async function scanDue() {
+    await pool.query(`UPDATE platform.jobs SET run_after=now() WHERE property_id=$1`, [property]);
+  }
+  it("durably scans a binding, re-fetches events and deduplicates triggering delivery", async () => {
+    const trigger = randomUUID();
+    await enqueueChannexAlterationScan(pool, scope, trigger);
+    await enqueueChannexAlterationScan(pool, scope, trigger);
+    const config = scanPorts();
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ processed: 1 });
+    expect(config.provider.read).toHaveBeenCalledWith(externalProperty, scope.eventId, undefined);
+    expect((await scanRow()).status).toBe("succeeded");
+    const requests = await pool.query(
+      `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+      [booking],
+    );
+    expect(requests.rows).toHaveLength(1);
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    await runChannexAlterationIntake(config);
+    expect(
+      (
+        await pool.query(
+          `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+          [booking],
+        )
+      ).rows,
+    ).toEqual(requests.rows);
+  });
+  it("commits the cursor with intake, and retries a failed page without partial requests", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    const config = scanPorts();
+    config.provider.list.mockResolvedValueOnce({
+      eventIds: [scope.eventId, randomUUID()],
+      hasMore: true,
+    });
+    config.provider.read
+      .mockResolvedValueOnce(event())
+      .mockRejectedValueOnce(new Error("provider secret detail"));
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ retried: 1 });
+    expect(
+      (
+        await pool.query(
+          `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+          [booking],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    expect(await scanRow()).toMatchObject({
+      attempts_count: 1,
+      job_metadata: { page: 1, failure: "alteration_scan_failed" },
+    });
+    await scanDue();
+    config.provider.list.mockResolvedValueOnce({ eventIds: [scope.eventId], hasMore: true });
+    await runChannexAlterationIntake(config);
+    expect(await scanRow()).toMatchObject({
+      attempts_count: 0,
+      status: "pending",
+      job_metadata: { page: 2 },
+    });
+    await scanDue();
+    config.provider.list.mockResolvedValueOnce({ eventIds: [], hasMore: false });
+    await runChannexAlterationIntake(config);
+    expect(config.provider.list).toHaveBeenLastCalledWith(externalProperty, 2, undefined);
+    expect((await scanRow()).status).toBe("succeeded");
+  });
+  it("quarantines a replaced binding after bounded retries without provider reads", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    await pool.query(
+      `UPDATE platform.jobs SET payload=jsonb_set(payload,'{bindingGeneration}',to_jsonb($2::text)),max_attempts=2 WHERE property_id=$1`,
+      [property, randomUUID()],
+    );
+    const config = scanPorts();
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ retried: 1 });
+    await scanDue();
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ deadLettered: 1 });
+    expect((await scanRow()).status).toBe("dead_lettered");
+    expect(config.provider.list).not.toHaveBeenCalled();
+  });
+  it("preserves an exhausted pagination cursor and dead-letters instead of restarting", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    await pool.query(
+      `UPDATE platform.jobs SET job_metadata='{"page":10000}',max_attempts=1 WHERE property_id=$1`,
+      [property],
+    );
+    const config = scanPorts();
+    config.provider.list.mockResolvedValueOnce({ eventIds: [], hasMore: true });
+    await runChannexAlterationIntake(config);
+    await scanDue();
+    expect(await runChannexAlterationIntake(config)).toMatchObject({ deadLettered: 1 });
+    expect(await scanRow()).toMatchObject({
+      status: "dead_lettered",
+      job_metadata: { page: 10001 },
+    });
+    expect(config.provider.list).toHaveBeenCalledTimes(1);
+  });
+  it("rolls back a page when ownership is lost after provider fetch", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    let owns = true;
+    const config = scanPorts();
+    config.ownsMutation = () => owns;
+    config.provider.read.mockImplementationOnce(async () => {
+      owns = false;
+      return event();
+    });
+    await runChannexAlterationIntake(config);
+    expect(await scanRow()).toMatchObject({
+      status: "pending",
+      attempts_count: 0,
+      job_metadata: { page: 1 },
+    });
+    expect(
+      (
+        await pool.query(
+          `SELECT id FROM booking.booking_change_requests WHERE guest_booking_id=$1`,
+          [booking],
+        )
+      ).rows,
+    ).toHaveLength(0);
+  });
+  it("skips an in-flight scan in a competing worker", async () => {
+    await enqueueChannexAlterationScan(pool, scope, randomUUID());
+    const config = scanPorts();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    config.provider.list.mockImplementationOnce(async () => {
+      entered();
+      await gate;
+      return { eventIds: [], hasMore: false };
+    });
+    const first = runChannexAlterationIntake(config);
+    await started;
+    try {
+      expect(await runChannexAlterationIntake(config)).toMatchObject({ processed: 0 });
+    } finally {
+      release();
+      await first;
+    }
+    expect(config.provider.list).toHaveBeenCalledTimes(1);
   });
   function ports() {
     return {
