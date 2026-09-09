@@ -17,3 +17,13 @@ NEXT_PUBLIC_ROOM_IMPORT_PREVIEW_ENABLED=true npm run e2e:pms-web -- tests/e2e/pm
 ```
 
 The pilot uses mocked authentication and API reads. It verifies cancel, selection, editable name/description/capacity prefill, and manual start without a create request. It does not validate actual room persistence or provider extraction. The shared component is currently English-only for the local experiment.
+
+## Connected Airbnb saved-read MVP
+
+The local experiment also accepts a saved Channex read as JSON containing `name`, `description`, `maxGuests`, and `checkedAt`. Files are limited to 16 KB and parsed only in the browser; uploaded source labels are never treated as verified provenance. Only the three supported facts can reach the room form. This manual snapshot bridge validates real provider output against the UI before adding a property-scoped HTTP adapter. It does not provide one-click account connection or runtime provider fetching.
+
+On 2026-09-09 a fresh, authorized Channex GET returned Aether Hilltop Villa 3 with capacity 2 and a 197-character description. The credential stayed in memory and the minimal snapshot stayed outside the repository. No provider writes, photo downloads or room creation occurred. The connected-import track uses Channex; the separate Apify adapter is not a prerequisite.
+
+Set `E2E_CHANNEX_PREVIEW_FILE` to a local snapshot path to exercise that data through the focused pilot; without it the same test uses synthetic facts. Authentication and PMS API reads are still mocked, so this proves provider-read → reviewed prefill, not authorized product-endpoint access or persistence. The normal room save remains separate; do not save the source hotel's facts into an unrelated test property.
+
+Validation: 11 component tests and all 4 focused browser tests passed, including the real saved Channex read through preview and all three prefilled form fields. Browser authentication and read routes were mocked; no room was saved. PMS production build passed; lint had zero errors and 63 existing warnings. Independent adversarial review found no actionable defects. Complexity review found no additional abstractions or dependencies to remove.

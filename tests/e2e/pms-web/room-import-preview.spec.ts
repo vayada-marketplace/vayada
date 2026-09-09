@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import { mockPmsWebAuthenticatedSession, mockPmsWebTargetRoutes } from "../support/pmsWebMocks";
 
 test("reviews example details before opening the editable room form", async ({
@@ -28,7 +29,9 @@ test("reviews example details before opening the editable room form", async ({
   await apply.click();
   await expect(page.getByRole("region", { name: "Review room import" })).toHaveCount(0);
   await expect(page.locator('input[value="Reviewed Garden Suite"]')).toBeVisible();
-  await expect(page.locator("textarea").first()).toHaveValue("");
+  await expect(
+    page.locator("form").filter({ hasText: "Room Type Basics" }).locator("textarea"),
+  ).toHaveValue("");
   await expect(
     page
       .locator("div")
@@ -61,4 +64,56 @@ test("onboarding room creation skips the experiment", async ({ page }) => {
   await page.goto("/rooms/new?onboarding=pms-activation");
   await expect(page.locator("form").filter({ hasText: "Room Type Basics" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Review example" })).toHaveCount(0);
+});
+
+test("saved Channex read prefills the editable room form without creating a room", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    process.env.NEXT_PUBLIC_ROOM_IMPORT_PREVIEW_ENABLED !== "true",
+    "Local preview is opt-in",
+  );
+  const source = process.env.E2E_CHANNEX_PREVIEW_FILE;
+  const snapshot = source
+    ? JSON.parse(await readFile(source, "utf8"))
+    : {
+        name: "Test Channex suite",
+        description: "Synthetic provider description",
+        maxGuests: 2,
+        checkedAt: "2026-09-09T12:00:00Z",
+      };
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST") writes.push(request.url());
+  });
+  await page.goto("/rooms/new");
+  await page.getByLabel("Review a saved Channex read").setInputFiles({
+    name: "channex-preview.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(snapshot)),
+  });
+  await expect(page.getByLabel("Room name", { exact: true })).toHaveValue(snapshot.name);
+  await expect(page.getByLabel("Description", { exact: true })).toHaveValue(snapshot.description);
+  await expect(page.getByLabel("Maximum guests", { exact: true })).toHaveValue(
+    String(snapshot.maxGuests),
+  );
+  await page.screenshot({ path: testInfo.outputPath("channex-review.png"), fullPage: true });
+  await page.getByLabel("I reviewed the selected values").check();
+  await page.getByRole("button", { name: "Use selected details" }).click();
+  await expect(
+    page.locator("form").filter({ hasText: "Room Type Basics" }).locator("textarea"),
+  ).toHaveValue(snapshot.description);
+  await expect(page.getByPlaceholder("e.g. Two-Bedroom Villa")).toHaveValue(snapshot.name);
+  await expect(
+    page
+      .locator("div")
+      .filter({ has: page.locator("label", { hasText: "Total Max Occupancy" }) })
+      .filter({ has: page.locator("input") })
+      .last()
+      .locator("input"),
+  ).toHaveValue(String(snapshot.maxGuests));
+  await expect(page.getByRole("button", { name: "Create Room Type" })).toBeVisible();
+  expect(writes.filter((url) => url.includes("room-types"))).toEqual([]);
 });
