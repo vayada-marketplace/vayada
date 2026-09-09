@@ -8,7 +8,9 @@ import {
   useState,
   useRef,
   ReactNode,
+  Suspense,
 } from "react";
+import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { generateColorPalette } from "@/lib/utils/colors";
@@ -217,26 +219,6 @@ export function HotelProvider({
     [locale, slug],
   );
 
-  // Record affiliate click once per session per (slug, ref). The
-  // middleware drops the ref into a 30-day cookie on first arrival;
-  // this effect turns that cookie into a real click row in the
-  // affiliate_clicks table so conversion-rate stats are meaningful.
-  useEffect(() => {
-    if (!slugResolved || !slug) return;
-    const refMatch = document.cookie.match(/(?:^|; )ref=([^;]+)/);
-    const refCode = refMatch ? decodeURIComponent(refMatch[1]) : null;
-    if (!refCode) return;
-    const sessionKey = `affClickRecorded:${slug}:${refCode}`;
-    try {
-      if (sessionStorage.getItem(sessionKey)) return;
-      sessionStorage.setItem(sessionKey, "1");
-    } catch {
-      // sessionStorage unavailable (private mode etc.) — fall through
-      // and just fire the call; worst case is one extra click per visit.
-    }
-    hotelService.recordAffiliateClick(slug, refCode);
-  }, [slug, slugResolved]);
-
   // Apply branding colors as CSS variables
   useEffect(() => {
     if (hotel?.branding?.primaryColor) {
@@ -339,6 +321,11 @@ export function HotelProvider({
       }}
     >
       {children}
+      {slugResolved && slug && (
+        <Suspense fallback={null}>
+          <AffiliateClickTracker slug={slug} />
+        </Suspense>
+      )}
     </HotelContext.Provider>
   );
 }
