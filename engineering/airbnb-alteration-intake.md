@@ -126,3 +126,20 @@ and preserve the booking. Acceptance remains pending/awaiting confirmation until
 authoritative revision application is proven. A contradictory terminal observation
 is an evidence conflict; preserve the earlier outcome and retry later. Runtime
 registration and authoritative revision/assignment application remain gated.
+
+## Durable live-feed scans
+
+Treat webhook delivery as a property scan trigger; do not guess a live-feed UUID
+from the alteration payload's separate numeric ID. Queue a scan in existing
+`platform.jobs`, capturing the active connection and binding generation. A scan
+reads the property-filtered alteration feed, then re-fetches each unresolved
+event by its returned UUID before intake. No raw guest payload belongs in jobs.
+
+Process one page per transaction under a non-waiting job row lock. Persist the
+page cursor and request rows atomically, so a crash repeats the page safely.
+Retry failed pages with bounded attempts; leave invalid or conflicting evidence
+in the existing dead-letter job state. Terminal feed entries are not new requests.
+The scan must validate ownership and binding before provider reads and commit.
+Periodic full rescans are required at activation because offset pagination can
+shift while Airbnb creates requests. Neither webhook triggering nor scheduling
+is activated until the complete booking-revision workflow is ready.
