@@ -7,6 +7,7 @@ import Link from "next/link";
 import { roomsService, RoomTypeCreate, type PropertyPlan } from "@/services/rooms";
 import { bookingsService } from "@/services/bookings";
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
+import { RoomImportStart } from "@/components/rooms/RoomImportStart";
 import { useTranslation } from "@/lib/i18n";
 
 export default function NewRoomPage() {
@@ -15,6 +16,7 @@ export default function NewRoomPage() {
   const searchParams = useSearchParams();
   const onboarding = searchParams.get("onboarding");
   const isOnboarding = onboarding === "pms-activation" || onboarding === "booking-readiness";
+  const [importChosen, setImportChosen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [setupComplete, setSetupComplete] = useState(false);
   const [error, setError] = useState("");
@@ -197,18 +199,30 @@ export default function NewRoomPage() {
         </h2>
       </div>
 
-      <RoomTypeForm
-        form={form}
-        onChange={handleFormChange}
-        onSubmit={handleSubmit}
-        saving={saving}
-        error={error}
-        submitLabel={isOnboarding ? t("rooms.new.finishSetup") : t("rooms.new.submitLabel")}
-        cancelLabel={t("common.cancel")}
-        cancelHref="/rooms"
-        mode="create"
-        propertyPlan={propertyPlan}
-      />
+      {!isOnboarding &&
+      process.env.NODE_ENV !== "production" &&
+      process.env.NEXT_PUBLIC_ROOM_IMPORT_PREVIEW_ENABLED === "true" &&
+      !importChosen ? (
+        <RoomImportStart
+          onContinue={(patch) => {
+            setForm((current) => ({ ...current, ...patch }));
+            setImportChosen(true);
+          }}
+        />
+      ) : (
+        <RoomTypeForm
+          form={form}
+          onChange={handleFormChange}
+          onSubmit={handleSubmit}
+          saving={saving}
+          error={error}
+          submitLabel={isOnboarding ? t("rooms.new.finishSetup") : t("rooms.new.submitLabel")}
+          cancelLabel={t("common.cancel")}
+          cancelHref="/rooms"
+          mode="create"
+          propertyPlan={propertyPlan}
+        />
+      )}
     </div>
   );
 }
