@@ -314,7 +314,20 @@ describe("booking lifecycle email jobs", () => {
     },
   );
 
-  it("queues an auditable host failure instead of using the guest or creator address", async () => {
+  it.each([null, "", "invalid", "guest@example.test\nother@example.test"])(
+    "rejects a directly supplied invalid host recipient: %s",
+    async (email) => {
+      const target = createTargetEmailStore();
+      const input = bookingEmailInput({ kind: "host_request_updated" });
+      input.recipient = { role: "host", email };
+      await expect(enqueueBookingLifecycleEmailJob(target, input)).rejects.toThrow(
+        "A valid host notification recipient is required.",
+      );
+      expect(target.calls).toHaveLength(0);
+    },
+  );
+
+  it("records a missing host recipient without queuing an undeliverable job", async () => {
     const target = createTargetEmailStore({ hostEmail: null });
 
     const enqueued = await enqueueBookingTransitionNotifications(target, {
@@ -328,16 +341,23 @@ describe("booking lifecycle email jobs", () => {
       },
     });
 
-    expect(enqueued).toHaveLength(2);
-    expect(enqueued[1]?.jobKey).toContain(":recipient:host:");
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]?.jobKey).toContain(":recipient:guest:");
     const payloads = target.calls
       .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
       .map((call) => JSON.parse(String(call.values?.[8])));
-    expect(payloads).toContainEqual(expect.objectContaining({ to: null, recipientRole: "host" }));
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].recipientRole).toBe("guest");
+    const audit = target.requiredCall("'booking.notification.missing_recipient'");
+    expect(JSON.parse(String(audit.values?.[8]))).toMatchObject({
+      reason: "host_recipient_missing",
+      outcome: "blocked",
+      recipientRole: "host",
+    });
     const recipientQuery = target.requiredCall('AS "hostEmail"').text;
     expect(recipientQuery).toContain("contact.purpose = 'operations'");
     expect(recipientQuery).toContain(
-      "contact.purpose = 'general' AND contact.source_system = 'booking'",
+      "contact.purpose = 'general' AND contact.source_system IN ('platform', 'booking')",
     );
     expect(recipientQuery).not.toContain("contact.purpose = 'creator'");
   });

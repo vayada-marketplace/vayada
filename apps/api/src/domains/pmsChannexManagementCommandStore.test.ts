@@ -21,6 +21,11 @@ describe("PMS Channex management command store", () => {
     expect(db.sql()).toContain("INSERT INTO platform.idempotency_keys");
     expect(db.sql()).toContain("INSERT INTO platform.jobs");
     expect(db.sql()).toContain("INSERT INTO platform.product_audit_events");
+    // Published pre-alert fingerprint: retries across a deployment must keep replaying.
+    expect(
+      db.calls.find(({ text }) => text.includes("INSERT INTO platform.idempotency_keys"))
+        ?.values?.[2],
+    ).toBe("c9c145dffba3fa85cf894b8c881e1cfb478246ce16efb2336ffe3780392b9760");
     expect(db.calls.at(-1)?.text).toBe("COMMIT");
     expect(db.sql()).not.toMatch(/external_webhook_events|legacy/i);
   });

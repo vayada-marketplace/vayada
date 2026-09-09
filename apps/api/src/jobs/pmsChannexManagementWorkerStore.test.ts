@@ -204,8 +204,9 @@ class FakeDb {
   async query<T>(text: string, values?: unknown[]) {
     this.calls.push({ text, values });
     if (text === "ROLLBACK" && this.options.rollbackError) throw this.options.rollbackError;
-    const rows =
-      this.options.withJob && text.includes("FROM platform.jobs")
+    const rows = text.includes("FROM hotel_catalog.properties")
+      ? [{ id: job.propertyId }]
+      : this.options.withJob && text.includes("max_attempts AS")
         ? [
             {
               jobId: job.jobId,

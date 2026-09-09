@@ -79,6 +79,88 @@ describe("target Channex management plans", () => {
     );
   });
 
+  it.each([
+    ["breakfast", "pms-pricing.v1", "breakfast"],
+    ["room_only", "pms-pricing.v1", "room_only"],
+    [null, "pms-pricing.v1", "room_only"],
+    [null, null, undefined],
+  ])(
+    "provisions canonical meal %s without changing inclusive prices",
+    async (mealPlan, pricingContractVersion, expected) => {
+      const plan = await createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("provision", { mealPlan, pricingContractVersion, baseRate: 120 }),
+        bookingRevisionHandoff: vi.fn(),
+      }).plan(job("provision"));
+      const creates = plan.requests.filter((request) => request.capture?.kind === "rate_plan");
+      for (const request of creates) {
+        const body = request.resolveBody?.(new Map([["room-1", "provider-room"]])) as {
+          rate_plan: Record<string, unknown>;
+        };
+        expect(body.rate_plan.meal_type).toBe(expected);
+        expect(body.rate_plan.options).toEqual([{ occupancy: 1, is_primary: true, rate: 120 }]);
+      }
+      expect(plan.meals).toHaveLength(expected ? 3 : 0);
+    },
+  );
+
+  it("sends the inclusive 120 rate with a single 10 percent channel adjustment", async () => {
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: new FakePool("ari", { rate: 120, channel: "booking_com", markupPercent: 10 }),
+      bookingRevisionHandoff: vi.fn(),
+      now: () => new Date("2026-08-14T09:00:00Z"),
+    }).plan(job("sync_ari"));
+    expect(
+      plan.requests.find((request) => request.path === "/api/v1/restrictions")?.body,
+    ).toMatchObject({ values: [{ rate: "132.00" }] });
+  });
+
+  it("sends only restrictions when canonical pricing is unavailable", async () => {
+    const db = new FakePool("ari", { restrictions: { min_stay_arrival: 3 } });
+    const query = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation((text) => {
+      if (text.includes("WITH pricing_currency")) throw new Error("Pricing unavailable");
+      return query(text);
+    });
+    const input = job("sync_ari");
+    input.input.restrictionsOnly = true;
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: db,
+      bookingRevisionHandoff: vi.fn(),
+    }).plan(input);
+    expect(plan.requests).toHaveLength(2);
+    expect(plan.requests[0]?.body).toEqual({
+      property: { settings: { min_stay_type: "arrival" } },
+    });
+    expect(plan.requests[1]?.body).toMatchObject({ values: [{ min_stay_arrival: 3 }] });
+    expect(JSON.stringify(plan.requests)).not.toContain('"rate":');
+    expect(db.sql()).not.toContain("WITH pricing_currency");
+  });
+
+  it("reconciles mapped plans in place and rejects unsupported local meals", async () => {
+    const port = (mealPlan: string) =>
+      createPgChannexManagementPlanPort({
+        connectionString: "postgresql://target",
+        pool: new FakePool("provision", {
+          mealPlan,
+          externalRatePlanId: "mapped-rate",
+          externalRoomTypeId: "mapped-room",
+        }),
+        bookingRevisionHandoff: vi.fn(),
+      });
+    const plan = await port("breakfast").plan(job("provision"));
+    expect(plan.requests.filter((request) => request.capture?.kind === "rate_plan")).toEqual([]);
+    expect(plan.meals?.[0]).toMatchObject({
+      externalRatePlanId: "mapped-rate",
+      mealType: "breakfast",
+    });
+    await expect(port("unknown").plan(job("provision"))).rejects.toThrow(
+      "Unsupported configured meal",
+    );
+  });
+
   it("preserves provider identity when truncating long Unicode titles", async () => {
     const db = new FakePool("unicode");
     const port = createPgChannexManagementPlanPort({
@@ -160,15 +242,17 @@ describe("target Channex management plans", () => {
       "/api/v1/restrictions",
     ]);
     expect(ari.requests[0]?.body).toEqual({
-      property: { settings: { cut_off_time: "18:00:00", cut_off_days: 0 } },
+      property: {
+        settings: { min_stay_type: "arrival", cut_off_time: "18:00:00", cut_off_days: 0 },
+      },
     });
     expect(ari.requests[1]?.body).toMatchObject({ values: [{ availability: 0 }] });
-    expect(ari.requests[2]?.body).toMatchObject({ values: [{ rate: 120 }] });
+    expect(ari.requests[2]?.body).toMatchObject({ values: [{ rate: "120.00" }] });
     expect(db.sql()).toContain("rate_mapping.connection_id = connection.id");
     expect(db.sql()).toContain("connection.provider = 'channex'");
     expect(db.sql()).toContain("COALESCE(inventory.rate_gate_open, TRUE)");
-    expect(db.sql()).toContain("pms.inventory_materialization_coverage");
-    expect(db.sql()).toContain("GREATEST($3::date, COALESCE(coverage.coverage_through, $3::date))");
+    expect(db.sql()).toContain("inventory.stay_date >= $2::date");
+    expect(db.sql()).toContain("pms.effective_stay_restrictions");
 
     const rateGated = await createPgChannexManagementPlanPort({
       connectionString: "postgresql://target",
@@ -185,7 +269,7 @@ describe("target Channex management plans", () => {
       now: () => new Date("2026-08-15T10:00:00Z"),
     }).plan(job("sync_ari"));
     expect(disabled.requests[0]?.body).toEqual({
-      property: { settings: { cut_off_time: null, cut_off_days: 1 } },
+      property: { settings: { min_stay_type: "arrival", cut_off_time: null, cut_off_days: 1 } },
     });
 
     db = new FakePool("connected");
@@ -233,7 +317,10 @@ type Mode =
   | "ari_disabled";
 class FakePool {
   private calls: string[] = [];
-  constructor(private readonly mode: Mode) {}
+  constructor(
+    private readonly mode: Mode,
+    private readonly rateOverrides: Record<string, unknown> = {},
+  ) {}
   sql() {
     return this.calls.join("\n");
   }
@@ -270,7 +357,40 @@ class FakePool {
           },
         ];
       else rows = [{ externalPropertyId: null, claimExternalPropertyId: null, claimState: null }];
-    } else if (text.includes("hotel_catalog.properties"))
+    } else if (text.includes("WITH pricing_currency"))
+      rows = [
+        {
+          pricingCurrency: {
+            propertyId: pricingPropertyId,
+            currency: "EUR",
+            pricingCurrencyRevision: 1,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+          flexibleRatePlans: [
+            {
+              propertyId: pricingPropertyId,
+              roomTypeId: pricingRoomId,
+              flexibleRatePlanId: pricingPlanId,
+              flexibleRatePlanRevision: 1,
+              sourceRoomFactsRevision: 1,
+              amountDecimal: Number(this.rateOverrides.rate ?? 100).toFixed(2),
+              currency: "EUR",
+              cancellationTerms: {
+                type: "free_until_days_before_arrival",
+                freeCancellationDeadlineDays: 1,
+                afterDeadlinePenalty: "full_booking_amount",
+                noShowPenalty: "full_booking_amount",
+              },
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ],
+        },
+      ];
+    else if (text.includes("FROM pms.property_pricing_settings"))
+      rows = [{ currency: "EUR", pricingCurrencyRevision: 1, optionalPricingAggregateRevision: 0 }];
+    else if (text.includes("hotel_catalog.properties"))
       rows = text.includes("same_day_booking_policies")
         ? [
             {
@@ -321,6 +441,7 @@ class FakePool {
           markupPercent: 0,
           defaultOccupancy: 1,
           externalRoomTypeId: null,
+          ...this.rateOverrides,
         })),
       );
     } else if (text.includes("FROM pms.inventory_days"))
@@ -330,9 +451,14 @@ class FakePool {
           available: this.mode === "ari_rate_gated" ? 0 : 2,
           externalRoomTypeId: "external-room",
           externalRatePlanId: "external-rate",
-          rate: 100,
+          roomTypeId: pricingRoomId,
+          ratePlanId: pricingPlanId,
+          roomFactsRevision: 1,
+          planActive: true,
+          datePrice: null,
           channel: "airbnb",
           markupPercent: 10,
+          ...this.rateOverrides,
         },
       ];
     return { rows: rows as T[] };
@@ -342,10 +468,17 @@ class FakePool {
 function job(operationType: ChannexManagementJob["input"]["operationType"]): ChannexManagementJob {
   return {
     jobId: "job-1",
-    propertyId: "property-1",
+    propertyId: ["sync_ari", "update_markups"].includes(operationType)
+      ? pricingPropertyId
+      : "property-1",
     correlationId: null,
     attemptNumber: 1,
     maxAttempts: 5,
     input: { commandId: "command-1", idempotencyKey: "key-1", operationType },
   };
 }
+
+const pricingPropertyId = "15270000-0000-4000-8000-000000000001";
+const pricingRoomId = "15270000-0000-4000-8000-000000000002";
+const pricingPlanId = "15270000-0000-4000-8000-000000000003";
+const timestamp = "2026-08-14T10:00:00Z";

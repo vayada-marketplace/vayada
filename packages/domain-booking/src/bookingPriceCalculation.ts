@@ -185,6 +185,135 @@ export function applyBookingPricePercentageDiscount(
   });
 }
 
+/** Current canonical room rate, without guest-count adjustments or channel markup. */
+export function createBookingNightlyRoomPriceResolver(input: {
+  pricing: PmsPricingSourceSnapshot;
+  recurringPricing: PmsRecurringPricingBookingEvidence;
+  roomTypeId: string;
+  flexibleRatePlanId: string;
+  roomFactsRevision: number;
+}): (
+  stayDate: string,
+  datePrice?: { amountDecimal: string; currency: string },
+) => BookingPriceMinorUnits {
+  const pricing = parsePmsPricingSourceSnapshot(input.pricing);
+  const recurring = parsePmsRecurringPricingBookingEvidence(input.recurringPricing);
+  const plan = pricing?.flexibleRatePlans.find(
+    (item) =>
+      item.roomTypeId === input.roomTypeId && item.flexibleRatePlanId === input.flexibleRatePlanId,
+  );
+  if (
+    !pricing ||
+    !recurring ||
+    !plan ||
+    pricing.propertyId !== recurring.propertyId ||
+    pricing.pricingCurrency.currency !== recurring.currency ||
+    pricing.pricingCurrency.pricingCurrencyRevision !== recurring.pricingCurrencyRevision ||
+    plan.sourceRoomFactsRevision !== input.roomFactsRevision
+  ) {
+    throw new TypeError(
+      "Nightly pricing is missing or stale; refresh the canonical flexible plan.",
+    );
+  }
+  const sources = recurring.sources.filter(
+    (source) =>
+      source.lifecycle !== "disabled" &&
+      (source.sourceKind === "season" || source.sourceKind === "weekend_surcharge"),
+  );
+  for (const source of sources) {
+    if (
+      source.lifecycle !== "active" ||
+      source.currency !== recurring.currency ||
+      source.pricingCurrencyRevision !== recurring.pricingCurrencyRevision
+    ) {
+      throw new TypeError(`Nightly pricing source ${source.sourceId} is invalid or stale.`);
+    }
+  }
+  const applicable = sources.filter((source) =>
+    source.sourceKind === "season"
+      ? source.roomPrices.some((room) => room.roomTypeId === input.roomTypeId)
+      : source.sourceKind === "weekend_surcharge" &&
+        source.roomSurcharges.some((room) => room.roomTypeId === input.roomTypeId),
+  );
+  for (const source of applicable) {
+    if (
+      !sourceMatchesRoomPlan(
+        source,
+        input.roomTypeId,
+        input.flexibleRatePlanId,
+        plan.flexibleRatePlanRevision,
+        input.roomFactsRevision,
+      )
+    ) {
+      throw new TypeError(
+        `Nightly pricing source ${source.sourceId} has stale room/plan revisions.`,
+      );
+    }
+  }
+  return (stayDate, datePrice) => {
+    if (!isIsoDate(stayDate))
+      throw new TypeError("Nightly pricing requires a property-local stay date.");
+    const monthDay = stayDate.slice(5);
+    const weekday = (
+      ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const
+    )[new Date(`${stayDate}T00:00:00Z`).getUTCDay()]!;
+    const seasons = applicable.filter(
+      (source) =>
+        source.sourceKind === "season" &&
+        (source.startMonthDay <= source.endMonthDay
+          ? monthDay >= source.startMonthDay && monthDay <= source.endMonthDay
+          : monthDay >= source.startMonthDay || monthDay <= source.endMonthDay),
+    );
+    const weekends = applicable.filter(
+      (source) => source.sourceKind === "weekend_surcharge" && source.weekdays.includes(weekday),
+    );
+    if (seasons.length > 1 || weekends.length > 1)
+      throw new TypeError("Nightly pricing sources overlap.");
+    const season = seasons[0];
+    const weekend = weekends[0];
+    const amounts = roomNightAmounts(
+      plan.baseAmount.amountDecimal,
+      season?.sourceKind === "season"
+        ? season.roomPrices.find((room) => room.roomTypeId === input.roomTypeId)?.amountDecimal
+        : undefined,
+      weekend?.sourceKind === "weekend_surcharge"
+        ? weekend.roomSurcharges.find((room) => room.roomTypeId === input.roomTypeId)?.amountDecimal
+        : undefined,
+    );
+    if (datePrice && datePrice.currency !== recurring.currency)
+      throw new TypeError("Date price currency does not match canonical pricing.");
+    const total = datePrice
+      ? requireExactMinorUnits(datePrice.amountDecimal)
+      : boundedMinorUnits(amounts.base + amounts.weekend);
+    if (total <= 0n) throw new TypeError("Nightly price must be positive.");
+    return minorUnits(total);
+  };
+}
+
+/** A percentage with up to four decimal places, rounded once at the currency boundary. */
+export function applyBookingPriceMarkup(amount: BookingPriceMinorUnits, percent: number): string {
+  if (
+    !Number.isFinite(percent) ||
+    percent < -50 ||
+    percent > 200 ||
+    !/^\d+(?:\.\d{1,4})?$/.test(String(Math.abs(percent)))
+  )
+    throw new TypeError("Invalid channel markup.");
+  const [whole, fraction = ""] = String(Math.abs(percent)).split(".");
+  const units =
+    (BigInt(whole!) * 10000n + BigInt(fraction.padEnd(4, "0"))) * (percent < 0 ? -1n : 1n);
+  return formatBookingPriceMinorUnits(
+    minorUnits(roundRatioHalfUp(BigInt(amount) * (1000000n + units), 1000000n)),
+  )!;
+}
+
+function roomNightAmounts(base: string, season?: string, weekend?: string) {
+  return {
+    base: requireExactMinorUnits(season ?? base),
+    weekend: weekend ? requireExactMinorUnits(weekend) : 0n,
+  };
+}
+
 export function calculateBookingPrice(
   input: BookingPriceCalculationInput,
 ): BookingPriceCalculation {
@@ -234,7 +363,6 @@ export function calculateBookingPrice(
       ))
   )
     return invalidInput();
-  const basePerRoom = requireExactMinorUnits(plan.baseAmount.amountDecimal);
 
   const nights = parsed.nights.map((night) => {
     const season = night.appliedSeasonSourceId
@@ -257,15 +385,13 @@ export function calculateBookingPrice(
     );
     if ((season && !seasonRoom) || (weekend && !weekendRoom)) return invalidInput();
 
-    const nightlyBasePerRoom = seasonRoom
-      ? requireExactMinorUnits(seasonRoom.amountDecimal)
-      : basePerRoom;
-    const baseRoomTotal = boundedMinorUnits(nightlyBasePerRoom * BigInt(parsed.roomCount));
-    const weekendRoomTotal = weekendRoom
-      ? boundedMinorUnits(
-          requireExactMinorUnits(weekendRoom.amountDecimal) * BigInt(parsed.roomCount),
-        )
-      : 0n;
+    const amounts = roomNightAmounts(
+      plan.baseAmount.amountDecimal,
+      seasonRoom?.amountDecimal,
+      weekendRoom?.amountDecimal,
+    );
+    const baseRoomTotal = boundedMinorUnits(amounts.base * BigInt(parsed.roomCount));
+    const weekendRoomTotal = boundedMinorUnits(amounts.weekend * BigInt(parsed.roomCount));
     const additionalGuestTotal = additionalGuest
       ? boundedMinorUnits(
           requireExactMinorUnits(additionalGuest.amountDecimal) *

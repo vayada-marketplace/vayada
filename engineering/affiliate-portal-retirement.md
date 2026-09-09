@@ -1,6 +1,6 @@
 # Affiliate portal source retirement
 
-VAY-1498, based on the accepted
+VAY-1498 and VAY-1499, based on the accepted
 [VAY-1497 inventory](https://linear.app/vayadacom/document/affiliate-retirement-inventory-and-continuity-plan-vay-1497-2135f92ca34e).
 
 ## Source removal is separate from service cutover
@@ -87,60 +87,134 @@ acceptance criterion. Keep the issue open until the accepted destination and
 required verification are delivered. Do not report a build freeze, HTTP 200 or
 mocked tests as a complete affiliate migration.
 
-## Public enrolment retirement (VAY-1499)
+## Current source retirement state (VAY-1499)
 
-The first API slice retires GET `/api/booking-web/hotels/:slug/affiliates/check-email`
-and POST `/api/booking-web/hotels/:slug/affiliates` with HTTP 410,
-`affiliate_enrollment_retired`, and `Cache-Control: no-store` wherever those routes
-are mounted. Neither route calls the old enrolment repository or fallback adapter.
-Booking Web no longer offers the guest enrolment button, even when old branding
-settings enable it. Missing route configuration continues to fail closed.
+This section describes the stacked implementation through PR #1688 and this cleanup.
+It is not a claim that the stack is merged, deployed or accepted. Source removal and
+service/account cutover remain separate, as described above.
 
-Existing `?ref=` cookies/click capture, quote attribution and affiliate account /
-Finance routes remain unchanged. The scoped existing-affiliate Connect endpoint
-remains for continuity; this slice adds no provider capability. Old affiliate
-administration remains a subsequent removal slice; VAY-1499 is not complete.
-Do not delete lifecycle history or migration fixtures while removing their old UI/API callers.
+### Removed product behavior
 
-The retired Booking Web enrolment modal and its exclusive registration/check-email/
-Connect client have been deleted after navigation was disconnected. Server-side
-existing-affiliate Connect compatibility remains available independently. Removing
-this unused client does not remove referral-cookie capture or payment history.
+Booking Web no longer offers public enrolment. Its ReferModal, exclusive API client,
+registration/email-existence repository methods and obsolete projection tests are removed.
+Booking Admin `/affiliates` keeps an unavailable notice and dashboard link inside the
+existing authenticated shell. Its old workspace, client, sidebar/search entry and
+lifecycle/commission UI are removed. The shared Feature Hub catalog no longer advertises
+or offers activation of the old affiliate module in Booking Admin or PMS.
 
-The target public registration writer, email-existence lookup and obsolete registration
-projection tests are removed. Retained Connect checks read existing registration events;
-their identity derivation and event/history formats remain unchanged. No historical rows
-or applied migrations are removed. Test identities are seeded explicitly as existing data.
+The target API retains explicit HTTP 410 responses with `Cache-Control: no-store`:
 
-Booking Admin `/affiliates` now keeps only an unavailable notice and dashboard link
-inside the existing authenticated shell. Sidebar and search no longer offer affiliate
-management, including for previously active modules. Lifecycle/commission controls no
-longer load or call affiliate APIs. The unused AffiliateWorkspace component, affiliate
-service and its obsolete tests have been deleted. Backend administration and shared
-Feature Hub advertising/activation remain subsequent cleanup; account state, commissions
-and history are not changed.
+| Surface          | Retired routes                                                                                                             | Error code                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Public enrolment | GET `/api/booking-web/hotels/:slug/affiliates/check-email`; POST `/api/booking-web/hotels/:slug/affiliates`                | `affiliate_enrollment_retired`        |
+| Module changes   | PATCH `/api/pms/properties/:propertyId/module-activations/:moduleId` for the known affiliate module and valid request body | `affiliate_module_activation_retired` |
+| Administration   | GET `/api/marketplace/properties/:propertyId/affiliates`; GET detail and POST `/:affiliateId/lifecycle`                    | `affiliate_administration_retired`    |
 
-The shared Feature Hub catalog no longer offers the retired affiliate module, including
-its activation switch and navigation preview in Booking Admin and PMS. Existing module
-activation records are neither removed nor changed. Direct backend module activation and
-administration APIs remain separate retirement work; an empty UI catalog is not a server
-write guard.
+Existing authorization, property scope, CORS and applicable request validation remain
+before the protected retirement responses. Public enrolment is retired wherever its
+routes are mounted, including the fallback adapter. Missing configuration remains
+fail-closed. Retired administration routes do not read affiliate data or mutate state.
 
-Authorized requests to the old module activation PATCH and affiliate lifecycle POST
-now return HTTP 410 with no-store and no repository/publication side effects. Existing
-CORS, authentication, permission, entitlement and property-scope checks remain in place.
-Module inventory no longer advertises supported modules, while retained activation and
-affiliate reads preserve existing state. Repository write implementations and remaining
-read-only administration cleanup are separate steps; shared Finance is unchanged.
+Unused lifecycle and module-activation writers, their obsolete tests, listing SQL/query
+parser and exclusive action/command/result/list-input/endpoint exports are removed.
+The module route no longer receives a publication-refresh port; other booking consumers
+retain their refresh wiring.
 
-The unused Marketplace affiliate lifecycle writer and its command/result/action exports
-are removed, including its obsolete mutation integration test. The repository retains
-property-scoped list/detail reads used by administration and shared Finance. Existing
-lifecycle/audit tables, records and migrations remain intact. The module activation
-repository writer and remaining administration reads are subsequent cleanup.
+### Retained continuity
 
-The unused module activation repository upsert and its route-specific publication
-refresh wiring are removed. Scoped entitlement reads and the authorized HTTP 410
-boundary remain. Existing activation rows are retained; the preservation integration
-fixture seeds an existing activation directly instead of calling the retired writer.
-Shared booking publication refresh remains available to its other consumers.
+- Booking `?ref=` cookie/click capture, quote attribution and reservation history remain.
+  These paths prove capture/storage, not verified completed-booking attribution.
+- Existing-affiliate Connect remains scoped to existing registration evidence. Shared
+  provider handling, identity derivation, callbacks and historical events are unchanged.
+- Module inventory advertises no supported modules but still reads existing scoped
+  activation state. No activation rows or earning agreements are deactivated by cleanup.
+- The admin-named repository retains `getAffiliate(propertyId, affiliateId)` for shared
+  Finance and its existing close hook. Its record/status types remain required by that
+  consumer; old administration reads return 410 independently.
+- Portal auth/account and payout settings/history APIs remain for the frozen service.
+  The server does not supply the optional dashboard reporting repository; guarded
+  unavailable responses are not proof of working deployed reporting.
+- Collaboration approval still reports affiliate provisioning requests for enabled terms.
+  Response/evidence contracts alone do not prove actual provisioning. Preserve collaboration
+  data and trace this behavior through the integrated M1 design before changing it.
+- Finance commission configuration, payout operations, fee settings and shared dispatcher
+  code remain subject to VAY-1500 reconciliation. No normal affiliate dispatcher caller
+  was found in searched source; deployed scheduler/queue/provider ownership is unverified.
+
+Identity records, quarantine, referral evidence, historical lifecycle/audit rows, commission
+rules, balances, provider references, payment evidence and applied migrations remain intact.
+Python services and platform infrastructure are outside this source cleanup.
+
+### Verification and remaining release work
+
+Per-slice unit/build/browser evidence is recorded in VAY-1499 and the stacked PRs.
+Mocked checks and skipped PostgreSQL integration tests do not establish live continuity.
+Before completion, integrate reviewed PRs in order, verify the deployed revision and
+exercise returning-user access, callbacks, old links through persisted booking evidence,
+and unchanged balances/history using bounded synthetic data. No real reservations or
+payments belong in smoke testing.
+
+The integrated account destination and service cutover remain VAY-1498 work; conditional
+Finance cleanup remains VAY-1500 work. Keep VAY-1499 In Progress until required validation
+and explicit acceptance are complete. Do not delete the retained continuity boundary
+merely because the standalone source has been removed.
+
+## VAY-1500 commission configuration retirement
+
+The user confirms no real customers use the new TypeScript system and authorizes
+its affiliate cleanup. Real-customer link/balance fixtures are not a prerequisite
+for this source retirement; preserve stored records and shared Finance.
+
+Property default and individual affiliate commission GET/PATCH routes now return
+410/no-store after the existing property Finance authorization checks. They do not
+read or write commission rules or look up affiliate records. The authorization
+fallback still reads Booking Finance access. Old commission writer/contracts will
+be removed in a separate slice. Shared payouts, jobs, history and Python are unchanged.
+
+VAY-1500 follow-up removes the obsolete commission writer integration suite and
+exclusive affiliate-scope/clock wiring. Retirement tests retain throwing read/write
+probes; shared Finance and dispatcher tests remain. The route now depends only on
+Booking Finance access and pool cleanup. Writer removal follows separately.
+
+The unused commission reader/writer and its command/view/result exports are now
+removed. The remaining repository only reads Booking Finance access and closes
+its pool; it cannot change commission rules, balances, audit or payment evidence.
+
+## VAY-1500 affiliate dispatch retirement
+
+The unused affiliate payout runner and its exclusive provider port, result types
+and unit-test fixtures are removed. A source search across apps, packages, scripts
+and workflows found no application caller; the removed tests were its only callers.
+This follows the user's authorization to clean up the customer-free TypeScript
+system. It does not establish the absence of external jobs or stored obligations.
+
+The PostgreSQL affiliate store remains for a separate cleanup slice. Shared property
+dispatch, provider attempts, historical queue keys, platform payout operations and
+manual mark-paid guards remain unchanged. No job is replayed, record deleted or
+provider ownership changed.
+
+The next slice removes the unused affiliate PostgreSQL store factory, candidate
+query and exclusive store/row types and normalizers. No application callers remain.
+Its private mutation helpers are removed separately; shared property SQL, platform
+payout read/mark-paid paths and stored evidence remain unchanged.
+
+The final dispatcher slice removes private affiliate claim/success/failure and
+notification-audit writers, their job-update helper and exclusive candidate/context/
+mutation types and job-key exports. Shared property dispatch and provider-attempt
+evidence encoding remain intact, including nullable historical affiliate metadata.
+Platform manual mark-paid still checks the historical affiliate queue directly;
+this cleanup neither deletes queued records nor releases in-flight payment guards.
+
+## VAY-1500 affiliate fee-split retirement
+
+The next bounded change removes the obsolete affiliate argument, affiliate commission
+result and affiliate-only fee branch from the pure calculatePayoutSplit contract.
+Source search found only tests calling this helper. It retains the shared property
+calculation: fixed plans charge zero platform fee; commission plans use the direct
+booking or channel-manager rate, with existing rounding and validation.
+
+BillingConfigReadModel, stored affiliate fee metadata, Booking checkout snapshots,
+migrations, payout history and operational Finance APIs remain unchanged. Their
+retained fields are financial evidence, not authorization to calculate new affiliate
+commissions using the retired product rules. New earning calculations belong to the
+accepted Marketplace affiliate agreement/booking/commission design.

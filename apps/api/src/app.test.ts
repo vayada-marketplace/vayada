@@ -7233,7 +7233,7 @@ describe("vayada-api", () => {
     expect(sql).toContain("FROM booking.guest_bookings booking");
     expect(sql).toContain("hotel_catalog.property_source_links source");
     expect(sql).toContain("pms.operational_booking_assignments");
-    expect(sql).toContain("booking.booking_addon_selections");
+    expect(sql).toContain("booking.active_booking_addon_selections");
     expect(sql).toContain("finance.payments");
     expect(sql).toContain("assignment_status IN ('checked_in', 'in_house', 'checked_out')");
     expect(sql).toContain("row_number() OVER");
@@ -7660,6 +7660,7 @@ describe("vayada-api", () => {
       1,
       3,
       "2026-06-09T09:00:00.000Z",
+      20,
     ]);
     expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
   });
@@ -15622,145 +15623,164 @@ describe("vayada-api", () => {
     expect(new Set(hiddenPropertyDenials.map((body) => JSON.stringify(body))).size).toBe(1);
   });
 
-  it("creates a PMS room type through the target property-scoped route", async () => {
-    const commandRepository = createPmsOperationsCommandRepository();
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
+  it.each([undefined, "Free until 7 days before", "Custom cancellation terms"])(
+    "creates a PMS room type through the target property-scoped route with policy %s",
+    async (cancellationPolicy) => {
+      const commandRepository = createPmsOperationsCommandRepository();
+      app = buildAuthenticatedApp({
+        permissions: ["pms.operations.manage"],
+        entitlements: [
+          {
             product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
+            key: "property-management",
+            status: "active",
+            resource: {
+              product: "pms",
+              resourceType: "pms_property",
+              resourceId: pmsPropertyId,
+            },
           },
-        },
-      ],
-      pmsOperationsCommandRepository: commandRepository,
-    });
+        ],
+        pmsOperationsCommandRepository: commandRepository,
+      });
 
-    for (const bathroomType of [null, "", "ensuite"]) {
-      const invalid = await injectJson(app, {
+      for (const bathroomType of [null, "", "ensuite"]) {
+        const invalid = await injectJson(app, {
+          method: "POST",
+          url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+          payload: {
+            commandId: "cmd-room-type-invalid-bathroom",
+            idempotencyKey: "room-type-invalid-bathroom",
+            name: "Invalid Bathroom Suite",
+            bathroomType,
+            baseRate: "240.00",
+            operatingPeriods: [{ from: "01-01", to: "12-31" }],
+            seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31" }],
+          },
+          headers: { authorization: "Bearer valid-token" },
+        });
+        expect(invalid.statusCode).toBe(400);
+      }
+      expect(commandRepository.roomTypeCreates).toHaveLength(0);
+
+      const response = await injectJson(app, {
         method: "POST",
         url: `/api/pms/properties/${pmsPropertyId}/room-types`,
         payload: {
-          commandId: "cmd-room-type-invalid-bathroom",
-          idempotencyKey: "room-type-invalid-bathroom",
-          name: "Invalid Bathroom Suite",
-          bathroomType,
-          baseRate: "240.00",
+          commandId: "cmd-room-type-create-001",
+          idempotencyKey: "room-type-create-001",
+          initialSetupOnly: true,
+          ...(cancellationPolicy ? { cancellationPolicy } : {}),
+          name: "Loft Suite",
+          category: "suite",
+          description: "Top-floor suite.",
+          maxAdults: 2,
+          maxChildren: 2,
+          maxOccupancy: 4,
+          bedType: "1 King Bed",
+          bedrooms: 1,
+          bathrooms: 1,
+          bathroomType: "private",
+          size: 32,
+          baseRate: 0,
+          currency: "eur",
           operatingPeriods: [{ from: "01-01", to: "12-31" }],
-          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31" }],
+          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
+          nonRefundableEnabled: true,
+          nonRefundableRate: 216,
+          amenities: ["wifi", "terrace"],
+          images: [
+            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+            "https://cdn.vayada.example/loft-balcony.jpg",
+          ],
+          totalRooms: 3,
+          sortOrder: 7,
         },
-        headers: { authorization: "Bearer valid-token" },
+        headers: {
+          authorization: "Bearer valid-token",
+          "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
+        },
       });
-      expect(invalid.statusCode).toBe(400);
-    }
-    expect(commandRepository.roomTypeCreates).toHaveLength(0);
+      const body = response.body as PmsRoomTypeCommandResponse;
 
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        commandId: "cmd-room-type-create-001",
-        idempotencyKey: "room-type-create-001",
+      expect(response.statusCode).toBe(200);
+      expect(body).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        propertyId: pmsPropertyId,
+        item: {
+          name: "Loft Suite",
+          category: "suite",
+          baseRate: { amountDecimal: "240.00", currency: "EUR" },
+          ratePlans: [
+            { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
+            { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
+          ],
+          media: [
+            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+            { url: "https://cdn.vayada.example/loft-balcony.jpg" },
+          ],
+          roomCount: 3,
+        },
+        commandMeta: {
+          commandId: "cmd-room-type-create-001",
+          idempotencyKey: "room-type-create-001",
+          sideEffects: ["ari_changed", "audit_event"],
+        },
+      });
+      if (cancellationPolicy === "Custom cancellation terms") {
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).not.toHaveProperty(
+          "freeCancellationDeadlineDays",
+        );
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy?.text).toBe(
+          cancellationPolicy,
+        );
+      } else {
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).toMatchObject({
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 7,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+        });
+      }
+      expect(commandRepository.roomTypeCreates).toHaveLength(1);
+      expect(commandRepository.roomTypeCreates[0]).toMatchObject({
+        propertyId: pmsPropertyId,
         initialSetupOnly: true,
         name: "Loft Suite",
-        category: "suite",
-        description: "Top-floor suite.",
-        maxAdults: 2,
-        maxChildren: 2,
-        maxOccupancy: 4,
-        bedType: "1 King Bed",
-        bedrooms: 1,
-        bathrooms: 1,
-        bathroomType: "private",
-        size: 32,
-        baseRate: 0,
-        currency: "eur",
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-        nonRefundableEnabled: true,
-        nonRefundableRate: 216,
-        amenities: ["wifi", "terrace"],
-        images: [
-          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-          "https://cdn.vayada.example/loft-balcony.jpg",
-        ],
-        totalRooms: 3,
-        sortOrder: 7,
-      },
-      headers: {
-        authorization: "Bearer valid-token",
-        "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
-      },
-    });
-    const body = response.body as PmsRoomTypeCommandResponse;
-
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      contractVersion: "pms-operations.v1",
-      propertyId: pmsPropertyId,
-      item: {
-        name: "Loft Suite",
-        category: "suite",
         baseRate: { amountDecimal: "240.00", currency: "EUR" },
-        ratePlans: [
-          { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
-          { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
-        ],
-        media: [
-          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-          { url: "https://cdn.vayada.example/loft-balcony.jpg" },
-        ],
+        nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
+        attributes: {
+          bedType: "1 King Bed",
+          bedrooms: 1,
+          bathrooms: 1,
+          bathroomType: "private",
+          size: 32,
+        },
         roomCount: 3,
-      },
-      commandMeta: {
-        commandId: "cmd-room-type-create-001",
-        idempotencyKey: "room-type-create-001",
-        sideEffects: ["ari_changed", "audit_event"],
-      },
-    });
-    expect(commandRepository.roomTypeCreates).toHaveLength(1);
-    expect(commandRepository.roomTypeCreates[0]).toMatchObject({
-      propertyId: pmsPropertyId,
-      initialSetupOnly: true,
-      name: "Loft Suite",
-      baseRate: { amountDecimal: "240.00", currency: "EUR" },
-      nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
-      attributes: {
-        bedType: "1 King Bed",
-        bedrooms: 1,
-        bathrooms: 1,
-        bathroomType: "private",
-        size: 32,
-      },
-      roomCount: 3,
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [
-        {
-          from: "01-01",
-          to: "12-31",
-          rate: { amountDecimal: "240.00", currency: "EUR" },
-          minStayNights: 1,
+        operatingPeriods: [{ from: "01-01", to: "12-31" }],
+        seasons: [
+          {
+            from: "01-01",
+            to: "12-31",
+            rate: { amountDecimal: "240.00", currency: "EUR" },
+            minStayNights: 1,
+          },
+        ],
+        audit: {
+          actor: {
+            kind: "user",
+            userId: "user_hotel_owner",
+          },
         },
-      ],
-      audit: {
-        actor: {
-          kind: "user",
-          userId: "user_hotel_owner",
-        },
-      },
-    });
-    expect(commandRepository.outboxEnqueues).toEqual([
-      "ari_changed:f6855000-0000-0000-0000-000000000003",
-    ]);
-    expect(commandRepository.auditEvents).toEqual([
-      "room_type_created:f6855000-0000-0000-0000-000000000003",
-    ]);
-  });
+      });
+      expect(commandRepository.outboxEnqueues).toEqual([
+        "ari_changed:f6855000-0000-0000-0000-000000000003",
+      ]);
+      expect(commandRepository.auditEvents).toEqual([
+        "room_type_created:f6855000-0000-0000-0000-000000000003",
+      ]);
+    },
+  );
 
   it("defaults omitted bathroom facts for room-type create clients", async () => {
     const commandRepository = createPmsOperationsCommandRepository();

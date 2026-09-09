@@ -1,3 +1,4 @@
+import { CHANNEX_ALERT_EVENTS } from "../domains/channexOperationalAlerts.js";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { Webhook } from "svix";
@@ -570,6 +571,7 @@ function channexModeFor(
   classification: ChannexClassification,
 ): ProviderWebhookMode {
   const mode = modeFor(options, "channex");
+  if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
     ((classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
       (["booking", "message"].includes(classification.family) &&
@@ -629,7 +631,7 @@ async function resolveChannexPropertyIdentity(
   store: ProviderWebhookStore,
   classification: ChannexClassification,
 ): Promise<ChannexClassification> {
-  if (!["booking", "message"].includes(classification.family)) return classification;
+  if (!["booking", "message", "alert"].includes(classification.family)) return classification;
   const providerPropertyId = classification.propertyId;
   if (classification.propertyIdentityConsistent === false) {
     return {
@@ -649,7 +651,9 @@ async function resolveChannexPropertyIdentity(
     receiptKey:
       classification.family === "booking"
         ? bookingReceiptKey(propertyId ?? providerPropertyId, classification)
-        : messageReceiptKey(propertyId ?? providerPropertyId, classification),
+        : classification.family === "message"
+          ? messageReceiptKey(propertyId ?? providerPropertyId, classification)
+          : classification.receiptKey,
   };
 }
 
@@ -769,7 +773,13 @@ function xenditPayoutStatusFromEvent(event: string | undefined): string | undefi
   }
 }
 
-type ChannexEventFamily = "message" | "booking" | "review" | "updated_review" | "unsupported";
+type ChannexEventFamily =
+  | "message"
+  | "booking"
+  | "review"
+  | "updated_review"
+  | "alert"
+  | "unsupported";
 
 type ChannexEventEnvelope = {
   eventType: string;
@@ -948,6 +958,7 @@ function channexMessageThreadId(payload: Record<string, unknown>): string {
 }
 
 function channexEventFamily(eventType: string): ChannexEventFamily {
+  if (CHANNEX_ALERT_EVENTS.has(eventType)) return "alert";
   if (eventType === "message") return "message";
   if (
     eventType === "booking" ||
@@ -1201,6 +1212,22 @@ function previewChannexEvent(
   classification: ChannexClassification,
   revisionSource: "webhook_hint" | "revision_feed" = "webhook_hint",
 ): ProviderWebhookNormalizedPreview {
+  if (classification.family === "alert") {
+    const preview = fallbackPreview(
+      "channex",
+      classification.receiptKey,
+      classification.eventType,
+      payload,
+    );
+    return {
+      ...preview,
+      payload: {
+        propertyId: classification.propertyId,
+        providerPropertyId: classification.providerPropertyId,
+        propertyOwnerResolved: classification.propertyOwnerResolved === true,
+      },
+    };
+  }
   if (
     classification.family === "message" &&
     classification.sourceMessageId &&

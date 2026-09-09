@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Revisar no presentación…",
+  "checkOut.reviewNoShow": "Revisar no presentación…",
   "layout.header.signOut": "Cerrar sesion",
   "layout.header.noProperties": "Sin propiedades",
   "layout.header.user": "Usuario",

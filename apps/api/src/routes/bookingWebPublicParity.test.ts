@@ -1509,10 +1509,8 @@ describe("Booking Web public bootstrap parity", () => {
       "jsonb_agg(offer.payment_options ORDER BY offer.stay_date)->0",
     );
     expect(offerRead?.text).not.toContain("array_agg(offer.payment_options");
-    expect(offerRead?.text).toContain("offer.rate_summary ->> 'minStayNights'");
-    expect(offerRead?.text).toContain("offer.rate_summary ->> 'maxStayNights'");
-    expect(offerRead?.text).toContain("<= $11::int");
-    expect(offerRead?.text).toContain(">= $11::int");
+    expect(offerRead?.text).toContain("pms.stay_restrictions_allow");
+    expect(offerRead?.text).toContain("offer.rate_plan_id,$2::date,$3::date");
     const quoteWrite = calls.find((call) =>
       call.text.includes("INSERT INTO booking.quote_sessions"),
     );
@@ -1723,6 +1721,7 @@ describe("Booking Web public bootstrap parity", () => {
                   currency: "EUR",
                   status: "active",
                   selectedOfferSnapshot: {
+                    rateSummary: { mealPlan: "breakfast" },
                     roomTypeId: "room_deluxe",
                     publicOfferKey: "room_deluxe:flexible",
                     paymentMethod: "pay_at_property",
@@ -1822,8 +1821,9 @@ describe("Booking Web public bootstrap parity", () => {
               ],
             };
           }
-          if (text.includes("SELECT * FROM booking_row")) {
-            bookingWriteValues = values;
+          if (text.includes("SELECT * FROM booking_row") || text.includes('AS "canEditRequest"')) {
+            if (text.includes("SELECT * FROM booking_row")) bookingWriteValues = values;
+            values = bookingWriteValues;
             return {
               rows: [
                 {
@@ -1870,6 +1870,9 @@ describe("Booking Web public bootstrap parity", () => {
           }
           if (text.includes("INSERT INTO platform.domain_events")) {
             return { rows: [{ eventId: "4c6a35e2-1436-455a-bf05-96d2f4559421" }] };
+          }
+          if (text.includes("INSERT INTO booking.promo_applications") && text.includes("RETURNING id")) {
+            return { rows: [{ id: "promo-application" }] };
           }
           if (text.includes('RETURNING id::text AS "jobId"')) {
             return {
@@ -2108,6 +2111,9 @@ describe("Booking Web public bootstrap parity", () => {
     await expect(
       automaticBooking.adapter.createBooking("hotel-alpenrose", request, context),
     ).resolves.toMatchObject({ bookingReference: "B-OPTIONAL" });
+    expect(
+      JSON.parse(String(automaticBooking.bookingWriteValues?.[18])).selectedOffer.rateSummary,
+    ).toEqual({ mealPlan: "breakfast" });
     expect(
       JSON.parse(String(automaticBooking.bookingWriteValues?.[18])).selectedOffer.promotion,
     ).toMatchObject({ name: "Early bird", discountAmount: 20 });
@@ -2736,7 +2742,7 @@ describe("Booking Web public bootstrap parity", () => {
             ],
           };
         }
-        if (text.includes("INSERT INTO booking.guest_bookings")) {
+        if (text.includes("INSERT INTO booking.guest_bookings") || text.includes('AS "canEditRequest"')) {
           return {
             rows: [
               {

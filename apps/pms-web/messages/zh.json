@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "查看未入住情况…",
+  "checkOut.reviewNoShow": "查看未入住情况…",
   "layout.header.signOut": "退出登录",
   "layout.header.noProperties": "暂无物业",
   "layout.header.user": "用户",

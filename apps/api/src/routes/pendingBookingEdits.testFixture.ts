@@ -17,7 +17,7 @@ import type {
   StripeBookingPaymentIntent,
   StripeBookingPaymentProvider,
 } from "../domains/stripeBookingPayments.js";
-export function pendingEditFixture() {
+export function pendingEditFixture(capacity = 2) {
   const intents = new Map<string, StripeBookingPaymentIntent>();
   const keys = new Map<string, string>();
   const stripe: StripeBookingPaymentProvider = {
@@ -86,7 +86,7 @@ export function pendingEditFixture() {
     if (!url || !new URL(url).pathname.endsWith("_edit_test"))
       throw new Error("Use the dedicated edit test database.");
     await cleanup(pool);
-    await seedProperty(pool);
+    await seedProperty(pool, capacity);
     await seedQuote(pool, randomUUID(), "edit-original", addonId);
     created = await adapter.createBooking(
       "vay-959-hotel",

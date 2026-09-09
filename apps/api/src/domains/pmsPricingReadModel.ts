@@ -45,6 +45,7 @@ export type PmsFlexibleRatePlanRow = {
   amountDecimal: string;
   currency: string;
   cancellationTerms: unknown;
+  mealPlan?: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -73,6 +74,7 @@ const PLAN_SELECT = `SELECT
   plan.source_room_facts_revision AS "sourceRoomFactsRevision",
   plan.base_rate_amount::text AS "amountDecimal",
   plan.currency::text AS currency,
+  plan.meal_plan AS "mealPlan",
   COALESCE(cancellation_extension.cancellation_terms, plan.cancellation_policy_snapshot)
     AS "cancellationTerms",
   plan.created_at AS "createdAt",
@@ -223,6 +225,7 @@ export function pmsFlexibleRatePlanSnapshotFromRow(
     sourceRoomFactsRevision: positiveInteger(row.sourceRoomFactsRevision),
     baseAmount: { amountDecimal: row.amountDecimal, currency: row.currency },
     cancellationTerms: row.cancellationTerms,
+    mealPlan: row.mealPlan ?? "room_only",
     createdAt: isoDate(row.createdAt),
     updatedAt: isoDate(row.updatedAt),
   });
