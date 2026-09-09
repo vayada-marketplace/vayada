@@ -640,6 +640,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
         closedInventoryDays: 3,
       });
       expect(await closure.closeRoom(input)).toEqual(result);
+      await admin.query(
+        "UPDATE platform.idempotency_keys SET idempotency_metadata='null'::jsonb WHERE property_id=$1 AND operation='room_type.close' AND status='completed'",
+        [propertyId],
+      );
+      await expect(closure.closeRoom(input)).rejects.toThrow("Invalid persisted room closure result");
+
       expect(await closure.closeRoom({ ...input, roomTypeId: roomTypeB })).toMatchObject({
         ok: false,
         error: { code: "idempotency_key_conflict" },
