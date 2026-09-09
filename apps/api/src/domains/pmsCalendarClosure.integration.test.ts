@@ -72,6 +72,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
     await seedRooms();
   });
   afterAll(async () => {
+    // Retain audit/job history without leaving runnable synthetic delivery work.
+    await admin.query(
+      "UPDATE pms.channel_connections SET connection_status='disconnected' WHERE property_id=$1",
+      [propertyId],
+    );
+    await admin.query(
+      "UPDATE platform.jobs SET status='canceled',finished_at=now() WHERE property_id=$1 AND queue_name='pms.channex.management' AND status='pending'",
+      [propertyId],
+    );
     await impact.close();
     await readModel.close();
     await repository.close();
