@@ -164,7 +164,10 @@ The corrected deployed editor now passes four-to-three guest reallocation,
 quote and save: one adult in the new room, two in the original room, both exact
 room/rate identities, EUR 200 and the same reference. PMS lists three guests
 under both rooms. Guest withdrawal passed and instant acceptance was restored.
-The final inventory cleanup proof is recorded with the local smoke ledger.
+Independent final cleanup at 12:12 UTC verified all three synthetic bookings canceled,
+the original eight reservations unchanged, both September 21 assignments released,
+732 inventory days at calendar/coverage revision 7, readiness ready and an empty queue.
+The evidence is recorded with the local smoke ledger.
 These deployed checks cover two room types; the broader combinations, races
 and negative cases retain their separately labeled local/database coverage above.
 
@@ -182,7 +185,7 @@ Keep provider records closed/zero and preserve original mappings and reservation
 
 Request-mode pay-at-property copy still incorrectly promises instant confirmation;
 guest cancellation obscures the safe legacy-policy rejection reason. Both are
-recorded follow-ups. Booking.com mapping remains separately blocked and no OTA
-acceptance is claimed. Preserve scoped Channex restrictions/meals and disabled
+recorded follow-ups. A separate coordinated Booking.com test-channel recovery
+succeeded after this cleanup; no OTA acceptance is claimed. Preserve scoped Channex restrictions/meals and disabled
 global workers; coordinate any later inventory-worker scope rollout with its owner.
 Keep VAY-910 In Progress until remaining release work and explicit acceptance.
