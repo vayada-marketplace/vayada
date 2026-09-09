@@ -7,6 +7,7 @@ import {
 } from "./pmsOccupiedInventory.js";
 
 const uuid = z.uuid();
+const money = z.string().regex(/^\d{1,13}(?:\.\d{1,2})?$/);
 const room = z.object({
   room_type_id: uuid,
   occupancy: z.object({
@@ -22,7 +23,7 @@ const revisionSchema = z.object({
   arrival_date: z.iso.date(),
   departure_date: z.iso.date(),
   currency: z.string(),
-  amount: z.string().regex(/^\d+(?:\.\d{1,2})?$/),
+  amount: money,
   rooms: z.array(room).min(1).max(100),
 });
 type Scope = {
@@ -96,6 +97,7 @@ export async function applyChannexAlterationRevision(
     ? z.record(z.string(), z.unknown()).parse(envelope["attributes"])
     : envelope;
   const revision = revisionSchema.parse({ ...attributes, id: envelope["id"] ?? attributes["id"] });
+  const proposedTotal = money.nullable().parse(changes["newTotal"]);
   const proposedRooms = z
     .array(z.object({ roomTypeId: uuid, adults: z.number(), children: z.number() }))
     .parse(changes["rooms"]);
@@ -105,8 +107,7 @@ export async function applyChannexAlterationRevision(
     revision.arrival_date !== changes["requestedCheckIn"] ||
     revision.departure_date !== changes["requestedCheckOut"] ||
     revision.currency !== changes["currency"] ||
-    changes["newTotal"] == null ||
-    Number(revision.amount) !== Number(changes["newTotal"]) ||
+    (proposedTotal !== null && Number(revision.amount) !== Number(proposedTotal)) ||
     revision.rooms.length !== proposedRooms.length ||
     revision.rooms.some(
       (item, index) =>
