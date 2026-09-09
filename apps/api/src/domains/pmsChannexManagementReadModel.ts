@@ -147,6 +147,18 @@ export function createPgPmsChannexManagementReadRepository(config: {
       );
 
       const row = connection.rows[0];
+      const inventoryState = row?.metadata.inventoryRules as
+        | {
+            rules: import("@vayada/domain-pms-channex").ChannexInventoryRule[];
+            operationId: string;
+          }
+        | undefined;
+      const inventoryOperation = inventoryState
+        ? await pool.query<PmsChannexManagementJobRow>(
+            operationSelect("property_id = $1::uuid AND id = $2::uuid") + " LIMIT 1",
+            [propertyId, inventoryState.operationId],
+          )
+        : null;
       const sync = emptySyncState();
       for (const item of syncRows.rows) sync[item.domain] = item.state;
       if (row?.ariMappingMissing && (row.status === "connected" || row.status === "degraded")) {
@@ -179,6 +191,12 @@ export function createPgPmsChannexManagementReadRepository(config: {
           ratePlans: rateMappings.rows as ChannexManagementSnapshot["mappings"]["ratePlans"],
         },
         channels: connectedChannels(row?.metadata),
+        inventoryRules: {
+          rules: inventoryState?.rules ?? [],
+          operation: inventoryOperation?.rows[0]
+            ? mapPmsChannexManagementOperation(inventoryOperation.rows[0])
+            : null,
+        },
         markups:
           row && (row.status === "connected" || row.status === "degraded")
             ? uniqueMarkups(

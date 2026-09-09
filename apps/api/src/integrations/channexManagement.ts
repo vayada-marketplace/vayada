@@ -15,6 +15,10 @@ import type {
   ChannexManagementProviderFailure,
   ChannexManagementProviderSuccess,
 } from "../jobs/pmsChannexManagementWorker.js";
+import {
+  reconcileChannexInventoryRules,
+  type InventoryRulesPlan,
+} from "./channexInventoryRules.js";
 
 type ChannexRequest = {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -65,6 +69,7 @@ type ChannexRequest = {
 };
 
 export type ChannexManagementActionPlan = {
+  inventoryRules?: InventoryRulesPlan;
   requests: ChannexRequest[];
   meals?: Array<{
     ratePlanId: string;
@@ -84,6 +89,10 @@ export type ChannexManagementActionPlan = {
 };
 
 export type ChannexManagementPlanPort = {
+  withPropertyLock?<T>(
+    job: ChannexManagementJob,
+    work: (preparePlan: () => Promise<ChannexManagementActionPlan>) => Promise<T>,
+  ): Promise<T>;
   plan(job: ChannexManagementJob): Promise<ChannexManagementActionPlan>;
 };
 
@@ -103,19 +112,56 @@ export function createChannexManagementProvider(config: {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
   const fetcher = config.fetch ?? fetch;
-  return {
-    async execute(job, input) {
+  const provider = {
+    async execute(
+      job: ChannexManagementJob,
+      input?: Parameters<ChannexManagementProvider["execute"]>[1],
+      preparedPlan?: () => Promise<ChannexManagementActionPlan>,
+    ): ReturnType<ChannexManagementProvider["execute"]> {
       if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
         return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
       }
       let plan: ChannexManagementActionPlan;
       try {
-        plan = await config.plans.plan(job);
+        plan = await (preparedPlan ? preparedPlan() : config.plans.plan(job));
       } catch (error) {
         return failure(
           error instanceof ChannexAriMappingMissingError ? "mapping_missing" : "invalid_state",
           error,
         );
+      }
+      if (plan.inventoryRules) {
+        try {
+          const currentChannels = await reconcileChannexInventoryRules(
+            plan.inventoryRules,
+            async (path, method, body) => {
+              await input?.onProgress?.();
+              const response = await fetcher(new URL(path, `${apiBaseUrl}/`), {
+                method,
+                headers: { "content-type": "application/json", "user-api-key": apiKey },
+                ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+                signal: AbortSignal.timeout(30_000),
+              });
+              if (!response.ok && !(method === "DELETE" && response.status === 404))
+                throw await responseFailure(
+                  response,
+                  response.headers.get("x-request-id") ?? undefined,
+                );
+              return response.status === 204 || response.status === 404 ? {} : response.json();
+            },
+          );
+          return {
+            ok: true,
+            externalPropertyId: plan.externalPropertyId,
+            channels: currentChannels
+              .map(channelFromProvider)
+              .filter((channel): channel is ChannexConnectedChannel => channel !== null),
+          };
+        } catch (error) {
+          if (error && typeof error === "object" && "ok" in error && error.ok === false)
+            return error as ChannexManagementProviderFailure;
+          return failure(isTimeout(error) ? "timeout" : "provider_unavailable", error);
+        }
       }
       if (plan.recoveryChannelId) {
         await input?.onProgress?.();
@@ -375,6 +421,12 @@ export function createChannexManagementProvider(config: {
       };
     },
   };
+  return {
+    execute: (job, input) =>
+      config.plans.withPropertyLock
+        ? config.plans.withPropertyLock(job, (plan) => provider.execute(job, input, plan))
+        : provider.execute(job, input),
+  };
 }
 
 async function responseFailure(
@@ -584,10 +636,12 @@ function channelFromProvider(value: unknown): ChannexConnectedChannel | null {
     item.attributes && typeof item.attributes === "object"
       ? (item.attributes as Record<string, unknown>)
       : item;
-  if (typeof attributes.application !== "string") return null;
+  const application = attributes.channel ?? attributes.application;
+  if (typeof application !== "string") return null;
   return {
-    key: canonicalChannel(attributes.application),
-    application: attributes.application,
+    ...(typeof item.id === "string" ? { externalChannelId: item.id } : {}),
+    key: canonicalChannel(application),
+    application,
     title: typeof attributes.title === "string" ? attributes.title : null,
     isActive: attributes.is_active === true,
   };
