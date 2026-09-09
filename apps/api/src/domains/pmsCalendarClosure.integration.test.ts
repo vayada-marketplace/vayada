@@ -1,3 +1,6 @@
+import { readPmsRoomClosureState } from "./pmsRoomClosureState.js";
+import { retireClosingRoomUnits } from "./pmsRoomClosureUnits.js";
+import { createPgPmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import {
   parseUpsertPmsOperatingCalendarCommand,
   type UpsertPmsOperatingCalendarCommand,
@@ -77,6 +80,146 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
   });
   it("rejects a pre-closure room set and accepts only remaining operating rooms", async () => {
     expect(await repository.upsertOperatingCalendar(command("before"))).toMatchObject({ ok: true });
+    const configured = await readModel.getCurrentOperatingCalendarConfiguration(propertyId);
+    if (!configured?.configuration) throw new Error("Expected configured calendar");
+    const materializer = createPgPmsInventoryMaterializationRepository({
+      connectionString,
+      authorization: { authorizeInventoryMaterialization: async () => true },
+      operatingCalendar: readModel,
+      propertyProfileEvidence: profileEvidence,
+      roomCapacity: roomEvidence,
+      now: () => new Date(acceptedAt),
+    });
+    try {
+      expect(
+        await materializer.materializeInventory({
+          organizationId,
+          propertyId,
+          configurationSource: configured.configuration.source,
+          expectedMaterializedRevision: 1,
+          horizon: { from: "2026-08-04", through: "2026-08-06" },
+          idempotencyKey: randomUUID(),
+          audit: command("materialize").audit,
+        }),
+      ).toMatchObject({ ok: true });
+    } finally {
+      await materializer.close();
+    }
+    const preflight = () =>
+      readPmsRoomClosureState(admin, { propertyId, roomTypeId: roomTypeA }, new Date(acceptedAt));
+    expect(await preflight()).toMatchObject({
+      blockers: [],
+      cutoffDate: "2026-08-04",
+      futureInventoryDays: 3,
+    });
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        `UPDATE pms.inventory_days SET manual_sellable_limit_count=0,
+        effective_sellable_limit_count=0,available_count=0,manual_source_revision=1,inventory_revision=2
+        WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-04'`,
+        [propertyId, roomTypeA],
+      );
+      expect((await preflight())?.blockers).toContain("protected_inventory");
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        `DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2
+        AND stay_date='2026-08-06'`,
+        [propertyId, roomTypeB],
+      );
+      expect((await preflight())?.blockers).toContain("coverage_incomplete");
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    for (const [mutation, blocker] of [
+      [
+        "ALTER TABLE pms.inventory_days ADD COLUMN unexpected_source_revision integer NOT NULL DEFAULT 0",
+        "unknown_inventory_owner",
+      ],
+      [
+        "UPDATE pms.rooms SET status='out_of_order' WHERE property_id=$1 AND room_type_id=$2",
+        "protected_units",
+      ],
+      [
+        "UPDATE pms.room_types SET active=false WHERE property_id=$1 AND id<>$2",
+        "last_operating_room",
+      ],
+      [
+        "INSERT INTO pms.room_blocks(property_id,room_type_id,starts_on,ends_on) VALUES ($1,$2,'2026-08-04','2026-08-06')",
+        "active_blocks",
+      ],
+    ]) {
+      await admin.query("BEGIN");
+      try {
+        await admin.query(mutation!, mutation!.includes("$1") ? [propertyId, roomTypeA] : []);
+        expect((await preflight())?.blockers).toContain(blocker);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    }
+    await admin.query("BEGIN");
+    try {
+      const closureScope = { propertyId, roomTypeId: roomTypeA, commandId: randomUUID() };
+      await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow(
+        "requires its receipt",
+      );
+      const history = await admin.query<{ id: string; room_id: string }>(
+        `INSERT INTO pms.room_blocks(property_id,room_type_id,room_id,starts_on,ends_on,status)
+        SELECT property_id,room_type_id,id,'2026-08-01','2026-08-02','released'
+        FROM pms.rooms WHERE property_id=$1 AND room_type_id=$2 RETURNING id,room_id`,
+        [propertyId, roomTypeA],
+      );
+      expect((await preflight())?.blockers).toEqual([]);
+      const otherUnits = await admin.query(
+        "SELECT * FROM pms.rooms WHERE property_id=$1 AND room_type_id=$2 ORDER BY id",
+        [propertyId, roomTypeB],
+      );
+      await admin.query(
+        `INSERT INTO pms.room_type_closures
+        (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+         expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+        VALUES ($1,$2,$3,$4,3,5,1,2,'2026-08-04',$5,$6)`,
+        [propertyId, roomTypeA, closureScope.commandId, "c".repeat(64), acceptedAt, actorUserId],
+      );
+      await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow("remain protected");
+      await admin.query(
+        `UPDATE pms.inventory_days SET status='closed',available_count=0,
+        closure_source_revision=1,inventory_revision=inventory_revision+1
+        WHERE property_id=$1 AND room_type_id=$2 AND stay_date>='2026-08-04'`,
+        [propertyId, roomTypeA],
+      );
+      const retired = await retireClosingRoomUnits(admin, closureScope);
+      expect(retired).toEqual({
+        retiredUnitIds: history.rows.map((row) => row.room_id).sort(),
+        roomUnitsRevision: 6,
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT id,room_id FROM pms.room_blocks WHERE property_id=$1 ORDER BY id",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([...history.rows].sort((a, b) => a.id.localeCompare(b.id)));
+      expect(
+        (
+          await admin.query(
+            "SELECT * FROM pms.rooms WHERE property_id=$1 AND room_type_id=$2 ORDER BY id",
+            [propertyId, roomTypeB],
+          )
+        ).rows,
+      ).toEqual(otherUnits.rows);
+      await expect(retireClosingRoomUnits(admin, closureScope)).rejects.toThrow(
+        "requires its receipt",
+      );
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    expect((await preflight())?.roomUnitsRevision).toBe(5);
     await admin.query(
       `INSERT INTO pms.room_type_closures
       (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
