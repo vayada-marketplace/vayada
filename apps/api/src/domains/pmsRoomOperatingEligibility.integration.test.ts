@@ -1,3 +1,5 @@
+import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
 import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
@@ -711,6 +713,41 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       expect(JSON.stringify(retry)).toContain(otherRoom);
     } finally {
       await port.close();
+    }
+  });
+
+  it("keeps the accepted closure cutoff for final retirement instead of aging unresolved inventory out", async () => {
+    const readRepository = createTargetPmsOperationsReadRepository({ connectionString: url! });
+    const commands = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      readRepository,
+    });
+    try {
+      await db.query(
+        `INSERT INTO pms.inventory_days
+        (property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,CURRENT_DATE-1,1,1,'open')`,
+        [propertyId, roomTypeId],
+      );
+      // Ordinary retirement retains its existing treatment of historical inventory.
+      expect(await commands.inspectRoomTypeRetirement(propertyId, roomTypeId)).toMatchObject({
+        canRetire: true,
+      });
+      await db.query(
+        `INSERT INTO pms.room_type_closures
+        (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+         expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+         cutoff_date,accepted_at,actor_user_id)
+        VALUES ($1,$2,$3,$4,1,1,1,2,CURRENT_DATE-1,now()-interval '1 day',$5)`,
+        [propertyId, roomTypeId, randomUUID(), "a".repeat(64), actorId],
+      );
+      expect(await commands.inspectRoomTypeRetirement(propertyId, roomTypeId)).toMatchObject({
+        canRetire: false,
+        blockers: [{ category: "inventory", code: "future_inventory", affectedCount: 1 }],
+      });
+    } finally {
+      await commands.close?.();
+      await readRepository.close?.();
     }
   });
 
