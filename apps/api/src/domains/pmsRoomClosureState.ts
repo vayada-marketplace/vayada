@@ -104,6 +104,7 @@ export async function readPmsRoomClosureState(
       EXISTS(SELECT 1 FROM pms.inventory_days day WHERE day.property_id=room.property_id
         AND day.room_type_id=room.id AND day.stay_date>=calendar.cutoff
         AND (day.assigned_count<>0 OR day.blocked_count<>0
+          OR day.stay_date>coverage.coverage_through
           OR day.manual_sellable_limit_count IS NOT NULL OR day.channel_sellable_limit_count IS NOT NULL
           OR day.calendar_revision IS DISTINCT FROM calendar.calendar_revision
           OR day.generated_source_revision IS DISTINCT FROM calendar.calendar_revision
