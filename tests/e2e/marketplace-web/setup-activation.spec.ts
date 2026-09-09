@@ -1,3 +1,7 @@
+import {
+  createPropertySetupRouteMock,
+  mockPropertySetupRoute,
+} from "../support/propertySetupRouteMocks";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AdaptiveHotelSetupStatus, SetupTaskId } from "@vayada/domain-hotels";
 import { createAdaptiveHotelSetupStatusMock } from "../support/sharedHotelSetupMocks";
@@ -95,7 +99,11 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("button", { name: "Add External Creator" })).toHaveCount(0);
   });
 
-  test("recovers the first hotel after a correlated create conflict", async ({ page, baseURL }) => {
+  const recoverFirstHotel = async (
+    { page, baseURL }: { page: Page; baseURL?: string },
+    adaptive = false,
+    adding = false,
+  ) => {
     await mockGooglePlaces(page);
     await primeBrowserState(page, true);
     await mockAuthSession(page);
@@ -116,7 +124,7 @@ test.describe("marketplace-web shared setup activation", () => {
     let logoAssigned = false;
     let personalMediaRequests = 0;
     let accountProfileWrites = 0;
-    let creatorTrackSelected = false;
+    let creatorTrackSelected = adding;
     const launchSettingsWrites: unknown[] = [];
     await page.route(/\/api\/hotel-setup\/status/, async (route) => {
       if (route.request().method() === "OPTIONS") {
@@ -128,15 +136,22 @@ test.describe("marketplace-web shared setup activation", () => {
         headers: corsHeaders(route),
         json: logoAssigned
           ? sharedSetupStatus([], "ready")
-          : creatorTrackSelected
+          : adding
             ? createAdaptiveHotelSetupStatusMock({
                 entryProduct: "marketplace",
                 organizationId: "11111111-1111-4111-8111-111111111111",
                 organizationDisplayName: "Alpenrose Hotel Group",
-                selectedTracks: ["creator_marketplace"],
-                propertyId: null,
+                propertyId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               })
-            : emptySharedSetupStatus(),
+            : creatorTrackSelected
+              ? createAdaptiveHotelSetupStatusMock({
+                  entryProduct: "marketplace",
+                  organizationId: "11111111-1111-4111-8111-111111111111",
+                  organizationDisplayName: "Alpenrose Hotel Group",
+                  selectedTracks: ["creator_marketplace"],
+                  propertyId: null,
+                })
+              : emptySharedSetupStatus(),
       });
     });
     await page.route(/\/api\/hotel-setup\/tracks$/, async (route) => {
@@ -347,12 +362,37 @@ test.describe("marketplace-web shared setup activation", () => {
       },
     );
 
-    await page.goto(setupUrl(baseURL));
+    const url = new URL(setupUrl(baseURL), baseURL);
+    if (adding) {
+      url.searchParams.set("mode", "add");
+      url.searchParams.set("propertyId", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+      url.searchParams.set("step", "payments");
+    }
+    if (adaptive) {
+      url.searchParams.set("_adaptive", "1");
+      await mockPropertySetupRoute(
+        page,
+        createPropertySetupRouteMock({
+          propertyId,
+          selectedTracks: ["creator_marketplace"],
+          resumeStepId: "present_hotel",
+        }),
+      );
+    }
+    await page.goto(url.toString());
 
-    await expect(page.getByRole("heading", { name: "Choose how you’ll use vayada" })).toBeVisible();
-    await page.getByLabel("Creator Marketplace").locator("xpath=ancestor::label").click();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("heading", { name: "Let’s get to know your hotel" })).toBeVisible();
+    if (!adding) {
+      await expect(
+        page.getByRole("heading", { name: "Choose how you’ll use vayada" }),
+      ).toBeVisible();
+      await page.getByLabel("Creator Marketplace").locator("xpath=ancestor::label").click();
+      await page.getByRole("button", { name: "Continue" }).click();
+    }
+    await expect(
+      page.getByRole("heading", {
+        name: adding ? "Let’s get to know this hotel" : "Let’s get to know your hotel",
+      }),
+    ).toBeVisible();
     const hotelName = page.getByRole("textbox", { name: /Hotel name/ });
     await hotelName.fill("Hotel Alpenrose");
     await expect(hotelName).toHaveValue("Hotel Alpenrose");
@@ -465,9 +505,9 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("heading", { name: "Set up guest preferences" })).toBeVisible();
     await expect(page.getByRole("combobox", { name: /Default currency/ })).toHaveValue("EUR");
     await expect(page.getByRole("combobox", { name: /Default language/ })).toHaveValue("de");
-    await expect(page.getByRole("checkbox", { name: "English" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "Remove English" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Skip for now, configure later" })).toBeVisible();
-    await page.getByRole("checkbox", { name: "CHF" }).check({ force: true });
+    await page.getByRole("button", { name: "🇨🇭 CHF", exact: true }).click();
     await page.getByRole("textbox", { name: /Instagram/ }).fill("https://instagram.com/alpenrose");
     await page.getByRole("textbox", { name: /Facebook/ }).fill("https://facebook.com/alpenrose");
     await page.getByRole("textbox", { name: /TikTok/ }).fill("https://tiktok.com/@alpenrose");
@@ -495,23 +535,30 @@ test.describe("marketplace-web shared setup activation", () => {
     await expect(page.getByRole("textbox", { name: /Website/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Save and continue" }).click();
 
-    await expect(page.getByRole("img", { name: "vayada" })).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Review and next steps", level: 1 }),
-    ).toBeVisible();
-    const marketplaceProgress = page.getByRole("progressbar", {
-      name: "Hotel setup progress",
-    });
-    await expect(marketplaceProgress).toHaveAttribute("aria-valuemin", "1");
-    await expect(marketplaceProgress).toHaveAttribute("aria-valuemax", "4");
-    await expect(marketplaceProgress).toHaveAttribute("aria-valuenow", "4");
-    await expect(marketplaceProgress).toHaveAttribute(
-      "aria-valuetext",
-      "Step 4 of 4: Review and next steps",
-    );
-    await expect(marketplaceProgress.locator('[data-state="reached"]')).toHaveCount(4);
-    await expect(marketplaceProgress.locator('[data-state="upcoming"]')).toHaveCount(0);
-    await expect(page.getByText("Step 4 of 4", { exact: true })).toBeVisible();
+    if (adaptive) {
+      await expect(
+        page.getByRole("heading", { name: "Present your hotel", level: 1 }),
+      ).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`propertyId=${propertyId}`));
+    } else {
+      await expect(page.getByRole("img", { name: "vayada" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Review and next steps", level: 1 }),
+      ).toBeVisible();
+      const marketplaceProgress = page.getByRole("progressbar", {
+        name: "Hotel setup progress",
+      });
+      await expect(marketplaceProgress).toHaveAttribute("aria-valuemin", "1");
+      await expect(marketplaceProgress).toHaveAttribute("aria-valuemax", "4");
+      await expect(marketplaceProgress).toHaveAttribute("aria-valuenow", "4");
+      await expect(marketplaceProgress).toHaveAttribute(
+        "aria-valuetext",
+        "Step 4 of 4: Review and next steps",
+      );
+      await expect(marketplaceProgress.locator('[data-state="reached"]')).toHaveCount(4);
+      await expect(marketplaceProgress.locator('[data-state="upcoming"]')).toHaveCount(0);
+      await expect(page.getByText("Step 4 of 4", { exact: true })).toBeVisible();
+    }
     expect(propertyCreated).toBe(true);
     expect(propertyCreateRequests).toBe(1);
     expect(logoUploadFinalized).toBe(true);
@@ -531,6 +578,7 @@ test.describe("marketplace-web shared setup activation", () => {
         youtube: "https://youtube.com/@alpenrose",
       },
     ]);
+    if (adaptive) return;
     const review = page.locator('section[aria-labelledby="setup-review-title"]');
     await expect(review).toBeVisible();
     await expect(
@@ -553,7 +601,18 @@ test.describe("marketplace-web shared setup activation", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
-  });
+  };
+  test("recovers the first hotel after a correlated create conflict", async ({ page, baseURL }) =>
+    recoverFirstHotel({ page, baseURL }));
+  test("hands a newly created hotel to adaptive setup after saving contact and logo", async ({
+    page,
+    baseURL,
+  }) => recoverFirstHotel({ page, baseURL }, true));
+
+  test("hands an additional hotel to its own adaptive session instead of the previous hotel", async ({
+    page,
+    baseURL,
+  }) => recoverFirstHotel({ page, baseURL }, true, true));
 
   test("shows both selected tracks as one inline property-scoped setup flow", async ({
     page,

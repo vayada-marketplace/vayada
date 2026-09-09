@@ -1,3 +1,7 @@
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import {
@@ -119,6 +123,19 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
     await primeBrowserState(page);
     await mockAuthSession(page);
     const api = await mockAdaptiveApis(page);
+    const destination = new URL("/handoff", baseURL).toString() + "#code=" + "a".repeat(32);
+    await page.route("**/auth/handoff/create", async (route) => {
+      expect(route.request().postDataJSON()).toMatchObject({
+        sourceSurface: "marketplace-web",
+        targetSurface: "pms-web",
+        routingHints: { propertyId },
+        targetPath: `/dashboard?setup=incomplete&propertyId=${propertyId}`,
+      });
+      await route.fulfill({ status: 200, json: { destination } });
+    });
+    await page.route("**/handoff", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html", body: "<h1>PMS handoff</h1>" }),
+    );
     api.failNextDraft = "network";
 
     await page.goto(setupUrl(baseURL));
@@ -133,7 +150,7 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
     await expect(textarea).toHaveValue(summary);
     await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(1);
     await saveFailure.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(page).toHaveURL(/\/marketplace$/);
+    await expect(page).toHaveURL(destination);
 
     await page.goto(setupUrl(baseURL));
     await expect(page.getByLabel("Short hotel summary")).toHaveValue(summary);
@@ -156,7 +173,7 @@ test.describe("adaptive presentation, Marketplace preferences, and Booking desig
     );
     expect(api.resetSteps).toEqual(["present_hotel"]);
     await page.getByRole("button", { name: "Exit setup", exact: true }).click();
-    await expect(page).toHaveURL(/\/marketplace$/);
+    await expect(page).toHaveURL(destination);
     expect(api.canonicalWrites).toEqual([]);
   });
 
@@ -251,7 +268,7 @@ async function mockAdaptiveApis(page: Page, options: { designConfigured?: boolea
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
     if (
-      /^\/api\/hotel-setup\/(?:status|tracks|handoffs)(?:\/|$)/.test(pathname) ||
+      /^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
       /^\/api\/hotel-setup\/properties\/[^/]+\/(?:profile|public-profile)(?:\/|$)/.test(pathname)
     ) {
       legacyCalls.push(`${request.method()} ${pathname}`);
@@ -745,6 +762,16 @@ function designReadiness(
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(

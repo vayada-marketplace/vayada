@@ -1,3 +1,7 @@
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import type { PropertySetupStepId, SetupTrack } from "@vayada/domain-hotels";
 import {
@@ -44,18 +48,153 @@ const routeScenarios: Array<{
 ];
 
 test.describe("marketplace-web adaptive hotel setup shell", () => {
-  test("holds safely when an adaptive entry has no property scope", async ({ page, baseURL }) => {
-    const forbiddenCalls = watchForbiddenSetupCalls(page);
+  test("automatically selects the only hotel before resuming adaptive setup", async ({
+    page,
+    baseURL,
+  }) => {
     await primeBrowserState(page);
     await mockAuthSession(page);
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["hotel_operations"],
+        resumeStepId: "calendar",
+      }),
+    );
     const entryUrl = new URL(setupUrl(baseURL));
     entryUrl.searchParams.delete("propertyId");
-
     await page.goto(entryUrl.toString());
+    await expect(page.getByRole("heading", { name: "Open your calendar", level: 1 })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`propertyId=${propertyId}`));
+  });
 
-    await expect(page.getByRole("heading", { name: "Choose a hotel to continue" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Exit setup", exact: true })).toBeVisible();
-    expect(forbiddenCalls()).toEqual([]);
+  test("retries a failed prerequisite read before opening the saved hotel", async ({
+    page,
+    baseURL,
+  }) => {
+    await primeBrowserState(page);
+    await mockAuthSession(page);
+    const status = createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId,
+      organizationDisplayName: "Hotels",
+      propertyId,
+    });
+    let unavailable = true;
+    await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      await route.fulfill({
+        status: unavailable ? 503 : 200,
+        headers: corsHeaders(route),
+        json: unavailable ? { detail: "Temporary outage" } : status,
+      });
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "review",
+      }),
+    );
+    await page.goto(setupUrl(baseURL));
+    await expect(page.getByRole("heading", { name: "Setup unavailable" })).toBeVisible();
+    unavailable = false;
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page).toHaveURL(/step=review/);
+  });
+
+  test("selects among existing hotels and clears the previous hotel's step", async ({
+    page,
+    baseURL,
+  }) => {
+    await primeBrowserState(page);
+    await mockAuthSession(page);
+    const status = createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId,
+      organizationDisplayName: "Hotels",
+      propertyId,
+    });
+    status.propertySelection.state = "multiple_properties";
+    status.propertySelection.selectedPropertyId = null;
+    status.propertySelection.availableProperties.push({
+      ...status.propertySelection.availableProperties[0],
+      propertyId: "other-hotel",
+      displayName: "Other hotel",
+    });
+    await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      const selected = new URL(route.request().url()).searchParams.get("propertyId");
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders(route),
+        json: {
+          ...status,
+          setupPlan: selected === propertyId ? status.setupPlan : null,
+          entryDecision:
+            selected === propertyId
+              ? status.entryDecision
+              : {
+                  requestedProduct: "marketplace",
+                  propertyId: null,
+                  decision: "setup_required",
+                  destinationRouteKey: "hotel_setup",
+                  reasonCode: "property_selection_required",
+                },
+          propertySelection: {
+            ...status.propertySelection,
+            selectedPropertyId: selected === propertyId ? propertyId : null,
+          },
+        },
+      });
+    });
+    await mockPropertySetupRoute(
+      page,
+      createPropertySetupRouteMock({
+        propertyId,
+        selectedTracks: ["creator_marketplace"],
+        resumeStepId: "marketplace_preferences",
+      }),
+    );
+    const url = new URL(setupUrl(baseURL, { step: "payments" }));
+    url.searchParams.delete("propertyId");
+    await page.goto(url.toString());
+    await expect(page.getByRole("heading", { name: "Choose hotel" })).toBeVisible();
+    await page.getByRole("button", { name: /Alpenrose Hotel/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "Tell creators what you are open to", level: 1 }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/step=marketplace_preferences/);
+  });
+
+  test("add mode takes precedence over an existing property and saved step", async ({
+    page,
+    baseURL,
+  }) => {
+    await primeBrowserState(page);
+    await mockAuthSession(page);
+    await page.route(/\/api\/hotel-setup\/property-types/, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: corsHeaders(route),
+        json: {
+          contractVersion: "adaptive-hotel-property-types.v1",
+          propertyTypes: [{ value: "hotel", label: "Hotel" }],
+        },
+      }),
+    );
+    let adaptiveReads = 0;
+    page.on("request", (request) => {
+      if (/\/route(?:\?|$)/.test(request.url())) adaptiveReads++;
+    });
+    const url = new URL(setupUrl(baseURL, { step: "calendar" }));
+    url.searchParams.set("mode", "add");
+    await page.goto(url.toString());
+    await expect(page.getByRole("heading", { name: "Let’s get to know this hotel" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: /Hotel name/ })).toHaveValue("");
+    expect(adaptiveReads).toBe(0);
   });
 
   for (const scenario of routeScenarios) {
@@ -391,6 +530,16 @@ test.describe("marketplace-web adaptive hotel setup shell", () => {
 });
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(
@@ -479,7 +628,7 @@ function watchForbiddenSetupCalls(page: Page) {
 function isForbiddenSetupCall(request: Request): boolean {
   const pathname = new URL(request.url()).pathname;
   return (
-    /^\/api\/hotel-setup\/(?:status|tracks|property-types|handoffs)(?:\/|$)/.test(pathname) ||
+    /^\/api\/hotel-setup\/(?:tracks|property-types|handoffs)(?:\/|$)/.test(pathname) ||
     /^\/api\/hotel-setup\/properties\/[^/]+\/(?:profile|public-profile)(?:\/|$)/.test(pathname) ||
     /^\/api\/(?:booking|finance|marketplace|pms|distribution)\//.test(pathname)
   );

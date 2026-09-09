@@ -1,3 +1,7 @@
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import type {
@@ -209,7 +213,7 @@ async function mockPricingCalendarApis(page: Page) {
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
     if (
-      /^\/api\/hotel-setup\/(?:status|tracks|handoffs)(?:\/|$)/.test(pathname) ||
+      /^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
       /^\/api\/(?:booking|finance|distribution)\//.test(pathname)
     ) {
       forbiddenCalls.push(`${request.method()} ${pathname}`);
@@ -693,6 +697,16 @@ function acceptedCalendarConfiguration(body: Record<string, unknown>) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(

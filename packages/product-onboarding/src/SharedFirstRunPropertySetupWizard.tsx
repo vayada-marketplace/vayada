@@ -108,6 +108,7 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
+  renderAfterHotelDetails?: (propertyId: string) => ReactNode;
   onExit?: (propertyId: string | null) => void;
 };
 
@@ -345,11 +346,13 @@ export default function SharedFirstRunPropertySetupWizard({
   renderTaskForm,
   propertyLaunchSettingsApi,
   onPropertySelected,
+  renderAfterHotelDetails,
   onExit,
 }: SharedFirstRunPropertySetupWizardProps) {
   const labels = { ...DEFAULT_PRODUCT_LABELS, ...productLabels };
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
   const [forceTrackSelection, setForceTrackSelection] = useState(false);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
@@ -408,6 +411,7 @@ export default function SharedFirstRunPropertySetupWizard({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setStatus(null);
     setError("");
 
     api
@@ -428,7 +432,7 @@ export default function SharedFirstRunPropertySetupWizard({
     return () => {
       cancelled = true;
     };
-  }, [api, entryProduct, initialPropertyId]);
+  }, [api, entryProduct, initialPropertyId, statusReloadToken]);
 
   useEffect(() => {
     if (view.screen !== "property_profile") return;
@@ -592,9 +596,9 @@ export default function SharedFirstRunPropertySetupWizard({
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
-      await reloadStatus(saved.propertyId);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -721,11 +725,24 @@ export default function SharedFirstRunPropertySetupWizard({
           >
             {error}
           </div>
+          <button
+            type="button"
+            className="mt-4 rounded-full bg-primary-600 px-5 py-2 font-semibold text-white"
+            onClick={() => setStatusReloadToken((value) => value + 1)}
+          >
+            Retry
+          </button>
         </WizardShell>
       );
     }
 
     return <WizardShell title="Setting up your property" view={view} loading embedded={embedded} />;
+  }
+
+  if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
+    if (saving)
+      return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
+    return renderAfterHotelDetails(view.selectedPropertyId);
   }
 
   return (

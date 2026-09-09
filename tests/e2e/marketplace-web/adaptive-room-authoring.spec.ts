@@ -1,3 +1,7 @@
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page } from "@playwright/test";
 import type { PropertySetupRouteReadModel, PropertySetupStepDraft } from "@vayada/domain-hotels";
 
@@ -179,6 +183,16 @@ async function uploadPhoto(page: Page, filename: string) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(
