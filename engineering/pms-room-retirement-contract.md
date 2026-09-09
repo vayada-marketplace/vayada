@@ -1,7 +1,8 @@
 # Supported room closure and retirement
 
 VAY-910 follow-up, authorized 2026-09-09. This contract covers one existing room
-in a property with at least one other operational room. It does not authorize
+in the TypeScript next-environment target schema, in a property with at least
+one other operational room. It does not authorize
 production activation, whole-property closure, or direct repair of fixture data.
 See [backend ownership](typescript-backend-structure.md) and the existing
 `pmsPhysicalRoomInventory.ts` and room-type retirement guards.
@@ -54,7 +55,9 @@ holding the publication lock. No path may acquire inventory after publication. A
 1. Reserve idempotency and establish the immutable closing receipt/fence.
 2. Close only the selected room's future inventory from the property-local
    accepted date. Closure, impact and final retirement must share that explicit
-   timezone-derived cutoff (replace the retirement query's implicit CURRENT_DATE
+   timezone-derived cutoff: `stay_date >= cutoff_date` is inclusive; rows with
+   `stay_date < cutoff_date` are historical. Use that predicate in all three
+   operations (replace the retirement query's implicit CURRENT_DATE
    in this flow); do not mix server UTC and property-local dates. Preserve its historical rows and existing owner counters;
    assigned/blocked counts must already be zero. Retire only its eligible units
    through PMS-owned lifecycle logic, retaining IDs and history.
@@ -130,7 +133,10 @@ requires provider closure acknowledgement before disabling mapped identities;
 no database transaction pretends a provider write succeeded.
 
 For this already authorized staging fixture, keep the provider room/rate closed
-and unmapped from OTA channels. After the pre-closure pause and supported closure/publication prerequisites
+without any OTA-channel binding. The two canonical-to-provider mappings remain
+active through closing, provider acknowledgement and readback; only the later
+exact-two-row operation disables them. OTA bindings and these identity mappings
+are different relationships. After the pre-closure pause and supported closure/publication prerequisites
 are satisfied, the separately reviewed exact-two-row maintenance operation may
 verify fresh closed-zero provider evidence, acquire the exclusive fixture lease,
 retain the already verified pause of the actual current image, reconfirm no
@@ -146,7 +152,8 @@ active channel mappings, public offers or active-content references for the room
 Only then soft-retire it with fresh revision/idempotency checks. The closing fence
 and receipt survive retirement so delayed jobs and replay cannot resurrect it.
 Canonical flexible pricing and canceled booking history remain retained. A room
-that is already retired without this command's receipt is not an own replay.
+that is already retired without this command's receipt returns `room_type_not_found`; clients must not
+treat it as successful idempotent replay.
 
 ## Required evidence and implementation slices
 
@@ -188,3 +195,16 @@ are historical evidence, not a future execution gate; refresh before writes.
 
 This table is a review checklist, not proof that those integrations exist. The
 contract cannot be marked implemented on the basis of a migration or one route.
+
+### Runtime scope
+
+This is a target-schema `apps/api` change. Legacy Python
+`RoomTypeRepository.list_by_hotel_id`, `admin_room_types.delete_room_type`,
+`ChannexConnectionRepository.upsert/deactivate` and `provision_property` use the
+legacy PMS model/database and are not alternate writers of this target fixture.
+Do not connect those paths to the target database or staging connection as part
+of this change. Any future compatibility bridge must preserve the same fence.
+Within `apps/api`, include connection-level enable/disable and provisioning in
+the Channex consumer review: enabling must not recreate or reactivate mappings
+for closing rooms; room closure must not disable the property connection or
+unrelated room/rate mappings. Unsupported connected modes remain rejected.
