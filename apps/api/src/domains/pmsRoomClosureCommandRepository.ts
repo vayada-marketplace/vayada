@@ -94,7 +94,7 @@ export function createPgPmsRoomClosureRepository(config: {
             id: string;
             fingerprint: string;
             status: string;
-            metadata: { result?: PmsRoomClosureSuccess };
+            metadata: { result?: PmsRoomClosureSuccess } | null;
           }>(
             `SELECT id::text,request_fingerprint_hash AS fingerprint,status,idempotency_metadata AS metadata
         FROM platform.idempotency_keys WHERE operation_scope='pms' AND operation='room_type.close'
@@ -105,7 +105,7 @@ export function createPgPmsRoomClosureRepository(config: {
         if (!saved || saved.fingerprint !== fingerprint)
           throw new ClosureRejected("idempotency_key_conflict");
         if (saved.status === "completed") {
-          const result = saved.metadata.result;
+          const result = saved.metadata?.result;
           if (
             !result?.ok ||
             result.commandId !== saved.id ||
@@ -226,7 +226,8 @@ export function createPgPmsRoomClosureRepository(config: {
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      // Preserve the command failure if the connection also fails during rollback.
+      await client.query("ROLLBACK").catch(() => {});
       if (error instanceof ClosureRejected)
         return {
           ok: false,
