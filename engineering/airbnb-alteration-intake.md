@@ -151,3 +151,28 @@ and promotes through the existing receipt/domain-event/job transaction. That
 transaction captures the connected binding generation under lock; the browser or
 notification cannot supply it. Unresolved or inconsistent ownership stays observed.
 Server runtime does not enable the gate or start either alteration worker yet.
+
+## Applying authoritative alterations
+
+Behind a separate default-off booking-worker option, a modified revision for a
+booking with an open Airbnb request must match its provider booking/property,
+binding generation and full proposed dates, currency, total and per-room guest
+counts/types. Provider acceptance and the unchanged original booking snapshot
+are required. A missing/mismatching proposal or unresolved acceptance retries
+without partially importing the revision. Acknowledgement occurs only after commit.
+
+Take the property inventory lock before the existing connection/booking locks.
+Use the request decision advisory lock without waiting. Apply booking values,
+exact channel assignment stays/occupancy, inventory reconciliation and the applied
+request marker in the same transaction. Advance assignment versions so stale staff
+commands cannot overwrite the provider change. Revision replay remains owned by the
+existing importer. Enqueue the existing channel-manager, public-bookability and
+calendar outbox events for the affected date range in that transaction. Preserve
+guest payments; do not capture/refund or rewrite folios.
+
+The first application slice supports unchanged room count/types and pre-arrival
+assignments only. Preserve assigned physical rooms only when their proposed stay
+has no assignment/block conflict. Unsupported room changes, linked inventory,
+missing materialization and in-house stays require review and block application.
+Those limitations remain activation gates, alongside finance-source freshness
+validation, periodic scans and sanctioned provider end-to-end evidence.
