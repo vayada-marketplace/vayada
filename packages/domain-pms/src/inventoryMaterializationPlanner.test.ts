@@ -142,6 +142,13 @@ describe("PMS inventory materialization planner", () => {
     expect(
       planPmsInventoryMaterialization({ ...baseInput, currentDays: result.days }),
     ).toMatchObject({ ok: true, outcome: "unchanged" });
+    expect(
+      planPmsInventoryMaterialization({
+        ...baseInput,
+        previousConfiguration,
+        currentDays: result.days.filter((day) => day.roomTypeId === ROOM_A),
+      }),
+    ).toMatchObject({ ok: true, outcome: "rematerialized" });
     // An old binding with missing rows remains corrupt, including with historical evidence.
     expect(
       planPmsInventoryMaterialization({
