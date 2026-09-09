@@ -16,7 +16,7 @@ describe.skipIf(!connectionString)("replacement pricing storage constraints", ()
       const property = randomUUID(), other = randomUUID(), room = randomUUID(), actor = randomUUID();
       await client.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Pricing test')", [actor, `${actor}@example.test`]);
       await client.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Pricing test'),($2::uuid,$2::text,'Other')", [property, other]);
-      await client.query("INSERT INTO pms.room_types(id,property_id,name,currency) VALUES($1,$2,'Room','EUR')", [room, property]);
+      await client.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Room',100,'EUR')", [room, property]);
       await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1),($2)", [property, other]);
       for (const p of [property, other]) await client.query(`INSERT INTO pms.pricing_v2_revisions
         (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id)
