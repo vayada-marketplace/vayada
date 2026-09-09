@@ -28,8 +28,9 @@ The editor must show the basis next to the rate. Provider adapters must supply a
 explicitly classified accommodation amount; a total-only booking cannot be treated
 as commissionable accommodation revenue.
 
-This slice adds policy validation and version selection. Persistence, owner approval
-commands and hotel editor integration follow. Refund/no-show handling, discount
+Implemented layers cover policy validation, immutable storage and authorized save
+and approval commands. Persisted policy resolution, HTTP adapters and the hotel editor
+follow. Refund/no-show handling, discount
 allocation, payer, platform fees, currency conversion, rounding of earned amounts
 and payout scheduling remain outside this contract; no settlement calculator or
 earning activation is introduced. Existing accepted agreements must retain their
@@ -45,7 +46,7 @@ record exists. Neither rate versions nor approval evidence can be updated, delet
 or truncated. New rates require new version IDs; old agreements keep their references.
 
 Property, user and organization foreign keys establish record identity, not current
-actor authorization. Future commands must verify hotel ownership/permission and
+actor authorization. Commands must verify hotel ownership/permission and
 write idempotency/audit evidence atomically before recording approval. Approving this
 commission component does not publish offers or establish booking/settlement eligibility.
 No existing drafts or historical Finance records are backfilled or reinterpreted.
@@ -60,6 +61,19 @@ creating a Finance-owned version. It records author, organization and request.
 Repeated actor/property/key/input requests return the original version; changed
 input under that key fails. Saving another explicit rate creates another draft
 version, without replacing an approved version or changing existing agreements.
-Save does not approve the commission component. No HTTP route is exposed yet;
-approval, persisted resolution and the editor follow. Additional product adapters
+Save does not approve the commission component. The separate approval command below
+records that decision. No HTTP route is exposed yet; persisted resolution and the
+editor follow. Additional product adapters
 must use their own explicit authorization boundary with the same Finance storage.
+
+## Approving an exact version
+
+Approval uses the same Marketplace permission, active entitlement and owner/operator
+property access as saving, rechecked before replay. The transaction locks the
+enabled property and persisted organization link, then selects only the requested
+version for that property and its authoring organization. Approval records the
+approver, organization and request without editing the rate. The same actor and key
+replay the original result; reusing the key for another version or actor conflicts.
+A different key for an already-approved version returns already_approved, preserving
+the first approval evidence. Approval covers only the commission component; it does
+not publish an offer, activate a link or authorize earnings or payout.
