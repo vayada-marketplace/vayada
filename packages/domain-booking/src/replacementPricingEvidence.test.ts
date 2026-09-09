@@ -81,6 +81,7 @@ describe("replacement stay and evidence contracts", () => {
 const percent = (amount: bigint, bps: bigint) => (amount * bps + 5000n) / 10000n;
 describe("agreed pricing acceptance arithmetic", () => {
   it.each([
+    ["July31 to August2: July month 120 then base 100", 12000n + 10000n, 0n, 0n, 22000n],
     ["one guest occupancy", 10000n, 0n, 0n, 10000n],
     ["three guests occupancy", 15500n, 0n, 0n, 15500n],
     ["three guests per-person at 60", 3n * 6000n, 0n, 0n, 18000n],
@@ -101,7 +102,6 @@ describe("agreed pricing acceptance arithmetic", () => {
   });
   it("fixes rounding expectations and flags future zero/overflow outcomes", () => {
     expect(percent(15500n, 11000n)).toBe(17050n);
-    expect(percent(22000n, 10000n)).toBe(22000n);
     expect(percent(1n, 5000n)).toBe(1n);
     expect(percent(1n, 1n)).toBe(0n); // future evaluator must return unavailable
     expect(999999999999999999n + 1n > 999999999999999999n).toBe(true); // overflow must fail
