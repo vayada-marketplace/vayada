@@ -313,10 +313,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
   });
 
   it("reconciles only established staging meal mappings without provisioning variants", async () => {
-    await db.query(
-      "UPDATE pms.rate_plans SET meal_plan='breakfast' WHERE id=$1",
-      [rate],
-    );
+    await db.query("UPDATE pms.rate_plans SET meal_plan='breakfast' WHERE id=$1", [rate]);
     const planner = createPgChannexManagementPlanPort({
       connectionString: url!,
       stagingMealsPropertyId: property,
@@ -401,6 +398,73 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       jobId: ids[4],
       propertyId: property,
       input: { operationType: "provision", mealRatePlanId: rate },
+    });
+    expect(
+      (
+        await db.query("SELECT status FROM platform.jobs WHERE id=ANY($1::uuid[])", [
+          ids.slice(0, 4),
+        ])
+      ).rows,
+    ).toEqual(Array.from({ length: 4 }, () => ({ status: "pending" })));
+  });
+
+  it("claims only opted-in inventory rules for the staging property", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    const jobs = [
+      [otherProperty, { operationType: "update_inventory_rules" }],
+      [property, { operationType: "provision" }],
+      [property, { operationType: "provision", mealRatePlanId: "invalid" }],
+      [property, { operationType: "sync_bookings", mealRatePlanId: rate }],
+      [property, { operationType: "update_inventory_rules" }],
+    ] as const;
+    const ids: string[] = [];
+    for (const [owner, payload] of jobs) {
+      const id = randomUUID();
+      ids.push(id);
+      await db.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','property',$2,$3::jsonb)`,
+        [id, owner, JSON.stringify(payload)],
+      );
+    }
+    // Suppress the unrelated periodic restrictions enqueue for this claim-only test.
+    await db.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [property]);
+    const worker = (enabled: boolean, ari = true) =>
+      createPgPmsChannexManagementWorkerStore({
+        connectionString: url!,
+        ariSyncMutating: ari,
+        stagingRestrictionsPropertyId: property,
+        stagingInventoryEnabled: enabled,
+        targetState: { succeed: vi.fn(), fail: vi.fn() },
+        pool: {
+          end: async () => {},
+          connect: async () => ({
+            release() {},
+            query: ((text: string, values?: unknown[]) =>
+              db.query(
+                (
+                  {
+                    BEGIN: "SAVEPOINT meal_worker",
+                    COMMIT: "RELEASE SAVEPOINT meal_worker",
+                    ROLLBACK: "ROLLBACK TO SAVEPOINT meal_worker",
+                  } as Record<string, string>
+                )[text] ?? text,
+                values,
+              )) as pg.PoolClient["query"],
+          }),
+        },
+      });
+    expect(await worker(false).claim({ workerId: "meals", now: new Date() })).toBeNull();
+    expect(await worker(true, false).claim({ workerId: "inventory", now: new Date() })).toBeNull();
+    const claimed = await worker(true).claim({ workerId: "meals", now: new Date() });
+    expect(claimed).toMatchObject({
+      jobId: ids[4],
+      propertyId: property,
+      input: { operationType: "update_inventory_rules" },
     });
     expect(
       (

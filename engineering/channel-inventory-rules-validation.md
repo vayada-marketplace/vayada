@@ -51,3 +51,12 @@ e3eb5c44 (close-out), 071ed0eb (restoration) each received Success.
 This verifies provider delivery and acknowledgement, not Booking.com storefront
 presentation, a sales-quota scenario using bookings, or a second active OTA.
 Deployed PMS UI/queue/worker smoke remains a post-merge acceptance check.
+
+## Scoped deployed inventory worker
+
+`PMS_CHANNEX_STAGING_INVENTORY_ENABLED=true` opts the existing property-scoped
+staging worker into `update_inventory_rules`. It defaults off and requires the
+existing valid staging property, exact staging URL, disabled global workers and
+mutating ARI capability. Other properties and operation types retain the previous
+claim restrictions. This flag does not create channels or mappings. Coordinate
+the shared fixture lease and verify the deployed image before enabling it.
