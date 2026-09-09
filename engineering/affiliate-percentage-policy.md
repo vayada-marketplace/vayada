@@ -34,3 +34,18 @@ allocation, payer, platform fees, currency conversion, rounding of earned amount
 and payout scheduling remain outside this contract; no settlement calculator or
 earning activation is introduced. Existing accepted agreements must retain their
 original policy version when a hotel later changes its rate.
+
+## Immutable storage
+
+Migration 0174 stores Finance policy versions with a canonical property ID, explicit
+basis-point rate, fixed contract/model/basis/eligibility and author/request/time.
+Approval is a separate append-only record tied to the exact version/property tuple,
+with approving organization/user/request/time. A version is a draft until its approval
+record exists. Neither rate versions nor approval evidence can be updated, deleted
+or truncated. New rates require new version IDs; old agreements keep their references.
+
+Property, user and organization foreign keys establish record identity, not current
+actor authorization. Future commands must verify hotel ownership/permission and
+write idempotency/audit evidence atomically before recording approval. Approving this
+commission component does not publish offers or establish booking/settlement eligibility.
+No existing drafts or historical Finance records are backfilled or reinterpreted.
