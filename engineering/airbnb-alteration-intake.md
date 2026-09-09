@@ -161,6 +161,15 @@ counts/types. Provider acceptance and the unchanged original booking snapshot
 are required. A missing/mismatching proposal or unresolved acceptance retries
 without partially importing the revision. Acknowledgement occurs only after commit.
 
+When intake explicitly stored a null proposed total, the accepted authoritative
+revision supplies the final total. It must contain a valid, nonnegative amount
+within the booking column's precision; absent or malformed amounts block import.
+An explicitly quoted total must still match. A missing stored total field is invalid
+evidence, not an unknown quote. Preserve the original null quote and price difference
+for the request comparison; do not retroactively represent the final amount as a
+price staff saw before acceptance. The booking reflects the confirmed provider total.
+All other linkage, acceptance, proposal and inventory checks remain required.
+
 Take the property inventory lock before the existing connection/booking locks.
 Use the request decision advisory lock without waiting. Apply booking values,
 exact channel assignment stays/occupancy, inventory reconciliation and the applied

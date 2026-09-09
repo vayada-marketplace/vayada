@@ -457,6 +457,62 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await admin.query("ROLLBACK");
     }
+    await admin.query("BEGIN");
+    try {
+      const change = await prepareRevision("2026-08-07");
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null,"priceDifference":null}'::jsonb WHERE id=$1`,
+        [change.requestId],
+      );
+      for (const amount of [undefined, null, "", "-1.00", "NaN", "10000000000000.00", "25.001"]) {
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, {
+            ...change.revision,
+            attributes: { ...change.revision.attributes, amount },
+          }),
+        ).rejects.toThrow();
+      }
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, {
+          ...change.revision,
+          attributes: { ...change.revision.attributes, currency: "USD" },
+        }),
+      ).rejects.toThrow("alteration_revision_proposal_mismatch");
+      expect(
+        (
+          await admin.query(
+            "SELECT check_out::text,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual({ check_out: "2026-08-06", total_amount: "0.00" });
+      await admin.query(
+        "UPDATE booking.booking_change_requests SET requested_changes=requested_changes - 'newTotal' WHERE id=$1",
+        [change.requestId],
+      );
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).rejects.toThrow();
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null}'::jsonb WHERE id=$1`,
+        [change.requestId],
+      );
+      // An explicit provider zero is valid; a missing amount above is not zero.
+      change.revision.attributes.amount = "0.00";
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).resolves.toBe(true);
+      expect(
+        (
+          await admin.query(
+            "SELECT status,requested_changes->'newTotal' AS quote,requested_changes->'priceDifference' AS difference FROM booking.booking_change_requests WHERE id=$1",
+            [change.requestId],
+          )
+        ).rows[0],
+      ).toEqual({ status: "accepted", quote: null, difference: null });
+    } finally {
+      await admin.query("ROLLBACK");
+    }
     // Application assertions run before rollback, against actual materialized inventory.
     await admin.query("BEGIN");
     try {
@@ -637,7 +693,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].code,
     ).toBe("alteration_revision_proposal_mismatch");
-    providerRevision.attributes.amount = "25.00";
+    providerRevision.attributes.amount = "37.50";
+    await admin.query(
+      `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null,"priceDifference":null}'::jsonb WHERE id=$1`,
+      [applied.requestId],
+    );
     await admin.query(`UPDATE platform.jobs SET run_after=now() WHERE id=$1`, [jobId]);
     const trigger = `alteration_fail_${bookingId.replaceAll("-", "")}`;
     await admin.query(
@@ -692,6 +752,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await queueRevision();
     expect(await runRevision()).toMatchObject({ succeeded: 1 });
     expect(acknowledgements).toBe(2);
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50" });
+    expect(
+      (
+        await admin.query(
+          "SELECT requested_changes->'newTotal' AS quote,requested_changes->'priceDifference' AS difference FROM booking.booking_change_requests WHERE id=$1",
+          [applied.requestId],
+        )
+      ).rows[0],
+    ).toEqual({ quote: null, difference: null });
     expect(
       (
         await admin.query(
