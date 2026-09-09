@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { runChannexBookingJobs } from "../jobs/channexBookings.js";
+import { applyChannexAlterationRevision } from "./channexAlterationRevision.js";
 
 import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
@@ -86,9 +88,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         materializationCommand(fixture, "airbnb-materialized", 1, "2026-08-04", "2026-08-06"),
       ),
     ).toMatchObject({ ok: true, outcome: "applied" });
-    await admin.query(`UPDATE pms.inventory_days SET rate_gate_open=TRUE, inventory_revision=inventory_revision+1, generated_pricing_source_fingerprint=repeat('a',64) WHERE property_id=$1`, [
-      propertyId,
-    ]);
+    await admin.query(
+      `UPDATE pms.inventory_days SET rate_gate_open=TRUE, inventory_revision=inventory_revision+1, generated_pricing_source_fingerprint=repeat('a',64) WHERE property_id=$1`,
+      [propertyId],
+    );
     async function book(id: string, from: string, to: string) {
       await admin.query(
         `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,room_count,currency)
@@ -128,9 +131,19 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     async function check() {
       await admin.query("BEGIN");
       try {
-        const beforeCheck = await admin.query(`SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,[propertyId]);
+        const beforeCheck = await admin.query(
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          [propertyId],
+        );
         await assertChannexAlterationAvailability(admin, input);
-        expect((await admin.query(`SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,[propertyId])).rows).toEqual(beforeCheck.rows);
+        expect(
+          (
+            await admin.query(
+              `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual(beforeCheck.rows);
       } finally {
         await admin.query("ROLLBACK");
       }
@@ -150,6 +163,333 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).toEqual(before.rows);
     input.changes.requestedCheckOut = "2026-08-07";
     await expect(check()).resolves.toBeUndefined();
+    async function prepareRevision(checkout: string) {
+      const externalProperty = randomUUID(),
+        providerBookingId = randomUUID();
+      const requestId = randomUUID(),
+        revisionId = randomUUID();
+      await admin.query(
+        `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex',$2,'active','repair')`,
+        [propertyId, externalProperty],
+      );
+      const bindingGeneration = (
+        await admin.query(
+          `UPDATE pms.channel_connections SET external_property_id=$2 WHERE id=$1 RETURNING binding_generation`,
+          [connectionId, externalProperty],
+        )
+      ).rows[0].binding_generation as string;
+      const original = (
+        await admin.query(
+          `SELECT check_in::text,check_out::text,total_amount::text,adults,children FROM booking.guest_bookings WHERE id=$1`,
+          [bookingId],
+        )
+      ).rows[0];
+      const changes = {
+        ...input.changes,
+        requestedCheckOut: checkout,
+        providerBookingId,
+        oldCheckIn: original.check_in,
+        oldCheckOut: original.check_out,
+        oldTotal: original.total_amount,
+        oldAdults: original.adults,
+        oldChildren: original.children,
+        requestedAdults: 2,
+        requestedChildren: 0,
+        currency: "EUR",
+        newTotal: "25.00",
+        rooms: [
+          { roomTypeId: externalRoom, adults: 1, children: 0 },
+          { roomTypeId: externalRoom, adults: 1, children: 0 },
+        ],
+        channex: {
+          eventId: randomUUID(),
+          connectionId,
+          bindingGeneration,
+          providerPropertyId: externalProperty,
+          providerState: "accepted",
+        },
+      };
+      await admin.query(
+        `INSERT INTO booking.booking_change_requests(id,guest_booking_id,request_type,requested_by,requested_changes)
+        VALUES($1,$2,'date_change','guest',$3)`,
+        [requestId, bookingId, changes],
+      );
+      const scope = {
+        propertyId,
+        bookingId,
+        connectionId,
+        bindingGeneration,
+        providerPropertyId: externalProperty,
+      };
+      const revision = {
+        id: revisionId,
+        attributes: {
+          booking_id: providerBookingId,
+          property_id: externalProperty,
+          status: "modified",
+          arrival_date: "2026-08-04",
+          departure_date: checkout,
+          currency: "EUR",
+          amount: "25.00",
+          rooms: [
+            { room_type_id: externalRoom, occupancy: { adults: 1, children: 0 } },
+            { room_type_id: externalRoom, occupancy: { adults: 1, children: 0 } },
+          ],
+        },
+      };
+      return { scope, revision, requestId, revisionId, providerBookingId };
+    }
+    // Application assertions run before rollback, against actual materialized inventory.
+    await admin.query("BEGIN");
+    try {
+      const { scope, revision, requestId, revisionId } = await prepareRevision("2026-08-07");
+      const historic = randomUUID();
+      await admin.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency)
+        VALUES($1::uuid,$2,$1::text,'airbnb','confirmed','2026-08-01','2026-08-02','EUR')`,
+        [historic, propertyId],
+      );
+      await admin.query(
+        `INSERT INTO pms.operational_booking_assignments(property_id,guest_booking_id,room_type_id,source,room_id)
+        VALUES($1,$2,$3,'channel',(SELECT id FROM pms.rooms WHERE property_id=$1 AND room_number='A'))`,
+        [propertyId, historic, roomTypeId],
+      );
+      await expect(
+        applyChannexAlterationRevision(admin, scope, {
+          ...revision,
+          attributes: { ...revision.attributes, amount: "26.00" },
+        }),
+      ).rejects.toThrow("alteration_revision_proposal_mismatch");
+      expect(
+        (
+          await admin.query(`SELECT status FROM booking.booking_change_requests WHERE id=$1`, [
+            requestId,
+          ])
+        ).rows[0].status,
+      ).toBe("pending");
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=jsonb_set(requested_changes,'{channex,providerState}','"pending"') WHERE id=$1`,
+        [requestId],
+      );
+      await expect(applyChannexAlterationRevision(admin, scope, revision)).rejects.toThrow(
+        "alteration_revision_acceptance_unconfirmed",
+      );
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=jsonb_set(requested_changes,'{channex,providerState}','"accepted"') WHERE id=$1`,
+        [requestId],
+      );
+      await admin.query(
+        `UPDATE pms.operational_booking_assignments SET assignment_payload='{"version":"reservation-v3"}' WHERE guest_booking_id=$1`,
+        [bookingId],
+      );
+      expect(await applyChannexAlterationRevision(admin, scope, revision)).toBe(true);
+      expect(
+        (
+          await admin.query(
+            `SELECT assignment_payload->>'version' AS version FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
+            [bookingId],
+          )
+        ).rows,
+      ).toEqual([{ version: "reservation-v4" }, { version: "reservation-v4" }]);
+      expect(
+        (
+          await admin.query(
+            `SELECT check_out::text,total_amount::text,adults FROM booking.guest_bookings WHERE id=$1`,
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual({ check_out: "2026-08-07", total_amount: "25.00", adults: 2 });
+      expect(
+        (
+          await admin.query(
+            `SELECT check_out::text FROM pms.operational_booking_assignments WHERE guest_booking_id=$1`,
+            [bookingId],
+          )
+        ).rows,
+      ).toEqual([{ check_out: "2026-08-07" }, { check_out: "2026-08-07" }]);
+      expect(
+        (
+          await admin.query(
+            `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date='2026-08-06'`,
+            [propertyId],
+          )
+        ).rows[0].assigned_count,
+      ).toBe(2);
+      expect(
+        (
+          await admin.query(
+            `SELECT status,requested_changes#>>'{channex,appliedRevisionId}' AS revision FROM booking.booking_change_requests WHERE id=$1`,
+            [requestId],
+          )
+        ).rows[0],
+      ).toEqual({ status: "accepted", revision: revisionId });
+      const after = (
+        await admin.query(
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          [propertyId],
+        )
+      ).rows;
+      expect(await applyChannexAlterationRevision(admin, scope, revision)).toBe(false);
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1 AND correlation_id=$2`,
+            [propertyId, requestId],
+          )
+        ).rows[0].count,
+      ).toBe(3);
+      expect(
+        (
+          await admin.query(
+            `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual(after);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    const applied = await prepareRevision("2026-08-05");
+    await admin.query(
+      `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,external_booking_id,channel,channel_room_index,sync_status)
+      VALUES($1,$2,$3,$4,'channex',0,'active'),($1,$2,$3,$4,'channex',1,'active')`,
+      [propertyId, connectionId, bookingId, applied.providerBookingId],
+    );
+    const providerRevision = {
+      ...applied.revision,
+      attributes: {
+        ...applied.revision.attributes,
+        ota_name: "Airbnb",
+        inserted_at: new Date().toISOString(),
+      },
+    };
+    const queueRevision = async () =>
+      (
+        await admin.query(
+          `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,resource_product,resource_type,resource_id,payload)
+      VALUES($1,'pms.channex.webhooks','channex.ingest-booking','external','pms','channel_booking',$2,$3) RETURNING id`,
+          [
+            randomUUID(),
+            applied.providerBookingId,
+            {
+              propertyId,
+              providerPropertyId: applied.scope.providerPropertyId,
+              channelBookingId: applied.providerBookingId,
+              revision: applied.revisionId,
+              revisionSource: "webhook_hint",
+              pullRequired: true,
+              rawPayload: { event: "booking" },
+            },
+          ],
+        )
+      ).rows[0].id as string;
+    let acknowledgements = 0;
+    const runRevision = () =>
+      runChannexBookingJobs(TEST_DATABASE_URL!, {
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic-key",
+        ownsMutation: () => true,
+        applyAirbnbAlterations: true,
+        limit: 1,
+        fetch: async (_url, init) => {
+          if (init?.method === "POST") {
+            expect(
+              (
+                await admin.query(
+                  `SELECT check_out::text FROM booking.guest_bookings WHERE id=$1`,
+                  [bookingId],
+                )
+              ).rows[0].check_out,
+            ).toBe("2026-08-05");
+            acknowledgements++;
+            return Response.json({});
+          }
+          return Response.json({ data: [providerRevision] });
+        },
+      });
+    const jobId = await queueRevision();
+    providerRevision.attributes.amount = "26.00";
+    expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
+    expect(acknowledgements).toBe(0);
+    expect(
+      (
+        await admin.query(
+          `SELECT job_metadata->>'lastErrorCode' AS code FROM platform.jobs WHERE id=$1`,
+          [jobId],
+        )
+      ).rows[0].code,
+    ).toBe("alteration_revision_proposal_mismatch");
+    providerRevision.attributes.amount = "25.00";
+    await admin.query(`UPDATE platform.jobs SET run_after=now() WHERE id=$1`, [jobId]);
+    const trigger = `alteration_fail_${bookingId.replaceAll("-", "")}`;
+    await admin.query(
+      `CREATE FUNCTION pms.${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.property_id='${propertyId}'::uuid THEN RAISE EXCEPTION 'synthetic mapping failure'; END IF; RETURN NEW; END$$; CREATE TRIGGER ${trigger} BEFORE INSERT ON pms.channel_booking_mappings FOR EACH ROW EXECUTE FUNCTION pms.${trigger}()`,
+    );
+    try {
+      expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
+      expect(acknowledgements).toBe(0);
+      expect(
+        (
+          await admin.query(`SELECT check_out::text FROM booking.guest_bookings WHERE id=$1`, [
+            bookingId,
+          ])
+        ).rows[0].check_out,
+      ).toBe("2026-08-06");
+      expect(
+        (
+          await admin.query(`SELECT status FROM booking.booking_change_requests WHERE id=$1`, [
+            applied.requestId,
+          ])
+        ).rows[0].status,
+      ).toBe("pending");
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS count FROM platform.outbox_events WHERE correlation_id=$1`,
+            [applied.requestId],
+          )
+        ).rows[0].count,
+      ).toBe(0);
+    } finally {
+      await admin.query(
+        `DROP TRIGGER ${trigger} ON pms.channel_booking_mappings; DROP FUNCTION pms.${trigger}()`,
+      );
+    }
+    await admin.query(`UPDATE platform.jobs SET run_after=now() WHERE id=$1`, [jobId]);
+    expect(await runRevision()).toMatchObject({ succeeded: 1 });
+    expect(
+      (
+        await admin.query(
+          `SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date='2026-08-05'`,
+          [propertyId],
+        )
+      ).rows[0].assigned_count,
+    ).toBe(0);
+    const appliedInventory = (
+      await admin.query(
+        `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+        [propertyId],
+      )
+    ).rows;
+    await queueRevision();
+    expect(await runRevision()).toMatchObject({ succeeded: 1 });
+    expect(acknowledgements).toBe(2);
+    expect(
+      (
+        await admin.query(
+          `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date`,
+          [propertyId],
+        )
+      ).rows,
+    ).toEqual(appliedInventory);
+    expect(
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count FROM platform.outbox_events WHERE correlation_id=$1`,
+          [applied.requestId],
+        )
+      ).rows[0].count,
+    ).toBe(3);
     await book(randomUUID(), "2026-08-06", "2026-08-07");
     await expect(check()).rejects.toThrow("alteration_rooms_unavailable");
     input.changes.requestedCheckOut = "2026-08-06";
