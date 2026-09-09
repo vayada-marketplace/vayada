@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -349,6 +350,11 @@ export function createPgPmsRoomFactsCommandRepository(
       return runCommand(command, UPDATE_SPEC, async (client, acceptedAt) => {
         const current = await lockActiveRoomType(client, command.propertyId, command.roomTypeId);
         if (!current) return finalized(updateFailure({ code: "room_type_not_found" }));
+        const eligibility = (
+          await readPmsRoomOperatingEligibility(client, command.propertyId)
+        ).find((room) => room.roomTypeId === command.roomTypeId);
+        if (eligibility?.state !== "operating")
+          return finalized(updateFailure({ code: "room_type_not_found" }));
         const currentRevision = positiveDatabaseInteger(current.roomFactsRevision);
         if (currentRevision !== command.expectedRevision) {
           return finalized(
