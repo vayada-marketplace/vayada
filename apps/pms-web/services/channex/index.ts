@@ -114,7 +114,7 @@ async function endpoint(action: string, suffix = "channex") {
   return `/api/pms/properties/${encodeURIComponent(propertyId)}/${suffix}`;
 }
 
-async function command(operationType: Exclude<ChannexOperationType, "update_markups">) {
+async function command(operationType: Exclude<ChannexOperationType, "update_markups" | "update_inventory_rules">) {
   return pmsOperationsClient.post<ChannexOperation>(
     await endpoint(`starting Channex ${operationType}`, "channex/commands"),
     identity(operationType),
