@@ -55,6 +55,20 @@ describe("PMS Channex management command routes", () => {
     expect(
       (
         await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/commands`,
+          headers: { authorization: "Bearer valid" },
+          payload: {
+            commandId: "refresh",
+            idempotencyKey: "refresh",
+            operationType: "refresh_channels",
+          },
+        })
+      ).statusCode,
+    ).toBe(statusCode);
+    expect(
+      (
+        await app.inject({
           method: "PUT",
           url: `/properties/${propertyId}/channex/stay-restrictions`,
           headers: { authorization: "Bearer valid" },
@@ -90,6 +104,33 @@ describe("PMS Channex management command routes", () => {
     expect((await datePrice(app)).statusCode).toBe(statusCode);
     expect(harness.putDatePrice).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("accepts a channel refresh only with the channel-settings capability", async () => {
+    const harness = await testApp({}, { ...mutating, iframe: "mutating" });
+    app = harness.app;
+    const refresh = () =>
+      app!.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/commands`,
+        headers: { authorization: "Bearer valid" },
+        payload: {
+          commandId: "refresh",
+          idempotencyKey: "refresh",
+          operationType: "refresh_channels",
+        },
+      });
+    expect((await refresh()).statusCode).toBe(202);
+    expect(harness.enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      propertyId,
+      expect.objectContaining({ operationType: "refresh_channels" }),
+    );
+    await app.close();
+    const guarded = await testApp();
+    app = guarded.app;
+    expect((await refresh()).statusCode).toBe(409);
+    expect(guarded.enqueue).not.toHaveBeenCalled();
   });
 
   it("saves/removes validated date prices and honors the ARI cutover guard", async () => {

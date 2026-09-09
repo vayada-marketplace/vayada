@@ -8,6 +8,7 @@ export const CHANNEX_MANAGEMENT_OPERATION_TYPES = [
   "enable",
   "disable",
   "provision",
+  "refresh_channels",
   "sync_ari",
   "sync_bookings",
   "update_markups",
@@ -65,6 +66,8 @@ export type ChannexRatePlanMapping = {
 };
 
 export type ChannexConnectedChannel = {
+  nativeRateModifiers?: Array<{ operation: string; value: string }> | null;
+  currency?: string | null;
   externalChannelId?: string;
   providerCode?: string;
   key: string;

@@ -9,6 +9,7 @@ export type ChannexOperationType =
   | "enable"
   | "disable"
   | "provision"
+  | "refresh_channels"
   | "sync_ari"
   | "sync_bookings"
   | "update_markups"
@@ -67,6 +68,9 @@ export interface ChannexRatePlanMapping {
 }
 
 export interface ConnectedChannel {
+  externalChannelId?: string;
+  nativeRateModifiers?: Array<{ operation: string; value: string }> | null;
+  currency?: string | null;
   key: string;
   application: string;
   title: string | null;
@@ -180,6 +184,7 @@ export const channexService = {
   enable: () => command("enable"),
   disable: () => command("disable"),
   provision: () => command("provision"),
+  refreshChannels: () => command("refresh_channels"),
   syncAri: () => command("sync_ari"),
   syncBookings: () => command("sync_bookings"),
   installMessagingApp: () => command("install_messaging"),
