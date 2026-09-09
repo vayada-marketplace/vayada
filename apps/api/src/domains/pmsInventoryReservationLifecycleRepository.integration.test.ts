@@ -287,6 +287,49 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
     },
   );
 
+  it("rejects a captured reservation command after its room closes", async () => {
+    const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
+    await materialize(fixture, "2026-08-04", "2026-08-04");
+    const input = await reserveCommand(admin, fixture, "closure-stale", 1, "2026-08-04");
+    await admin.query("BEGIN");
+    try {
+      await lockPmsInventoryMutationScope(admin, fixture.propertyId);
+      await admin.query(
+        `INSERT INTO pms.room_type_closures
+        (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+         expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+        VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+        [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+      );
+      // Deliberately retain captured open inventory to prove eligibility, rather
+      // than current availability alone, rejects the stale command.
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    expect(await fixture.reservation.reserveInventory(input)).toMatchObject({
+      ok: false,
+      error: { code: "configuration_not_current" },
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT assigned_count,available_count,status FROM pms.inventory_days WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ assigned_count: 0, available_count: 2, status: "open" }]);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.inventory_reservation_receipts WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
+
   it("reserves every day atomically and exact reserve/release retries return current state", async () => {
     const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
     await materialize(fixture, "2026-08-04", "2026-08-05");

@@ -157,6 +157,54 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
     }
   });
 
+  it("fences inventory from the inclusive cutoff without changing historical or unrelated rooms", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await close(db);
+    const day = (room: string, date: string, status: string, available: number) =>
+      db.query(
+        `INSERT INTO pms.inventory_days (property_id,room_type_id,stay_date,total_count,assigned_count,blocked_count,available_count,status)
+       VALUES ($1,$2,$3,1,0,0,$4,$5)`,
+        [propertyId, room, date, available, status],
+      );
+    await day(roomTypeId, "2026-09-08", "open", 1);
+    await day(otherRoom, "2026-09-09", "open", 1);
+    await expect(day(roomTypeId, "2026-09-09", "open", 1)).rejects.toMatchObject({ code: "23514" });
+    await day(roomTypeId, "2026-09-09", "closed", 0);
+    for (const change of [
+      "status='open'",
+      "available_count=1",
+      "assigned_count=1",
+      "blocked_count=1",
+    ]) {
+      await expect(
+        db.query(
+          `UPDATE pms.inventory_days SET ${change}
+        WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-09-09'`,
+          [propertyId, roomTypeId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+    expect(
+      (
+        await db.query(
+          `SELECT room_type_id::text AS room,stay_date::text AS day,status,available_count
+      FROM pms.inventory_days WHERE property_id=$1 ORDER BY stay_date,room_type_id`,
+          [propertyId],
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        { room: roomTypeId, day: "2026-09-08", status: "open", available_count: 1 },
+        { room: otherRoom, day: "2026-09-09", status: "open", available_count: 1 },
+        { room: roomTypeId, day: "2026-09-09", status: "closed", available_count: 0 },
+      ]),
+    );
+  });
+
   it("serializes competing closure receipts to one winner", async () => {
     const competitor = new pg.Client({ connectionString: url });
     await competitor.connect();
