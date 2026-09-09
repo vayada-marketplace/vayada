@@ -833,6 +833,12 @@ function expectedInboundForeignKeys(): InboundForeignKeyRow[] {
       "fk_pms_channel_rate_mappings_room_type_property",
       "pms.room_types",
     ),
+    inbound(
+      "pms",
+      "room_type_closures",
+      "room_type_closures_room_type_id_property_id_fkey",
+      "pms.room_types",
+    ),
     inbound("pms", "room_type_media", "fk_pms_room_type_media_room_property", "pms.room_types"),
     inbound("pms", "room_blocks", "fk_pms_room_blocks_room_property", "pms.rooms"),
     inbound(
