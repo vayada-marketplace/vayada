@@ -418,3 +418,5 @@ export * from "./physicalRoomManagement.js";
 
 export * from "./replacementPricing.js";
 export * from "./replacementPricingConfiguration.js";
+
+export * from "./replacementPricingCalculator.js";
