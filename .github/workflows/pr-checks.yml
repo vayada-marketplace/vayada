@@ -181,6 +181,8 @@ jobs:
           src/marketplaceCollaborations.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
+          src/domains/pmsRoomOperatingEligibility.integration.test.ts
+          src/domains/pmsCalendarClosure.integration.test.ts
           src/domains/pmsPhysicalRoomUnitReconcileRepository.integration.test.ts
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
