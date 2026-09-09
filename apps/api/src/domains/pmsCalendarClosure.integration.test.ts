@@ -1,3 +1,8 @@
+import {
+  createProductReadinessResult,
+  createReadyProductReadinessEvidence,
+} from "@vayada/domain-hotels";
+import { createPgDistributionBookingPublicationProjection } from "./distributionBookingPublicationProjection.js";
 import { createPgPmsRoomClosureRepository } from "./pmsRoomClosureCommandRepository.js";
 import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./pmsPhysicalRoomUnitReconcileRepository.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
@@ -448,7 +453,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       expectedRoomFactsRevision: 3,
       expectedRoomUnitsRevision: 5,
       expectedCalendarRevision: 1,
-      expectedActivePublicationRevisionId: null,
+      expectedActivePublicationRevisionId: null as string | null,
       idempotencyKey: randomUUID(),
       requestId: "atomic-test",
     };
@@ -553,6 +558,85 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
             [propertyId],
           )
         ).rows[0].value;
+      await admin.query(
+        "UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1",
+        [propertyId],
+      );
+      // Queue real publication activation ahead of closure on the same fence.
+      const publication = createPgDistributionBookingPublicationProjection({ connectionString });
+      const source = {
+        ownerDomain: "pms" as const,
+        entityType: "room_type",
+        entityId: roomTypeA,
+        revision: "3",
+      };
+      const ready = await createProductReadinessResult({
+        contractVersion: "onboarding-product-readiness.v1",
+        propertyId,
+        product: "booking",
+        status: "ready",
+        sourceManifest: {
+          contractVersion: "onboarding-source-manifest.v1",
+          propertyId,
+          sources: [source],
+        },
+        groups: [
+          {
+            groupId: "booking.rooms",
+            status: "ready",
+            steps: [
+              {
+                owningStepId: "rooms",
+                status: "ready",
+                entities: [{ source, status: "ready", blockers: [] }],
+              },
+            ],
+          },
+        ],
+        evaluatedAt: acceptedAt,
+      });
+      const revision = await publication.appendRevision({
+        propertyId,
+        readiness: await createReadyProductReadinessEvidence(ready, {
+          propertyId,
+          product: "booking",
+        }),
+        publicContent: { rooms: [{ roomTypeId: roomTypeA }, { roomTypeId: roomTypeB }] },
+        builtByUserId: actorUserId,
+        builtAt: acceptedAt,
+      });
+      await admin.query("BEGIN");
+      await admin.query(
+        "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
+        [propertyId],
+      );
+      const activating = publication.activate({
+        propertyId,
+        revisionId: revision.revisionId,
+        expectedActiveRevisionId: null,
+        activatedByUserId: actorUserId,
+      });
+      void activating.catch(() => {});
+      let staleClosure: ReturnType<typeof closure.closeRoom> | undefined;
+      const beforePublicationRace = await snapshot();
+      try {
+        const activationPid = await waitingOn(null);
+        staleClosure = closure.closeRoom(input);
+        void staleClosure.catch(() => {});
+        await waitingOn(null, null, activationPid);
+        await admin.query("COMMIT");
+        expect(await activating).toMatchObject({ revisionId: revision.revisionId });
+        expect(await staleClosure).toMatchObject({
+          ok: false,
+          error: { code: "room_closure_revision_conflict" },
+        });
+        expect(await snapshot()).toEqual(beforePublicationRace);
+        input.expectedActivePublicationRevisionId = revision.revisionId;
+      } finally {
+        await admin.query("ROLLBACK");
+        await Promise.allSettled([activating, staleClosure]);
+        await publication.close?.();
+      }
       const before = await snapshot();
       await admin.query(`CREATE FUNCTION pg_temp.reject_closure_test() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN IF NEW.property_id='${propertyId}'::uuid AND NEW.calendar_revision=2 THEN
@@ -574,6 +658,19 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
         connectionString,
         now: () => new Date(acceptedAt),
       });
+      const capturedCalendar = (await readModel.getCurrentOperatingCalendarConfiguration(
+        propertyId,
+      ))!.configuration!;
+      const materializer = createPgPmsInventoryMaterializationRepository({
+        connectionString,
+        authorization: { authorizeInventoryMaterialization: async () => true },
+        operatingCalendar: readModel,
+        propertyProfileEvidence: profileEvidence,
+        roomCapacity: roomEvidence,
+        now: () => new Date(acceptedAt),
+      });
+      let materializing: ReturnType<typeof materializer.materializeInventory> | undefined;
+      let materialized: Awaited<NonNullable<typeof materializing>> | undefined;
       await admin.query("BEGIN");
       await admin.query(
         "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
@@ -594,6 +691,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           .rows[0].pid;
         try {
           const closurePid = await waitingOn(null);
+          materializing = materializer.materializeInventory({
+            organizationId,
+            propertyId,
+            configurationSource: capturedCalendar.source,
+            expectedMaterializedRevision: 1,
+            horizon: { from: "2026-08-04", through: "2026-08-06" },
+            idempotencyKey: randomUUID(),
+            audit: command("waiting-materializer").audit,
+          });
+          void materializing.catch(() => {});
+          const materializerPid = await waitingOn(closurePid);
+
           reconciling = reconciliation.reconcilePhysicalRoomUnits({
             organizationId,
             propertyId,
@@ -604,20 +713,48 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
             audit: command("concurrent").audit,
           });
           void reconciling.catch(() => {});
-          await waitingOn(closurePid);
+          await waitingOn(closurePid, null, materializerPid);
           lateBooking = reserve(lateBookingClient);
           void lateBooking.catch(() => {});
           await waitingOn(closurePid, lateBookingPid);
         } finally {
           await admin.query("COMMIT");
         }
-        [result, reconciled, lateReceipt] = await Promise.all([closing, reconciling, lateBooking]);
+        [result, reconciled, lateReceipt, materialized] = await Promise.all([
+          closing,
+          reconciling,
+          lateBooking,
+          materializing,
+        ]);
       } finally {
         await admin.query("ROLLBACK");
-        await Promise.allSettled([closing, reconciling, lateBooking]);
+        await Promise.allSettled([closing, reconciling, lateBooking, materializing]);
         await lateBookingClient.query("ROLLBACK").catch(() => {});
-        await Promise.all([lateBookingClient.end(), reconciliation.close()]);
+        await Promise.all([lateBookingClient.end(), reconciliation.close(), materializer.close()]);
       }
+      expect(materialized).toMatchObject({
+        ok: false,
+        error: { code: "configuration_not_current" },
+      });
+      const afterRaces = await snapshot();
+      expect(afterRaces.coverage).toMatchObject({
+        calendar_revision: 2,
+        materialized_revision: 2,
+        room_type_count: 1,
+        expected_day_count: 3,
+        materialized_day_count: 3,
+        coverage_from: before.coverage.coverage_from,
+        coverage_through: before.coverage.coverage_through,
+      });
+      expect(afterRaces.days).toEqual(
+        before.days.map((day: Record<string, unknown>) => ({
+          ...day,
+          inventory_revision: Number(day.inventory_revision) + 1,
+          ...(day.room_type_id === roomTypeA
+            ? { status: "closed", available_count: 0, closure_source_revision: 1 }
+            : { calendar_revision: 2, generated_source_revision: 2 }),
+        })),
+      );
       expect(lateReceipt).toBeNull();
       expect(reconciled).toMatchObject({
         ok: false,
@@ -644,7 +781,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
         "UPDATE platform.idempotency_keys SET idempotency_metadata='null'::jsonb WHERE property_id=$1 AND operation='room_type.close' AND status='completed'",
         [propertyId],
       );
-      await expect(closure.closeRoom(input)).rejects.toThrow("Invalid persisted room closure result");
+      await expect(closure.closeRoom(input)).rejects.toThrow(
+        "Invalid persisted room closure result",
+      );
 
       expect(await closure.closeRoom({ ...input, roomTypeId: roomTypeB })).toMatchObject({
         ok: false,
@@ -688,14 +827,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
     async function waitingOn(
       holderPid: number | null,
       waiterPid: number | null = null,
+      excludedPid: number | null = null,
     ): Promise<number> {
       for (let attempt = 0; attempt < 200; attempt++) {
         const waiting = await admin.query(
           `SELECT waiter.pid FROM pg_locks waiter JOIN pg_locks holder
           USING(locktype,database,classid,objid,objsubid)
           WHERE holder.pid=COALESCE($1::int,pg_backend_pid()) AND holder.granted AND NOT waiter.granted
-            AND holder.locktype='advisory' AND ($2::int IS NULL OR waiter.pid=$2::int)`,
-          [holderPid, waiterPid],
+            AND holder.locktype='advisory' AND ($2::int IS NULL OR waiter.pid=$2::int) AND ($3::int IS NULL OR waiter.pid<>$3::int)`,
+          [holderPid, waiterPid, excludedPid],
         );
         if (waiting.rows[0]) return waiting.rows[0].pid;
         await new Promise((resolve) => setTimeout(resolve, 10));
