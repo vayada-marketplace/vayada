@@ -12,11 +12,13 @@ describe.skipIf(!url)("prepared import durable binding", () => {
   const db = new pg.Client({ connectionString: url });
   const repository = createPgPreparedImportRepository(url ?? "postgresql://disabled");
   const scope = { organizationId: org, actorUserId: actor };
+  let connected = false;
   beforeAll(async () => {
     const target = new URL(url!);
     if (!["localhost", "127.0.0.1"].includes(target.hostname) || !target.pathname.endsWith("_test"))
       throw new Error("Requires isolated local test database");
     await db.connect();
+    connected = true;
     await db.query(
       "INSERT INTO identity.users(id,email,status) VALUES($1,'import@example.test','active')",
       [actor],
@@ -44,17 +46,20 @@ describe.skipIf(!url)("prepared import durable binding", () => {
     );
   });
   afterAll(async () => {
-    await db.query("DELETE FROM hotel_catalog.prepared_import_applications WHERE invite_id=$1", [
-      invite,
-    ]);
-    await db.query("DELETE FROM marketplace.invite_codes WHERE id=$1", [invite]);
-    await db.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
-      [property, other],
-    ]);
-    await db.query("DELETE FROM identity.organizations WHERE id=$1", [org]);
-    await db.query("DELETE FROM identity.users WHERE id=$1", [actor]);
-    await repository.close();
-    await db.end();
+    try {
+      if (!connected) return;
+      await db.query("DELETE FROM hotel_catalog.prepared_import_applications WHERE invite_id=$1", [
+        invite,
+      ]);
+      await db.query("DELETE FROM marketplace.invite_codes WHERE id=$1", [invite]);
+      await db.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [
+        [property, other],
+      ]);
+      await db.query("DELETE FROM identity.organizations WHERE id=$1", [org]);
+      await db.query("DELETE FROM identity.users WHERE id=$1", [actor]);
+    } finally {
+      await Promise.allSettled([repository.close(), db.end()]);
+    }
   });
   it("exposes only the accepting actor and invite-derived organization", async () => {
     expect((await repository.find(scope))?.sourceId).toBe(invite);

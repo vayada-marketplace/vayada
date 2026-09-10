@@ -12,28 +12,41 @@ vi.mock("pg", () => ({
 }));
 import { createPgPreparedImportRepository } from "./preparedHotelImportRepository.js";
 describe("prepared import lock cleanup", () => {
-  it("destroys a connection when unlocking fails", async () => {
-    mocks.query.mockImplementation(async (sql: string) => {
-      if (sql.includes("pg_advisory_unlock")) throw new Error("unlock cancelled");
-      if (sql.startsWith("SELECT invite"))
-        return {
-          rows: [
-            {
-              sourceId: "source",
-              data: { contractVersion: "prepared-hotel-import.v1", property: {}, rooms: [] },
-              results: {},
-            },
-          ],
-        };
-      return { rows: [] };
-    });
-    const repository = createPgPreparedImportRepository("postgresql://unused");
-    await expect(
-      repository.apply(
-        { organizationId: "org", actorUserId: "actor", sourceId: "source", propertyId: "property" },
-        async () => [],
-      ),
-    ).rejects.toThrow("unlock cancelled");
-    expect(mocks.release).toHaveBeenCalledExactlyOnceWith(true);
-  });
+  it.each([false, true])(
+    "destroys a connection and preserves an earlier failure: %s",
+    async (executionFails) => {
+      mocks.query.mockReset();
+      mocks.release.mockReset();
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes("pg_advisory_unlock")) throw new Error("unlock cancelled");
+        if (sql.startsWith("SELECT invite"))
+          return {
+            rows: [
+              {
+                sourceId: "source",
+                data: { contractVersion: "prepared-hotel-import.v1", property: {}, rooms: [] },
+                results: {},
+              },
+            ],
+          };
+        return { rows: [] };
+      });
+      const repository = createPgPreparedImportRepository("postgresql://unused");
+      await expect(
+        repository.apply(
+          {
+            organizationId: "org",
+            actorUserId: "actor",
+            sourceId: "source",
+            propertyId: "property",
+          },
+          async () => {
+            if (executionFails) throw new Error("execution failed");
+            return [];
+          },
+        ),
+      ).rejects.toThrow(executionFails ? "execution failed" : "unlock cancelled");
+      expect(mocks.release).toHaveBeenCalledExactlyOnceWith(true);
+    },
+  );
 });
