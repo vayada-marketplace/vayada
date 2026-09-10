@@ -256,6 +256,44 @@ filters cannot silently drop conflicting evidence. Provider revision freshness,
 binding ownership, Finance payment/folio handling and gross-price interpretation
 remain the coordinator's responsibility; this reader does not activate the workflow.
 
+### Provider economics confirmation required before worker wiring
+
+Rechecked the [official Bookings Collection](https://docs.channex.io/api-v.1-documentation/bookings-collection)
+on 2026-09-10. The generic field definitions describe `amount` as total booking
+amount, `rooms[].days` as a daily price breakdown, and `ota_commission` as the OTA
+commission amount. They do not explicitly establish the gross-revenue treatment
+of Airbnb daily prices, fees or tax allocations required by our Finance contract.
+
+The published Airbnb **New Booking** example has three nightly prices of 83.20,
+room/booking amounts of 249.60, a separate commission amount of 10.00 and empty
+services/taxes arrays. Its notes separately describe a listing base price of
+300.00, cancellation payout of 249.60 and cancellation host fee of 50.40. These
+values are inconsistent with a simple assumption that daily prices necessarily
+equal listing gross. This is ambiguous example evidence, not proof that the API
+always returns net payouts. Do not parse the free-text notes into financial facts
+or infer that empty services/taxes arrays prove gross-price semantics.
+
+Before removing the Finance guard or connecting the price reader directly to the
+correction planner, obtain a provider-confirmed mapping and a sanctioned modified
+Airbnb revision pair that establish:
+
+- Whether daily prices are before or after Airbnb host commission, and whether
+  this varies by fee model or revision lifecycle.
+- Which structured fields distinguish accommodation, cleaning/service fees,
+  inclusive/exclusive taxes and retained cancellation amounts; how nightly gross
+  is recoverable without inventing an allocation.
+- The scope of `ota_commission` (including non-room charges), whether its revision
+  value replaces the previous total, and how it relates to the configured Finance
+  commission rule snapshots without recording the expense twice.
+- Expected reconciliation of daily prices, room totals, booking totals and
+  commission for a price/date alteration, including reductions and explicit zero.
+
+Capture the provider response and sanitized before/after payload evidence in this
+contract before implementing that mapping. The existing reader, ledger loader and
+planner remain reusable components; their synthetic tests do not establish this
+provider mapping. Worker Finance integration remains blocked on this confirmation,
+alongside the other documented activation gates.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical
