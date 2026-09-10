@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { publicRoomCombinationOffer } from "../routes/bookingPublicCombinationProjection.js";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import { createTargetPublicHotelQuoteRepository, serializePublicHotelQuoteProjection } from "../routes/aiHotelQuotes.js";
@@ -702,7 +703,7 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
 
   it("requires explicit checkout activation and quotes the complete selection through the adapter", async () => {
     const client = await pool.connect();
-    const adapter = (enabled = false) => createTargetBookingWebCheckoutAdapter({ connectionString: url!,
+    const adapter = (enabled = false) => createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges, connectionString: url!,
       mixedRoomSelectionsEnabled: enabled, inventoryReservationPort: port, now: () => input.occurredAt,
       pool: { query: client.query.bind(client) } as unknown as pg.Pool });
     const disabled = adapter();
@@ -1311,6 +1312,7 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       };
     });
     const config = {
+      externalChanges: externalBookingChanges,
       connectionString: url!,
       inventoryReservationPort: port,
       now: () => now,

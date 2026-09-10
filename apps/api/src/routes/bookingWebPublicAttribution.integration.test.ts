@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -224,6 +225,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
 
     function createAdapter(pool: pg.Pool) {
       return createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
         connectionString: TEST_DATABASE_URL!,
         pool,
         inventoryReservationPort,

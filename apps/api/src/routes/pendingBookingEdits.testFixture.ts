@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { beforeAll, afterAll, expect } from "vitest";
@@ -52,6 +53,7 @@ export function pendingEditFixture(capacity = 2) {
   const pool = new pg.Pool({ connectionString: url, max: 4 });
   const now = new Date("2027-01-01T10:00:00Z");
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: url ?? "",
     pool,
     stripePaymentProvider: stripe,

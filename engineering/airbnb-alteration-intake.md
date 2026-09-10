@@ -103,6 +103,14 @@ logic. The port is absent in server runtime until reconciliation/cutover is read
 Property plus booking plus request identity are resolved from storage; browser
 provider identifiers are never accepted. Existing `enforceRoutePolicy` applies.
 
+Booking consumes a required, read-only `ExternalChangePresentationPort` supplied
+at server composition. The connectivity adapter owns provider-marker
+classification and the staff-safe projection; Booking treats provider metadata as
+opaque. Classification remains available with decision writes disabled and treats
+malformed provider markers as externally managed, preventing direct accept/decline
+from bypassing the provider workflow. Registering this read-only adapter does not
+enable decisions or workers.
+
 Responses add a sanitized `providerRequest` projection. Provider acknowledgement
 is `awaiting_confirmation`, not an applied booking change. Unknown sends offer
 only same-intent readback. Queued intents permit only the original decision.

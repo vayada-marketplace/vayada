@@ -1,3 +1,5 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
+import { externallyManagedChangeFixture } from "../integrations/externalBookingChanges.testFixture.js";
 import type { QueryResultRow } from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -321,6 +323,7 @@ describe("target booking date-change lifecycle", () => {
     };
     const inventory = inventoryPort();
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,
@@ -364,7 +367,7 @@ describe("target booking date-change lifecycle", () => {
     // prettier-ignore
     pool.booking.bookingMetadata.inventoryReservation = { contractVersion: "pms-inventory-reservation-lifecycle.v1", owner: "pms", receiptId: inventoryReceiptId } as never;
     // prettier-ignore
-    const adapter = createTargetBookingWebCheckoutAdapter({ connectionString: "postgres://unused", pool: pool as never, inventoryReservationPort: inventory.port });
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges, connectionString: "postgres://unused", pool: pool as never, inventoryReservationPort: inventory.port });
 
     // prettier-ignore
     const preview = await adapter.previewChangeRequest("hotel", bookingId, { guestEmail: "guest@example.test", checkIn: "2026-09-15", checkOut: "2026-09-17" });
@@ -379,6 +382,7 @@ describe("target booking date-change lifecycle", () => {
     const pool = new LifecyclePool();
     const inventory = inventoryPort();
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,
@@ -442,6 +446,7 @@ describe("target booking date-change lifecycle", () => {
     const pool = new LifecyclePool();
     const inventory = inventoryPort();
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,
@@ -486,6 +491,7 @@ describe("target booking date-change lifecycle", () => {
     const inventory = inventoryPort();
     pool.offerStayDates = ["2026-08-11", "2026-08-12"];
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,
@@ -585,10 +591,11 @@ describe("target booking date-change lifecycle", () => {
     const inventory = inventoryPort();
     pool.changeRequest = {
       id: changeId, guestBookingId: bookingId, status: "pending",
-      requestedChanges: { channex: { eventId: "provider-event" } },
+      requestedChanges: structuredClone(externallyManagedChangeFixture),
       decisionNote: null, decidedAt: null, createdAt: "2026-07-22T10:00:00.000Z",
     };
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused", pool: pool as never, inventoryReservationPort: inventory.port,
     });
     const context = {
@@ -624,6 +631,7 @@ describe("target booking date-change lifecycle", () => {
       createdAt: "2026-07-22T10:00:00.000Z",
     };
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,
@@ -714,6 +722,7 @@ describe("target booking date-change lifecycle", () => {
       createdAt: "2026-07-22T10:00:00.000Z",
     };
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       pool: pool as never,
       inventoryReservationPort: inventory.port,

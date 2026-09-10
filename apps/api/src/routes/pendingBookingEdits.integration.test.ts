@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { describe, expect, it } from "vitest";
 import { createPgBookingLifecycleStore } from "../jobs/bookingLifecycle.js";
 import {
@@ -325,6 +326,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         [abandoned.attemptId],
       );
       await releaseAbandonedBookingEdits(pool, {
+        externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: stripe,
@@ -346,6 +348,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       });
       await edit("save", { revision: second.revision, attemptId: awayPrepared.attemptId });
       await releaseAbandonedBookingEdits(pool, {
+        externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: stripe,
@@ -553,6 +556,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       provider_request || '{"idempotencyKey":"poison"}'::jsonb,now()-interval '2 hours',now()-interval '1 hour',now()-interval '2 hours'
       FROM booking.pending_booking_edit_attempts WHERE payment_method='card' LIMIT 1`);
       await releaseAbandonedBookingEdits(pool, {
+        externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: {
