@@ -625,8 +625,24 @@ function RoomTypeCard({
   );
 }
 
+import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
+import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
+import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+
 export default function RoomsPage() {
   const { t } = useTranslation();
+  const [importPropertyId, setImportPropertyId] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void resolveSelectedPmsPropertyId()
+      .then((id) => {
+        if (active) setImportPropertyId(id);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [individualRooms, setIndividualRooms] = useState<Room[]>([]);
   const [linkedGroups, setLinkedGroups] = useState<LinkedInventoryGroup[] | null>(null);
@@ -701,6 +717,15 @@ export default function RoomsPage() {
         </div>
       </div>
 
+      {importPropertyId && (
+        <PreparedHotelImportPanel
+          key={importPropertyId}
+          client={sharedSetupClient}
+          propertyId={importPropertyId}
+          roomsOnly
+          onSaved={refreshRooms}
+        />
+      )}
       {/* Search */}
       <div className="mb-4 md:mb-5">
         <div className="relative">
