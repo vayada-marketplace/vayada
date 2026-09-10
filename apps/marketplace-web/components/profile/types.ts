@@ -292,6 +292,6 @@ export function createEmptyOffering(type: CollaborationKind = "Free Stay"): List
     paidMaxAmount: undefined,
     currency: type === "Paid" ? "USD" : undefined,
     discountPercentage: undefined,
-    commissionPercentage: type === "Affiliate" ? 5 : undefined,
+    commissionPercentage: undefined,
   };
 }
