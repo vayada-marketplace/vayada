@@ -60,3 +60,18 @@ version IDs. No row grants verification, activation or publication.
 Migration numbering: main uses 0174–0178. Destination storage uses 0179;
 the unmerged Finance policy migration was renumbered to 0180 throughout this
 stack. No applied migration or existing database ledger is rewritten.
+
+## Hotel setup HTTP API
+
+`/api/marketplace/properties/:propertyId/affiliate-destinations` supports POST
+with exactly `{displayName, bookingUrl}` and one nonempty Idempotency-Key (up to
+200 characters, no commas). Created versions return 201; replay returns 200;
+invalid input 422, unavailable scope 404 and changed-key payload conflicts 409.
+GET lists the newest 20 versions for the authorized property and authoring
+organization. GET `/:destinationVersionId` retrieves that exact version or 404.
+Reads return `trackingStatus: not_validated`, never verification from configuration.
+Fresh hotel profile-management permission, owner/operator link, active hotel identity
+and profile entitlement protect every endpoint; errors and successes are no-store.
+The shared app error handler retains 503 for database connection/capacity failures;
+ordinary server exceptions remain 500. Neither becomes a missing destination.
+No edit/delete, verification, network-fetch, activation or publication route exists.
