@@ -1,4 +1,4 @@
-import { presentChannexAlteration } from "../domains/channexAlterationPresentation.js";
+import type { ExternalChangePresentationPort } from "../domains/booking/externalChangePresentation.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import {
   bookedMealDescription,
@@ -1451,6 +1451,7 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: { decide(input: {
     propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
@@ -1531,6 +1532,9 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
+  const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
+    serializeChangeRequest(row, config.externalChanges, enabled);
+
   async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
     action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
     if (!config.airbnbAlterations) return null;
@@ -1541,11 +1545,10 @@ export function createTargetBookingWebCheckoutAdapter(
        FROM booking.booking_change_requests change JOIN booking.guest_bookings booking
          ON booking.id=change.guest_booking_id
        WHERE booking.property_id=$1::uuid AND (booking.id::text=$2 OR booking.public_reference=$2)
-         AND change.id=$3::uuid AND change.request_type='date_change'
-         AND change.requested_changes ? 'channex'`,[propertyId,bookingId,changeRequestId],
+         AND change.id=$3::uuid AND change.request_type='date_change'`,[propertyId,bookingId,changeRequestId],
     )).rows[0];
     const request = await load();
-    if (!request) return null;
+    if (!request || !config.externalChanges.isManaged(request.requestedChanges)) return null;
     try {
       await config.airbnbAlterations.decide({propertyId,bookingId:request.guestBookingId,
         changeRequestId,actorUserId:context.actorUserId,action,correlationId:context.correlationId ?? context.requestId});
@@ -1666,6 +1669,7 @@ export function createTargetBookingWebCheckoutAdapter(
           propertyId,
           booking.guestBookingId,
           changeRequestId,
+          config.externalChanges,
           true,
         );
         if (!changeRequest) {
@@ -1791,6 +1795,7 @@ export function createTargetBookingWebCheckoutAdapter(
           propertyId,
           booking.guestBookingId,
           changeRequestId,
+          config.externalChanges,
           true,
         );
         if (!changeRequest) {
@@ -5026,10 +5031,10 @@ async function insertTargetChangeRequest(
   return changeRequest;
 }
 
-function serializeTargetChangeRequest(row: TargetChangeRequestRow, providerEnabled = false): Record<string, unknown> {
+function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
-    providerRequest: presentChannexAlteration(snapshot, providerEnabled && row.status === "pending", row.status),
+    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status),
     ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,
@@ -5173,6 +5178,7 @@ async function loadTargetChangeRequestForHotelById(
   propertyId: string,
   bookingId: string,
   changeRequestId: string,
+  externalChanges: ExternalChangePresentationPort,
   forUpdate = false,
 ): Promise<TargetChangeRequestRow | null> {
   const result = await pool.query<TargetChangeRequestRow>(
@@ -5196,7 +5202,7 @@ async function loadTargetChangeRequestForHotelById(
     [propertyId, bookingId, changeRequestId],
   );
   const row = result.rows[0];
-  if (row && Object.prototype.hasOwnProperty.call(row.requestedChanges, "channex")) {
+  if (row && externalChanges.isManaged(row.requestedChanges)) {
     throw createHttpError(409, "Airbnb change requests require a provider decision.");
   }
   return row ?? null;

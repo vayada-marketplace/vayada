@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -856,6 +857,7 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     const config = ports(),
       command = input(requestId);
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: url!,
       pool,
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),

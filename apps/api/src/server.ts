@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -394,6 +395,7 @@ const bankTransferBookings = bankTransferCodec
   : undefined;
 
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  externalChanges: externalBookingChanges,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),

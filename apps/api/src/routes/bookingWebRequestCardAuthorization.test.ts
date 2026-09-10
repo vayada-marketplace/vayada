@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { describe, expect, it } from "vitest";
 
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
@@ -76,6 +77,7 @@ describe("request-mode card checkout", () => {
       async end() {},
     };
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       stripePaymentProvider: {

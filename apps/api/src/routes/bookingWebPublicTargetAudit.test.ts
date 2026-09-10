@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { describe, expect, it } from "vitest";
 
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
@@ -485,6 +486,7 @@ function quoteHarness(options: {
     async end() {},
   };
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: "postgresql://unused",
     inventoryReservationPort: createTargetPmsInventoryReservationPort(),
     pool: pool as never,
@@ -591,6 +593,7 @@ function bookingCollisionHarness(
     async end() {},
   };
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: "postgresql://unused",
     inventoryReservationPort: createTargetPmsInventoryReservationPort(),
     billingConfigReadPortFactory: () => ({
