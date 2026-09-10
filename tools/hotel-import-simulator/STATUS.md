@@ -58,5 +58,10 @@ Provider authorization, account-to-property binding, listing retrieval and a fre
 host journey still need implementation/verification. No fictional Airbnb listing
 or real provider write is needed to review this local MVP.
 
+Follow-up: the [Airbnb source slice](../../engineering/airbnb-onboarding-source.md)
+adds an unmounted read-only adapter for channel scope checks, listing names and
+capacity. Its tests use synthetic provider responses. Connection routes, durable
+source storage, detailed room facts and shared-review wiring remain outstanding.
+
 Do not infer deployment from a merged foundation PR. This record does not verify
 the running remote revision, invite redemption or a complete launch-ready hotel.
