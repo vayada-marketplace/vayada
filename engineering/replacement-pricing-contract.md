@@ -393,3 +393,20 @@ exclusion of charge verification, but does not establish the provenance/freshnes
 of supplied source tokens: the complete source guard must still collect and lock
 them. FX and separately owned conversion, command wiring and routes remain separate
 obligations before publication is available.
+
+## Authoritative PMS room-facts source (VAY-1931)
+
+`lockPmsReplacementPricingRoomSource` reads the property's complete room-type set,
+including inactive rows, under the existing PMS room-facts mutation lock and row
+share locks. Its deterministic token binds property identity, room IDs, active
+state, fact revisions, occupancy limits and room attributes. Room creation/removal
+and fact changes invalidate it. Canonical identity and JSON ordering keep equivalent
+reads stable. It does not use retired price/currency fields or substitute physical
+unit revisions for room facts; inventory/availability evidence remains separate.
+
+The combined owner verifier reads this source after live authorization, checks
+selected room scope and requires exact `sources.room` equality before proceeding.
+Missing or changed evidence returns `room_source_stale`; substituting a newly read
+room token also invalidates any older charge declaration bound to the previous
+sources. The reader requires a caller-authorized transaction; it is not an access
+check. Other source owners and complete publication wiring remain required.
