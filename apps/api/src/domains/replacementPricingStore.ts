@@ -13,10 +13,10 @@ export type StoredPricingRevision = PricingStorageSnapshot & Readonly<{ revision
 export interface PricingStorageGuard {
   /** Recheck current access and lock current source revisions until transaction end.
    * Runs even for historical retries; must not require proposed owner references to remain current. */
-  lock(client: PoolClient, scope: PricingStorageScope): Promise<PricingStorageSources | null>;
+  lock(client: PoolClient, scope: PricingStorageScope, access: "read" | "manage"): Promise<PricingStorageSources | null>;
   /** Validate every proposed room/owner/terms reference against its owner and hold relevant locks.
    * Required for new publications and drafts, after historical receipt lookup. No default allow. */
-  validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot): Promise<boolean>;
+  validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<boolean>;
   /** Additional owner approval: verify separately owned amounts and conversion obligations.
    * Storage independently enforces persisted FX and complete PMS room conversion. No default allow. */
   allowCurrencyChange(client: PoolClient, scope: PricingStorageScope, before: StoredPricingRevision,
@@ -41,13 +41,13 @@ function snapshot(value: unknown, propertyId: string, revision: number): Pricing
 }
 /** Infrastructure primitive only. Routes/preview/publication orchestration belong to VAY-1541. */
 export function createReplacementPricingStore(pool: Pool, guard: PricingStorageGuard) {
-  async function transaction<T>(scope: PricingStorageScope, work: (client: PoolClient, sources: PricingStorageSources) => Promise<T>): Promise<T> {
+  async function transaction<T>(scope: PricingStorageScope, access: "read" | "manage", work: (client: PoolClient, sources: PricingStorageSources) => Promise<T>): Promise<T> {
     if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid)) return fail("invalid");
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await lockPmsInventoryMutationScope(client, scope.propertyId);
-      const sources = await guard.lock(client, scope);
+      const sources = await guard.lock(client, scope, access);
       if (!sources) return fail("denied");
       if (!references(sources)) return fail("invalid");
       const result = await work(client, sources);
@@ -78,7 +78,7 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
   return {
     read(scope: PricingStorageScope) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, "read", async (client, sources) => {
         const result = await current(client, scope.propertyId);
         return result && { ...result, stale: canonical(result.sources) !== canonical(sources) };
       });
@@ -92,7 +92,7 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       const next = snapshot(input.snapshot, scope.propertyId, input.expectedRevision + 1);
       const command = structuredClone({ ...input, snapshot: next, ...(input.draft ? { draft: { ...input.draft, id: input.draft.id.toLowerCase() } } : {}) });
       const hash = createHash("sha256").update(canonical({ ...command, scope })).digest("hex");
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, "manage", async (client, sources) => {
         const prior = (await client.query("SELECT revision,request_hash FROM pms.pricing_v2_revisions WHERE property_id=$1 AND request_id=$2", [scope.propertyId, command.requestId])).rows[0];
         if (prior) { if (prior.request_hash !== hash) return fail("idempotency_conflict"); return { revision: prior.revision as number, replayed: true }; }
         if (command.draft) {
@@ -103,7 +103,7 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         if (canonical(sources) !== canonical(command.sources)) return fail("stale");
         const previous = await current(client, scope.propertyId);
         if ((previous?.revision ?? 0) !== command.expectedRevision) return fail("stale");
-        if (!await guard.validate(client, scope, next)) return fail("denied");
+        if (!await guard.validate(client, scope, next, sources, "publish")) return fail("denied");
         const currencyChange = previous && previous.currency !== next.currency;
         if (currencyChange) {
           const rate = await lockReplacementPricingFxObservation(client, next.ownerReferences.fx ?? "", previous.currency, next.currency);
@@ -130,9 +130,9 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision) || input.expectedDraftRevision >= 2147483647 || !pricingInteger(input.baseRevision) || input.baseRevision >= 2147483647 || !references(input.sources)) return Promise.reject(new PricingStorageError("invalid"));
       const next = snapshot(input.snapshot, scope.propertyId, input.baseRevision + 1);
       const command = structuredClone({ ...input, snapshot: next });
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, "manage", async (client, sources) => {
         if (canonical(sources) !== canonical(command.sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== command.baseRevision) return fail("stale");
-        if (!await guard.validate(client, scope, next)) return fail("denied");
+        if (!await guard.validate(client, scope, next, sources, "draft")) return fail("denied");
         const previous = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, command.draftId])).rows[0];
         if (previous?.draft_revision === command.expectedDraftRevision + 1 && previous.base_revision === command.baseRevision && canonical(previous.snapshot) === canonical(next) && canonical(previous.source_revisions) === canonical(sources)) return previous.draft_revision as number;
         if ((previous?.draft_revision ?? 0) !== command.expectedDraftRevision) return fail("stale");
@@ -149,7 +149,7 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
     readDraft(scope: PricingStorageScope, draftId: string) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!uuid(draftId)) return Promise.reject(new PricingStorageError("invalid"));
-      return transaction(scope, async (client, sources) => {
+      return transaction(scope, "read", async (client, sources) => {
         const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, draftId])).rows[0];
         return draft ? { snapshot: snapshot(draft.snapshot, scope.propertyId, draft.base_revision + 1), revision: draft.draft_revision as number,
           baseRevision: draft.base_revision as number, sources: draft.source_revisions as PricingStorageSources, stale: canonical(draft.source_revisions) !== canonical(sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== draft.base_revision } : null;

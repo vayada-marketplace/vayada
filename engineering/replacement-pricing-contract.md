@@ -451,3 +451,22 @@ requires a new charge declaration; a declaration cannot validate a forged source
 PMS room, Booking terms and Finance source inputs in the combined checks are now
 owner-read. Complete storage guard/command composition, remaining currency/owner
 obligations and publication routes are still required before runtime publication.
+
+## Concrete storage guard and pending draft charges (VAY-1934)
+
+`createReplacementPricingStorageGuard` binds a trusted request context to live
+read/manage authorization and the proposal-independent PMS/Booking/Finance sources.
+Storage passes read intent for reads and manage intent for writes, including
+historical publication retries. Source collection never requires old proposal
+readiness to remain current. New writes still validate current proposed owners.
+
+Draft validation may return `awaiting_charge_confirmation` only when the charge
+reference is absent and all other owner checks pass. A supplied declaration must
+match. This permits saving the draft, confirming charges through their owner,
+saving the declaration reference into that draft, then publishing its exact saved
+version. Publication never accepts pending confirmation.
+
+The concrete guard accepts only Finance/charge owner references and the three
+implemented source keys. Currency changes fail closed until separate owner
+conversion obligations are implemented. This is storage integration, not HTTP
+publication/editor wiring or deployed provider evidence.
