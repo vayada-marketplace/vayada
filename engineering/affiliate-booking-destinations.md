@@ -57,6 +57,6 @@ replay. A completed actor/property/key/payload request replays; changed input
 conflicts. Configuration and retry evidence commit together. New URLs create new
 version IDs. No row grants verification, activation or publication.
 
-Migration numbering: main already uses 0174 for PMS closures. The predecessor
-Finance migration in this stack must be renumbered/restacked before merge; 0179
-was the next unused main number when this slice was created.
+Migration numbering: main uses 0174–0178. Destination storage uses 0179;
+the unmerged Finance policy migration was renumbered to 0180 throughout this
+stack. No applied migration or existing database ledger is rewritten.

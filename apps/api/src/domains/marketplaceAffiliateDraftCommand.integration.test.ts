@@ -15,7 +15,7 @@ const drafts = await readFile(
   "utf8",
 );
 const policies = await readFile(
-  new URL("0174_finance_affiliate_percentage_policies.sql", migrations),
+  new URL("0180_finance_affiliate_percentage_policies.sql", migrations),
   "utf8",
 );
 const terms = {
