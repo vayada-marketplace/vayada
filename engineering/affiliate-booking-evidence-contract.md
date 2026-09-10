@@ -220,3 +220,28 @@ terms acceptance, property authorization and the chosen evidence path are ready.
 
 This draft does not complete VAY-1505 or unblock unresolved commercial behavior.
 No product routes, schema migrations, provider connections or payment effects change.
+
+## Accepted completed-stay authority — 2026-09-10
+
+Flamur accepted an explicit authenticated hotel/PMS check-out as completed-stay
+evidence, retaining that it is a hotel assertion and its audit/command causation.
+The same rule applies to Vayada and external PMSs. Scheduled departure, payment
+or reservation confirmation alone do not qualify; no extra manual approval is
+required solely because the authenticated hotel recorded the check-out.
+
+The first PMS-owned internal read requires a fresh Marketplace hotel-management
+context and entitlement, a persisted active owner/operator property link, one exact
+booking/stay item, current checked-out state and an explicit matching check-out
+plus user audit record. Missing, conflicting or ambiguous evidence remains pending.
+Check-out records must retain the exact stay-item reference. A null reference
+remains pending even for a current single-item booking: assignment deletion can
+clear that reference, so current item counts cannot prove original scope. Recorded action time is not invented actual
+departure time. Pending operational flags are retained as a boolean signal; their
+financial effect is not decided here. Guest PII and private notes are excluded.
+
+This read is not a connection capability test, public route or automatic update
+to destination tracking readiness. It does not establish referral matching or
+commissionable revenue, publish terms or authorize payment. External adapters must
+supply equally scoped authenticated provenance through their owning boundary; no
+provider is selected by this policy decision. Remaining intake, retention, money
+and evidence-conflict policy gates above remain open.
