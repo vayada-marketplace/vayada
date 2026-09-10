@@ -15,15 +15,17 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     await pool.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Pricing test')", [propertyId]);
     await pool.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Room',100,'EUR')", [roomTypeId, propertyId]);
     const scope = { propertyId, actorUserId, organizationId };
-    let policy = "1", conversion = false;
-    const sources = () => ({ room: "1", guest: policy, currency: "1", terms: "1", finance: "1" });
+    let policy = "1", conversion = false, authorized = true, termsRevision = "1";
+    const sources = () => ({ room: "1", guest: policy, currency: "1", terms: termsRevision, finance: "1" });
     const store = createReplacementPricingStore(pool, {
-      async lock(client, candidate, proposed) {
-        if (candidate.organizationId !== organizationId || candidate.actorUserId !== actorUserId || candidate.propertyId !== propertyId) return null;
-        const owned = (await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 FOR SHARE", [propertyId])).rows.map((r) => r.id);
-        if (proposed && (proposed.ownerReferences.terms !== "terms-1" ||
-          proposed.rooms.some((r) => !owned.includes(r.roomTypeId) || r.offers.some((o) => o.termsRevision !== "terms-1")))) return null;
+      async lock(_client, candidate) {
+        if (!authorized || candidate.organizationId !== organizationId || candidate.actorUserId !== actorUserId || candidate.propertyId !== propertyId) return null;
         return sources();
+      },
+      async validate(client, _scope, proposed) {
+        const owned = (await client.query("SELECT id FROM pms.room_types WHERE property_id=$1 FOR SHARE", [propertyId])).rows.map((r) => r.id);
+        return proposed.ownerReferences.terms === `terms-${termsRevision}` &&
+          proposed.rooms.every((r) => owned.includes(r.roomTypeId) && r.offers.every((o) => o.termsRevision === `terms-${termsRevision}`));
       },
       // Deliberately permissive owner fixture: this does not establish real owner approval.
       async allowCurrencyChange() { return conversion; },
@@ -37,7 +39,8 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
         restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] } }],
     }] });
     const command = (expectedRevision = 0) => ({ requestId: randomUUID(), expectedRevision, sources: sources(), snapshot: snapshot(expectedRevision + 1) });
-    return { scope, store, snapshot, command, sources, changeSources: () => { policy = "2"; }, allowConversion: () => { conversion = true; } };
+    return { scope, store, snapshot, command, sources, changeSources: () => { policy = "2"; }, allowConversion: () => { conversion = true; },
+      changeTerms: () => { termsRevision = "2"; }, revokeAccess: () => { authorized = false; } };
   }
   async function fx(expirySeconds = 3600, target = "USD") {
     const time = Math.floor((await pool.query("SELECT extract(epoch FROM clock_timestamp())::double precision AS time")).rows[0].time);
@@ -74,6 +77,23 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     await expect(f.store.save(f.scope, next)).rejects.toThrow();
     expect((await f.store.read(f.scope))?.revision).toBe(1);
     expect((await pool.query("SELECT count(*)::int AS count FROM pms.pricing_v2_revisions WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
+  });
+  it("replays authorized historical publication after owner changes but validates every new write", async () => {
+    const f = await fixture(), draftId = randomUUID();
+    await f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) });
+    const command = { ...f.command(), draft: { id: draftId, revision: 1 } };
+    expect(await f.store.save(f.scope, command)).toEqual({ revision: 1, replayed: false });
+    f.changeTerms();
+    expect(await f.store.save(f.scope, command)).toEqual({ revision: 1, replayed: true });
+    await expect(f.store.save(f.scope, { ...command, sources: f.sources() })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(f.store.save(f.scope, f.command(1))).rejects.toMatchObject({ code: "denied" });
+    await expect(f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 1, baseRevision: 1, sources: f.sources(), snapshot: f.snapshot(2) })).rejects.toMatchObject({ code: "denied" });
+    expect(await f.store.read(f.scope)).toMatchObject({ revision: 1, stale: true });
+    expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 1, baseRevision: 0 });
+    for (const [table, count] of [["domain_events", 2], ["product_audit_events", 2], ["outbox_events", 1]])
+      expect((await pool.query(`SELECT count(*)::int AS count FROM platform.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(count);
+    f.revokeAccess();
+    await expect(f.store.save(f.scope, command)).rejects.toMatchObject({ code: "denied" });
   });
   it("denies foreign scopes and stale sources, and flags invalidated drafts", async () => {
     const f = await fixture(), draftId = randomUUID();

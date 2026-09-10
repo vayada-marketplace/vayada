@@ -339,3 +339,22 @@ successful request replay returns its historical receipt without a new conversio
 new effects, even after expiry. Draft binding, source/base concurrency checks and
 same-currency writes retain their existing behavior. Provider fetching stays outside
 this transaction; there is no refresh or substitute rate inside publication.
+
+## Authorization and proposed-owner validation ordering (VAY-1928)
+
+`PricingStorageGuard.lock(client, scope)` now rechecks current access and locks
+current source revisions without inspecting a proposed snapshot. It runs for all
+operations, including historical publication retries. The separate required
+`validate(client, scope, proposed)` checks the selected room/owner/terms references
+and holds their owner locks for each new publication and every draft save.
+There is no default allow for either operation.
+
+Publication checks an existing request receipt after authorization and before
+proposed-owner validation. Exact retries return the historical result even when
+the accepted proposal's terms or other owner evidence have since changed. Changed
+reuse of that request ID still conflicts; revoked access still denies the retry.
+For a new request, exact draft binding and current source/base checks precede owner
+validation, followed by the existing currency-conversion checks and atomic writes.
+This supersedes the earlier combined `lock(client, scope, proposed)` interface.
+Concrete live owner integration and route wiring remain required; fixture guards
+establish ordering coverage only.
