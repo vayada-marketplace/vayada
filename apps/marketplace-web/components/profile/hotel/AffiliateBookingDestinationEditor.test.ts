@@ -109,3 +109,34 @@ it("ignores a previous property request after a keyed property switch", async ()
     "/api/marketplace/properties/hotel-2/affiliate-destinations",
   );
 });
+
+it("shows server-reported missing checks without offering manual verification", async () => {
+  await mount();
+  api.get.mockResolvedValue({
+    destinations: [
+      {
+        ...saved.destinations[0],
+        trackingReadiness: {
+          status: "pending",
+          missing: ["referral_round_trip", "stay_completion"],
+        },
+      },
+    ],
+  });
+  await act(async () => button("Reload booking pages").props.onClick());
+  const view = JSON.stringify(renderer.toJSON());
+  expect(view).toContain("Match the creator link");
+  expect(view).toContain("guest completed the stay");
+  expect(view).not.toContain("Receive booking confirmations");
+  expect(renderer.root.findAllByType("input")).toHaveLength(2);
+  expect(api.post).not.toHaveBeenCalled();
+});
+it("does not treat absent verification details as ready", async () => {
+  await mount();
+  api.get.mockResolvedValue(saved);
+  await act(async () => button("Reload booking pages").props.onClick());
+  expect(JSON.stringify(renderer.toJSON())).toContain(
+    "Tracking verification details are unavailable",
+  );
+  expect(JSON.stringify(renderer.toJSON())).toContain("Tracking not validated");
+});

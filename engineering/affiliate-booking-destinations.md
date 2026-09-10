@@ -85,3 +85,23 @@ Retries preserve the same key for the same normalized input during the editor
 session. Successful saves clear the form and reload stored history; a failed history
 reload does not offer a duplicate save. The component is keyed to the canonical
 property so requests and retry state do not carry across property selections.
+
+## Tracking diagnostics
+
+Authorized destination reads now include `trackingReadiness: { status, missing }`
+from the shared Booking assessment; offer draft reads carry the same destination
+diagnostics. The current adapter supplies no trusted evidence, so all four purposes
+remain pending. No row, URL or PMS subscription can produce verified tracking.
+The hotel setup form displays the server-reported missing purposes in expandable
+details, or reports unavailable details when an older API omits the field.
+No checkbox, verification write endpoint or provider-specific shortcut exists.
+
+The next dependency is a trusted owner-domain evidence adapter, scoped to exact
+destination/property and live connection. It must resolve an existing restricted
+evidence reference, validation time and current connection health for each purpose.
+The adapter owns freshness and revocation; documented support alone cannot pass.
+Vayada Booking and external booking/PMS integrations must use the same evidence
+contract. Existing Channex inventory/operational tests are not affiliate referral
+round-trip or completed-stay proof. Policy gates in
+[the booking evidence contract](affiliate-booking-evidence-contract.md) remain
+applicable before attribution/intake runtime or publication is enabled.
