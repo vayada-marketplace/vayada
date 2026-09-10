@@ -1,3 +1,4 @@
+import { createPgPmsAffiliateCompletionRepository } from "./pmsAffiliateCompletionRepository.js";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
@@ -41,6 +42,7 @@ describe.skipIf(!databaseUrl)("PMS affiliate completion evidence", () => {
   const name = `vay1505_test_${randomUUID().replaceAll("-", "")}`;
   const admin = new pg.Client({ connectionString: databaseUrl });
   let pool: pg.Pool;
+  let isolatedUrl: string;
   beforeAll(async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(databaseUrl!).pathname.slice(1)))
       throw new Error("Isolated test database required");
@@ -48,7 +50,8 @@ describe.skipIf(!databaseUrl)("PMS affiliate completion evidence", () => {
     await admin.query(`CREATE DATABASE ${name}`);
     const url = new URL(databaseUrl!);
     url.pathname = `/${name}`;
-    pool = new pg.Pool({ connectionString: url.toString() });
+    isolatedUrl = url.toString();
+    pool = new pg.Pool({ connectionString: isolatedUrl });
   });
   afterAll(async () => {
     await pool?.end();
@@ -109,7 +112,12 @@ describe.skipIf(!databaseUrl)("PMS affiliate completion evidence", () => {
       actualDepartureAt: null,
       hasPendingFlags: true,
     });
-    expect(await read(pool, input())).toEqual(result);
+    const repository = createPgPmsAffiliateCompletionRepository(isolatedUrl);
+    try {
+      expect(await repository.read(input())).toEqual(result);
+    } finally {
+      await repository.close();
+    }
   });
   it.each([
     "DELETE FROM pms.booking_checkout_records",
