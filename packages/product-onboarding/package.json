@@ -29,7 +29,8 @@
     "./SharedSignupPage": "./src/SharedSignupPage.tsx",
     "./bankTransferDestination": "./src/bankTransferDestination.ts",
     "./AddonEditor": "./src/AddonEditor.tsx",
-    "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx"
+    "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx",
+    "./PreparedHotelImportPanel": "./src/PreparedHotelImportPanel.tsx"
   },
   "dependencies": {
     "@vayada/domain-hotels": "*",
