@@ -157,7 +157,7 @@ flow. Guest cancellation correctly rejected its unverifiable legacy policy
 snapshot, although the UI hid the 409 reason. A pending test then passed complete
 selection prefill, special-request quote/save and guest withdrawal. The deployed
 four-to-three guest change exposed missing held-room allocation controls;
-#1806 added those controls with nine unit and ten mocked browser checks,
+PR #1806 added those controls with nine unit and ten mocked browser checks,
 production build, required CI and independent/CodeRabbit review passing.
 
 The corrected deployed editor now passes four-to-three guest reallocation,
