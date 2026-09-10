@@ -6,7 +6,7 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 
 const databaseUrl = process.env["TEST_DATABASE_URL"];
 const migration = await readFile(
-  new URL("../migrations/0174_finance_affiliate_percentage_policies.sql", import.meta.url),
+  new URL("../migrations/0180_finance_affiliate_percentage_policies.sql", import.meta.url),
   "utf8",
 );
 const platform = await readFile(
