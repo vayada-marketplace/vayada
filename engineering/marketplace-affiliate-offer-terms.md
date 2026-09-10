@@ -131,3 +131,15 @@ configuration with `trackingStatus: not_validated`, or null for unavailable hist
 references. No current destination is silently substituted, including beyond the
 20-version configuration history. Saving a new version preserves prior revisions.
 This configuration check is not tracking verification or permission to publish.
+
+## Initial hotel setup and destination selection
+
+The offer editor now supports a missing draft with explicit saved booking-page,
+approved commission and attribution-window selections; no values are defaulted.
+Initial setup uses expected revision zero. Existing drafts show their exact saved
+page even beyond recent history, or require a replacement if unavailable. The
+selected URL is plain text with tracking not validated; the browser never follows it.
+Changing a page appends a draft revision and cannot alter earlier terms. Missing
+configuration directs the hotel to setup above and a reload. Save/retry and failed
+reload protections also apply to initial setup. This supersedes the earlier
+existing-draft-only UI limitation and does not publish or activate an affiliate offer.
