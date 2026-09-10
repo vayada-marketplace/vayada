@@ -1,5 +1,6 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import Fastify from "fastify";
+import { parseFinanceAffiliatePercentagePolicy } from "@vayada/domain-finance";
 import { describe, expect, it, vi } from "vitest";
 import { registerMarketplaceAffiliateDraftRoutes } from "./routes/marketplaceAffiliateDrafts.js";
 import type { AffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
@@ -75,6 +76,34 @@ describe("hotel affiliate draft HTTP adapter", () => {
         expectedRevision: 0,
         idempotencyKey: "save-1",
       });
+    } finally {
+      await app.close();
+    }
+  });
+  it("returns the stored commission resolution and a private policy-unavailable conflict", async () => {
+    const { app, read, save } = await setup();
+    try {
+      for (const commission of [
+        {
+          status: "available" as const,
+          policyVersionId: "policy-1",
+          propertyId,
+          policy: parseFinanceAffiliatePercentagePolicy({ percentageRate: "12.50" })!,
+        },
+        { status: "unavailable" as const, reason: "not_found" as const },
+      ]) {
+        const saved = { revision: 1, draft: { id: "draft-1", terms, commission } };
+        read.mockResolvedValue(saved);
+        const get = await app.inject({ method: "GET", url, headers });
+        expect(get.statusCode).toBe(200);
+        expect(get.json()).toEqual(saved);
+        expect(get.headers["cache-control"]).toBe("no-store");
+      }
+      save.mockResolvedValue({ ok: false, code: "policy_unavailable" });
+      const put = await app.inject({ method: "PUT", url, headers, payload });
+      expect(put.statusCode).toBe(409);
+      expect(put.json()).toEqual({ ok: false, code: "policy_unavailable" });
+      expect(put.headers["cache-control"]).toBe("no-store");
     } finally {
       await app.close();
     }
@@ -155,6 +184,7 @@ describe("hotel affiliate draft HTTP adapter", () => {
       ).toBe(422);
       expect(save).not.toHaveBeenCalled();
       for (const code of [
+        "policy_unavailable",
         "revision_conflict",
         "idempotency_conflict",
         "scope_unavailable",
