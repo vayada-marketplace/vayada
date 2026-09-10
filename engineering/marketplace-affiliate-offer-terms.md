@@ -118,3 +118,16 @@ An offer without an initial draft shows setup required and cannot save. This edi
 does not invent a destination, window or rate. Destination configuration/validation
 and creator-visible publication are not implemented here. Draft terms remain
 hotel-only and separate from the existing descriptive collaboration offer fields.
+
+## Saved booking-page association
+
+Each new draft revision resolves its exact Booking destination version against the
+canonical property, authoring organization and enabled property through the Booking
+read boundary inside the offer transaction. Missing, malformed or out-of-scope
+references return `destination_unavailable` (HTTP 409), without a draft or retry key.
+Storage failures propagate as server errors. Authorized completed retries still
+return their original result. GET adds `draft.destination`: the exact saved
+configuration with `trackingStatus: not_validated`, or null for unavailable historical
+references. No current destination is silently substituted, including beyond the
+20-version configuration history. Saving a new version preserves prior revisions.
+This configuration check is not tracking verification or permission to publish.
