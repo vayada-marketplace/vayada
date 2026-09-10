@@ -146,7 +146,7 @@ and room name/description/occupancy/bed/bathroom/size facts. Contacts, media, ph
 inventory, prices, availability, amenities, and publication are separate setup steps.
 Existing room types are preserved; importing into an existing room is not supported.
 
-Migration 0174 stores the invitation-to-property binding and per-field/per-room
+Migration 0178 stores the invitation-to-property binding and per-field/per-room
 success markers. The binding commits before canonical commands, under a session
 advisory lock. Failed unlocks destroy the connection. Room creation uses a stable
 draft binding plus a facts-sensitive command key so corrected failures can retry.
@@ -193,3 +193,14 @@ Complete-stack validation evidence belongs in the implementation PRs, including
   slice. Their validation is recorded in the later implementation PRs.
 - Not deployed. Real-account invite acceptance and deployed saving remain to be
   verified after the prerequisite and import changes are merged and deployed.
+
+## Migration allocation correction (2026-09-10)
+
+Prepared import uses version 0178. The shared next database already applied closure
+migrations 0174–0177 from the approved closure canary; those files and checksums
+are immutable. A read-only ledger check at 04:06:34 UTC showed version 0174 named
+`pms_room_type_closures` and no `hotel_catalog.prepared_import_applications` table.
+The original prepared-import 0174 filename therefore conflicts with applied
+history and is moved to 0178 without changing SQL. No database ledger is edited.
+Deploy with the closure migration lineage preserved; the aggregate owner must
+verify the combined catalog before rollout.
