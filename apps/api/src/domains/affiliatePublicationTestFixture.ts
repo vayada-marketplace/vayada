@@ -108,7 +108,8 @@ export function publicationFixture() {
     await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1),($2)", [id(3), id(6)]);
     await pool.query(`CREATE TABLE identity.organization_resource_links(id UUID PRIMARY KEY, organization_id UUID, resource_id TEXT,
       product TEXT, resource_type TEXT, status TEXT, relationship TEXT);
-      INSERT INTO identity.organization_resource_links VALUES ('${id(90)}','${id(4)}','${id(3)}','marketplace','hotel_profile','active','owner')`);
+      INSERT INTO identity.organization_resource_links VALUES ('${id(90)}','${id(4)}','${id(3)}','marketplace','hotel_profile','active','owner'),
+      ('${id(91)}','${id(4)}','${id(2)}','marketplace','marketplace_offer','active','operator')`);
     await policy(id(10), id(3), 1250, true);
     await destination(id(30), id(3), id(4));
     await pool.query(
