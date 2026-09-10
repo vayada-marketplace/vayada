@@ -162,7 +162,6 @@ export {
   type PartialRefundTier,
   type RoomType,
 } from "./RoomsStep";
-export { useSetupWizardState, type RoomTab, type SetupWizardOptions } from "./useSetupWizardState";
 export {
   readBankTransferDestination,
   saveBankTransferDestination,
