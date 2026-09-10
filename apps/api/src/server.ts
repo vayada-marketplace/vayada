@@ -424,8 +424,10 @@ const noShowReportPool = pmsOperationsRepository
   ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 })
   : undefined;
 const noShowReportingEnabled =
-  config.channexManagement.capabilityModes.bookingSync === "mutating" &&
-  config.channexManagement.workerEnabled;
+  config.channexManagement.workerEnabled &&
+  (config.channexManagement.stagingNoShowEnabled ||
+    (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
+      config.backgroundWorkersEnabled));
 const pmsChannexManagementCommandPort = channexCommandsMutating
   ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -1309,6 +1311,9 @@ const app = buildApp({
         repository: pmsChannexManagementRepository,
         noShowReports: noShowReportPool ? createNoShowReportingStore(noShowReportPool) : undefined,
         noShowReportingEnabled,
+        noShowReportingPropertyId: config.channexManagement.stagingNoShowEnabled
+          ? config.channexManagement.stagingRestrictionsPropertyId
+          : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
         commandPort: pmsChannexManagementCommandPort,
@@ -1882,7 +1887,7 @@ let activeNoShowRun: Promise<void> | undefined;
 const noShowTimer =
   noShowReportPool && noShowReportingEnabled
     ? setInterval(() => {
-        if (!config.backgroundWorkersEnabled || activeNoShowRun) return;
+        if (activeNoShowRun) return;
         activeNoShowRun = runNoShowReport(
           noShowReportPool,
           {
@@ -1890,6 +1895,9 @@ const noShowTimer =
             apiKey: config.channexManagement.apiKey!,
           },
           `no-show:${process.pid}`,
+          config.channexManagement.stagingNoShowEnabled
+            ? config.channexManagement.stagingRestrictionsPropertyId
+            : undefined,
         )
           .catch((error: unknown) =>
             app.log.warn({ err: error }, "No-show reporting worker failed"),

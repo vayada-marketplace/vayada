@@ -76,6 +76,7 @@ export type ChannexManagementConfig = {
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
+  stagingNoShowEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -559,6 +560,10 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     env,
     "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
   );
+  const stagingNoShowEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_NO_SHOW_ENABLED", false);
+  if (stagingNoShowEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex no-show reporting requires a staging property");
+  }
   const stagingInventoryEnabled = readBooleanEnv(
     env,
     "PMS_CHANNEX_STAGING_INVENTORY_ENABLED",
@@ -631,6 +636,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     stagingRestrictionsPropertyId,
     stagingMealsEnabled,
     stagingInventoryEnabled,
+    stagingNoShowEnabled,
     workerEnabled,
     capabilityModes,
   };

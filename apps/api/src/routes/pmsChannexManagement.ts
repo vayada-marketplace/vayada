@@ -22,6 +22,7 @@ export type PmsChannexManagementRoutesOptions = {
   repository: PmsChannexManagementReadRepository;
   noShowReports?: NoShowReportingStore;
   noShowReportingEnabled?: boolean;
+  noShowReportingPropertyId?: string;
   capabilityModes: ChannexManagementCapabilityModes;
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
@@ -89,6 +90,9 @@ export async function registerPmsChannexManagementRoutes(
     );
   });
 
+  const reportingEnabled = (propertyId: string) =>
+    options.noShowReportingEnabled &&
+    (!options.noShowReportingPropertyId || options.noShowReportingPropertyId === propertyId);
   const reportPath = "/properties/:propertyId/reservations/:bookingId/no-show-report";
   type ReportParams = { propertyId: string; bookingId: string };
   app.get<{ Params: ReportParams }>(reportPath, async (request, reply) => {
@@ -98,7 +102,7 @@ export async function registerPmsChannexManagementRoutes(
       return reply.code(503).send({ message: "Reporting is unavailable." });
     const result = await options.noShowReports.get(propertyId, bookingId);
     if (!result) return reply.code(404).send({ message: "Reservation not found." });
-    return options.noShowReportingEnabled
+    return reportingEnabled(propertyId)
       ? result
       : {
           ...result,
@@ -110,7 +114,7 @@ export async function registerPmsChannexManagementRoutes(
   app.post<{ Params: ReportParams; Body: unknown }>(reportPath, async (request, reply) => {
     const { propertyId, bookingId } = request.params;
     const context = enforcePmsChannexPolicy(request, propertyId, "pms.operations.manage");
-    if (!options.noShowReportingEnabled || !options.noShowReports)
+    if (!reportingEnabled(propertyId) || !options.noShowReports)
       return reply
         .code(409)
         .send({ message: "Booking.com reporting is disabled in this environment." });
