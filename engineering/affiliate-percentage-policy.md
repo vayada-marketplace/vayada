@@ -38,7 +38,7 @@ original policy version when a hotel later changes its rate.
 
 ## Immutable storage
 
-Migration 0174 stores Finance policy versions with a canonical property ID, explicit
+Migration 0180 stores Finance policy versions with a canonical property ID, explicit
 basis-point rate, fixed contract/model/basis/eligibility and author/request/time.
 Approval is a separate append-only record tied to the exact version/property tuple,
 with approving organization/user/request/time. A version is a draft until its approval
