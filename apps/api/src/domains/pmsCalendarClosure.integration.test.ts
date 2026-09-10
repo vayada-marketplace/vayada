@@ -458,6 +458,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       requestId: "atomic-test",
     };
     try {
+      await admin.query("UPDATE pms.room_types SET active=false WHERE id=$1", [roomTypeA]);
+      expect(await closure.preview(input)).toEqual({
+        ok: false,
+        error: { code: "room_type_not_found" },
+      });
+      expect(await closure.closeRoom(input)).toEqual({
+        ok: false,
+        error: { code: "room_type_not_found" },
+      });
+      await admin.query("UPDATE pms.room_types SET active=true WHERE id=$1", [roomTypeA]);
       expect(await closure.preview(input)).toMatchObject({ ok: true, impact: { blockers: [] } });
       expect(await closure.closeRoom({ ...input, organizationId: randomUUID() })).toMatchObject({
         ok: false,

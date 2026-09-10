@@ -25,15 +25,17 @@ describe.skipIf(!connectionString)("inventory rules durable Postgres path (mock 
     connectionString: connectionString ?? "disabled",
     bookingRevisionHandoff: async () => {},
   });
-  const store = createPgPmsChannexManagementWorkerStore({
-    connectionString: connectionString ?? "disabled",
-    targetState: createPmsChannexManagementTargetState(),
-  });
   const propertyId = randomUUID(),
     roomId = randomUUID(),
     channelId = randomUUID(),
     actorId = randomUUID(),
     externalPropertyId = randomUUID();
+  const store = createPgPmsChannexManagementWorkerStore({
+    connectionString: connectionString ?? "disabled",
+    targetState: createPmsChannexManagementTargetState(),
+    stagingRestrictionsPropertyId: propertyId,
+    stagingInventoryEnabled: true,
+  });
   const context = {
     actor: { internalUserId: actorId },
     audit: { requestId: "vay1531-test", source: "api" },

@@ -129,7 +129,7 @@ export async function readPmsRoomClosureState(
     LEFT JOIN hotel_catalog.property_locations location ON location.property_id=room.property_id
     LEFT JOIN calendar ON true
     LEFT JOIN pms.inventory_materialization_coverage coverage ON coverage.property_id=room.property_id
-    WHERE room.property_id=$1::uuid AND room.id=$2::uuid`,
+    WHERE room.property_id=$1::uuid AND room.id=$2::uuid AND room.active`,
       [scope.propertyId, scope.roomTypeId, acceptedAt.toISOString()],
     )
   ).rows[0];
