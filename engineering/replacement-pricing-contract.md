@@ -375,3 +375,21 @@ complete source revisions, mandatory-charge declarations, FX or separately owned
 amount conversion. It must be composed with those checks for publication; a
 `verified` result here alone never authorizes publication or checkout. No route or
 active pricing mutation is exposed by this owner-composition port.
+
+## Charge declaration in the combined owner check (VAY-1930)
+
+`lockReplacementPricingOfferOwners` now also requires source revisions from the
+caller's current, transaction-locked owner reads and an explicit
+`ownerReferences.charges` declaration. After live access, PMS, Booking and Finance
+verification, it calls the charge owner with the same complete proposal and source
+snapshot. The verified result includes the declaration; missing, foreign or changed
+evidence returns `charges_stale`. There is no implicit confirmation or zero-charge
+fallback. Inputs used for declaration binding are copied before asynchronous owner
+reads so this operation checks one proposal.
+
+Attaching the declaration's own reference remains valid. Price, child/meal or
+non-self source changes require a new declaration. This supersedes VAY-1929's
+exclusion of charge verification, but does not establish the provenance/freshness
+of supplied source tokens: the complete source guard must still collect and lock
+them. FX and separately owned conversion, command wiring and routes remain separate
+obligations before publication is available.
