@@ -1,3 +1,4 @@
+import { readBookingAffiliateDestinations } from "./bookingAffiliateDestinationRepository.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import { requireActiveEntitlement, requireResourceAccess } from "@vayada/backend-authorization";
@@ -25,7 +26,8 @@ type Result =
         | "scope_unavailable"
         | "revision_conflict"
         | "idempotency_conflict"
-        | "policy_unavailable";
+        | "policy_unavailable"
+        | "destination_unavailable";
     };
 const operation = "marketplace.affiliate_offer_draft.save";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -129,6 +131,16 @@ export async function saveMarketplaceAffiliateDraft(
     if (commission.status !== "available") {
       await client.query("ROLLBACK");
       return { ok: false, code: "policy_unavailable" };
+    }
+    const destinations = await readBookingAffiliateDestinations(
+      client,
+      propertyId,
+      organizationId,
+      terms.terms.bookingDestinationId,
+    );
+    if (!destinations.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "destination_unavailable" };
     }
     const draftId = randomUUID();
     const revision = expectedRevision + 1;

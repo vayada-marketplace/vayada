@@ -18,8 +18,12 @@ const policies = await readFile(
   new URL("0180_finance_affiliate_percentage_policies.sql", migrations),
   "utf8",
 );
+const destinations = await readFile(
+  new URL("0179_booking_affiliate_destinations.sql", migrations),
+  "utf8",
+);
 const terms = {
-  bookingDestinationId: "destination-1",
+  bookingDestinationId: id(30),
   financePolicyVersionId: id(10),
   attributionWindowDays: 14,
 };
@@ -78,11 +82,11 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     pool = new pg.Pool({ connectionString: isolatedUrl.toString(), max: 3 });
   });
   beforeEach(async () => {
-    await pool.query(`DROP SCHEMA IF EXISTS marketplace,platform,identity,hotel_catalog,finance CASCADE;
-      CREATE SCHEMA finance; CREATE SCHEMA marketplace; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
+    await pool.query(`DROP SCHEMA IF EXISTS marketplace,platform,identity,hotel_catalog,finance,booking CASCADE;
+      CREATE SCHEMA booking; CREATE SCHEMA finance; CREATE SCHEMA marketplace; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
       CREATE TABLE identity.users(id UUID PRIMARY KEY);
       CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
-      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY);
+      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY, profile_status TEXT DEFAULT 'active');
       CREATE TABLE marketplace.marketplace_offers(id UUID PRIMARY KEY, property_id UUID, organization_id UUID,
         offer_status TEXT DEFAULT 'draft', UNIQUE(id,property_id,organization_id));`);
     await pool.query(
@@ -99,10 +103,12 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     );
     await pool.query(drafts);
     await pool.query(policies);
+    await pool.query(destinations);
     await pool.query("INSERT INTO identity.users VALUES ($1);", [id(1)]);
     await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(4)]);
     await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1),($2)", [id(3), id(6)]);
     await policy(id(10), id(3), 1250, true);
+    await destination(id(30), id(3), id(4));
     await pool.query(
       "INSERT INTO marketplace.marketplace_offers(id,property_id,organization_id) VALUES($1,$2,$3)",
       [id(2), id(3), id(4)],
@@ -113,6 +119,14 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     if (pool) await admin.query(`DROP DATABASE ${databaseName}`);
     await admin.end();
   });
+  async function destination(versionId: string, propertyId: string, organizationId: string) {
+    await pool.query(
+      `INSERT INTO booking.affiliate_destination_versions
+      (id,property_id,display_name,booking_url,created_by_user_id,created_by_organization_id,request_id)
+      VALUES ($1,$2,'Synthetic booking page','https://booking.example.invalid/?hotel=42',$3,$4,'fixture')`,
+      [versionId, propertyId, id(1), organizationId],
+    );
+  }
   async function policy(versionId: string, propertyId: string, rate: number, approved: boolean) {
     await pool.query(
       `INSERT INTO finance.affiliate_percentage_policy_versions
@@ -228,6 +242,78 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     ).resolves.toMatchObject({ ok: true, revision: 1 });
   });
 
+  it("rejects malformed, missing, other-property and other-organization destinations without writes", async () => {
+    await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(40)]);
+    await destination(id(31), id(6), id(4));
+    await destination(id(32), id(3), id(40));
+    for (const bookingDestinationId of ["legacy-destination", id(99), id(31), id(32)]) {
+      await expect(
+        saveMarketplaceAffiliateDraft(pool, {
+          ...input(),
+          terms: { ...terms, bookingDestinationId },
+        }),
+      ).resolves.toEqual({ ok: false, code: "destination_unavailable" });
+    }
+    for (const table of ["marketplace.affiliate_offer_terms_drafts", "platform.idempotency_keys"])
+      expect((await pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count).toBe("0");
+    await expect(saveMarketplaceAffiliateDraft(pool, input())).resolves.toMatchObject({
+      ok: true,
+      revision: 1,
+    });
+  });
+
+  it("preserves destination versions and reports configuration without claiming tracking verification", async () => {
+    const repository = createPgMarketplaceAffiliateDraftRepository(isolatedConnectionString);
+    try {
+      const first = await repository.save(input());
+      await destination(id(31), id(3), id(4));
+      await expect(repository.read(id(4), id(3), id(2))).resolves.toMatchObject({
+        draft: {
+          destination: {
+            destinationVersionId: id(30),
+            trackingStatus: "not_validated",
+            configuration: { bookingUrl: "https://booking.example.invalid/?hotel=42" },
+          },
+        },
+      });
+      await repository.save({
+        ...input(),
+        expectedRevision: 1,
+        idempotencyKey: "new-destination",
+        terms: { ...terms, bookingDestinationId: id(31) },
+      });
+      expect(
+        (
+          await pool.query(
+            "SELECT booking_destination_id FROM marketplace.affiliate_offer_terms_drafts ORDER BY revision",
+          )
+        ).rows,
+      ).toEqual([id(30), id(31)].map((booking_destination_id) => ({ booking_destination_id })));
+      await expect(repository.save(input())).resolves.toEqual({ ...first, replayed: true });
+      await pool.query(
+        "UPDATE hotel_catalog.properties SET profile_status='disabled' WHERE id=$1",
+        [id(3)],
+      );
+      await expect(repository.read(id(4), id(3), id(2))).resolves.toMatchObject({
+        draft: { destination: null },
+      });
+      await expect(
+        repository.save({ ...input(), expectedRevision: 2, idempotencyKey: "disabled" }),
+      ).resolves.toMatchObject({ code: "destination_unavailable" });
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it("propagates Booking storage failure without persisting a draft or retry key", async () => {
+    await pool.query(
+      "ALTER TABLE booking.affiliate_destination_versions RENAME TO unavailable_test",
+    );
+    await expect(saveMarketplaceAffiliateDraft(pool, input())).rejects.toThrow();
+    for (const table of ["marketplace.affiliate_offer_terms_drafts", "platform.idempotency_keys"])
+      expect((await pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count).toBe("0");
+  });
+
   it("keeps the selected rate until an explicit new revision selects a different approved version", async () => {
     const repository = createPgMarketplaceAffiliateDraftRepository(isolatedConnectionString);
     try {
@@ -274,6 +360,7 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
         revision: 1,
         draft: {
           terms: { financePolicyVersionId: "policy-1" },
+          destination: null,
           commission: { status: "unavailable", reason: "not_found" },
         },
       });

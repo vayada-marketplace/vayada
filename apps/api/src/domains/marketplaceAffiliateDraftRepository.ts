@@ -1,3 +1,4 @@
+import { readBookingAffiliateDestinations } from "./bookingAffiliateDestinationRepository.js";
 import {
   parseMarketplaceAffiliateOfferTerms,
   type MarketplaceAffiliateOfferTerms,
@@ -13,6 +14,7 @@ export type AffiliateDraftRead = {
     id: string;
     terms: MarketplaceAffiliateOfferTerms;
     commission: FinanceAffiliatePolicyResolution;
+    destination: Awaited<ReturnType<typeof readBookingAffiliateDestinations>>[number] | null;
   } | null;
 };
 export type AffiliateDraftRepository = {
@@ -60,7 +62,21 @@ export function createPgMarketplaceAffiliateDraftRepository(
         propertyId,
         policyVersionId: parsed.terms.financePolicyVersionId,
       });
-      return { revision: row.revision, draft: { id: row.id, terms: parsed.terms, commission } };
+      const destinations = await readBookingAffiliateDestinations(
+        pool,
+        propertyId,
+        organizationId,
+        parsed.terms.bookingDestinationId,
+      );
+      return {
+        revision: row.revision,
+        draft: {
+          id: row.id,
+          terms: parsed.terms,
+          commission,
+          destination: destinations[0] ?? null,
+        },
+      };
     },
     close: () => pool.end(),
   };
