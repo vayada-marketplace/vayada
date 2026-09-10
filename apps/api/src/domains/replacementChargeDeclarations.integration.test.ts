@@ -1,3 +1,4 @@
+import { lockReplacementPricingSources } from "./replacementPricingStorageGuard.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
@@ -46,7 +47,11 @@ describe.skipIf(!url)("Replacement mandatory-charge declarations PostgreSQL owne
         price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
         restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] } }],
     }] };
-    const sources = { room: "1", terms: saved.revision, finance: "1" }, draftId = randomUUID();
+    const client = await pool.connect(); let sources;
+    try { await client.query("BEGIN"); sources = await lockReplacementPricingSources(client, context, scope, "manage"); }
+    finally { await client.query("ROLLBACK"); client.release(); }
+    if (!sources) throw new Error("source fixture unavailable");
+    const draftId = randomUUID();
     // Seed the saved-draft boundary; the complete publication guard is a separate integration.
     await pool.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [propertyId]);
     await pool.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
@@ -82,7 +87,9 @@ describe.skipIf(!url)("Replacement mandatory-charge declarations PostgreSQL owne
         await expect(pool.query(sql, [first.id])).rejects.toThrow();
       await expect(pool.query("TRUNCATE pms.pricing_v2_charge_declarations")).rejects.toThrow();
       await pool.query("UPDATE pms.pricing_v2_drafts SET draft_revision=2 WHERE property_id=$1", [f.scope.propertyId]);
-      expect(await store.confirm(f.context, f.scope, command)).toEqual(first); // historical receipt, not a new confirmation
+      await pool.query("INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency) VALUES($1,false,ARRAY['pay_at_property'],'EUR')", [f.scope.propertyId]);
+      expect(await store.confirm(f.context, f.scope, command)).toEqual(first); // historical receipt survives source changes
+      await expect(store.confirm(f.context, f.scope, { ...command, requestId: randomUUID(), expectedDraftRevision: 2 })).rejects.toMatchObject({ code: "stale" });
     } finally { client.release(); }
   });
   it("rejects stale draft versions, fingerprints, bases and Booking terms", async () => {

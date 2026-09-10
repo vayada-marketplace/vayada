@@ -136,11 +136,26 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context) });
     const base = `/properties/${id}/pricing-v2`, draftPath = `${base}/drafts/${f.draft.draftId}`;
     try {
+      const room = f.proposed.rooms[0], offer = room.offers[0], termsPath = `${base}/rooms/${room.roomTypeId}/offers/${offer.id}/terms`;
+      const read = await app.inject({ url: termsPath }); expect(read.statusCode).toBe(200);
+      const policy = { expectedRevision: read.json().revision, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+      const update = await app.inject({ method: "PUT", url: termsPath, headers: { "idempotency-key": "http-terms" }, payload: policy });
+      expect(update.statusCode).toBe(200); expect(update.json().revision).not.toBe(policy.expectedRevision);
+      expect((await app.inject({ method: "PUT", url: termsPath, headers: { "idempotency-key": "http-terms" }, payload: policy })).json()).toEqual(update.json());
+      expect((await app.inject({ method: "PUT", url: termsPath, headers: { "idempotency-key": "stale-terms" }, payload: policy })).statusCode).toBe(409);
+      const newTermsPath = `${base}/rooms/${room.roomTypeId}/offers/new-offer/terms`;
+      expect((await app.inject({ url: newTermsPath })).statusCode).toBe(404);
+      expect((await app.inject({ method: "PUT", url: newTermsPath, headers: { "idempotency-key": "create-terms" }, payload: { ...policy, expectedRevision: null } })).statusCode).toBe(200);
+      await expect(f.commands.saveDraft(id, f.draft)).rejects.toMatchObject({ code: "stale" });
+      offer.termsRevision = update.json().revision;
       const prep = await app.inject({ method: "POST", url: `${base}/prepare`, payload: f.proposed });
       expect(prep.statusCode).toBe(200); const prepared = prep.json();
       expect((await app.inject({ method: "PUT", url: draftPath, payload: { expectedDraftRevision: 0, baseRevision: 0, ...prepared } })).json()).toEqual({ revision: 1 });
+      const review = await app.inject({ url: `${draftPath}/charge-review` }); expect(review.statusCode).toBe(200);
+      expect(review.json()).toMatchObject({ draftId: f.draft.draftId, revision: 1, snapshot: prepared.snapshot, declaration: "all_mandatory_charges_included" });
+      expect((await pool.query("SELECT count(*)::int AS n FROM pms.pricing_v2_charge_declarations WHERE property_id=$1", [id])).rows[0].n).toBe(0);
       const confirmation = await app.inject({ method: "POST", url: `${base}/charges`, headers: { "idempotency-key": "http-confirm" },
-        payload: { draftId: f.draft.draftId, expectedDraftRevision: 1, claimedFingerprint: replacementChargeFingerprint(id, prepared.snapshot, prepared.sources), declaration: "all_mandatory_charges_included" } });
+        payload: { draftId: f.draft.draftId, expectedDraftRevision: 1, claimedFingerprint: review.json().fingerprint, declaration: review.json().declaration } });
       expect(confirmation.statusCode).toBe(200);
       const snapshot = { ...prepared.snapshot, ownerReferences: { ...prepared.snapshot.ownerReferences, charges: confirmation.json().id } };
       expect((await app.inject({ method: "PUT", url: draftPath, payload: { expectedDraftRevision: 1, baseRevision: 0, sources: prepared.sources, snapshot } })).json()).toEqual({ revision: 2 });
@@ -150,5 +165,31 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
       expect((await app.inject({ method: "POST", url: `${base}/publish`, headers: { "idempotency-key": "http-publish" }, payload })).statusCode).toBe(403);
       expect(await counts(id)).toEqual({ drafts: 1, revisions: 1, events: 1 });
     } finally { await app.close(); }
+  });
+  it("rejects old charge reviews after draft edits and stale-source reviews without writing confirmation", async () => {
+    const f = await fixture(), id = f.scope.propertyId;
+    expect(await f.commands.reviewCharges(id, randomUUID())).toBeNull();
+    await f.commands.saveDraft(id, f.draft);
+    const review = (await f.commands.reviewCharges(id, f.draft.draftId))!;
+    expect(review.fingerprint).toBe(replacementChargeFingerprint(id, f.prepared.snapshot, f.prepared.sources));
+    const edited = { ...f.prepared.snapshot, rooms: f.prepared.snapshot.rooms.map((room, index) => index ? room :
+      { ...room, children: { ...room.children, bands: room.children.bands.map((band) => ({ ...band, nightlyMinor: "100" })) } }) };
+    await f.commands.saveDraft(id, { ...f.draft, expectedDraftRevision: 1, snapshot: edited });
+    const confirmation = { draftId: f.draft.draftId, expectedDraftRevision: 1, claimedFingerprint: review.fingerprint,
+      declaration: review.declaration, requestId: randomUUID() };
+    await expect(f.commands.confirmCharges(id, confirmation)).rejects.toMatchObject({ code: "stale" });
+    await expect(f.commands.confirmCharges(id, { ...confirmation, expectedDraftRevision: 2 })).rejects.toMatchObject({ code: "stale" });
+    const latestReview = (await f.commands.reviewCharges(id, f.draft.draftId))!;
+    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [id]);
+    const app = Fastify(); app.decorateRequest("authContext", null);
+    app.addHook("onRequest", async (request) => { request.authContext = f.context; });
+    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context) });
+    try {
+      const response = await app.inject({ method: "POST", url: `/properties/${id}/pricing-v2/charges`, headers: { "idempotency-key": "stale-review" },
+        payload: { draftId: f.draft.draftId, expectedDraftRevision: latestReview.revision, claimedFingerprint: latestReview.fingerprint, declaration: latestReview.declaration } });
+      expect(response.statusCode).toBe(409); expect(response.json()).toEqual({ code: "stale" });
+    } finally { await app.close(); }
+    await expect(f.commands.reviewCharges(id, f.draft.draftId)).rejects.toMatchObject({ code: "stale" });
+    expect((await pool.query("SELECT count(*)::int AS n FROM pms.pricing_v2_charge_declarations WHERE property_id=$1", [id])).rows[0].n).toBe(0);
   });
 });

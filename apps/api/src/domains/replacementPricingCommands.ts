@@ -1,9 +1,9 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool } from "pg";
-import { lockBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
+import { createBookingPricingOfferTermsStore, lockBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
-import { createReplacementChargeDeclarationStore } from "./replacementChargeDeclarations.js";
+import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
 import { createReplacementPricingStorageGuard, lockReplacementPricingSources } from "./replacementPricingStorageGuard.js";
 import { createReplacementPricingStore, PricingStorageError, type PricingStorageScope, type PricingStorageSnapshot } from "./replacementPricingStore.js";
@@ -19,6 +19,7 @@ const fail = (code: "invalid" | "denied"): never => { throw new PricingStorageEr
 export function createReplacementPricingCommands(pool: Pool, context: RequestContext | null) {
   const trustedContext = structuredClone(context);
   const store = createReplacementPricingStore(pool, createReplacementPricingStorageGuard(trustedContext));
+  const booking = createBookingPricingOfferTermsStore(pool);
   const charges = createReplacementChargeDeclarationStore(pool);
   function scope(propertyId: string): PricingStorageScope {
     if (!uuid(propertyId)) return fail("invalid");
@@ -52,6 +53,20 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
         if (owners.kind !== "awaiting_charge_confirmation") return fail("denied");
         await client.query("COMMIT"); return { sources, snapshot };
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    },
+    async readTerms(propertyId: string, roomTypeId: string, offerId: string) {
+      return booking.read(trustedContext, scope(propertyId), roomTypeId, offerId);
+    },
+    async saveTerms(propertyId: string, input: Parameters<typeof booking.save>[2]) {
+      return booking.save(trustedContext, scope(propertyId), input);
+    },
+    async reviewCharges(propertyId: string, draftId: string) {
+      const currentScope = scope(propertyId), draft = await store.readDraft(currentScope, draftId);
+      if (!draft) return null;
+      if (draft.stale) throw new PricingStorageError("stale");
+      const fingerprint = replacementChargeFingerprint(currentScope.propertyId, draft.snapshot, draft.sources);
+      if (!fingerprint) return fail("invalid");
+      return { draftId: draftId.toLowerCase(), ...draft, fingerprint, declaration: "all_mandatory_charges_included" as const };
     },
     async read(propertyId: string) { return store.read(scope(propertyId)); },
     async readDraft(propertyId: string, draftId: string) { return store.readDraft(scope(propertyId), draftId); },

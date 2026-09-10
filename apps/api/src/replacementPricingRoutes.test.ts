@@ -26,13 +26,17 @@ const endpoints = [
   ["PUT", `/drafts/${draftId}`, { expectedDraftRevision: 0, baseRevision: 0, sources, snapshot }],
   ["POST", "/charges", { draftId, expectedDraftRevision: 1, claimedFingerprint: "a".repeat(64), declaration: "all_mandatory_charges_included" }],
   ["POST", "/publish", publish],
+  ["GET", `/rooms/${id}/offers/flex/terms`, undefined],
+  ["PUT", `/rooms/${id}/offers/flex/terms`, { expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }],
+  ["GET", `/drafts/${draftId}/charge-review`, undefined],
 ] as const;
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
 async function fixture(auth: RequestContext | null = context) {
   const app = Fastify(); apps.push(app); app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => { if (request.headers.authorization === "Bearer valid") request.authContext = auth; });
-  const commands = { read: vi.fn().mockResolvedValue(snapshot), readDraft: vi.fn().mockResolvedValue({ snapshot, revision: 2 }),
+  const commands = { readTerms: vi.fn().mockResolvedValue({ revision: draftId }), saveTerms: vi.fn().mockResolvedValue({ revision: draftId }),
+    reviewCharges: vi.fn().mockResolvedValue({ fingerprint: "a".repeat(64) }), read: vi.fn().mockResolvedValue(snapshot), readDraft: vi.fn().mockResolvedValue({ snapshot, revision: 2 }),
     prepare: vi.fn().mockResolvedValue({ snapshot, sources }), saveDraft: vi.fn().mockResolvedValue(1),
     confirmCharges: vi.fn().mockResolvedValue({ id: draftId }), publish: vi.fn().mockResolvedValue({ revision: 1, replayed: false }) };
   const factory = vi.fn(() => commands as unknown as ReturnType<ReplacementPricingRoutesOptions["commands"]>);
@@ -81,10 +85,24 @@ describe("replacement pricing HTTP boundary", () => {
       { ...publish, snapshot: { ...snapshot, ownerReferences: { charges: draftId } } },
       { ...publish, expectedRevision: -1 }, { ...publish, snapshot: { ...snapshot, rooms: [null] } }])
       expect((await f.inject(5, body)).statusCode).toBe(400);
-    for (const index of [4, 5]) expect((await f.inject(index, endpoints[index][2], { "idempotency-key": "" })).statusCode).toBe(400);
+    for (const index of [4, 5, 7]) expect((await f.inject(index, endpoints[index][2], { "idempotency-key": "" })).statusCode).toBe(400);
     expect((await f.app.inject({ method: "POST", url: `/api/pms/properties/${id}/pricing-v2/publish`, payload: publish,
       headers: { authorization: "Bearer valid", "idempotency-key": ["a", "b"] } })).statusCode).toBe(400);
     expect(f.commands.publish).not.toHaveBeenCalled();
+  });
+  it("rejects malformed offer policies and body identity before the Booking command", async () => {
+    const f = await fixture(), valid = endpoints[7][2];
+    for (const body of [{ ...valid, actorUserId: id }, { ...valid, roomTypeId: id }, { ...valid, expectedRevision: 1 },
+      { ...valid, payment: { kind: "deposit", basisPoints: 10001, balanceDaysBeforeArrival: 1 } },
+      { ...valid, cancellation: { kind: "non_refundable", extra: true } }]) expect((await f.inject(7, body)).statusCode).toBe(400);
+    expect(f.commands.saveTerms).not.toHaveBeenCalled();
+    expect((await f.inject(7)).statusCode).toBe(200);
+    expect(f.commands.saveTerms).toHaveBeenCalledWith(id, { requestId: "request-1", expectedRevision: null,
+      terms: { roomTypeId: id, offerId: "flex", cancellation: valid.cancellation, payment: valid.payment } });
+    f.commands.reviewCharges.mockResolvedValue(null);
+    expect((await f.inject(8)).statusCode).toBe(404);
+    f.commands.reviewCharges.mockRejectedValue(new PricingStorageError("stale"));
+    expect((await f.inject(8)).statusCode).toBe(409);
   });
   it("maps domain failures and sanitizes unexpected failures", async () => {
     const f = await fixture();

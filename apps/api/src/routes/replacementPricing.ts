@@ -1,3 +1,4 @@
+import { parseBookingPricingOfferTerms } from "../domains/bookingPricingOfferTerms.js";
 import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import { parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms";
@@ -8,7 +9,7 @@ import { enforceRoutePolicy } from "./policy.js";
 
 type Commands = ReturnType<typeof createReplacementPricingCommands>;
 export type ReplacementPricingRoutesOptions = { commands(context: RequestContext): Commands };
-type Params = { propertyId: string; draftId?: string };
+type Params = { propertyId: string; draftId?: string; roomTypeId?: string; offerId?: string };
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const exact = (v: unknown, keys: string[]): v is Record<string, unknown> => pricingObject(v) && pricingKeys(v, keys);
 const revision = (v: unknown) => pricingInteger(v) && (v as number) < 2147483647;
@@ -36,7 +37,9 @@ export async function registerReplacementPricingRoutes(app: FastifyInstance, opt
           const permission = method === "GET" ? "pms.rooms_rates.read" : "pms.rooms_rates.manage";
           const base = enforceRoutePolicy(request, { permission });
           if (base.selectedOrganization.kind !== "hotel_group") return reply.code(403).send({ code: "forbidden" });
-          if (!uuid(request.params.propertyId) || (request.params.draftId !== undefined && !uuid(request.params.draftId))) return invalid();
+          if (!uuid(request.params.propertyId) || (request.params.draftId !== undefined && !uuid(request.params.draftId)) ||
+              (request.params.roomTypeId !== undefined && !uuid(request.params.roomTypeId)) ||
+              (request.params.offerId !== undefined && (!request.params.offerId.length || request.params.offerId.length > 200 || request.params.offerId.trim() !== request.params.offerId))) return invalid();
           request.params.propertyId = request.params.propertyId.toLowerCase();
           const resource = { product: "pms", resourceType: "pms_property", resourceId: request.params.propertyId } as const;
           authorized.set(request, enforceRoutePolicy(request, { permission,
@@ -62,6 +65,17 @@ export async function registerReplacementPricingRoutes(app: FastifyInstance, opt
       },
     });
   }
+  route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!));
+  route("PUT", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => {
+    const requestId = key(request), body = request.body;
+    if (!exact(body, ["expectedRevision", "cancellation", "payment"]) || !(body.expectedRevision === null || uuid(body.expectedRevision))) return invalid();
+    const parsed = parseBookingPricingOfferTerms({ roomTypeId: request.params.roomTypeId, offerId: request.params.offerId,
+      revision: request.params.roomTypeId, cancellation: body.cancellation, payment: body.payment });
+    if (!parsed) return invalid();
+    const { revision: _revision, ...terms } = parsed;
+    return commands.saveTerms(id, { requestId, expectedRevision: body.expectedRevision, terms });
+  });
+  route("GET", "/drafts/:draftId/charge-review", (commands, id, request) => commands.reviewCharges(id, request.params.draftId!));
   route("GET", "", (commands, id) => commands.read(id));
   route("GET", "/drafts/:draftId", (commands, id, request) => commands.readDraft(id, request.params.draftId!));
   route("POST", "/prepare", (commands, id, request) => {

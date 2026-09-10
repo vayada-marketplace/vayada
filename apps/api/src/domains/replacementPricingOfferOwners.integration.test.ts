@@ -186,12 +186,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "room_source_stale" });
     const forged = { ...f.sources, room: "forged" };
     await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    const declaration = await createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
       draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
       declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    });
+    })).rejects.toMatchObject({ code: "stale" });
     // A matching declaration is still insufficient when its saved source was never authoritative.
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: declaration.id } }, f.context, forged)).toMatchObject({ reason: "room_source_stale" });
+    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "room_source_stale" });
     await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'New room')", [randomUUID(), f.scope.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "room_source_stale" });
     const client = await pool.connect();
@@ -202,7 +202,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, room: room! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
-  it("binds the complete Booking terms set and rejects even a matching forged-source declaration", async () => {
+  it("binds the complete Booking terms set and rejects forged-source confirmation", async () => {
     const f = await fixture(), other = await fixture();
     expect(await f.currentTermsSource()).toBe(f.sources.terms);
     expect(await other.currentTermsSource()).not.toBe(f.sources.terms);
@@ -210,11 +210,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "terms_source_stale" });
     const forged = { ...f.sources, terms: "forged" };
     await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    const declaration = await createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
       draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
       declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    });
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: declaration.id } }, f.context, forged)).toMatchObject({ reason: "terms_source_stale" });
+    })).rejects.toMatchObject({ code: "stale" });
+    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "terms_source_stale" });
     await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...f.termsInput, offerId: "unselected" } });
     expect(await f.read()).toMatchObject({ reason: "terms_source_stale" });
     const changed = await f.currentTermsSource(); expect(changed).not.toBe(f.sources.terms);
@@ -241,11 +241,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "finance_source_stale" });
     const forged = { ...f.sources, finance: "forged" };
     await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    const declaration = await createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
       draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
       declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    });
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: declaration.id } }, f.context, forged)).toMatchObject({ reason: "finance_source_stale" });
+    })).rejects.toMatchObject({ code: "stale" });
+    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "finance_source_stale" });
     // Tax policy is source state but does not change method capability; readiness alone is insufficient.
     await pool.query("UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1", [f.scope.propertyId]);
     expect(await f.read()).toMatchObject({ reason: "finance_source_stale" });
