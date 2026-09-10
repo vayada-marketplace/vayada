@@ -212,3 +212,28 @@ not proof of checkout, collection timing or complete publication readiness.
 The caller verifies terms through Booking and pricing through PMS before use;
 the adapter is not a parser for client-supplied approval evidence. No new Finance
 settings writer, HTTP endpoint or complete pricing guard is wired in this slice.
+
+## Mandatory-charge inclusion declarations (VAY-1667)
+
+`createReplacementChargeDeclarationStore.confirm` records the explicit PMS
+declaration `all_mandatory_charges_included` against the commercial contents of
+a saved replacement draft. It reads the draft under live authorization and PMS
+locks, checks draft/base revisions, active property-owned rooms and current
+Booking offer terms, then atomically writes immutable evidence, audit and outbox.
+No missing declaration is interpreted as zero charges or calculated tax evidence.
+
+The fingerprint includes currency, complete room pricing configurations (including
+pricing and terms revisions), owner references and source revisions. Only the
+`charges` key in owner references and source revisions is excluded so attaching
+the declaration does not invalidate itself. Other price/source changes require a
+new explicit confirmation. The stored draft ID/revision records the confirmation's
+origin; exact idempotent replay returns that historical receipt, not renewed validity.
+`lockReplacementChargeDeclaration` verifies the exact property, ID and commercial
+fingerprint inside a caller-authorized transaction.
+
+This evidence states that no extra mandatory collection is needed; it does not
+calculate taxes or additive charges. The full publication guard must still validate
+live non-charge owners, Finance readiness and FX evidence. Routes, additive charge
+configuration and publication wiring remain follow-up work. Integration tests seed
+the saved-draft boundary and exercise real local PostgreSQL authorization, Booking
+terms and charge confirmation; they do not represent a deployed hotel confirmation.
