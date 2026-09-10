@@ -49,14 +49,23 @@ Earlier per-slice build and review evidence remains in the PR descriptions.
 Use [DATABASE.md](DATABASE.md) for the dedicated database procedure. Do not reset
 shared databases or treat a room type as physical stock, pricing or publication.
 
+## Connection lifecycle follow-up
+
+The stack now adds the read-only listing adapter (#1909), scoped source storage
+(#1911), authenticated unmounted routes (#1913), and connection-link transport
+(#1914). The browser-return slice adds token scrubbing, session recovery, cancellation
+and saved-source recovery. Eight browser scenarios pass with synthetic API/auth
+responses; the link/route/reader suite has 58 passing tests. See
+[the source design](../../engineering/airbnb-onboarding-source.md) for contracts.
+
 ## Remaining boundary
 
-The next functional milestone is a real source adapter and authenticated
-connection lifecycle feeding the shared review model. The current production
-source contract is invitation-prepared data; an Airbnb account is not that source.
-Provider authorization, account-to-property binding, listing retrieval and a fresh
-host journey still need implementation/verification. No fictional Airbnb listing
-or real provider write is needed to review this local MVP.
+The callback is disabled by default, and provider routes are not mounted. Next:
+resolve trusted account/property bindings, redact initial callback request logs,
+and connect saved Airbnb sources to shared review/application. The current room
+application contract still uses invitation-prepared data. A full fresh-host
+authorization remains unverified; synthetic tests do not close that gap. No live
+provider write or deployment was performed for these connection lifecycle slices.
 
 Follow-up: the [Airbnb source slice](../../engineering/airbnb-onboarding-source.md)
 adds an unmounted read-only adapter for channel scope checks, listing names and

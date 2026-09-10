@@ -121,3 +121,24 @@ Responses are bounded to 256 KiB and transport failures are sanitized.
 Tests mock provider responses; no live connection was created. Mounting still needs
 a trusted binding resolver, callback handling, and request-log token redaction.
 The existing 20-minute attempt expiry still applies even if a provider link lasts longer.
+
+## Browser return slice
+
+`/setup/airbnb-return/:propertyId/:sourceId` is disabled unless the server sets
+`AIRBNB_IMPORT_CALLBACK_ENABLED=true`. The response sets no-referrer policy. The
+client scrubs query/hash before authenticated completion or session recovery.
+Strict Mode reuses one completion operation. Cancelled/malformed callbacks do not
+complete; reload or a lost completion response reads the actor-scoped saved source.
+Only a matching source returned by Vayada produces a review-ready message. No room
+is applied, and the existing setup page does not yet consume this source.
+
+Browser tests use synthetic auth/provider API responses. Live mounting still needs
+trusted binding resolution, verified request-log token redaction at proxy/application
+layers, and source review/application wiring. URL scrubbing cannot remove tokens
+from the initial incoming request logs. Do not enable this flag remotely yet.
+
+Focused browser check: start the isolated marketplace frontend with the callback
+flag, then run `E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_MARKETPLACE_BASE_URL=<local-origin>
+npx playwright test tests/e2e/marketplace-web/airbnb-import-return.spec.ts
+--project=marketplace-web-chromium`. The suite is opt-in because normal builds keep
+the callback disabled.
