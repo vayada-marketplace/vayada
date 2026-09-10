@@ -7,6 +7,9 @@ describe("replacement money and room-price boundary", () => {
       expect(parsePricingMoney({ currency, amountMinor: "123" })).not.toBeNull();
     }
     expect(pricingCurrencyScale("EUR")).toBe(2);
+    for (const currency of ["AFN", "ALL", "COP", "HUF", "IDR", "IRR", "KPW", "LAK", "LBP", "MGA", "MMK", "PKR", "SOS", "SYP", "YER"])
+      expect(pricingCurrencyScale(currency), currency).toBe(2);
+    expect(pricingCurrencyScale("IQD")).toBe(3);
     expect(pricingCurrencyScale("JPY")).toBe(0);
     expect(pricingCurrencyScale("KWD")).toBe(3);
   });
