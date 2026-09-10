@@ -34,3 +34,6 @@ review found stale saved-count feedback on lost response; fixed and re-reviewed.
 Ponytail pass: reuse native sessionStorage and existing shared editor; no new dependency.
 Separate fresh read-only Channex check returned HTTP200, capacity2, description197
 characters. No data from that real listing is stored in the synthetic fixtures.
+
+For the shared editor backed by the real local import API and PostgreSQL, see
+[the database harness](DATABASE.md). Its identity and Airbnb source are still simulated.
