@@ -229,6 +229,21 @@ economics producer must establish revenue semantics and correction/source freshn
 before passing lines to the atomic Booking/Finance writer. This pure reader has no
 runtime registration and does not relax the temporary application guard.
 
+The Booking OTA correction planner compares scoped current room-night ledger
+aggregates and their latest evidence IDs with verified desired **gross** economics.
+It uses decimal integer arithmetic for price deltas, reverses removed nights, adds
+new nights, restores previously removed nights of the same room type and omits
+unchanged economics. Corrections retain current-tip lineage and cannot backdate
+recognition before the prior evidence or service night. Missing-to-known economics
+can be corrected, including explicit zero. Room-type replacements, known-to-missing
+prices and quality-only changes with unchanged known money remain unsupported by
+this slice. The caller must establish tenant/source scope, booking locks, complete
+ledger coverage, currency, accounting date and provider source freshness before
+planning; raw provider prices are not automatically verified gross economics.
+Plans are bounded to 1,000 lines and commit through the existing atomic Finance
+economics writer. This pure planner does not yet load ledger state or change the
+runtime guard.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical

@@ -8,6 +8,7 @@ import {
   type ExternalRevenueEvidenceLine,
 } from "./bookingExternalNightlyRevenueEvidence.js";
 import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
+import { planOtaRevenueCorrections } from "./bookingOtaRevenueCorrections.js";
 const DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY = randomUUID(),
   OTA_BOOKING = randomUUID(),
@@ -308,6 +309,80 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
         )
       ).rows[0],
     ).toEqual({ gross: "0.0000", nights: 0 });
+  });
+
+  it("writes planned price and stay corrections through Booking and Finance", async () => {
+    await client.query(
+      `INSERT INTO finance.commission_rules
+        (property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision)
+       VALUES ($1,'property','pms','percentage',15,'2026-01-01','finance','airbnb',1)`,
+      [PROPERTY],
+    );
+    const timezone = {
+      source: {
+        ownerDomain: "hotel_catalog" as const,
+        entityType: "property_profile" as const,
+        entityId: PROPERTY,
+        revision: "profile:1",
+      },
+      timeZone: "Europe/Berlin",
+    };
+    const initial = await appendExternalNightlyRevenueEconomics(
+      client,
+      command({ lines: [line("2026-09-01", "100", "exact")] }),
+      timezone,
+    );
+    const current = {
+      roomTypeId: ROOM_TYPE,
+      stayDate: "2026-09-01",
+      linePosition: 1,
+      grossRoomAmount: "100",
+      evidenceQuality: "exact" as const,
+      occupiedRoomNights: 1 as const,
+      recognizedOn: "2026-09-01",
+      evidenceId: initial.evidenceIds[0]!,
+    };
+    const corrected = await appendExternalNightlyRevenueEconomics(
+      client,
+      command({
+        idempotencyKey: "planned-price",
+        lines: planOtaRevenueCorrections(
+          [current],
+          [{ ...current, grossRoomAmount: "80" }],
+          "2026-09-10",
+        ),
+      }),
+      timezone,
+    );
+    const lines = planOtaRevenueCorrections(
+      [
+        {
+          ...current,
+          grossRoomAmount: "80",
+          evidenceId: corrected.evidenceIds[0]!,
+          recognizedOn: "2026-09-10",
+        },
+      ],
+      [{ ...current, stayDate: "2026-09-02", grossRoomAmount: "50" }],
+      "2026-09-10",
+    );
+    const change = command({ idempotencyKey: "planned-stay", lines });
+    const applied = await appendExternalNightlyRevenueEconomics(client, change, timezone);
+    expect(await appendExternalNightlyRevenueEconomics(client, change, timezone)).toEqual({
+      ...applied,
+      outcome: "replayed",
+    });
+    expect(
+      (
+        await client.query(
+          `SELECT
+      (SELECT sum(gross_room_amount)::text FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1) AS gross,
+      (SELECT sum(occupied_room_nights)::int FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1) AS nights,
+      (SELECT sum(commission_amount)::text FROM finance.ota_commission_evidence WHERE guest_booking_id=$1) AS commission`,
+          [OTA_BOOKING],
+        )
+      ).rows[0],
+    ).toEqual({ gross: "50.0000", nights: 1, commission: "7.5000" });
   });
 
   it("serializes manual revisions and appends adjustment history", async () => {
