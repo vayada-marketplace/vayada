@@ -120,6 +120,7 @@ describe.skipIf(!url)("durable Airbnb source", () => {
     const reopened = createPgAirbnbImportSourceRepository(url!);
     try {
       expect(await reopened.find(scope, attempt.sourceId)).toEqual({
+        ...binding,
         sourceId: attempt.sourceId,
         channelId: channel,
         data,
