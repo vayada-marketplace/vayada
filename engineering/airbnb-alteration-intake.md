@@ -204,6 +204,18 @@ guard, not completed Finance reconciliation: activation still requires an atomic
 OTA nightly-revenue/commission correction integration with source freshness,
 including reductions and room-type changes, without rewriting issued folios.
 
+Revenue correction scope must retain removed room positions: after `room_count`
+decreases, the Booking evidence writer may append a non-positive occupancy change
+or money-only correction for an old position only when it references existing
+evidence for the same property, booking, source kind, currency, room type, date and
+position. Existing database lineage and current-tip checks still apply. New room
+nights and occupancy increases remain bounded by the current room count. An exact
+replay of previously committed evidence remains valid after a room-count reduction;
+changed content under the same idempotency key remains a conflict. The existing
+Finance economics writer must capture linked commission corrections in the same
+transaction, retaining the original commission rule snapshot. This writer support
+does not remove the alteration application guard or supply provider nightly prices.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical
