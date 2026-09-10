@@ -1,3 +1,5 @@
+import Fastify from "fastify";
+import { registerReplacementPricingRoutes } from "../routes/replacementPricing.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
@@ -127,5 +129,26 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await expect(f.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
     await expect(other.commands.prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
     await expect(createReplacementPricingCommands(pool, null).prepare(id, f.proposed)).rejects.toMatchObject({ code: "denied" });
+  });
+  it("executes the protected HTTP flow against real pricing owners and storage", async () => {
+    const f = await fixture(), id = f.scope.propertyId, app = Fastify();
+    app.decorateRequest("authContext", null); app.addHook("onRequest", async (request) => { request.authContext = f.context; });
+    await app.register(registerReplacementPricingRoutes, { commands: (context) => createReplacementPricingCommands(pool, context) });
+    const base = `/properties/${id}/pricing-v2`, draftPath = `${base}/drafts/${f.draft.draftId}`;
+    try {
+      const prep = await app.inject({ method: "POST", url: `${base}/prepare`, payload: f.proposed });
+      expect(prep.statusCode).toBe(200); const prepared = prep.json();
+      expect((await app.inject({ method: "PUT", url: draftPath, payload: { expectedDraftRevision: 0, baseRevision: 0, ...prepared } })).json()).toEqual({ revision: 1 });
+      const confirmation = await app.inject({ method: "POST", url: `${base}/charges`, headers: { "idempotency-key": "http-confirm" },
+        payload: { draftId: f.draft.draftId, expectedDraftRevision: 1, claimedFingerprint: replacementChargeFingerprint(id, prepared.snapshot, prepared.sources), declaration: "all_mandatory_charges_included" } });
+      expect(confirmation.statusCode).toBe(200);
+      const snapshot = { ...prepared.snapshot, ownerReferences: { ...prepared.snapshot.ownerReferences, charges: confirmation.json().id } };
+      expect((await app.inject({ method: "PUT", url: draftPath, payload: { expectedDraftRevision: 1, baseRevision: 0, sources: prepared.sources, snapshot } })).json()).toEqual({ revision: 2 });
+      const payload = { expectedRevision: 0, sources: prepared.sources, snapshot, draft: { id: f.draft.draftId, revision: 2 } };
+      for (const replayed of [false, true]) expect((await app.inject({ method: "POST", url: `${base}/publish`, headers: { "idempotency-key": "http-publish" }, payload })).json()).toEqual({ revision: 1, replayed });
+      await pool.query("UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1", [f.membershipId]);
+      expect((await app.inject({ method: "POST", url: `${base}/publish`, headers: { "idempotency-key": "http-publish" }, payload })).statusCode).toBe(403);
+      expect(await counts(id)).toEqual({ drafts: 1, revisions: 1, events: 1 });
+    } finally { await app.close(); }
   });
 });

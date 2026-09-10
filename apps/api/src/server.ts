@@ -1,3 +1,4 @@
+import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -1323,6 +1324,9 @@ const app = buildApp({
       : undefined,
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
+    : undefined,
+  replacementPricing: config.pmsOperationsSource === "target"
+    ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
     : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
     ? {

@@ -1,3 +1,4 @@
+import { registerReplacementPricingRoutes, type ReplacementPricingRoutesOptions } from "./routes/replacementPricing.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -312,6 +313,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
+  replacementPricing?: ReplacementPricingRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
@@ -782,6 +784,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
+  if (options.replacementPricing) app.register(registerReplacementPricingRoutes, { prefix: "/api/pms", ...options.replacementPricing });
   if (options.pmsPricing) {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",
