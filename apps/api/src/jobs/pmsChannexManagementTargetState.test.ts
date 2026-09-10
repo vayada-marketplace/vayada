@@ -113,6 +113,32 @@ describe("PMS Channex management target state", () => {
     expect(client.sql()).toContain("pms.channel_rate_plan_mappings SET status = 'disabled'");
   });
 
+  it("persists the scoped Airbnb amount settings with the channel snapshot", async () => {
+    const client = fakeClient();
+    const channels = [
+      {
+        key: "airbnb",
+        application: "Airbnb",
+        title: null,
+        isActive: true,
+        airbnbAmountSettings: {
+          channelId: "82000000-0000-4000-8000-000000000001",
+          bookingAmountMode: "Total Paid Amount" as const,
+          deductCoHostPayout: false,
+        },
+      },
+    ];
+    await createPmsChannexManagementTargetState().succeed(
+      client,
+      job("provision"),
+      { ok: true, channels },
+      now,
+    );
+    expect(client.parameters().some((values) => values.includes(JSON.stringify(channels)))).toBe(
+      true,
+    );
+  });
+
   it("fails before connection state when the binding claim is not active", async () => {
     const client = fakeClient(false);
 
@@ -130,9 +156,11 @@ describe("PMS Channex management target state", () => {
 
 function fakeClient(claimActive = true) {
   const calls: string[] = [];
+  const parameters: unknown[][] = [];
   return {
-    query: async <T>(text: string) => {
+    query: async <T>(text: string, values: unknown[] = []) => {
       calls.push(text);
+      parameters.push(values);
       return {
         rows: (text.includes("pms.channel_binding_claims") && claimActive
           ? [{ id: "claim-1" }]
@@ -141,6 +169,7 @@ function fakeClient(claimActive = true) {
     },
     release() {},
     sql: () => calls.join("\n"),
+    parameters: () => parameters,
   };
 }
 

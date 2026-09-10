@@ -69,6 +69,11 @@ export type ChannexConnectedChannel = {
   application: string;
   title: string | null;
   isActive: boolean;
+  airbnbAmountSettings?: {
+    channelId: string | null;
+    bookingAmountMode: "Payout Amount" | "Total Paid Amount" | null;
+    deductCoHostPayout: boolean | null;
+  };
 };
 
 export type ChannexManagementOperation = {

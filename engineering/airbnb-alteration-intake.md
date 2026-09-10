@@ -256,7 +256,22 @@ filters cannot silently drop conflicting evidence. Provider revision freshness,
 binding ownership, Finance payment/folio handling and gross-price interpretation
 remain the coordinator's responsibility; this reader does not activate the workflow.
 
-### Provider economics confirmation required before worker wiring
+### Provider economics evidence required before worker wiring
+
+The [Airbnb channel settings reference](https://docs.channex.io/channel-api-examples/airbnb#airbnb-connection-settings-reference)
+explicitly documents `booking_amount_settings` (`Payout Amount` or `Total Paid
+Amount`) and `cohost_payout_calculations` (deduct co-host commission when true).
+The management adapter retains the provider channel ID and these two settings
+on each normalized Airbnb channel in `connectedChannels`. Missing or malformed
+values remain null; absence never means payout mode or a disabled deduction.
+No raw provider settings or tokens are copied. The provider's `channel` field
+is preferred over the older `application` shape. Existing metadata without
+the new settings remains readable and must be treated as unknown by consumers.
+
+This narrows the earlier blocker: inspect the connection's configured amount
+mode before seeking provider clarification. A stored settings snapshot alone
+does not establish its freshness for a particular booking revision or prove
+the gross/tax semantics of `rooms[].days`; financial application stays guarded.
 
 Rechecked the [official Bookings Collection](https://docs.channex.io/api-v.1-documentation/bookings-collection)
 on 2026-09-10. The generic field definitions describe `amount` as total booking
@@ -274,7 +289,7 @@ always returns net payouts. Do not parse the free-text notes into financial fact
 or infer that empty services/taxes arrays prove gross-price semantics.
 
 Before removing the Finance guard or connecting the price reader directly to the
-correction planner, obtain a provider-confirmed mapping and a sanctioned modified
+correction planner, establish a configuration-aware mapping and a sanctioned modified
 Airbnb revision pair that establish:
 
 - Whether daily prices are before or after Airbnb host commission, and whether
@@ -288,10 +303,11 @@ Airbnb revision pair that establish:
 - Expected reconciliation of daily prices, room totals, booking totals and
   commission for a price/date alteration, including reductions and explicit zero.
 
-Capture the provider response and sanitized before/after payload evidence in this
-contract before implementing that mapping. The existing reader, ledger loader and
+Capture the settings, supporting documentation and sanitized before/after payload
+evidence in this contract; seek provider confirmation for any unresolved semantics.
+The existing reader, ledger loader and
 planner remain reusable components; their synthetic tests do not establish this
-provider mapping. Worker Finance integration remains blocked on this confirmation,
+provider mapping. Worker Finance integration still requires this verified mapping,
 alongside the other documented activation gates.
 
 Application supports room count/type changes for pre-arrival channel assignments.
