@@ -178,3 +178,20 @@ Consent/retention, operational evidence conflict handling and the remaining Fina
 commercial/settlement rules still need their owning contracts. No live tracking or
 payment readiness is claimed. No new migration, API or provider connection is part
 of this design change. Acceptance criteria above are requirements, not executed tests.
+
+## Initial storage and internal publication command
+
+Migration 0181 stores stable per-offer programs and immutable published terms tied
+to the exact scoped draft, disclosure bytes/hash, attribution policy, evidence and
+author audit. The internal publication command locks the offer, checks persisted
+property access and verified moderation, resolves the exact approved rate and saved
+destination, and atomically stores publication and retry result. Publication does
+not modify agreements or activate links. Authorized replay returns its original
+record; a different key cannot republish the same draft.
+
+The default prerequisite resolver blocks publication: complete commercial conditions
+and a validated tracking adapter are unavailable. Its trusted internal replacement
+must verify both for the exact scope with transaction-consistent evidence and
+retain immutable proof references. No public request can supply that resolver.
+Synthetic resolver tests prove transaction behavior only. No HTTP route or live
+provider/publication path is wired.
