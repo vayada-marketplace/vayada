@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import {
   PlusIcon,
@@ -647,16 +647,23 @@ export default function RoomsPage() {
   const [individualRooms, setIndividualRooms] = useState<Room[]>([]);
   const [linkedGroups, setLinkedGroups] = useState<LinkedInventoryGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadRevision = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [duplicatingRoomTypeIds, setDuplicatingRoomTypeIds] = useState<Set<string>>(new Set());
 
   const loadData = () => {
+    const revision = ++loadRevision.current;
+    setRefreshing(true);
     Promise.allSettled([
       roomsService.list(),
       individualRoomsService.list(),
       linkedInventoryGroupsService.list(),
     ])
       .then(([types, indRooms, groups]) => {
+        if (revision !== loadRevision.current) return;
+        setLoadFailed([types, indRooms, groups].some((result) => result.status === "rejected"));
         if (types.status === "fulfilled") setRooms(types.value);
         else console.error(types.reason);
         if (indRooms.status === "fulfilled") setIndividualRooms(indRooms.value);
@@ -664,11 +671,18 @@ export default function RoomsPage() {
         if (groups.status === "fulfilled") setLinkedGroups(groups.value);
         else console.error(groups.reason);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (revision !== loadRevision.current) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
   };
 
   useEffect(() => {
     loadData();
+    return () => {
+      loadRevision.current++;
+    };
   }, []);
 
   const refreshRooms = () => {
@@ -727,6 +741,22 @@ export default function RoomsPage() {
         />
       )}
       {/* Search */}
+      {loadFailed && (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <p>{t("rooms.loadFailed")}</p>
+          <button
+            type="button"
+            onClick={refreshRooms}
+            disabled={refreshing}
+            className="mt-2 font-semibold underline disabled:opacity-50"
+          >
+            {t(refreshing ? "common.loading" : "common.retry")}
+          </button>
+        </div>
+      )}
       <div className="mb-4 md:mb-5">
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -755,7 +785,8 @@ export default function RoomsPage() {
             <div key={i} className="h-20 bg-gray-50 rounded-xl" />
           ))}
         </div>
-      ) : filteredRooms.length === 0 && rooms.length === 0 ? (
+      ) : loadFailed && rooms.length === 0 ? null : filteredRooms.length === 0 &&
+        rooms.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
           <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <svg

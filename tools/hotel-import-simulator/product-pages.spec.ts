@@ -168,3 +168,57 @@ test("import from actual onboarding appears in actual PMS room settings", async 
   const after = await (await request.get(endpoint)).json();
   expect(after.existingRooms).toHaveLength(before.existingRooms.length + 2);
 });
+
+test("room settings recovers a failed refresh without another import", async ({
+  page,
+  request,
+}, testInfo) => {
+  const { propertyId } = await (await request.get(`${database}/api/import-demo`)).json();
+  const endpoint = `${database}/api/hotel-setup/properties/${propertyId}/import`;
+  const before = await (await request.get(endpoint)).json();
+  expect(before.existingRooms.length, "Run the product-page import scenario first").toBeGreaterThan(
+    0,
+  );
+  const existingName = before.existingRooms[0].name;
+  await prepare(page, request, propertyId);
+  let failReads = true;
+  let writes = 0;
+  await page.route(/\/api\//, async (route) => {
+    const req = route.request();
+    if (!["GET", "OPTIONS"].includes(req.method())) {
+      writes++;
+      return route.fulfill({
+        status: 503,
+        headers: corsHeaders(route),
+        json: { code: "unexpected_write" },
+      });
+    }
+    if (
+      req.method() === "GET" &&
+      new URL(req.url()).pathname.endsWith("/room-types") &&
+      failReads
+    ) {
+      return route.fulfill({
+        status: 503,
+        headers: corsHeaders(route),
+        json: { code: "simulated_read_failure" },
+      });
+    }
+    return route.fallback();
+  });
+  await page.goto("https://pms.localhost:1382/rooms");
+  const error = page.getByRole("alert").filter({ hasText: "Some room data could not be loaded" });
+  await expect(error).toBeVisible();
+  await expect(page.getByText("No room types yet.", { exact: false })).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("settings-refresh-failure.png"),
+    fullPage: true,
+  });
+  failReads = false;
+  await error.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(error).toHaveCount(0);
+  await expect(page.getByText(existingName, { exact: true }).first()).toBeVisible();
+  expect(writes).toBe(0);
+  const after = await (await request.get(endpoint)).json();
+  expect(after).toEqual(before);
+});
