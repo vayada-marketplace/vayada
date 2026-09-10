@@ -171,21 +171,34 @@ The evidence is recorded with the local smoke ledger.
 These deployed checks cover two room types; the broader combinations, races
 and negative cases retain their separately labeled local/database coverage above.
 
-## Remaining release constraints
+## Final retirement and release acceptance — 2026-09-10
 
-The new room's supported retirement-impact reports one active physical unit,
-two future open inventory days and four publication references. Last-unit
-retirement is blocked while the canonical calendar binds that room; no supported
-room-only close/unbind path was found. Preserve the room until that prerequisite
-is resolved. Do not change the whole-property schedule or bypass guards.
-An independently reviewed exact-two-row mapping-disable maintenance template is
-prepared but unexecuted; it requires supported closure/publication prerequisites,
-a fresh exclusive lease, same-image worker pause and zero pending/in-flight work.
-Keep provider records closed/zero and preserve original mappings and reservations.
+The supported closure and retirement workflow completed. Receipt
+`9e9e559c-cab7-4887-a842-5ebe9ce654cb` closed 364 future inventory days,
+retired the selected physical unit and suppressed three offers. Exact replay
+passed. Publication `45680212-b27e-40d1-90a2-1ec1d1b5b402` succeeded after
+extending rolling coverage by two closed-zero original-room dates. The selected
+room is inactive, with zero active units; only its two mappings were disabled
+and independently audited. All 11 reservations, original room/pricing/policy
+choices, two season rules and 369 pre-existing original inventory rows/revisions
+were preserved. The room is absent publicly and readiness is ready.
 
-Request-mode pay-at-property copy still incorrectly promises instant confirmation;
-guest cancellation obscures the safe legacy-policy rejection reason. Both are
-recorded follow-ups. A separate coordinated Booking.com test-channel recovery
-succeeded after this cleanup; no OTA acceptance is claimed. Preserve scoped Channex restrictions/meals and disabled
-global workers; coordinate any later inventory-worker scope rollout with its owner.
-Keep VAY-910 In Progress until remaining release work and explicit acceptance.
+Closure mode was disabled and the scoped worker restored on the same reviewed
+image. The normal retirement ARI job was dead-lettered once by the existing
+mapping guard before provider HTTP; pending/running jobs ended at zero. A later
+supported unchanged inventory-rule reconciliation refreshed stale channel
+metadata from the provider. The actual deployed planner then passed the mapping
+precondition without executing HTTP. The historical failure remains recorded;
+no ARI resend or OTA success is claimed. Booking.com is absent from the current
+provider channel list. The fixture lease was released.
+
+Sanitized local evidence: `evidence/vay910-closure-live/RESULT.md` and
+`evidence/vay1528-mapping-diagnostic/RESULT.md` under the reusable test evidence
+store. Canary26 retains the closure fences with closure mode off; deploying a
+replacement must preserve compatibility with the durable closure receipt.
+
+The user accepted proceeding with broad activation after these results on
+2026-09-10. Activation still requires current-head checks, review and deployment
+compatibility verification; Done follows verified deployment. Request-mode
+pay-at-property copy and the obscured legacy-policy cancellation rejection
+remain separate recorded UI follow-ups.
