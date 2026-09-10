@@ -58,6 +58,16 @@ and saved-source recovery. Eight browser scenarios pass with synthetic API/auth
 responses; the link/route/reader suite has 58 passing tests. See
 [the source design](../../engineering/airbnb-onboarding-source.md) for contracts.
 
+## Airbnb application receipts
+
+A separate internal receipt repository now records completed Airbnb source items
+without invitation rows. The local migration 0180 was applied and its rerun was
+a no-op. The focused suite passes 74 tests, including 16 real PostgreSQL source/
+receipt tests. Concurrent mixed-case source IDs share one lock; successful receipts
+persist across reopening, failed items remain retryable, and exact actor/organization/
+property/source scope is required. Executors are synthetic; no canonical room
+commands are wired to this repository yet.
+
 ## Remaining boundary
 
 The callback is disabled by default, and provider routes are not mounted. Next:
