@@ -198,6 +198,64 @@ describe("Channex management provider", () => {
     });
   });
 
+  it.each([
+    [
+      { booking_amount_settings: "Payout Amount", cohost_payout_calculations: true },
+      "Payout Amount",
+      true,
+    ],
+    [
+      { booking_amount_settings: "Total Paid Amount", cohost_payout_calculations: false },
+      "Total Paid Amount",
+      false,
+    ],
+    [{}, null, null],
+    [{ booking_amount_settings: "unknown", cohost_payout_calculations: "false" }, null, null],
+    [null, null, null],
+  ])(
+    "retains only explicit Airbnb financial settings (%j)",
+    async (settings, bookingAmountMode, deductCoHostPayout) => {
+      const id = "82000000-0000-4000-8000-000000000001";
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "secret",
+        plans: {
+          plan: async () => ({ requests: [channexRequests.listChannels("external-property")] }),
+        },
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(
+            response(200, {
+              data: [
+                {
+                  id,
+                  attributes: {
+                    channel: "Airbnb",
+                    application: "obsolete",
+                    title: "Airbnb",
+                    is_active: true,
+                    settings: settings && { ...settings, access_token: "PRIVATE PROVIDER TOKEN" },
+                  },
+                },
+              ],
+            }),
+          ),
+      });
+      const result = await provider.execute(job("provision"));
+      expect(result).toMatchObject({
+        ok: true,
+        channels: [
+          {
+            key: "airbnb",
+            application: "Airbnb",
+            airbnbAmountSettings: { channelId: id, bookingAmountMode, deductCoHostPayout },
+          },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain("PRIVATE PROVIDER TOKEN");
+    },
+  );
+
   it("reconciles provider state and checkpoints it before skipping duplicate creates", async () => {
     const checkpoint = vi.fn();
     const fetcher = vi

@@ -584,12 +584,40 @@ function channelFromProvider(value: unknown): ChannexConnectedChannel | null {
     item.attributes && typeof item.attributes === "object"
       ? (item.attributes as Record<string, unknown>)
       : item;
-  if (typeof attributes.application !== "string") return null;
+  const application =
+    typeof attributes.channel === "string" ? attributes.channel : attributes.application;
+  if (typeof application !== "string") return null;
+  const key = canonicalChannel(application);
+  const settings =
+    attributes.settings &&
+    typeof attributes.settings === "object" &&
+    !Array.isArray(attributes.settings)
+      ? (attributes.settings as Record<string, unknown>)
+      : {};
+  const mode = settings.booking_amount_settings;
+  const channelId = item.id ?? attributes.id;
   return {
-    key: canonicalChannel(attributes.application),
-    application: attributes.application,
+    key,
+    application,
     title: typeof attributes.title === "string" ? attributes.title : null,
     isActive: attributes.is_active === true,
+    ...(key === "airbnb"
+      ? {
+          airbnbAmountSettings: {
+            channelId:
+              typeof channelId === "string" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId)
+                ? channelId
+                : null,
+            bookingAmountMode:
+              mode === "Payout Amount" || mode === "Total Paid Amount" ? mode : null,
+            deductCoHostPayout:
+              typeof settings.cohost_payout_calculations === "boolean"
+                ? settings.cohost_payout_calculations
+                : null,
+          },
+        }
+      : {}),
   };
 }
 
