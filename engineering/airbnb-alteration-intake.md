@@ -216,6 +216,19 @@ Finance economics writer must capture linked commission corrections in the same
 transaction, retaining the original commission rule snapshot. This writer support
 does not remove the alteration application guard or supply provider nightly prices.
 
+The provider-price reader uses the documented `rooms[].days` date-to-price map
+from [Channex booking revisions](https://docs.channex.io/api-v.1-documentation/bookings-collection).
+It accepts only the expected revision, provider property/booking, currency, stay
+and room positions, with caller-supplied scoped local room-type mappings. It emits
+one line per room/night, at most 1,000 lines; absent/null prices stay null, explicit
+zero stays zero, and malformed prices or dates outside the stay reject the input.
+It never spreads booking/room totals or services/taxes across nights. Its output is
+provider nightly-price evidence, not a claim of final Finance gross revenue or tax
+allocation. Guest data and unrelated provider fields are excluded. The subsequent
+economics producer must establish revenue semantics and correction/source freshness
+before passing lines to the atomic Booking/Finance writer. This pure reader has no
+runtime registration and does not relax the temporary application guard.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical
