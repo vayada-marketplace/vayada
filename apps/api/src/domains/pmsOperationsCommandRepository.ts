@@ -3901,7 +3901,7 @@ async function inspectRoomTypeRetirement(
          WHERE receipt.property_id = room_type.property_id
            AND receipt.room_type_id = room_type.id
            AND status.lifecycle_state IN ('reserved','handed_off')
-           AND receipt.check_out > CURRENT_DATE))::bigint AS "reservationCount",
+           AND receipt.check_out > COALESCE(closure.cutoff_date, CURRENT_DATE)))::bigint AS "reservationCount",
        (SELECT count(*) FROM pms.rooms room
         WHERE room.property_id = room_type.property_id
           AND room.room_type_id = room_type.id
@@ -3909,20 +3909,20 @@ async function inspectRoomTypeRetirement(
        ((SELECT count(*) FROM pms.inventory_days inventory
          WHERE inventory.property_id = room_type.property_id
            AND inventory.room_type_id = room_type.id
-           AND inventory.stay_date >= CURRENT_DATE
+           AND inventory.stay_date >= COALESCE(closure.cutoff_date, CURRENT_DATE)
            AND (inventory.status <> 'closed' OR inventory.available_count > 0
                 OR inventory.assigned_count > 0 OR inventory.blocked_count > 0))
         +
         (SELECT count(*) FROM pms.room_blocks block
          WHERE block.property_id = room_type.property_id
            AND (block.room_type_id = room_type.id OR block.source_room_type_id = room_type.id)
-           AND block.status = 'active' AND block.ends_on >= CURRENT_DATE)
+           AND block.status = 'active' AND block.ends_on >= COALESCE(closure.cutoff_date, CURRENT_DATE))
         + CASE WHEN room_type.linked_inventory_group_id IS NULL THEN 0 ELSE 1 END
        )::bigint AS "inventoryCount",
        ((SELECT count(*) FROM distribution.public_room_offer_snapshots offer
          WHERE offer.property_id = room_type.property_id
            AND offer.room_type_id = room_type.id
-           AND offer.stay_date >= CURRENT_DATE AND offer.sellable_publicly)
+           AND offer.stay_date >= COALESCE(closure.cutoff_date, CURRENT_DATE) AND offer.sellable_publicly)
         +
         (SELECT count(*) FROM pms.channel_room_type_mappings mapping
          WHERE mapping.property_id = room_type.property_id
@@ -3952,6 +3952,8 @@ async function inspectRoomTypeRetirement(
            ))
        )::bigint AS "publicationCount"
      FROM pms.room_types room_type
+     LEFT JOIN pms.room_type_closures closure
+       ON closure.property_id=room_type.property_id AND closure.room_type_id=room_type.id
      WHERE room_type.property_id = $1::uuid AND room_type.id = $2::uuid AND room_type.active`,
     [propertyId, roomTypeId],
   );

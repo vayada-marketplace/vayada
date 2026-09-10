@@ -1,3 +1,4 @@
+import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -303,6 +304,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+  pmsRoomClosureRepository?: PmsRoomClosureRepository;
   pmsLinkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -752,6 +754,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
+      roomClosureRepository: options.pmsRoomClosureRepository,
       linkedInventoryGroupCommandRepository: options.pmsLinkedInventoryGroupCommandRepository,
       resolveOnboardingRoomCurrency: async (propertyId) =>
         (await options.bookingSettingsRepository?.findPropertySettingsByHotelId?.(propertyId))

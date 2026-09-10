@@ -57,6 +57,31 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
+  it("rejects captured active-room evidence after closure without writing inventory", async () => {
+    const fixture = await createFixture(admin, repositories, [2]);
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+      [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+    );
+    expect(
+      await fixture.repository.materializeInventory(
+        materializationCommand(fixture, "closed", 1, "2026-08-04", "2026-08-06"),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.inventory_days WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
+
   it("adds a new room to stored coverage and still rejects missing old-room rows", async () => {
     const newRoom = randomUUID();
     const fixture = await createFixture(admin, repositories, [2, 2], newRoom);

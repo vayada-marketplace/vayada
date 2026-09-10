@@ -70,8 +70,13 @@ holding the publication lock. No path may acquire inventory after publication. A
    across that horizon advance calendar_revision/generated_source_revision and
    inventory_revision exactly once; no booking/manual/channel/block/linked
    source revision or counter changes. Past rows of the closing room remain
-   historical and are excluded from the new coverage set; future rows remain
-   stored and closed. Do not reuse the unit helper's coverage truncation.
+   historical and are excluded from the new coverage set. The closing room's
+   future rows retain their old calendar/binding and all existing source counters:
+   a dedicated `closure_source_revision` advances exactly once from 0 to 1,
+   alongside `inventory_revision + 1`, to set status closed and availability zero.
+   This transition requires the immutable receipt and inclusive cutoff, forbids
+   mixed-owner changes and existing occupancy/blocks, and also marks already-closed
+   rows. Inserts cannot fabricate closure ownership; replay does not mutate it. Do not reuse the unit helper's coverage truncation.
 4. Invoke Distribution's transaction port to suppress only this room's public
    offers. Establish the current operating-eligibility fence for active-content
    reads and quote/reservation acceptance. Do not fabricate a new `ready`
