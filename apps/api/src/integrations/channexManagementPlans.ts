@@ -203,7 +203,9 @@ async function basePlan(
          ON connection.id = mapping.connection_id AND connection.property_id = mapping.property_id
          AND connection.provider = 'channex'
        JOIN pms.room_types room ON room.id = mapping.room_type_id AND room.property_id = mapping.property_id
-       WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active`,
+       WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active
+         AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)`,
       [job.propertyId],
     );
     if (!state.rows[0]?.rules) throw new Error("Desired inventory rules are missing");
@@ -314,6 +316,8 @@ async function provisioningPlan(
        LEFT JOIN pms.channel_room_type_mappings mapping
          ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
        WHERE room.property_id = $1::uuid AND room.active
+         AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
          AND ($2::uuid IS NULL OR EXISTS (
            SELECT 1 FROM pms.rate_plans selected_plan
            WHERE selected_plan.id = $2::uuid AND selected_plan.property_id = room.property_id
@@ -334,6 +338,9 @@ async function provisioningPlan(
          room_mapping.external_room_type_id AS "externalRoomTypeId"
        FROM pms.rate_plans plan
        JOIN pms.room_types room ON room.id = plan.room_type_id AND room.active
+         AND room.property_id=plan.property_id
+         AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
        CROSS JOIN (VALUES ('direct', 'Standard'), ('booking_com', 'BDC Standard'),
          ('airbnb', 'Airbnb Standard')) AS channel(key, label)
        LEFT JOIN pms.channel_connections connection

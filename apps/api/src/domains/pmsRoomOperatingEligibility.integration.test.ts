@@ -1,0 +1,790 @@
+import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
+import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
+import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
+import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
+import {
+  PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS,
+  createTargetPmsInventoryPublicOfferProjection,
+} from "./pmsInventoryPublicOfferProjection.js";
+import {
+  createProductReadinessResult,
+  createReadyProductReadinessEvidence,
+} from "@vayada/domain-hotels";
+import {
+  createPgDistributionBookingPublicationProjection,
+  BookingPublicationRoomClosureConflictError,
+} from "./distributionBookingPublicationProjection.js";
+import { createPmsMandatoryChargePricingSourceSnapshot } from "@vayada/domain-pms";
+import { loadPmsMandatoryChargePricingSourceSnapshot } from "./pmsMandatoryChargePricingSourceSnapshot.js";
+import { createPgPmsRecurringPricingReadModel } from "./pmsRecurringPricingReadModel.js";
+import { createPgPropertySetupPmsOwnerRepository } from "./propertySetupPmsOwnerRepository.js";
+import { createPgPmsPricingReadModel } from "./pmsPricingReadModel.js";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
+
+const url = process.env["TEST_DATABASE_URL"];
+describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
+  const db = new pg.Client({ connectionString: url });
+  let propertyId: string, roomTypeId: string, actorId: string;
+  beforeAll(async () => {
+    if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname))
+      throw new Error("Test database required");
+    await db.connect();
+  });
+  afterAll(async () => {
+    await db.end();
+  });
+  beforeEach(async () => {
+    propertyId = randomUUID();
+    roomTypeId = randomUUID();
+    actorId = randomUUID();
+    await db.query(
+      "INSERT INTO identity.users (id,email,name,status) VALUES ($1,$2,'Closure test','active')",
+      [actorId, `${actorId}@example.test`],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.properties (id,public_id,display_name) VALUES ($1::uuid,$1::text,'Closure test')",
+      [propertyId],
+    );
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Closure test',true)",
+      [roomTypeId, propertyId],
+    );
+  });
+  const close = (
+    client: pg.Client,
+    commandId = randomUUID(),
+    property = propertyId,
+    room = roomTypeId,
+  ) =>
+    client.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+     VALUES ($1,$2,$3,$4,1,1,7,8,'2026-09-09','2026-09-09T01:00:00Z',$5)`,
+      [property, room, commandId, "a".repeat(64), actorId],
+    );
+
+  it("keeps canonical facts active while excluding a closing room, retaining its receipt after retirement", async () => {
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+    ]);
+    const commandId = randomUUID();
+    await close(db, commandId);
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      {
+        propertyId,
+        roomTypeId,
+        state: "closing",
+        closureCommandId: commandId,
+        cutoffDate: "2026-09-09",
+      },
+    ]);
+    expect(
+      (await db.query("SELECT active FROM pms.room_types WHERE id=$1", [roomTypeId])).rows,
+    ).toEqual([{ active: true }]);
+    await db.query("UPDATE pms.room_types SET active=false WHERE id=$1", [roomTypeId]);
+    expect(await readPmsRoomOperatingEligibility(db, propertyId)).toEqual([
+      {
+        propertyId,
+        roomTypeId,
+        state: "inactive",
+        closureCommandId: commandId,
+        cutoffDate: "2026-09-09",
+      },
+    ]);
+  });
+
+  it("enforces property ownership in storage and never returns another property's rooms", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties (id,public_id,display_name) VALUES ($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    await expect(close(db, randomUUID(), otherProperty)).rejects.toMatchObject({ code: "23503" });
+    expect(await readPmsRoomOperatingEligibility(db, otherProperty)).toEqual([]);
+    expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("operating");
+  });
+
+  it("rejects receipt rewrites and reusing a command for a different room", async () => {
+    const commandId = randomUUID();
+    await close(db, commandId);
+    await expect(
+      db.query("UPDATE pms.room_type_closures SET cutoff_date='2026-09-10' WHERE property_id=$1", [
+        propertyId,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      db.query("DELETE FROM pms.room_type_closures WHERE property_id=$1", [propertyId]),
+    ).rejects.toMatchObject({ code: "23514" });
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await expect(close(db, commandId, propertyId, otherRoom)).rejects.toMatchObject({
+      code: "23505",
+    });
+  });
+
+  it("shares the caller's transaction and rolls eligibility back with an aborted closure", async () => {
+    await db.query("BEGIN");
+    try {
+      await close(db);
+      expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("closing");
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.state).toBe("operating");
+  });
+
+  it("rejects invalid receipt evidence and preserves an unrelated operating room", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await close(db);
+    expect(
+      (await readPmsRoomOperatingEligibility(db, propertyId)).find(
+        (row) => row.roomTypeId === otherRoom,
+      ),
+    ).toMatchObject({ state: "operating", closureCommandId: null });
+    for (const [column, value] of [
+      ["request_fingerprint", "invalid"],
+      ["expected_room_facts_revision", "0"],
+      ["expected_room_units_revision", "0"],
+      ["previous_calendar_revision", "0"],
+      ["closed_calendar_revision", "10"],
+    ]) {
+      // Column names and values are fixed test cases, never caller input.
+      await expect(
+        db.query(
+          `INSERT INTO pms.room_type_closures
+        SELECT property_id,$1::uuid,$2::uuid,
+          ${column === "request_fingerprint" ? "'invalid'" : "request_fingerprint"},
+          ${column === "expected_room_facts_revision" ? value : "expected_room_facts_revision"},
+          ${column === "expected_room_units_revision" ? value : "expected_room_units_revision"},
+          ${column === "previous_calendar_revision" ? value : "previous_calendar_revision"},
+          ${column === "closed_calendar_revision" ? value : "closed_calendar_revision"},
+          cutoff_date,accepted_at,actor_user_id
+        FROM pms.room_type_closures WHERE property_id=$3`,
+          [otherRoom, randomUUID(), propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+
+  it("fences inventory from the inclusive cutoff without changing historical or unrelated rooms", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await close(db);
+    const day = (room: string, date: string, status: string, available: number) =>
+      db.query(
+        `INSERT INTO pms.inventory_days (property_id,room_type_id,stay_date,total_count,assigned_count,blocked_count,available_count,status)
+       VALUES ($1,$2,$3,1,0,0,$4,$5)`,
+        [propertyId, room, date, available, status],
+      );
+    await day(roomTypeId, "2026-09-08", "open", 1);
+    await day(otherRoom, "2026-09-09", "open", 1);
+    await expect(day(roomTypeId, "2026-09-09", "open", 1)).rejects.toMatchObject({ code: "23514" });
+    await day(roomTypeId, "2026-09-09", "closed", 0);
+    for (const change of [
+      "status='open'",
+      "available_count=1",
+      "assigned_count=1",
+      "blocked_count=1",
+    ]) {
+      await expect(
+        db.query(
+          `UPDATE pms.inventory_days SET ${change}
+        WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-09-09'`,
+          [propertyId, roomTypeId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+    expect(
+      (
+        await db.query(
+          `SELECT room_type_id::text AS room,stay_date::text AS day,status,available_count
+      FROM pms.inventory_days WHERE property_id=$1 ORDER BY stay_date,room_type_id`,
+          [propertyId],
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        { room: roomTypeId, day: "2026-09-08", status: "open", available_count: 1 },
+        { room: otherRoom, day: "2026-09-09", status: "open", available_count: 1 },
+        { room: roomTypeId, day: "2026-09-09", status: "closed", available_count: 0 },
+      ]),
+    );
+  });
+
+  it("excludes closing-room pricing from publication sources but retains the canonical plan", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      "INSERT INTO pms.property_pricing_settings (property_id,currency) VALUES ($1,'EUR')",
+      [propertyId],
+    );
+    for (const room of [roomTypeId, otherRoom])
+      await db.query(
+        `INSERT INTO pms.rate_plans
+      (property_id,room_type_id,code,name,rate_type,base_rate_amount,currency,pricing_contract_version,
+       flexible_rate_plan_revision,source_room_facts_revision,source_pricing_currency_revision,cancellation_policy_snapshot)
+      VALUES ($1,$2::uuid,$2::text,'Flexible','flexible',100,'EUR','pms-pricing.v1',1,1,1,
+        '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":7,"afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}')`,
+        [propertyId, room],
+      );
+    await db.query(
+      `UPDATE pms.room_types SET room_facts_revision=1,
+      description='Test room',category='suite',occupancy_limits='{"total":2,"adults":2,"children":0}',
+      room_attributes='{"beds":[{"type":"queen","quantity":1}],"bedrooms":1,"bathrooms":1,"bathroomType":"private","size":{"value":30,"unit":"sqm"}}'
+      WHERE property_id=$1`,
+      [propertyId],
+    );
+    const organizationId = randomUUID();
+    await db.query(
+      `INSERT INTO identity.organizations (id,kind,name,slug,status)
+      VALUES ($1::uuid,'hotel_group','Closure test',$1::text,'active')`,
+      [organizationId],
+    );
+    await db.query(
+      `INSERT INTO identity.organization_resource_links
+      (organization_id,product,resource_type,resource_id,relationship,status)
+      VALUES ($1,'pms','pms_property',$2,'owner','active')`,
+      [organizationId, propertyId],
+    );
+    await db.query(
+      `INSERT INTO identity.product_entitlements
+      (organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id)
+      VALUES ($1,'pms','property-management','active','pms','pms_property',$2)`,
+      [organizationId, propertyId],
+    );
+    const setup = createPgPropertySetupPmsOwnerRepository({ connectionString: url! });
+    const recurring = createPgPmsRecurringPricingReadModel({ connectionString: url! });
+    const pricing = createPgPmsPricingReadModel({ connectionString: url! });
+    try {
+      expect((await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans).toHaveLength(
+        2,
+      );
+      expect((await setup.getRoomOwnerSnapshot({ organizationId, propertyId })).rooms).toHaveLength(
+        2,
+      );
+      const original = await pricing.getFlexibleRatePlan(propertyId, roomTypeId);
+      await close(db);
+      expect(
+        (await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans.map(
+          (plan) => plan.roomTypeId,
+        ),
+      ).toEqual([otherRoom]);
+      expect(await pricing.getFlexibleRatePlan(propertyId, roomTypeId)).toEqual(original);
+      const roomSnapshot = await setup.getRoomOwnerSnapshot({ organizationId, propertyId });
+      expect(roomSnapshot.rooms.map((room) => room.roomTypeId)).toEqual([otherRoom]);
+      const publicationSource = createPmsMandatoryChargePricingSourceSnapshot({
+        rooms: roomSnapshot.rooms.map((room) => ({
+          roomTypeId: room.roomTypeId,
+          roomFactsRevision: room.roomFactsRevision,
+          occupancy: room.facts.occupancy,
+        })),
+        pricing: (await pricing.getPricingSourceSnapshot(propertyId))!,
+        recurringPricing: (await recurring.getRecurringPricingBookingEvidence(propertyId))!,
+      });
+      const confirmationSource = await loadPmsMandatoryChargePricingSourceSnapshot(
+        db,
+        propertyId,
+        new Date(),
+      );
+      expect(confirmationSource?.serializedPayload).toBe(publicationSource.serializedPayload);
+      expect(
+        (await db.query("SELECT active FROM pms.room_types WHERE id=$1", [roomTypeId])).rows,
+      ).toEqual([{ active: true }]);
+    } finally {
+      await pricing.close();
+      await recurring.close();
+      await setup.close();
+    }
+  });
+
+  it("fences activation of pre-closure content and preserves the remaining-room publication", async () => {
+    await db.query("UPDATE hotel_catalog.properties SET lifecycle_status='active' WHERE id=$1", [
+      propertyId,
+    ]);
+    const projection = createPgDistributionBookingPublicationProjection({ connectionString: url! });
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    const result = await createProductReadinessResult({
+      contractVersion: "onboarding-product-readiness.v1",
+      propertyId,
+      product: "booking",
+      status: "ready",
+      sourceManifest: {
+        contractVersion: "onboarding-source-manifest.v1",
+        propertyId,
+        sources: [
+          {
+            ownerDomain: "pms",
+            entityType: "room_type",
+            entityId: roomTypeId,
+            revision: "1",
+          },
+        ],
+      },
+      groups: [
+        {
+          groupId: "booking.rooms",
+          status: "ready",
+          steps: [
+            {
+              owningStepId: "rooms",
+              status: "ready",
+              entities: [
+                {
+                  source: {
+                    ownerDomain: "pms",
+                    entityType: "room_type",
+                    entityId: roomTypeId,
+                    revision: "1",
+                  },
+                  status: "ready",
+                  blockers: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      evaluatedAt: new Date().toISOString(),
+    });
+    const readiness = await createReadyProductReadinessEvidence(result, {
+      propertyId,
+      product: "booking",
+    });
+    const append = (rooms: { roomTypeId: string }[] | null) =>
+      projection.appendRevision({
+        propertyId,
+        readiness,
+        publicContent: { rooms },
+        builtByUserId: actorId,
+        builtAt: new Date().toISOString(),
+      });
+    try {
+      const stale = await append([{ roomTypeId }, { roomTypeId: otherRoom }]);
+      const previous = await projection.activate({
+        propertyId,
+        revisionId: stale.revisionId,
+        expectedActiveRevisionId: null,
+        activatedByUserId: actorId,
+      });
+      const malformed = await append(null);
+      const current = await append([{ roomTypeId: otherRoom }]);
+      await db.query("BEGIN");
+      try {
+        await db.query(
+          "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
+          [propertyId],
+        );
+        const pending = projection
+          .activate({
+            propertyId,
+            revisionId: stale.revisionId,
+            expectedActiveRevisionId: previous.revisionId,
+            activatedByUserId: actorId,
+          })
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+        const deadline = Date.now() + 3000;
+        let blocked = false;
+        while (Date.now() < deadline) {
+          const waits = await db.query(
+            `SELECT EXISTS(SELECT 1 FROM pg_locks
+            WHERE locktype='advisory' AND classid=hashtext('booking.publication')::oid
+              AND objid=hashtext($1::uuid::text)::oid AND NOT granted) AS blocked`,
+            [propertyId],
+          );
+          if (waits.rows[0]?.blocked) {
+            blocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        await close(db);
+        await db.query("COMMIT");
+        expect(await pending).toBeInstanceOf(BookingPublicationRoomClosureConflictError);
+        expect(await projection.getActive(propertyId)).toEqual(previous);
+      } finally {
+        await db.query("ROLLBACK");
+      }
+      const active = await projection.activate({
+        propertyId,
+        revisionId: current.revisionId,
+        expectedActiveRevisionId: previous.revisionId,
+        activatedByUserId: actorId,
+      });
+      for (const revision of [stale, malformed]) {
+        await expect(
+          projection.activate({
+            propertyId,
+            revisionId: revision.revisionId,
+            expectedActiveRevisionId: active.revisionId,
+            activatedByUserId: actorId,
+          }),
+        ).rejects.toBeInstanceOf(BookingPublicationRoomClosureConflictError);
+        expect(await projection.getActive(propertyId)).toEqual(active);
+      }
+    } finally {
+      await projection.close?.();
+    }
+  });
+
+  it("atomically suppresses only closing-room offers and keeps them closed during re-projection", async () => {
+    const otherRoom = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types (id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+      (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+      VALUES ($1::uuid,$1::text,'Closure test',$1::text,'en',ARRAY['en'],'complete')`,
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+      (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,
+       default_currency,supported_currencies,profile_status)
+      VALUES ($1::uuid,$1::text,$1::text,'https://example.test/hotel','https://example.test',
+        'Europe/Vienna','EUR',ARRAY['EUR'],'public')`,
+      [propertyId],
+    );
+    for (const room of [roomTypeId, otherRoom]) {
+      await db.query(
+        `INSERT INTO pms.rate_plans (property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES ($1,$2,'flexible','Flexible','flexible',100,'EUR')`,
+        [propertyId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.inventory_days
+        (property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,'2026-09-10',2,2,'open')`,
+        [propertyId, room],
+      );
+    }
+    const project = () =>
+      db.query(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [propertyId, "2026-09-09T12:00:00Z"]);
+    const offers = async () =>
+      (
+        await db.query(
+          `SELECT * FROM distribution.public_room_offer_snapshots
+      WHERE property_id=$1 ORDER BY room_type_id`,
+          [propertyId],
+        )
+      ).rows;
+    await project();
+    const before = await offers();
+    expect(before).toHaveLength(2);
+    await expect(suppressClosingRoomOffers(db, { propertyId, roomTypeId })).rejects.toThrow(
+      "requires a PMS room closure receipt",
+    );
+    await db.query("BEGIN");
+    try {
+      await close(db);
+      expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+        suppressedOfferDays: 1,
+      });
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect(await offers()).toEqual(before);
+    const eventId = randomUUID();
+    await db.query(
+      `INSERT INTO platform.domain_events
+      (id,source_system,event_key,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,occurred_at)
+      VALUES ($1,'pms',$2,'pms.inventory.projection_refresh_requested','property',$3::uuid,'pms','inventory',$3::text,now())`,
+      [eventId, randomUUID(), propertyId],
+    );
+    await db.query(
+      `INSERT INTO platform.outbox_events
+      (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id)
+      VALUES ($1,$2,'distribution.inventory-projection','pms.inventory.projection_refresh_requested','property',$3::uuid,'pms','inventory',$3::text)`,
+      [eventId, randomUUID(), propertyId],
+    );
+    const worker = createTargetPmsInventoryPublicOfferProjection({
+      connectionString: url!,
+      now: () => new Date("2026-09-09T12:00:00Z"),
+    });
+    await db.query("BEGIN");
+    try {
+      await db.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))",
+        [propertyId],
+      );
+      const pending = worker.projectPending({ propertyId });
+      const deadline = Date.now() + 3000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const waits =
+          await db.query(`SELECT EXISTS(SELECT 1 FROM pg_locks waiter JOIN pg_locks holder
+          USING(locktype,database,classid,objid,objsubid)
+          WHERE holder.pid=pg_backend_pid() AND holder.granted AND NOT waiter.granted
+            AND holder.locktype='advisory') AS blocked`);
+        if (waits.rows[0]?.blocked) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await close(db);
+      expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+        suppressedOfferDays: 1,
+      });
+      expect((await offers()).find((row) => row.room_type_id === otherRoom)).toEqual(
+        before.find((row) => row.room_type_id === otherRoom),
+      );
+      await db.query("COMMIT");
+      expect(await pending).toMatchObject({ profileAvailable: true, projectedOfferDays: 2 });
+    } finally {
+      await db.query("ROLLBACK");
+      await worker.close?.();
+    }
+    const suppressed = await offers();
+
+    expect(suppressed.find((row) => row.room_type_id === roomTypeId)).toMatchObject({
+      availability_status: "closed",
+      sellable_publicly: false,
+      available_rooms: 0,
+    });
+    expect(await suppressClosingRoomOffers(db, { propertyId, roomTypeId })).toEqual({
+      suppressedOfferDays: 0,
+    });
+    // Deliberately retain stale open inventory: eligibility independently prevents resurrection.
+    await project();
+    const after = await offers();
+    expect(after.find((row) => row.room_type_id === roomTypeId)).toMatchObject({
+      availability_status: "closed",
+      sellable_publicly: false,
+      available_rooms: 0,
+    });
+    expect(after.find((row) => row.room_type_id === otherRoom)).toMatchObject({
+      availability_status: "available",
+      sellable_publicly: true,
+      available_rooms: 2,
+      base_price_amount: "100.00",
+    });
+  });
+
+  it("omits closing rooms from Channex provisioning and ARI while retaining their mappings", async () => {
+    const otherRoom = randomUUID(),
+      connectionId = randomUUID();
+    await db.query(
+      "INSERT INTO pms.room_types(id,property_id,name,active) VALUES ($1,$2,'Other',true)",
+      [otherRoom, propertyId],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES ($1,'Europe/Vienna')",
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+      VALUES ($1::uuid,'channex',$1::text,'active','enable')`,
+      [propertyId],
+    );
+    await db.query(
+      `INSERT INTO pms.channel_connections(id,property_id,provider,external_property_id,connection_status)
+      VALUES ($1,$2::uuid,'channex',$2::text,'connected')`,
+      [connectionId, propertyId],
+    );
+    const rateIds = new Map<string, string>();
+    for (const room of [roomTypeId, otherRoom]) {
+      const planId = randomUUID();
+      rateIds.set(room, planId);
+      await db.query(
+        `INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,rate_type,base_rate_amount,currency)
+        VALUES ($1,$2,$3,'flexible','Flexible','flexible',100,'EUR')`,
+        [planId, propertyId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+        VALUES ($1,$2,$3::uuid,$3::text)`,
+        [propertyId, connectionId, room],
+      );
+      await db.query(
+        `INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,external_rate_plan_id,channel,external_room_type_id)
+        VALUES ($1,$2,$3::uuid,$4::uuid,$4::text,'direct',$3::text)`,
+        [propertyId, connectionId, room, planId],
+      );
+      await db.query(
+        `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,'2026-09-10',1,1,'open')`,
+        [propertyId, room],
+      );
+    }
+    const port = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      bookingRevisionHandoff: async () => {},
+      now: () => new Date("2026-09-09T12:00:00Z"),
+    });
+    const job = (operationType: "provision" | "sync_ari") => ({
+      jobId: randomUUID(),
+      propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType,
+        restrictionsOnly: true,
+      },
+    });
+    try {
+      expect(JSON.stringify(await port.plan(job("provision")))).toContain(roomTypeId);
+      await close(db);
+      const provision = JSON.stringify(await port.plan(job("provision")));
+      expect(provision).not.toContain(roomTypeId);
+      expect(provision).toContain(otherRoom);
+      const ari = JSON.stringify(await port.plan(job("sync_ari")));
+      expect(ari).not.toContain(rateIds.get(roomTypeId)!);
+      expect(ari).toContain(rateIds.get(otherRoom)!);
+      expect(
+        (
+          await db.query(
+            `SELECT status FROM pms.channel_room_type_mappings
+        WHERE property_id=$1 AND room_type_id=$2`,
+            [propertyId, roomTypeId],
+          )
+        ).rows,
+      ).toEqual([{ status: "active" }]);
+      const channelId = randomUUID();
+      await db.query(
+        `UPDATE pms.channel_connections SET connection_metadata=$2::jsonb WHERE id=$1`,
+        [
+          connectionId,
+          JSON.stringify({
+            connectedChannels: [
+              { key: "booking_com", externalChannelId: channelId, isActive: true },
+            ],
+          }),
+        ],
+      );
+      const rulesFor = (room: string) => ({
+        expectedOperationId: null,
+        rules: [
+          {
+            id: randomUUID(),
+            type: "availability_offset" as const,
+            value: 2,
+            channelIds: [channelId],
+            roomTypeIds: [room],
+            startDate: "2026-09-10",
+            endDate: "2026-09-11",
+            days: ["th" as const],
+          },
+        ],
+      });
+      expect(await validateInventoryRules(db, propertyId, rulesFor(roomTypeId))).toMatch(
+        /active mapped room types/,
+      );
+      expect(await validateInventoryRules(db, propertyId, rulesFor(otherRoom))).toBeNull();
+      await db.query(
+        `UPDATE pms.channel_room_type_mappings SET status='disabled'
+        WHERE property_id=$1 AND room_type_id=$2`,
+        [propertyId, roomTypeId],
+      );
+      const retry = await port.plan(job("provision"));
+      expect(JSON.stringify(retry)).not.toContain(roomTypeId);
+      expect(JSON.stringify(retry)).toContain(otherRoom);
+    } finally {
+      await port.close();
+    }
+  });
+
+  it("keeps the accepted closure cutoff for final retirement instead of aging unresolved inventory out", async () => {
+    const readRepository = createTargetPmsOperationsReadRepository({ connectionString: url! });
+    const commands = createTargetPmsOperationsCommandRepository({
+      connectionString: url!,
+      readRepository,
+    });
+    try {
+      await db.query(
+        `INSERT INTO pms.inventory_days
+        (property_id,room_type_id,stay_date,total_count,available_count,status)
+        VALUES ($1,$2,CURRENT_DATE-1,1,1,'open')`,
+        [propertyId, roomTypeId],
+      );
+      // Ordinary retirement retains its existing treatment of historical inventory.
+      expect(await commands.inspectRoomTypeRetirement(propertyId, roomTypeId)).toMatchObject({
+        canRetire: true,
+      });
+      await db.query(
+        `INSERT INTO pms.room_type_closures
+        (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+         expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+         cutoff_date,accepted_at,actor_user_id)
+        VALUES ($1,$2,$3,$4,1,1,1,2,CURRENT_DATE-1,now()-interval '1 day',$5)`,
+        [propertyId, roomTypeId, randomUUID(), "a".repeat(64), actorId],
+      );
+      expect(await commands.inspectRoomTypeRetirement(propertyId, roomTypeId)).toMatchObject({
+        canRetire: false,
+        blockers: [{ category: "inventory", code: "future_inventory", affectedCount: 1 }],
+      });
+    } finally {
+      await commands.close?.();
+      await readRepository.close?.();
+    }
+  });
+
+  it("serializes competing closure receipts to one winner", async () => {
+    const competitor = new pg.Client({ connectionString: url });
+    await competitor.connect();
+    const winningCommand = randomUUID();
+    try {
+      await db.query("BEGIN");
+      await close(db, winningCommand);
+      const competitorPid = competitor.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      const loser = close(competitor).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const pid = (await competitorPid).rows[0]!.pid;
+      const deadline = Date.now() + 3_000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const waits = await db.query("SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked", [
+          pid,
+        ]);
+        if (waits.rows[0]?.blocked) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await db.query("COMMIT");
+      expect(await loser).toMatchObject({ code: "23505" });
+      expect((await readPmsRoomOperatingEligibility(db, propertyId))[0]?.closureCommandId).toBe(
+        winningCommand,
+      );
+    } finally {
+      await db.query("ROLLBACK");
+      await competitor.end();
+    }
+  });
+});

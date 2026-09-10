@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -229,6 +230,10 @@ async function reconcileLockedRoomType(
   roomType: RoomTypeRow,
   occurredAt: Date,
 ): Promise<ReconcilePhysicalRoomUnitsResult> {
+  const eligibility = (await readPmsRoomOperatingEligibility(client, command.propertyId)).find(
+    (room) => room.roomTypeId === command.roomTypeId,
+  );
+  if (eligibility?.state !== "operating") return failure({ code: "room_type_not_found" });
   const units = await lockActiveUnits(client, command);
   const previousCount = units.length;
   if (previousCount > 500) {

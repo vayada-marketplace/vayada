@@ -80,6 +80,10 @@ function harness(
         result(rows, rowCount) as Pick<QueryResult<T>, "rows" | "rowCount">;
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return queryResult();
       if (sql.includes("pg_advisory_xact_lock")) return queryResult([{ locked: true }]);
+      if (sql.includes("LEFT JOIN pms.room_type_closures"))
+        return queryResult([
+          { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+        ]);
       if (sql.includes("FROM hotel_catalog.properties property")) {
         return queryResult(options.scope === false ? [] : [{ id: propertyId }]);
       }

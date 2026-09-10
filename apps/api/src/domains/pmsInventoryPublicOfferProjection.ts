@@ -183,7 +183,10 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
       room_type.room_attributes,
       room_type.amenities_snapshot,
       room_type.media_snapshot,
-      room_type.active AS room_type_active,
+      (room_type.active AND NOT EXISTS (
+        SELECT 1 FROM pms.room_type_closures closure
+        WHERE closure.property_id=room_type.property_id AND closure.room_type_id=room_type.id
+      )) AS room_type_active,
       rate_plan.code AS rate_plan_code,
       rate_plan.name AS rate_plan_name,
       rate_plan.rate_type,
@@ -301,7 +304,7 @@ export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
       AND input.inventory_status <> 'closed'
       AND input.available_count > 0
       AND input.effective_rate > 0,
-    CASE WHEN input.rate_gate_open THEN input.available_count ELSE 0 END,
+    CASE WHEN input.rate_gate_open AND input.room_type_active THEN input.available_count ELSE 0 END,
     input.effective_rate,
     0,
     0,
@@ -741,6 +744,11 @@ async function projectInventoryClaim(
       };
     }
 
+    // Acquire in a separate statement so a waiter reads a fresh snapshot after closure commits.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))",
+      [claim.propertyId],
+    );
     const projected = await client.query<ProjectedRow>(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [
       claim.propertyId,
       projectedAt.toISOString(),

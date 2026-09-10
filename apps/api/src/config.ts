@@ -157,6 +157,7 @@ export type ApiConfig = {
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
+  pmsRoomClosureEnabled: boolean;
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
@@ -915,6 +916,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
     financeFolioRecipientKms,
+    pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
