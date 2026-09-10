@@ -342,6 +342,7 @@ class TestCreateBooking:
         await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
         await Database.execute("UPDATE hotels SET instant_book = true WHERE id = $1", hotel["id"])
 
+        base_date = date.today()
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
             json={
@@ -350,8 +351,8 @@ class TestCreateBooking:
                 "guestLastName": "Smith",
                 "guestEmail": "jane@example.com",
                 "guestPhone": "+9876543210",
-                "checkIn": (date.today() + timedelta(days=30)).isoformat(),
-                "checkOut": (date.today() + timedelta(days=33)).isoformat(),
+                "checkIn": (base_date + timedelta(days=30)).isoformat(),
+                "checkOut": (base_date + timedelta(days=33)).isoformat(),
                 "adults": 2,
                 "children": 0,
                 "paymentMethod": "pay_at_property",
@@ -394,6 +395,7 @@ class TestCreateBooking:
         room = hotel_with_rooms["room"]
         await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
 
+        base_date = date.today()
         resp = await client.post(
             f"/api/hotels/{hotel['slug']}/bookings",
             json={
@@ -402,8 +404,8 @@ class TestCreateBooking:
                 "guestLastName": "Smith",
                 "guestEmail": "jane@example.com",
                 "guestPhone": "+9876543210",
-                "checkIn": (date.today() + timedelta(days=30)).isoformat(),
-                "checkOut": (date.today() + timedelta(days=33)).isoformat(),
+                "checkIn": (base_date + timedelta(days=30)).isoformat(),
+                "checkOut": (base_date + timedelta(days=33)).isoformat(),
                 "adults": 2,
                 "children": 0,
                 "paymentMethod": "pay_at_property",
