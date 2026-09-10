@@ -35,7 +35,7 @@ test("password workspace selection retries the chosen workspace and lets users c
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Choose workspace" })).toBeVisible();
   await page.getByRole("button", { name: "Second Hotel", exact: true }).click();
-  await expect(page.getByText("Please sign in again.")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText("Please sign in again.");
   await page.getByRole("button", { name: "Use another account" }).click();
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await expect(page.getByLabel("Email address", { exact: true })).toHaveValue("");

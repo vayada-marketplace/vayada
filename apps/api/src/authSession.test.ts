@@ -329,6 +329,7 @@ describe("AuthKit session routes", () => {
             ? null
             : {
                 membershipId: "membership",
+                workosMembershipId: "om_membership",
                 status: "active",
                 roleKey: "hotel_owner",
                 workosRoleSlugs: [],
