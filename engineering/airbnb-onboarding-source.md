@@ -108,3 +108,16 @@ expiry or already-completed state requires source retrieval/new flow rather than
 another completion. Failure redirects display failure without completing anything.
 Source retrieval rechecks the current binding before exposing its saved snapshot.
 Production binding/link ports, callback UI and live mounting remain later slices.
+
+## Connection link transport slice
+
+The unmounted provider factory posts only to the configured Channex environment's
+connection-link endpoint. Server-resolved group/property IDs and a fixed return path
+containing canonical property/source IDs bind the link to its pending attempt.
+The opaque state is passed as Channex's callback token; browser redirects cannot
+choose destinations. Returned links require HTTPS on airbnb.com or www.airbnb.com.
+Responses are bounded to 256 KiB and transport failures are sanitized.
+
+Tests mock provider responses; no live connection was created. Mounting still needs
+a trusted binding resolver, callback handling, and request-log token redaction.
+The existing 20-minute attempt expiry still applies even if a provider link lasts longer.
