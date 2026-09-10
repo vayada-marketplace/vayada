@@ -1,5 +1,4 @@
 export { default as AddonsStep, createEmptyAddon, type SetupAddon } from "./AddonsStep";
-export { default as BenefitsStep } from "./BenefitsStep";
 export { default as BrandMediaStep } from "./BrandMediaStep";
 export { BookingPagePreview } from "./BookingPagePreview";
 export {
