@@ -518,14 +518,20 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           currency: "EUR",
           occurredAt: new Date(acceptedAt),
         });
-      await admin.query("BEGIN");
-      const hold = await reserve(admin);
-      expect(hold).not.toBeNull();
-      const blockedClosure = closure.closeRoom(input);
+      let hold: Awaited<ReturnType<typeof reserve>> | undefined;
+      let blockedClosure: ReturnType<typeof closure.closeRoom> | undefined;
       try {
+        await admin.query("BEGIN");
+        hold = await reserve(admin);
+        expect(hold).not.toBeNull();
+        blockedClosure = closure.closeRoom(input);
+        void blockedClosure.catch(() => {});
         await waitingOn(null);
-      } finally {
         await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        await Promise.allSettled([blockedClosure]);
+        throw error;
       }
       expect(await blockedClosure).toMatchObject({
         ok: false,
@@ -615,21 +621,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
         builtByUserId: actorUserId,
         builtAt: acceptedAt,
       });
-      await admin.query("BEGIN");
-      await admin.query(
-        "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
-        [propertyId],
-      );
-      const activating = publication.activate({
-        propertyId,
-        revisionId: revision.revisionId,
-        expectedActiveRevisionId: null,
-        activatedByUserId: actorUserId,
-      });
-      void activating.catch(() => {});
+      let activating: ReturnType<typeof publication.activate> | undefined;
       let staleClosure: ReturnType<typeof closure.closeRoom> | undefined;
-      const beforePublicationRace = await snapshot();
       try {
+        await admin.query("BEGIN");
+        await admin.query(
+          "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
+          [propertyId],
+        );
+        activating = publication.activate({
+          propertyId,
+          revisionId: revision.revisionId,
+          expectedActiveRevisionId: null,
+          activatedByUserId: actorUserId,
+        });
+        void activating.catch(() => {});
+        const beforePublicationRace = await snapshot();
         const activationPid = await waitingOn(null);
         staleClosure = closure.closeRoom(input);
         void staleClosure.catch(() => {});
@@ -681,13 +688,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       });
       let materializing: ReturnType<typeof materializer.materializeInventory> | undefined;
       let materialized: Awaited<NonNullable<typeof materializing>> | undefined;
-      await admin.query("BEGIN");
-      await admin.query(
-        "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
-        [propertyId],
-      );
-      const closing = closure.closeRoom(input);
-      void closing.catch(() => {});
+      let closing: ReturnType<typeof closure.closeRoom> | undefined;
       let reconciling: ReturnType<typeof reconciliation.reconcilePhysicalRoomUnits> | undefined;
       const lateBookingClient = new pg.Client({ connectionString });
       let lateBooking: ReturnType<typeof reserve> | undefined;
@@ -695,6 +696,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
       let reconciled: Awaited<NonNullable<typeof reconciling>> | undefined;
       let lateReceipt: Awaited<ReturnType<typeof reserve>> | undefined;
       try {
+        await admin.query("BEGIN");
+        await admin.query(
+          "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
+          [propertyId],
+        );
+        closing = closure.closeRoom(input);
+        void closing.catch(() => {});
         await lateBookingClient.connect();
         await lateBookingClient.query("BEGIN");
         const lateBookingPid = (await lateBookingClient.query("SELECT pg_backend_pid() AS pid"))

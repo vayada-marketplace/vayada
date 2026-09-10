@@ -591,7 +591,6 @@ function resultMatchesCommand(
   }
   if (
     result.error.code === "setup_scope_unavailable" ||
-    result.error.code === "room_type_not_found" ||
     result.error.code === "idempotency_key_conflict" ||
     result.error.code === "command_in_progress"
   ) {

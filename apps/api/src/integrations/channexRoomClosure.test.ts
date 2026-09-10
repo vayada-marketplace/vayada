@@ -37,7 +37,9 @@ function fixture(
     stopSell?: unknown;
   } = {},
 ) {
+  const sequence: string[] = [];
   const query = vi.fn(async (sql: string) => {
+    if (sql.includes("FROM platform.jobs")) sequence.push("queue");
     const rows = sql.includes("pg_try_advisory")
       ? [{ locked: options.locked ?? true }]
       : sql.includes("FROM pms.channel_connections")
@@ -80,6 +82,7 @@ function fixture(
     return { rows, rowCount: rows.length };
   });
   const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+    sequence.push("read");
     if (String(url).includes("/rate_plans?"))
       return Response.json({
         data: [
@@ -106,6 +109,7 @@ function fixture(
     client: { query } as unknown as DistributionBookingPublicationTransaction,
     query,
     fetcher,
+    sequence,
   };
 }
 
@@ -114,14 +118,46 @@ describe("paused Channex room closure readback", () => {
     const test = fixture();
     await verifyChannexRoomClosure(test.client, config, scope, test.fetcher);
     expect(test.fetcher).toHaveBeenCalledTimes(4);
-    expect(
-      test.query.mock.calls.filter(([sql]) => sql.includes("FROM platform.jobs")),
-    ).toHaveLength(2);
+    expect(test.sequence).toEqual(["queue", "read", "read", "read", "read", "queue"]);
     const [url, request] = test.fetcher.mock.calls[0] as unknown as [URL, RequestInit];
     expect(url.origin).toBe("https://staging.channex.io");
     expect(url.searchParams.get("filter[property_id]")).toBe("external-property");
     expect(request.redirect).toBe("error");
     expect(request.method).toBeUndefined();
+  });
+  it("bounds the complete sequential readback phase with one deadline", async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    const test = fixture();
+    const fetcher = vi.fn(async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 12000);
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(new Error("deadline"));
+          },
+          { once: true },
+        );
+      });
+      return test.fetcher(url);
+    });
+    try {
+      const result = expect(
+        verifyChannexRoomClosure(test.client, config, scope, fetcher),
+      ).rejects.toThrow("channex_closure_readback_failed");
+      await vi.advanceTimersByTimeAsync(30001);
+      await result;
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    } finally {
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
   });
   it.each([
     [{ locked: false }, "operation_in_flight"],

@@ -192,15 +192,18 @@ describe("protected PMS room closure endpoints", () => {
     );
     expect(port.closeRoom).not.toHaveBeenCalled();
   });
-  it("preserves actionable protected and provider conflicts", async () => {
-    const port = await setup();
-    const failure = {
-      ok: false as const,
-      error: { code: "room_closure_protected", blockers: ["active_reservations"] },
-    };
-    port.closeRoom.mockResolvedValue(failure);
-    const result = await send();
-    expect(result.statusCode).toBe(409);
-    expect(result.json()).toEqual(failure);
-  });
+  it.each(["room_closure_protected", "channex_closure_mode_unsupported"])(
+    "preserves %s conflicts",
+    async (code) => {
+      const port = await setup();
+      const failure = {
+        ok: false as const,
+        error: { code, blockers: ["active_reservations"] },
+      };
+      port.closeRoom.mockResolvedValue(failure);
+      const result = await send();
+      expect(result.statusCode).toBe(409);
+      expect(result.json()).toEqual(failure);
+    },
+  );
 });

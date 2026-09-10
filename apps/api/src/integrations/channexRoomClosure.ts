@@ -98,6 +98,7 @@ export async function verifyChannexRoomClosure(
     dates.push(new Date(at).toISOString().slice(0, 10));
   await requireEmptyQueue();
   const apiKey = config.apiKey;
+  const deadline = AbortSignal.timeout(30000);
   await verifyChannexRoomClosureIdentity(
     (path) => read(new URL(path, "https://staging.channex.io")),
     {
@@ -135,7 +136,7 @@ export async function verifyChannexRoomClosure(
       const response = await fetcher(url, {
         headers: { "user-api-key": apiKey },
         redirect: "error",
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.any([deadline, AbortSignal.timeout(15000)]),
       });
       if (!response.ok) throw new Error();
       return await response.json();

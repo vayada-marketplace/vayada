@@ -393,6 +393,25 @@ describe("PMS physical room unit reconcile repository", () => {
     });
   });
 
+  it("replays a stored closure rejection without weakening fingerprint checks", async () => {
+    const command = reconcileCommand();
+    const fingerprint = createHash("sha256")
+      .update(serializeReconcilePhysicalRoomUnitsFingerprint(command))
+      .digest("hex");
+    const result: ReconcilePhysicalRoomUnitsResult = {
+      ok: false,
+      error: { code: "room_type_not_found" },
+    };
+    const test = harness({ replay: { fingerprint, result } });
+    expect(await test.repository.reconcilePhysicalRoomUnits(command)).toEqual(result);
+    const changed = harness({ replay: { fingerprint, result } });
+    expect(
+      await changed.repository.reconcilePhysicalRoomUnits(
+        reconcileCommand({ targetActiveUnitCount: 4 }),
+      ),
+    ).toEqual({ ok: false, error: { code: "idempotency_key_conflict" } });
+  });
+
   it("fails wrong-property scope before idempotency and rolls back injected audit failure", async () => {
     const wrongScope = harness({ scope: false });
     await expect(
