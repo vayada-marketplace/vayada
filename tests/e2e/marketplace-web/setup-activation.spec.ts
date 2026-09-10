@@ -705,6 +705,131 @@ test.describe("marketplace-web shared setup activation", () => {
     expect(handoffRequests).toBe(0);
   });
 
+  for (const failRefresh of [false, true]) {
+    test(`earlier room form preserves input after import (mock APIs, refresh fails: ${failRefresh})`, async ({
+      page,
+      baseURL,
+    }, testInfo) => {
+      await primeBrowserState(page, true);
+      await mockAuthSession(page);
+      await mockSharedSetupStatus(page, sharedRoadmapStatus("rooms_rates_availability"));
+      await mockOperationsApis(page);
+      let imported = false;
+      let failurePending = failRefresh;
+      let roomWrites = 0;
+      await page.route(
+        new RegExp(`/api/pms/properties/${propertyId}/room-types(?:\\?|$)`),
+        async (route) => {
+          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+          if (route.request().method() !== "GET") {
+            roomWrites++;
+            return route.fulfill({ status: 500 });
+          }
+          if (imported && failurePending) {
+            failurePending = false;
+            return route.fulfill({
+              status: 503,
+              headers: corsHeaders(route),
+              json: { code: "test_read_failure" },
+            });
+          }
+          return route.fulfill({
+            headers: corsHeaders(route),
+            json: {
+              items: imported
+                ? [
+                    {
+                      roomTypeId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                      active: true,
+                      name: "Imported Suite",
+                      roomCount: 0,
+                      occupancyLimits: { total: 2 },
+                      baseRate: { amountDecimal: "0.00", currency: "EUR" },
+                      rateRulesSummary: { minStayNights: null },
+                    },
+                  ]
+                : [],
+            },
+          });
+        },
+      );
+      await page.route(
+        /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+        async (route) => {
+          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+          const item = {
+            itemId: "room:suite",
+            status: "applied",
+            resourceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          };
+          if (route.request().method() === "POST") {
+            imported = true;
+            return route.fulfill({ headers: corsHeaders(route), json: { items: [item] } });
+          }
+          return route.fulfill({
+            headers: corsHeaders(route),
+            json: {
+              import: {
+                sourceId: "test-source",
+                propertyId,
+                results: imported ? { "room:suite": item } : {},
+                data: {
+                  contractVersion: "prepared-hotel-import.v1",
+                  property: {},
+                  rooms: [
+                    {
+                      id: "suite",
+                      name: "Imported Suite",
+                      description: "",
+                      maxGuests: 2,
+                      maxAdults: 2,
+                      maxChildren: 0,
+                      bedType: "queen",
+                      bedQuantity: 1,
+                      bathroomType: "private",
+                      sizeSquareMetres: null,
+                    },
+                  ],
+                },
+              },
+              profile: { propertyId, profileRevision: 1, profile: { displayName: "Test Hotel" } },
+              canImportRooms: true,
+            },
+          });
+        },
+      );
+      const url = new URL(setupUrl(baseURL), baseURL);
+      url.searchParams.set("propertyId", propertyId);
+      await page.goto(url.toString());
+      const current = page.locator('section[aria-labelledby="current-setup-step-title"]');
+      await current.getByLabel("Room type name").fill("My unfinished room");
+      await current.getByLabel("Nightly rate").fill("245");
+      const panel = page.getByRole("region", { name: "Prepared hotel data" });
+      await panel.getByRole("button", { name: "Review prepared hotel data" }).click();
+      await panel.getByRole("checkbox", { name: "Imported Suite", exact: true }).check();
+      await panel.getByRole("button", { name: "Save selected items" }).click();
+      if (failRefresh) {
+        await expect(current.getByRole("alert")).toContainText(
+          "Room setup could not refresh after import",
+        );
+        await expect(current.getByLabel("Room type name")).toHaveValue("My unfinished room");
+        await expect(current.getByRole("button", { name: "Save and continue" })).toBeDisabled();
+        await panel.getByRole("button", { name: "Refresh", exact: true }).click();
+      }
+      await expect(current.getByText("Imported Suite", { exact: true })).toBeVisible();
+      await expect(current.getByText("My unfinished room", { exact: true })).toBeVisible();
+      await expect(current.getByText("EUR 245.00", { exact: true })).toBeVisible();
+      await expect(current.getByText("Your unsaved entry", { exact: true })).toBeVisible();
+      await expect(current.getByText("Add at least one active physical room.")).toBeVisible();
+      await expect(current.getByRole("button", { name: "Check setup again" })).toBeVisible();
+      expect(roomWrites).toBe(0);
+      await page.screenshot({
+        path: testInfo.outputPath("earlier-import-refresh.png"),
+        fullPage: true,
+      });
+    });
+  }
+
   test("renders the recommended Operations form inline without leaving setup", async ({
     page,
     baseURL,
