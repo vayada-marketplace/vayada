@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { targetApiClient } from "@/services/api/targetClient";
 
 type Policy = { id: string; rateBasisPoints: number; approved: boolean };
+type Destination = {
+  destinationVersionId: string;
+  configuration: { displayName: string; bookingUrl: string };
+  trackingStatus: "not_validated";
+};
 type Terms = {
   bookingDestinationId: string;
   financePolicyVersionId: string;
@@ -14,6 +19,7 @@ type DraftRead = {
   draft: null | {
     id: string;
     terms: Terms;
+    destination: Destination | null;
     commission:
       | { status: "unavailable"; reason: string }
       | {
@@ -35,6 +41,8 @@ export function AffiliateOfferTermsEditor({
   const path = `/api/marketplace/properties/${encodeURIComponent(propertyId)}/offers/${encodeURIComponent(offerId)}/affiliate-draft`;
   const [loaded, setLoaded] = useState<DraftRead | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [destinationId, setDestinationId] = useState("");
   const [policyId, setPolicyId] = useState("");
   const [days, setDays] = useState("");
   const [busy, setBusy] = useState(true);
@@ -52,8 +60,11 @@ export function AffiliateOfferTermsEditor({
       targetApiClient.get<{ policies: Policy[] }>(
         `/api/marketplace/properties/${encodeURIComponent(propertyId)}/affiliate-policies`,
       ),
+      targetApiClient.get<{ destinations: Destination[] }>(
+        `/api/marketplace/properties/${encodeURIComponent(propertyId)}/affiliate-destinations`,
+      ),
     ])
-      .then(([draft, history]) => {
+      .then(([draft, history, bookingPages]) => {
         if (!active) return;
         const approved = history.policies.filter((p) => p.approved);
         const commission = draft.draft?.commission;
@@ -66,6 +77,15 @@ export function AffiliateOfferTermsEditor({
             rateBasisPoints: commission.policy.rateBasisPoints,
             approved: true,
           });
+        const available = [...bookingPages.destinations];
+        const savedDestination = draft.draft?.destination;
+        if (
+          savedDestination &&
+          !available.some((d) => d.destinationVersionId === savedDestination.destinationVersionId)
+        )
+          available.push(savedDestination);
+        setDestinations(available);
+        setDestinationId(savedDestination?.destinationVersionId ?? "");
         setPolicies(approved);
         setLoaded(draft);
         setPolicyId(commission?.status === "available" ? commission.policyVersionId : "");
@@ -83,7 +103,13 @@ export function AffiliateOfferTermsEditor({
   }, [path, propertyId, reload]);
 
   async function save() {
-    if (busy || !loaded?.draft || !policies.some((p) => p.id === policyId)) return;
+    if (
+      busy ||
+      !loaded ||
+      !policies.some((p) => p.id === policyId) ||
+      !destinations.some((d) => d.destinationVersionId === destinationId)
+    )
+      return;
     const windowDays = Number(days);
     if (
       !/^\d+$/.test(days) ||
@@ -97,7 +123,7 @@ export function AffiliateOfferTermsEditor({
     const payload = {
       expectedRevision: loaded.revision,
       terms: {
-        ...loaded.draft.terms,
+        bookingDestinationId: destinationId,
         financePolicyVersionId: policyId,
         attributionWindowDays: windowDays,
       },
@@ -149,20 +175,61 @@ export function AffiliateOfferTermsEditor({
           {message}
         </p>
       )}
-      {loaded && !loaded.draft && (
-        <p className="text-sm text-gray-600">
-          Affiliate setup is not ready for this offer. A booking destination and initial terms must
-          be configured before you can select a commission here.
-        </p>
-      )}
-      {loaded?.draft && (
+      {loaded && (
         <>
-          <p className="text-sm text-gray-600">
-            Saved commission:{" "}
-            {loaded.draft.commission.status === "available"
-              ? `${loaded.draft.commission.policy.percentageRate}%`
-              : "unavailable — select an approved rate"}
-          </p>
+          {!loaded.draft && (
+            <p className="text-sm text-gray-600">
+              Choose a saved booking page, approved commission and attribution window to set up this
+              offer.
+            </p>
+          )}
+          <label className="block text-sm font-medium">
+            Booking page
+            <select
+              aria-label="Booking page"
+              value={destinationId}
+              disabled={busy}
+              onChange={(e) => setDestinationId(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-gray-300 p-2"
+            >
+              <option value="">Choose a saved booking page</option>
+              {destinations.map((d) => (
+                <option key={d.destinationVersionId} value={d.destinationVersionId}>
+                  {d.configuration.displayName}
+                  {d.destinationVersionId === loaded.draft?.terms.bookingDestinationId
+                    ? " (saved)"
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {destinationId && (
+            <p className="break-all text-sm text-gray-600">
+              {
+                destinations.find((d) => d.destinationVersionId === destinationId)?.configuration
+                  .bookingUrl
+              }
+              {" — Tracking not validated"}
+            </p>
+          )}
+          {!destinations.length && (
+            <p className="text-sm text-gray-600">
+              Save a booking page above, then reload these terms.
+            </p>
+          )}
+          {loaded.draft && !loaded.draft.destination && (
+            <p className="text-sm text-gray-600">
+              The saved booking page is unavailable. Choose a saved page before saving a new draft.
+            </p>
+          )}
+          {loaded.draft && (
+            <p className="text-sm text-gray-600">
+              Saved commission:{" "}
+              {loaded.draft.commission.status === "available"
+                ? `${loaded.draft.commission.policy.percentageRate}%`
+                : "unavailable — select an approved rate"}
+            </p>
+          )}
           <label className="block text-sm font-medium">
             Approved commission rate
             <select
@@ -203,7 +270,7 @@ export function AffiliateOfferTermsEditor({
           </p>
           <button
             type="button"
-            disabled={busy || !policyId || !days}
+            disabled={busy || !destinationId || !policyId || !days}
             onClick={() => void save()}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
