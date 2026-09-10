@@ -202,3 +202,14 @@ The user accepted proceeding with broad activation after these results on
 compatibility verification; Done follows verified deployment. Request-mode
 pay-at-property copy and the obscured legacy-policy cancellation rejection
 remain separate recorded UI follow-ups.
+
+## Closure compatibility integration
+
+Aggregate PR #1861 merged as `9f7125ae6198760a9edf90e1102e08c0c55598e2`.
+It includes the closure eligibility, publication, inventory, booking and worker
+protections, with closure mode defaulting off. The unapplied prepared-import
+migration is numbered 0178; applied closure migrations 0174–0177 retain their
+original checksums. All ten required checks, 194 focused tests, a fresh migration
+run and an upgrade applying only 0178 passed. Independent final review cleared
+the composition. CodeRabbit skipped: rate limited after actionable findings
+were fixed. This activation branch incorporates the integrated protections.
