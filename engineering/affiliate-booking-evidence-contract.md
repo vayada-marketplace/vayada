@@ -245,3 +245,17 @@ commissionable revenue, publish terms or authorize payment. External adapters mu
 supply equally scoped authenticated provenance through their owning boundary; no
 provider is selected by this policy decision. Remaining intake, retention, money
 and evidence-conflict policy gates above remain open.
+
+## Hotel completion evidence HTTP read
+
+`GET /api/marketplace/properties/:propertyId/bookings/:bookingId/stay-items/:stayItemId/affiliate-completion`
+now calls the PMS-owned completion read through the configured application repository.
+Fresh hotel-management permission, property owner/operator link and active Marketplace
+entitlement are required; creators and front-desk-only contexts cannot read provenance.
+Canonical UUIDs are required. Missing/revoked property or booking/item scope returns
+404 without disclosing a record; authorized unconfirmed completion returns 200 pending.
+Confirmed evidence returns its exact audit/actor/source references. Invalid IDs return
+422 and authentication/authorization failures remain 401/403. Success and error responses
+are no-store, including infrastructure failures. Database errors never become completion.
+There is no verification POST or state mutation, no UI control, background processor,
+attribution decision or Finance handoff in this slice. Destination readiness stays pending.

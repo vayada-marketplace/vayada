@@ -1,3 +1,5 @@
+import type { AffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { registerMarketplaceAffiliateCompletionRoutes } from "./routes/marketplaceAffiliateCompletion.js";
 import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { registerMarketplaceAffiliateDestinationRoutes } from "./routes/marketplaceAffiliateDestinations.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
@@ -352,6 +354,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
+  marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -568,6 +571,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceAffiliateAdminRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliateAdminRepository,
+    });
+  }
+  if (options.marketplaceAffiliateCompletionRepository) {
+    app.register(registerMarketplaceAffiliateCompletionRoutes, {
+      prefix: "/api/marketplace", repository: options.marketplaceAffiliateCompletionRepository,
     });
   }
   if (options.marketplaceAffiliateDestinationRepository) {
