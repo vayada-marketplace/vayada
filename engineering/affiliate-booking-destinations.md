@@ -46,3 +46,17 @@ Booking-owned immutable storage and authorized configuration/read API, hotel set
 UI and provider evidence adapters, then initial offer-draft creation and publication.
 No destination is registered or verified by this pure contract. Public creator reads
 and redirect execution remain unavailable until those application gates exist.
+
+## Immutable persistence
+
+Migration 0179 stores Booking-owned destination versions with their canonical
+property, authoring organization/user, request and timestamp. Saves require fresh
+Marketplace profile management permission, active entitlement and owner/operator
+access, rechecking the persisted property/link under a transaction lock before any
+replay. A completed actor/property/key/payload request replays; changed input
+conflicts. Configuration and retry evidence commit together. New URLs create new
+version IDs. No row grants verification, activation or publication.
+
+Migration numbering: main already uses 0174 for PMS closures. The predecessor
+Finance migration in this stack must be renumbered/restacked before merge; 0179
+was the next unused main number when this slice was created.
