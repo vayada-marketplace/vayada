@@ -143,3 +143,29 @@ Changing a page appends a draft revision and cannot alter earlier terms. Missing
 configuration directs the hotel to setup above and a reload. Save/retry and failed
 reload protections also apply to initial setup. This supersedes the earlier
 existing-draft-only UI limitation and does not publish or activate an affiliate offer.
+
+## Last eligible click selection
+
+The pure Marketplace selector accepts only trusted, booking-correlated candidates
+with exact creator/link/agreement/accepted-terms references, explicit attribution
+window, source click instant, test marker and resolved eligibility. Caller-owned
+reads must authorize scope, prove the booking/referral match, resolve accepted
+agreement terms and eligibility, and establish that the candidate set is complete.
+A hotel form or unsigned callback cannot supply these assertions. No candidate
+collection, identity matching, consent or retention mechanism is introduced.
+
+Selection uses the latest eligible click at or before the original booking instant
+within that candidate's accepted terms window. The exact window boundary is included
+(elapsed time <= days \* 86400000); milliseconds, not hotel calendar dates, determine
+the window. Source times must be explicit UTC instants. The selector has no clock
+or defaults and never substitutes latest terms. Other properties/bookings, known
+test clicks and ineligible clicks cannot win. Identical click duplicates collapse;
+conflicting duplicates and tied latest clicks require review. Unknown eligibility
+within a relevant window requires review; incomplete candidate evidence stays pending.
+Only complete evidence with no eligible candidate returns unattributed.
+
+This is a pure decision building block, not a durable attribution processor or
+published agreement/link API. Historical reprocessing must use the same accepted
+terms and original booking time. Repeat-booking eligibility, identity/referral
+matching, consent/retention and evidence authority remain application/policy gates.
+No PMS name, stay-completion state, money, guest data or payout belongs in this selector.
