@@ -101,3 +101,10 @@ created or 200 for replay; invalid requests are 422, unavailable scope 404 and
 conflicts (including already-approved) 409. GET `/:policyVersionId` returns the
 exact approved policy (200), missing/wrong-property reference (404), or an unavailable
 unapproved/invalid policy (409). Database failures remain server errors.
+
+The editor's authorized GET collection returns the 20 most recently recorded policy
+versions for the exact property and selected authoring organization, with rate basis
+points, timestamp and approval state. This is editing history, not an active-rate
+selector: no version becomes effective merely because it is newest. Existing offer
+references and agreements retain their exact version. Empty history returns an empty
+list. The same route permission, entitlement and property checks apply.
