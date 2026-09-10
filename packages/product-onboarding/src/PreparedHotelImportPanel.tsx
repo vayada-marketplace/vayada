@@ -279,7 +279,9 @@ export function PreparedHotelImportPanel({
               <button
                 type="button"
                 onClick={() =>
-                  void load().catch(() => setError("Prepared data could not be refreshed."))
+                  void load()
+                    .then(() => onSaved?.())
+                    .catch(() => setError("Prepared data could not be refreshed."))
                 }
                 className="px-3 text-sm"
               >
