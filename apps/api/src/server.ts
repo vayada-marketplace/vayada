@@ -1,3 +1,4 @@
+import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -452,6 +453,12 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       readRepository: pmsOperationsRepository,
       stripePaymentProvider: stripeBookingPaymentProvider,
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
+    })
+  : undefined;
+const pmsRoomClosureRepository = pmsOperationsRepository && config.pmsRoomClosureEnabled
+  ? createPgPmsRoomClosureRepository({
+      connectionString: targetDatabaseUrl,
+      channex: config.channexManagement,
     })
   : undefined;
 const pmsLinkedInventoryGroupCommandRepository = pmsOperationsRepository
@@ -1379,6 +1386,7 @@ const app = buildApp({
   pmsModuleActivationRepository,
   pmsReviewRepository: createPgPmsReviewRepository({ connectionString: targetDatabaseUrl }),
   pmsOperationsCommandRepository,
+  pmsRoomClosureRepository,
   pmsLinkedInventoryGroupCommandRepository,
   bookingAcceptanceSettings,
   sameDayBookingSettings,

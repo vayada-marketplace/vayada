@@ -98,6 +98,8 @@ const PRICING_SOURCES_SELECT = `WITH pricing_currency AS (
       WHERE room.property_id = plan.property_id
         AND room.id = plan.room_type_id
         AND room.active
+        AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+          WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
     )
 )
 SELECT

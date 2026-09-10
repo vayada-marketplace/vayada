@@ -20,6 +20,7 @@ import { createBookingPublicationProjector } from "./bookingPublicationProjector
 import type { BookingPublicationProjectorPool } from "./bookingPublicationProjector.js";
 import {
   createPgDistributionBookingPublicationProjection,
+  BookingPublicationRoomClosureConflictError,
   type DistributionBookingPublicationPool,
 } from "./distributionBookingPublicationProjection.js";
 
@@ -903,6 +904,43 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
       });
     } finally {
       await failingStatus.close?.();
+    }
+  });
+
+  it("terminalizes a room-closure activation conflict as changed source content", async () => {
+    const accepted = await repository.requestPublication(await command("room-closure-conflict"));
+    if (!accepted.ok) throw new Error("Expected accepted publication request");
+    const worker = createBookingPublicationProjector({
+      connectionString: TEST_DATABASE_URL!,
+      projection: {
+        ...distributionPublication,
+        async projectPublication() {
+          throw new BookingPublicationRoomClosureConflictError();
+        },
+      },
+      attempts: attemptStatus,
+      readiness: { getBookingReadiness: async () => readinessEvidence() },
+      builder,
+      now: () => new Date("2026-08-02T13:01:00.000Z"),
+    });
+    try {
+      await worker.projectPending({ propertyId });
+      await expect(
+        repository.getPublicationStatus({
+          actorUserId,
+          organizationId,
+          propertyId,
+          operationId: accepted.operation.operationId,
+        }),
+      ).resolves.toMatchObject({
+        status: "failed",
+        resultContentRevisionId: null,
+        failureCode: "source_content_changed",
+      });
+      expect(await distributionPublication.getActive(propertyId)).toBeNull();
+      expect(await worker.projectPending({ propertyId })).toMatchObject({ processed: 0 });
+    } finally {
+      await worker.close?.();
     }
   });
 
