@@ -1,6 +1,6 @@
 # Shared hotel and room import
 
-Status: locally implemented, 2026-09-09. Deployment and real-account acceptance remain pending.
+Status: contract and parser implemented in slice 1, 2026-09-10. Full-flow implementation is delivered by subsequent stacked PRs; deployment and real-account acceptance remain pending.
 
 ## Outcome
 
@@ -135,10 +135,11 @@ complete when only its contract, UI shell, or happy-path preview is implemented.
 
 ### Implementation progress
 
-The local branch `fm/shared-hotel-import` implements the prepared-data contract,
-admin invitation editor, authenticated retrieval, first-run suggestions, shared
-review panel, and canonical profile/room application. The panel is mounted in
-marketplace onboarding and PMS room settings. The adaptive flag remains unchanged.
+This first slice contains the prepared-data contract, bounded parser, and parser
+tests. Subsequent slices add storage, authenticated routes, the admin editor, and
+the shared review UI. Runtime activation starts in slice 5; onboarding and PMS
+mounting arrive in slice 7. The following behavior describes the complete stack,
+not functionality available from slice 1 alone. The adaptive flag remains unchanged.
 
 Version 1 supports hotel name/type, street/postal address, city, country, timezone,
 and room name/description/occupancy/bed/bathroom/size facts. Contacts, media, physical
@@ -157,10 +158,8 @@ Import saves do not remount the adjacent setup wizard or discard unsaved edits.
 Existing forms retain their ordinary revision-conflict handling; reopen the relevant
 setup step to read newly imported facts. Skipped fields and rooms remain available.
 
-Local verification includes parser/API regressions, real Postgres migration and
-binding/concurrency tests, shared component tests, and browser flows with mocked
-authentication/API responses. These are not deployed WorkOS/account evidence.
-No external account, deployment configuration, or ticket has been changed.
+Complete-stack validation evidence belongs in the implementation PRs, including
+#1841. It is not evidence that this contract slice exposes the full flow.
 
 ## Acceptance and verification
 
@@ -186,17 +185,11 @@ No external account, deployment configuration, or ticket has been changed.
 - Record deployed revision and real-account smoke evidence separately from
   local/mocked verification. Preserve reusable accounts and shared fixtures.
 
-## Local validation record (2026-09-09)
+## Local validation record for slice 1
 
-- Root `npm run build` and `npm run typecheck --ignore-scripts` pass.
-- Focused API, parser, wizard, and review tests pass, including a real isolated
-  Postgres run of all migrations through 0174 and concurrent source application.
-- Browser pilot flows pass for admin invitation preparation, marketplace
-  onboarding prefill without writes, and PMS selected-room application/replay.
-  These browser runs use mocked authentication and API responses.
-- Independent adversarial review and complexity review completed; reported
-  retry, target-switching, dirty-form, and Add-property findings were fixed.
-- App changed-file ESLint reports no errors; existing warnings remain. Shared
-  packages are outside the repository's ESLint scope and were typechecked/tested.
+- Prepared-data parser tests cover valid data, unknown facts, unsupported fields,
+  duplicate room identifiers, and input bounds.
+- No runtime route, database migration, or mounted import UI is included in this
+  slice. Their validation is recorded in the later implementation PRs.
 - Not deployed. Real-account invite acceptance and deployed saving remain to be
   verified after the prerequisite and import changes are merged and deployed.
