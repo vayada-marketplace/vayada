@@ -237,3 +237,31 @@ live non-charge owners, Finance readiness and FX evidence. Routes, additive char
 configuration and publication wiring remain follow-up work. Integration tests seed
 the saved-draft boundary and exercise real local PostgreSQL authorization, Booking
 terms and charge confirmation; they do not represent a deployed hotel confirmation.
+
+## Complete PMS currency conversion (VAY-1878)
+
+`convertPricingConfigurationCurrency` converts a complete validated room snapshot
+with explicit `PricingConversionRate` evidence. Rates express target minor units
+per source minor unit (including scale differences); integer arithmetic rounds
+half-up per component, symmetrically for negative fixed adjustments. Evidence
+uses canonical UTC ISO timestamps (`Date.toISOString()` format), a positive
+bounded ratio, matching distinct supported currencies and a valid window at the
+trusted caller-supplied time. An explicitly observed 1:1 ratio is legal; missing
+FX never becomes 1:1. Overflow and positive tariffs rounded to zero fail.
+
+Conversion covers all four room modes, all calendar layers, fixed adjustments,
+linked date overrides, child supplements and both meal charging models. It keeps
+percentages, restrictions, dates, terms, links, capacities and identities and
+advances the pricing revision once without mutating the source.
+`isCompletePricingCurrencyConversion` verifies the complete same-property room
+set and exact converted contents; missing rooms, relabels, partial conversions,
+revision mismatches and unrelated policy edits fail.
+
+These functions prove PMS arithmetic only. They do not authenticate FX provenance
+or caller scope, convert separately owned amounts, mutate settings or authorize
+`PricingStorageGuard.allowCurrencyChange` alone. The authoritative FX adapter,
+Booking/add-on/charge/Finance conversion and atomic publication remain required.
+Production Python and accepted booking evidence are unchanged. Unlike Python's
+mixed-room failure path, the new conversion never returns a relabeled room after
+a missing exchange-rate failure; approved exact minor units also replace Python's
+floating arithmetic and legacy IDR scale convention.
