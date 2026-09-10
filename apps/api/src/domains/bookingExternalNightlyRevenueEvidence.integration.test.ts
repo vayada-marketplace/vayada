@@ -7,6 +7,7 @@ import {
   type AppendExternalRevenueEvidenceCommand,
   type ExternalRevenueEvidenceLine,
 } from "./bookingExternalNightlyRevenueEvidence.js";
+import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
 const DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY = randomUUID(),
   OTA_BOOKING = randomUUID(),
@@ -63,9 +64,9 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
     await client.query(
       `INSERT INTO booking.guest_bookings
        (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,payment_status,
-        check_in,check_out,room_count,currency,total_amount,balance_amount)
-       VALUES ($1,$3,$1::uuid::text,'pms',$4,'confirmed','unpaid','2026-09-01','2026-12-01',2,'EUR',0,0),
-         ($2,$3,$2::uuid::text,'booking',NULL,'confirmed','unpaid','2026-09-01','2026-12-01',1,'EUR',0,0)`,
+        check_in,check_out,room_count,currency,total_amount,balance_amount,booking_channel)
+       VALUES ($1,$3,$1::uuid::text,'pms',$4,'confirmed','unpaid','2026-09-01','2026-12-01',2,'EUR',0,0,'airbnb'),
+         ($2,$3,$2::uuid::text,'booking',NULL,'confirmed','unpaid','2026-09-01','2026-12-01',1,'EUR',0,0,'unknown')`,
       [OTA_BOOKING, DIRECT_BOOKING, PROPERTY, OTA_REFERENCE],
     );
     const roomScopes = [PROPERTY, ROOM_TYPE, OTHER_PROPERTY, OTHER_ROOM_TYPE];
@@ -106,7 +107,9 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
       { lines: [line("2026-09-01", "1", "exact", { roomTypeId: OTHER_ROOM_TYPE })] },
       { lines: [line("2026-09-01", "1", "exact", { linePosition: 3 })] },
     ])
-      await expect(append(overrides)).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError);
+      await expect(append({ ...overrides, idempotencyKey: randomUUID() })).rejects.toBeInstanceOf(
+        ExternalRevenueEvidenceScopeError,
+      );
     for (const lines of [
       [null],
       [line("2026-02-30", "1", "exact")],
@@ -121,6 +124,190 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
       [OTA_BOOKING, OTA_REFERENCE],
     );
     expect(evidence.rows[0]!.ok).toBe(true);
+  });
+
+  it("corrects removed-room revenue and commission atomically using original rules", async () => {
+    await client.query(
+      `INSERT INTO finance.commission_rules
+        (property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision)
+       VALUES ($1,'property','pms','percentage',15,'2026-01-01','finance','airbnb',1)`,
+      [PROPERTY],
+    );
+    const timezone = {
+      source: {
+        ownerDomain: "hotel_catalog" as const,
+        entityType: "property_profile" as const,
+        entityId: PROPERTY,
+        revision: "profile:1",
+      },
+      timeZone: "Europe/Berlin",
+    };
+    const baseCommand = command({
+      lines: [line("2026-09-01", "100", "exact", { linePosition: 2 })],
+    });
+    const base = await appendExternalNightlyRevenueEconomics(client, baseCommand, timezone);
+    await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1", [OTA_BOOKING]);
+    expect(await appendExternalNightlyRevenueEconomics(client, baseCommand, timezone)).toEqual({
+      ...base,
+      outcome: "replayed",
+    });
+    await expect(
+      append({ lines: [line("2026-09-01", "101", "exact", { linePosition: 2 })] }),
+    ).rejects.toMatchObject({ code: "external_evidence_idempotency_conflict" });
+    await client.query(
+      "UPDATE finance.commission_rules SET percentage_rate=99 WHERE property_id=$1",
+      [PROPERTY],
+    );
+    const correction = command({
+      idempotencyKey: "remove-second-room",
+      lines: [
+        line("2026-09-01", "-100", "exact", {
+          linePosition: 2,
+          occupiedRoomNights: -1,
+          economicEvent: "occupancy_adjustment",
+          lifecycleState: "corrected",
+          correctsEvidenceId: base.evidenceIds[0],
+        }),
+      ],
+    });
+    await client.query("SAVEPOINT failed_economics");
+    await expect(
+      appendExternalNightlyRevenueEconomics(client, correction, {
+        ...timezone,
+        source: { ...timezone.source, entityId: OTHER_PROPERTY },
+      }),
+    ).rejects.toMatchObject({ code: "ota_commission_evidence_scope_unavailable" });
+    await client.query("ROLLBACK TO SAVEPOINT failed_economics");
+    expect(
+      (
+        await client.query(
+          `SELECT
+      (SELECT count(*)::int FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1) AS revenue,
+      (SELECT count(*)::int FROM finance.ota_commission_evidence WHERE guest_booking_id=$1) AS commission`,
+          [OTA_BOOKING],
+        )
+      ).rows[0],
+    ).toEqual({ revenue: 1, commission: 1 });
+    const result = await appendExternalNightlyRevenueEconomics(client, correction, timezone);
+    expect(await appendExternalNightlyRevenueEconomics(client, correction, timezone)).toEqual({
+      ...result,
+      outcome: "replayed",
+    });
+    const totals = await client.query(
+      `SELECT sum(gross_room_amount)::text AS gross, sum(occupied_room_nights)::int AS nights
+       FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1`,
+      [OTA_BOOKING],
+    );
+    expect(totals.rows[0]).toEqual({ gross: "0.0000", nights: 0 });
+    const commissions = await client.query(
+      `SELECT percentage_rate::text AS rate, commission_amount::text AS amount,
+        corrects_commission_evidence_id IS NOT NULL AS correction
+       FROM finance.ota_commission_evidence WHERE guest_booking_id=$1 ORDER BY correction`,
+      [OTA_BOOKING],
+    );
+    expect(commissions.rows).toEqual([
+      { rate: "15.0000", amount: "15.0000", correction: false },
+      { rate: "15.0000", amount: "-15.0000", correction: true },
+    ]);
+  });
+
+  it("rejects unrelated correction targets and occupancy increases for removed positions", async () => {
+    const base = await append({ lines: [line("2026-09-01", "100", "exact", { linePosition: 2 })] });
+    const otherBooking = randomUUID();
+    await client.query(
+      `INSERT INTO booking.guest_bookings
+        (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,payment_status,
+         check_in,check_out,room_count,currency,total_amount,balance_amount)
+       VALUES ($1,$2,$1::uuid::text,'pms',$1::uuid::text,'confirmed','unpaid','2026-09-01','2026-09-03',2,'EUR',100,100)`,
+      [otherBooking, PROPERTY],
+    );
+    const unrelated = await append({
+      guestBookingId: otherBooking,
+      sourceBookingReference: otherBooking,
+      idempotencyKey: randomUUID(),
+      lines: [line("2026-09-01", "100", "exact", { linePosition: 2 })],
+    });
+    await client.query("INSERT INTO booking.nightly_revenue_room_scopes VALUES ($1,$2)", [
+      PROPERTY,
+      OTHER_ROOM_TYPE,
+    ]);
+    await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1", [OTA_BOOKING]);
+    const correction = line("2026-09-01", "-100", "exact", {
+      linePosition: 2,
+      occupiedRoomNights: -1,
+      economicEvent: "occupancy_adjustment",
+      lifecycleState: "corrected",
+      correctsEvidenceId: base.evidenceIds[0],
+    });
+    for (const override of [
+      { correctsEvidenceId: null },
+      { correctsEvidenceId: randomUUID() },
+      { correctsEvidenceId: unrelated.evidenceIds[0] },
+      { roomTypeId: OTHER_ROOM_TYPE },
+      { stayDate: "2026-09-02" },
+      { linePosition: 3 },
+      { occupiedRoomNights: 1 as const, grossRoomAmount: "100" },
+    ])
+      await expect(
+        append({ idempotencyKey: randomUUID(), lines: [{ ...correction, ...override }] }),
+      ).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError);
+    await expect(
+      append({ sourceKind: "manual", idempotencyKey: randomUUID(), lines: [correction] }),
+    ).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError);
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS count FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+          [OTA_BOOKING],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+  });
+
+  it("permits money corrections for removed positions but rejects stale occupancy targets", async () => {
+    const base = await append({ lines: [line("2026-09-01", "100", "exact", { linePosition: 2 })] });
+    await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1", [OTA_BOOKING]);
+    const correction = await append({
+      idempotencyKey: "removed-room-price",
+      lines: [
+        line("2026-09-01", "10", "exact", {
+          linePosition: 2,
+          occupiedRoomNights: 0,
+          economicEvent: "correction",
+          lifecycleState: "corrected",
+          correctsEvidenceId: base.evidenceIds[0],
+        }),
+      ],
+    });
+    const remove = (correctsEvidenceId: string) =>
+      append({
+        idempotencyKey: "removed-room-occupancy",
+        lines: [
+          line("2026-09-01", "-110", "exact", {
+            linePosition: 2,
+            occupiedRoomNights: -1,
+            economicEvent: "occupancy_adjustment",
+            lifecycleState: "corrected",
+            correctsEvidenceId,
+          }),
+        ],
+      });
+    await client.query("SAVEPOINT stale_tip");
+    await expect(remove(base.evidenceIds[0]!)).rejects.toMatchObject({
+      constraint: "chk_booking_nightly_revenue_evidence_occupancy_transition",
+    });
+    await client.query("ROLLBACK TO SAVEPOINT stale_tip");
+    await remove(correction.evidenceIds[0]!);
+    expect(
+      (
+        await client.query(
+          `SELECT sum(gross_room_amount)::text AS gross,
+      sum(occupied_room_nights)::int AS nights FROM booking.nightly_revenue_evidence
+      WHERE guest_booking_id=$1`,
+          [OTA_BOOKING],
+        )
+      ).rows[0],
+    ).toEqual({ gross: "0.0000", nights: 0 });
   });
 
   it("serializes manual revisions and appends adjustment history", async () => {

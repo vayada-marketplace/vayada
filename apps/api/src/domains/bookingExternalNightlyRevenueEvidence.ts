@@ -84,10 +84,7 @@ export async function appendExternalNightlyRevenueEvidence(
   if (!scope) throw new ExternalRevenueEvidenceScopeError("External booking scope is unavailable");
   if (scope.transactionId !== transaction.rows[0]?.id)
     throw new Error("External evidence requires an open transaction");
-  if (
-    scope.roomTypeCount !== roomTypes.length ||
-    lines.some((line) => line.linePosition > scope.roomCount)
-  )
+  if (scope.roomTypeCount !== roomTypes.length)
     throw new ExternalRevenueEvidenceScopeError("External room scope is unavailable");
   const stored = await client.query<StoredLine>(
     `SELECT id::text AS id, guest_booking_id::text AS "guestBookingId",
@@ -97,6 +94,43 @@ export async function appendExternalNightlyRevenueEvidence(
     [command.propertyId, prefix],
   );
   if (stored.rows.length > 0) return replay(stored.rows, lines, command);
+  const removedRoomLines = lines.filter((line) => line.linePosition > scope.roomCount);
+  if (removedRoomLines.length > 0) {
+    const targets = await client.query<{
+      id: string;
+      roomTypeId: string;
+      stayDate: string;
+      linePosition: number;
+    }>(
+      `SELECT evidence.id::text AS id, room_type_id::text AS "roomTypeId",
+         stay_date::text AS "stayDate", line_position AS "linePosition"
+       FROM booking.nightly_revenue_evidence evidence
+       JOIN booking.guest_bookings booking ON booking.id=evidence.guest_booking_id
+         AND booking.property_id=evidence.property_id AND booking.currency=evidence.currency
+       WHERE evidence.property_id=$1 AND evidence.guest_booking_id=$2
+         AND evidence.source_kind=$3 AND evidence.id=ANY($4::uuid[])`,
+      [
+        command.propertyId,
+        command.guestBookingId,
+        command.sourceKind,
+        removedRoomLines.map((line) => line.correctsEvidenceId).filter(Boolean),
+      ],
+    );
+    if (
+      removedRoomLines.some(
+        (line) =>
+          line.occupiedRoomNights > 0 ||
+          !targets.rows.some(
+            (target) =>
+              target.id === line.correctsEvidenceId &&
+              target.roomTypeId === line.roomTypeId &&
+              target.stayDate === line.stayDate &&
+              target.linePosition === line.linePosition,
+          ),
+      )
+    )
+      throw new ExternalRevenueEvidenceScopeError("External correction room scope is unavailable");
+  }
   const revision = await client.query<{ value: number }>(
     "SELECT COALESCE(MAX(source_revision),0)::int+1 value FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
     [command.guestBookingId],
