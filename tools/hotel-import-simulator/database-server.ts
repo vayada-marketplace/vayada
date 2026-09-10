@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import pg from "pg";
+import { createPgPropertyAccessRepository } from "@vayada/backend-authorization";
 import type { RequestContext } from "@vayada/backend-auth";
 import { createPgPreparedImportRepository } from "../../apps/api/src/domains/preparedHotelImportRepository.js";
 import { createPgSharedHotelSetupStatusRepository } from "../../apps/api/src/platform/sharedHotelSetupStatusReadModel.js";
@@ -9,6 +10,8 @@ import { createPgPmsRoomFactsCommandRepository } from "../../apps/api/src/domain
 import { createPgPmsRoomFactsReadModel } from "../../apps/api/src/domains/pmsRoomFactsReadModel.js";
 import { createPmsRoomFactsVocabularyValidationPort } from "../../apps/api/src/domains/pmsRoomFactsVocabulary.js";
 import { registerPreparedHotelImportRoutes } from "../../apps/api/src/routes/preparedHotelImports.js";
+import { registerPmsOperationsRoutes } from "../../apps/api/src/routes/pmsOperations.js";
+import { createTargetPmsOperationsReadRepository } from "../../apps/api/src/domains/pmsOperationsReadModel.js";
 import { listings } from "./client.js";
 
 async function main() {
@@ -93,6 +96,14 @@ async function main() {
       actor,
     ],
   );
+  const membership = await db.query(
+    "SELECT id FROM identity.organization_memberships WHERE organization_id=$1 AND user_id=$2",
+    [organization, actor],
+  );
+  await db.query(
+    "INSERT INTO identity.membership_property_assignments(membership_id,property_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+    [membership.rows[0].id, propertyId],
+  );
   await db.end();
   const app = Fastify();
   const token = randomUUID();
@@ -104,11 +115,16 @@ async function main() {
       actor: { internalUserId: actor, status: "active" },
       selectedOrganization: { organizationId: organization, kind: "hotel_group", status: "active" },
       membership: {
+        membershipId: membership.rows[0].id,
+        roleKey: "hotel_owner",
         status: "active",
         permissions: [
           "hotel_catalog.setup.manage",
           "marketplace.profile.manage",
           "pms.operations.manage",
+          "pms.rooms_rates.read",
+          "pms.room_status.read",
+          "pms.operations.read",
         ],
       },
       linkedResources: [
@@ -150,8 +166,20 @@ async function main() {
       capacityReadPort: readPort,
     },
   });
+  const propertyAccess = createPgPropertyAccessRepository({ connectionString });
+  await app.register(registerPmsOperationsRoutes, {
+    prefix: "/api/pms",
+    repository: createTargetPmsOperationsReadRepository({ connectionString }),
+    propertyAccessRepository: propertyAccess,
+    allowedOrigins: ["https://pms.localhost:1380"],
+  });
   app.addHook("onClose", async () => {
-    await Promise.all([profiles.close?.(), commandPort.close(), readPort.close()]);
+    await Promise.all([
+      profiles.close?.(),
+      commandPort.close(),
+      readPort.close(),
+      propertyAccess.close?.(),
+    ]);
   });
   await app.listen({ host: "127.0.0.1", port: 49709 });
   // Run Vite in this process: token stays out of browser bundles and command arguments.
