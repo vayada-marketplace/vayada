@@ -5,6 +5,7 @@ import { parseFlexibleCancellationTerms, pricingInteger, pricingKeys, pricingObj
 import type { Pool, PoolClient } from "pg";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { PricingStorageError, type PricingStorageScope } from "./replacementPricingStore.js";
 
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -12,6 +13,18 @@ const text = (v: unknown): v is string => typeof v === "string" && v === v.trim(
 const canonical = (v: unknown): string => JSON.stringify(v, (_key, value) => pricingObject(value)
   ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value);
 const fail = (code: "invalid" | "denied" | "stale" | "idempotency_conflict"): never => { throw new PricingStorageError(code); };
+
+/** Complete Booking terms-head source inside a caller-authorized transaction.
+ * The writer takes the same property lock, protecting new heads as well as updates.
+ * Immutable terms are identified by revision; historical rows are not current sources. */
+export async function lockBookingPricingTermsSource(client: PoolClient, propertyId: string): Promise<string | null> {
+  if (!uuid(propertyId)) return null;
+  propertyId = propertyId.toLowerCase();
+  await lockPmsInventoryMutationScope(client, propertyId);
+  const terms = (await client.query(`SELECT room_type_id,offer_id,revision FROM booking.pricing_v2_offer_term_heads
+    WHERE property_id=$1 ORDER BY room_type_id,offer_id COLLATE "C" FOR SHARE`, [propertyId])).rows;
+  return "booking.pricing.terms.v2:" + createHash("sha256").update(canonical({ propertyId, terms })).digest("hex");
+}
 
 /** Strict owner boundary; no defaults that silently change a saved policy. */
 export function parseBookingPricingOfferTerms(value: unknown): ReplacementOfferTerms | null {
