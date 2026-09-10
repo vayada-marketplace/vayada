@@ -1,3 +1,4 @@
+import { AFFILIATE_TRACKING_PURPOSES } from "@vayada/domain-booking";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import { buildApp } from "./app.js";
 import { type IdentityRepository, type RequestContext } from "@vayada/backend-auth";
@@ -209,10 +210,12 @@ describe("Marketplace affiliate destination HTTP", () => {
       configuration: { displayName: "Hotel", bookingUrl: "https://booking.example.com/" },
       createdAt: new Date(),
       trackingStatus: "not_validated",
+      trackingReadiness: { status: "pending", missing: [...AFFILIATE_TRACKING_PURPOSES] },
     });
-    expect((await app.inject({ ...endpoints[0]!, headers })).json().trackingStatus).toBe(
-      "not_validated",
-    );
+    expect((await app.inject({ ...endpoints[0]!, headers })).json()).toMatchObject({
+      trackingStatus: "not_validated",
+      trackingReadiness: { status: "pending", missing: [...AFFILIATE_TRACKING_PURPOSES] },
+    });
     repository.get.mockRejectedValue(new Error("database unavailable"));
     const failed = await app.inject({ ...endpoints[0]!, headers });
     expect(failed.statusCode).toBe(500);
