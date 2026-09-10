@@ -1,4 +1,5 @@
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
+import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -1496,6 +1497,7 @@ const app = buildApp({
   marketplaceAdminLegacySuperadminFallbackEnabled:
     config.marketplaceAdminLegacySuperadminFallbackEnabled,
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
+  preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
   marketplaceHotelProfileStatusRepository: createPgMarketplaceHotelProfileStatusRepository({
     connectionString: targetDatabaseUrl,
   }),
