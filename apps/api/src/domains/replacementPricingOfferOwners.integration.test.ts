@@ -1,0 +1,135 @@
+import { randomUUID } from "node:crypto";
+import type { RequestContext } from "@vayada/backend-auth";
+import type { ReplacementOfferTerms } from "@vayada/domain-booking";
+import pg from "pg";
+import { afterAll, describe, expect, it } from "vitest";
+import { createBookingPricingOfferTermsStore } from "./bookingPricingOfferTerms.js";
+import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
+import { lockReplacementPricingOfferOwners as verify } from "./replacementPricingOfferOwners.js";
+import type { PricingStorageSnapshot } from "./replacementPricingStore.js";
+const url = process.env["TEST_DATABASE_URL"];
+describe.skipIf(!url)("live replacement pricing offer owners", () => {
+  const pool = new pg.Pool({ connectionString: url, max: 5 });
+  afterAll(() => pool.end());
+  async function fixture() {
+    if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
+    const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
+    const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
+    await pool.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Terms test')", [actorUserId, `${actorUserId}@example.test`]);
+    await pool.query("INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Terms test',$2)", [organizationId, organizationId]);
+    await pool.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Terms test')", [propertyId]);
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Terms room')", [roomTypeId, propertyId]);
+    await pool.query(`INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin)
+      VALUES($1,$2,$3,$4,'all','agency')`, [membershipId, organizationId, actorUserId, roleKey]);
+    for (const permission of ["pms.rooms_rates.read", "pms.rooms_rates.manage"]) await pool.query(`INSERT INTO identity.role_permission_grants
+      (organization_kind,role_key,permission_key) VALUES('hotel_group',$1,$2)`, [roleKey, permission]);
+    for (const [product, type] of [["pms", "pms_property"], ["hotel_catalog", "property"]]) await pool.query(`INSERT INTO identity.organization_resource_links
+      (organization_id,product,resource_type,resource_id,relationship) VALUES($1,$2,$3,$4,'owner')`, [organizationId, product, type, propertyId]);
+    await pool.query("INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')", [organizationId]);
+    const context: RequestContext = {
+      actor: { internalUserId: actorUserId, email: "terms@example.test", status: "active", providerIdentity: { provider: "workos", providerUserId: "test-user" } },
+      selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
+      membership: { membershipId, roleKey, status: "active", permissions: ["pms.rooms_rates.read", "pms.rooms_rates.manage"], workosRoleSlugs: [] },
+      linkedResources: [{ product: "pms", resourceType: "pms_property", resourceId: propertyId, relationship: "owner", status: "active" }],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      locale: "en", currency: "EUR", audit: { requestId: randomUUID(), source: "web", receivedAt: new Date().toISOString() },
+    };
+    const booking = createBookingPricingOfferTermsStore(pool), secondRoomId = randomUUID();
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Second room')", [secondRoomId, propertyId]);
+    const termsInput = { roomTypeId, offerId: "flex", cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+    const terms: ReplacementOfferTerms[] = [];
+    for (const [room, offerId] of [[roomTypeId, "flex"], [roomTypeId, "other"], [secondRoomId, "flex"]])
+      terms.push(await booking.save(context, scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...termsInput, roomTypeId: room, offerId } }));
+    await pool.query(`INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
+      VALUES($1,true,ARRAY['pay_at_property'],'EUR')`, [propertyId]);
+    const client = await pool.connect();
+    let finance;
+    try {
+      await client.query("BEGIN");
+      finance = await lockFinanceReplacementPricingReadiness(client, { propertyId, currency: "EUR", pricingRevision: 1, terms });
+    } finally { await client.query("ROLLBACK"); client.release(); }
+    if (finance.kind !== "ready") throw new Error("fixture requires Finance readiness");
+    const snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
+      rooms: [roomTypeId, secondRoomId].map((id) => ({
+        version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
+        children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
+        offers: terms.filter((t) => t.roomTypeId === id).map((t) => ({ id: t.offerId, termsRevision: t.revision,
+          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
+          restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
+        })),
+      })) };
+    async function read(proposed: unknown = snapshot, auth: RequestContext | null = context) {
+      const client = await pool.connect();
+      try { await client.query("BEGIN"); return await verify(client, auth, scope, proposed); }
+      finally { await client.query("ROLLBACK"); client.release(); }
+    }
+    return { scope, context, membershipId, snapshot, read, booking, terms, termsInput, finance };
+  }
+  it("verifies every offer across rooms with exact current Finance evidence", async () => {
+    const f = await fixture();
+    expect(await f.read()).toEqual({ kind: "verified", terms: f.terms, finance: f.finance });
+    expect(await f.read({ ...f.snapshot, rooms: [...f.snapshot.rooms].reverse() })).toMatchObject({ kind: "verified" });
+    expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0]] })).toMatchObject({ reason: "finance_unavailable", financeReason: "stale" });
+    expect((await pool.query("SELECT count(*)::int AS n FROM platform.domain_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(3); // only terms writer events
+  });
+  it("denies missing or revoked authorization and foreign or inactive room scope", async () => {
+    const f = await fixture(), other = await fixture();
+    expect(await f.read(f.snapshot, null)).toMatchObject({ reason: "denied" });
+    expect(await f.read(f.snapshot, other.context)).toMatchObject({ reason: "denied" });
+    const foreignRoom = { ...f.snapshot.rooms[1], roomTypeId: other.snapshot.rooms[0].roomTypeId };
+    expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0], foreignRoom] })).toMatchObject({ reason: "room_unavailable" });
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.snapshot.rooms[1].roomTypeId]);
+    expect(await f.read()).toMatchObject({ reason: "room_unavailable" });
+    await pool.query("UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1", [f.membershipId]);
+    expect(await f.read()).toMatchObject({ reason: "denied" });
+  });
+  it("rejects malformed, duplicate, mixed-revision and cross-property configurations", async () => {
+    const f = await fixture(), first = f.snapshot.rooms[0];
+    for (const input of [null, { ...f.snapshot, rooms: [] }, { ...f.snapshot, ownerReferences: {} },
+      { ...f.snapshot, rooms: [first, first] }, { ...f.snapshot, rooms: [first, { ...f.snapshot.rooms[1], revision: 2 }] },
+      { ...f.snapshot, rooms: [{ ...first, roomTypeId: "not-a-uuid" }] },
+      { ...f.snapshot, rooms: [{ ...first, propertyId: randomUUID() }] },
+      { ...f.snapshot, currency: "USD" },
+    ]) expect(await f.read(input)).toMatchObject({ reason: "invalid" });
+  });
+  it("rejects stale and foreign terms on any selected offer", async () => {
+    const f = await fixture(), other = await fixture();
+    for (const index of [0, 1]) {
+      const rooms = [...f.snapshot.rooms];
+      rooms[0] = { ...rooms[0], offers: rooms[0].offers.map((o, i) => i === index ? { ...o, termsRevision: other.terms[0].revision } : o) };
+      expect(await f.read({ ...f.snapshot, rooms })).toMatchObject({ reason: "terms_stale" });
+    }
+    const last = f.terms[2];
+    await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: last.revision,
+      terms: { ...f.termsInput, roomTypeId: last.roomTypeId, offerId: last.offerId } });
+    expect(await f.read()).toMatchObject({ reason: "terms_stale" });
+  });
+  it("rejects foreign/stale Finance evidence, disabled payments and requested deposits", async () => {
+    const f = await fixture(), other = await fixture();
+    expect(await f.read({ ...f.snapshot, ownerReferences: { finance: other.finance.evidenceId } })).toMatchObject({ financeReason: "stale" });
+    expect(await f.read({ ...f.snapshot, rooms: f.snapshot.rooms.map((r) => ({ ...r, revision: 2 })) })).toMatchObject({ financeReason: "stale" });
+    expect(await f.read({ ...f.snapshot, currency: "USD", rooms: f.snapshot.rooms.map((r) => ({ ...r, currency: "USD" })) })).toMatchObject({ financeReason: "currency_mismatch" });
+    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+    expect(await f.read()).toMatchObject({ financeReason: "payments_disabled" });
+    await pool.query("UPDATE finance.payment_settings SET payments_enabled=true WHERE property_id=$1", [f.scope.propertyId]);
+    const saved = await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.terms[0].revision,
+      terms: { ...f.termsInput, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } } });
+    const rooms = [...f.snapshot.rooms];
+    rooms[0] = { ...rooms[0], offers: rooms[0].offers.map((o, i) => i === 0 ? { ...o, termsRevision: saved.revision } : o) };
+    expect(await f.read({ ...f.snapshot, rooms })).toMatchObject({ financeReason: "deposit_execution_unavailable" });
+  });
+  it("holds live owner locks until transaction end, then rejects the replaced terms", async () => {
+    const f = await fixture(), client = await pool.connect(), writer = new pg.Pool({ connectionString: url, max: 1 });
+    const command = { requestId: randomUUID(), expectedRevision: f.terms[0].revision, terms: f.termsInput };
+    try {
+      await writer.query("SET lock_timeout='150ms'");
+      await client.query("BEGIN"); expect(await verify(client, f.context, f.scope, f.snapshot)).toMatchObject({ kind: "verified" });
+      await expect(createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command)).rejects.toMatchObject({ code: "55P03" });
+      await expect(writer.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId])).rejects.toMatchObject({ code: "55P03" });
+      await client.query("COMMIT");
+      await createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command);
+      expect(await f.read()).toMatchObject({ reason: "terms_stale" });
+    } finally { await client.query("ROLLBACK"); client.release(); await writer.end(); }
+  });
+});
