@@ -16,7 +16,6 @@
     "./nearbyApi": "./src/nearbyApi.ts",
     "./AddonsStep": "./src/AddonsStep.tsx",
     "./BrandMediaStep": "./src/BrandMediaStep.tsx",
-    "./LastMinuteStep": "./src/LastMinuteStep.tsx",
     "./localApiOrigin": "./src/localApiOrigin.ts",
     "./LocalizationMultiSelect": "./src/LocalizationMultiSelect.tsx",
     "./PoliciesStep": "./src/PoliciesStep.tsx",
