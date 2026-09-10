@@ -84,7 +84,7 @@ export function publicationFixture() {
       CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
       CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY, profile_status TEXT DEFAULT 'active');
       CREATE TABLE marketplace.marketplace_offers(id UUID PRIMARY KEY, property_id UUID, organization_id UUID,
-        offer_status TEXT DEFAULT 'active', UNIQUE(id,property_id,organization_id));`);
+        offer_status TEXT DEFAULT 'verified', UNIQUE(id,property_id,organization_id));`);
     await pool.query(
       platform.slice(
         platform.indexOf("CREATE FUNCTION platform.tenant_scope_key("),
@@ -100,7 +100,9 @@ export function publicationFixture() {
     await pool.query(drafts);
     await pool.query(policies);
     await pool.query(destinations);
-    await pool.query(await readFile(new URL("0181_marketplace_published_affiliate_terms.sql", migrations), "utf8"));
+    await pool.query(
+      await readFile(new URL("0181_marketplace_published_affiliate_terms.sql", migrations), "utf8"),
+    );
     await pool.query("INSERT INTO identity.users VALUES ($1);", [id(1)]);
     await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(4)]);
     await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1),($2)", [id(3), id(6)]);

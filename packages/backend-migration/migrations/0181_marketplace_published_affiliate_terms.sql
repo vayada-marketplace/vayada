@@ -19,7 +19,7 @@ CREATE TABLE marketplace.affiliate_published_terms (
   organization_id UUID NOT NULL,
   source_draft_id UUID NOT NULL UNIQUE,
   -- Complete immutable creator-visible disclosure, resolved by a trusted publication port.
-  disclosure JSONB NOT NULL CHECK (jsonb_typeof(disclosure) = 'object' AND disclosure <> '{}'::jsonb),
+  disclosure TEXT NOT NULL CHECK (jsonb_typeof(disclosure::jsonb) = 'object' AND disclosure::jsonb <> '{}'::jsonb),
   disclosure_hash TEXT NOT NULL CHECK (disclosure_hash ~ '^[0-9a-f]{64}$'),
   attribution_policy_version TEXT NOT NULL CHECK (length(btrim(attribution_policy_version)) BETWEEN 1 AND 200),
   evidence_references JSONB NOT NULL CHECK (jsonb_typeof(evidence_references) = 'array' AND jsonb_array_length(evidence_references) > 0),
