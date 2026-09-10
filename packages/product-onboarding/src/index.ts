@@ -34,13 +34,6 @@ export {
   type PropertyLaunchSettings,
   type PropertyLaunchSettingsApi,
 } from "./propertyLaunchSettings";
-export {
-  default as LastMinuteStep,
-  DEFAULT_LAST_MINUTE_TIERS,
-  createEmptyLastMinuteConfig,
-  type LastMinuteConfig,
-  type LastMinuteTier,
-} from "./LastMinuteStep";
 export { default as PoliciesStep } from "./PoliciesStep";
 export {
   default as SharedFirstRunPropertySetupWizard,
