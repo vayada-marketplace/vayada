@@ -1336,3 +1336,5 @@ export type AffiliateProvisionedEvent = {
   readonly referralOutput: Readonly<CollaborationReferralOutput>;
   readonly audit: Readonly<MarketplaceCommandAudit>;
 };
+
+export * from "./affiliateAttribution.js";
