@@ -104,3 +104,17 @@ Changing the selected rate creates a new draft revision and preserves all previo
 references. Destination readiness, creator-visible published terms and accepted
 agreement creation remain separate publication work; this association alone does
 not certify a booking destination, publish terms or activate earning links.
+
+## Editing an existing hotel draft
+
+Expanded Affiliate offers in the hotel profile expose approved rate selection and
+an explicit attribution window. The editor loads the existing draft and approved
+policy history, preserving its exact current approved rate even beyond the history
+limit. Saving uses the loaded revision and a retry key bound to the exact payload;
+the booking destination reference is preserved. A successful write reloads the
+server record, and a failed reload does not leave the stale form editable.
+
+An offer without an initial draft shows setup required and cannot save. This editor
+does not invent a destination, window or rate. Destination configuration/validation
+and creator-visible publication are not implemented here. Draft terms remain
+hotel-only and separate from the existing descriptive collaboration offer fields.
