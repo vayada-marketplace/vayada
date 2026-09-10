@@ -4,6 +4,7 @@ import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSu
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
@@ -1617,6 +1618,8 @@ const app = buildApp({
     createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   marketplaceAffiliateDestinationRepository:
     createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateCompletionRepository:
+    createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
