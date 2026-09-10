@@ -244,6 +244,18 @@ Plans are bounded to 1,000 lines and commit through the existing atomic Finance
 economics writer. This pure planner does not yet load ledger state or change the
 runtime guard.
 
+The Booking OTA ledger reader locks the confirmed Airbnb booking by property,
+booking ID, exact external source reference and currency. It requires a caller-owned
+transaction and returns at most 1,000 current room-night aggregates with their
+latest evidence IDs and recognition dates. It includes removed historical nights
+for correction lineage and rejects mixed/non-OTA or unsupported economic events,
+invalid aggregate occupancy/money, and incomplete current-stay coverage. Every
+current room position must have one occupied entry for every stay date; active
+entries outside the current stay/count also reject. Currency, source and property
+filters cannot silently drop conflicting evidence. Provider revision freshness,
+binding ownership, Finance payment/folio handling and gross-price interpretation
+remain the coordinator's responsibility; this reader does not activate the workflow.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical
