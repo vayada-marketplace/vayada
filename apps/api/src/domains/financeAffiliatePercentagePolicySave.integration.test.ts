@@ -11,7 +11,7 @@ const id = (n: number) => `15100000-0000-4000-8000-${String(n).padStart(12, "0")
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 const platform = await readFile(new URL("0010_platform_jobs_events_audit.sql", migrations), "utf8");
 const policies = await readFile(
-  new URL("0174_finance_affiliate_percentage_policies.sql", migrations),
+  new URL("0180_finance_affiliate_percentage_policies.sql", migrations),
   "utf8",
 );
 function context(): RequestContext {
