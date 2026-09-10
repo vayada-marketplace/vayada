@@ -11,6 +11,7 @@ import { ProfilePictureModal } from "../ProfilePictureModal";
 import { DeleteConfirmModal } from "../DeleteConfirmModal";
 import { HotelOverviewTab } from "./HotelOverviewTab";
 import { ListingViewCard } from "./ListingViewCard";
+import { AffiliateCommissionEditor } from "./AffiliateCommissionEditor";
 import { ListingEditorForm } from "./ListingEditorForm";
 import { ManagePhotosModal } from "./ManagePhotosModal";
 import { useHotelProfile } from "@/hooks/useHotelProfile";
@@ -224,6 +225,7 @@ export function HotelProfile() {
               </div>
             </div>
 
+            <AffiliateCommissionEditor key={hotelProfile.id} propertyId={hotelProfile.id} />
             {hotelProfile.listings && hotelProfile.listings.length > 0 ? (
               <div className={`mt-6 space-y-3 ${listing.isAddingNewListing ? "" : "mt-6"}`}>
                 {hotelProfile.listings.map((listingItem, index) => {
