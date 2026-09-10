@@ -294,3 +294,29 @@ and exact evidence references together with all other owners. Future consuming U
 must show `REPLACEMENT_FX_ATTRIBUTION`; raw-rate redistribution is not exposed.
 Provider reference: https://www.exchangerate-api.com/docs/free. ISO reference:
 https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml.
+
+## Immutable FX ledger (VAY-1926)
+
+`createReplacementPricingFxStore.observe(from, to)` fetches through the trusted
+server adapter before acquiring a database connection, then records the exact
+observation in `finance.pricing_v2_fx_observations`. This global reference ledger
+stores provider, stable ID, pair, exact ratio, currency scales, observation/expiry
+and database receipt time. Concurrent or repeated collection deduplicates by ID;
+update, deletion and truncation are prohibited. The immutable record is the
+observation audit trail, not a pricing publication event.
+
+`lockReplacementPricingFxObservation` verifies an exact ID and pair inside the
+caller's authorized transaction. It checks current currency scales, recomputes
+content identity and uses `clock_timestamp()` for freshness. Immutable rows need
+no row lock; transaction-start time must not extend their validity. Expired
+observations remain available as historical database records but cannot approve
+new pricing. The content hash detects mismatches; it is not a signature or a
+replacement for the server-owned ingestion boundary.
+
+The writer accepts currency pairs rather than arbitrary rate payloads. Both
+insertion and verification use database wall time, so application clock skew
+cannot admit future or expired observations. A rate that expires after insertion
+can remain in history even if the final lookup correctly returns unavailable.
+The publication caller must recheck expiry at the mutation boundary and verify
+property scope, complete conversion and every other owner. Collection alone does
+not authorize a currency change, rewrite accepted bookings or publish prices.
