@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject,
+import { isCompletePricingCurrencyConversion, parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject,
   type PricingConfiguration } from "@vayada/domain-pms";
 import type { Pool, PoolClient } from "pg";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { lockReplacementPricingFxObservation } from "./replacementPricingFxStore.js";
 
 export type PricingStorageScope = Readonly<{ propertyId: string; organizationId: string; actorUserId: string }>;
 export type PricingStorageSources = Readonly<Record<string, string>>;
@@ -13,7 +14,8 @@ export interface PricingStorageGuard {
   /** Authenticate scope; validate every proposed room/owner/terms reference against its owner;
    * lock the validated sources until transaction end. proposed=null for reads. No default allow. */
   lock(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot | null): Promise<PricingStorageSources | null>;
-  /** Verify complete conversion of every room AND owner-owned amount, with authoritative FX evidence. */
+  /** Additional owner approval: verify separately owned amounts and conversion obligations.
+   * Storage independently enforces persisted FX and complete PMS room conversion. No default allow. */
   allowCurrencyChange(client: PoolClient, scope: PricingStorageScope, before: StoredPricingRevision,
     after: PricingStorageSnapshot): Promise<boolean>;
 }
@@ -98,7 +100,13 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         if (canonical(sources) !== canonical(command.sources)) return fail("stale");
         const previous = await current(client, scope.propertyId);
         if ((previous?.revision ?? 0) !== command.expectedRevision) return fail("stale");
-        if (previous && previous.currency !== next.currency && !await guard.allowCurrencyChange(client, scope, previous, next)) return fail("currency_conversion_required");
+        const currencyChange = previous && previous.currency !== next.currency;
+        if (currencyChange) {
+          const rate = await lockReplacementPricingFxObservation(client, next.ownerReferences.fx ?? "", previous.currency, next.currency);
+          const now = (await client.query("SELECT clock_timestamp() AS time")).rows[0].time as Date;
+          if (!rate || !isCompletePricingCurrencyConversion(previous.rooms, next.rooms, rate, now.getTime()) ||
+              !await guard.allowCurrencyChange(client, scope, previous, next)) return fail("currency_conversion_required");
+        }
         await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1) ON CONFLICT DO NOTHING", [scope.propertyId]);
         const revision = command.expectedRevision + 1;
         await client.query(`INSERT INTO pms.pricing_v2_revisions
@@ -108,6 +116,8 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
           (property_id,revision,room_type_id,currency,configuration) VALUES($1,$2,$3,$4,$5)`, [scope.propertyId, revision, room.roomTypeId, next.currency, JSON.stringify(room)]);
         await client.query("UPDATE pms.pricing_v2_heads SET revision=$2 WHERE property_id=$1", [scope.propertyId, revision]);
         await effects(client, scope, revision, "pricing.v2.revised", command.requestId, true);
+        // A slow write/effect must not extend FX validity. Failure rolls back the entire publication.
+        if (currencyChange && !await lockReplacementPricingFxObservation(client, next.ownerReferences.fx ?? "", previous.currency, next.currency)) return fail("currency_conversion_required");
         return { revision, replayed: false };
       });
     },
