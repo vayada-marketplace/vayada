@@ -118,6 +118,45 @@ describe("PMS Channex management command routes", () => {
     expect(harness.reportSubmit).not.toHaveBeenCalled();
   });
 
+  it("denies an authorized property outside the staged reporting scope on GET and POST", async () => {
+    const harness = await testApp({}, { ...mutating, bookingSync: "observe_only" }, operationId);
+    app = harness.app;
+    const request = {
+      url: `/properties/${propertyId}/reservations/booking-1/no-show-report`,
+      headers: { authorization: "Bearer valid" },
+    };
+    expect((await app.inject({ ...request, method: "GET" })).json()).toMatchObject({
+      eligible: false,
+      retryable: false,
+    });
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          payload: { waivedFees: false, retry: false },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(harness.reportSubmit).not.toHaveBeenCalled();
+    await app.close();
+    const scoped = await testApp({}, { ...mutating, bookingSync: "observe_only" }, propertyId);
+    app = scoped.app;
+    expect((await app.inject({ ...request, method: "GET" })).json()).toMatchObject({
+      eligible: true,
+    });
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          payload: { waivedFees: false, retry: false },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(scoped.reportSubmit).toHaveBeenCalledOnce();
+  });
+
   it("requires an explicit fee choice and property-scoped authorization for reporting", async () => {
     const harness = await testApp();
     app = harness.app;
@@ -414,6 +453,7 @@ describe("PMS Channex management command routes", () => {
 async function testApp(
   access: Access = {},
   capabilityModes: ChannexManagementCapabilityModes = mutating,
+  reportScope?: string,
 ) {
   const app = Fastify({ logger: false });
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
@@ -466,8 +506,12 @@ async function testApp(
     },
     capabilityModes,
     commandPort: { enqueue, recoverAlert },
-    noShowReports: { get: vi.fn(), submit: reportSubmit },
-    noShowReportingEnabled: capabilityModes.bookingSync === "mutating",
+    noShowReports: {
+      get: vi.fn().mockResolvedValue({ eligible: true, retryable: true }),
+      submit: reportSubmit,
+    },
+    noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
+    noShowReportingPropertyId: reportScope,
   });
   return { app, enqueue, putDatePrice, recoverAlert, reportSubmit };
 }
