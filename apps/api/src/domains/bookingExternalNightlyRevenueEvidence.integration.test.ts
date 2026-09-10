@@ -9,6 +9,7 @@ import {
 } from "./bookingExternalNightlyRevenueEvidence.js";
 import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
 import { planOtaRevenueCorrections } from "./bookingOtaRevenueCorrections.js";
+import { loadBookingOtaRevenueLedger } from "./bookingOtaRevenueLedger.js";
 const DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY = randomUUID(),
   OTA_BOOKING = randomUUID(),
@@ -313,6 +314,10 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
 
   it("writes planned price and stay corrections through Booking and Finance", async () => {
     await client.query(
+      "UPDATE booking.guest_bookings SET check_out='2026-09-02',room_count=1 WHERE id=$1",
+      [OTA_BOOKING],
+    );
+    await client.query(
       `INSERT INTO finance.commission_rules
         (property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision)
        VALUES ($1,'property','pms','percentage',15,'2026-01-01','finance','airbnb',1)`,
@@ -332,16 +337,14 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
       command({ lines: [line("2026-09-01", "100", "exact")] }),
       timezone,
     );
-    const current = {
-      roomTypeId: ROOM_TYPE,
-      stayDate: "2026-09-01",
-      linePosition: 1,
-      grossRoomAmount: "100",
-      evidenceQuality: "exact" as const,
-      occupiedRoomNights: 1 as const,
-      recognizedOn: "2026-09-01",
-      evidenceId: initial.evidenceIds[0]!,
+    const scope = {
+      propertyId: PROPERTY,
+      bookingId: OTA_BOOKING,
+      sourceBookingReference: OTA_REFERENCE,
+      currency: "EUR",
     };
+    const current = (await loadBookingOtaRevenueLedger(client, scope))[0]!;
+    expect(current.evidenceId).toBe(initial.evidenceIds[0]);
     const corrected = await appendExternalNightlyRevenueEconomics(
       client,
       command({
@@ -354,24 +357,36 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
       }),
       timezone,
     );
+    expect((await loadBookingOtaRevenueLedger(client, scope))[0]).toMatchObject({
+      evidenceId: corrected.evidenceIds[0],
+      grossRoomAmount: "80.0000",
+    });
     const lines = planOtaRevenueCorrections(
-      [
-        {
-          ...current,
-          grossRoomAmount: "80",
-          evidenceId: corrected.evidenceIds[0]!,
-          recognizedOn: "2026-09-10",
-        },
-      ],
+      await loadBookingOtaRevenueLedger(client, scope),
       [{ ...current, stayDate: "2026-09-02", grossRoomAmount: "50" }],
       "2026-09-10",
     );
     const change = command({ idempotencyKey: "planned-stay", lines });
+    await client.query(
+      "UPDATE booking.guest_bookings SET check_in='2026-09-02',check_out='2026-09-03' WHERE id=$1",
+      [OTA_BOOKING],
+    );
     const applied = await appendExternalNightlyRevenueEconomics(client, change, timezone);
     expect(await appendExternalNightlyRevenueEconomics(client, change, timezone)).toEqual({
       ...applied,
       outcome: "replayed",
     });
+    const ledger = await loadBookingOtaRevenueLedger(client, scope);
+    expect(
+      ledger.map(({ stayDate, grossRoomAmount, occupiedRoomNights }) => ({
+        stayDate,
+        grossRoomAmount,
+        occupiedRoomNights,
+      })),
+    ).toEqual([
+      { stayDate: "2026-09-01", grossRoomAmount: "0.0000", occupiedRoomNights: 0 },
+      { stayDate: "2026-09-02", grossRoomAmount: "50.0000", occupiedRoomNights: 1 },
+    ]);
     expect(
       (
         await client.query(
@@ -383,6 +398,70 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
         )
       ).rows[0],
     ).toEqual({ gross: "50.0000", nights: 1, commission: "7.5000" });
+  });
+
+  it("requires complete current-stay coverage and exact Booking scope", async () => {
+    const scope = {
+      propertyId: PROPERTY,
+      bookingId: OTA_BOOKING,
+      sourceBookingReference: OTA_REFERENCE,
+      currency: "EUR",
+    };
+    await client.query("UPDATE booking.guest_bookings SET check_out='2026-09-02' WHERE id=$1", [
+      OTA_BOOKING,
+    ]);
+    const read = (override = {}) => loadBookingOtaRevenueLedger(client, { ...scope, ...override });
+    await expect(read()).rejects.toThrow("alteration_revenue_ledger_unavailable");
+    await append({ lines: [line("2026-09-01", "100", "exact")] });
+    await expect(read()).rejects.toThrow("alteration_revenue_ledger_unavailable");
+    await append({
+      idempotencyKey: "second-room",
+      lines: [line("2026-09-01", null, "missing", { linePosition: 2 })],
+    });
+    expect(await read()).toHaveLength(2);
+    for (const override of [
+      { propertyId: OTHER_PROPERTY },
+      { bookingId: DIRECT_BOOKING },
+      { sourceBookingReference: "wrong" },
+      { currency: "USD" },
+    ])
+      await expect(read(override)).rejects.toThrow("alteration_revenue_ledger_unavailable");
+    await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1", [OTA_BOOKING]);
+    await expect(read()).rejects.toThrow("alteration_revenue_ledger_unavailable");
+  });
+
+  it("rejects mixed-source revenue instead of silently ignoring it", async () => {
+    await client.query("UPDATE booking.guest_bookings SET check_out='2026-09-02' WHERE id=$1", [
+      OTA_BOOKING,
+    ]);
+    await append({ lines: [line("2026-09-01", "100", "exact")] });
+    await append({
+      sourceKind: "manual",
+      idempotencyKey: "manual-second-room",
+      lines: [line("2026-09-01", "50", "exact", { linePosition: 2 })],
+    });
+    await expect(
+      loadBookingOtaRevenueLedger(client, {
+        propertyId: PROPERTY,
+        bookingId: OTA_BOOKING,
+        sourceBookingReference: OTA_REFERENCE,
+        currency: "EUR",
+      }),
+    ).rejects.toThrow("alteration_revenue_ledger_unavailable");
+  });
+
+  it("rejects reads outside a caller-owned transaction", async () => {
+    const peer = new pg.Client({ connectionString: DATABASE_URL });
+    peers.push(peer);
+    await peer.connect();
+    await expect(
+      loadBookingOtaRevenueLedger(peer, {
+        propertyId: PROPERTY,
+        bookingId: OTA_BOOKING,
+        sourceBookingReference: OTA_REFERENCE,
+        currency: "EUR",
+      }),
+    ).rejects.toThrow("alteration_revenue_ledger_unavailable");
   });
 
   it("serializes manual revisions and appends adjustment history", async () => {
