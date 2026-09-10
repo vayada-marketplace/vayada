@@ -264,7 +264,7 @@ export function mergeImportProperty(
   let addressChanged = false;
   for (const key of IMPORT_PROPERTY_FIELDS) {
     if (key === "displayName" || key === "propertyType" || fields[key] === undefined) continue;
-    if (location[key] !== fields[key]) addressChanged = true;
+    if (key !== "timezone" && location[key] !== fields[key]) addressChanged = true;
     location[key] = fields[key];
   }
   if (addressChanged) {

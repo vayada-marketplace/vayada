@@ -50,6 +50,15 @@ const routeScenarios: Array<{
 ];
 
 test.describe("marketplace-web adaptive hotel setup shell", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route(
+      /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+      async (route) => {
+        if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+        await route.fulfill({ headers: corsHeaders(route), json: { import: null } });
+      },
+    );
+  });
   test("automatically selects the only hotel before resuming adaptive setup", async ({
     page,
     baseURL,

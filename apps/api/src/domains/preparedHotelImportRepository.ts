@@ -32,6 +32,7 @@ export function createPgPreparedImportRepository(
     },
     async apply(scope, execute) {
       const client = await pool.connect();
+      let failed = false;
       try {
         // Serialize both the first binding and retries for this source.
         await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [scope.sourceId]);
@@ -56,16 +57,19 @@ export function createPgPreparedImportRepository(
           [scope.sourceId, JSON.stringify(successes)],
         );
         return items;
+      } catch (error) {
+        failed = true;
+        throw error;
       } finally {
         try {
           await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
             scope.sourceId,
           ]);
+          client.release();
         } catch (error) {
           client.release(true);
-          throw error;
+          if (!failed) throw error;
         }
-        client.release();
       }
     },
     async close() {
