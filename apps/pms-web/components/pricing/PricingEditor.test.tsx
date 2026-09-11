@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeStaySeason } from "./PricingStaySeasons";
 import { changeStayDate } from "./PricingStayDates";
 import { changeStayRules } from "./PricingStayRules";
 import { changeSeasonPrice } from "./PricingSeasons";
@@ -426,4 +427,40 @@ it("protects unfinished date stay rules, prefills defaults and reviews the saved
   expect(button("Clear date stay rules").props.disabled).toBe(true); expect(button("Add date stay rules").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   await click("Back to editing"); await click("Clear date stay rules"); await click("Save draft");
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
+});
+
+it("validates seasonal stay ranges and clears only the selected exception", () => {
+  const input = { minimum: "5", maximum: "10", closedToArrival: false, closedToDeparture: true, stopSell: false };
+  const original = changeStayDate(snapshot.rooms[0], "flex", "2026-12-25", { ...input, minimum: "7" });
+  const winter = changeStaySeason(original, "flex", "12-15", "01-10", input);
+  const leap = changeStaySeason(winter, "flex", "02-29", "02-29", { ...input, maximum: "" });
+  expect(winter.offers[0].restrictions).toMatchObject({ rules: { minArrivalNights: 1 }, seasons: [{ from: "12-15", through: "01-10", rules: { minArrivalNights: 5, maxStayNights: 10, closedToDeparture: true } }], dates: [{ date: "2026-12-25", rules: { minArrivalNights: 7 } }] });
+  expect(changeStaySeason(leap, "flex", "02-29", "02-29", null)).toEqual(winter);
+  expect(changeStaySeason(winter, "flex", "12-15", "01-10", null)).toEqual(original);
+  for (const [from, through] of [["12-15", "01-10"], ["01-10", "02-01"], ["12-01", "12-15"], ["02-28", "03-01"], ["02-30", "03-01"], ["", "01-01"], ["1-01", "01-02"]]) expect(() => changeStaySeason(leap, "flex", from, through, input)).toThrow();
+  expect(() => changeStaySeason(original, "flex", "06-01", "06-30", { ...input, minimum: "0" })).toThrow();
+  expect(() => changeStaySeason(original, "flex", "06-01", "06-30", { ...input, maximum: "4" })).toThrow();
+  expect(() => changeStaySeason(original, "flex", "06-01", "06-30", null)).toThrow();
+  const offer = original.offers[0], linked = { ...offer, id: "nr", price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "fixed" as const, deltaMinor: "0" }, dateOverrides: [] } };
+  expect(changeStaySeason({ ...original, offers: [offer, linked] }, "nr", "06-01", "06-30", input).offers[1].restrictions).toMatchObject({ seasons: [{ from: "06-01" }] });
+  expect(() => changeStaySeason({ ...original, offers: [offer, { ...linked, restrictions: { kind: "inherit" } }] }, "nr", "06-01", "06-30", input)).toThrow(/owns/);
+});
+
+it("protects seasonal stay entries separately and reviews then clears the saved rule", async () => {
+  await mount(); await click("Save draft"); await click("Add seasonal stay rules");
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  expect(field("Minimum nights for season rule Room 1 Offer 1").props.value).toBe("1");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const listener = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: Event) => void;
+  const unload = new Event("beforeunload", { cancelable: true }); listener(unload); expect(unload.defaultPrevented).toBe(true);
+  await click("Add date stay rules"); await click("Cancel seasonal stay rules"); expect(button("Save draft").props.disabled).toBe(true);
+  await click("Add seasonal stay rules"); await click("Cancel date stay rules"); expect(button("Save draft").props.disabled).toBe(true);
+  await fill("Stay-rule Start (MM-DD) for Room 1 Offer 1", "12-"); await click("Apply seasonal stay rules"); expect(JSON.stringify(view.toJSON())).toContain("valid MM-DD");
+  await fill("Stay-rule Start (MM-DD) for Room 1 Offer 1", "12-15"); await fill("Stay-rule End (MM-DD) for Room 1 Offer 1", "01-10");
+  await fill("Minimum nights for season rule Room 1 Offer 1", "5"); await click("Apply seasonal stay rules"); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); await click("Review saved charges");
+  expect(saved.snapshot.rooms[0].offers[0].restrictions).toMatchObject({ seasons: [{ from: "12-15", through: "01-10", rules: { minArrivalNights: 5 } }] });
+  expect(button("Clear seasonal stay rules").props.disabled).toBe(true); expect(button("Add seasonal stay rules").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  await click("Back to editing"); await click("Clear seasonal stay rules"); await click("Save draft"); expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
 });
