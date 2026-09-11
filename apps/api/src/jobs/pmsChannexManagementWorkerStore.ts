@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { CHANNEX_JOB_LEASE_MS as LEASE_MS } from "./pmsChannexPricingJobLease.js";
 
 import type { PmsChannexManagementCommandInput } from "../domains/pmsChannexManagementCommands.js";
 import { PMS_CHANNEX_MANAGEMENT_QUEUE } from "../domains/pmsChannexManagementReadModel.js";
@@ -10,7 +11,6 @@ import type {
   ChannexManagementWorkerStore,
 } from "./pmsChannexManagementWorker.js";
 
-const LEASE_MS = 5 * 60_000;
 export type ChannexManagementQueryClient = {
   query<T extends pg.QueryResultRow = pg.QueryResultRow>(
     text: string,
