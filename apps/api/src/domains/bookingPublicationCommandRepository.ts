@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type {
   BookingPublicationCommandPort,
+  BookingPublicationReviewReadPort,
   BookingPublicationRequestResult,
   RequestBookingPublicationCommand,
 } from "@vayada/domain-booking";
@@ -60,7 +61,7 @@ export function createPgBookingPublicationCommandRepository(config: {
   now?: () => Date;
   randomId?: () => string;
   activeContent: Pick<BookingContentLifecyclePort, "getActive">;
-}): BookingPublicationCommandPort {
+}): BookingPublicationCommandPort & BookingPublicationReviewReadPort {
   if (!config.connectionString.trim()) {
     throw new Error("Booking publication command repository connectionString must not be empty");
   }
@@ -221,6 +222,57 @@ export function createPgBookingPublicationCommandRepository(config: {
         );
         await client.query("COMMIT");
         return result.rows[0] ? operationProjection(result.rows[0]) : null;
+      } catch (error) {
+        await rollback(client);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async getPublicationReview(input) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        if (!(await lockAuthorizedScope(client, input, now()))) {
+          await rollback(client);
+          return null;
+        }
+        const latest = await client.query<BookingPublicationOperationRow>(
+          `${OPERATION_SELECT} WHERE attempt.organization_id = $1::uuid AND attempt.property_id = $2::uuid
+           ORDER BY attempt.requested_at DESC, attempt.id DESC LIMIT 1`,
+          [input.organizationId, input.propertyId],
+        );
+        const recovered = input.idempotencyKey
+          ? await client.query<BookingPublicationOperationRow>(
+              `${OPERATION_SELECT}
+           JOIN platform.idempotency_keys key ON key.id = attempt.idempotency_key_id
+           WHERE attempt.organization_id = $1::uuid AND attempt.property_id = $2::uuid
+             AND key.operation_scope = 'booking' AND key.operation = $3 AND key.key_hash = $4
+             AND key.tenant_scope = 'property' AND key.property_id = $2::uuid AND key.organization_id IS NULL`,
+              [
+                input.organizationId,
+                input.propertyId,
+                OPERATION,
+                sha256(
+                  JSON.stringify({
+                    organizationId: input.organizationId,
+                    idempotencyKey: input.idempotencyKey,
+                  }),
+                ),
+              ],
+            )
+          : null;
+        const active = await config.activeContent.getActive(input.propertyId);
+        if (active && active.propertyId !== input.propertyId)
+          throw new Error("Active content scope mismatch");
+        await client.query("COMMIT");
+        return {
+          propertyId: input.propertyId,
+          activeContentRevisionId: active?.revisionId ?? null,
+          latestOperation: latest.rows[0] ? operationProjection(latest.rows[0]) : null,
+          recoveredOperation: recovered?.rows[0] ? operationProjection(recovered.rows[0]) : null,
+        };
       } catch (error) {
         await rollback(client);
         throw error;
