@@ -141,15 +141,23 @@ deduction remain unresolved rather than being selected by implementation.
 
 ## First bounded price component implementation
 
-`classifyAffiliateRoomPrice` reuses `createBookingPriceSnapshotInput` and its real
+`reportAffiliateRoomPrice` reuses `createBookingPriceSnapshotInput` and its real
 versioned calculator instead of interpreting legacy quote totals. The existing
-factory requires matching mandatory-charge confirmation and explicit-zero taxes/fees.
+factory requires matching mandatory-charge confirmation and explicit-zero added taxes/fees.
+That confirmation means predictable mandatory charges are **included** in the guest
+price; it does not say they are absent or identify their amount. See the
+[onboarding price contract](hotel-onboarding-information-inventory.md),
+`rate.mandatory_charges_acknowledged`. The factory's zero fields cannot certify a
+tax-exclusive accommodation amount. This corrects the earlier `classified_price`
+interpretation from PR #1977.
 The first supported case is one room with no applied additional-guest charge; other
 item allocations/classifications remain pending. Seasonal/weekend room prices and
 any supported selected-rate discount are already included in the final price.
 
 The immutable result retains the complete producer snapshot and uses
-`accommodationPriceMinor`, not Finance's `netAccommodationMinor`. It does not claim
+`reportedRoomPriceMinor` with `status: reported_price` and
+`taxClassification: unverified`. Neither `accommodationPriceMinor` nor Finance's
+`netAccommodationMinor` is emitted. It does not claim
 that extras are absent, that the booking accepted this price, or that any amount was
 collected. Canonical booking/item acceptance binding and complete charge composition
 remain required before collection reconciliation. No checkout caller, persistence,
