@@ -51,6 +51,7 @@ async function harness() {
     contractVersion: "booking-publication-review.v1",
     propertyId,
     activeContentRevisionId: null,
+    publishedUrl: null,
     latestOperation: operation,
     recoveredOperation: operation,
     readiness,
@@ -149,4 +150,22 @@ it("keeps unknown recoverable and accepts complete succeeded operations", async 
     completedAt: "2026-09-11T00:01:00.000Z",
   });
   expect((await h.client.publish(h.attempt)).status).toBe("succeeded");
+});
+
+it("offers only a safe URL tied to an active revision", async () => {
+  const h = await harness();
+  h.http.get.mockResolvedValue({
+    ...h.review,
+    publishedUrl: "https://hotel.booking.test",
+    activeContentRevisionId: operationId,
+  });
+  expect((await h.client.load(propertyId)).publishedUrl).toBe("https://hotel.booking.test");
+  h.http.get.mockResolvedValue({ ...h.review, publishedUrl: "https://hotel.booking.test" });
+  await expect(h.client.load(propertyId)).rejects.toThrow();
+  h.http.get.mockResolvedValue({
+    ...h.review,
+    publishedUrl: "javascript:alert(1)",
+    activeContentRevisionId: operationId,
+  });
+  await expect(h.client.load(propertyId)).rejects.toThrow();
 });
