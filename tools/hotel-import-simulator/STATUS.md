@@ -171,3 +171,11 @@ original setup page, with explicit start, retry and manual continuation. Seven
 synthetic browser scenarios pass, including automatic hotel selection in both
 forms. Independent review's initial selection issue was fixed and re-reviewed.
 The local callback flag was restored to false after testing.
+
+## New-hotel preparation
+
+The connection page can now queue the existing Channex enable command for a
+disconnected hotel with no external binding, wait for its status, and retry the
+verified Airbnb start flow. Existing connections are refused; retries reuse the
+per-tab command identity. Waiting is bounded and aborts on leaving the page.
+Failed durable jobs still require operator recovery. No live provider was called.
