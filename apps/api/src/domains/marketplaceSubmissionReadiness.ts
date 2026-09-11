@@ -38,6 +38,7 @@ export function createMarketplaceSubmissionReadiness(config: {
 }): MarketplaceSubmissionReadinessPort {
   const now = config.now ?? (() => new Date());
   async function evaluate(scope: HotelCatalogStep1Scope): Promise<MarketplaceSubmissionEvaluation> {
+    scope = { ...scope, propertyId: scope.propertyId.toLowerCase() };
     // Keep Catalog before Marketplace so transaction-backed providers share one lock order.
     const catalog = await config.catalog.getSubmissionEvidence(scope);
     const result = await config.preferences.getHotelCollaborationPreferences(scope);
