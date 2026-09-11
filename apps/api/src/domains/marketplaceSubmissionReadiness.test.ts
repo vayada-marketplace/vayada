@@ -5,7 +5,7 @@ import type {
   MarketplaceCatalogSubmissionEvidence,
   MarketplaceCatalogSnapshot,
 } from "./hotelCatalogMarketplaceSubmissionSource.js";
-const propertyId = "22222222-2222-4222-8222-222222222222";
+const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const scope = { propertyId, organizationId: "org", actorUserId: "actor" };
 function harness(saved = true) {
   const source = {
@@ -93,9 +93,15 @@ it("changes readiness identity after either owner revision changes", async () =>
   expect(before.readiness.readinessHash).not.toBe(after.readiness.readinessHash);
   h.readModel.revision = 2;
   h.readModel.sourceRevision = "preferences:2";
-  h.readModel.readiness = createMarketplaceHotelCollaborationPreferencesEvidence(propertyId, 2, h.readModel.preferences);
+  h.readModel.readiness = createMarketplaceHotelCollaborationPreferencesEvidence(
+    propertyId,
+    2,
+    h.readModel.preferences,
+  );
   const changedPreferences = await h.service.evaluate(scope);
-  expect(after.readiness.sourceManifestHash).not.toBe(changedPreferences.readiness.sourceManifestHash);
+  expect(after.readiness.sourceManifestHash).not.toBe(
+    changedPreferences.readiness.sourceManifestHash,
+  );
   expect(after.readiness.readinessHash).not.toBe(changedPreferences.readiness.readinessHash);
 });
 it("rejects mismatched scopes and tampered preference evidence", async () => {
@@ -124,4 +130,13 @@ it("preserves Catalog blockers and owning coordinates", async () => {
   const result = await h.service.evaluate(scope);
   expect(result.readiness.status).toBe("blocked");
   expect(result.readiness.groups[0]?.steps[0]?.entities[0]?.blockers[0]?.code).toBe("logo_missing");
+});
+
+it("normalizes uppercase UUID scope before reading or comparing owner identities", async () => {
+  const h = harness();
+  const result = await h.service.evaluate({ ...scope, propertyId: propertyId.toUpperCase() });
+  expect(result.readiness.status).toBe("ready");
+  expect(result.readiness.propertyId).toBe(propertyId);
+  expect(h.catalog.getSubmissionEvidence).toHaveBeenCalledWith(scope);
+  expect(h.preferences.getHotelCollaborationPreferences).toHaveBeenCalledWith(scope);
 });
