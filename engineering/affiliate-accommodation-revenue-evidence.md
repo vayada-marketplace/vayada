@@ -138,3 +138,19 @@ This sequence requires no new payment provider or generic accounting framework.
 External adapters use the same evidence semantics but must prove their own mappings.
 Partial-payment allocation policy, unsupported tax treatment and any provider-fee
 deduction remain unresolved rather than being selected by implementation.
+
+## First bounded price component implementation
+
+`classifyAffiliateRoomPrice` reuses `createBookingPriceSnapshotInput` and its real
+versioned calculator instead of interpreting legacy quote totals. The existing
+factory requires matching mandatory-charge confirmation and explicit-zero taxes/fees.
+The first supported case is one room with no applied additional-guest charge; other
+item allocations/classifications remain pending. Seasonal/weekend room prices and
+any supported selected-rate discount are already included in the final price.
+
+The immutable result retains the complete producer snapshot and uses
+`accommodationPriceMinor`, not Finance's `netAccommodationMinor`. It does not claim
+that extras are absent, that the booking accepted this price, or that any amount was
+collected. Canonical booking/item acceptance binding and complete charge composition
+remain required before collection reconciliation. No checkout caller, persistence,
+public route or journal integration is added by this pure component.

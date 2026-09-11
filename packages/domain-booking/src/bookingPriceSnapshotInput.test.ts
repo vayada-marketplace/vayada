@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { classifyAffiliateRoomPrice } from "./affiliateRoomPrice.js";
 
 import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import {
@@ -431,5 +432,74 @@ describe("Booking price snapshot input", () => {
     ];
 
     for (const value of cases) expect(createBookingPriceSnapshotInput(value as never)).toBeNull();
+  });
+});
+
+describe("affiliate room price component", () => {
+  function supportedInput() {
+    return {
+      ...factoryInput({
+        ...calculationInput(),
+        roomCount: 1,
+        additionalGuestSourceId: null,
+        chargeableGuestCount: 0,
+      }),
+      adultCount: 2,
+      childCount: 0,
+    };
+  }
+  it("reuses actual price producer and retains immutable source evidence", () => {
+    const input = supportedInput();
+    const result = classifyAffiliateRoomPrice(input);
+    expect(result).toMatchObject({
+      status: "classified_price",
+      basis: "room_price_only",
+      propertyId,
+      organizationId,
+      roomTypeId,
+      currency: "EUR",
+      scale: 2,
+      accommodationPriceMinor: "35500",
+    });
+    if (result.status !== "classified_price") throw new Error("Expected classified price");
+    expect(result.source).toEqual(createBookingPriceSnapshotInput(input));
+    expect(Object.isFrozen(result.source)).toBe(true);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(result).not.toHaveProperty("netAccommodationMinor");
+  });
+  it("keeps multi-room and additional guest allocation unresolved", () => {
+    expect(classifyAffiliateRoomPrice(factoryInput())).toMatchObject({
+      reason: "item_allocation_required",
+    });
+    const input = supportedInput();
+    input.calculationInput = {
+      ...input.calculationInput,
+      additionalGuestSourceId: additionalGuestId,
+      chargeableGuestCount: 1,
+    };
+    expect(classifyAffiliateRoomPrice(input)).toMatchObject({
+      reason: "additional_guest_classification_required",
+    });
+  });
+  it("rejects missing or mismatched mandatory charge evidence and client total injection", () => {
+    const input = supportedInput();
+    expect(
+      classifyAffiliateRoomPrice({
+        ...input,
+        mandatoryChargeConfirmation: {
+          ...input.mandatoryChargeConfirmation,
+          propertyId: roomTypeId,
+        },
+      }),
+    ).toMatchObject({ reason: "price_evidence_unavailable" });
+    expect(
+      classifyAffiliateRoomPrice({
+        ...input,
+        total: "1",
+      } as unknown as BookingPriceSnapshotFactoryInput),
+    ).toMatchObject({ reason: "price_evidence_unavailable" });
+    expect(
+      classifyAffiliateRoomPrice(null as unknown as BookingPriceSnapshotFactoryInput),
+    ).toMatchObject({ reason: "price_evidence_unavailable" });
   });
 });
