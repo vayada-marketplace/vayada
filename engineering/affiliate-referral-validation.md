@@ -158,3 +158,17 @@ This configuration is not wired in the server or exposed as guest input. Integra
 tests inject a synthetic server context into the actual checkout adapter; they do
 not demonstrate browser/quote transport, click-history completeness, a real provider,
 production eligibility, creator attribution or Finance exclusion of future live flows.
+
+The diagnostic HTTP checkout request now requires `validationProbe` to exactly match
+the server-selected probe when validation configuration is enabled. Supplying this
+field without that configuration is rejected; missing/mismatched values cannot create
+a validation booking. The field conveys an opaque test identity, not hotel authority
+or creator eligibility. Fresh server authorization and probe resolution still apply.
+
+The opt-in Chromium test (`TEST_AFFILIATE_BROWSER=1` with an isolated
+`TEST_DATABASE_URL`) serves a minimal diagnostic page and sends JSON through the real
+HTTP booking route into the actual checkout/database adapter. It verifies rejection,
+successful creation/replay and exact binding without cookies or local/session storage.
+It requires the existing Playwright Chromium installation. This is not the normal
+Booking Web guest UI, quote-generation round-trip, cross-origin/provider transport,
+live link capture or deployed-account evidence. No guest-facing tracking is enabled.

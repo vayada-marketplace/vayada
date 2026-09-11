@@ -618,13 +618,13 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings",
     async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
       const body = request.body ?? {};
       const response = await checkoutAdapter.createBooking(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
       );
-      reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
       reply.header("X-Robots-Tag", "noindex");
       return response;
@@ -1824,6 +1824,12 @@ export function createTargetBookingWebCheckoutAdapter(
     async createBooking(slug, request, context) {
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
+      }
+      if (config.affiliateValidation) {
+        if (request["validationProbe"] !== config.affiliateValidation.probe)
+          throw createHttpError(400, "The selected validation probe is required.");
+      } else if (request["validationProbe"] !== undefined) {
+        throw createHttpError(409, "Validation checkout is not enabled.");
       }
       const commandContext = context;
       return withTargetCheckoutTransaction(pool, async (client) => {

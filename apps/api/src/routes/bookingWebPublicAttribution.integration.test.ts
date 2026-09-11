@@ -1,3 +1,5 @@
+import Fastify from "fastify";
+import { chromium } from "@playwright/test";
 import { context as hotelContext } from "../domains/affiliatePublicationTestFixture.js";
 import { manageAffiliateValidationProbe } from "../domains/bookingAffiliateValidationProbe.js";
 import type { AffiliateProbeCheckout } from "../domains/bookingAffiliateProbeBinding.js";
@@ -9,6 +11,7 @@ import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventory
 import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
 import {
   createTargetBookingWebCheckoutAdapter,
+  registerBookingWebPublicRoutes,
   resolveTargetCheckoutProperty,
   type BookingWebCheckoutCommandContext,
 } from "./bookingWebPublic.js";
@@ -398,9 +401,13 @@ describe.skipIf(!TEST_DATABASE_URL)(
       );
       if (!another.ok || !("probe" in another)) throw new Error("Second probe fixture failed");
       const swapped = createAdapter(checkoutPool, { ...validation, probe: another.probe });
-      await expect(swapped.createBooking("vay-1188-hotel", request, context)).rejects.toMatchObject(
-        { statusCode: 409 },
-      );
+      await expect(
+        swapped.createBooking(
+          "vay-1188-hotel",
+          { ...request, validationProbe: another.probe },
+          context,
+        ),
+      ).rejects.toMatchObject({ statusCode: 409 });
       await manageAffiliateValidationProbe(
         admin,
         {
@@ -462,6 +469,107 @@ describe.skipIf(!TEST_DATABASE_URL)(
         await checkout.end();
       }
     });
+
+    it.skipIf(process.env["TEST_AFFILIATE_BROWSER"] !== "1")(
+      "transports a probe from Chromium through the actual HTTP checkout route",
+      async () => {
+        const deployment = {
+          environment: "local" as const,
+          connectionReference: "binding-test",
+          adapterVersion: "native-v1",
+        };
+        const issued = await manageAffiliateValidationProbe(
+          admin,
+          {
+            context: await freshProbeContext(),
+            propertyId,
+            destinationVersionId: uuid(9),
+            action: "create",
+            idempotencyKey: "browser-probe",
+            lifetimeSeconds: 3600,
+          },
+          deployment,
+        );
+        if (!issued.ok || !("probe" in issued)) throw new Error("Browser probe fixture failed");
+        const browserQuote = uuid(10);
+        await seedQuote(browserQuote, "VAY-1506-BROWSER", addonId);
+        const selected = { ...validation, probe: issued.probe };
+        await expect(
+          createAdapter(checkoutPool).createBooking(
+            "vay-1188-hotel",
+            { ...checkoutRequest("VAY-1506-BROWSER"), validationProbe: issued.probe },
+            command("disabled-validation"),
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+        const app = Fastify({ logger: false });
+        await app.register(
+          async (scope) =>
+            registerBookingWebPublicRoutes(scope, {
+              profileRepository: { findProfileBySlug: async () => null },
+              checkoutAdapter: createAdapter(checkoutPool, selected),
+              now: () => occurredAt,
+            }),
+          { prefix: "/api/booking-web" },
+        );
+        // Deliberately synthetic diagnostic page: no guest app, cookie, storage or tracking script.
+        app.get("/", async (_request, reply) =>
+          reply
+            .type("text/html")
+            .send("<!doctype html><title>Isolated probe transport test</title>"),
+        );
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+          const page = await browser.newPage();
+          await page.goto(origin);
+          const request = { ...checkoutRequest("VAY-1506-BROWSER"), validationProbe: issued.probe };
+          const post = (body: Record<string, unknown>, key: string) =>
+            page.evaluate(
+              async ({ body, key }) => {
+                const response = await fetch("/api/booking-web/hotels/vay-1188-hotel/bookings", {
+                  method: "POST",
+                  headers: { "content-type": "application/json", "idempotency-key": key },
+                  body: JSON.stringify(body),
+                });
+                return {
+                  status: response.status,
+                  cache: response.headers.get("cache-control"),
+                  body: await response.json(),
+                };
+              },
+              { body, key },
+            );
+          for (const validationProbe of [undefined, "avp_forged"]) {
+            const rejected = await post({ ...request, validationProbe }, "browser-invalid");
+            expect(rejected).toMatchObject({ status: 400, cache: "no-store" });
+          }
+          expect(
+            (
+              await admin.query("SELECT status FROM booking.quote_sessions WHERE id=$1", [
+                browserQuote,
+              ])
+            ).rows[0].status,
+          ).toBe("active");
+          const created = await post(request, "browser-create");
+          expect(created).toMatchObject({ status: 200, cache: "no-store" });
+          expect(await post(request, "browser-create")).toEqual(created);
+          const binding = (
+            await admin.query(
+              "SELECT b.probe_id FROM booking.affiliate_validation_booking_bindings b JOIN booking.guest_bookings g ON g.id=b.booking_id WHERE g.quote_session_id=$1",
+              [browserQuote],
+            )
+          ).rows;
+          expect(binding).toEqual([{ probe_id: issued.probe.slice(4) }]);
+          expect(await page.context().cookies()).toEqual([]);
+          expect(await page.evaluate("[localStorage.length, sessionStorage.length]")).toEqual([
+            0, 0,
+          ]);
+        } finally {
+          await browser.close();
+          await app.close();
+        }
+      },
+    );
 
     function createAdapter(pool: pg.Pool, affiliateValidation?: AffiliateProbeCheckout) {
       return createTargetBookingWebCheckoutAdapter({
@@ -707,6 +815,7 @@ async function waitForLockWaiter(observer: pg.Pool, pid: number): Promise<void> 
 
 function checkoutRequest(quoteId: string): Record<string, unknown> {
   return {
+    validationProbe: validation?.probe,
     quoteId,
     checkIn: "2027-02-01",
     checkOut: "2027-02-03",
