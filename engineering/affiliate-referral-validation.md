@@ -148,3 +148,13 @@ connection or adapter. An `avp_` reference resolves only in its exact authorized
 and configuration while unexpired and unrevoked. Revocation remains available for
 expired or old-configuration probes. No HTTP route or actual capture/booking binding
 is wired yet; probe existence does not validate that the supplied connection works.
+
+The dedicated internal checkout configuration can now resolve a probe with fresh
+hotel authority under the checkout transaction's property lock. Migration 0184 stores
+its original booking binding atomically; booking edits cannot overwrite that row.
+Probe identity participates in checkout retry identity. Missing authority, revocation,
+expiry or changed configuration blocks validation checkout, including retries.
+This configuration is not wired in the server or exposed as guest input. Integration
+tests inject a synthetic server context into the actual checkout adapter; they do
+not demonstrate browser/quote transport, click-history completeness, a real provider,
+production eligibility, creator attribution or Finance exclusion of future live flows.

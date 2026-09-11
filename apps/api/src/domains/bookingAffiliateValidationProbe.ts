@@ -56,44 +56,14 @@ export async function manageAffiliateValidationProbe(
         !uuid.test(input.probe.slice(4))
   )
     return { ok: false, code: "invalid_request" };
-  if (
-    context.actor.status !== "active" ||
-    context.membership.status !== "active" ||
-    context.selectedOrganization.status !== "active" ||
-    context.selectedOrganization.kind !== "hotel_group"
-  )
-    return { ok: false, code: "scope_unavailable" };
   const propertyId = input.propertyId.toLowerCase(),
     destinationId = input.destinationVersionId.toLowerCase();
   const organizationId = context.selectedOrganization.organizationId,
     actorId = context.actor.internalUserId;
-  const resource = {
-    product: "marketplace" as const,
-    resourceType: "hotel_profile" as const,
-    resourceId: propertyId,
-  };
-  requireResourceAccess(context, {
-    permission: "marketplace.profile.manage",
-    resource: { ...resource, allowedRelationships: ["owner", "operator"] },
-  });
-  requireActiveEntitlement(context, {
-    product: "marketplace",
-    key: "marketplace-hotel-profile",
-    resource,
-  });
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const scope = await client.query(
-      `SELECT p.id FROM hotel_catalog.properties p
-      JOIN identity.organization_resource_links l ON l.resource_id=p.id::text
-      JOIN booking.affiliate_destination_versions d ON d.property_id=p.id AND d.id=$3 AND d.created_by_organization_id=$2
-      WHERE p.id=$1 AND p.profile_status <> 'disabled' AND l.organization_id=$2
-      AND l.product='marketplace' AND l.resource_type='hotel_profile' AND l.status='active' AND l.relationship IN ('owner','operator')
-      ORDER BY l.id FOR UPDATE OF p,l`,
-      [propertyId, organizationId, destinationId],
-    );
-    if (!scope.rowCount) {
+    if (!(await lockAffiliateValidationScope(client, context, propertyId, destinationId))) {
       await client.query("ROLLBACK");
       return { ok: false, code: "scope_unavailable" };
     }
@@ -191,4 +161,45 @@ export async function manageAffiliateValidationProbe(
   } finally {
     client.release();
   }
+}
+
+/** Caller owns the transaction; locks remain held through the dependent write. */
+export async function lockAffiliateValidationScope(
+  client: pg.PoolClient,
+  context: RequestContext,
+  propertyId: string,
+  destinationId: string,
+): Promise<boolean> {
+  if (
+    context.actor.status !== "active" ||
+    context.membership.status !== "active" ||
+    context.selectedOrganization.status !== "active" ||
+    context.selectedOrganization.kind !== "hotel_group"
+  )
+    return false;
+  const organizationId = context.selectedOrganization.organizationId;
+  const resource = {
+    product: "marketplace" as const,
+    resourceType: "hotel_profile" as const,
+    resourceId: propertyId,
+  };
+  requireResourceAccess(context, {
+    permission: "marketplace.profile.manage",
+    resource: { ...resource, allowedRelationships: ["owner", "operator"] },
+  });
+  requireActiveEntitlement(context, {
+    product: "marketplace",
+    key: "marketplace-hotel-profile",
+    resource,
+  });
+  const scope = await client.query(
+    `SELECT p.id FROM hotel_catalog.properties p
+      JOIN identity.organization_resource_links l ON l.resource_id=p.id::text
+      JOIN booking.affiliate_destination_versions d ON d.property_id=p.id AND d.id=$3 AND d.created_by_organization_id=$2
+      WHERE p.id=$1 AND p.profile_status <> 'disabled' AND l.organization_id=$2
+      AND l.product='marketplace' AND l.resource_type='hotel_profile' AND l.status='active' AND l.relationship IN ('owner','operator')
+      ORDER BY l.id FOR UPDATE OF p,l`,
+    [propertyId, organizationId, destinationId],
+  );
+  return !!scope.rowCount;
 }
