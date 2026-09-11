@@ -155,6 +155,28 @@ describe.each(["guest_experience", "payments"] as const)("%s draft boundary", (s
     expect(h.props.saveAndContinue).toHaveBeenCalledOnce();
     h.renderer.unmount();
   });
+  it("adopts new revisions after saving in place and preserves the next edit", async () => {
+    const h = await harness(stepId);
+    await act(async () => h.current.change(h.field, h.value));
+    const baseRevisions = {
+      [stepId === "payments" ? "finance.payment_methods" : "booking.guest_experience"]: "updated:1",
+    };
+    mocks.route.mockResolvedValue({
+      ...h.props.route,
+      sessionRevision: 5,
+      steps: [{ ...h.props.step, draft: null, currentBaseRevisions: baseRevisions }],
+    });
+    await act(async () => h.current.commit(async () => {}, false));
+    expect(h.props.saveAndContinue).not.toHaveBeenCalled();
+    expect(h.props.refreshRoute).toHaveBeenCalledOnce();
+    await act(async () => h.current.change(h.field, h.value));
+    await act(async () => h.leave());
+    expect(mocks.save.mock.calls.at(-1)?.[1]).toMatchObject({
+      expectedSessionRevision: 5,
+      expectedBaseRevisions: baseRevisions,
+    });
+    h.renderer.unmount();
+  });
   it("does not reset the draft when canonical save fails", async () => {
     const h = await harness(stepId);
     await act(async () => h.current.change(h.field, h.value));
