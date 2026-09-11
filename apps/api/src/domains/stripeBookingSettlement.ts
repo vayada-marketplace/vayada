@@ -1,3 +1,4 @@
+import { preserveCardDraftChargeSnapshot } from "./bookingCardChargeSnapshot.js";
 import { parseBookingRoomSelection } from "@vayada/domain-booking";
 import { createHash } from "node:crypto";
 import { inventoryReservationReceiptFromBookingMetadata } from "../platform/inventoryReservation.js";
@@ -85,6 +86,8 @@ export async function authorizeStripeBookingPayment(
   if (row.paymentStatus === "authorized" && row.bookingPaymentStatus === "authorized") {
     return "already_authorized";
   }
+  if (row.lifecycleStatus === "draft")
+    await preserveCardDraftChargeSnapshot(client, row.propertyId, row.guestBookingId);
   const occurredAt = input.occurredAt.toISOString();
   const paymentUpdated = await client.query(
     `UPDATE finance.payments
@@ -193,6 +196,8 @@ export async function settleStripeBookingPayment(
 
   const alreadySettled = row.paymentStatus === "paid" && row.bookingPaymentStatus === "paid";
   if (!alreadySettled) {
+    if (row.lifecycleStatus === "draft")
+      await preserveCardDraftChargeSnapshot(client, row.propertyId, row.guestBookingId);
     await client.query(
       `UPDATE finance.payments
        SET status = 'paid', paid_at = $2::timestamptz, updated_at = $2::timestamptz,
