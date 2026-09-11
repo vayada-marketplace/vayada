@@ -1,4 +1,8 @@
 import Fastify from "fastify";
+import {
+  seedAffiliateProbeIdentity,
+  cleanupAffiliateProbeIdentity,
+} from "../platform/affiliateProbeIdentityTestFixture.js";
 import { decomposeNativeCheckoutCharge } from "@vayada/domain-booking";
 import { readBookingAffiliateProbeEvidence } from "../domains/bookingAffiliateProbeEvidence.js";
 import { chromium } from "@playwright/test";
@@ -61,18 +65,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
       completedReservationQuoteIds.clear();
       await cleanup();
       await seedProperty();
-      await admin.query(
-        "INSERT INTO identity.users(id,email) VALUES($1,'probe-binding@example.invalid')",
-        [propertyId],
-      );
-      await admin.query(
-        "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Probe binding test','probe-binding-test')",
-        [propertyId],
-      );
-      await admin.query(
-        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship) VALUES($1::uuid,'marketplace','hotel_profile',$1::uuid::text,'owner')",
-        [propertyId],
-      );
+      await seedAffiliateProbeIdentity(admin);
       await admin.query(
         "INSERT INTO booking.affiliate_destination_versions(id,property_id,display_name,booking_url,created_by_user_id,created_by_organization_id,request_id) VALUES($2,$1,'Probe test','https://example.invalid',$1,$1,'probe-seed')",
         [propertyId, uuid(9)],
@@ -1109,15 +1102,13 @@ describe.skipIf(!TEST_DATABASE_URL)(
       try {
         await client.query("BEGIN");
         await client.query("SET LOCAL session_replication_role = replica");
+        await cleanupAffiliateProbeIdentity(client);
         for (const statement of [
           "DELETE FROM booking.affiliate_validation_quote_bindings WHERE property_id=$1",
           "DELETE FROM booking.affiliate_validation_booking_bindings WHERE property_id=$1",
           "DELETE FROM booking.affiliate_validation_probe_revocations WHERE probe_id IN (SELECT id FROM booking.affiliate_validation_probes WHERE property_id=$1)",
           "DELETE FROM booking.affiliate_validation_probes WHERE property_id=$1",
           "DELETE FROM booking.affiliate_destination_versions WHERE property_id=$1",
-          "DELETE FROM identity.organization_resource_links WHERE organization_id=$1",
-          "DELETE FROM identity.organizations WHERE id=$1",
-          "DELETE FROM identity.users WHERE id=$1",
           "WITH s AS (DELETE FROM pms.inventory_reservation_statuses WHERE property_id=$1::uuid), w AS (DELETE FROM pms.inventory_reservation_day_watermarks WHERE property_id=$1::uuid), r AS (DELETE FROM pms.inventory_reservation_receipts WHERE property_id=$1::uuid) DELETE FROM platform.outbox_events WHERE property_id=$1::uuid",
           "DELETE FROM platform.product_audit_events WHERE property_id = $1::uuid",
           "DELETE FROM platform.jobs WHERE property_id = $1::uuid",
