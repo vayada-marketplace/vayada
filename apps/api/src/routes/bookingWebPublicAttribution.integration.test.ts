@@ -1,3 +1,4 @@
+import { readBookingAffiliateCreationEvidence } from "../domains/bookingAffiliateCreationEvidence.js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -56,6 +57,74 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await expect(adapter.createBooking("vay-1188-hotel", request, context)).resolves.toEqual(
         created,
       );
+      const booking = (
+        await admin.query(
+          "SELECT id FROM booking.guest_bookings WHERE property_id=$1 AND quote_session_id=$2",
+          [propertyId, successfulQuoteId],
+        )
+      ).rows[0];
+      const evidenceInput = { propertyId, bookingId: booking.id };
+      const creationEvidence = await readBookingAffiliateCreationEvidence(
+        admin,
+        evidenceInput,
+        occurredAt,
+      );
+      expect(creationEvidence).toMatchObject({
+        status: "recorded",
+        propertyId,
+        bookingId: booking.id,
+        originalBookedAt: occurredAt.toISOString(),
+        requestId: context.requestId,
+        correlationId: context.correlationId,
+      });
+      await expect(
+        readBookingAffiliateCreationEvidence(
+          admin,
+          { ...evidenceInput, propertyId: uuid(999) },
+          occurredAt,
+        ),
+      ).resolves.toMatchObject({ reason: "scope_unavailable" });
+      // Exercise real persisted creation rows; roll back every negative fixture variation.
+      const evidenceClient = await admin.connect();
+      try {
+        for (const [sql, reason] of [
+          [
+            "UPDATE booking.guest_bookings SET source_system='migration',source_booking_id='test-import' WHERE id=$1",
+            "unsupported_source",
+          ],
+          [
+            "UPDATE booking.guest_bookings SET created_at=created_at+interval '1 microsecond' WHERE id=$1",
+            "conflicting_creation_evidence",
+          ],
+          [
+            "DELETE FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "creation_evidence_missing",
+          ],
+          [
+            "INSERT INTO booking.booking_status_events(guest_booking_id,event_type,actor_type,event_payload,occurred_at) SELECT guest_booking_id,event_type,actor_type,event_payload,occurred_at FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "conflicting_creation_evidence",
+          ],
+        ]) {
+          await evidenceClient.query("BEGIN");
+          await evidenceClient.query(sql!, [booking.id]);
+          await expect(
+            readBookingAffiliateCreationEvidence(evidenceClient, evidenceInput, occurredAt),
+          ).resolves.toMatchObject({ reason });
+          await evidenceClient.query("ROLLBACK");
+        }
+        await evidenceClient.query("BEGIN");
+        await evidenceClient.query(
+          "UPDATE booking.guest_bookings SET updated_at=updated_at+interval '1 day' WHERE id=$1",
+          [booking.id],
+        );
+        await expect(
+          readBookingAffiliateCreationEvidence(evidenceClient, evidenceInput, occurredAt),
+        ).resolves.toEqual(creationEvidence);
+        await evidenceClient.query("ROLLBACK");
+      } finally {
+        await evidenceClient.query("ROLLBACK").catch(() => undefined);
+        evidenceClient.release();
+      }
       await admin.query(
         `UPDATE booking.addon_definitions
             SET price_amount = 99, ownership_kind = 'property', partner_commission_rate = NULL
