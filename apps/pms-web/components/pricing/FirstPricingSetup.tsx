@@ -31,22 +31,22 @@ export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: 
   if (!configuration) throw new Error("Check the ages, stay limits, capacity and prices.");
   return { configuration, terms };
 }
-export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCreate }: { propertyId: string; rooms: readonly SetupRoom[]; disabled: boolean; onDirty: () => void;
-  onCreate: (input: ReturnType<typeof firstPricingInput>) => void }) {
-  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], included: { adults: "", adjustments: [] }, room: "", currency: "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
+export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCreate, fixedCurrency }: { propertyId: string; rooms: readonly SetupRoom[]; disabled: boolean; onDirty: () => void;
+  onCreate: (input: ReturnType<typeof firstPricingInput>) => void; fixedCurrency?: string }) {
+  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], included: { adults: "", adjustments: [] }, room: "", currency: fixedCurrency ?? "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
   const [error, setError] = useState("");
   const change = (key: Exclude<keyof Values, "occupancy" | "included">, value: string) => { setValues({ ...values, [key]: value, ...(["room", "mode"].includes(key) ? { base: "", occupancy: [], included: { adults: "", adjustments: [] } } : {}) }); setError(""); onDirty(); };
-  const field = (key: Exclude<keyof Values, "occupancy" | "included">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
+  const field = (key: Exclude<keyof Values, "occupancy" | "included">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled || (key === "currency" && !!fixedCurrency)} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
   const select = (key: Exclude<keyof Values, "occupancy" | "included">, label: string, options: [string, string][]) => <label className="block text-sm">{label}<select aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
   if (!rooms.length) return <p>No active room types with complete capacity settings are available. Complete room setup first.</p>;
   const room = rooms.find((candidate) => candidate.roomTypeId === values.room);
   return <form className="mt-4 space-y-4" onSubmit={(event) => {
     event.preventDefault(); if (disabled) return;
-    try { if (!room) throw new Error("Choose a room type."); onCreate(firstPricingInput(propertyId, room, crypto.randomUUID(), values)); }
+    try { if (!room) throw new Error("Choose a room type."); onCreate(firstPricingInput(propertyId, room, crypto.randomUUID(), { ...values, currency: fixedCurrency ?? values.currency })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Check the pricing settings."); }
   }}>
-    <h2 className="text-lg font-semibold">Create your first room price</h2>
-    <p className="text-sm text-gray-600">Start with one room-only offer: the chosen prices apply every night, no calendar exceptions, and arrivals, departures and sales open. Only active rooms with complete capacity settings are listed. Additional pricing controls will follow.</p>
+    <h2 className="text-lg font-semibold">{fixedCurrency ? "Add another room price" : "Create your first room price"}</h2>
+    <p className="text-sm text-gray-600">Start with one room-only offer: the chosen prices apply every night, no calendar exceptions, and arrivals, departures and sales open. Only active rooms with complete capacity settings are listed. You can edit the pricing rules after setup.</p>
     <div className="grid gap-4 sm:grid-cols-2">
       {select("room", "Room type", rooms.map((r) => [r.roomTypeId, r.name]))}{field("currency", "Currency code (for example EUR)")}
       {select("mode", "How is the room priced?", [["flat", "One price per room"], ["occupancy", "Price for each adult count"], ["per_person", "Price per adult"], ["included_guests", "Base price with adult-count adjustments"]])}
