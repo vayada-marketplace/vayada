@@ -281,14 +281,27 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       expect((await setup.getRoomOwnerSnapshot({ organizationId, propertyId })).rooms).toHaveLength(
         2,
       );
-      const original = await pricing.getFlexibleRatePlan(propertyId, roomTypeId);
+      const savedPlan = () =>
+        db.query("SELECT * FROM pms.rate_plans WHERE property_id=$1 AND room_type_id=$2", [
+          propertyId,
+          roomTypeId,
+        ]);
+      const original = (await savedPlan()).rows;
+      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).rejects.toMatchObject({
+        statusCode: 503,
+        code: "PRICING_UNAVAILABLE",
+      });
       await close(db);
       expect(
         (await pricing.getPricingSourceSnapshot(propertyId))?.flexibleRatePlans.map(
           (plan) => plan.roomTypeId,
         ),
       ).toEqual([otherRoom]);
-      expect(await pricing.getFlexibleRatePlan(propertyId, roomTypeId)).toEqual(original);
+      expect((await savedPlan()).rows).toEqual(original);
+      await expect(pricing.getFlexibleRatePlan(propertyId, roomTypeId)).rejects.toMatchObject({
+        statusCode: 503,
+        code: "PRICING_UNAVAILABLE",
+      });
       const roomSnapshot = await setup.getRoomOwnerSnapshot({ organizationId, propertyId });
       expect(roomSnapshot.rooms.map((room) => room.roomTypeId)).toEqual([otherRoom]);
       const publicationSource = createPmsMandatoryChargePricingSourceSnapshot({
@@ -496,7 +509,15 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
           [propertyId],
         )
       ).rows;
-    await project();
+    // Historical snapshots stay available to the closure writer; the reset no longer generates prices.
+    for (const room of [roomTypeId, otherRoom]) {
+      await db.query(
+        `INSERT INTO distribution.public_room_offer_snapshots
+        (property_id,room_type_id,stay_date,public_offer_key,available_rooms,base_price_amount,currency,availability_status,sellable_publicly)
+        VALUES ($1::uuid,$2::uuid,'2026-09-10',$2::text,2,100,'EUR','available',true)`,
+        [propertyId, room],
+      );
+    }
     const before = await offers();
     expect(before).toHaveLength(2);
     await expect(suppressClosingRoomOffers(db, { propertyId, roomTypeId })).rejects.toThrow(
@@ -583,14 +604,14 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       available_rooms: 0,
     });
     expect(after.find((row) => row.room_type_id === otherRoom)).toMatchObject({
-      availability_status: "available",
-      sellable_publicly: true,
+      availability_status: "closed",
+      sellable_publicly: false,
       available_rooms: 2,
       base_price_amount: "100.00",
     });
   });
 
-  it("omits closing rooms from Channex provisioning and ARI while retaining their mappings", async () => {
+  it("keeps pricing delivery unavailable while preserving closure eligibility and mappings", async () => {
     const otherRoom = randomUUID(),
       connectionId = randomUUID();
     await db.query(
@@ -655,14 +676,17 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
       },
     });
     try {
-      expect(JSON.stringify(await port.plan(job("provision")))).toContain(roomTypeId);
+      await expect(port.plan(job("provision"))).rejects.toMatchObject({
+        statusCode: 503,
+        code: "PRICING_UNAVAILABLE",
+      });
       await close(db);
-      const provision = JSON.stringify(await port.plan(job("provision")));
-      expect(provision).not.toContain(roomTypeId);
-      expect(provision).toContain(otherRoom);
-      const ari = JSON.stringify(await port.plan(job("sync_ari")));
-      expect(ari).not.toContain(rateIds.get(roomTypeId)!);
-      expect(ari).toContain(rateIds.get(otherRoom)!);
+      for (const operation of ["provision", "sync_ari"] as const) {
+        await expect(port.plan(job(operation))).rejects.toMatchObject({
+          statusCode: 503,
+          code: "PRICING_UNAVAILABLE",
+        });
+      }
       expect(
         (
           await db.query(
@@ -708,9 +732,10 @@ describe.skipIf(!url)("room closure eligibility PostgreSQL", () => {
         WHERE property_id=$1 AND room_type_id=$2`,
         [propertyId, roomTypeId],
       );
-      const retry = await port.plan(job("provision"));
-      expect(JSON.stringify(retry)).not.toContain(roomTypeId);
-      expect(JSON.stringify(retry)).toContain(otherRoom);
+      await expect(port.plan(job("provision"))).rejects.toMatchObject({
+        statusCode: 503,
+        code: "PRICING_UNAVAILABLE",
+      });
     } finally {
       await port.close();
     }

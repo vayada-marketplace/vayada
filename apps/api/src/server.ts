@@ -116,7 +116,6 @@ import { createPgPropertySetupFinanceOwnerScopePort } from "./domains/propertySe
 import { createPgPropertySetupPmsOwnerRepository } from "./domains/propertySetupPmsOwnerRepository.js";
 import { createPgPmsPricingReadModel } from "./domains/pmsPricingReadModel.js";
 import { createPgChannelDatePrices } from "./domains/pmsChannelDatePrices.js";
-import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { createPgPmsPricingCommandRepository } from "./domains/pmsPricingCommandRepository.js";
 import {
   PMS_PRICING_CURRENCY_CAPABILITIES_PORT,
@@ -906,7 +905,6 @@ const pmsGuestPolicySetupCommands =
           currencyChangeGuard: PMS_PRICING_CURRENCY_CHANGE_FAIL_CLOSED_GUARD,
           channexMealSyncEnabled:
             config.channexManagement.capabilityModes.provisioning === "mutating",
-          channexMealSyncPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
         }),
         recurringPricing: createPgPmsRecurringPricingCommandRepository({
           connectionString: targetDatabaseUrl,
@@ -1825,27 +1823,7 @@ app.addHook("onClose", async () => {
   ]);
 });
 
-const channexAriSchedule =
-  channexManagementWorkerStore &&
-  config.backgroundWorkersEnabled &&
-  config.channexManagement.capabilityModes.ariSync === "mutating"
-    ? createPgChannexAriSchedule(targetDatabaseUrl)
-    : undefined;
-let activeChannexScheduleRun: Promise<unknown> | undefined;
-const scheduleChannexAri = () => {
-  if (!channexAriSchedule || activeChannexScheduleRun) return;
-  activeChannexScheduleRun = channexAriSchedule
-    .enqueue()
-    .catch((err: unknown) => app.log.warn({ err }, "Channex ARI scheduling failed"))
-    .finally(() => {
-      activeChannexScheduleRun = undefined;
-    });
-};
-const channexScheduleTimer = channexAriSchedule
-  ? setInterval(scheduleChannexAri, 60_000)
-  : undefined;
-channexScheduleTimer?.unref();
-scheduleChannexAri();
+// VAY-1546: automatic rate delivery resumes with the replacement pricing system.
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
   if (!config.backgroundWorkersEnabled && !config.channexManagement.stagingRestrictionsPropertyId)
@@ -1875,13 +1853,10 @@ channexManagementTimer?.unref();
 if (channexManagementWorkerStore) runChannexManagement();
 app.addHook("onClose", async () => {
   if (channexManagementTimer) clearInterval(channexManagementTimer);
-  if (channexScheduleTimer) clearInterval(channexScheduleTimer);
-  await activeChannexScheduleRun;
   await activeChannexManagementRun;
   await Promise.all([
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
-    channexAriSchedule?.close(),
     channexBookingRevisionStore?.close?.(),
   ]);
 });

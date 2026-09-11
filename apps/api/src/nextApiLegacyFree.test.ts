@@ -151,11 +151,8 @@ describe("next-api legacy-free runtime check", () => {
 
     const routes = [
       "/api/ai/hotels/hotel-alpenrose",
-      "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
       "/api/booking-web/hosts/book.alpenrose.example",
       "/api/booking-web/hotels/hotel-alpenrose",
-      "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2",
-      "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-15",
       "/api/marketplace/offers",
       "/api/marketplace/creators",
     ];
@@ -163,6 +160,15 @@ describe("next-api legacy-free runtime check", () => {
     for (const url of routes) {
       const response = await injectJson(app, { method: "GET", url });
       expect(response.statusCode, `${url}: ${JSON.stringify(response.body)}`).toBe(200);
+    }
+    for (const url of [
+      "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-15",
+      "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
+      "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2",
+    ]) {
+      const response = await injectJson(app, { method: "GET", url });
+      expect(response.statusCode).toBe(503);
+      expect(response.body).toMatchObject({ code: "PRICING_UNAVAILABLE" });
     }
   });
 
