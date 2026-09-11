@@ -259,3 +259,24 @@ Confirmed evidence returns its exact audit/actor/source references. Invalid IDs 
 are no-store, including infrastructure failures. Database errors never become completion.
 There is no verification POST or state mutation, no UI control, background processor,
 attribution decision or Finance handoff in this slice. Destination readiness stays pending.
+
+## Native Booking creation provenance read
+
+The Booking-owned `readBookingAffiliateCreationEvidence` reuses the actual direct
+checkout persistence: a native booking and its single `guest_booking.created` status
+event are inserted atomically using the same server occurrence time and request/
+correlation metadata. The reader requires exact property/booking scope, an enabled
+property, native Booking/direct source, quote/checkout references and a single guest
+creation event whose timestamp exactly matches booking creation (SQL precision).
+Imported/external records remain unsupported; missing provenance stays pending;
+duplicate, inconsistent or future-dated provenance requires review. Update events
+and updated_at cannot replace the original creation time.
+
+This is an internal source read for an already authorized caller; a later resolver
+must enforce fresh property access before invocation. No public read route, guest
+identity, raw referral data or automatic scope authorization is added. `recorded`
+means native creation evidence only, not a trusted creator match or an earning.
+Validation uses the real checkout persistence adapter on isolated PostgreSQL, with
+existing synthetic booking fixtures and rolled-back negative cases. It is not
+deployed-account evidence or proof of referral round-trip, completion, net revenue
+or overall destination readiness. No publication/journal entries or payments result.
