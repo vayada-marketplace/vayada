@@ -181,3 +181,13 @@ connection or adapter. An `avp_` reference resolves only in its exact authorized
 and configuration while unexpired and unrevoked. Revocation remains available for
 expired or old-configuration probes. No HTTP route or actual capture/booking binding
 is wired yet; probe existence does not validate that the supplied connection works.
+
+The internal binding helper can resolve a probe with fresh hotel authority while the
+caller holds a checkout transaction's property lock. Migration 0213 stores an original
+booking binding atomically; booking edits cannot overwrite that row. Missing authority,
+revocation, expiry or changed configuration blocks resolution. No public checkout
+adapter, server route or guest input is wired to this helper yet, so validation cannot
+enter payment, PMS handoff, notification or revenue-evidence paths. Integration tests
+exercise fresh scope resolution and immutable binding against PostgreSQL; they do not
+demonstrate browser/quote transport, click-history completeness, a real provider,
+production eligibility, creator attribution or Finance exclusion of future live flows.
