@@ -1,6 +1,7 @@
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { editedSnapshot } from "./pricingAmounts";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -17,7 +18,7 @@ const sources = { room: "room", terms: "terms", finance: "finance" };
 let view: ReactTestRenderer;
 let saved: PricingDraft;
 const confirm = vi.fn(), publish = vi.fn();
-const client = { readTerms: vi.fn(), read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn() };
+const client = { termsAction: vi.fn(), readTerms: vi.fn(), read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn() };
 const button = (label: string) => view.root.findAllByType("button").find((node) => node.children.join("") === label)!;
 const click = async (label: string) => { await act(async () => { button(label).props.onClick(); }); };
 const input = () => view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!;
@@ -100,4 +101,19 @@ it("warns before leaving pending work and cancels property changes before select
   const change = new Event("pms:before-property-change", { cancelable: true }); listener("pms:before-property-change")(change); expect(change.defaultPrevented).toBe(true);
   vi.mocked(window.confirm).mockReturnValueOnce(true); const accepted = new Event("pms:before-property-change", { cancelable: true }); listener("pms:before-property-change")(accepted);
   expect(accepted.defaultPrevented).toBe(false); const leaving = new Event("beforeunload", { cancelable: true }); listener("beforeunload")(leaving); expect(leaving.defaultPrevented).toBe(false);
+});
+
+it.each([new Error("lost preparation response"), new ApiErrorResponse(403, {})])("retains a created policy after preparation failure %s and requires draft review", async (failure) => {
+  const id = "61000000-0000-4000-8000-000000000001", room = { roomTypeId: id, name: "Double", capacity: { total: 2, adults: 2, children: 1 } };
+  client.read.mockResolvedValueOnce(null);
+  const policy = vi.fn().mockResolvedValue({ revision: id }); client.termsAction.mockReturnValue(policy);
+  client.prepare.mockRejectedValueOnce(failure);
+  await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} setup={{ propertyId: id, rooms: [room] }} />); });
+  const input = firstPricingInput(id, room, id, { room: id, currency: "EUR", base: "130", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(input));
+  expect(view.root.findByType(FirstPricingSetup).props.disabled).toBe(true); expect(button("Reload pricing").props.disabled).toBe(true);
+  await click("Retry last action"); expect(policy).toHaveBeenCalledOnce(); expect(client.prepare).toHaveBeenCalledTimes(2);
+  expect(client.saveDraft).not.toHaveBeenCalled(); expect(confirm).not.toHaveBeenCalled(); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); expect(saved.baseRevision).toBe(0); expect(saved.snapshot.rooms[0].offers[0].termsRevision).toBe(id);
+  await click("Review saved charges"); expect(button("Approve rates").props.disabled).toBe(true);
 });

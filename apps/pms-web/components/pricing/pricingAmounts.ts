@@ -15,20 +15,21 @@ export function decimalAmount(minor: string, scale: number) {
 }
 export function editedSnapshot(snapshot: PricingSnapshot, inputs: Record<string, string>): PricingSnapshot {
   const scale = pricingCurrencyScale(snapshot.currency)!;
-  function amount(value: string) {
-    if (!new RegExp(`^\\d+(?:\\.\\d{1,${scale || 1}})?$`).test(value) || (!scale && value.includes("."))) throw new Error("Enter a valid price using a decimal point.");
-    const [whole, fraction = ""] = value.split("."), minor = `${whole}${fraction.padEnd(scale, "0")}`.replace(/^0+(?=\d)/, "");
-    if (minor === "0") throw new Error("Enter a price greater than zero.");
-    if (minor.length > 18) throw new Error("This price is too large.");
-    return minor;
-  }
   return { ...snapshot, ownerReferences: { finance: snapshot.ownerReferences.finance }, rooms: snapshot.rooms.map((room, ri) => ({ ...room,
     offers: room.offers.map((offer, oi) => {
       if (offer.price.kind !== "independent" || !offer.price.calendar.base) return offer;
-      const base = offer.price.calendar.base, values = baseAmounts(base).map(([, minor], ai) => amount(inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)));
+      const base = offer.price.calendar.base, values = baseAmounts(base).map(([, minor], ai) => parseMinorInput(inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale), scale));
       const next = base.mode === "flat" ? { ...base, amountMinor: values[0] } : base.mode === "per_person" ? { ...base, unitMinor: values[0] }
         : base.mode === "occupancy" ? { ...base, amountsMinor: values } : { ...base, baseMinor: values[0] };
       return { ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base: next } } };
     }),
   })) };
+}
+
+export function parseMinorInput(value: string, scale: number, allowZero = false) {
+  if (!new RegExp(`^\\d+(?:\\.\\d{1,${scale || 1}})?$`).test(value) || (!scale && value.includes("."))) throw new Error("Enter a valid price using a decimal point.");
+  const [whole, fraction = ""] = value.split("."), minor = `${whole}${fraction.padEnd(scale, "0")}`.replace(/^0+(?=\d)/, "");
+  if (!allowZero && minor === "0") throw new Error("Enter a price greater than zero.");
+  if (minor.length > 18) throw new Error("This price is too large.");
+  return minor;
 }

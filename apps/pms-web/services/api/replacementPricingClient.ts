@@ -6,6 +6,7 @@ import { ApiErrorResponse } from "./client";
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperationsClient";
 
 type Http = Pick<typeof pmsOperationsClient, "get" | "put" | "post">;
+export type PricingTermsInput = Omit<ReplacementOfferTerms, "revision"> & { expectedRevision: string | null };
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = { currency: string; rooms: readonly PricingConfiguration[]; ownerReferences: { finance: string; charges?: string } };
 export type PricingDraft = { draftId: string; revision: number; baseRevision: number; sources: PricingSources; snapshot: PricingSnapshot; stale: boolean };
@@ -67,6 +68,21 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     catch (error) { if (error instanceof ApiErrorResponse && error.status === 404 && error.data.code === "not_found") return missing; throw error; }
   }
   return {
+    termsAction(input: PricingTermsInput) {
+      const sent = structuredClone(input);
+      if (!exact(sent, ["roomTypeId", "offerId", "expectedRevision", "cancellation", "payment"]) ||
+          !(sent.expectedRevision === null || uuid(sent.expectedRevision))) return bad();
+      const parsed = parseBookingPricingOfferTerms({ roomTypeId: sent.roomTypeId, offerId: sent.offerId, revision: sent.roomTypeId, cancellation: sent.cancellation, payment: sent.payment });
+      if (!parsed) return bad();
+      const requestId = crypto.randomUUID(), body = { expectedRevision: sent.expectedRevision?.toLowerCase() ?? null, cancellation: parsed.cancellation, payment: parsed.payment };
+      return async () => {
+        const value = await http.put<unknown>(`${base}/rooms/${parsed.roomTypeId}/offers/${encodeURIComponent(parsed.offerId)}/terms`, structuredClone(body), options(requestId));
+        const saved = parseBookingPricingOfferTerms(value);
+        if (!saved || saved.roomTypeId !== parsed.roomTypeId || saved.offerId !== parsed.offerId ||
+            canonical({ cancellation: saved.cancellation, payment: saved.payment }) !== canonical({ cancellation: parsed.cancellation, payment: parsed.payment })) return bad();
+        return saved;
+      };
+    },
     async readTerms(roomTypeId: string, offerId: string, revision: string): Promise<ReplacementOfferTerms | null> {
       if (!uuid(roomTypeId) || !uuid(revision) || !offerId || offerId !== offerId.trim() || offerId.length > 200) return bad();
       const value = await optionalRead(`${base}/rooms/${roomTypeId.toLowerCase()}/offers/${encodeURIComponent(offerId)}/terms`);
