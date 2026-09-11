@@ -13,14 +13,15 @@ export type AffiliateRoomPriceResult =
         | "additional_guest_classification_required";
     }
   | {
-      status: "classified_price";
+      status: "reported_price";
       basis: "room_price_only";
       organizationId: string;
       propertyId: string;
       roomTypeId: string;
       currency: string;
       scale: 2;
-      accommodationPriceMinor: string;
+      reportedRoomPriceMinor: string;
+      taxClassification: "unverified";
       source: BookingPriceSnapshotInput;
     };
 
@@ -29,7 +30,7 @@ export type AffiliateRoomPriceResult =
  * No booking acceptance, canonical item mapping, extras completeness, payment,
  * refunds, attribution or earning is established by this result.
  */
-export function classifyAffiliateRoomPrice(
+export function reportAffiliateRoomPrice(
   input: BookingPriceSnapshotFactoryInput,
 ): AffiliateRoomPriceResult {
   const source = createBookingPriceSnapshotInput(input);
@@ -38,17 +39,19 @@ export function classifyAffiliateRoomPrice(
     return { status: "pending", reason: "item_allocation_required" };
   if (source.additionalGuestDisclosure.kind !== "not_applied")
     return { status: "pending", reason: "additional_guest_classification_required" };
-  // v1 factory requires exact mandatory-charge confirmation and explicit zero taxes/fees.
+  // Confirmation means mandatory charges are included in the guest price.
+  // The factory's explicit zero added taxes/fees does not prove tax-exclusive revenue.
   // Its final total already includes seasonal/weekend prices and selected rate discount.
   return Object.freeze({
-    status: "classified_price",
+    status: "reported_price",
     basis: "room_price_only",
     organizationId: source.organizationId,
     propertyId: source.propertyId,
     roomTypeId: source.calculation.roomTypeId,
     currency: source.calculation.currency,
     scale: source.calculation.scale,
-    accommodationPriceMinor: source.totals.priceTotalMinorUnits,
+    reportedRoomPriceMinor: source.totals.priceTotalMinorUnits,
+    taxClassification: "unverified",
     source,
   });
 }

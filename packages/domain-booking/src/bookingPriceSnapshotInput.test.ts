@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyAffiliateRoomPrice } from "./affiliateRoomPrice.js";
+import { reportAffiliateRoomPrice } from "./affiliateRoomPrice.js";
 
 import { createFinancePaymentReadinessSnapshot } from "@vayada/domain-finance";
 import {
@@ -450,25 +450,40 @@ describe("affiliate room price component", () => {
   }
   it("reuses actual price producer and retains immutable source evidence", () => {
     const input = supportedInput();
-    const result = classifyAffiliateRoomPrice(input);
+    const result = reportAffiliateRoomPrice(input);
     expect(result).toMatchObject({
-      status: "classified_price",
+      status: "reported_price",
       basis: "room_price_only",
       propertyId,
       organizationId,
       roomTypeId,
       currency: "EUR",
       scale: 2,
-      accommodationPriceMinor: "35500",
+      reportedRoomPriceMinor: "35500",
+      taxClassification: "unverified",
     });
-    if (result.status !== "classified_price") throw new Error("Expected classified price");
+    if (result.status !== "reported_price") throw new Error("Expected reported price");
     expect(result.source).toEqual(createBookingPriceSnapshotInput(input));
     expect(Object.isFrozen(result.source)).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);
     expect(result).not.toHaveProperty("netAccommodationMinor");
   });
+  it("does not treat confirmed included charges and zero added tax as tax-exclusive revenue", () => {
+    const result = reportAffiliateRoomPrice(supportedInput());
+    if (result.status !== "reported_price") throw new Error("Expected reported price");
+    expect(result.source.mandatoryChargeConfirmation.confirmationRevision).toBeGreaterThan(0);
+    expect(result.source.taxesAndFees).toEqual({
+      model: "explicit_zero.v1",
+      taxTotalMinorUnits: "0",
+      feeTotalMinorUnits: "0",
+      totalMinorUnits: "0",
+    });
+    expect(result.taxClassification).toBe("unverified");
+    expect(result).not.toHaveProperty("accommodationPriceMinor");
+    expect(result).not.toHaveProperty("netAccommodationMinor");
+  });
   it("keeps multi-room and additional guest allocation unresolved", () => {
-    expect(classifyAffiliateRoomPrice(factoryInput())).toMatchObject({
+    expect(reportAffiliateRoomPrice(factoryInput())).toMatchObject({
       reason: "item_allocation_required",
     });
     const input = supportedInput();
@@ -477,14 +492,14 @@ describe("affiliate room price component", () => {
       additionalGuestSourceId: additionalGuestId,
       chargeableGuestCount: 1,
     };
-    expect(classifyAffiliateRoomPrice(input)).toMatchObject({
+    expect(reportAffiliateRoomPrice(input)).toMatchObject({
       reason: "additional_guest_classification_required",
     });
   });
   it("rejects missing or mismatched mandatory charge evidence and client total injection", () => {
     const input = supportedInput();
     expect(
-      classifyAffiliateRoomPrice({
+      reportAffiliateRoomPrice({
         ...input,
         mandatoryChargeConfirmation: {
           ...input.mandatoryChargeConfirmation,
@@ -493,13 +508,13 @@ describe("affiliate room price component", () => {
       }),
     ).toMatchObject({ reason: "price_evidence_unavailable" });
     expect(
-      classifyAffiliateRoomPrice({
+      reportAffiliateRoomPrice({
         ...input,
         total: "1",
       } as unknown as BookingPriceSnapshotFactoryInput),
     ).toMatchObject({ reason: "price_evidence_unavailable" });
     expect(
-      classifyAffiliateRoomPrice(null as unknown as BookingPriceSnapshotFactoryInput),
+      reportAffiliateRoomPrice(null as unknown as BookingPriceSnapshotFactoryInput),
     ).toMatchObject({ reason: "price_evidence_unavailable" });
   });
 });
