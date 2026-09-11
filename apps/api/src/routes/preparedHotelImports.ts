@@ -27,6 +27,8 @@ import { enforceRoutePolicy } from "./policy.js";
 
 export type PreparedHotelImportRoutesOptions = {
   repository: PreparedImportRepository;
+  /** An explicit source path disables invitation discovery. */
+  sourcePath?: string;
   profiles: Pick<SharedHotelSetupStatusRepository, "getPropertyProfile" | "updatePropertyProfile">;
   rooms?: PmsRoomFactsRoutesOptions;
 };
@@ -71,16 +73,21 @@ export async function registerPreparedHotelImportRoutes(
     };
   };
 
-  app.get("/imports/prepared", async (request) => ({
-    import: await options.repository.find(scope(request)),
-  }));
+  if (!options.sourcePath)
+    app.get("/imports/prepared", async (request) => ({
+      import: await options.repository.find(scope(request)),
+    }));
 
-  app.get<{ Params: { propertyId: string } }>(
-    "/properties/:propertyId/import",
+  app.get<{ Params: { propertyId: string; sourceId?: string } }>(
+    options.sourcePath ?? "/properties/:propertyId/import",
     async (request, reply) => {
       const actor = scope(request);
       const propertyId = request.params.propertyId;
-      const source = await options.repository.find(actor);
+      const source = await options.repository.find({
+        ...actor,
+        propertyId,
+        sourceId: request.params.sourceId,
+      });
       if (!source) return { import: null };
       if (source.propertyId && source.propertyId !== propertyId)
         return reply.status(409).send({ code: "import_property_conflict" });
@@ -102,8 +109,8 @@ export async function registerPreparedHotelImportRoutes(
     },
   );
 
-  app.post<{ Params: { propertyId: string }; Body: unknown }>(
-    "/properties/:propertyId/import",
+  app.post<{ Params: { propertyId: string; sourceId?: string }; Body: unknown }>(
+    options.sourcePath ?? "/properties/:propertyId/import",
     { bodyLimit: 300_000 },
     async (request, reply) => {
       const body = request.body;
@@ -115,6 +122,8 @@ export async function registerPreparedHotelImportRoutes(
         typeof body.sourceId !== "string"
       )
         return reply.status(422).send({ code: "invalid_import" });
+      if (request.params.sourceId && body.sourceId !== request.params.sourceId)
+        return reply.status(422).send({ code: "invalid_import_source" });
       const data = parsePreparedHotelImport(body.data);
       if (!data || (!data.rooms.length && !Object.keys(data.property).length))
         return reply.status(422).send({ code: "invalid_import" });

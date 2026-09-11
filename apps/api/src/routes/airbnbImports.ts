@@ -6,11 +6,20 @@ import type { PreparedHotelImport } from "@vayada/domain-hotels";
 import type { createPgAirbnbImportSourceRepository } from "../domains/airbnbImportSourceRepository.js";
 import { enforceRoutePolicy } from "./policy.js";
 
+import type { createPgAirbnbImportApplicationRepository } from "../domains/airbnbImportApplicationRepository.js";
+import {
+  registerPreparedHotelImportRoutes,
+  type PreparedHotelImportRoutesOptions,
+} from "./preparedHotelImports.js";
+
 type Repository = ReturnType<typeof createPgAirbnbImportSourceRepository>;
 type Scope = Parameters<Repository["begin"]>[0];
 type Binding = Parameters<Repository["begin"]>[1];
 export type AirbnbImportRoutesOptions = {
   repository: Repository;
+  review?: Pick<PreparedHotelImportRoutesOptions, "profiles" | "rooms"> & {
+    applications: ReturnType<typeof createPgAirbnbImportApplicationRepository>;
+  };
   propertyAccessRepository: PropertyAccessRepository;
   allowedOrigins: string[];
   resolveBinding(scope: Scope): Promise<Binding | null>;
@@ -124,4 +133,47 @@ export async function registerAirbnbImportRoutes(
       return reply.code(502).send({ code: "airbnb_source_unavailable" });
     }
   });
+  if (options.review) {
+    const review = options.review;
+    async function verified(scope: Scope, sourceId: string) {
+      const source = await options.repository.find(scope, sourceId);
+      if (!source || !sameBinding(source, await options.resolveBinding(scope)))
+        throw Object.assign(new Error("import_not_available"), { statusCode: 404 });
+    }
+    await app.register(async (child) => {
+      child.addHook("onRequest", async (request, reply) => {
+        const { sourceId } = request.params as { sourceId: string };
+        if (!z.uuid().safeParse(sourceId).success)
+          return reply.code(400).send({ code: "invalid_source_id" });
+      });
+      child.addHook("preHandler", async (request, reply) => {
+        if (request.method === "POST") {
+          const body = request.body as { data?: { property?: unknown } } | null;
+          const fields = body?.data?.property;
+          if (fields && typeof fields === "object" && Object.keys(fields).length)
+            return reply.code(422).send({ code: "airbnb_rooms_only" });
+        }
+      });
+      await registerPreparedHotelImportRoutes(child, {
+        profiles: review.profiles,
+        rooms: review.rooms,
+        sourcePath: path + "/sources/:sourceId/review",
+        repository: {
+          async find(scope) {
+            if (!scope.propertyId || !scope.sourceId) return null;
+            const target = { ...scope, propertyId: scope.propertyId, sourceId: scope.sourceId };
+            await verified(target, target.sourceId);
+            return review.applications.find(target);
+          },
+          async apply(scope, execute) {
+            return review.applications.apply(scope, async (source) => {
+              await verified(scope, source.sourceId);
+              return execute(source);
+            });
+          },
+          close: () => review.applications.close(),
+        },
+      });
+    });
+  }
 }

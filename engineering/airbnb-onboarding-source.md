@@ -159,3 +159,13 @@ A room command may commit before its receipt is written: the future consumer mus
 reuse the existing draft-room binding lookup to recover that gap without creating
 a second room or overwriting subsequent edits. Tests in this slice validate receipt
 serialization and scope using synthetic executors, not actual room creation.
+
+## Shared review consumer
+
+The optional Airbnb review API lives at `/properties/:propertyId/airbnb-import/sources/:sourceId/review`.
+It inherits Airbnb session, assigned-property, entitlement and Origin checks. It rechecks
+the source's saved provider binding on reads and inside the serialized application callback.
+The existing prepared-import executor handles selected room validation, canonical commands
+and draft binding recovery; the Airbnb receipt repository supplies its source and receipts.
+The URL and body source IDs must agree. Property-field updates are excluded for Airbnb.
+No invitation discovery route is registered for this consumer. Production mounting remains off.
