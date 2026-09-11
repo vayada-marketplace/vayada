@@ -26,6 +26,8 @@
   "common.confirm": "Confirm",
   "common.previous": "Previous",
   "common.next": "Next",
+  "common.retry": "Retry",
+  "rooms.loadFailed": "Some room data could not be loaded. The list may be out of date. Retry to load the latest saved data.",
   "common.loading": "Loading...",
   "common.noResults": "No results",
   "common.required": "Required",

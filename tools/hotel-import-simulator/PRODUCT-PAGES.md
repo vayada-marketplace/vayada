@@ -34,7 +34,16 @@ validation message includes beds, supplies those facts, and saves. It then opens
 PMS `/rooms`, verifies the imported loft, imports the garden suite there, and
 reloads to verify both names remain. Screenshots are saved in test-results.
 
+A second scenario simulates a room-list read outage, checks that the page shows
+a retry instead of an empty-hotel message, then loads the saved rooms from the
+local database. It rejects writes and verifies the import snapshot is unchanged.
+To rerun only this read-only recovery check against an already populated demo:
+
+```sh
+npx playwright test --config tools/hotel-import-simulator/product-pages-playwright.config.ts --grep 'room settings recovers'
+```
+
 Validation: product-page browser test, strict harness TypeScript, and four shared
-import-panel unit tests pass. The only product change is clearer missing-bed
-validation guidance. Canonical save, property assignment, and room reads are real;
+import-panel unit tests pass. Product changes include clearer missing-bed
+validation guidance and visible room-list load failure/retry. Canonical save, property assignment, and room reads are real;
 authentication, prepared source, setup readiness and unrelated APIs are fixtures.
