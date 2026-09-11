@@ -474,6 +474,143 @@ describe.skipIf(!TEST_DATABASE_URL)(
       }
     });
 
+    it("reauthorizes quote retries and rolls back a failure after binding", async () => {
+      const issued = await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "create",
+          idempotencyKey: "quote-failure-probe",
+          lifetimeSeconds: 3600,
+        },
+        validation,
+      );
+      if (!issued.ok || !("probe" in issued)) throw new Error("Quote failure probe fixture failed");
+      const selected = { ...validation, probe: issued.probe };
+      const adapter = createAdapter(checkoutPool, selected);
+      const request = { ...checkoutRequest("unused"), roomTypeId, validationProbe: issued.probe };
+      const context = { ...command("quote-authorization"), operation: "booking-quote" as const };
+      const quoted = await adapter.quoteBooking("vay-1188-hotel", request, context);
+      await expect(adapter.quoteBooking("vay-1188-hotel", request, context)).resolves.toEqual(
+        quoted,
+      );
+      await expect(
+        createAdapter(checkoutPool, {
+          ...selected,
+          freshContext: async () => ({ ...(await freshProbeContext()), entitlements: [] }),
+        }).quoteBooking("vay-1188-hotel", request, context),
+      ).rejects.toThrow();
+      await expect(
+        createAdapter(checkoutPool, {
+          ...selected,
+          adapterVersion: "changed",
+        }).quoteBooking("vay-1188-hotel", request, context),
+      ).rejects.toThrow("Validation probe is unavailable");
+
+      const counts = async () =>
+        (
+          await admin.query(
+            `SELECT
+        (SELECT count(*)::int FROM booking.quote_sessions WHERE property_id=$1) AS quotes,
+        (SELECT count(*)::int FROM booking.affiliate_validation_quote_bindings WHERE property_id=$1) AS bindings,
+        (SELECT count(*)::int FROM platform.idempotency_keys WHERE property_id=$1) AS retries`,
+            [propertyId],
+          )
+        ).rows[0];
+      const before = await counts();
+      // Fault injection runs AFTER the real binding insert, inside the quote transaction.
+      await admin.query(`CREATE FUNCTION booking.test_quote_binding_failure() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN
+          IF NEW.property_id='${propertyId}'::uuid AND NEW.request_id='vay-1188-quote-rollback' THEN
+            RAISE EXCEPTION 'injected failure after quote binding';
+          END IF;
+          RETURN NEW;
+        END $$`);
+      try {
+        await admin.query(`CREATE TRIGGER test_quote_binding_failure AFTER INSERT
+          ON booking.affiliate_validation_quote_bindings FOR EACH ROW
+          EXECUTE FUNCTION booking.test_quote_binding_failure()`);
+        await expect(
+          adapter.quoteBooking("vay-1188-hotel", request, {
+            ...command("quote-rollback"),
+            occurredAt: new Date(occurredAt.getTime() + 1000),
+            operation: "booking-quote",
+          }),
+        ).rejects.toThrow("injected failure after quote binding");
+        expect(await counts()).toEqual(before);
+      } finally {
+        await admin.query(
+          "DROP TRIGGER IF EXISTS test_quote_binding_failure ON booking.affiliate_validation_quote_bindings",
+        );
+        await admin.query("DROP FUNCTION booking.test_quote_binding_failure()");
+      }
+      const recovered = await adapter.quoteBooking("vay-1188-hotel", request, {
+        ...command("quote-rollback"),
+        occurredAt: new Date(occurredAt.getTime() + 1000),
+        operation: "booking-quote",
+      });
+      expect(recovered).toHaveProperty("quoteId");
+      expect(await counts()).toEqual({
+        quotes: before.quotes + 1,
+        bindings: before.bindings + 1,
+        retries: before.retries + 1,
+      });
+      await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "revoke",
+          probe: issued.probe,
+        },
+        validation,
+      );
+      await expect(adapter.quoteBooking("vay-1188-hotel", request, context)).rejects.toThrow(
+        "Validation probe is unavailable",
+      );
+    });
+
+    it("rejects an expired probe before returning a cached quote", async () => {
+      const issued = await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "create",
+          idempotencyKey: "expiring-quote-probe",
+          lifetimeSeconds: 5,
+        },
+        validation,
+      );
+      if (!issued.ok || !("probe" in issued)) throw new Error("Expiring probe fixture failed");
+      const adapter = createAdapter(checkoutPool, { ...validation, probe: issued.probe });
+      const request = { ...checkoutRequest("unused"), roomTypeId, validationProbe: issued.probe };
+      const context = { ...command("quote-expiry"), operation: "booking-quote" as const };
+      const quoted = await adapter.quoteBooking("vay-1188-hotel", request, context);
+      expect(quoted).toHaveProperty("quoteId");
+      // Use the real database expiry; do not mutate immutable issuance or mock its clock.
+      await admin.query(
+        `SELECT pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (expires_at-clock_timestamp()))) + 0.02)
+        FROM booking.affiliate_validation_probes WHERE id=$1`,
+        [issued.probe.slice(4)],
+      );
+      await expect(adapter.quoteBooking("vay-1188-hotel", request, context)).rejects.toThrow(
+        "Validation probe is unavailable",
+      );
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM booking.affiliate_validation_quote_bindings WHERE probe_id=$1",
+            [issued.probe.slice(4)],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    }, 15000);
+
     it.skipIf(process.env["TEST_AFFILIATE_BROWSER"] !== "1")(
       "transports a probe from Chromium through the actual HTTP checkout route",
       async () => {
@@ -496,10 +633,6 @@ describe.skipIf(!TEST_DATABASE_URL)(
         );
         if (!issued.ok || !("probe" in issued)) throw new Error("Browser probe fixture failed");
 
-        await admin.query(
-          'UPDATE distribution.public_room_offer_snapshots SET rate_summary=\'{"code":"flex"}\'::jsonb WHERE property_id=$1',
-          [propertyId],
-        );
         const selected = { ...validation, probe: issued.probe };
         await expect(
           createAdapter(checkoutPool).createBooking(
@@ -548,7 +681,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
                 return {
                   status: response.status,
                   cache: response.headers.get("cache-control"),
-                  body: await response.json(),
+                  body: (await response.json()) as Record<string, unknown>,
                 };
               },
               { body, key, suffix },
@@ -751,9 +884,9 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await admin.query(
         `INSERT INTO distribution.public_room_offer_snapshots
          (property_id, room_type_id, stay_date, public_offer_key, available_rooms,
-          base_price_amount, currency, payment_options, freshness_status)
+          base_price_amount, currency, payment_options, freshness_status, rate_summary)
        SELECT $1::uuid, $2::uuid, stay_date, 'vay-1188-flex', 2,
-              100, 'EUR', ARRAY['pay_at_property'], 'fresh'
+              100, 'EUR', ARRAY['pay_at_property'], 'fresh', '{"code":"flex"}'::jsonb
        FROM unnest(ARRAY[DATE '2027-02-01', DATE '2027-02-02']) AS stay_date`,
         [propertyId, roomTypeId],
       );
