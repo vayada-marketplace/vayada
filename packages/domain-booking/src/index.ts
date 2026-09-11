@@ -663,3 +663,4 @@ export * from "./roomCombinationSearch.js";
 export * from "./affiliateBookingDestination.js";
 
 export * from "./affiliateRoomPrice.js";
+export * from "./nativeChargeBreakdown.js";
