@@ -131,3 +131,15 @@ logs while an ordinary setup request remained logged. This does not verify produ
 ingress or tracing. The current PMS claim/enable path also lacks persisted Channex
 environment/group evidence needed by the live source binding resolver. Those remain
 enablement prerequisites; no account-wide credential was treated as tenant proof.
+
+## Channex creation provenance
+
+The enable worker now records environment, external property ID and job ID only
+for a successful direct property creation (HTTP 201) on an official Channex origin.
+A title-recovered property receives no creation evidence. Evidence is saved after
+the binding claim and removed on disconnect. The 47 targeted tests, API build and
+typecheck pass with synthetic provider responses. No provider request was made.
+
+A verified read of the created property's group and the production binding resolver
+are still required before enabling the Airbnb connection flow. Existing connections
+are not retroactively certified by this change.
