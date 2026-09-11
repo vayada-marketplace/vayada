@@ -19,6 +19,7 @@ import {
   type SharedSetupTaskFormContext,
 } from "@vayada/product-onboarding";
 
+import { RoomImportRevisionContext } from "./RoomImportRevisionContext";
 import { ROUTES } from "@/lib/constants";
 import { authService } from "@/services/auth";
 import {
@@ -61,6 +62,7 @@ export function SharedHotelSetupPage({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [roomImportRevision, setRoomImportRevision] = useState(0);
   const [preparedSource, setPreparedSource] = useState<PreparedImportResponse["import"]>(null);
   const [checkingPrepared, setCheckingPrepared] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -297,12 +299,13 @@ export function SharedHotelSetupPage({
   }
 
   return (
-    <>
+    <RoomImportRevisionContext.Provider value={roomImportRevision}>
       {initialPropertyId && !initialAddProperty && (
         <div className="mx-auto max-w-4xl px-6">
           <PreparedHotelImportPanel
             key={initialPropertyId}
             client={sharedSetupClient}
+            onSaved={() => setRoomImportRevision((revision) => revision + 1)}
             propertyId={initialPropertyId}
           />
         </div>
@@ -341,7 +344,7 @@ export function SharedHotelSetupPage({
         )}
         onExit={handleExit}
       />
-    </>
+    </RoomImportRevisionContext.Provider>
   );
 }
 

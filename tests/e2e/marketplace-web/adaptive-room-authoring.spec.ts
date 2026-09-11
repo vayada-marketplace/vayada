@@ -81,6 +81,83 @@ test.describe("adaptive room authoring", () => {
     await assertHealthy();
   });
 
+  for (const lostResponse of [false, true]) {
+    test(`refreshes imported rooms while preserving local input (mock APIs, lost response: ${lostResponse})`, async ({
+      page,
+      baseURL,
+    }, testInfo) => {
+      await primeBrowserState(page);
+      await mockAuthSession(page);
+      await mockRoute(page, () => routeWithRoomsDraft(emptyRoomsDraft()));
+      const owner = await mockRoomOwnerApis(page);
+      let saved = false;
+      const prepared = {
+        contractVersion: "prepared-hotel-import.v1",
+        property: {},
+        rooms: [
+          {
+            id: "garden",
+            name: "Imported Suite",
+            description: "",
+            maxGuests: 2,
+            maxAdults: 2,
+            maxChildren: 0,
+            bedType: "queen",
+            bedQuantity: 1,
+            bathroomType: "private",
+            sizeSquareMetres: null,
+          },
+        ],
+      };
+      await page.route(
+        /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+        async (route) => {
+          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+          const item = { itemId: "room:garden", status: "applied", resourceId: roomTypeIds[0] };
+          if (route.request().method() === "POST") {
+            owner.insertImportedRoom();
+            saved = true;
+            if (lostResponse) return route.abort("failed");
+            return route.fulfill({ headers: corsHeaders(route), json: { items: [item] } });
+          }
+          return route.fulfill({
+            headers: corsHeaders(route),
+            json: {
+              import: {
+                sourceId: "synthetic-source",
+                propertyId,
+                data: prepared,
+                results: saved ? { "room:garden": item } : {},
+              },
+              profile: { propertyId, profileRevision: 1, profile: { displayName: "Test Hotel" } },
+              canImportRooms: true,
+              canImportProperty: false,
+              existingRooms: saved ? [{ id: roomTypeIds[0], name: "Imported Suite" }] : [],
+            },
+          });
+        },
+      );
+      await page.goto(setupUrl(baseURL));
+      await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
+      await page.getByLabel("Room type name").fill("Unfinished local room");
+      const panel = page.getByRole("region", { name: "Prepared hotel data" });
+      await panel.getByRole("button", { name: "Review prepared hotel data" }).click();
+      await panel.getByRole("checkbox", { name: "Imported Suite", exact: true }).check();
+      await panel.getByRole("button", { name: "Save selected items" }).click();
+      if (lostResponse) {
+        await expect(panel.getByRole("alert")).toContainText("Import could not finish");
+        await panel.getByRole("button", { name: "Refresh", exact: true }).click();
+      }
+      await expect(
+        page.getByRole("heading", { name: "Imported Suite", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByLabel("Room type name")).toHaveValue("Unfinished local room");
+      expect(owner.createdDraftIds).toHaveLength(0);
+      expect(owner.draftWrites).toBe(0);
+      await page.screenshot({ path: testInfo.outputPath("import-refresh.png"), fullPage: true });
+    });
+  }
+
   test("retains first-visit values and exits with the exact current manifest", async ({
     page,
     baseURL,
@@ -662,6 +739,24 @@ async function mockRoomOwnerApis(page: Page) {
   });
 
   return {
+    insertImportedRoom() {
+      rooms.set(roomTypeIds[0]!, {
+        ...ownerRoomShape(),
+        roomTypeId: roomTypeIds[0]!,
+        draftRoomId: "import:synthetic-source:garden",
+        facts: {
+          name: "Imported Suite",
+          description: "",
+          category: null,
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "queen", quantity: 1 }],
+          bedrooms: null,
+          bathrooms: null,
+          bathroomType: "private",
+          size: null,
+        },
+      });
+    },
     events,
     createdDraftIds,
     mediaTargets,
