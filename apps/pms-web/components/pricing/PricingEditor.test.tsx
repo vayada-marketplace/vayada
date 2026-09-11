@@ -109,7 +109,7 @@ it.each([new Error("lost preparation response"), new ApiErrorResponse(403, {})])
   const policy = vi.fn().mockResolvedValue({ revision: id }); client.termsAction.mockReturnValue(policy);
   client.prepare.mockRejectedValueOnce(failure);
   await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} setup={{ propertyId: id, rooms: [room] }} />); });
-  const input = firstPricingInput(id, room, id, { mode: "flat", occupancy: [], room: id, currency: "EUR", base: "130", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+  const input = firstPricingInput(id, room, id, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, room: id, currency: "EUR", base: "130", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
   await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(input));
   expect(view.root.findByType(FirstPricingSetup).props.disabled).toBe(true); expect(button("Reload pricing").props.disabled).toBe(true);
   await click("Retry last action"); expect(policy).toHaveBeenCalledOnce(); expect(client.prepare).toHaveBeenCalledTimes(2);
@@ -128,5 +128,15 @@ it.each(["occupancy", "per_person"])("preserves %s prices through editing and sa
   expect(view.root.findByProps({ "aria-label": label }).props.value).toBe("75.25");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: mode === "occupancy" ? { mode, amountsMinor: ["10000", "7525"] } : { mode: "per_person", unitMinor: "7525" } } });
   expect(saved.snapshot.rooms[0].children).toEqual(snapshot.rooms[0].children);
+  expect(button("Approve rates").props.disabled).toBe(true);
+});
+it("keeps included-adult adjustments when editing and reviewing the saved base price", async () => {
+  const value = structuredClone(snapshot), offer = value.rooms[0].offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  const adjustments = [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }];
+  const price = { ...offer.price, calendar: { ...offer.price.calendar, base: { mode: "included_guests" as const, baseGuests: 2, baseMinor: "13000", adjustments } } };
+  client.read.mockResolvedValue({ ...value, rooms: [{ ...value.rooms[0], offers: [{ ...offer, price }] }], revision: 1, sources, stale: false }); await mount();
+  await act(async () => input().props.onChange({ target: { value: "150" } })); await click("Save draft"); await click("Review saved charges");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { baseMinor: "15000", baseGuests: 2, adjustments } } });
+  expect(JSON.stringify(view.toJSON())).toContain("1 adult −30.00 EUR; 2 adults 0.00 EUR");
   expect(button("Approve rates").props.disabled).toBe(true);
 });

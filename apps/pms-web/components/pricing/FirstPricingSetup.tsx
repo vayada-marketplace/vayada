@@ -3,17 +3,18 @@ import { useState } from "react";
 import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
 import { parseMinorInput } from "./pricingAmounts";
 
 export type SetupRoom = { roomTypeId: string; name: string; capacity: PricingConfiguration["capacity"] };
-type Values = Record<"mode" | "room" | "currency" | "base" | "adultAge" | "childPrice" | "countChildren" | "minimum" | "maximum" | "cancellation" | "freeDays" | "payment", string> & { occupancy: string[] };
+type Values = Record<"mode" | "room" | "currency" | "base" | "adultAge" | "childPrice" | "countChildren" | "minimum" | "maximum" | "cancellation" | "freeDays" | "payment", string> & { occupancy: string[]; included: IncludedInput };
 export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: string, values: Values) {
   const scale = pricingCurrencyScale(values.currency);
   const integer = (value: string) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : NaN;
   if (scale === null || !["yes", "no"].includes(values.countChildren) || values.payment !== "full" || !["non_refundable", "flexible"].includes(values.cancellation)) throw new Error("Complete every required pricing and policy setting.");
-  if (!["flat", "occupancy", "per_person"].includes(values.mode)) throw new Error("Choose how to price this room.");
+  if (!["flat", "occupancy", "per_person", "included_guests"].includes(values.mode)) throw new Error("Choose how to price this room.");
   if (values.mode === "occupancy" && values.occupancy.length !== room.capacity.adults) throw new Error("Enter a price for every adult count.");
-  const base = values.mode === "occupancy" ? { mode: "occupancy", amountsMinor: Array.from(values.occupancy, (amount) => parseMinorInput(amount, scale)) }
+  const base = values.mode === "included_guests" ? includedPrice(values.included, values.base, room.capacity.adults, scale) : values.mode === "occupancy" ? { mode: "occupancy", amountsMinor: Array.from(values.occupancy, (amount) => parseMinorInput(amount, scale)) }
     : values.mode === "per_person" ? { mode: "per_person", unitMinor: parseMinorInput(values.base, scale) }
     : { mode: "flat", amountMinor: parseMinorInput(values.base, scale) };
   const adultFromAge = integer(values.adultAge), minArrivalNights = integer(values.minimum);
@@ -32,11 +33,11 @@ export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: 
 }
 export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCreate }: { propertyId: string; rooms: readonly SetupRoom[]; disabled: boolean; onDirty: () => void;
   onCreate: (input: ReturnType<typeof firstPricingInput>) => void }) {
-  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], room: "", currency: "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
+  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], included: { adults: "", adjustments: [] }, room: "", currency: "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
   const [error, setError] = useState("");
-  const change = (key: Exclude<keyof Values, "occupancy">, value: string) => { setValues({ ...values, [key]: value, ...(["room", "mode"].includes(key) ? { base: "", occupancy: [] } : {}) }); setError(""); onDirty(); };
-  const field = (key: Exclude<keyof Values, "occupancy">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
-  const select = (key: Exclude<keyof Values, "occupancy">, label: string, options: [string, string][]) => <label className="block text-sm">{label}<select aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
+  const change = (key: Exclude<keyof Values, "occupancy" | "included">, value: string) => { setValues({ ...values, [key]: value, ...(["room", "mode"].includes(key) ? { base: "", occupancy: [], included: { adults: "", adjustments: [] } } : {}) }); setError(""); onDirty(); };
+  const field = (key: Exclude<keyof Values, "occupancy" | "included">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
+  const select = (key: Exclude<keyof Values, "occupancy" | "included">, label: string, options: [string, string][]) => <label className="block text-sm">{label}<select aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
   if (!rooms.length) return <p>No active room types with complete capacity settings are available. Complete room setup first.</p>;
   const room = rooms.find((candidate) => candidate.roomTypeId === values.room);
   return <form className="mt-4 space-y-4" onSubmit={(event) => {
@@ -48,8 +49,8 @@ export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCrea
     <p className="text-sm text-gray-600">Start with one room-only offer: the chosen prices apply every night, no calendar exceptions, and arrivals, departures and sales open. Only active rooms with complete capacity settings are listed. Additional pricing controls will follow.</p>
     <div className="grid gap-4 sm:grid-cols-2">
       {select("room", "Room type", rooms.map((r) => [r.roomTypeId, r.name]))}{field("currency", "Currency code (for example EUR)")}
-      {select("mode", "How is the room priced?", [["flat", "One price per room"], ["occupancy", "Price for each adult count"], ["per_person", "Price per adult"]])}
-      {values.mode === "flat" && field("base", "Room price per night")}
+      {select("mode", "How is the room priced?", [["flat", "One price per room"], ["occupancy", "Price for each adult count"], ["per_person", "Price per adult"], ["included_guests", "Base price with adult-count adjustments"]])}
+      {(values.mode === "flat" || values.mode === "included_guests") && field("base", "Room price per night")}
       {values.mode === "per_person" && field("base", "Price per adult per night")}
       {values.mode === "occupancy" && room && Array.from({ length: room.capacity.adults }, (_, index) => <label key={index} className="block text-sm">
         Room price for {index + 1} {index ? "adults" : "adult"} per night<input aria-label={`Room price for ${index + 1} ${index ? "adults" : "adult"} per night`} inputMode="decimal" disabled={disabled}
@@ -57,6 +58,7 @@ export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCrea
             const occupancy = Array.from({ length: room.capacity.adults }, (_, i) => i === index ? event.target.value : values.occupancy[i] ?? "");
             setValues({ ...values, occupancy }); setError(""); onDirty();
           }} /></label>)}
+      {values.mode === "included_guests" && room && <IncludedPricing value={values.included} capacity={room.capacity.adults} disabled={disabled} onChange={(included) => { setValues({ ...values, included }); setError(""); onDirty(); }} />}
       {field("adultAge", "Adult pricing starts at age (1–18)")}
       {field("childPrice", "Price per child per night (0 is allowed)")}{select("countChildren", "Children count toward room capacity", [["yes", "Yes"], ["no", "No"]])}
       {field("minimum", "Minimum stay in nights")}{field("maximum", "Maximum stay in nights (blank means unlimited)")}
