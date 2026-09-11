@@ -153,3 +153,12 @@ Missing, mismatched or ambiguous bindings are rejected. The 53 targeted tests, A
 build and typecheck pass; independent review found no actionable defects. Database
 and provider responses for this slice are synthetic. Routes remain unmounted; live
 composition, production callback logging and fresh-host authorization remain pending.
+
+## Opt-in API runtime
+
+The API can now compose the real Airbnb repositories, verified provider binding,
+connection provider and shared canonical room editor routes. It is default-off via
+`AIRBNB_IMPORT_ENABLED`; enabled startup requires valid provider settings, an
+auth-allowlisted HTTPS callback origin, auth/session configuration and room setup.
+No local or remote feature flag was enabled. Frontend entry wiring, production
+callback logging and fresh-host authorization still require verification.

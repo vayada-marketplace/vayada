@@ -1,3 +1,4 @@
+import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
@@ -457,12 +458,13 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
     })
   : undefined;
-const pmsRoomClosureRepository = pmsOperationsRepository && config.pmsRoomClosureEnabled
-  ? createPgPmsRoomClosureRepository({
-      connectionString: targetDatabaseUrl,
-      channex: config.channexManagement,
-    })
-  : undefined;
+const pmsRoomClosureRepository =
+  pmsOperationsRepository && config.pmsRoomClosureEnabled
+    ? createPgPmsRoomClosureRepository({
+        connectionString: targetDatabaseUrl,
+        channex: config.channexManagement,
+      })
+    : undefined;
 const pmsLinkedInventoryGroupCommandRepository = pmsOperationsRepository
   ? createPgPmsLinkedInventoryGroupCommandRepository({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -1139,7 +1141,17 @@ const platformAdminDashboardRepository = createTargetPlatformAdminDashboardRepos
   connectionString: targetDatabaseUrl,
 });
 
+if (config.airbnbImport && (!config.auth || !config.authSession || !pmsRoomSetupRuntime))
+  throw new Error("Airbnb imports require authentication and canonical room setup");
+const airbnbImportRuntime = config.airbnbImport
+  ? createAirbnbImportRuntime({
+      config: config.airbnbImport,
+      connectionString: targetDatabaseUrl,
+      allowedOrigins: config.authSession!.authAllowedOrigins,
+    })
+  : undefined;
 const app = buildApp({
+  airbnbImports: airbnbImportRuntime?.routes,
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
@@ -1656,6 +1668,9 @@ app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
 });
 
+app.addHook("onClose", async () => {
+  await airbnbImportRuntime?.close();
+});
 app.addHook("onClose", async () => {
   stopPostgresTelemetry();
   await postgresRuntime.close();

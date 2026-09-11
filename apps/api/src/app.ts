@@ -1,3 +1,7 @@
+import {
+  registerAirbnbImportRoutes,
+  type AirbnbImportRoutesOptions,
+} from "./routes/airbnbImports.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -361,6 +365,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     "profileRepository" | "lifecycleCommandBus"
   >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
+    applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
+  };
   preparedImportRepository?: PreparedImportRepository;
   sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
   propertyNearbyRepository?: PropertyNearbyRepository;
@@ -619,6 +626,24 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.propertyNearbyRepository,
       discovery: options.propertyNearbyDiscovery,
       propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.airbnbImports) {
+    if (
+      !options.auth?.propertyAccessRepository ||
+      !options.sharedHotelSetupStatusRepository ||
+      !options.pmsRoomSetup?.facts
+    )
+      throw new Error("Airbnb imports require authorization and canonical hotel room setup");
+    app.register(registerAirbnbImportRoutes, {
+      prefix: "/api/hotel-setup",
+      ...options.airbnbImports,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      review: {
+        profiles: options.sharedHotelSetupStatusRepository,
+        rooms: options.pmsRoomSetup.facts,
+        applications: options.airbnbImports.applications,
+      },
     });
   }
   if (options.preparedImportRepository && options.sharedHotelSetupStatusRepository) {
