@@ -118,3 +118,27 @@ The existing publication command must remain blocked until actual complete
 creator-visible commercial disclosures and validated tracking evidence are available.
 Product-policy acceptance does not satisfy its evidence prerequisites. No schema,
 route, Finance balance, provider setting or payout changes in this contract slice.
+
+## Deterministic item amount calculation
+
+`calculateAffiliateEarning` takes trusted scoped evidence, an exact approved policy
+record and optional previous calculated total for that same hotel/creator/agreement/
+policy/booking/item/currency/precision/rounding tuple. It uses canonical nonnegative
+minor-unit integer strings (at most 30 digits) and BigInt arithmetic. The currency
+precision must be explicit (technical supported range 0–9); it is not a currency
+support registry. Only explicit `half_up` is supported; omission cannot select it
+as a product default. The caller must resolve the agreed currency/rounding contract.
+
+Revenue is already classified, collected accommodation net of discounts/refunds;
+no gross-total conversion or refund allocation happens here. Completed items use
+the exact rate, rounded once; cancelled/no-show unconsumed items yield zero.
+Positive consumed accommodation on an unconsumed item is conflicting evidence.
+Missing evidence/policy stays pending, conflicting facts or prior scope mismatch
+require review. Missing prior total means first calculation; zero is explicit.
+
+The result preserves scope and evidence references and returns the revised total
+and difference from the previous total. That difference is not itself a durable
+adjustment: the caller must order evidence and idempotently persist decisions before
+Finance processing. Repeated calls with the same previous input return the same
+difference; the function does not claim deduplication. No runtime caller, hold-clock
+logic, payment eligibility, balance write or transfer is introduced in this slice.

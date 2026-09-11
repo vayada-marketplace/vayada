@@ -1,3 +1,4 @@
+export * from "./affiliateEarning.js";
 /**
  * domain-finance — Finance domain contracts.
  *
