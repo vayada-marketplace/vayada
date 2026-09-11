@@ -125,6 +125,42 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking publication command safe
     await admin.end();
   });
 
+  it("recovers a lost-response operation by scoped key without new durable work", async () => {
+    const request = await command("lost-response");
+    const accepted = await repository.requestPublication(request);
+    if (!accepted.ok) throw new Error("Expected acceptance");
+    const before = await counts();
+    const review = await repository.getPublicationReview({
+      organizationId,
+      propertyId,
+      actorUserId,
+      idempotencyKey: request.idempotencyKey,
+    });
+    expect(review).toMatchObject({
+      propertyId,
+      activeContentRevisionId: null,
+      latestOperation: accepted.operation,
+      recoveredOperation: accepted.operation,
+    });
+    expect(await counts()).toEqual(before);
+    const missing = await repository.getPublicationReview({
+      organizationId,
+      propertyId,
+      actorUserId,
+      idempotencyKey: "unknown-key",
+    });
+    expect(missing?.recoveredOperation).toBeNull();
+    expect(missing?.latestOperation).toEqual(accepted.operation);
+    expect(
+      await repository.getPublicationReview({
+        organizationId: secondOrganizationId,
+        propertyId,
+        actorUserId,
+        idempotencyKey: request.idempotencyKey,
+      }),
+    ).toBeNull();
+  });
+
   it("atomically accepts once and exactly replays without duplicate durable work", async () => {
     const request = await command("accept-once");
     const accepted = await repository.requestPublication(request);
