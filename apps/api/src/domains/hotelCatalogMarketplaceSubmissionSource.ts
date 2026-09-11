@@ -43,11 +43,9 @@ export function createHotelCatalogMarketplaceSubmissionSource(config: {
   profiles: ProfileReader;
 }): MarketplaceCatalogSubmissionSource {
   async function read(scope: Scope): Promise<MarketplaceCatalogSnapshot> {
-    const [state, rawProfile, rawPublic] = await Promise.all([
-      config.step1.getState(scope),
-      config.profiles.getPropertyProfile(scope),
-      config.profiles.getPublicPropertyProfile(scope),
-    ]);
+    const state = await config.step1.getState(scope);
+    const rawProfile = await config.profiles.getPropertyProfile(scope);
+    const rawPublic = await config.profiles.getPublicPropertyProfile(scope);
     const profile = parsePropertyProfileResponse(rawProfile);
     const publicProfile = parsePublicPropertyProfileResponse(rawPublic);
     const presentation = parseHotelCatalogStep1ReadModel(state?.readModel);
