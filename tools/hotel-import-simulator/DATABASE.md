@@ -27,14 +27,10 @@ npx tsc -p tools/hotel-import-simulator/tsconfig.json
 npx playwright test --config tools/hotel-import-simulator/database-playwright.config.ts
 ```
 
-The browser suite requires a fresh dedicated database and fails clearly if the
-Garden Suite was previously saved. To repeat, stop this harness, then reset only
-its database and rerun migrations/startup:
-
-```sh
-docker exec vay1009-import-test dropdb -U postgres vay1009_import_test
-docker exec vay1009-import-test createdb -U postgres vay1009_import_test
-```
+The browser suite preserves existing database data. On a fresh Garden listing it
+checks edit/save; on subsequent runs it checks replay and preserves the saved
+name. Incomplete-listing checks compare against their own starting room data.
+Do not reset the database to repeat these checks.
 
 Coverage: edit/save through the browser, reload persistence, simultaneous replay
 without duplicate or overwritten edits, incomplete/unknown input, wrong-property
