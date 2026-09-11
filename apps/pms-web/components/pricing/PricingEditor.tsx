@@ -26,6 +26,7 @@ import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
+  const [independentOffer, setIndependentOffer] = useState(false);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
@@ -161,9 +162,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       {display.rooms.map((room, ri) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomNames[room.roomTypeId] ?? `Room ${ri + 1}`}</h2>
         {addingOfferRoom === room.roomTypeId ? <div className="border-b p-5">
-          <NewLinkedOffer room={room} disabled={disabled} onCreate={(input) => createInitial(input, true)} />
+          {independentOffer ? <FirstPricingSetup propertyId={room.propertyId} rooms={[{ roomTypeId: room.roomTypeId, name: roomNames[room.roomTypeId] ?? `Room ${ri + 1}`, capacity: room.capacity }]} existingRoom={room} fixedCurrency={room.currency} disabled={disabled} onDirty={() => {}} onCreate={(input) => createInitial(input, true)} /> : <NewLinkedOffer room={room} disabled={disabled} onCreate={(input) => createInitial(input, true)} />}
           <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (!disabled) { setAddingOfferRoom(null); setError(""); } }}>Cancel new offer</button>
-        </div> : <button type="button" className="m-5 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || !!review || hasPendingEntries} onClick={() => { if (!disabled && !review && !hasPendingEntries) { setAddingOfferRoom(room.roomTypeId); setError(""); } }}>Add linked offer</button>}
+        </div> : <div className="flex gap-3 p-5">{[false, true].map((independent) => <button key={String(independent)} type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || !!review || hasPendingEntries} onClick={() => { if (!disabled && !review && !hasPendingEntries) { setIndependentOffer(independent); setAddingOfferRoom(room.roomTypeId); setError(""); } }}>{independent ? "Add independent offer" : "Add linked offer"}</button>)}</div>}
         <PricingChildCharges room={room} label={roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} disabled={disabled || !!review || exclusiveEditPending}
           onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`children:${ri}`]: pending }))}
           onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
