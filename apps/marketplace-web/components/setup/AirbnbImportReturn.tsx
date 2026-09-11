@@ -1,12 +1,14 @@
 "use client";
 
+import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
 import { useEffect, useRef, useState } from "react";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 
 type Result = "ready" | "cancelled" | "unavailable";
 const messages = {
   checking: "Checking your Airbnb connection…",
-  ready: "Your listing details are saved for review. No rooms have been created.",
+  ready:
+    "Your listing details are saved for review. Choose the listings for this hotel and complete any missing details.",
   cancelled: "The connection was cancelled. You can continue setting up your hotel manually.",
   unavailable:
     "We could not confirm this connection. Return to hotel setup to try again or continue manually.",
@@ -38,11 +40,20 @@ export function AirbnbImportReturn({
     };
   }, [propertyId, sourceId]);
   return (
-    <main className="mx-auto max-w-xl px-6 py-20">
+    <main className="mx-auto max-w-3xl px-6 py-20">
       <h1 className="mb-4 text-2xl font-semibold">Airbnb connection</h1>
       <p role="status" aria-live="polite" className="mb-6 text-gray-600">
         {messages[result]}
       </p>
+      {result === "ready" && (
+        <PreparedHotelImportPanel
+          client={sharedSetupClient}
+          propertyId={propertyId}
+          roomsOnly
+          emptyMessage="There are no remaining listings to import from this connection."
+          importEndpoint={`/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/airbnb-import/sources/${encodeURIComponent(sourceId)}/review`}
+        />
+      )}
       {result !== "checking" && (
         <a
           className="font-medium text-blue-700 underline"

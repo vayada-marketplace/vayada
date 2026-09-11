@@ -169,3 +169,10 @@ The existing prepared-import executor handles selected room validation, canonica
 and draft binding recovery; the Airbnb receipt repository supplies its source and receipts.
 The URL and body source IDs must agree. Property-field updates are excluded for Airbnb.
 No invitation discovery route is registered for this consumer. Production mounting remains off.
+
+The callback now embeds the shared room review panel using the explicit source review
+endpoint. Owners select only relevant listings, fill sparse facts, and save canonical
+room types before returning to setup. The shared component's default invitation
+endpoint is unchanged. Source changes reset pending edits and ignore stale responses.
+Browser checks use simulated API/auth responses, including a lost save response followed
+by receipt refresh; actual Channex linking and production binding remain unverified.
