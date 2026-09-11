@@ -158,3 +158,25 @@ Missing/invalid/stale configuration, guest or terms evidence, missing prices and
 overflow remain explicit unavailable results. It never erases rules, fabricates
 a longer stay, or calls a second calculator. Provider materialization remains
 VAY-1545/VAY-1528; this pure interface makes no provider writes.
+
+## Channex adult nightly candidates (VAY-1946)
+
+The API integration's `prepareChannexAdultNightPrices` consumes the PMS projection
+for one offer/date and every adult-only occupancy from one through adult capacity.
+It returns a complete `prepared` candidate set or an explicit `unavailable` result;
+one failed occupancy rejects the whole set. A local work limit of 100 candidates
+returns `candidate_limit` rather than truncating; this is not a provider limit.
+
+Each candidate retains the full projection and its occupancy, plus the inclusive
+nightly total formatted by ISO currency scale using string operations. Occupancy
+table values are room totals, per-person meals use the represented adults, and
+linked adjustments remain owned by PMS. No channel adjustment is applied here.
+
+These are internal candidates, not sendable ARI requests or a complete guest
+product. The adapter does not read published state, validate provider mappings,
+choose a primary occupancy, represent child ages, translate restriction rules,
+or establish inventory, mandatory-charge or OTA capability readiness. Runtime
+consumers must establish those gates and preserve the full evidence before
+delivery. VAY-1545 owns materialization and write/readback integration; VAY-1541,
+VAY-1530 and VAY-1528 supply publication, meal identities and restriction mapping.
+The adapter is deliberately not wired into the disabled pricing job paths yet.
