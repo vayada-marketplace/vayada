@@ -430,6 +430,7 @@ function fakeRepository(
       return {
         propertyId,
         activeContentRevisionId: null,
+        publishedUrl: null,
         latestOperation: this.statusResult,
         recoveredOperation: input.idempotencyKey ? this.statusResult : null,
       };

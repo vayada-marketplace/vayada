@@ -13,6 +13,7 @@ export type BookingPublicationReview = {
   contractVersion: "booking-publication-review.v1";
   propertyId: string;
   activeContentRevisionId: string | null;
+  publishedUrl: string | null;
   latestOperation: BookingPublicationOperation | null;
   recoveredOperation: BookingPublicationOperation | null;
   readiness: ProductReadinessResult | ReadinessProviderFailure;
@@ -49,6 +50,20 @@ export function createBookingPublicationReviewClient(http: Http) {
         !nullableUuid(raw.activeContentRevisionId)
       )
         throw invalid();
+      if (raw.publishedUrl !== null) {
+        try {
+          const url = new URL(raw.publishedUrl);
+          if (
+            url.protocol !== "https:" ||
+            url.username ||
+            url.password ||
+            !raw.activeContentRevisionId
+          )
+            throw invalid();
+        } catch {
+          throw invalid();
+        }
+      }
       const latestOperation =
         raw.latestOperation === null ? null : operation(raw.latestOperation, propertyId);
       const recoveredOperation =

@@ -91,6 +91,7 @@ export interface BookingPublicationReviewReadPort {
   }): Promise<{
     propertyId: string;
     activeContentRevisionId: string | null;
+    publishedUrl: string | null;
     latestOperation: BookingPublicationOperation | null;
     recoveredOperation: BookingPublicationOperation | null;
   } | null>;

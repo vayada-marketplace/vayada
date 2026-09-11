@@ -60,7 +60,9 @@ export function createPgBookingPublicationCommandRepository(config: {
   pool?: BookingPublicationCommandPool;
   now?: () => Date;
   randomId?: () => string;
-  activeContent: Pick<BookingContentLifecyclePort, "getActive">;
+  activeContent: Pick<BookingContentLifecyclePort, "getActive"> & {
+    getPublishedUrl?(propertyId: string, revisionId: string): Promise<string | null>;
+  };
 }): BookingPublicationCommandPort & BookingPublicationReviewReadPort {
   if (!config.connectionString.trim()) {
     throw new Error("Booking publication command repository connectionString must not be empty");
@@ -266,9 +268,14 @@ export function createPgBookingPublicationCommandRepository(config: {
         const active = await config.activeContent.getActive(input.propertyId);
         if (active && active.propertyId !== input.propertyId)
           throw new Error("Active content scope mismatch");
+        const publishedUrl =
+          active && config.activeContent.getPublishedUrl
+            ? await config.activeContent.getPublishedUrl(input.propertyId, active.revisionId)
+            : null;
         await client.query("COMMIT");
         return {
           propertyId: input.propertyId,
+          publishedUrl,
           activeContentRevisionId: active?.revisionId ?? null,
           latestOperation: latest.rows[0] ? operationProjection(latest.rows[0]) : null,
           recoveredOperation: recovered?.rows[0] ? operationProjection(recovered.rows[0]) : null,
