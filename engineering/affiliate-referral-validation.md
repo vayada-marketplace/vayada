@@ -170,5 +170,17 @@ The opt-in Chromium test (`TEST_AFFILIATE_BROWSER=1` with an isolated
 HTTP booking route into the actual checkout/database adapter. It verifies rejection,
 successful creation/replay and exact binding without cookies or local/session storage.
 It requires the existing Playwright Chromium installation. This is not the normal
-Booking Web guest UI, quote-generation round-trip, cross-origin/provider transport,
+Booking Web guest UI, cross-origin/provider transport,
 live link capture or deployed-account evidence. No guest-facing tracking is enabled.
+
+Diagnostic quote creation now requires the same request probe and fresh server
+authority as booking creation, using the property write lock before either operation.
+Migration 0185 preserves the quote/probe relationship immutably in the quote transaction.
+Probe identity participates in quote/retry identity. Checkout resolves this relationship
+from Booking storage: an unbound quote cannot enter diagnostic checkout, a different
+probe cannot claim it, and a diagnostic quote cannot enter normal checkout by dropping
+the request field. Historical pre-binding quotes are not backfilled as validated.
+
+The Chromium diagnostic now generates its quote through the real quote HTTP route
+and uses the returned reference/amount for booking. It still does not exercise the
+normal guest UI, a creator link, cross-origin/provider transport or live attribution.

@@ -602,13 +602,13 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings/quote",
     async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
       const body = request.body ?? {};
       const response = await checkoutAdapter.quoteBooking(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-quote", request.params.slug, body, now),
       );
-      reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-quote");
       reply.header("X-Robots-Tag", "noindex");
       return response;
@@ -1865,6 +1865,8 @@ export function createTargetBookingWebCheckoutAdapter(
           request,
           context.occurredAt,
         );
+        if ((quote.selectedOfferSnapshot["validationProbeId"] ?? null) !== validationProbeId)
+          throw createHttpError(409, "Quote validation probe does not match this checkout.");
         if (quote.selectedOfferSnapshot["roomSelection"] !== undefined && !config.mixedRoomSelectionsEnabled)
           throw createHttpError(409, "Room selection checkout is not available.");
         if (quote.selectedOfferSnapshot["editBookingId"])
@@ -1979,8 +1981,20 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async quoteBooking(slug, request, context) {
+      if (config.affiliateValidation) {
+        if (!context || request["validationProbe"] !== config.affiliateValidation.probe)
+          throw createHttpError(400, "The selected validation probe and command context are required.");
+      } else if (request["validationProbe"] !== undefined) {
+        throw createHttpError(409, "Validation checkout is not enabled.");
+      }
+      const commandContext = context;
       const action = async (executor: BookingWebQueryExecutor) => {
-        const property = await resolveTargetCheckoutProperty(executor, slug, true);
+        const property = await resolveTargetCheckoutProperty(executor, slug, true, config.affiliateValidation ? "update" : "share");
+        // Validation requires context above, so executor is the transaction client.
+        const probeId = config.affiliateValidation
+          ? await resolveCheckoutValidationProbe(executor as pg.PoolClient, property.propertyId, config.affiliateValidation) : null;
+        const context = probeId && commandContext
+          ? {...commandContext, fingerprint:sha256Hex(JSON.stringify([commandContext.fingerprint,probeId]))} : commandContext;
         if (context) {
           const reservation = await reserveTargetCheckoutCommand(
             executor,
@@ -1997,6 +2011,12 @@ export function createTargetBookingWebCheckoutAdapter(
           request,
           context?.occurredAt ?? config.now?.() ?? new Date(),
         );
+        if (probeId) {
+          const bound = await executor.query(`INSERT INTO booking.affiliate_validation_quote_bindings(quote_id,property_id,probe_id,request_id)
+            SELECT $1,$2,id,$4 FROM booking.affiliate_validation_probes WHERE id=$3 AND expires_at > clock_timestamp() RETURNING quote_id`,
+            [quote.quoteSessionId,property.propertyId,probeId,context!.requestId]);
+          if (!bound.rows.length) throw createHttpError(409,"Validation probe expired before quote creation.");
+        }
         const body = serializeTargetCheckoutQuote(quote);
         if (context) {
           await recordTargetCheckoutCommand(executor, {
@@ -2974,6 +2994,7 @@ export async function createTargetCheckoutQuote(
       addonRequest,
       promoCode: stringField(request, "promoCode"),
       referralCode: stringField(request, "referralCode"),
+      validationProbe: stringField(request, "validationProbe"),
     }),
   );
   const publicQuoteReference = targetPublicReference("Q", [
@@ -3346,7 +3367,10 @@ export async function loadTargetCheckoutQuoteSnapshot(
        requested_room_count AS "roomCount",
        currency,
        status,
-       selected_offer_snapshot AS "selectedOfferSnapshot",
+       selected_offer_snapshot || jsonb_build_object('validationProbeId', (
+         SELECT probe_id::text FROM booking.affiliate_validation_quote_bindings binding
+         WHERE binding.quote_id=booking.quote_sessions.id AND binding.property_id=booking.quote_sessions.property_id
+       )) AS "selectedOfferSnapshot",
        totals,
        policy_snapshot AS "policySnapshot",
        promo_code AS "promoCode",

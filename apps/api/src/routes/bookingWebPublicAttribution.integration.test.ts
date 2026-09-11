@@ -101,6 +101,10 @@ describe.skipIf(!TEST_DATABASE_URL)(
       };
       await seedQuote(successfulQuoteId, "VAY-1188-SUCCESS", addonId);
       await seedQuote(rollbackQuoteId, "VAY-1188-ROLLBACK", missingAddonId);
+      await admin.query(
+        "INSERT INTO booking.affiliate_validation_quote_bindings(quote_id,property_id,probe_id,request_id) SELECT id,property_id,$2,'fixture' FROM booking.quote_sessions WHERE property_id=$1",
+        [propertyId, validation.probe.slice(4)],
+      );
     });
 
     afterAll(async () => {
@@ -491,8 +495,11 @@ describe.skipIf(!TEST_DATABASE_URL)(
           deployment,
         );
         if (!issued.ok || !("probe" in issued)) throw new Error("Browser probe fixture failed");
-        const browserQuote = uuid(10);
-        await seedQuote(browserQuote, "VAY-1506-BROWSER", addonId);
+
+        await admin.query(
+          'UPDATE distribution.public_room_offer_snapshots SET rate_summary=\'{"code":"flex"}\'::jsonb WHERE property_id=$1',
+          [propertyId],
+        );
         const selected = { ...validation, probe: issued.probe };
         await expect(
           createAdapter(checkoutPool).createBooking(
@@ -522,23 +529,95 @@ describe.skipIf(!TEST_DATABASE_URL)(
           const origin = await app.listen({ host: "127.0.0.1", port: 0 });
           const page = await browser.newPage();
           await page.goto(origin);
-          const request = { ...checkoutRequest("VAY-1506-BROWSER"), validationProbe: issued.probe };
-          const post = (body: Record<string, unknown>, key: string) =>
+          const request: Record<string, unknown> = {
+            ...checkoutRequest("VAY-1506-BROWSER"),
+            roomTypeId,
+            validationProbe: issued.probe,
+          };
+          const post = (body: Record<string, unknown>, key: string, suffix = "") =>
             page.evaluate(
-              async ({ body, key }) => {
-                const response = await fetch("/api/booking-web/hotels/vay-1188-hotel/bookings", {
-                  method: "POST",
-                  headers: { "content-type": "application/json", "idempotency-key": key },
-                  body: JSON.stringify(body),
-                });
+              async ({ body, key, suffix }) => {
+                const response = await fetch(
+                  "/api/booking-web/hotels/vay-1188-hotel/bookings" + suffix,
+                  {
+                    method: "POST",
+                    headers: { "content-type": "application/json", "idempotency-key": key },
+                    body: JSON.stringify(body),
+                  },
+                );
                 return {
                   status: response.status,
                   cache: response.headers.get("cache-control"),
                   body: await response.json(),
                 };
               },
-              { body, key },
+              { body, key, suffix },
             );
+          for (const validationProbe of [undefined, "avp_forged"])
+            expect(
+              await post({ ...request, validationProbe }, "bad-quote", "/quote"),
+            ).toMatchObject({ status: 400, cache: "no-store" });
+          const quoted = await post(request, "browser-quote", "/quote");
+          expect(quoted, JSON.stringify(quoted.body)).toMatchObject({
+            status: 200,
+            cache: "no-store",
+          });
+          expect(await post(request, "browser-quote", "/quote")).toEqual(quoted);
+          request.quoteId = quoted.body.quoteId;
+          request.expectedTotalAmount = quoted.body.totalAmount;
+          const browserQuote = (
+            await admin.query(
+              "SELECT id FROM booking.quote_sessions WHERE public_quote_reference=$1",
+              [request.quoteId],
+            )
+          ).rows[0].id;
+          expect(
+            (
+              await admin.query(
+                "SELECT probe_id FROM booking.affiliate_validation_quote_bindings WHERE quote_id=$1",
+                [browserQuote],
+              )
+            ).rows,
+          ).toEqual([{ probe_id: issued.probe.slice(4) }]);
+          await expect(
+            admin.query(
+              "UPDATE booking.affiliate_validation_quote_bindings SET request_id='changed' WHERE quote_id=$1",
+              [browserQuote],
+            ),
+          ).rejects.toThrow();
+          const other = await manageAffiliateValidationProbe(
+            admin,
+            {
+              context: await freshProbeContext(),
+              propertyId,
+              destinationVersionId: uuid(9),
+              action: "create",
+              idempotencyKey: "other-quote-probe",
+              lifetimeSeconds: 3600,
+            },
+            deployment,
+          );
+          if (!other.ok || !("probe" in other)) throw new Error("Other quote probe failed");
+          await expect(
+            createAdapter(checkoutPool, { ...selected, probe: other.probe }).createBooking(
+              "vay-1188-hotel",
+              { ...request, validationProbe: other.probe },
+              command("mismatched-quote-probe"),
+            ),
+          ).rejects.toThrow("Quote validation probe does not match this checkout.");
+          const { validationProbe: _ignored, ...normalRequest } = request;
+          const normalAdapter = createAdapter(checkoutPool);
+          await expect(
+            normalAdapter.createBooking("vay-1188-hotel", normalRequest, command("bypass-probe")),
+          ).rejects.toThrow("Quote validation probe does not match this checkout.");
+          const unbound = (await normalAdapter.quoteBooking(
+            "vay-1188-hotel",
+            normalRequest,
+            command("normal-quote"),
+          )) as Record<string, unknown>;
+          expect(
+            await post({ ...request, quoteId: unbound.quoteId }, "unbound-checkout"),
+          ).toMatchObject({ status: 409 });
           for (const validationProbe of [undefined, "avp_forged"]) {
             const rejected = await post({ ...request, validationProbe }, "browser-invalid");
             expect(rejected).toMatchObject({ status: 400, cache: "no-store" });
@@ -732,6 +811,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
         await client.query("BEGIN");
         await client.query("SET LOCAL session_replication_role = replica");
         for (const statement of [
+          "DELETE FROM booking.affiliate_validation_quote_bindings WHERE property_id=$1",
           "DELETE FROM booking.affiliate_validation_booking_bindings WHERE property_id=$1",
           "DELETE FROM booking.affiliate_validation_probe_revocations WHERE probe_id IN (SELECT id FROM booking.affiliate_validation_probes WHERE property_id=$1)",
           "DELETE FROM booking.affiliate_validation_probes WHERE property_id=$1",
