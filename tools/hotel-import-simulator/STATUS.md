@@ -60,9 +60,9 @@ or real provider write is needed to review this local MVP.
 
 Follow-up: the [Airbnb source slice](../../engineering/airbnb-onboarding-source.md)
 adds an unmounted read-only adapter for channel scope checks, listing names and
-capacity. Its tests use synthetic provider responses. Connection routes, durable
-source storage, detailed room facts and shared-review wiring are separate slices.
-The next storage slice adds hashed, expiring connection state and immutable source
+capacity. Its tests use synthetic provider responses. Detailed room facts and
+shared-review wiring are separate slices.
+This storage slice adds hashed, expiring connection state and immutable source
 snapshots, checked with eight real local PostgreSQL tests. It remains unmounted;
 authenticated connection routes, save receipts and shared-review wiring are still pending.
 
