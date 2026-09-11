@@ -1,3 +1,4 @@
+import { authorizeStripeBookingPayment, settleStripeBookingPayment } from "./stripeBookingSettlement.js";
 import { publicRoomCombinationOffer } from "../routes/bookingPublicCombinationProjection.js";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import { createTargetPublicHotelQuoteRepository, serializePublicHotelQuoteProjection } from "../routes/aiHotelQuotes.js";
@@ -452,7 +453,8 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       }
     },
   );
-  it.each(["card", "pay_at_property"])("preserves original charges only beyond draft for %s", async (paymentMethod) => {
+  it.each(["card", "pay_at_property", "authorized", "settled", "missing", "rollback"])("preserves original charges only beyond draft for %s", async (mode) => {
+    const paymentMethod = mode === "pay_at_property" ? mode : "card";
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -471,8 +473,30 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       if (paymentMethod === "card") {
         expect(created.lifecycleStatus).toBe("draft");
         expect(snapshots).toEqual([]);
-        // Same deletion constrained by the expired-draft job; no new retention FK blocks it.
-        expect((await client.query("DELETE FROM booking.guest_bookings WHERE id=$1 AND lifecycle_status='draft' RETURNING id", [created.guestBookingId])).rowCount).toBe(1);
+        if (mode === "card") {
+          // Same deletion constrained by the expired-draft job; no retention FK blocks it.
+          expect((await client.query("DELETE FROM booking.guest_bookings WHERE id=$1 AND lifecycle_status='draft' RETURNING id", [created.guestBookingId])).rowCount).toBe(1);
+        } else {
+          const intent = `pi_${randomUUID()}`;
+          await client.query(`INSERT INTO finance.payments(property_id,guest_booking_id,payment_kind,payment_method,status,amount,currency,provider_payment_intent_id)
+            VALUES($1,$2,'full','card','requires_action',$3,'EUR',$4)`, [propertyId,created.guestBookingId,quote.totalAmount,intent]);
+          if (mode === "missing")
+            await client.query("UPDATE booking.booking_status_events SET event_payload=event_payload-'requestId' WHERE guest_booking_id=$1 AND event_type='guest_booking.created'", [created.guestBookingId]);
+          const payment = { paymentIntentId: intent, amountMinor: Math.round(Number(quote.totalAmount)*100), currency: "EUR", occurredAt: input.occurredAt, correlationId: context.correlationId };
+          const transition = () => mode === "settled" ? settleStripeBookingPayment(client, payment) : authorizeStripeBookingPayment(client, payment);
+          if (mode === "rollback") {
+            await client.query("UPDATE finance.payments SET status='failed' WHERE provider_payment_intent_id=$1", [intent]);
+            await client.query("SAVEPOINT failed_transition");
+            await expect(transition()).rejects.toThrow("Stripe payment authorization state changed.");
+            await client.query("ROLLBACK TO SAVEPOINT failed_transition");
+            expect((await client.query("SELECT booking_id FROM booking.original_charge_snapshots WHERE booking_id=$1", [created.guestBookingId])).rows).toEqual([]);
+            return;
+          }
+          expect(await transition()).toBe(mode === "settled" ? "settled" : "authorized");
+          expect(await transition()).toBe(mode === "settled" ? "already_settled" : "already_authorized");
+          const saved = (await client.query("SELECT totals,selected_offer,request_id FROM booking.original_charge_snapshots WHERE booking_id=$1", [created.guestBookingId])).rows;
+          expect(saved).toEqual(mode === "missing" ? [] : JSON.parse(JSON.stringify([{ totals: quote.totals, selected_offer: quote.selectedOfferSnapshot, request_id: context.requestId }])));
+        }
       } else {
         expect(snapshots).toEqual(JSON.parse(JSON.stringify([{ totals: quote.totals, selected_offer: quote.selectedOfferSnapshot }])));
       }

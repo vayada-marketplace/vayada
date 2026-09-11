@@ -175,3 +175,17 @@ Card checkout initially creates a deletable draft. This slice excludes drafts so
 existing abandoned-draft cleanup can still delete them and release inventory.
 Capturing card price evidence at its later accepted transition remains unsupported;
 do not infer an original snapshot from a later mutable quote or treat absence as zero.
+
+## Card transition capture
+
+The shared Stripe authorization/settlement functions now preserve the original quote
+before advancing a draft, in the caller's transaction under the existing booking lock.
+The source must match the original checkout context, quote reference, canonical scope,
+zero edit revision and exactly one guest-creation event at the booking's creation time.
+Missing provenance produces no snapshot and does not block payment processing.
+Authorization/settlement replay does not backfill an already-advanced booking.
+
+This supersedes the prior card-capture limitation only for evidenced drafts advancing
+through these functions. Abandoned drafts still have no snapshot and remain deletable.
+The saved price remains unclassified; authorization alone is neither hotel acceptance
+nor collected payment, and later price amendments need separate evidence.
