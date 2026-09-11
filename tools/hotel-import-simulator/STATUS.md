@@ -12,8 +12,8 @@ pass. API/provider/database responses in this joined test are mocked. Earlier
 local PostgreSQL evidence below separately verifies canonical room persistence.
 
 This is still a local, default-off implementation in draft PRs. Production callback
-log handling and fresh-host authorization remain unverified. Room settings reuse
-the shared import editor but do not yet expose the Airbnb connection entry. Invite
+log handling and fresh-host authorization remain unverified. Room settings now expose a separately gated Airbnb entry through Marketplace sign-in;
+its scoped navigation is browser-tested with mocked authentication. Invite
 acceptance/integration remains owned by the separate invite-code task. Historical
 sections below describe evidence at each implementation stage.
 
@@ -194,3 +194,17 @@ disconnected hotel with no external binding, wait for its status, and retry the
 verified Airbnb start flow. Existing connections are refused; retries reuse the
 per-tab command identity. Waiting is bounded and aborts on leaving the page.
 Failed durable jobs still require operator recovery. No live provider was called.
+
+## Room settings connection entry
+
+The PMS room list now links to the shared Marketplace Airbnb connection page via
+the existing cross-app sign-in URL. It uses the resolved canonical hotel ID and
+opens a separate tab. `NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED` defaults to false; the
+Marketplace callback and API flags must also be enabled separately. Invalid
+property IDs or non-HTTPS/invalid Marketplace URLs hide the link. Twelve unit tests,
+a scoped popup browser scenario, PMS build and lint pass (64 existing warnings,
+zero errors). Authentication and downstream provider approval remain mocked.
+
+The PMS Docker build accepts `NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED` with a default of
+`false`. An explicitly configured Marketplace origin is required; missing or empty
+configuration hides the entry. The local PMS flag was restored to false after testing.
