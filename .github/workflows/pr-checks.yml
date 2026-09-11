@@ -285,22 +285,10 @@ jobs:
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
-      - name: Verify saved Channex pricing in an isolated database
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_channex_pricing_test
-          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_channex_pricing_test
-        run: |
-          node --input-type=module -e '
-            import pg from "pg";
-            const url = new URL(process.env.TEST_DATABASE_URL);
-            url.pathname = "/postgres";
-            const client = new pg.Client({ connectionString: url.href });
-            await client.connect();
-            await client.query("CREATE DATABASE vayada_channex_pricing_test");
-            await client.end();
-          '
-          npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/integrations/channexPricing.integration.test.ts
+      - name: Verify removed pricing boundaries
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
