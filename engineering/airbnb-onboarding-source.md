@@ -265,3 +265,13 @@ Seven browser scenarios use synthetic API/provider responses: authorization
 navigation, unavailable binding, failure, unsafe URL, retry, and automatic selection
 with a new tab in both form modes. They do not verify a real Airbnb host session
 or saving arbitrary unsaved edits. The feature remains default-off.
+
+## New-hotel provisioning gap
+
+The setup entry currently starts import only for an already provisioned, verified
+Channex binding. Neither the shared setup wizard nor the Airbnb start route queues
+the existing Channex enable command. A brand-new canonical hotel therefore receives
+`channex_binding_required` until provisioning completes. The next integration step
+is an explicit, authorized preparation action using the existing durable enable
+command and its completion status, followed by binding verification and connection
+start. Do not equate exposing the button with completing new-hotel onboarding.
