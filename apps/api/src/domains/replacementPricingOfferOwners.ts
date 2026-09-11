@@ -1,11 +1,16 @@
+import { performance } from "node:perf_hooks";
+import { lockChannexPricingJobLease, type ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
+import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { readCurrentPricingSnapshot, PricingStorageError } from "./replacementPricingSnapshot.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness, type FinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
-import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
+import { lockPmsPricingRoomScope, lockPmsPricingRoomCapacity } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockReplacementChargeDeclaration, type ReplacementChargeDeclaration } from "./replacementChargeDeclarations.js";
@@ -19,9 +24,10 @@ export type ReplacementPricingOfferOwners =
 type DraftPricingOwners = ReplacementPricingOfferOwners | { kind: "awaiting_charge_confirmation" };
 
 /** Drafts may await confirmation; a supplied declaration must still match. */
-export function lockReplacementPricingDraftOwners(client: PoolClient, context: RequestContext | null,
+export async function lockReplacementPricingDraftOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<DraftPricingOwners> {
-  return lockOwners(client, context, scope, proposed, sources, "draft");
+  if (!await lockReplacementPricingAuthorization(client, context, scope, "manage")) return { kind: "unavailable", reason: "denied" };
+  return lockOwners(client, scope, proposed, sources, "draft");
 }
 
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
@@ -30,12 +36,13 @@ export function lockReplacementPricingDraftOwners(client: PoolClient, context: R
  * currency conversion still require explicit validation before publication. */
 export async function lockReplacementPricingOfferOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<ReplacementPricingOfferOwners> {
-  const result = await lockOwners(client, context, scope, proposed, sources, "publish");
+  if (!await lockReplacementPricingAuthorization(client, context, scope, "manage")) return { kind: "unavailable", reason: "denied" };
+  const result = await lockOwners(client, scope, proposed, sources, "publish");
   return result.kind === "awaiting_charge_confirmation" ? { kind: "unavailable", reason: "charges_stale" } : result;
 }
 
-async function lockOwners(client: PoolClient, context: RequestContext | null,
-  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<DraftPricingOwners> {
+async function lockOwners(client: PoolClient,
+  scope: Pick<PricingStorageScope, "propertyId">, proposed: unknown, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<DraftPricingOwners> {
   const unavailable = (reason: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>["reason"]): ReplacementPricingOfferOwners => ({ kind: "unavailable", reason });
   if (!pricingObject(proposed) || !pricingKeys(proposed, ["currency", "rooms", "ownerReferences"]) ||
       typeof proposed.currency !== "string" || !Array.isArray(proposed.rooms) || !proposed.rooms.length || !pricingObject(proposed.ownerReferences) ||
@@ -50,7 +57,6 @@ async function lockOwners(client: PoolClient, context: RequestContext | null,
   const snapshot: PricingStorageSnapshot = { currency, rooms: rooms.map((r) => r!),
     ownerReferences: structuredClone(proposed.ownerReferences) as PricingStorageSources };
   const currentSources = structuredClone(sources);
-  if (!await lockReplacementPricingAuthorization(client, context, scope, "manage")) return unavailable("denied");
   const roomSource = await lockPmsReplacementPricingRoomSource(client, scope.propertyId);
   const references = [];
   for (const room of rooms) {
@@ -71,4 +77,107 @@ async function lockOwners(client: PoolClient, context: RequestContext | null,
   if (intent === "draft" && snapshot.ownerReferences.charges === undefined) return { kind: "awaiting_charge_confirmation" };
   const charges = await lockReplacementChargeDeclaration(client, scope.propertyId, snapshot.ownerReferences.charges ?? "", snapshot, currentSources);
   return charges ? { kind: "verified", terms, finance, charges } : unavailable("charges_stale");
+}
+
+/** Server-only worker entrypoint. No payload identities or user impersonation.
+ * A successful coherent snapshot is not a send permit. Delivery must recheck
+ * authority, publication, owners and mapping generation in a fresh transaction.
+ * Contention/serialization/timeouts propagate for durable-worker retry.
+ */
+export async function readPublishedPricingForChannexJob(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+) {
+  const leaseInput = {
+    jobId: input.jobId,
+    workerId: input.workerId,
+    attemptNumber: input.attemptNumber,
+  };
+  const connection = await pool.connect();
+  const started = performance.now();
+  const deadlineError = () =>
+    Object.assign(new Error("Pricing read deadline exceeded"), { code: "57014" });
+  // Owner ports share this transaction client, so their loops cannot reset the
+  // aggregate budget. Cleanup uses the original connection even after expiry.
+  const client = new Proxy(connection, {
+    get(target, key) {
+      if (key !== "query") return Reflect.get(target, key);
+      return async (sql: string, values?: unknown[]) => {
+        const remaining = Math.floor(5_000 - (performance.now() - started));
+        if (remaining <= 0) throw deadlineError();
+        await target.query("SELECT set_config('statement_timeout',$1,true)", [`${remaining}ms`]);
+        if (performance.now() - started >= 5_000) throw deadlineError();
+        return target.query(sql, values);
+      };
+    },
+  });
+  const unavailable = (reason: string) => ({ kind: "unavailable" as const, reason });
+  try {
+    await connection.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    await client.query("SET LOCAL lock_timeout='150ms'");
+
+    await client.query("SET LOCAL idle_in_transaction_session_timeout='5s'");
+    const lease = await lockChannexPricingJobLease(client, leaseInput);
+    if (!lease) return unavailable("lease_unavailable");
+    await lockPmsInventoryMutationScope(client, lease.propertyId);
+    const authority = await lockChannexPricingPropertyAuthority(client, leaseInput);
+    if (authority.kind !== "authorized") return authority;
+    const snapshot = await readCurrentPricingSnapshot(client, lease.propertyId);
+    if (!snapshot) return unavailable("publication_missing");
+    if (
+      Object.keys(snapshot.sources).length !== 3 ||
+      !["room", "terms", "finance"].every((key) => typeof snapshot.sources[key] === "string") ||
+      Object.keys(snapshot.ownerReferences).length !== 2 ||
+      !["finance", "charges"].every((key) => typeof snapshot.ownerReferences[key] === "string")
+    )
+      return unavailable("publication_invalid");
+    const proposed = {
+      currency: snapshot.currency,
+      rooms: snapshot.rooms,
+      ownerReferences: snapshot.ownerReferences,
+    };
+    const owners = await lockOwners(client, lease, proposed, snapshot.sources, "publish");
+    if (owners.kind !== "verified")
+      return unavailable(
+        owners.kind === "unavailable" && owners.reason.endsWith("_source_stale")
+          ? "sources_stale"
+          : "owner_unavailable",
+      );
+    for (const room of snapshot.rooms)
+      if (
+        !(await lockPmsPricingRoomCapacity(
+          client,
+          lease.propertyId,
+          room.roomTypeId,
+          room.capacity,
+        ))
+      )
+        return unavailable("owner_unavailable");
+    // Held source/owner locks protect existing evidence; repeat time-sensitive
+    // readiness and authority at the final boundary before returning any prices.
+    const finalOwners = await lockOwners(client, lease, proposed, snapshot.sources, "publish");
+    if (finalOwners.kind !== "verified") return unavailable("owner_unavailable");
+    const finalAuthority = await lockChannexPricingPropertyAuthority(client, leaseInput);
+    if (finalAuthority.kind !== "authorized") return finalAuthority;
+    const readAt = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
+    if (performance.now() - started >= 5_000) throw deadlineError();
+    await client.query("COMMIT");
+    return structuredClone({
+      kind: "available" as const,
+      readAt: readAt.toISOString(),
+      authority: finalAuthority,
+      publication: snapshot,
+      owners: finalOwners,
+    });
+  } catch (error) {
+    if (error instanceof PricingStorageError && error.code === "invalid")
+      return unavailable("publication_invalid");
+    throw error;
+  } finally {
+    try {
+      await connection.query("ROLLBACK");
+    } finally {
+      connection.release();
+    }
+  }
 }

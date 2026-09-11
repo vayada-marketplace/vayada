@@ -8,14 +8,14 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingOfferOwners as verify } from "./replacementPricingOfferOwners.js";
+import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob } from "./replacementPricingOfferOwners.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture() {
+  async function fixture(total = 2) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
     const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
     const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
@@ -46,6 +46,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       terms.push(await booking.save(context, scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...termsInput, roomTypeId: room, offerId } }));
     await pool.query(`INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
       VALUES($1,true,ARRAY['pay_at_property'],'EUR')`, [propertyId]);
+    await pool.query("UPDATE pms.room_types SET occupancy_limits=jsonb_build_object('total',$2::int,'adults',$2::int,'children',0) WHERE property_id=$1", [propertyId,total]);
     const client = await pool.connect();
     let finance, roomSource, termsSource, financeSource;
     try {
@@ -94,6 +95,197 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     }
     return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId, currentTermsSource };
   }
+  async function serviceFixture(total = 2) {
+    const f = await fixture(total),
+      propertyId = f.scope.propertyId,
+      jobId = randomUUID();
+    await pool.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1::uuid,'channex',$1::text,'active','enable')",
+      [propertyId],
+    );
+    await pool.query(
+      "INSERT INTO pms.channel_connections(property_id,provider,external_property_id,connection_status) VALUES($1::uuid,'channex',$1::text,'connected')",
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.sync_ari','running',1,'reader-test',clock_timestamp(),'property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"sync_ari"}')`,
+      [jobId, propertyId],
+    );
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'reader-test')",
+      [jobId],
+    );
+    const input = { jobId, workerId: "reader-test", attemptNumber: 1 };
+    async function publish(snapshot = f.snapshot, sources = f.sources) {
+      const c = await pool.connect();
+      try {
+        await c.query("BEGIN");
+        await c.query(
+          `INSERT INTO pms.pricing_v2_revisions(property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count)
+            VALUES($1,1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            propertyId,
+            snapshot.currency,
+            sources,
+            snapshot.ownerReferences,
+            randomUUID(),
+            "a".repeat(64),
+            f.scope.actorUserId,
+            snapshot.rooms.length,
+          ],
+        );
+        for (const room of snapshot.rooms)
+          await c.query(
+            "INSERT INTO pms.pricing_v2_rooms(property_id,revision,room_type_id,currency,configuration) VALUES($1,1,$2,$3,$4)",
+            [propertyId, room.roomTypeId, room.currency, room],
+          );
+        await c.query("UPDATE pms.pricing_v2_heads SET revision=1 WHERE property_id=$1", [
+          propertyId,
+        ]);
+        await c.query("COMMIT");
+      } finally {
+        await c.query("ROLLBACK");
+        c.release();
+      }
+    }
+    return {
+      ...f,
+      input,
+      publish,
+      serviceRead: () => readPublishedPricingForChannexJob(pool, input),
+    };
+  }
+  it("reads complete publication for a live job without user membership authority", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    await pool.query("UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1", [
+      f.membershipId,
+    ]);
+    expect(await f.read()).toMatchObject({ reason: "denied" });
+    const result = await f.serviceRead();
+    expect(result).toMatchObject({
+      kind: "available",
+      authority: { organizationId: f.scope.organizationId, lease: f.input },
+      publication: { revision: 1, sources: f.sources },
+      owners: { kind: "verified", finance: f.finance, charges: f.charges },
+    });
+    if (result.kind === "available")
+      expect(result.publication.rooms).toEqual(
+        [...f.snapshot.rooms].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      );
+  });
+  it("rejects prices exceeding current room capacity even with matching owner evidence", async () => {
+    const f = await serviceFixture(1);
+    await f.publish();
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "owner_unavailable" });
+  });
+  it("rejects stale source evidence independently of method readiness", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    await pool.query(
+      "UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "sources_stale" });
+  });
+  it("does not read a draft as a publication and denies an expired job", async () => {
+    const f = await serviceFixture();
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "publication_missing" });
+    await f.publish();
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '6 minutes' WHERE id=$1",
+      [f.input.jobId],
+    );
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+  });
+  it("denies revoked property access without returning prices", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    await pool.query(
+      "UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1",
+      [f.scope.organizationId],
+    );
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "scope_unavailable" });
+  });
+  it.each(["terms", "finance", "room"])("rejects changed %s owner state", async (owner) => {
+    const f = await serviceFixture();
+    await f.publish();
+    if (owner === "terms")
+      await f.booking.save(f.context, f.scope, {
+        requestId: randomUUID(),
+        expectedRevision: f.terms[0].revision,
+        terms: f.termsInput,
+      });
+    if (owner === "finance")
+      await pool.query(
+        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+    if (owner === "room")
+      await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [
+        f.snapshot.rooms[0].roomTypeId,
+      ]);
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "owner_unavailable" });
+  });
+  it("rejects invalid source sets and unconfirmed charges", async () => {
+    const f = await serviceFixture();
+    await f.publish(f.snapshot, { ...f.sources, extra: "unsupported" } as typeof f.sources);
+    expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "publication_invalid" });
+    const g = await serviceFixture();
+    await g.publish({
+      ...g.snapshot,
+      ownerReferences: { ...g.snapshot.ownerReferences, charges: randomUUID() },
+    });
+    expect(await g.serviceRead()).toEqual({ kind: "unavailable", reason: "owner_unavailable" });
+  });
+  it("bounds cumulative query delays and releases the transaction for retry", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    const delayed = new Proxy(pool, {
+      get(target, key) {
+        if (key !== "connect") return Reflect.get(target, key);
+        return async () => {
+          const c = await target.connect();
+          return new Proxy(c, {
+            get(client, method) {
+              if (method === "query")
+                return async (sql: string, values?: unknown[]) => {
+                  if (sql !== "ROLLBACK") await client.query("SELECT pg_sleep(0.12)");
+                  return client.query(sql, values);
+                };
+              const value = Reflect.get(client, method);
+              return typeof value === "function" ? value.bind(client) : value;
+            },
+          });
+        };
+      },
+    });
+    const started = performance.now();
+    await expect(readPublishedPricingForChannexJob(delayed, f.input)).rejects.toMatchObject({
+      code: "57014",
+    });
+    expect(performance.now() - started).toBeLessThan(7_000);
+    expect(await f.serviceRead()).toMatchObject({ kind: "available" });
+  });
+  it("rolls back publication lock contention and succeeds on a fresh retry", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+        [f.scope.propertyId],
+      );
+      await expect(f.serviceRead()).rejects.toMatchObject({ code: "55P03" });
+      await c.query("ROLLBACK");
+      expect(await f.serviceRead()).toMatchObject({ kind: "available" });
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  });
   it("verifies every offer across rooms with exact current Finance evidence", async () => {
     const f = await fixture();
     expect(await f.read()).toEqual({ kind: "verified", terms: f.terms, finance: f.finance, charges: f.charges });
