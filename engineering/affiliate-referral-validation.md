@@ -184,3 +184,17 @@ the request field. Historical pre-binding quotes are not backfilled as validated
 The Chromium diagnostic now generates its quote through the real quote HTTP route
 and uses the returned reference/amount for booking. It still does not exercise the
 normal guest UI, a creator link, cross-origin/provider transport or live attribution.
+
+The internal `readBookingAffiliateProbeEvidence` read checks current hotel authority
+and exact unexpired/unrevoked deployment probe scope before looking up a booking.
+It reads original native creation provenance and the immutable booking binding in
+a transaction holding the property lock, which serializes binding insertion and
+revocation. READ COMMITTED observes revocations committed while acquiring that lock;
+the binding is immutable. Their request IDs must agree; conflicting provenance needs
+review, and absent bindings stay pending. Replacing a booking's current quote cannot
+replace its original probe evidence. A recorded result includes the diagnostic purpose,
+local/sandbox environment, destination/connection/adapter and original creation source.
+It proves only the native diagnostic booking binding, not browser transport, a live
+creator click, readiness, completion or revenue. It is not a historical access endpoint:
+expired/revoked probes remain stored but cannot be resolved through this read. There
+is no HTTP wiring, publication consumption or Finance call in this slice.

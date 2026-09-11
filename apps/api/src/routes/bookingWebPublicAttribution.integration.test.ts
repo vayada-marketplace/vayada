@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { readBookingAffiliateProbeEvidence } from "../domains/bookingAffiliateProbeEvidence.js";
 import { chromium } from "@playwright/test";
 import { context as hotelContext } from "../domains/affiliatePublicationTestFixture.js";
 import { manageAffiliateValidationProbe } from "../domains/bookingAffiliateValidationProbe.js";
@@ -210,6 +211,82 @@ describe.skipIf(!TEST_DATABASE_URL)(
           occurredAt,
         ),
       ).resolves.toMatchObject({ reason: "scope_unavailable" });
+      const probeEvidence = await readBookingAffiliateProbeEvidence(
+        admin,
+        evidenceInput,
+        validation,
+        occurredAt,
+      );
+      expect(probeEvidence).toMatchObject({
+        ...creationEvidence,
+        purpose: "validation",
+        probeId: validation.probe.slice(4),
+        environment: "local",
+        destinationVersionId: uuid(9),
+        connectionReference: "binding-test",
+      });
+      await expect(
+        readBookingAffiliateProbeEvidence(
+          admin,
+          { propertyId, bookingId: uuid(999) },
+          validation,
+          occurredAt,
+        ),
+      ).resolves.toMatchObject({ status: "pending", reason: "scope_unavailable" });
+      await expect(
+        readBookingAffiliateProbeEvidence(
+          admin,
+          evidenceInput,
+          {
+            ...validation,
+            freshContext: async () => ({ ...(await freshProbeContext()), entitlements: [] }),
+          },
+          occurredAt,
+        ),
+      ).rejects.toThrow();
+      await expect(
+        readBookingAffiliateProbeEvidence(
+          admin,
+          evidenceInput,
+          {
+            ...validation,
+            connectionReference: "other-connection",
+          },
+          occurredAt,
+        ),
+      ).rejects.toThrow("Validation probe is unavailable");
+      // Committed synthetic edits let the owning read exercise its own snapshot.
+      try {
+        await admin.query(
+          "UPDATE booking.booking_status_events SET event_payload=jsonb_set(event_payload,'{requestId}',to_jsonb('conflicting-request'::text)) WHERE id=$1",
+          [creationEvidence.status === "recorded" ? creationEvidence.creationEventId : null],
+        );
+        await expect(
+          readBookingAffiliateProbeEvidence(admin, evidenceInput, validation, occurredAt),
+        ).resolves.toEqual({ status: "needs_review", reason: "conflicting_probe_binding" });
+      } finally {
+        await admin.query(
+          "UPDATE booking.booking_status_events SET event_payload=jsonb_set(event_payload,'{requestId}',to_jsonb($2::text)) WHERE id=$1",
+          [
+            creationEvidence.status === "recorded" ? creationEvidence.creationEventId : null,
+            context.requestId,
+          ],
+        );
+      }
+      try {
+        await admin.query("UPDATE booking.guest_bookings SET quote_session_id=$2 WHERE id=$1", [
+          booking.id,
+          rollbackQuoteId,
+        ]);
+        await expect(
+          readBookingAffiliateProbeEvidence(admin, evidenceInput, validation, occurredAt),
+        ).resolves.toEqual(probeEvidence);
+      } finally {
+        await admin.query("UPDATE booking.guest_bookings SET quote_session_id=$2 WHERE id=$1", [
+          booking.id,
+          successfulQuoteId,
+        ]);
+      }
       // Exercise real persisted creation rows; roll back every negative fixture variation.
       const evidenceClient = await admin.connect();
       try {
@@ -404,6 +481,14 @@ describe.skipIf(!TEST_DATABASE_URL)(
         validation,
       );
       if (!another.ok || !("probe" in another)) throw new Error("Second probe fixture failed");
+      await expect(
+        readBookingAffiliateProbeEvidence(
+          admin,
+          evidenceInput,
+          { ...validation, probe: another.probe },
+          occurredAt,
+        ),
+      ).resolves.toEqual({ status: "pending", reason: "probe_binding_missing" });
       const swapped = createAdapter(checkoutPool, { ...validation, probe: another.probe });
       await expect(
         swapped.createBooking(
@@ -412,20 +497,41 @@ describe.skipIf(!TEST_DATABASE_URL)(
           context,
         ),
       ).rejects.toMatchObject({ statusCode: 409 });
-      await manageAffiliateValidationProbe(
-        admin,
-        {
-          context: await freshProbeContext(),
+      const revoker = await admin.connect();
+      const readerPid = (await checkoutPool.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      let rejectionCheck: Promise<unknown> | undefined;
+      try {
+        await revoker.query("BEGIN");
+        await revoker.query("SELECT id FROM hotel_catalog.properties WHERE id=$1 FOR UPDATE", [
           propertyId,
-          destinationVersionId: uuid(9),
-          action: "revoke",
-          probe: validation.probe,
-        },
-        validation,
-      );
+        ]);
+        await revoker.query(
+          `INSERT INTO booking.affiliate_validation_probe_revocations
+          (probe_id,actor_id,organization_id,request_id) VALUES($1,$2,$2,'concurrent-revocation')`,
+          [validation.probe.slice(4), propertyId],
+        );
+        const waitingRead = readBookingAffiliateProbeEvidence(
+          checkoutPool,
+          evidenceInput,
+          validation,
+          occurredAt,
+        );
+        // Attach the rejection assertion before releasing the blocked read.
+        rejectionCheck = expect(waitingRead).rejects.toThrow("Validation probe is unavailable");
+        await waitForLockWaiter(admin, readerPid);
+        await revoker.query("COMMIT");
+        await rejectionCheck;
+      } finally {
+        await revoker.query("ROLLBACK").catch(() => undefined);
+        revoker.release();
+        await rejectionCheck?.catch(() => undefined);
+      }
       await expect(adapter.createBooking("vay-1188-hotel", request, context)).rejects.toThrow(
         "Validation probe is unavailable",
       );
+      await expect(
+        readBookingAffiliateProbeEvidence(admin, evidenceInput, validation, occurredAt),
+      ).rejects.toThrow("Validation probe is unavailable");
     });
 
     it("reads the committed same-day policy after waiting for its property lock", async () => {
