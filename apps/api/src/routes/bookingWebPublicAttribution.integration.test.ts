@@ -122,8 +122,11 @@ describe.skipIf(!TEST_DATABASE_URL)(
         ).resolves.toEqual(creationEvidence);
         await evidenceClient.query("ROLLBACK");
       } finally {
-        await evidenceClient.query("ROLLBACK");
-        evidenceClient.release();
+        try {
+          await evidenceClient.query("ROLLBACK");
+        } finally {
+          evidenceClient.release();
+        }
       }
       await admin.query(
         `UPDATE booking.addon_definitions
