@@ -8,13 +8,14 @@ import { type createReplacementPricingClient, type PricingSnapshot, type Pricing
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingWeekdays } from "./PricingWeekdays";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
-  const [pendingDates, setPendingDates] = useState<Record<string, boolean>>({});
-  const hasPendingDates = Object.values(pendingDates).some(Boolean);
+  const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
+  const hasPendingEntries = Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
   const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
@@ -31,14 +32,14 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       setEmpty(saved === null);
       setCurrent(saved ? { currency: saved.currency, ownerReferences: { finance: saved.ownerReferences.finance },
         rooms: saved.rooms.map((room) => ({ ...room, revision: saved.revision + 1 })) } : null);
-      setPendingDates({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
+      setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
       pendingDraftId.current = crypto.randomUUID();
       setNotice(saved?.stale ? "Some source settings changed. Saving will check them again." : "");
     } catch (e) { if (alive.current) setError(message(e)); }
     finally { if (alive.current) setLoading(false); }
   }, [client]);
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
-  const leaveRisk = hasPendingDates || dirty || retry || busy || (!!draft && !done);
+  const leaveRisk = hasPendingEntries || dirty || retry || busy || (!!draft && !done);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (leaveRisk && !leaving.current) { event.preventDefault(); event.returnValue = ""; } };
     // Pricing is entered and left through document navigation so browser history also runs beforeunload.
@@ -81,7 +82,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     }, () => saved !== null); // Preparation is read-only; keep the accepted policy even after readiness is rejected.
   }
   function save() {
-    if (!current || hasPendingDates) return;
+    if (!current || hasPendingEntries) return;
     let edited: PricingSnapshot;
     try { edited = editedSnapshot(current, inputs); } catch (e) { setError(message(e)); return; }
     const expected = draft?.revision ?? 0, id = draft?.draftId ?? pendingDraftId.current;
@@ -112,7 +113,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const disabled = busy || retry || needsReload || done, display = review?.snapshot ?? current;
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">Pricing</h1><p className="mt-1 text-sm text-gray-600">Edit base nightly prices, then review and approve your saved draft.</p></div>
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">Pricing</h1><p className="mt-1 text-sm text-gray-600">Edit nightly prices and calendar rules, then review and approve your saved draft.</p></div>
       <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (!leaveRisk || window.confirm("Discard this draft and reload pricing?")) void load(); }}>Reload pricing</button></header>
     {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}{retry && <p className="mt-2">Keep this page open and retry the same action. Do not start another pricing action.</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{notice}</p>}
@@ -127,7 +128,10 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
             value={review ? decimalAmount(minor, scale) : inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></label>)}
             {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Add date prices below; other calendar editing is not available yet.</p>}</div>
           <PricingDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
-            onPending={(pending) => setPendingDates((previous) => ({ ...previous, [`${ri}:${oi}`]: pending }))}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`date:${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+          <PricingWeekdays room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`weekday:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
         </div>)}
         <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">Retained rules and other charges</summary>
@@ -150,8 +154,8 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
         {retry ? <button className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" disabled={busy} onClick={() => void run()}>Retry last action</button> : review ? <>
           <button disabled={disabled} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={() => { setReview(null); setAck(false); }}>Back to editing</button>
           <button disabled={disabled || !ack} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={approve}>Approve rates</button></> : <>
-          <button disabled={disabled || hasPendingDates} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={save}>Save draft</button>
-          <button disabled={disabled || hasPendingDates || dirty || !draft} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => { const next = await client.reviewCharges(draft!.draftId); if (!next) throw new ApiErrorResponse(409, { message: "The saved draft is missing. Reload pricing." }); if (alive.current) { setReview(next); setAck(false); } })}>Review saved charges</button></>}
+          <button disabled={disabled || hasPendingEntries} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={save}>Save draft</button>
+          <button disabled={disabled || hasPendingEntries || dirty || !draft} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => { const next = await client.reviewCharges(draft!.draftId); if (!next) throw new ApiErrorResponse(409, { message: "The saved draft is missing. Reload pricing." }); if (alive.current) { setReview(next); setAck(false); } })}>Review saved charges</button></>}
       </footer>
       <p className="text-xs text-gray-500">Keep this page open while saving or approving. Draft recovery after closing the page is not available yet.</p>
     </>}
