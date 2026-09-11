@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
+import { changeDatePrice } from "./PricingDates";
 import { editedSnapshot } from "./pricingAmounts";
 import { ApiErrorResponse } from "@/services/api/client";
 import type { PricingSnapshot, PricingDraft, createReplacementPricingClient } from "@/services/api/replacementPricingClient";
@@ -148,4 +149,39 @@ it("labels every saved weekday using Monday-zero without changing its adjustment
   const paragraphs = view.root.findAllByType("p").map((node) => node.children.join(""));
   expect(paragraphs).toEqual(expect.arrayContaining(["Monday: 1%", "Tuesday: 2%", "Wednesday: 3%", "Thursday: 4%", "Friday: 5%", "Saturday: 6%", "Sunday: 7%"]));
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { weekdays } });
+});
+it("adds and clears an independent date price without changing fallback or other rules", () => {
+  const room = snapshot.rooms[0], before = structuredClone(room), added = changeDatePrice(room, "flex", "2028-02-29", "150.25");
+  expect(added.offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "10000" }, dates: [{ date: "2028-02-29", price: { mode: "flat", amountMinor: "15025" } }] } });
+  expect(changeDatePrice(added, "flex", "2028-02-29", null)).toEqual(room); expect(room).toEqual(before);
+  for (const [date, amount] of [["2026-02-29", "100"], ["", "100"], ["2026-12-25", "0"], ["2026-12-25", "1.001"]]) expect(() => changeDatePrice(room, "flex", date, amount)).toThrow();
+  expect(() => changeDatePrice(added, "flex", "2028-02-29", "200")).toThrow("Clear the existing");
+});
+it("preserves linked adjustments, other dates and parents when clearing an override", () => {
+  const room = snapshot.rooms[0], child = { ...room.offers[0], id: "nr", price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [{ date: "2026-12-24", price: { mode: "flat" as const, amountMinor: "11000" } }] }, restrictions: { kind: "inherit" as const } };
+  const linked = { ...room, offers: [...room.offers, child] };
+  const added = changeDatePrice(linked, "nr", "2026-12-25", "200");
+  expect(added.offers[0]).toEqual(room.offers[0]); expect(added.offers[1]).toMatchObject({ meal: child.meal, restrictions: child.restrictions, price: { parentId: "flex", adjustment: child.price.adjustment } });
+  expect(changeDatePrice(added, "nr", "2026-12-25", null)).toEqual(linked);
+});
+it("blocks saving unfinished date entry, protects leaving and requires review for applied dates", async () => {
+  await mount(); await click("Save draft");
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  expect(field("Override date for Room 1 Offer 1").props.type).toBe("text");
+  await act(async () => field("Override date for Room 1 Offer 1").props.onChange({ target: { value: "2026-12-" } }));
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Cancel date entry");
+  await act(async () => field("Date room price for Room 1 Offer 1").props.onChange({ target: { value: "150.25" } }));
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const listener = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: Event) => void;
+  const unload = new Event("beforeunload", { cancelable: true }); listener(unload); expect(unload.defaultPrevented).toBe(true);
+  await click("Cancel date entry"); expect(button("Save draft").props.disabled).toBe(false);
+  await act(async () => field("Override date for Room 1 Offer 1").props.onChange({ target: { value: "2026-12-25" } }));
+  await act(async () => field("Date room price for Room 1 Offer 1").props.onChange({ target: { value: "150.25" } }));
+  await click("Add date price"); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); await click("Review saved charges");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { dates: [{ date: "2026-12-25", price: { amountMinor: "15025" } }] } });
+  expect(button("Clear date price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  await click("Back to editing"); await click("Clear date price"); await click("Save draft");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "10000" }, dates: [] } });
 });
