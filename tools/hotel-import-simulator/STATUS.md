@@ -122,3 +122,12 @@ The existing Onboarding Imported Loft and Settings Imported Suite were preserved
 Provider approval/listings and identity are synthetic; import responses and room writes
 are real. The callback flag was restored to false after testing. See [DATABASE.md](DATABASE.md)
 for the repeatable opt-in command and exact scope.
+
+## Callback logging check
+
+Next.js development request logging now excludes the fixed Airbnb callback path.
+A live local probe confirmed the synthetic callback token was absent from terminal
+logs while an ordinary setup request remained logged. This does not verify production
+ingress or tracing. The current PMS claim/enable path also lacks persisted Channex
+environment/group evidence needed by the live source binding resolver. Those remain
+enablement prerequisites; no account-wide credential was treated as tenant proof.

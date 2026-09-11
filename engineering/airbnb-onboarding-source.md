@@ -186,3 +186,17 @@ through that harness, discards the save response, reloads, removes only its own 
 and concurrently replays a changed room draft. The saved room identity/name must remain
 unchanged and the receipt must be recovered without another room. Each run preserves
 one new synthetic room for inspection; the existing demo is not reset.
+
+## Remaining binding and log prerequisites
+
+The existing PMS claim registry proves a canonical property/external-property claim;
+its schema does not persist Channex environment or group. The management worker
+records enable claims and external property IDs but does not supply those missing
+fields. An account-wide credential or a name match must not fill this evidence gap.
+Live composition therefore remains blocked on trustworthy environment/group resolution
+linked to the provisioning lifecycle. No binding was inferred or adopted in this slice.
+
+Next.js development request logging now excludes the fixed Airbnb callback path,
+including disabled/invalid callback requests. This closes a local terminal log leak;
+it does not configure production ingress, load-balancer, error-reporting or tracing
+systems. Those layers still require explicit verification before remote enablement.
