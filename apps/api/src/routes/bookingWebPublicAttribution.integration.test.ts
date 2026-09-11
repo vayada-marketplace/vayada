@@ -1,3 +1,6 @@
+import { context as hotelContext } from "../domains/affiliatePublicationTestFixture.js";
+import { manageAffiliateValidationProbe } from "../domains/bookingAffiliateValidationProbe.js";
+import type { AffiliateProbeCheckout } from "../domains/bookingAffiliateProbeBinding.js";
 import { readBookingAffiliateCreationEvidence } from "../domains/bookingAffiliateCreationEvidence.js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +23,21 @@ const addonId = uuid(5);
 const missingAddonId = uuid(6);
 const occurredAt = new Date("2027-01-01T10:00:00.000Z");
 const completedReservationQuoteIds = new Set<string>();
+let validation: AffiliateProbeCheckout;
+const freshProbeContext = async () => ({
+  ...hotelContext(),
+  actor: { ...hotelContext().actor, internalUserId: propertyId },
+  selectedOrganization: { ...hotelContext().selectedOrganization, organizationId: propertyId },
+  linkedResources: [
+    {
+      product: "marketplace" as const,
+      resourceType: "hotel_profile" as const,
+      resourceId: propertyId,
+      status: "active" as const,
+      relationship: "owner" as const,
+    },
+  ],
+});
 
 describe.skipIf(!TEST_DATABASE_URL)(
   "Booking Web canonical attribution PostgreSQL persistence",
@@ -38,6 +56,46 @@ describe.skipIf(!TEST_DATABASE_URL)(
       completedReservationQuoteIds.clear();
       await cleanup();
       await seedProperty();
+      await admin.query(
+        "INSERT INTO identity.users(id,email) VALUES($1,'probe-binding@example.invalid')",
+        [propertyId],
+      );
+      await admin.query(
+        "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Probe binding test','probe-binding-test')",
+        [propertyId],
+      );
+      await admin.query(
+        "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship) VALUES($1::uuid,'marketplace','hotel_profile',$1::uuid::text,'owner')",
+        [propertyId],
+      );
+      await admin.query(
+        "INSERT INTO booking.affiliate_destination_versions(id,property_id,display_name,booking_url,created_by_user_id,created_by_organization_id,request_id) VALUES($2,$1,'Probe test','https://example.invalid',$1,$1,'probe-seed')",
+        [propertyId, uuid(9)],
+      );
+      const deployment = {
+        environment: "local" as const,
+        connectionReference: "binding-test",
+        adapterVersion: "native-v1",
+      };
+      const probe = await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "create",
+          idempotencyKey: "binding-probe",
+          lifetimeSeconds: 3600,
+        },
+        deployment,
+      );
+      if (!probe.ok || !("probe" in probe)) throw new Error("Probe fixture creation failed");
+      validation = {
+        ...deployment,
+        probe: probe.probe,
+        destinationVersionId: uuid(9),
+        freshContext: freshProbeContext,
+      };
       await seedQuote(successfulQuoteId, "VAY-1188-SUCCESS", addonId);
       await seedQuote(rollbackQuoteId, "VAY-1188-ROLLBACK", missingAddonId);
     });
@@ -49,11 +107,51 @@ describe.skipIf(!TEST_DATABASE_URL)(
     });
 
     it("owns canonical attribution across creation, replay, and rollback", async () => {
-      const adapter = createAdapter(checkoutPool);
+      const adapter = createAdapter(checkoutPool, validation);
       const context = command("success");
-      const request = checkoutRequest("VAY-1188-SUCCESS");
+      const request = {
+        ...checkoutRequest("VAY-1188-SUCCESS"),
+        referralCode: "guest-forged-probe",
+      };
 
-      const created = await adapter.createBooking("vay-1188-hotel", request, context);
+      // Hold the first checkout after its initial property lock; the second must
+      // wait there, not obtain SHARE and later deadlock upgrading both transactions.
+      let releaseFirst!: () => void, enteredFirst!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const entered = new Promise<void>((resolve) => {
+        enteredFirst = resolve;
+      });
+      const secondPool = new pg.Pool({ connectionString: TEST_DATABASE_URL!, max: 1 });
+      const secondPid = (await secondPool.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const held = createAdapter(checkoutPool, {
+        ...validation,
+        freshContext: async () => {
+          enteredFirst();
+          await gate;
+          return freshProbeContext();
+        },
+      });
+      const firstBooking = held.createBooking("vay-1188-hotel", request, context);
+      await entered;
+      const secondBooking = createAdapter(secondPool, validation).createBooking(
+        "vay-1188-hotel",
+        request,
+        context,
+      );
+      let created: unknown;
+      try {
+        await waitForLockWaiter(admin, secondPid);
+        releaseFirst();
+        const results = await Promise.all([firstBooking, secondBooking]);
+        expect(results[1]).toEqual(results[0]);
+        created = results[0];
+      } finally {
+        releaseFirst();
+        await Promise.allSettled([firstBooking, secondBooking]);
+        await secondPool.end();
+      }
       await expect(adapter.createBooking("vay-1188-hotel", request, context)).resolves.toEqual(
         created,
       );
@@ -63,6 +161,27 @@ describe.skipIf(!TEST_DATABASE_URL)(
           [propertyId, successfulQuoteId],
         )
       ).rows[0];
+      const originalBinding = (
+        await admin.query(
+          "SELECT * FROM booking.affiliate_validation_booking_bindings WHERE booking_id=$1",
+          [booking.id],
+        )
+      ).rows;
+      expect(originalBinding).toHaveLength(1);
+      expect(originalBinding[0]).toMatchObject({
+        property_id: propertyId,
+        probe_id: validation.probe.slice(4),
+        request_id: context.requestId,
+      });
+      const denied = createAdapter(checkoutPool, {
+        ...validation,
+        freshContext: async () => ({ ...(await freshProbeContext()), entitlements: [] }),
+      });
+      await expect(denied.createBooking("vay-1188-hotel", request, context)).rejects.toThrow();
+      const wrong = createAdapter(checkoutPool, { ...validation, adapterVersion: "changed" });
+      await expect(wrong.createBooking("vay-1188-hotel", request, context)).rejects.toThrow(
+        "Validation probe is unavailable",
+      );
       const evidenceInput = { propertyId, bookingId: booking.id };
       const creationEvidence = await readBookingAffiliateCreationEvidence(
         admin,
@@ -114,13 +233,27 @@ describe.skipIf(!TEST_DATABASE_URL)(
         }
         await evidenceClient.query("BEGIN");
         await evidenceClient.query(
-          "UPDATE booking.guest_bookings SET updated_at=updated_at+interval '1 day' WHERE id=$1",
+          "UPDATE booking.guest_bookings SET updated_at=updated_at+interval '1 day',quote_session_id='11880000-0000-4000-8000-000000000004' WHERE id=$1",
           [booking.id],
         );
         await expect(
           readBookingAffiliateCreationEvidence(evidenceClient, evidenceInput, occurredAt),
         ).resolves.toEqual(creationEvidence);
+        expect(
+          (
+            await evidenceClient.query(
+              "SELECT * FROM booking.affiliate_validation_booking_bindings WHERE booking_id=$1",
+              [booking.id],
+            )
+          ).rows,
+        ).toEqual(originalBinding);
         await evidenceClient.query("ROLLBACK");
+        await expect(
+          admin.query(
+            "UPDATE booking.affiliate_validation_booking_bindings SET request_id='changed' WHERE booking_id=$1",
+            [booking.id],
+          ),
+        ).rejects.toThrow();
       } finally {
         await evidenceClient.query("ROLLBACK").catch(() => undefined);
         evidenceClient.release();
@@ -243,6 +376,45 @@ describe.skipIf(!TEST_DATABASE_URL)(
         inventoryAssigned: 1,
         publicAvailable: 1,
       });
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM booking.affiliate_validation_booking_bindings WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+      const another = await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "create",
+          idempotencyKey: "other-probe",
+          lifetimeSeconds: 3600,
+        },
+        validation,
+      );
+      if (!another.ok || !("probe" in another)) throw new Error("Second probe fixture failed");
+      const swapped = createAdapter(checkoutPool, { ...validation, probe: another.probe });
+      await expect(swapped.createBooking("vay-1188-hotel", request, context)).rejects.toMatchObject(
+        { statusCode: 409 },
+      );
+      await manageAffiliateValidationProbe(
+        admin,
+        {
+          context: await freshProbeContext(),
+          propertyId,
+          destinationVersionId: uuid(9),
+          action: "revoke",
+          probe: validation.probe,
+        },
+        validation,
+      );
+      await expect(adapter.createBooking("vay-1188-hotel", request, context)).rejects.toThrow(
+        "Validation probe is unavailable",
+      );
     });
 
     it("reads the committed same-day policy after waiting for its property lock", async () => {
@@ -291,9 +463,10 @@ describe.skipIf(!TEST_DATABASE_URL)(
       }
     });
 
-    function createAdapter(pool: pg.Pool) {
+    function createAdapter(pool: pg.Pool, affiliateValidation?: AffiliateProbeCheckout) {
       return createTargetBookingWebCheckoutAdapter({
         connectionString: TEST_DATABASE_URL!,
+        affiliateValidation,
         pool,
         inventoryReservationPort,
         billingConfigReadPortFactory: () => ({
@@ -451,6 +624,13 @@ describe.skipIf(!TEST_DATABASE_URL)(
         await client.query("BEGIN");
         await client.query("SET LOCAL session_replication_role = replica");
         for (const statement of [
+          "DELETE FROM booking.affiliate_validation_booking_bindings WHERE property_id=$1",
+          "DELETE FROM booking.affiliate_validation_probe_revocations WHERE probe_id IN (SELECT id FROM booking.affiliate_validation_probes WHERE property_id=$1)",
+          "DELETE FROM booking.affiliate_validation_probes WHERE property_id=$1",
+          "DELETE FROM booking.affiliate_destination_versions WHERE property_id=$1",
+          "DELETE FROM identity.organization_resource_links WHERE organization_id=$1",
+          "DELETE FROM identity.organizations WHERE id=$1",
+          "DELETE FROM identity.users WHERE id=$1",
           "WITH s AS (DELETE FROM pms.inventory_reservation_statuses WHERE property_id=$1::uuid), w AS (DELETE FROM pms.inventory_reservation_day_watermarks WHERE property_id=$1::uuid), r AS (DELETE FROM pms.inventory_reservation_receipts WHERE property_id=$1::uuid) DELETE FROM platform.outbox_events WHERE property_id=$1::uuid",
           "DELETE FROM platform.product_audit_events WHERE property_id = $1::uuid",
           "DELETE FROM platform.jobs WHERE property_id = $1::uuid",

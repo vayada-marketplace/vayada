@@ -1,3 +1,8 @@
+import {
+  resolveCheckoutValidationProbe,
+  bindCheckoutValidationProbe,
+  type AffiliateProbeCheckout,
+} from "../domains/bookingAffiliateProbeBinding.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import {
   bookedMealDescription,
@@ -1450,6 +1455,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Dedicated server-configured isolated validation only; never populated from HTTP input. */
+  affiliateValidation?: AffiliateProbeCheckout;
   /** Enable only after all mixed selection consumers have passed cutover validation. */
   mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
@@ -1818,8 +1825,19 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
       }
+      const commandContext = context;
       return withTargetCheckoutTransaction(pool, async (client) => {
-        const property = await resolveTargetCheckoutProperty(client, slug, true);
+        const property = await resolveTargetCheckoutProperty(client, slug, true, config.affiliateValidation ? "update" : "share");
+        const validationProbeId = config.affiliateValidation
+          ? await resolveCheckoutValidationProbe(client, property.propertyId, config.affiliateValidation)
+          : null;
+        // Bind the probe to retry identity; swapping probes cannot replay an earlier booking.
+        const context = validationProbeId
+          ? {
+              ...commandContext,
+              fingerprint: sha256Hex(JSON.stringify([commandContext.fingerprint, validationProbeId])),
+            }
+          : commandContext;
         const reservation = await reserveTargetCheckoutCommand(
           client,
           property.propertyId,
@@ -1868,6 +1886,10 @@ export function createTargetBookingWebCheckoutAdapter(
           billingConfig,
           checkoutConfig,
         );
+        if (validationProbeId)
+          await bindCheckoutValidationProbe(
+            client, property.propertyId, booking.guestBookingId, validationProbeId, context.requestId,
+          );
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
           await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);
@@ -2492,6 +2514,7 @@ export async function resolveTargetCheckoutProperty(
   pool: BookingWebQueryExecutor,
   slug: string,
   requireBookable = false,
+  propertyLock: "share" | "update" = "share",
 ): Promise<TargetCheckoutPropertyRow> {
   const bookabilityPredicate = requireBookable
     ? `AND profile.freshness_status = 'fresh'
@@ -2524,7 +2547,7 @@ export async function resolveTargetCheckoutProperty(
        AND (profile.expires_at IS NULL OR profile.expires_at > now())
        ${bookabilityPredicate}
      LIMIT 1
-     ${requireBookable ? "FOR SHARE OF p" : ""}`,
+     ${requireBookable ? (propertyLock === "update" ? "FOR UPDATE OF p" : "FOR SHARE OF p") : ""}`,
     [
       slug,
       SAME_DAY_BOOKING_POLICY_DEFAULTS.enabled,
