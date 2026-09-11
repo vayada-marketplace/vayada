@@ -128,3 +128,14 @@ real payment or production checkout may be manufactured to pass validation. Foll
 [booking evidence](affiliate-booking-evidence-contract.md),
 [agreement boundaries](marketplace-affiliate-agreements.md) and
 [earning rules](affiliate-earning-settlement.md).
+
+## Initial validation identity storage
+
+Migration 0183 adds immutable local/sandbox probe issuance and revocation records.
+An issuance is the run's initial audit: exact destination/property/author organization,
+actor/request, connection/environment/adapter identity, retry fingerprint and expiry.
+Callers must choose an explicit lifetime; the technical ceiling is 24 hours for these
+test resources, not a production tracking window or capability-evidence freshness rule.
+Retry identity lasts with the record. Revocation is permanent and preserves issuance.
+There is no creator/agreement association, booking, capability result or earning in
+this storage slice. Server authorization and probe resolution belong to the command.
