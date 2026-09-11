@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
 import { changeLinkedParent, linkedParentChoices } from "./PricingLinkedParent";
 import { changeMealPlan } from "./PricingMealPlan";
 import { changeMealCharges } from "./PricingMealCharges";
@@ -736,4 +737,45 @@ it("cancels room setup without changing the draft and rejects duplicate rooms or
   }
   expect(client.termsAction).not.toHaveBeenCalled(); await click("Cancel room setup"); expect(button("Review saved charges").props.disabled).toBe(false);
   await click("Review saved charges"); expect(button("Add another room").props.disabled).toBe(true);
+});
+
+it("builds a linked room-only offer with explicit terms and rejects invalid settings", () => {
+  const id = "61000000-0000-4000-8000-000000000004", room = { ...snapshot.rooms[0], roomTypeId: id };
+  const values = { parent: room.offers[0].id, kind: "percentage", value: "-10.25", cancellation: "non_refundable", deadline: "", payment: "full" };
+  const created = linkedOfferInput(room, id, values);
+  expect(created.configuration.offers[0]).toEqual(room.offers[0]); expect(created.configuration.children).toEqual(room.children);
+  expect(created.configuration.offers[1]).toEqual({ id, termsRevision: id, meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } }, restrictions: { kind: "inherit" }, price: { kind: "linked", parentId: "flex", adjustment: { kind: "percentage", basisPoints: -1025 }, dateOverrides: [] } });
+  expect(created.terms).toMatchObject({ expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } });
+  expect(linkedOfferInput(room, id, { ...values, kind: "fixed", value: "-90071992547409.93", cancellation: "flexible", deadline: "365" }).configuration.offers[1].price).toMatchObject({ adjustment: { deltaMinor: "-9007199254740993" } });
+  expect(linkedOfferInput(room, id, { ...values, cancellation: "flexible", deadline: "0" }).terms.cancellation).toMatchObject({ terms: { freeCancellationDeadlineDays: 0 } });
+  for (const patch of [{ parent: "outside" }, { kind: "other" }, { value: "-100.01" }, { value: "1.001" }, { cancellation: "" }, { payment: "" }, { cancellation: "flexible", deadline: "366" }, { cancellation: "flexible", deadline: "1.5" }]) expect(() => linkedOfferInput(room, id, { ...values, ...patch })).toThrow();
+  expect(() => linkedOfferInput(created.configuration, id, values)).toThrow();
+});
+it("appends linked offers preserving prices, revisions and accepted-policy retry identity", async () => {
+  const id = "61000000-0000-4000-8000-000000000004", offerId = "61000000-0000-4000-8000-000000000005", room = { ...snapshot.rooms[0], roomTypeId: id };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false });
+  const policy = vi.fn().mockResolvedValue({ revision: offerId }); client.termsAction.mockReturnValue(policy);
+  await mount(); await click("Save draft"); const prior = saved;
+  await act(async () => input().props.onChange({ target: { value: "155.25" } }));
+  await click("Add linked offer"); expect(button("Save draft").props.disabled).toBe(true); expect(button("Change meal plan").props.disabled).toBe(true);
+  const next = linkedOfferInput(room, offerId, { parent: "flex", kind: "percentage", value: "-10", cancellation: "non_refundable", deadline: "", payment: "full" });
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(403, {}));
+  await act(async () => view.root.findByType(NewLinkedOffer).props.onCreate(next));
+  expect(button("Cancel new offer").props.disabled).toBe(true); expect(view.root.findByType(NewLinkedOffer).props.disabled).toBe(true);
+  const attempted = client.prepare.mock.calls.at(-1)![0]; await click("Retry last action");
+  expect(policy).toHaveBeenCalledOnce(); expect(client.termsAction).toHaveBeenCalledOnce(); expect(client.prepare.mock.calls.at(-1)![0]).toEqual(attempted);
+  expect(client.saveDraft).toHaveBeenCalledTimes(1); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); expect(saved.draftId).toBe(prior.draftId); expect(saved.revision).toBe(prior.revision + 1); expect(saved.baseRevision).toBe(7);
+  expect(saved.snapshot.rooms).toHaveLength(1); expect(saved.snapshot.rooms[0].revision).toBe(8); expect(saved.snapshot.rooms[0].offers).toHaveLength(2);
+  expect(saved.snapshot.rooms[0].offers[0]).toEqual(editedSnapshot({ ...snapshot, rooms: [room] }, { "0:0:0": "155.25" }).rooms[0].offers[0]);
+  expect(saved.snapshot.rooms[0].offers[1].id).toBe(offerId); expect(saved.snapshot.rooms[0].offers[1].termsRevision).toBe(offerId);
+  await click("Review saved charges"); expect(button("Add linked offer").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+});
+it("cancels new-offer setup without writes and protects pending entries and leaving", async () => {
+  await mount(); await click("Save draft"); await click("Edit child charges"); expect(button("Add linked offer").props.disabled).toBe(true);
+  await click("Add linked offer"); expect(button("Cancel new offer")).toBeUndefined(); await click("Cancel child charges"); await click("Add linked offer");
+  expect(input().props.disabled).toBe(true); expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  await click("Cancel new offer"); expect(client.termsAction).not.toHaveBeenCalled(); expect(button("Review saved charges").props.disabled).toBe(false);
 });
