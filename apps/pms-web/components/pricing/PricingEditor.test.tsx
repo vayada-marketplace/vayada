@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { changeStayOwnership } from "./PricingStayOwnership";
 import { changeStaySeason } from "./PricingStaySeasons";
 import { changeStayDate } from "./PricingStayDates";
@@ -504,4 +505,37 @@ it("guards ownership confirmation, cancels without mutation, and saves the ackno
   await click("Save draft"); expect(saved.snapshot.rooms[0].offers[1].restrictions).toEqual(root.restrictions);
   await click("Review saved charges"); expect(button("Use parent stay rules").props.disabled).toBe(true);
   expect(button("Approve rates").props.disabled).toBe(true);
+});
+
+it("changes only the linked adjustment with exact signed currency and percentage values", () => {
+  const room = snapshot.rooms[0], root = room.offers[0];
+  const linked = { ...root, id: "linked", price: { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [{ date: "2026-12-25", price: { mode: "flat" as const, amountMinor: "15000" } }] } };
+  const original = { ...room, offers: [root, linked] };
+  for (const [kind, value, expected] of [["fixed", "-90071992547409.93", { kind: "fixed", deltaMinor: "-9007199254740993" }], ["percentage", "-10.25", { kind: "percentage", basisPoints: -1025 }], ["fixed", "+20.00", { kind: "fixed", deltaMinor: "2000" }], ["percentage", "-0", { kind: "percentage", basisPoints: 0 }]] as const) {
+    expect(changeLinkedAdjustment(original, linked.id, { kind, value })).toEqual({ ...original, offers: [root, { ...linked, price: { ...linked.price, adjustment: expected } }] });
+  }
+  for (const value of ["", "1e2", " 10", "NaN", "1.001", "--2", "900719925474099.99", "-100.01"]) expect(() => changeLinkedAdjustment(original, linked.id, { kind: "percentage", value })).toThrow();
+  expect(() => changeLinkedAdjustment(original, root.id, { kind: "fixed", value: "1" })).toThrow("linked");
+  expect(() => changeLinkedAdjustment(original, linked.id, { kind: "other", value: "1" })).toThrow();
+  expect(() => changeLinkedAdjustment({ ...original, currency: "JPY" }, linked.id, { kind: "fixed", value: "1.2" })).toThrow();
+  expect(changeLinkedAdjustment({ ...original, currency: "KWD" }, linked.id, { kind: "fixed", value: "-1.234" }).offers[1].price).toMatchObject({ adjustment: { deltaMinor: "-1234" } });
+  expect(original.offers[1]).toEqual(linked);
+});
+it("protects pending linked edits and reviews only the saved adjustment", async () => {
+  const room = snapshot.rooms[0], root = room.offers[0];
+  client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false, rooms: [{ ...room, offers: [root, { ...root, id: "linked", price: { kind: "linked", parentId: root.id, adjustment: { kind: "percentage", basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" } }] }] });
+  await mount(); await click("Save draft"); await click("Edit linked adjustment");
+  const field = () => view.root.findByProps({ "aria-label": "Linked adjustment for Room 1 Offer 2" });
+  expect(field().props.value).toBe("-10.00"); expect(button("Save draft").props.disabled).toBe(true); expect(button("Use own stay rules").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  await act(async () => view.root.findByProps({ "aria-label": "Linked adjustment type for Room 1 Offer 2" }).props.onChange({ target: { value: "fixed" } }));
+  expect(field().props.value).toBe(""); await click("Apply linked adjustment"); expect(JSON.stringify(view.toJSON())).toContain("valid signed amount");
+  await click("Cancel linked adjustment"); expect(button("Review saved charges").props.disabled).toBe(false);
+  await click("Use own stay rules"); expect(button("Edit linked adjustment").props.disabled).toBe(true); await click("Cancel ownership change");
+  await click("Edit linked adjustment"); expect(field().props.value).toBe("-10.00");
+  await act(async () => field().props.onChange({ target: { value: "-15.25" } })); await click("Apply linked adjustment");
+  expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
+  expect(saved.snapshot.rooms[0].offers[1].price).toMatchObject({ adjustment: { kind: "percentage", basisPoints: -1525 } });
+  await click("Review saved charges"); expect(button("Edit linked adjustment").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
 });
