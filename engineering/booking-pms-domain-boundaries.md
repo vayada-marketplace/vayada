@@ -203,3 +203,13 @@ answer:
 - Lodgify features: https://www.lodgify.com/all-features/
 - Hostaway features: https://www.hostaway.com/features/
 - SiteMinder channel manager: https://www.siteminder.com/channel-manager/
+
+## Browser-safe pricing contracts (VAY-1940)
+
+`@vayada/domain-pms/replacement-pricing` is a public parser/type contract entrypoint,
+so Booking may import it just as it imports the root PMS contracts. It exports
+validation and money/configuration contracts only; it must not export operational
+services, database access or provider adapters. The architecture check permits
+this exact subpath, while deeper and other implementation subpaths remain blocked.
+This lets the shared Booking terms parser run in both the server and browser
+without importing Node-only operational modules or duplicating owner validation.

@@ -116,3 +116,35 @@ describe("replacement pricing browser workflow", () => {
     }
   });
 });
+
+describe("saved offer terms", () => {
+  const terms = { roomTypeId: id, offerId: "flex / breakfast", revision: draftId, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+  it("uses the selected property and verifies exact room, offer and revision", async () => {
+    http.get.mockResolvedValue(terms);
+    expect(await client().readTerms(id, terms.offerId, draftId)).toEqual(terms);
+    expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/rooms/${id}/offers/flex%20%2F%20breakfast/terms`);
+    for (const changed of [{ ...terms, roomTypeId: draftId }, { ...terms, offerId: "other" }, { ...terms, extra: true }, null]) {
+      http.get.mockResolvedValue(changed); await expect(client().readTerms(id, terms.offerId, draftId)).rejects.toBeInstanceOf(PricingResponseError);
+    }
+    http.get.mockResolvedValue({ ...terms, revision: id });
+    await expect(client().readTerms(id, terms.offerId, draftId)).rejects.toMatchObject({ status: 409 });
+    expect(http.put).not.toHaveBeenCalled(); expect(http.post).not.toHaveBeenCalled();
+  });
+  it("preserves flexible settings and rejects malformed payment/refund settings", async () => {
+    const flexible = { ...terms, cancellation: { kind: "flexible", terms: { type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 7,
+      afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount", flexibleCancellationType: "partial_refund", partialRefundCancelWindowDays: 3,
+      partialRefundAmountPercent: 50, partialRefundTiers: [{ minDaysBeforeCheckIn: 7, refundPercent: 80 }], text: "Saved policy" } },
+      payment: { kind: "deposit", basisPoints: 3025, balanceDaysBeforeArrival: 2 } };
+    http.get.mockResolvedValue(flexible); expect(await client().readTerms(id, terms.offerId, draftId)).toEqual(flexible);
+    for (const invalid of [{ ...flexible, payment: { ...flexible.payment, basisPoints: 10001 } }, { ...terms, cancellation: { kind: "non_refundable", text: "extra" } },
+      { ...flexible, cancellation: { kind: "flexible", terms: { ...flexible.cancellation.terms, partialRefundTiers: [{ minDaysBeforeCheckIn: 7, refundPercent: 101 }] } } }]) {
+      http.get.mockResolvedValue(invalid); await expect(client().readTerms(id, terms.offerId, draftId)).rejects.toBeInstanceOf(PricingResponseError);
+    }
+  });
+  it("distinguishes absent terms from authorization and server failures", async () => {
+    http.get.mockRejectedValueOnce(new ApiErrorResponse(404, { code: "not_found" })); expect(await client().readTerms(id, terms.offerId, draftId)).toBeNull();
+    for (const status of [403, 409, 503]) {
+      const error = new ApiErrorResponse(status, {}); http.get.mockRejectedValueOnce(error); await expect(client().readTerms(id, terms.offerId, draftId)).rejects.toBe(error);
+    }
+  });
+});
