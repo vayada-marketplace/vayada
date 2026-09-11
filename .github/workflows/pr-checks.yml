@@ -237,6 +237,7 @@ jobs:
           src/workosBackfill.test.ts
           src/financeFolioRecipientCiphertextMigration.integration.test.ts
           src/channexBookingRevisionTombstonesMigration.integration.test.ts
+          src/channexAdoptionManifestFoundation.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
