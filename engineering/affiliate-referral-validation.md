@@ -139,3 +139,12 @@ test resources, not a production tracking window or capability-evidence freshnes
 Retry identity lasts with the record. Revocation is permanent and preserves issuance.
 There is no creator/agreement association, booking, capability result or earning in
 this storage slice. Server authorization and probe resolution belong to the command.
+
+The internal `manageAffiliateValidationProbe` command creates, resolves and permanently
+revokes these identities. Every call requires fresh hotel management context and
+entitlement, plus a persisted active property relationship locked before retry lookup.
+The server supplies deployment identity; no public input may choose an environment,
+connection or adapter. An `avp_` reference resolves only in its exact authorized scope
+and configuration while unexpired and unrevoked. Revocation remains available for
+expired or old-configuration probes. No HTTP route or actual capture/booking binding
+is wired yet; probe existence does not validate that the supplied connection works.
