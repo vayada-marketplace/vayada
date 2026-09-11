@@ -1,3 +1,8 @@
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page } from "@playwright/test";
 import type { PropertySetupRouteReadModel, PropertySetupStepDraft } from "@vayada/domain-hotels";
 
@@ -76,16 +81,15 @@ test.describe("adaptive room authoring", () => {
     await assertHealthy();
   });
 
-  test("retains first-visit values and exits only after a refreshed exact manifest", async ({
+  test("retains first-visit values and exits with the exact current manifest", async ({
     page,
     baseURL,
   }, testInfo) => {
     await primeBrowserState(page);
     await mockAuthSession(page);
-    let manifestAvailable = false;
-    const routeState = await mockRoute(page, () =>
-      routeWithRoomsDraft(manifestAvailable ? emptyRoomsDraft() : null),
-    );
+    const initialRoute = routeWithRoomsDraft(null);
+    const routeState = await mockRoute(page, () => initialRoute);
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
     const owner = await mockRoomOwnerApis(page);
 
     await page.goto(setupUrl(baseURL));
@@ -95,30 +99,34 @@ test.describe("adaptive room authoring", () => {
     await name.fill("Locally retained room");
     await expect(
       page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add or arrange photos" })).toBeDisabled();
+    await expect(
+      page.getByText("Complete the required room details before uploading."),
+    ).toBeVisible();
 
     expect(owner.draftWrites).toBe(0);
     expect(owner.createdDraftIds).toEqual([]);
     expect(owner.mediaTargets).toEqual([]);
 
-    manifestAvailable = true;
-    await page.getByRole("button", { name: "Refresh setup data" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toHaveCount(0);
-    await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
     const assertHealthy = watchPageHealth(page, testInfo);
     await expect(name).toHaveValue("Locally retained room");
     await assertHealthy();
     await page.getByRole("button", { name: "Exit setup", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/marketplace$/, { timeout: 60_000 });
+    await expect(page).toHaveURL(destination);
     expect(owner.draftWrites).toBe(1);
     expect(owner.lastDraftPayload?.["room.name"]).toEqual(
       expect.objectContaining({ [owner.lastDraftRoomId!]: "Locally retained room" }),
     );
-    expect(routeState.reads).toBe(2);
+    expect(routeState.reads).toBe(1);
+    expect(owner.lastDraftRequest).toMatchObject({
+      expectedBaseRevisions: initialRoute.steps.find((step) => step.stepId === "rooms")!
+        .currentBaseRevisions,
+      expectedDraftRevision: 0,
+      expectedTrackRevision: 3,
+      expectedSessionRevision: 7,
+    });
   });
 
   test("keeps the mobile dialogs keyboard-contained and returns focus without overflow", async ({
@@ -179,6 +187,16 @@ async function uploadPhoto(page: Page, filename: string) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(
@@ -260,6 +278,7 @@ async function mockRoomOwnerApis(page: Page) {
   let draftWrites = 0;
   let draftRevision = 4;
   let sessionRevision = 7;
+  let lastDraftRequest: Record<string, unknown> | null = null;
   let lastDraftPayload: Record<string, unknown> | null = null;
   let lastDraftRoomId: string | null = null;
 
@@ -291,6 +310,7 @@ async function mockRoomOwnerApis(page: Page) {
     draftWrites += 1;
     draftRevision += 1;
     sessionRevision += 1;
+    lastDraftRequest = body;
     lastDraftPayload = body.payload;
     lastDraftRoomId =
       Object.keys((body.payload["room.name"] as Record<string, unknown>) ?? {})[0] ?? null;
@@ -647,6 +667,9 @@ async function mockRoomOwnerApis(page: Page) {
     mediaTargets,
     get draftWrites() {
       return draftWrites;
+    },
+    get lastDraftRequest() {
+      return lastDraftRequest;
     },
     get lastDraftPayload() {
       return lastDraftPayload;

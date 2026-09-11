@@ -89,6 +89,163 @@ describe("api config", () => {
     });
   });
 
+  it("allows only isolated staging restrictions with the background workers disabled", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingRestrictionsPropertyId).toBe(
+      base.PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID,
+    );
+    for (const invalid of [
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "invalid" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { API_BACKGROUND_WORKERS_ENABLED: undefined },
+      { PMS_CHANNEX_ARI_SYNC_MODE: "observe_only" },
+      ...["CONNECTION", "PROVISIONING", "BOOKING_SYNC", "MARKUPS", "MESSAGING", "IFRAME"].map(
+        (capability) => ({ [`PMS_CHANNEX_${capability}_MODE`]: "mutating" }),
+      ),
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow(
+        "Scoped Channex restrictions require",
+      );
+  });
+
+  it("requires explicit opt-in and retains isolation for staged inventory rules", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingInventoryEnabled).toBe(false);
+    const enabled = { ...base, PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "true" };
+    expect(loadConfig(enabled).channexManagement.stagingInventoryEnabled).toBe(true);
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "invalid" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { PMS_CHANNEX_ARI_SYNC_MODE: "observe_only" },
+      { PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating" },
+    ])
+      expect(() => loadConfig({ ...enabled, ...invalid })).toThrow();
+  });
+
+  it("isolates no-show opt-in without enabling booking sync and permits worker pause", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingNoShowEnabled).toBe(false);
+    const enabled = { ...base, PMS_CHANNEX_STAGING_NO_SHOW_ENABLED: "true" };
+    expect(loadConfig(enabled).channexManagement).toMatchObject({
+      stagingNoShowEnabled: true,
+      capabilityModes: { bookingSync: "observe_only" },
+    });
+    expect(
+      loadConfig({ ...enabled, PMS_CHANNEX_WORKER_ENABLED: "false" }).channexManagement
+        .workerEnabled,
+    ).toBe(false);
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "invalid" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { CHANNEX_API_KEY: undefined },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating" },
+      { PMS_CHANNEX_STAGING_NO_SHOW_ENABLED: "invalid" },
+    ])
+      expect(() => loadConfig({ ...enabled, ...invalid })).toThrow();
+  });
+
+  it("requires explicit opt-in and retains isolation for scoped meal processing", () => {
+    const base = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_PROVISIONING_MODE: "mutating",
+      PMS_CHANNEX_STAGING_MEALS_ENABLED: "true",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    expect(loadConfig(base).channexManagement.stagingMealsEnabled).toBe(true);
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_MEALS_ENABLED: "false" },
+      { PMS_CHANNEX_PROVISIONING_MODE: "observe_only" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      ...["CONNECTION", "BOOKING_SYNC", "MARKUPS", "MESSAGING", "IFRAME"].map((capability) => ({
+        [`PMS_CHANNEX_${capability}_MODE`]: "mutating",
+      })),
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow();
+  });
+
+  it.each([false, true])("loads a paused isolated staging runtime (meals=%s)", (meals) => {
+    const environment = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "synthetic-test-key",
+      API_BACKGROUND_WORKERS_ENABLED: "false",
+      PMS_CHANNEX_WORKER_ENABLED: "false",
+      PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_STAGING_MEALS_ENABLED: String(meals),
+      PMS_CHANNEX_PROVISIONING_MODE: meals ? "mutating" : "observe_only",
+      PMS_CHANNEX_CONNECTION_MODE: "observe_only",
+      PMS_CHANNEX_BOOKING_SYNC_MODE: "observe_only",
+      PMS_CHANNEX_MARKUPS_MODE: "observe_only",
+      PMS_CHANNEX_MESSAGING_MODE: "observe_only",
+      PMS_CHANNEX_IFRAME_MODE: "observe_only",
+      PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
+    };
+    const paused = loadConfig(environment);
+    expect(paused.backgroundWorkersEnabled).toBe(false);
+    expect(paused.channexManagement).toMatchObject({
+      workerEnabled: false,
+      stagingMealsEnabled: meals,
+      capabilityModes: { ariSync: "mutating", provisioning: meals ? "mutating" : "observe_only" },
+    });
+    const resumed = loadConfig({ ...environment, PMS_CHANNEX_WORKER_ENABLED: "true" });
+    expect(resumed).toEqual({
+      ...paused,
+      channexManagement: { ...paused.channexManagement, workerEnabled: true },
+    });
+    for (const invalid of [
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
+      { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "invalid" },
+      { CHANNEX_API_BASE_URL: "https://app.channex.io" },
+      { CHANNEX_API_KEY: undefined },
+      { API_BACKGROUND_WORKERS_ENABLED: "true" },
+      { API_BACKGROUND_WORKERS_ENABLED: undefined },
+      { PMS_OPERATIONS_SOURCE: "legacy" },
+      { PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating" },
+      { PMS_CHANNEX_CONNECTION_MODE: "mutating" },
+      { PMS_CHANNEX_MESSAGING_MODE: "mutating" },
+      { PMS_CHANNEX_ARI_SYNC_MODE: "observe_only" },
+    ]) {
+      expect(() => loadConfig({ ...environment, ...invalid })).toThrow();
+    }
+  });
+
   it("rejects Channex mutation without provider config or target ownership", () => {
     expect(() => loadConfig({ PMS_CHANNEX_ARI_SYNC_MODE: "mutating" })).toThrow(
       "Mutating PMS Channex capabilities require CHANNEX_API_BASE_URL and CHANNEX_API_KEY",
@@ -946,11 +1103,12 @@ describe("api config", () => {
   });
 });
 
-
 describe("API background worker configuration", () => {
   it("defaults to enabled and allows a request-only staging API", () => {
     expect(loadConfig({}).backgroundWorkersEnabled).toBe(true);
-    expect(loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "false" }).backgroundWorkersEnabled).toBe(false);
+    expect(loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "false" }).backgroundWorkersEnabled).toBe(
+      false,
+    );
     expect(() => loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "invalid" })).toThrow();
   });
 });

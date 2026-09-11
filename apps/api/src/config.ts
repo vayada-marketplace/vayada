@@ -73,6 +73,10 @@ export type ChannexManagementConfig = {
   apiKey?: string;
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
+  stagingRestrictionsPropertyId?: string;
+  stagingMealsEnabled?: boolean;
+  stagingInventoryEnabled?: boolean;
+  stagingNoShowEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -153,6 +157,7 @@ export type ApiConfig = {
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
+  pmsRoomClosureEnabled: boolean;
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
@@ -551,6 +556,48 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   };
   const apiBaseUrl = readOptionalEnv(env, "CHANNEX_API_BASE_URL");
   const apiKey = readOptionalEnv(env, "CHANNEX_API_KEY");
+  const stagingRestrictionsPropertyId = readOptionalEnv(
+    env,
+    "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
+  );
+  const stagingNoShowEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_NO_SHOW_ENABLED", false);
+  if (stagingNoShowEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex no-show reporting requires a staging property");
+  }
+  const stagingInventoryEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_STAGING_INVENTORY_ENABLED",
+    false,
+  );
+  if (stagingInventoryEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex inventory requires a staging property");
+  }
+  const stagingMealsEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_MEALS_ENABLED", false);
+  if (
+    stagingMealsEnabled &&
+    (!stagingRestrictionsPropertyId || capabilityModes.provisioning !== "mutating")
+  ) {
+    throw new Error("Scoped Channex meals require a staging property and mutating provisioning");
+  }
+  if (
+    stagingRestrictionsPropertyId &&
+    (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      stagingRestrictionsPropertyId,
+    ) ||
+      apiBaseUrl !== "https://staging.channex.io" ||
+      readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true) ||
+      capabilityModes.ariSync !== "mutating" ||
+      Object.entries(capabilityModes).some(
+        ([name, mode]) =>
+          name !== "ariSync" &&
+          !(stagingMealsEnabled && name === "provisioning") &&
+          mode === "mutating",
+      ))
+  ) {
+    throw new Error(
+      "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -573,7 +620,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
-  if (durableCommandsMutating && !workerEnabled) {
+  // A validated isolated staging scope may retain queued commands while its worker is paused.
+  if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   }
   if (capabilityModes.bookingSync === "mutating" && bookingMutationOwner !== "target") {
@@ -585,6 +633,10 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     apiBaseUrl,
     apiKey,
     bookingMutationOwner,
+    stagingRestrictionsPropertyId,
+    stagingMealsEnabled,
+    stagingInventoryEnabled,
+    stagingNoShowEnabled,
     workerEnabled,
     capabilityModes,
   };
@@ -864,6 +916,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
     financeFolioRecipientKms,
+    pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
