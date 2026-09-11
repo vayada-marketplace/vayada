@@ -111,7 +111,7 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
-  renderAfterHotelDetails?: (propertyId: string) => ReactNode;
+  renderAfterHotelDetails?: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
   onExit?: (propertyId: string | null) => void;
 };
 
@@ -768,7 +768,7 @@ export default function SharedFirstRunPropertySetupWizard({
   if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
     if (saving)
       return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
-    return renderAfterHotelDetails(view.selectedPropertyId);
+    return renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true));
   }
 
   return (

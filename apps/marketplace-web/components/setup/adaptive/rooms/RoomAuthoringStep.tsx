@@ -79,6 +79,7 @@ export function RoomAuthoringStep({
   refreshRoute,
   reportRevisionConflict,
   sessionStore,
+  requestedEntityId,
 }: RoomAuthoringStepProps) {
   const propertyId = route.scope.propertyId;
   const initialRooms =
@@ -270,6 +271,25 @@ export function RoomAuthoringStep({
     // The explicit reload counter controls owner reads; local edits do not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftManifestMissing, propertyId, step.draft, workspaceReload]);
+
+  const openedReviewEntity = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedEntityId) {
+      openedReviewEntity.current = null;
+      return;
+    }
+    if (workspaceState !== "ready" || openedReviewEntity.current === requestedEntityId) return;
+    const target = rooms.find(
+      (room) => room.roomTypeId === requestedEntityId || room.draftRoomId === requestedEntityId,
+    );
+    if (!target) return;
+    openedReviewEntity.current = requestedEntityId;
+    setActiveRoomId(target.draftRoomId);
+    const frame = requestAnimationFrame(() =>
+      document.getElementById(`${target.draftRoomId}-name`)?.focus(),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [requestedEntityId, workspaceState, rooms]);
 
   const activeRoom = rooms.find(({ draftRoomId }) => draftRoomId === activeRoomId) ?? null;
   const firstIncompleteRoom = rooms.find(

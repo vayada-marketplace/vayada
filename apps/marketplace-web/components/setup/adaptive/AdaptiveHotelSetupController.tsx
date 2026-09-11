@@ -53,6 +53,9 @@ export type AdaptiveSetupStepRenderContext = {
   interfaceLocale: SupportedInterfaceLocale;
   saveAndContinue: () => Promise<void>;
   refreshRoute: () => Promise<void>;
+  goToStep?: (stepId: AdaptiveSetupStepId, entityId?: string) => void;
+  requestedEntityId?: string | null;
+  editHotelDetails?: () => void;
   reportRevisionConflict: (message?: string) => void;
 };
 
@@ -60,6 +63,7 @@ export type AdaptiveHotelSetupControllerProps = {
   propertyId: string;
   requestedStepId?: string | null;
   onExit: () => void;
+  onEditHotelDetails?: () => void;
   beforeLeave?: () => void | Promise<void>;
   recoverStaleDraft?: () => void | Promise<void>;
   staleRecoveryMode?: () => "refresh" | "reset" | null;
@@ -70,6 +74,7 @@ export function AdaptiveHotelSetupController({
   propertyId,
   requestedStepId,
   onExit,
+  onEditHotelDetails,
   beforeLeave,
   recoverStaleDraft,
   staleRecoveryMode,
@@ -199,10 +204,10 @@ export function AdaptiveHotelSetupController({
   );
 
   const navigateToStep = useCallback(
-    (stepId: AdaptiveSetupStepId, method: "push" | "replace") => {
+    (stepId: AdaptiveSetupStepId, method: "push" | "replace", entityId?: string) => {
       programmaticStepRef.current = stepId;
       setActiveStepId(stepId);
-      router[method](setupStepPath(searchParams, stepId), { scroll: false });
+      router[method](setupStepPath(searchParams, stepId, entityId), { scroll: false });
     },
     [router, searchParams],
   );
@@ -396,6 +401,14 @@ export function AdaptiveHotelSetupController({
     });
   }, [activeStep?.stepId, navigateToStep, onExit, route, runAfterDraftSave]);
 
+  const goToStep = useCallback(
+    (stepId: AdaptiveSetupStepId, entityId?: string) => {
+      if (!route?.steps.some((step) => step.stepId === stepId)) return;
+      void runAfterDraftSave({ navigate: () => navigateToStep(stepId, "push", entityId) });
+    },
+    [route, runAfterDraftSave, navigateToStep],
+  );
+
   const handleExit = useCallback(() => {
     void runAfterDraftSave({ navigate: onExit });
   }, [onExit, runAfterDraftSave]);
@@ -498,6 +511,17 @@ export function AdaptiveHotelSetupController({
               interfaceLocale={interfaceLocale}
               saveAndContinue={saveAndContinue}
               refreshRoute={refreshRoute}
+              goToStep={goToStep}
+              editHotelDetails={
+                onEditHotelDetails
+                  ? () => {
+                      void runAfterDraftSave({ navigate: onEditHotelDetails });
+                    }
+                  : undefined
+              }
+              requestedEntityId={
+                requestedStepId === activeStep.stepId ? searchParams.get("entity") : null
+              }
               reportRevisionConflict={reportRevisionConflict}
             />
           ) : null}
@@ -507,9 +531,15 @@ export function AdaptiveHotelSetupController({
   );
 }
 
-function setupStepPath(searchParams: { toString(): string }, stepId: AdaptiveSetupStepId): string {
+function setupStepPath(
+  searchParams: { toString(): string },
+  stepId: AdaptiveSetupStepId,
+  entityId?: string,
+): string {
   const next = new URLSearchParams(searchParams.toString());
   next.set("step", stepId);
+  if (entityId) next.set("entity", entityId);
+  else next.delete("entity");
   return `${ROUTES.SETUP}?${next.toString()}`;
 }
 

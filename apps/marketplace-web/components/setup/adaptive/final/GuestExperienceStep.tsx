@@ -44,6 +44,8 @@ const languages = {
   nl: "Dutch",
 };
 
+import { useReviewEntityFocus } from "./useReviewEntityFocus";
+
 export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
   const draft = useFinalStepDraft(props, "guest_experience");
   const canonical = useRef<GuestPolicySetup | null>(null);
@@ -198,6 +200,11 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
       setHasSaved(true);
     });
   }
+  useReviewEntityFocus(
+    props.requestedEntityId ? `guest-policy-${props.requestedEntityId}` : null,
+    !loading && preview?.outcome === "ready",
+  );
+
   if (loading) return <AdaptiveStepSkeleton columns />;
   if (loadError)
     return <AdaptiveSaveError message={loadError} onRetry={() => setRetry((value) => value + 1)} />;
@@ -386,7 +393,12 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
                 {preview.bundle.propertyTimeZone}.
               </p>
               {preview.bundle.rates.map((rate) => (
-                <div key={rate.roomTypeId} className="rounded-lg border border-gray-200 p-4">
+                <div
+                  key={rate.roomTypeId}
+                  id={`guest-policy-${rate.roomTypeId}`}
+                  tabIndex={-1}
+                  className="rounded-lg border border-gray-200 p-4"
+                >
                   <h3 className="font-semibold">{roomNames[rate.roomTypeId]}</h3>
                   <p className="mt-2">
                     Free cancellation until {rate.flexible.freeCancellationDeadlineDays} days before

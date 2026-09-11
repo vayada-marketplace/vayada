@@ -328,9 +328,10 @@ export function SharedHotelSetupPage({
         onPropertySelected={handlePropertySelected}
         renderAfterHotelDetails={
           adaptiveShellEnabled
-            ? (propertyId) => (
+            ? (propertyId, onEditHotelDetails) => (
                 <AdaptiveSetupHandoff
                   propertyId={propertyId}
+                  onEditHotelDetails={onEditHotelDetails}
                   onExit={() => handleExit(propertyId)}
                 />
               )
@@ -345,7 +346,15 @@ export function SharedHotelSetupPage({
   );
 }
 
-function AdaptiveSetupHandoff({ propertyId, onExit }: { propertyId: string; onExit: () => void }) {
+function AdaptiveSetupHandoff({
+  propertyId,
+  onExit,
+  onEditHotelDetails,
+}: {
+  propertyId: string;
+  onExit: () => void;
+  onEditHotelDetails: () => void;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const scoped = searchParams.get("propertyId") === propertyId && !searchParams.has("mode");
@@ -368,6 +377,7 @@ function AdaptiveSetupHandoff({ propertyId, onExit }: { propertyId: string; onEx
       key={propertyId}
       propertyId={propertyId}
       requestedStepId={searchParams.get("step")}
+      onEditHotelDetails={onEditHotelDetails}
       onExit={onExit}
     />
   );
