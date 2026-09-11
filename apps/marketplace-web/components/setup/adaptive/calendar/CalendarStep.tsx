@@ -71,13 +71,13 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
   const retainLocalOnReloadRef = useRef(false);
   const discardHistoricalOnReloadRef = useRef(false);
   const [draft, setDraft] = useState<CalendarDraft | null>(null);
+  const [impactReview, setImpactReview] = useState<CalendarImpactReview | null>(null);
+  const [workspace, setWorkspace] = useState<CalendarWorkspace | null>(null);
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
   useReviewEntityFocus(
     props.requestedEntityId ? `calendar-room-${props.requestedEntityId}` : null,
     workspaceState === "ready" && !!draft,
   );
-  const [impactReview, setImpactReview] = useState<CalendarImpactReview | null>(null);
-  const [workspace, setWorkspace] = useState<CalendarWorkspace | null>(null);
-  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceReload, setWorkspaceReload] = useState(0);
   const [errors, setErrors] = useState<CalendarValidationErrors>({});
