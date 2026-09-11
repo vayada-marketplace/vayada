@@ -181,6 +181,32 @@ describe.skipIf(!TEST_DATABASE_URL)(
         probe_id: validation.probe.slice(4),
         request_id: context.requestId,
       });
+      const originalCharge = (
+        await admin.query("SELECT * FROM booking.original_charge_snapshots WHERE booking_id=$1", [
+          booking.id,
+        ])
+      ).rows;
+      expect(originalCharge).toHaveLength(1);
+      expect(originalCharge[0]).toMatchObject({
+        quote_id: successfulQuoteId,
+        property_id: propertyId,
+        classification_status: "unclassified",
+        contract_version: "native-checkout-charge.v1",
+        request_id: context.requestId,
+      });
+      const sourceQuote = (
+        await admin.query(
+          "SELECT totals,selected_offer_snapshot FROM booking.quote_sessions WHERE id=$1",
+          [successfulQuoteId],
+        )
+      ).rows[0];
+      expect(originalCharge[0].totals).toEqual(sourceQuote.totals);
+      expect(originalCharge[0].selected_offer).toEqual(sourceQuote.selected_offer_snapshot);
+      for (const sql of [
+        "UPDATE booking.original_charge_snapshots SET totals='{}' WHERE booking_id=$1",
+        "DELETE FROM booking.original_charge_snapshots WHERE booking_id=$1",
+      ])
+        await expect(admin.query(sql, [booking.id])).rejects.toThrow();
       const denied = createAdapter(checkoutPool, {
         ...validation,
         freshContext: async () => ({ ...(await freshProbeContext()), entitlements: [] }),
@@ -326,6 +352,14 @@ describe.skipIf(!TEST_DATABASE_URL)(
         expect(
           (
             await evidenceClient.query(
+              "SELECT * FROM booking.original_charge_snapshots WHERE booking_id=$1",
+              [booking.id],
+            )
+          ).rows,
+        ).toEqual(originalCharge);
+        expect(
+          (
+            await evidenceClient.query(
               "SELECT * FROM booking.affiliate_validation_booking_bindings WHERE booking_id=$1",
               [booking.id],
             )
@@ -450,6 +484,14 @@ describe.skipIf(!TEST_DATABASE_URL)(
            WHERE property_id = $1::uuid) AS "publicAvailable"`,
         [propertyId, rollbackQuoteId, missingAddonId],
       );
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM booking.original_charge_snapshots WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(1);
       expect(rolledBack.rows[0]).toMatchObject({
         bookingCount: 0,
         checkoutCount: 0,
@@ -1073,6 +1115,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
              SELECT id FROM booking.guest_bookings WHERE property_id = $1::uuid
            )`,
           "DELETE FROM booking.booking_addon_selections WHERE property_id = $1::uuid",
+          "DELETE FROM booking.original_charge_snapshots WHERE property_id = $1::uuid",
           "DELETE FROM booking.guest_bookings WHERE property_id = $1::uuid",
           "DELETE FROM booking.checkout_contexts WHERE property_id = $1::uuid",
           "DELETE FROM booking.quote_sessions WHERE property_id = $1::uuid",

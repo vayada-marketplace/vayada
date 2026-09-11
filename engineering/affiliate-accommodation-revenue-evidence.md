@@ -154,3 +154,24 @@ that extras are absent, that the booking accepted this price, or that any amount
 collected. Canonical booking/item acceptance binding and complete charge composition
 remain required before collection reconciliation. No checkout caller, persistence,
 public route or journal integration is added by this pure component.
+
+## Original native checkout charge storage
+
+Migration 0186 preserves the actual native checkout quote totals and selected offer
+in `booking.original_charge_snapshots`, scoped to the original booking/property/quote
+and request. It is written for non-draft creation in the booking statement and outer transaction;
+replay does not append another row and checkout failure rolls it back. Updates,
+deletes and truncation are rejected. Later current-quote changes cannot rewrite it.
+Existing bookings are not backfilled from their mutable current quotes.
+
+This is `native-checkout-charge.v1` with mandatory `unclassified` status. It is not
+the versioned price factory's output and cannot be passed as classified accommodation.
+A guest submitting a booking request does not prove hotel acceptance or payment.
+Amendment history, accepted-price/item mapping, classification and collection remain
+required; this original snapshot alone must not determine a later earning amount.
+There is no evidence-read route or Finance caller in this storage slice.
+
+Card checkout initially creates a deletable draft. This slice excludes drafts so
+existing abandoned-draft cleanup can still delete them and release inventory.
+Capturing card price evidence at its later accepted transition remains unsupported;
+do not infer an original snapshot from a later mutable quote or treat absence as zero.
