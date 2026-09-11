@@ -174,9 +174,8 @@ export function StripeSetupControls({
     <AdaptiveStepCard>
       <h2 className="text-lg font-semibold">Stripe account</h2>
       <p className="mt-2 text-sm text-gray-600">
-        Save your selection before connecting Stripe. Account setup opens in a new tab; keep this
-        setup tab to retain your return destination. Account connection alone does not make online
-        cards ready.
+        Save your selection before connecting Stripe. Account setup opens in a new tab. Account
+        connection alone does not make online cards ready.
       </p>
       {error && <AdaptiveSaveError message={error} />}
       <fieldset disabled={!enabled || busy} className="mt-4 grid gap-4 md:grid-cols-2">
