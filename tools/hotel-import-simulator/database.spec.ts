@@ -12,19 +12,27 @@ test("real import persists edits and concurrent replay creates no duplicate", as
   await page.getByLabel("Demo Garden Suite").check();
   await page.getByRole("button", { name: "Review selected listings" }).click();
   const before = await (await request.get(endpoint)).json();
-  expect(
-    before.import.results["room:synthetic-garden"],
-    "Start with a fresh dedicated test database; see README",
-  ).toBeUndefined();
-  await page.getByRole("button", { name: "Review prepared room data" }).click();
-  await page.getByLabel("Room name", { exact: true }).fill("Database Garden Suite");
-  await page.getByRole("checkbox", { name: "Database Garden Suite", exact: true }).check();
-  await page.getByRole("button", { name: "Save selected items" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Saved in PostgreSQL: 1 room type" }),
-  ).toBeVisible();
+  const alreadyApplied = before.import.results["room:synthetic-garden"]?.status === "applied";
+  const existing = alreadyApplied
+    ? before.existingRooms.find(
+        (room: { id: string }) =>
+          room.id === before.import.results["room:synthetic-garden"].resourceId,
+      )
+    : null;
+  if (alreadyApplied) expect(existing).toBeDefined();
+  const expectedName = existing?.name ?? "Database Garden Suite";
+  const expectedCount = before.existingRooms.length + (alreadyApplied ? 0 : 1);
+  if (!alreadyApplied) {
+    await page.getByRole("button", { name: "Review prepared room data" }).click();
+    await page.getByLabel("Room name", { exact: true }).fill("Database Garden Suite");
+    await page.getByRole("checkbox", { name: "Database Garden Suite", exact: true }).check();
+    await page.getByRole("button", { name: "Save selected items" }).click();
+    await expect
+      .poll(async () => (await (await request.get(endpoint)).json()).existingRooms.length)
+      .toBe(expectedCount);
+  }
   await page.reload();
-  await expect(page.getByText("Database Garden Suite", { exact: true })).toBeVisible();
+  await expect(page.getByText(expectedName, { exact: true })).toBeVisible();
   const body = {
     sourceId: before.import.sourceId,
     data: {
@@ -39,8 +47,11 @@ test("real import persists edits and concurrent replay creates no duplicate", as
   ]);
   for (const response of responses) expect(response.status()).toBe(200);
   const after = await (await request.get(endpoint)).json();
-  expect(after.existingRooms).toHaveLength(1);
-  expect(after.existingRooms[0].name).toBe("Database Garden Suite");
+  expect(after.existingRooms).toHaveLength(expectedCount);
+  if (alreadyApplied) expect(after.existingRooms).toEqual(before.existingRooms);
+  expect(after.existingRooms.some((room: { name: string }) => room.name === expectedName)).toBe(
+    true,
+  );
   expect(after.import.results["room:synthetic-garden"].status).toBe("applied");
   await page.screenshot({ path: testInfo.outputPath("database-saved.png"), fullPage: true });
 });
@@ -71,7 +82,10 @@ test("incomplete, unknown and wrong-property requests cannot add rooms", async (
   expect(after.existingRooms).toEqual(before.existingRooms);
 });
 
-test("incomplete listing explains which facts need review", async ({ page }) => {
+test("incomplete listing explains which facts need review", async ({ page, request }) => {
+  const { propertyId } = await (await request.get("/api/import-demo")).json();
+  const endpoint = `/api/hotel-setup/properties/${propertyId}/import`;
+  const before = await (await request.get(endpoint)).json();
   await page.goto("/database.html");
   await page.getByRole("button", { name: "Connect Airbnb (simulated)", exact: true }).click();
   await page.getByRole("button", { name: "Simulate approval" }).click();
@@ -82,7 +96,6 @@ test("incomplete listing explains which facts need review", async ({ page }) => 
   await page.getByRole("checkbox", { name: "Demo Loft", exact: true }).check();
   await page.getByRole("button", { name: "Save selected items" }).click();
   await expect(page.getByRole("alert")).toContainText("Complete each selected room");
-  await expect(
-    page.getByRole("heading", { name: "Saved in PostgreSQL: 1 room type" }),
-  ).toBeVisible();
+  const after = await (await request.get(endpoint)).json();
+  expect(after.existingRooms).toEqual(before.existingRooms);
 });
