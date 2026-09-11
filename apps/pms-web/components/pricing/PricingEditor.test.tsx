@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeChildCharges } from "./PricingChildCharges";
 import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { changeStayOwnership } from "./PricingStayOwnership";
 import { changeStaySeason } from "./PricingStaySeasons";
@@ -538,4 +539,35 @@ it("protects pending linked edits and reviews only the saved adjustment", async 
   expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
   expect(saved.snapshot.rooms[0].offers[1].price).toMatchObject({ adjustment: { kind: "percentage", basisPoints: -1525 } });
   await click("Review saved charges"); expect(button("Edit linked adjustment").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+});
+
+it("changes every existing child charge exactly while preserving bands and all offers", () => {
+  const original = snapshot.rooms[0], root = original.offers[0];
+  const room = { ...original, children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 2, nightlyMinor: "0", countsTowardCapacity: false }, { fromAge: 3, throughAge: 11, nightlyMinor: "2500", countsTowardCapacity: true }] }, offers: [
+    { ...root, meal: { kind: "breakfast" as const, charge: { kind: "person" as const, adultMinor: "1200", childBandAmountsMinor: ["0", "600"] } } },
+    { ...root, id: "linked", price: { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } } },
+  ] };
+  expect(changeChildCharges(room, ["0", "90071992547409.93"])).toEqual({ ...room, children: { ...room.children, bands: [room.children.bands[0], { ...room.children.bands[1], nightlyMinor: "9007199254740993" }] } });
+  expect(room.children.bands[1].nightlyMinor).toBe("2500");
+  for (const amounts of [[], ["0"], ["0", "1", "2"], ["0", ""], ["0", "-1"], ["0", "1e2"], ["0", "1.001"], ["0", "10000000000000000"]]) expect(() => changeChildCharges(room, amounts)).toThrow();
+  expect(() => changeChildCharges({ ...room, currency: "JPY" }, ["0", "1.2"])).toThrow();
+  expect(changeChildCharges({ ...room, currency: "KWD" }, ["0", "1.234"]).children.bands[1].nightlyMinor).toBe("1234");
+  expect(() => changeChildCharges({ ...room, children: { ...room.children, adultFromAge: 18 } }, ["0", "1"])).toThrow("invalid");
+});
+it("protects child charge edits and saves the changed room-wide charge for review", async () => {
+  const room = snapshot.rooms[0], root = room.offers[0];
+  client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false, rooms: [{ ...room, offers: [root, { ...root, id: "linked", price: { kind: "linked", parentId: root.id, adjustment: { kind: "percentage", basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" } }] }] });
+  await mount(); await click("Save draft"); await click("Edit child charges");
+  const field = () => view.root.findByProps({ "aria-label": "Child charge ages 0–11 for Room 1" });
+  expect(field().props.value).toBe("25.00"); expect(button("Save draft").props.disabled).toBe(true); expect(button("Use own stay rules").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  await act(async () => field().props.onChange({ target: { value: "-1" } })); await click("Apply child charges"); expect(client.prepare).toHaveBeenCalledTimes(1);
+  await click("Cancel child charges"); expect(button("Review saved charges").props.disabled).toBe(false);
+  await click("Use own stay rules"); expect(button("Edit child charges").props.disabled).toBe(true); await click("Cancel ownership change");
+  await click("Edit child charges"); expect(field().props.value).toBe("25.00");
+  await act(async () => field().props.onChange({ target: { value: "0" } })); await click("Apply child charges");
+  expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
+  expect(saved.snapshot.rooms[0].children.bands[0].nightlyMinor).toBe("0"); expect(saved.snapshot.rooms[0].offers[0]).toEqual(root);
+  await click("Review saved charges"); expect(button("Edit child charges").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
 });
