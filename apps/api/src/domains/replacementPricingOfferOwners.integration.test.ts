@@ -1,3 +1,4 @@
+import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
@@ -156,6 +157,66 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
+  it("prepares exact nightly candidates from verified publication and retains evidence", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    const selection = {
+      roomTypeId: f.snapshot.rooms[0].roomTypeId,
+      offerId: "flex",
+      date: "2026-10-01",
+    };
+    const result = await preparePublishedChannexNightPrices(pool, f.input, selection);
+    expect(result).toMatchObject({
+      kind: "prepared",
+      evidence: { publication: { revision: 1, sources: f.sources }, owners: { charges: f.charges } },
+      candidates: [
+        { occupancy: 1, rate: "100.00" },
+        { occupancy: 2, rate: "100.00" },
+      ],
+    });
+    if (result.kind === "prepared")
+      for (const candidate of result.candidates) {
+        expect(candidate.projection).toMatchObject({
+          propertyId: f.scope.propertyId,
+          roomTypeId: selection.roomTypeId,
+          offerId: "flex",
+          currency: "EUR",
+          night: { date: selection.date, totalMinor: "10000" },
+        });
+      }
+    for (const invalid of [
+      { ...selection, roomTypeId: randomUUID() },
+      { ...selection, offerId: "missing" },
+      { ...selection, date: "invalid" },
+    ]) {
+      const denied = await preparePublishedChannexNightPrices(pool, f.input, invalid);
+      expect(denied.kind).toBe("unavailable");
+      expect(denied).not.toHaveProperty("candidates");
+    }
+    await pool.query(
+      "UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await preparePublishedChannexNightPrices(pool, f.input, selection)).toEqual({
+      kind: "unavailable",
+      reason: "sources_stale",
+    });
+  });
+  it("prepares no candidates for a wrong lease or unpublished prices", async () => {
+    const f = await serviceFixture();
+    const selection = {
+      roomTypeId: f.snapshot.rooms[0].roomTypeId,
+      offerId: "flex",
+      date: "2026-10-01",
+    };
+    expect(
+      await preparePublishedChannexNightPrices(pool, { ...f.input, workerId: "wrong" }, selection),
+    ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(await preparePublishedChannexNightPrices(pool, f.input, selection)).toEqual({
+      kind: "unavailable",
+      reason: "publication_missing",
+    });
+  });
   it("reads complete publication for a live job without user membership authority", async () => {
     const f = await serviceFixture();
     await f.publish();
