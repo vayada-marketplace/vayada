@@ -4,12 +4,14 @@ import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 const propertyId = "10090000-0000-4000-8000-000000000001";
 const sourceId = "10090000-0000-4000-8000-000000000002";
 const channelId = "10090000-0000-4000-8000-000000000003";
+const operationId = "10090000-0000-4000-8000-000000000004";
 const token = "x".repeat(43);
 const path = `/setup/airbnb-return/${propertyId}/${sourceId}`;
 const success = `?success=true&channel_id=${channelId}&token=${token}`;
 // Requires AIRBNB_IMPORT_CALLBACK_ENABLED=true in the isolated frontend.
 test.skip(process.env.E2E_AIRBNB_IMPORT_CALLBACK !== "1", "Callback preview is opt-in");
 for (const scenario of [
+  "new-hotel",
   "success",
   "lost-response",
   "save-response-lost",
@@ -22,7 +24,11 @@ for (const scenario of [
   "wrong-source",
   "denied",
 ] as const) {
-  test(`Airbnb return: ${scenario}`, async ({ page }) => {
+  test(`Airbnb return: ${scenario}`, async ({ page, baseURL }) => {
+    let starts = 0;
+    let preparations = 0;
+    let prepared = false;
+    let commandId = "";
     let saves = 0;
     const receipts: Record<string, unknown> = {};
     const listingData = {
@@ -66,6 +72,59 @@ for (const scenario of [
         },
       });
     });
+    if (scenario === "new-hotel") {
+      await page.route("https://www.airbnb.com/**", async (route) => {
+        await route.fulfill({
+          contentType: "text/html",
+          body: `<h1>Simulated Airbnb approval</h1><a href="${new URL(path + success, baseURL).href.replaceAll("&", "&amp;")}">Approve simulated connection</a>`,
+        });
+      });
+      await page.route(/\/api\/pms\/properties\/.*\/channex/, async (route) => {
+        if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+        expect(route.request().headers().authorization).toBe("Bearer synthetic-access-token");
+        const pathname = new URL(route.request().url()).pathname;
+        const pmsPath = `/api/pms/properties/${propertyId}/channex`;
+        expect([pmsPath, `${pmsPath}/commands`, `${pmsPath}/operations/${operationId}`]).toContain(
+          pathname,
+        );
+        expect(route.request().method()).toBe(pathname === `${pmsPath}/commands` ? "POST" : "GET");
+        const send = (json: unknown, status = 200) =>
+          route.fulfill({ status, headers: corsHeaders(route), json });
+        if (pathname.endsWith("/channex"))
+          return send({
+            propertyId,
+            connection: { status: "disconnected", externalPropertyId: null },
+          });
+        if (pathname.endsWith("/commands")) {
+          preparations++;
+          const command = route.request().postDataJSON();
+          expect(command.operationType).toBe("enable");
+          commandId = command.commandId;
+          expect(command.idempotencyKey).toBe(`airbnb-prepare:${propertyId}:${commandId}`);
+          return send(
+            {
+              operationId,
+              propertyId,
+              commandId,
+              operationType: "enable",
+              status: "queued",
+            },
+            202,
+          );
+        }
+        expect(pathname).toBe(
+          `/api/pms/properties/${propertyId}/channex/operations/${operationId}`,
+        );
+        prepared = true;
+        return send({
+          operationId,
+          propertyId,
+          commandId,
+          operationType: "enable",
+          status: "succeeded",
+        });
+      });
+    }
     await page.route(/\/api\/hotel-setup\/properties\/.*\/airbnb-import\//, async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       expect(new URL(page.url()).search).toBe("");
@@ -73,6 +132,22 @@ for (const scenario of [
       expect(route.request().headers().referer).toBeUndefined();
       if (route.request().headers().authorization !== "Bearer synthetic-access-token") {
         return route.fulfill({ status: 401, headers: corsHeaders(route), json: {} });
+      }
+      if (new URL(route.request().url()).pathname.endsWith("/start")) {
+        expect(scenario).toBe("new-hotel");
+        expect(new URL(route.request().url()).pathname).toBe(
+          `/api/hotel-setup/properties/${propertyId}/airbnb-import/start`,
+        );
+        expect(route.request().postDataJSON()).toEqual({});
+        expect(route.request().method()).toBe("POST");
+        starts++;
+        return route.fulfill({
+          status: prepared ? 200 : 409,
+          headers: corsHeaders(route),
+          json: prepared
+            ? { sourceId, url: "https://www.airbnb.com/oauth2/auth?synthetic=true" }
+            : { code: "channex_binding_required" },
+        });
       }
       if (new URL(route.request().url()).pathname.endsWith("/review")) {
         if (route.request().method() === "POST") {
@@ -138,9 +213,22 @@ for (const scenario of [
             : scenario === "missing-token"
               ? `?success=true&channel_id=${channelId}`
               : success;
-    const response = await page.goto(`${path}${query}#discard`);
+    let response;
+    if (scenario === "new-hotel") {
+      await page.goto(`/setup/airbnb-connect/${propertyId}`);
+      await page.getByRole("button", { name: "Continue to Airbnb" }).click();
+      await expect(page.getByRole("heading", { name: "Simulated Airbnb approval" })).toBeVisible();
+      expect(starts).toBe(2);
+      expect(preparations).toBe(1);
+      const callbackResponse = page.waitForResponse(
+        (response) => response.request().isNavigationRequest() && response.url().includes(path),
+      );
+      await page.getByRole("link", { name: "Approve simulated connection" }).click();
+      response = await callbackResponse;
+    } else response = await page.goto(`${path}${query}#discard`);
     expect(response?.headers()["referrer-policy"]).toBe("no-referrer");
     const ready = [
+      "new-hotel",
       "success",
       "lost-response",
       "save-response-lost",
@@ -155,7 +243,7 @@ for (const scenario of [
     const skipped = ["cancelled", "duplicate", "missing-token"].includes(scenario);
     expect(posts).toBe(skipped || scenario === "reload" ? 0 : 1);
     expect(reads).toBe(skipped ? 0 : 1);
-    expect(refreshes).toBe(skipped ? 0 : 1);
+    expect(refreshes).toBe(skipped ? 0 : scenario === "new-hotel" ? 2 : 1);
     await expect(page.getByRole("link", { name: "Return to hotel setup" })).toHaveAttribute(
       "href",
       `/setup?propertyId=${propertyId}`,
@@ -166,7 +254,7 @@ for (const scenario of [
       ).toBeVisible();
       expect(saves).toBe(0);
     }
-    if (scenario === "success" || scenario === "save-response-lost") {
+    if (scenario === "new-hotel" || scenario === "success" || scenario === "save-response-lost") {
       await page.getByRole("button", { name: "Review prepared room data" }).click();
       await page.getByLabel("Maximum adults").first().fill("2");
       await page.getByLabel("Maximum children").first().fill("0");

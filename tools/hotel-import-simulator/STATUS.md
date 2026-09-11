@@ -2,6 +2,21 @@
 
 Checked 2026-09-10. This is local test evidence, not deployed acceptance.
 
+## Current scope — 2026-09-11
+
+The gated onboarding path now covers preparation, connection start, callback,
+listing review and room save. One continuous browser test exercises these steps,
+including session recovery after leaving for a simulated Airbnb page, choosing one
+listing, completing missing facts, saving and reloading. All 12 callback scenarios
+pass. API/provider/database responses in this joined test are mocked. Earlier
+local PostgreSQL evidence below separately verifies canonical room persistence.
+
+This is still a local, default-off implementation in draft PRs. Production callback
+log handling and fresh-host authorization remain unverified. Room settings reuse
+the shared import editor but do not yet expose the Airbnb connection entry. Invite
+acceptance/integration remains owned by the separate invite-code task. Historical
+sections below describe evidence at each implementation stage.
+
 ## What can be demonstrated
 
 | Part                                                 | Evidence                                                                            | Limit                                                                                 |
