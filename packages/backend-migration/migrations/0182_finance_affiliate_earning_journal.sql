@@ -3,8 +3,8 @@
 CREATE TABLE finance.affiliate_earning_journal (
   id UUID PRIMARY KEY,
   property_id UUID NOT NULL REFERENCES hotel_catalog.properties(id),
-  booking_id TEXT NOT NULL CHECK (booking_id ~ '^[A-Za-z0-9_-]{1,256}$'),
-  stay_item_id TEXT NOT NULL CHECK (stay_item_id ~ '^[A-Za-z0-9_-]{1,256}$'),
+  booking_id TEXT NOT NULL CHECK (length(booking_id) BETWEEN 1 AND 256 AND booking_id ~ '^[A-Za-z0-9_-]+$'),
+  stay_item_id TEXT NOT NULL CHECK (length(stay_item_id) BETWEEN 1 AND 256 AND stay_item_id ~ '^[A-Za-z0-9_-]+$'),
   revision INTEGER NOT NULL CHECK (revision > 0),
   source_revision BIGINT NOT NULL CHECK (source_revision BETWEEN 1 AND 9007199254740991),
   input_digest TEXT NOT NULL CHECK (input_digest ~ '^[0-9a-f]{64}$'),
