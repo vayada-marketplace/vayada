@@ -268,6 +268,117 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(performance.now() - started).toBeLessThan(7_000);
     expect(await f.serviceRead()).toMatchObject({ kind: "available" });
   });
+  function interceptRead(before: (c: pg.PoolClient, sql: string) => Promise<void>) {
+    return new Proxy(pool, {
+      get(target, key) {
+        if (key !== "connect") return Reflect.get(target, key);
+        return async () => {
+          const c = await target.connect();
+          return new Proxy(c, {
+            get(client, method) {
+              if (method === "query")
+                return async (sql: string, values?: unknown[]) => {
+                  await before(client, sql);
+                  return client.query(sql, values);
+                };
+              const value = Reflect.get(client, method);
+              return typeof value === "function" ? value.bind(client) : value;
+            },
+          });
+        };
+      },
+    });
+  }
+  it.each(["lease", "access"])("denies %s expiry after initial authorization", async (boundary) => {
+    const f = await serviceFixture();
+    await f.publish();
+    if (boundary === "lease")
+      await pool.query(
+        "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '298 seconds' WHERE id=$1",
+        [f.input.jobId],
+      );
+    else
+      await pool.query(
+        "UPDATE identity.product_entitlements SET expires_at=clock_timestamp()+interval '2 seconds' WHERE organization_id=$1",
+        [f.scope.organizationId],
+      );
+    let reached = false;
+    const intercepted = interceptRead(async (c, sql) => {
+      if (!reached && sql.includes("h.revision AS head_revision")) {
+        reached = true;
+        if (boundary === "lease")
+          await c.query(
+            "SELECT pg_sleep(GREATEST(0,extract(epoch FROM locked_at+interval '5 minutes'-clock_timestamp()))+0.02) FROM platform.jobs WHERE id=$1",
+            [f.input.jobId],
+          );
+        else
+          await c.query(
+            "SELECT pg_sleep(GREATEST(0,extract(epoch FROM expires_at-clock_timestamp()))+0.02) FROM identity.product_entitlements WHERE organization_id=$1",
+            [f.scope.organizationId],
+          );
+      }
+    });
+    expect(await readPublishedPricingForChannexJob(intercepted, f.input)).toEqual({
+      kind: "unavailable",
+      reason: boundary === "lease" ? "lease_unavailable" : "scope_unavailable",
+    });
+    expect(reached).toBe(true);
+  });
+  it("propagates a real serialization conflict and succeeds in a fresh transaction", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    let changed = false;
+    const intercepted = interceptRead(async (_c, sql) => {
+      if (!changed && sql.includes("SELECT id FROM hotel_catalog.properties")) {
+        changed = true;
+        await pool.query(
+          "UPDATE hotel_catalog.properties SET display_name='Concurrent update' WHERE id=$1",
+          [f.scope.propertyId],
+        );
+      }
+    });
+    await expect(readPublishedPricingForChannexJob(intercepted, f.input)).rejects.toMatchObject({
+      code: "40001",
+    });
+    expect(changed).toBe(true);
+    expect(await f.serviceRead()).toMatchObject({ kind: "available" });
+  });
+  it("holds publication and Finance locks until the composed read returns", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    let checked = false;
+    const writer = await pool.connect();
+    try {
+      const intercepted = interceptRead(async (_c, sql) => {
+        if (!checked && sql.includes("SELECT occupancy_limits FROM pms.room_types")) {
+          checked = true;
+          for (const query of [
+            "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+            "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+          ]) {
+            await writer.query("BEGIN");
+            await writer.query("SET LOCAL lock_timeout='100ms'");
+            await expect(writer.query(query, [f.scope.propertyId])).rejects.toMatchObject({
+              code: "55P03",
+            });
+            await writer.query("ROLLBACK");
+          }
+        }
+      });
+      expect(await readPublishedPricingForChannexJob(intercepted, f.input)).toMatchObject({
+        kind: "available",
+      });
+      expect(checked).toBe(true);
+      await writer.query(
+        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+      expect(await f.serviceRead()).toEqual({ kind: "unavailable", reason: "owner_unavailable" });
+    } finally {
+      await writer.query("ROLLBACK");
+      writer.release();
+    }
+  });
   it("rolls back publication lock contention and succeeds on a fresh retry", async () => {
     const f = await serviceFixture();
     await f.publish();
