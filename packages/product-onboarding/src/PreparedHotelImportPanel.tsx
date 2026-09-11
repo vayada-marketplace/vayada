@@ -154,7 +154,7 @@ export function PreparedHotelImportPanel({
       const code = (error as { data?: { code?: string } })?.data?.code;
       setError(
         code === "incomplete_room_facts"
-          ? "Complete each selected room’s maximum guests, adults, children, and bathroom details before saving."
+          ? "Complete each selected room’s guest limits, bed type, number of beds, and bathroom details before saving."
           : code === "import_property_conflict"
             ? "This invitation’s data is already assigned to another hotel. Open that hotel to continue."
             : "Import could not finish. Refresh the prepared data and review it before retrying.",
