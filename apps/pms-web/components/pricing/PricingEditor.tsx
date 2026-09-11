@@ -15,6 +15,7 @@ import { PricingStayRules } from "./PricingStayRules";
 import { PricingSeasons } from "./PricingSeasons";
 import { PricingMonths } from "./PricingMonths";
 import { PricingWeekdays } from "./PricingWeekdays";
+import { PricingLinkedParent } from "./PricingLinkedParent";
 import { PricingMealPlan } from "./PricingMealPlan";
 import { PricingMealCharges } from "./PricingMealCharges";
 import { PricingChildCharges } from "./PricingChildCharges";
@@ -25,7 +26,7 @@ import { PricingRules } from "./PricingRules";
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
-  const exclusiveEditPending = Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:")) && pending);
+  const exclusiveEditPending = Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:")) && pending);
   const hasPendingEntries = Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
@@ -158,6 +159,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
           <PricingMealCharges room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`meal:${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+          <PricingLinkedParent room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`parent:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
           <PricingLinkedAdjustment room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`linked:${ri}:${oi}`]: pending }))}
