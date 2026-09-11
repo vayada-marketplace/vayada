@@ -1,3 +1,5 @@
+import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
+import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
@@ -457,12 +459,13 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
     })
   : undefined;
-const pmsRoomClosureRepository = pmsOperationsRepository && config.pmsRoomClosureEnabled
-  ? createPgPmsRoomClosureRepository({
-      connectionString: targetDatabaseUrl,
-      channex: config.channexManagement,
-    })
-  : undefined;
+const pmsRoomClosureRepository =
+  pmsOperationsRepository && config.pmsRoomClosureEnabled
+    ? createPgPmsRoomClosureRepository({
+        connectionString: targetDatabaseUrl,
+        channex: config.channexManagement,
+      })
+    : undefined;
 const pmsLinkedInventoryGroupCommandRepository = pmsOperationsRepository
   ? createPgPmsLinkedInventoryGroupCommandRepository({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -714,6 +717,10 @@ const bookingWebAffiliateHotelResolver =
 
 const hotelCatalogStep1Repository = createPgHotelCatalogStep1Repository({
   connectionString: targetDatabaseUrl,
+});
+const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository({
+  connectionString: targetDatabaseUrl,
+  sources: marketplaceSubmissionTransactionSources,
 });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
@@ -1511,7 +1518,8 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
-  marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliateDraftRepository:
+    createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1555,6 +1563,7 @@ const app = buildApp({
         mediaCommands: platformMediaRuntime.propertyMediaCommands,
       }
     : undefined,
+  marketplaceSubmission: { repository: marketplaceSubmissionRepository },
   marketplaceHotelCollaborationPreferences: {
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
@@ -1692,6 +1701,7 @@ app.addHook("onClose", async () => {
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([
+    marketplaceSubmissionRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),

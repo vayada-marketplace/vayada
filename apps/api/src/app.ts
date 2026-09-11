@@ -1,3 +1,7 @@
+import {
+  registerMarketplaceSubmissionRoutes,
+  type MarketplaceSubmissionRoutesOptions,
+} from "./routes/marketplaceSubmission.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -375,6 +379,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     repository: HotelCatalogStep1Repository;
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
+  marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
@@ -665,6 +670,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerHotelCatalogStep1Routes, {
       prefix: "/api/hotel-setup",
       ...options.hotelCatalogStep1,
+    });
+  }
+  if (options.marketplaceSubmission) {
+    app.register(registerMarketplaceSubmissionRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceSubmission,
     });
   }
   if (options.marketplaceHotelCollaborationPreferences) {
