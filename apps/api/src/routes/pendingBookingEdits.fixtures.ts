@@ -177,6 +177,7 @@ export async function cleanup(admin: pg.Pool): Promise<void> {
              SELECT id FROM booking.guest_bookings WHERE property_id = $1::uuid
            )`,
       "DELETE FROM booking.booking_addon_selections WHERE property_id = $1::uuid",
+      "DELETE FROM booking.original_charge_snapshots WHERE property_id = $1::uuid",
       "DELETE FROM booking.guest_bookings WHERE property_id = $1::uuid",
       "DELETE FROM booking.checkout_contexts WHERE property_id = $1::uuid",
       "DELETE FROM booking.quote_sessions WHERE property_id = $1::uuid",

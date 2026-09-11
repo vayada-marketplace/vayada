@@ -178,6 +178,7 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
         "booking.pending_booking_edit_attempts",
         "booking.booking_addon_selections",
         "booking.direct_booking_summary_read_model",
+        "booking.original_charge_snapshots",
         "booking.guest_bookings",
         "booking.checkout_contexts",
         "booking.promo_applications",
@@ -451,6 +452,35 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       }
     },
   );
+  it.each(["card", "pay_at_property"])("preserves original charges only beyond draft for %s", async (paymentMethod) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const property = { propertyId, displayName: "Mixed room test", defaultLocale: "en", timezone: "Europe/Athens" };
+      const request = { checkIn: input.checkIn, checkOut: input.checkOut, roomSelection: selection,
+        adults: 5, children: 1, numberOfRooms: 3, paymentMethod, email: "mixed@example.test" };
+      const context = { operation: "original-charge", requestId: randomUUID(), correlationId: randomUUID(),
+        idempotencyKey: randomUUID(), fingerprint: randomUUID(), occurredAt: input.occurredAt };
+      await client.query("UPDATE distribution.public_room_offer_snapshots SET payment_options=ARRAY[$2::text] WHERE property_id=$1", [propertyId, paymentMethod]);
+      const quote = await createTargetMixedCheckoutQuote(client, property, request, input.occurredAt);
+      // Exercise the actual booking producer's card-draft branch without a provider call.
+      const created = await createTargetGuestBooking(client, port, property,
+        { ...request, paymentMethod, expectedTotalAmount: quote.totalAmount }, context,
+        { ...quote, paymentMethod }, null, null, null);
+      const snapshots = (await client.query("SELECT totals,selected_offer FROM booking.original_charge_snapshots WHERE booking_id=$1", [created.guestBookingId])).rows;
+      if (paymentMethod === "card") {
+        expect(created.lifecycleStatus).toBe("draft");
+        expect(snapshots).toEqual([]);
+        // Same deletion constrained by the expired-draft job; no new retention FK blocks it.
+        expect((await client.query("DELETE FROM booking.guest_bookings WHERE id=$1 AND lifecycle_status='draft' RETURNING id", [created.guestBookingId])).rowCount).toBe(1);
+      } else {
+        expect(snapshots).toEqual(JSON.parse(JSON.stringify([{ totals: quote.totals, selected_offer: quote.selectedOfferSnapshot }])));
+      }
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
+  });
   it.each(["host", "guest"])("retains every room line when confirmed dates change through %s decisions", async (source) => {
     const client = await pool.connect();
     try {

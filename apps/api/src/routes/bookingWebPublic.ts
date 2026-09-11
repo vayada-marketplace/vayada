@@ -4050,6 +4050,15 @@ export async function createTargetGuestBooking(
        FROM booking_row
        ON CONFLICT DO NOTHING
      ),
+     original_charge AS (
+       INSERT INTO booking.original_charge_snapshots
+         (booking_id,property_id,quote_id,contract_version,classification_status,
+          currency,totals,selected_offer,request_id)
+       SELECT b."guestBookingId"::uuid,$1::uuid,q.id,'native-checkout-charge.v1',
+         'unclassified',q.currency,q.totals,q.selected_offer_snapshot,$28::jsonb->>'requestId'
+       FROM booking_row b JOIN booking.quote_sessions q ON q.id=$29::uuid AND q.property_id=$1::uuid
+       WHERE $33::uuid IS NULL AND b."lifecycleStatus" <> 'draft'
+     ),
      summary AS (
        INSERT INTO booking.direct_booking_summary_read_model
          (
