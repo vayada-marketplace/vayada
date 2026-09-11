@@ -214,6 +214,7 @@ jobs:
           src/jobs/financeExpenseGeneration.integration.test.ts
           src/jobs/pmsChannexBookingRevisionTombstones.integration.test.ts
           src/jobs/channexBookings.integration.test.ts
+          src/domains/bookingChargeReport.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts

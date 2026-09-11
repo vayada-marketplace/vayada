@@ -285,3 +285,13 @@ complete-report table until its components are available. Diagnostic/live purpos
 source environment are retained separately; only production can claim live purpose,
 and neither purpose changes the mandatory unverified status. There is no capture
 endpoint, trusted acceptance resolver or Finance caller in this storage slice.
+
+## Internal native hotel report command
+
+`submitBookingChargeReport` requires fresh Booking settings-management access before
+and after locking current property ownership and the booking. It supports unchanged,
+single-room EUR originals only, checks their exact current/preserved total, and keeps
+reported item/tax claims unverified. Server configuration owns source identity and
+purpose; diagnostic bindings cannot enter its live stream. Source-revision replay
+compares the payload and actor; corrections require the current report ID. No HTTP
+route, accepted item binding, provider ingestion or Finance consumer is enabled.
