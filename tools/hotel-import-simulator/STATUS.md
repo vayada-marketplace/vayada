@@ -143,3 +143,13 @@ typecheck pass with synthetic provider responses. No provider request was made.
 A verified read of the created property's group and the production binding resolver
 are still required before enabling the Airbnb connection flow. Existing connections
 are not retroactively certified by this change.
+
+## Channex group binding resolver
+
+The route-compatible resolver now requires direct creation evidence and a connected
+active enable claim, then verifies the exact external property and its single group
+through a bounded provider GET. It rechecks local evidence after provider I/O.
+Missing, mismatched or ambiguous bindings are rejected. The 53 targeted tests, API
+build and typecheck pass; independent review found no actionable defects. Database
+and provider responses for this slice are synthetic. Routes remain unmounted; live
+composition, production callback logging and fresh-host authorization remain pending.
