@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createPgHotelCatalogStep1Repository } from "./hotelCatalogStep1Repository.js";
+import {
+  createPgHotelCatalogStep1Repository,
+  readLockedHotelCatalogStep1State,
+} from "./hotelCatalogStep1Repository.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const userId = "57575757-5757-4757-8757-575757575701";
@@ -36,6 +39,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Hotel Catalog Step 1 command", (
     await repository.close();
     await cleanup();
     await admin.end();
+  });
+
+  it("reads Catalog inside the caller's transaction without committing it", async () => {
+    await admin.query("BEGIN");
+    try {
+      const before = await admin.query("SELECT txid_current()::text AS id");
+      const state = await readLockedHotelCatalogStep1State(admin, {
+        organizationId,
+        propertyId,
+        actorUserId: userId,
+      });
+      expect(state?.readModel.propertyId).toBe(propertyId);
+      const after = await admin.query("SELECT txid_current()::text AS id");
+      expect(after.rows[0].id).toBe(before.rows[0].id);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
   });
 
   it("atomically saves locale, summary, reviewed-empty amenities, slug, setup fallback, audit, and outbox", async () => {
