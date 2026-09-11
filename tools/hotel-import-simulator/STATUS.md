@@ -83,12 +83,10 @@ Marketplace lint passed (48 existing warnings, zero errors).
 
 ## Remaining boundary
 
-The callback is disabled by default, and provider routes are not mounted. Next:
-resolve trusted account/property bindings and redact initial callback request logs
-before live enablement. The new review/save path needs one integrated canonical-DB
-smoke using the local harness; the existing database demo still starts from accepted
-invitation data. A full fresh-host authorization remains unverified. No live provider
-write or deployment was performed for these connection lifecycle slices.
+The callback is disabled by default, and provider routes are not mounted remotely.
+Next: resolve trusted account/property bindings and redact initial callback request
+logs before live enablement. A full fresh-host authorization remains unverified.
+No live provider write or deployment was performed for these connection lifecycle slices.
 
 Follow-up: the [Airbnb source slice](../../engineering/airbnb-onboarding-source.md)
 adds an unmounted read-only adapter for channel scope checks, listing names and
@@ -105,7 +103,22 @@ Production binding/link ports, callback UI, save receipts and live wiring remain
 Do not infer deployment from a merged foundation PR. This record does not verify
 the running remote revision, invite redemption or a complete launch-ready hotel.
 
-Migration numbering coordination: the unmerged Airbnb receipt migration is now
+Migration numbering coordination: the Airbnb receipt migration is now
 0182, reserving Finance0180 and Channex adoption0181. SQL is byte-identical. The
 earlier local0180 evidence above is historical; that local database was removed
 by the separate prepared-import task. No deployed migration ledger was changed.
+
+## Integrated Airbnb database result — 2026-09-11
+
+The actual callback/review UI now passed against real source, receipt and canonical
+room repositories in the reserved PostgreSQL database. It saved one selected room,
+recovered a lost save response through refresh/reload, removed only that new source's
+receipt, and concurrently replayed a changed draft twice. Both retries returned the
+same room ID; the room list and full canonical facts remained unchanged. Readback
+verified name, guest/adult/child limits, queen bed/quantity, and private bathroom.
+
+Two successful runs left two uniquely named Airbnb DB Suite room types for inspection.
+The existing Onboarding Imported Loft and Settings Imported Suite were preserved.
+Provider approval/listings and identity are synthetic; import responses and room writes
+are real. The callback flag was restored to false after testing. See [DATABASE.md](DATABASE.md)
+for the repeatable opt-in command and exact scope.
