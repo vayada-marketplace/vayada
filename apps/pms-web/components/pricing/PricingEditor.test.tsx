@@ -140,3 +140,12 @@ it("keeps included-adult adjustments when editing and reviewing the saved base p
   expect(JSON.stringify(view.toJSON())).toContain("1 adult −30.00 EUR; 2 adults 0.00 EUR");
   expect(button("Approve rates").props.disabled).toBe(true);
 });
+it("labels every saved weekday using Monday-zero without changing its adjustment", async () => {
+  const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  const weekdays = Array.from({ length: 7 }, (_, day) => ({ day, adjustment: { kind: "percentage" as const, basisPoints: (day + 1) * 100 } }));
+  client.read.mockResolvedValueOnce({ ...snapshot, revision: 1, sources, stale: false, rooms: [{ ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, weekdays } } }] }] });
+  await mount(); await click("Save draft"); await click("Review saved charges");
+  const paragraphs = view.root.findAllByType("p").map((node) => node.children.join(""));
+  expect(paragraphs).toEqual(expect.arrayContaining(["Monday: 1%", "Tuesday: 2%", "Wednesday: 3%", "Thursday: 4%", "Friday: 5%", "Saturday: 6%", "Sunday: 7%"]));
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { weekdays } });
+});
