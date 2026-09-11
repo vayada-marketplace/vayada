@@ -109,11 +109,24 @@ it.each([new Error("lost preparation response"), new ApiErrorResponse(403, {})])
   const policy = vi.fn().mockResolvedValue({ revision: id }); client.termsAction.mockReturnValue(policy);
   client.prepare.mockRejectedValueOnce(failure);
   await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} setup={{ propertyId: id, rooms: [room] }} />); });
-  const input = firstPricingInput(id, room, id, { room: id, currency: "EUR", base: "130", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+  const input = firstPricingInput(id, room, id, { mode: "flat", occupancy: [], room: id, currency: "EUR", base: "130", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
   await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(input));
   expect(view.root.findByType(FirstPricingSetup).props.disabled).toBe(true); expect(button("Reload pricing").props.disabled).toBe(true);
   await click("Retry last action"); expect(policy).toHaveBeenCalledOnce(); expect(client.prepare).toHaveBeenCalledTimes(2);
   expect(client.saveDraft).not.toHaveBeenCalled(); expect(confirm).not.toHaveBeenCalled(); expect(button("Review saved charges").props.disabled).toBe(true);
   await click("Save draft"); expect(saved.baseRevision).toBe(0); expect(saved.snapshot.rooms[0].offers[0].termsRevision).toBe(id);
   await click("Review saved charges"); expect(button("Approve rates").props.disabled).toBe(true);
+});
+it.each(["occupancy", "per_person"])("preserves %s prices through editing and saved charge review", async (mode) => {
+  const value = structuredClone(snapshot), offer = value.rooms[0].offers[0];
+  if (offer.price.kind !== "independent") throw new Error("fixture");
+  const price = { ...offer.price, calendar: { ...offer.price.calendar, base: mode === "occupancy" ? { mode, amountsMinor: ["10000", "13000"] } : { mode: "per_person", unitMinor: "6000" } } };
+  client.read.mockResolvedValue({ ...value, rooms: [{ ...value.rooms[0], offers: [{ ...offer, price }] }], revision: 1, sources, stale: false }); await mount();
+  const label = mode === "occupancy" ? "Room 1 Offer 1 2 adults" : "Room 1 Offer 1 Per adult";
+  await act(async () => view.root.findByProps({ "aria-label": label }).props.onChange({ target: { value: "75.25" } }));
+  await click("Save draft"); await click("Review saved charges");
+  expect(view.root.findByProps({ "aria-label": label }).props.value).toBe("75.25");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: mode === "occupancy" ? { mode, amountsMinor: ["10000", "7525"] } : { mode: "per_person", unitMinor: "7525" } } });
+  expect(saved.snapshot.rooms[0].children).toEqual(snapshot.rooms[0].children);
+  expect(button("Approve rates").props.disabled).toBe(true);
 });
