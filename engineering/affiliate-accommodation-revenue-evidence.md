@@ -189,3 +189,18 @@ This supersedes the prior card-capture limitation only for evidenced drafts adva
 through these functions. Abandoned drafts still have no snapshot and remain deletable.
 The saved price remains unclassified; authorization alone is neither hotel acceptance
 nor collected payment, and later price amendments need separate evidence.
+
+## Native reported components
+
+`decomposeNativeCheckoutCharge` checks the arithmetic of trusted
+`native-checkout-charge.v1` snapshots. It reports room, taxes/fees and extras in
+exact two-place minor units after room discounts. Single-type booking-wide promos
+with non-room charges and mixed-room allocations stay pending; contradictory totals
+require review. It does not use payment net proceeds or apply refund deductions.
+
+The result deliberately remains `reported_components` with tax classification
+`unverified`. `pmsInventoryPublicOfferProjection.ts` currently projects literal zero
+for taxes/fees; that is not the mandatory-charge confirmation consumed by the
+separate versioned price factory. Do not promote these reported components into
+`netAccommodationMinor` without producer-backed tax semantics, accepted item scope
+and confirmed collection/refund reconciliation. No route or journal caller is wired.

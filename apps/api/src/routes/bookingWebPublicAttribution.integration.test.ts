@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { decomposeNativeCheckoutCharge } from "@vayada/domain-booking";
 import { readBookingAffiliateProbeEvidence } from "../domains/bookingAffiliateProbeEvidence.js";
 import { chromium } from "@playwright/test";
 import { context as hotelContext } from "../domains/affiliatePublicationTestFixture.js";
@@ -920,6 +921,23 @@ describe.skipIf(!TEST_DATABASE_URL)(
             )
           ).rows;
           expect(binding).toEqual([{ probe_id: issued.probe.slice(4) }]);
+          const charges = (
+            await admin.query(
+              "SELECT contract_version,totals,selected_offer FROM booking.original_charge_snapshots WHERE quote_id=$1",
+              [browserQuote],
+            )
+          ).rows[0];
+          expect(
+            decomposeNativeCheckoutCharge({
+              contractVersion: charges.contract_version,
+              totals: charges.totals,
+              selectedOffer: charges.selected_offer,
+            }),
+          ).toMatchObject({
+            status: "reported_components",
+            reportedRoomMinor: "20000",
+            taxClassification: "unverified",
+          });
           expect(await page.context().cookies()).toEqual([]);
           expect(await page.evaluate("[localStorage.length, sessionStorage.length]")).toEqual([
             0, 0,
