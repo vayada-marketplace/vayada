@@ -260,3 +260,28 @@ revision and reconciliation tests. Each connected PMS then maps its actual suppo
 source through the same boundary. Source trust/acceptance checks, confirmed collection,
 allocated refunds and verified stay completion must all pass before Finance can use
 these components for earnings. A submitted breakdown alone does not release money.
+
+## Initial unverified report storage
+
+Migration 0187 stores complete **reported** components with explicit minor-unit scale,
+source/version, actor/request, observation time, and append-only correction lineage.
+The first storage scope requires an existing immutable native original-charge snapshot;
+external bookings without that evidence are not yet supported. Source-neutral report
+fields do not certify a connected system's integration or enable its ingestion.
+
+`evidence_status` is always `unverified`. Reported charge/item references are source
+claims, not canonical acceptance bindings. The sum check proves only internal
+arithmetic; it does not match a report to an accepted total or establish tax truth.
+A source revision is opaque and cannot be ordered lexically. The future owning command
+must authenticate current scope, resolve canonical accepted charge/item references,
+validate currency precision and source revision ordering, and atomically distinguish
+identical replay from conflicting content. Storage revisions advance by one within each report stream, independently of the
+opaque source revision. A single successor per prior report prevents cycles and
+branching corrections; stored history cannot be updated, deleted or truncated.
+
+All component amounts must be explicit and already net of their allocated discounts.
+Unknown tax cannot be entered as zero. An incomplete report stays pending outside this
+complete-report table until its components are available. Diagnostic/live purpose and
+source environment are retained separately; only production can claim live purpose,
+and neither purpose changes the mandatory unverified status. There is no capture
+endpoint, trusted acceptance resolver or Finance caller in this storage slice.
