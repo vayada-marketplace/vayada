@@ -30,10 +30,10 @@ as commissionable accommodation revenue.
 
 Implemented layers cover policy validation, immutable storage and authorized save
 and approval commands, plus persisted exact-version resolution. HTTP adapters and the
-hotel editor follow. Refund/no-show handling, discount
-allocation, payer, platform fees, currency conversion, rounding of earned amounts
-and payout scheduling remain outside this contract; no settlement calculator or
-earning activation is introduced. Existing accepted agreements must retain their
+hotel editor are described below. The accepted cancellation/refund, payer and payout
+cadence rules are now recorded in [earning and settlement](affiliate-earning-settlement.md).
+Detailed evidence allocation, currency/rounding, exact scheduling and pricing remain
+separately scoped there; no settlement calculator or earning activation is introduced. Existing accepted agreements must retain their
 original policy version when a hotel later changes its rate.
 
 ## Immutable storage
