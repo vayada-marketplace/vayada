@@ -212,3 +212,51 @@ for taxes/fees; that is not the mandatory-charge confirmation consumed by the
 separate versioned price factory. Do not promote these reported components into
 `netAccommodationMinor` without producer-backed tax semantics, accepted item scope
 and confirmed collection/refund reconciliation. No route or journal caller is wired.
+
+## Capturing the missing tax breakdown
+
+The native onboarding contract currently stores a final guest-facing price including
+predictable mandatory charges, without their separate amounts. Preserve that price
+and checkout behavior. Affiliate evidence needs an additional breakdown of the
+accepted charges; a current property tax setting must not retroactively classify an
+old booking. Vayada's booking-platform commission basis is separate from the accepted
+creator commission basis and cannot supply the missing affiliate tax semantics.
+
+Use the same Booking-owned evidence shape for native hotel reporting and PMS adapters:
+
+- Exact property, canonical booking and stay-item IDs, accepted-charge revision and
+  immutable source reference. A room-type ID or mutable quote is not a stay-item ID.
+- Currency and explicit minor-unit scale; exact component amounts after their allocated
+  discounts: accommodation excluding taxes/extras, taxes, extras, and other charges
+  such as mandatory fees or penalties. Unresolved charges remain explicitly unresolved.
+- Source kind, environment and connection, source record/revision, producer version,
+  observed time, and submitting actor/request for authenticated hotel reports.
+  Preserve whether evidence is hotel-reported or supplied by a connected system;
+  a label alone must not upgrade either source into verified payment evidence.
+
+The complete component sum must equal the accepted charge total in that currency.
+Included tax is carved out of the existing gross price, never added to it again.
+An explicit zero requires source evidence of zero tax; omission, a zero projection
+field, or the mandatory-charge-included checkbox is not enough. Do not derive tax
+from hotel location, today's rate, a free-text label or an arbitrary client amount.
+Adapters must document the source fields and included/excluded semantics they map.
+PMS capability validation must distinguish available tax amounts
+from a generic reservation-total field; unsupported providers remain pending.
+
+For example, accepted total EUR 650 can reconcile as accommodation 500, included tax
+50 and extras 100. A report of accommodation 550 and extras 100 with unknown included
+tax does not qualify. Likewise, adding tax 50 to those same gross components produces
+700 and must require review rather than changing the guest's 650 charge.
+
+Capture validates current actor/property authorization and the expected accepted-charge
+revision. Replaying the same source event is idempotent; different content under the
+same event identity conflicts. Corrections append a revision that supersedes a known
+prior record; stale submissions cannot replace newer accepted evidence. Diagnostics
+remain separate. An amendment requires evidence for its new accepted charge revision.
+
+This describes the next implementation boundary, not an available capture endpoint.
+First implement owner storage/commands and the native hotel submission surface with
+revision and reconciliation tests. Each connected PMS then maps its actual supported
+source through the same boundary. Source trust/acceptance checks, confirmed collection,
+allocated refunds and verified stay completion must all pass before Finance can use
+these components for earnings. A submitted breakdown alone does not release money.
