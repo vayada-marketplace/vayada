@@ -57,3 +57,27 @@ access, invalid data, bounded responses and sparse normalization. No real host
 authorization or current live-listing read is claimed. Remaining slices are durable
 source storage, authenticated connection start/callback, selection and details,
 shared-review integration, and fresh-host verification.
+
+## Durable connection attempt and source slice
+
+Migration 0179 adds `hotel_catalog.airbnb_import_sources`, separate from invitations.
+An internal repository generates a random 256-bit state, persists only its SHA-256
+digest, and binds it to actor, organization, canonical property, Channex environment,
+group and external property. Pending state expires after 20 minutes, independently
+of the provider link lifetime. Invalid/expired/wrong-scope callbacks return no record.
+
+The future callback must reauthorize the session, resolve the pending record, and
+verify/read the channel using its stored scope. Only then may it atomically complete
+the attempt with the channel ID and validated prepared snapshot. Concurrent callbacks
+have one winner. Completed snapshots are immutable; a unique environment/channel
+binding prevents a new attempt from binding that connection elsewhere or generating
+a second source identity. Reconnection/source refresh needs a later explicit reuse
+flow; it must not overwrite this snapshot. Reading a completed source requires its
+exact actor/organization/property scope and remains possible after attempt expiry.
+
+This repository is internal infrastructure, not an authorization boundary. Route
+policy, current membership/permission/property-access checks, callback CSRF/session
+correlation, failed-attempt cleanup, and item-level application receipts remain later
+slices. No route is mounted and no provider connection is created by this change.
+Integration tests use bounded synthetic records in the reserved local database,
+including concurrent completion and conflicting channel bindings.

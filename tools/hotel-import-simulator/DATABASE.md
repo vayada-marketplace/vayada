@@ -37,3 +37,18 @@ without duplicate or overwritten edits, incomplete/unknown input, wrong-property
 access, cross-origin writes, direct backend access, and missing-facts guidance.
 The fixtures create room types only; no physical room units, rates or publication.
 The original session-storage simulator remains available on port 1379.
+
+The Airbnb source-storage slice adds migration 0179 and an internal repository.
+Its integration test uses this same reserved database, creates unique synthetic
+users/organizations/properties, then removes only those records. It does not reset
+the demo or perform provider requests. With migration 0179 applied, run from
+`apps/api`:
+
+```sh
+TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:59709/vay1009_import_test npx vitest run src/airbnbImportSourceRepository.integration.test.ts
+```
+
+For the existing older demo migration ledger, validation applied only the new
+0179 SQL through the migration runner's `--migrations-dir` option, using a temporary
+directory containing that file. No historical migration was changed or replayed.
+This verifies the new table against local fixtures, not a full production migration.
