@@ -55,16 +55,57 @@ for (const scenario of ["success", "not-ready", "failure", "unsafe-url", "retry"
   });
 }
 
-for (const adaptive of [false, true]) {
-  test(`Airbnb entry for automatically selected hotel: adaptive=${adaptive}`, async ({ page }) => {
+for (const entry of ["earlier", "adaptive", "invite-pms", "invite-combined"] as const) {
+  test(`Airbnb entry for automatically selected hotel: ${entry}`, async ({ page }) => {
+    const invited = entry.startsWith("invite-");
+    const entryProduct = entry === "invite-combined" ? "marketplace" : "pms";
+    const selectedTracks =
+      entry === "invite-combined"
+        ? (["hotel_operations", "creator_marketplace"] as const)
+        : (["hotel_operations"] as const);
+    const inviteCode = "VAY-airbnb-synthetic-invite";
+    const inviteCalls: string[] = [];
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
     await page.route(/\/(api|auth)\//, async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       const path = new URL(route.request().url()).pathname;
       const send = (json: unknown) => route.fulfill({ json, headers: corsHeaders(route) });
-      if (path === "/auth/session")
+      if (path.startsWith("/api/marketplace/hotel-account-invites/")) {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toEqual({ code: inviteCode });
+        expect([
+          "/api/marketplace/hotel-account-invites/lookup",
+          "/api/marketplace/hotel-account-invites/redeem",
+        ]).toContain(path);
+        inviteCalls.push(path);
+        return send({
+          contractVersion: "hotel-account-invite.v1",
+          selectedTracks,
+          handoffPath: "/setup",
+          ...(path.endsWith("/lookup")
+            ? {
+                identity: { emailHint: "o****@example.test" },
+                organization: { displayName: "Test" },
+                property: { displayName: "Test Hotel" },
+                expiresAt: "2030-01-01T00:00:00.000Z",
+              }
+            : { status: "redeemed" }),
+        });
+      }
+      if (path === "/auth/onboarding") {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toEqual({
+          type: "hotel",
+          surface: "marketplace-web",
+          inviteCode,
+        });
+      }
+      if (path === "/auth/session" || path === "/auth/onboarding")
         return send({
           accessToken: "synthetic-token",
-          organizationId: propertyId,
+          csrfToken: "synthetic-csrf-token",
+          organizationId: "10090000-0000-4000-8000-000000000099",
           organizationKind: "hotel_group",
           workosOrganizationId: "org_synthetic",
           user: {
@@ -80,23 +121,39 @@ for (const adaptive of [false, true]) {
       if (path === "/api/hotel-setup/status")
         return send(
           createAdaptiveHotelSetupStatusMock({
-            entryProduct: "pms",
-            organizationId: propertyId,
+            entryProduct,
+            organizationId: "10090000-0000-4000-8000-000000000099",
             organizationDisplayName: "Test",
             propertyId,
             propertyDisplayName: "Test Hotel",
-            selectedTracks: ["hotel_operations"],
+            selectedTracks: [...selectedTracks],
             entryDecision: {
               propertyId,
               decision: "enter",
-              destinationRouteKey: "pms.workspace",
+              destinationRouteKey: `${entryProduct}.workspace`,
               reasonCode: null,
             },
           }),
         );
       return route.fulfill({ status: 503, headers: corsHeaders(route), json: {} });
     });
-    await page.goto(`/setup?entryProduct=pms${adaptive ? "&_adaptive=1" : ""}`);
+    if (invited) {
+      await page.goto(`/invite#code=${inviteCode}`);
+      await page.getByRole("button", { name: "Accept and continue to setup" }).click();
+      await expect(page).toHaveURL(
+        new RegExp(`/setup\\?entryProduct=${entryProduct}&returnProduct=${entryProduct}$`),
+      );
+      expect(inviteCalls).toEqual([
+        "/api/marketplace/hotel-account-invites/lookup",
+        "/api/marketplace/hotel-account-invites/redeem",
+      ]);
+      expect(requestedUrls.some((url) => url.includes(inviteCode))).toBe(false);
+      expect(
+        await page.evaluate(() => sessionStorage.getItem("vayada.hotel-account-invite.v1")),
+      ).toBeNull();
+    } else {
+      await page.goto(`/setup?entryProduct=pms${entry === "adaptive" ? "&_adaptive=1" : ""}`);
+    }
     const link = page.getByRole("link", {
       name: "Connect Airbnb to import rooms (opens in a new tab)",
     });
