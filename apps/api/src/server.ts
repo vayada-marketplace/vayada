@@ -135,6 +135,7 @@ import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
+import { createFinancePaymentSetupRuntime } from "./domains/financePaymentSetupRuntime.js";
 import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
@@ -811,6 +812,12 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
+  connectionString: targetDatabaseUrl,
+  pricing: pmsPricingReadModel,
+  finance: financePaymentReadinessReadModel,
+  scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
+});
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
 });
@@ -1278,6 +1285,7 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
+  financePaymentSetup: financePaymentSetupRuntime.routes,
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,
@@ -1796,6 +1804,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
+    financePaymentSetupRuntime.close(),
     marketplaceSetupLifecycleStatusRepository.close(),
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),

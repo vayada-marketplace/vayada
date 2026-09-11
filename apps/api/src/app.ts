@@ -269,6 +269,10 @@ import {
   type BookingGuestPolicyRoutesOptions,
 } from "./routes/bookingGuestPolicy.js";
 import { registerFinanceOtaCommissionSettingsRoutes as registerOtaSettings } from "./routes/financeOtaCommissionSettings.js";
+import {
+  registerFinancePaymentReadinessRoutes,
+  type FinancePaymentReadinessRoutesOptions,
+} from "./routes/financePaymentReadiness.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -284,6 +288,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
   bookingHostActions?: BookingHostActions;
@@ -690,6 +695,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingPublicationRoutes, {
       prefix: "/api/hotel-setup",
       ...options.bookingPublication,
+    });
+  }
+  if (options.financePaymentSetup) {
+    app.register(registerFinancePaymentReadinessRoutes, {
+      prefix: "/api",
+      ...options.financePaymentSetup,
     });
   }
   if (options.identityPrivacyRepository) {
