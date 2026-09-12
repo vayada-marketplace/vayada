@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 import type {
   ManagePhysicalRoomCommand,
@@ -189,6 +190,11 @@ async function mutate(
       "Rooms changed since this view was opened. Reload and reapply your change.",
       { currentRevision: roomType.rows[0].revision },
     );
+  const eligibility = (await readPmsRoomOperatingEligibility(client, command.propertyId)).find(
+    (room) => room.roomTypeId === command.roomTypeId,
+  );
+  if (eligibility?.state !== "operating")
+    return failure("room_type_not_found", "This room type is closing and cannot be changed.");
   const units = await client.query<{ id: string; status: string }>(
     `SELECT id::text, status FROM pms.rooms
     WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND status<>'retired' ORDER BY id FOR UPDATE`,
