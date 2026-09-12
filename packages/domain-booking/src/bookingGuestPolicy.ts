@@ -53,7 +53,7 @@ export type BookingGuestPolicyChoices = Readonly<{
   specialRequestsEnabled: boolean;
   checkInTime: string;
   checkOutTime: string;
-  /** Optional same-day check-in deadline; omission preserves historical from-only policies. */
+  /** Optional check-in deadline; 00:00 means end of arrival day. */
   checkInUntil?: string;
   /** Optional same-day check-out start; omission preserves historical by-only policies. */
   checkOutFrom?: string;
@@ -212,8 +212,12 @@ export function bookingArrivalTimeErrors(value: Record<string, unknown>): string
     }
   }
   if (errors.length) return errors;
-  if (typeof value.checkInUntil === "string" && value.checkInUntil <= String(value.checkInTime)) {
-    errors.push("Check-in until must be later than check-in from on the same day.");
+  if (
+    typeof value.checkInUntil === "string" &&
+    value.checkInUntil !== "00:00" &&
+    value.checkInUntil <= String(value.checkInTime)
+  ) {
+    errors.push("Check-in until must be later than check-in from, or 00:00 for end of day.");
   }
   if (typeof value.checkOutFrom === "string" && value.checkOutFrom >= String(value.checkOutTime)) {
     errors.push("Check-out from must be earlier than check-out by on the same day.");
