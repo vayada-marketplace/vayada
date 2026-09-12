@@ -66,6 +66,7 @@ export type ProviderWebhookConfig = {
   stripeMode: ProviderWebhookIntakeMode;
   xenditMode: ProviderWebhookIntakeMode;
   channexMode: ProviderWebhookIntakeMode;
+  channexReviewMode?: ProviderWebhookIntakeMode;
 };
 
 export type ChannexManagementMode = "observe_only" | "mutating";
@@ -536,6 +537,14 @@ function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfi
       ["observe_only", "mutating", "ack_only_with_receipt"],
       "observe_only",
     ),
+    channexReviewMode: readOptionalEnv(env, "CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE")
+      ? readSourceEnv(
+          env,
+          "CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE",
+          ["observe_only", "mutating", "ack_only_with_receipt"] as const,
+          "observe_only",
+        )
+      : undefined,
     channexMode: readSourceEnv(
       env,
       "CHANNEX_WEBHOOK_INTAKE_MODE",
