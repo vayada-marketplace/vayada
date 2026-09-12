@@ -10,6 +10,8 @@ const authPublicHostname = (() => {
 })();
 const nextConfig = {
   reactStrictMode: true,
+  // Provider callback queries contain a single-use correlation token.
+  logging: { incomingRequests: { ignore: [/^\/setup\/airbnb-return(?:\/|\?|$)/] } },
   async headers() {
     return [
       {
