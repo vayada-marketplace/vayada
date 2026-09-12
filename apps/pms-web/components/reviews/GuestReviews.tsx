@@ -107,6 +107,8 @@ function GuestReview({
       setBusy(false);
     }
   }
+  const reasonKey = `reviews.guest.reason.${status.reason}`;
+  const reason = t(reasonKey);
   const editable = opened && ["ready", "failed"].includes(status.state);
   const shown = status.state === "accepted" ? status.draft : draft;
   return (
@@ -119,7 +121,9 @@ function GuestReview({
         {t(`reviews.guest.${busy ? "submitting" : status.state}`)}
       </p>
       {status.reason && (
-        <p className="text-sm text-gray-500">{t(`reviews.guest.reason.${status.reason}`)}</p>
+        <p className="text-sm text-gray-500">
+          {reason === reasonKey ? t("reviews.guest.reason.provider_unavailable") : reason}
+        </p>
       )}
       {(editable || preview || (shown && status.state !== "ready")) && (
         <fieldset disabled={busy || !editable || preview} className="mt-3 space-y-3">
