@@ -69,15 +69,19 @@ export function matchesChannexCreationReceipt(
 /** Caller holds the target row lock before this query, as receipt capture does.
  * No history is cleared; the local 1000-row work ceiling also fails closed.
  */
-export async function channexCreationReceiptsResolved(client: PoolClient, targetId: string) {
+export async function channexCreationReceiptsResolved(
+  client: PoolClient,
+  targetId: string,
+  freshAttemptId: string | null = null,
+) {
   const rows = (
     await client.query(
       `SELECT a.state,a.job_attempt_id,a.worker_id,a.external_property_id,a.external_room_type_id,a.external_rate_plan_id,
        r.id AS receipt_id,r.outcome,r.http_status,r.has_warnings,r.identity_evidence
      FROM pms.channex_offer_create_attempts a
      LEFT JOIN pms.channex_offer_create_receipts r ON r.attempt_id=a.id
-     WHERE a.target_id=$1 LIMIT 1001`,
-      [targetId],
+     WHERE a.target_id=$1 AND ($2::uuid IS NULL OR a.id<>$2::uuid) LIMIT 1001`,
+      [targetId, freshAttemptId],
     )
   ).rows;
   return (
