@@ -8,5 +8,6 @@ describe("published arrival policy display", () => {
     const ranges = { ...times, checkInUntil: "23:00", checkOutFrom: "07:00" };
     expect(formatCheckInTime(ranges)).toBe("15:00–23:00");
     expect(formatCheckOutTime(ranges)).toBe("07:00–11:00");
+    expect(formatCheckInTime({ ...times, checkInUntil: "00:00" })).toBe("15:00–00:00");
   });
 });

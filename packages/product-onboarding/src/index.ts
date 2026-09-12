@@ -1,5 +1,4 @@
 export { default as AddonsStep, createEmptyAddon, type SetupAddon } from "./AddonsStep";
-export { default as BenefitsStep } from "./BenefitsStep";
 export { default as BrandMediaStep } from "./BrandMediaStep";
 export { BookingPagePreview } from "./BookingPagePreview";
 export {
@@ -35,13 +34,6 @@ export {
   type PropertyLaunchSettings,
   type PropertyLaunchSettingsApi,
 } from "./propertyLaunchSettings";
-export {
-  default as LastMinuteStep,
-  DEFAULT_LAST_MINUTE_TIERS,
-  createEmptyLastMinuteConfig,
-  type LastMinuteConfig,
-  type LastMinuteTier,
-} from "./LastMinuteStep";
 export { default as PoliciesStep } from "./PoliciesStep";
 export {
   default as SharedFirstRunPropertySetupWizard,
@@ -163,7 +155,6 @@ export {
   type PartialRefundTier,
   type RoomType,
 } from "./RoomsStep";
-export { useSetupWizardState, type RoomTab, type SetupWizardOptions } from "./useSetupWizardState";
 export {
   readBankTransferDestination,
   saveBankTransferDestination,
