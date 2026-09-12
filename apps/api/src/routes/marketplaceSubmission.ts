@@ -25,6 +25,7 @@ export async function registerMarketplaceSubmissionRoutes(
     request: FastifyRequest,
     reply: Parameters<typeof authorizeRequest>[1],
   ) => {
+    reply.header("Cache-Control", "no-store");
     const scope = authorizeRequest(request, reply);
     if (scope)
       scopes.set(request, {
@@ -46,7 +47,7 @@ export async function registerMarketplaceSubmissionRoutes(
         const result = await options.repository.getReview(scope, key ?? undefined);
         if (result.propertyId !== scope.propertyId)
           return reply.status(500).send({ code: "invalid_submission_result" });
-        return reply.header("Cache-Control", "no-store").send(result);
+        return reply.send(result);
       } catch (error) {
         if (error instanceof MarketplaceSubmissionError)
           return reply.status(error.status).send({ code: error.code });
@@ -70,7 +71,7 @@ export async function registerMarketplaceSubmissionRoutes(
         const result = await options.repository.submit(scope, key, body);
         if (result.propertyId !== scope.propertyId)
           return reply.status(500).send({ code: "invalid_submission_result" });
-        return reply.header("Cache-Control", "no-store").status(201).send(result);
+        return reply.status(201).send(result);
       } catch (error) {
         if (error instanceof MarketplaceSubmissionError)
           return reply.status(error.status).send({ code: error.code });

@@ -109,6 +109,7 @@ it.each(["GET", "POST"] as const)("rejects anonymous %s before owner calls", asy
     payload: method === "POST" ? body : undefined,
   });
   expect(reply.statusCode).toBe(401);
+  expect(reply.headers["cache-control"]).toBe("no-store");
   expect(h.repository.submit).not.toHaveBeenCalled();
   expect(h.repository.getReview).not.toHaveBeenCalled();
 });
@@ -132,6 +133,7 @@ it.each([
       payload: method === "POST" ? body : undefined,
     });
     expect(reply.statusCode).toBe(403);
+    expect(reply.headers["cache-control"]).toBe("no-store");
   }
   expect(h.repository.submit).not.toHaveBeenCalled();
   expect(h.repository.getReview).not.toHaveBeenCalled();
@@ -204,3 +206,21 @@ it.each([
   expect(reply.statusCode).toBe(400);
   expect(h.repository.submit).not.toHaveBeenCalled();
 });
+
+it.each(["invalid-key", "foreign-result", "repository-error", "unexpected-error"])(
+  "prevents caching review errors: %s",
+  async (failure) => {
+    const h = await harness();
+    if (failure === "foreign-result") h.repository.getReview.mockResolvedValue({ propertyId: "foreign" });
+    if (failure === "repository-error")
+      h.repository.getReview.mockRejectedValue(new MarketplaceSubmissionError("submission_revision_conflict"));
+    if (failure === "unexpected-error") h.repository.getReview.mockRejectedValue(new Error("unavailable"));
+    const reply = await h.app.inject({
+      method: "GET",
+      url: `/properties/${propertyId}/submission-review`,
+      headers: { ...headers, "idempotency-key": failure === "invalid-key" ? "" : "saved-key" },
+    });
+    expect(reply.statusCode).toBe(failure === "invalid-key" ? 400 : failure === "repository-error" ? 409 : 500);
+    expect(reply.headers["cache-control"]).toBe("no-store");
+  },
+);
