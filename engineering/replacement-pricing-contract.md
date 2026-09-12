@@ -7,8 +7,8 @@ no runtime fallback, routes, persistence, evaluator or provider activation here.
 ## Money and room modes (VAY-1554)
 
 All amounts are canonical integer minor-unit strings, never JS floating-point
-money. Currency vocabulary/scale comes from the runtime ISO/ICU currency data;
-unknown codes fail. Store currency alongside amount. Scale-0 JPY, scale-2 IDR,
+money. Currency vocabulary comes from runtime ICU; scales use ISO accounting
+overrides where ICU display-rounding defaults differ (VAY-1925). Unknown codes fail. Store currency alongside amount. Scale-0 JPY, scale-2 IDR,
 and scale-3 KWD are representable; provider support is a separate adapter gate.
 Amounts are bounded to 18 digits for validation; calculation overflow must fail.
 Do not pass these objects to old scale-2 interfaces without explicit conversion.
@@ -265,3 +265,32 @@ Production Python and accepted booking evidence are unchanged. Unlike Python's
 mixed-room failure path, the new conversion never returns a relabeled room after
 a missing exchange-rate failure; approved exact minor units also replace Python's
 floating arithmetic and legacy IDR scale convention.
+
+## Trusted FX observations (VAY-1925)
+
+`createReplacementPricingFxReader` is a server-owned reader for the same
+ExchangeRate-API open endpoint used by Python. It uses a fixed HTTPS origin,
+rejects redirects and bounds requests to 10 seconds and 128 KiB. A successful
+response must match the provider/base currency, contain an explicit requested
+pair, and remain inside its observation/update/EOL window at consumption. Validity
+is capped at 24 hours after observation. Errors return unavailable, never 1:1.
+
+Node 24+ JSON reviver source text preserves numeric tokens before binary floating
+rounding. Decimal/exponent rates become reduced BigInt ratios including source
+and target minor-unit scales; ratios exceeding the existing 18-digit bounds fail.
+A stable evidence ID binds provider, pair, exact ratio and observation/expiry.
+The reader caches by base until expiry, coalesces requests, and cools down failed
+fetches for one hour. It never returns stale evidence during an outage.
+
+SIX List One (published 2026-01-01) exposed 16 ICU display-scale differences. The
+shared pricing helper now explicitly uses ISO accounting scales for these codes,
+including IDR=2 and IQD=3; the others are recorded with regression tests. This
+corrects the previously documented scale promise rather than changing its meaning.
+
+Fetch observations outside property database locks. This adapter does not persist
+FX history, authenticate property access, convert separately owned amounts or
+authorize publication. The final transaction must still validate observation expiry
+and exact evidence references together with all other owners. Future consuming UI
+must show `REPLACEMENT_FX_ATTRIBUTION`; raw-rate redistribution is not exposed.
+Provider reference: https://www.exchangerate-api.com/docs/free. ISO reference:
+https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml.

@@ -15,11 +15,17 @@ export type RoomPrice =
     }>
   | Readonly<{ mode: "per_person"; unitMinor: string }>;
 
-// Use the host's ISO currency vocabulary, including legacy IDR and zero-unit JPY.
+// ICU supplies the currency vocabulary, but its display defaults differ from ISO minor units.
+// SIX List One (2026-01-01): these are the differences from Node 24/26 ICU.
+// https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
+const accountingScales: Readonly<Record<string, number>> = Object.freeze({
+  AFN: 2, ALL: 2, COP: 2, HUF: 2, IDR: 2, IQD: 3, IRR: 2, KPW: 2,
+  LAK: 2, LBP: 2, MGA: 2, MMK: 2, PKR: 2, SOS: 2, SYP: 2, YER: 2,
+});
 const currencies = new Set(Intl.supportedValuesOf("currency"));
 export function pricingCurrencyScale(currency: string): number | null {
   if (!currencies.has(currency)) return null;
-  return new Intl.NumberFormat("en", { style: "currency", currency })
+  return accountingScales[currency] ?? new Intl.NumberFormat("en", { style: "currency", currency })
     .resolvedOptions().maximumFractionDigits ?? null;
 }
 export function isMinorAmount(value: unknown): value is string {
