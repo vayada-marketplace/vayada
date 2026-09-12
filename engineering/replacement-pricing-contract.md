@@ -430,3 +430,24 @@ bound to a proposed currency/revision/selected terms set; it is not a generic
 settings revision. A proposal-independent Finance source remains required for
 the complete storage guard, along with remaining currency/owner obligations and
 publication command/route integration.
+
+## Independent Finance source (VAY-1933)
+
+`lockFinanceReplacementPricingSource` describes payment settings/policies, the
+selected provider account and its current execution evidence without a pricing
+proposal. Missing or disabled settings are valid source states, not readiness
+approval. Property and selected-account UPDATE locks protect missing-row insertion;
+settings/current-evidence share locks retain the observed state through transaction
+end. Call inside the existing authorized transaction, in property/settings/account/
+evidence order. No provider network requests or capability rules are added.
+
+The token includes property identity and exact JSONB state, excludes incidental
+created/updated timestamps and uses epoch text for execution/acceptance times so
+session timezone does not affect identity. Combined verification compares this
+token with `sources.finance` independently of the proposal-specific
+`ownerReferences.finance` readiness ID. A newly observed policy/source state also
+requires a new charge declaration; a declaration cannot validate a forged source.
+
+PMS room, Booking terms and Finance source inputs in the combined checks are now
+owner-read. Complete storage guard/command composition, remaining currency/owner
+obligations and publication routes are still required before runtime publication.

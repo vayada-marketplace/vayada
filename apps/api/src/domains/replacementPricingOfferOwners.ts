@@ -4,6 +4,7 @@ import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/d
 import type { PoolClient } from "pg";
 import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness, type FinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
+import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
@@ -12,13 +13,13 @@ import type { PricingStorageScope, PricingStorageSnapshot, PricingStorageSources
 
 export type ReplacementPricingOfferOwners =
   | { kind: "verified"; terms: readonly ReplacementOfferTerms[]; finance: Extract<FinanceReplacementPricingReadiness, { kind: "ready" }>; charges: ReplacementChargeDeclaration }
-  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "terms_source_stale" | "finance_unavailable" | "charges_stale";
+  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "terms_source_stale" | "finance_unavailable" | "finance_source_stale" | "charges_stale";
       financeReason?: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"] };
 
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
  * holds PMS/Booking/Finance locks until its end and verifies the charge declaration.
- * Rechecks sources.room and sources.terms against their complete owner sets. Caller must verify
- * remaining sources; this is not complete source freshness or currency-change approval. */
+ * Rechecks room/terms/Finance sources through their owners. Other source keys and
+ * currency conversion still require explicit validation before publication. */
 export async function lockReplacementPricingOfferOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<ReplacementPricingOfferOwners> {
   const unavailable = (reason: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>["reason"]): ReplacementPricingOfferOwners => ({ kind: "unavailable", reason });
@@ -47,10 +48,12 @@ export async function lockReplacementPricingOfferOwners(client: PoolClient, cont
   if (!terms) return unavailable("terms_stale");
   const termsSource = await lockBookingPricingTermsSource(client, scope.propertyId);
   if (!termsSource || currentSources.terms !== termsSource) return unavailable("terms_source_stale");
+  const financeSource = await lockFinanceReplacementPricingSource(client, scope.propertyId);
   const finance = await lockFinanceReplacementPricingReadiness(client, {
     propertyId: scope.propertyId, currency, pricingRevision: revision, terms, expectedEvidenceId,
   });
   if (finance.kind !== "ready") return { kind: "unavailable", reason: "finance_unavailable", financeReason: finance.reason };
+  if (!financeSource || currentSources.finance !== financeSource) return unavailable("finance_source_stale");
   const charges = await lockReplacementChargeDeclaration(client, scope.propertyId, snapshot.ownerReferences.charges ?? "", snapshot, currentSources);
   return charges ? { kind: "verified", terms, finance, charges } : unavailable("charges_stale");
 }
