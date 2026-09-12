@@ -131,3 +131,18 @@ changes supply a complete converted snapshot plus FX owner evidence through that
 guard; the adapter never treats a currency label change as conversion. VAY-1541
 owns route authorization, editor patch composition, preview and publish commands.
 No runtime caller is wired by these storage slices.
+
+## Draft publication binding (VAY-1559)
+
+Editor publication must pass `save.draft` with the saved draft ID and revision,
+in addition to its complete snapshot, base revision and source revisions. Storage
+compares all five under the same property lock as the active-head/effects write.
+A changed or missing draft fails stale without publishing. A successful retry
+replays the recorded result even if the draft or active head later changes; it
+is a receipt for the original publication, not a claim of current freshness.
+The draft binding participates in the request hash. Draft reads expose their
+saved source revisions so callers need not substitute newly read evidence.
+
+The unbound save remains an internal complete-snapshot primitive; editor routes
+must never omit the draft binding. Concrete owner/auth/FX guard adapters and
+preview orchestration remain VAY-1541 prerequisites before any runtime wiring.
