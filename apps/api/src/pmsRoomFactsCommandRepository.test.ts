@@ -543,6 +543,10 @@ class RecordingClient implements PmsRoomFactsCommandClient {
       );
     }
     if (sql.includes("pg_advisory_xact_lock")) return result<T>();
+    if (sql.includes("LEFT JOIN pms.room_type_closures"))
+      return result<T>([
+        { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+      ]);
     if (sql.includes("FROM platform.idempotency_keys") && sql.includes("FOR UPDATE")) {
       const idempotency = this.options.idempotencyReads
         ? this.options.idempotencyReads[this.idempotencyReadIndex++]
@@ -831,6 +835,12 @@ function expectedInboundForeignKeys(): InboundForeignKeyRow[] {
       "pms",
       "channel_rate_plan_mappings",
       "fk_pms_channel_rate_mappings_room_type_property",
+      "pms.room_types",
+    ),
+    inbound(
+      "pms",
+      "room_type_closures",
+      "room_type_closures_room_type_id_property_id_fkey",
       "pms.room_types",
     ),
     inbound("pms", "room_type_media", "fk_pms_room_type_media_room_property", "pms.room_types"),

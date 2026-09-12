@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,6 +26,16 @@ export function LoginContent({
   authError,
 }: LoginContentProps) {
   const router = useRouter();
+  const loginCredentials = useRef<{ email: string; password: string } | null>(null);
+  const [passwordOrganizations, setPasswordOrganizations] = useState<
+    { id: string; name: string }[]
+  >([]);
+  useEffect(
+    () => () => {
+      loginCredentials.current = null;
+    },
+    [],
+  );
   const [submitError, setSubmitError] = useState(authError ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
@@ -45,6 +55,8 @@ export function LoginContent({
     async (email: string, password: string) => {
       setSubmitError("");
       setIsSubmitting(true);
+      loginCredentials.current = null;
+      setPasswordOrganizations([]);
       try {
         const response = await authService.login({ email, password });
         if (isAuthOrganizationSelectionResponse(response)) {
@@ -53,6 +65,15 @@ export function LoginContent({
         }
         await redirectAfterLogin();
       } catch (error) {
+        if (
+          error instanceof AuthStateError &&
+          error.state === "organization_selection_required" &&
+          error.organizations?.length
+        ) {
+          loginCredentials.current = { email, password };
+          setPasswordOrganizations(error.organizations);
+          return;
+        }
         if (
           error instanceof AuthStateError &&
           error.state === "email_verification_required" &&
@@ -74,7 +95,14 @@ export function LoginContent({
       setSubmitError("");
       setIsSubmitting(true);
       try {
-        const response = await authService.refreshSession(workosOrganizationId);
+        const response = loginCredentials.current
+          ? await authService.login({
+              ...loginCredentials.current,
+              organizationId: workosOrganizationId,
+            })
+          : await authService.refreshSession(workosOrganizationId);
+        loginCredentials.current = null;
+        setPasswordOrganizations([]);
         if (isAuthOrganizationSelectionResponse(response)) {
           setOrganizationSelection(response);
           return;
@@ -118,6 +146,10 @@ export function LoginContent({
     };
   }, [redirectAfterLogin, resumeSession]);
 
+  const workspaceOptions = passwordOrganizations.length
+    ? passwordOrganizations.map(({ id, name }) => ({ workosOrganizationId: id, displayName: name }))
+    : organizationSelection?.organizations;
+  const isChoosingOrganization = Boolean(workspaceOptions?.length);
   const isResumingSession = resumeSession && isResuming && !organizationSelection && !submitError;
   const termsUrl = `${MARKETING_BASE_URL}${ROUTES.TERMS}`;
   const privacyUrl = `${MARKETING_BASE_URL}${ROUTES.PRIVACY}`;
@@ -137,14 +169,14 @@ export function LoginContent({
                 priority
               />
               <h1 className="text-xl font-bold text-gray-900">
-                {organizationSelection
+                {isChoosingOrganization
                   ? "Choose workspace"
                   : isResumingSession
                     ? "Signing you in"
                     : "Sign in to vayada"}
               </h1>
               <p className="text-[13px] text-gray-500 mt-1">
-                {organizationSelection
+                {isChoosingOrganization
                   ? "Select where you want to continue."
                   : isResumingSession
                     ? "Finishing secure sign in..."
@@ -152,9 +184,9 @@ export function LoginContent({
               </p>
             </div>
 
-            {organizationSelection && (
+            {isChoosingOrganization && (
               <div className="mb-5 space-y-2">
-                {organizationSelection.organizations.map((organization) => (
+                {workspaceOptions?.map((organization) => (
                   <button
                     key={organization.workosOrganizationId}
                     type="button"
@@ -165,8 +197,25 @@ export function LoginContent({
                     {organization.displayName}
                   </button>
                 ))}
+                {passwordOrganizations.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      loginCredentials.current = null;
+                      setPasswordOrganizations([]);
+                      setSubmitError("");
+                    }}
+                    className="text-sm text-primary-600"
+                  >
+                    Use another account
+                  </button>
+                )}
                 {submitError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                  >
                     {submitError}
                   </div>
                 )}
@@ -177,7 +226,7 @@ export function LoginContent({
               <p className="text-center text-sm text-gray-600">Please wait...</p>
             )}
 
-            {!organizationSelection && !isResumingSession && (
+            {!isChoosingOrganization && !isResumingSession && (
               <>
                 <button
                   type="button"
@@ -204,7 +253,7 @@ export function LoginContent({
             )}
           </div>
         </div>
-        {!organizationSelection && !isResumingSession && (
+        {!isChoosingOrganization && !isResumingSession && (
           <p className="pb-8 text-center text-xs leading-5 text-gray-500">
             By continuing, you agree to our{" "}
             <Link href={termsUrl} className="font-medium text-primary-600 hover:text-primary-700">

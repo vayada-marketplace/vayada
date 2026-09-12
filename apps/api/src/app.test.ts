@@ -7233,7 +7233,7 @@ describe("vayada-api", () => {
     expect(sql).toContain("FROM booking.guest_bookings booking");
     expect(sql).toContain("hotel_catalog.property_source_links source");
     expect(sql).toContain("pms.operational_booking_assignments");
-    expect(sql).toContain("booking.booking_addon_selections");
+    expect(sql).toContain("booking.active_booking_addon_selections");
     expect(sql).toContain("finance.payments");
     expect(sql).toContain("assignment_status IN ('checked_in', 'in_house', 'checked_out')");
     expect(sql).toContain("row_number() OVER");

@@ -5,6 +5,8 @@ import { BookingDesignStep } from "./booking/BookingDesignStep";
 import { CalendarStep } from "./calendar/CalendarStep";
 import { MarketplacePreferencesStep } from "./marketplace/MarketplacePreferencesStep";
 import { PresentHotelStep } from "./presentation/PresentHotelStep";
+import { PaymentsStep } from "./final/PaymentsStep";
+import { GuestExperienceStep } from "./final/GuestExperienceStep";
 import { PricingStep } from "./pricing/PricingStep";
 
 export type AdaptiveSetupStepComponentProps = AdaptiveSetupStepRenderContext & {
@@ -23,6 +25,10 @@ export function AdaptiveSetupStepFormDispatcher(props: AdaptiveSetupStepComponen
       return <BookingDesignStep {...props} />;
     case "pricing":
       return <PricingStep {...props} />;
+    case "guest_experience":
+      return <GuestExperienceStep {...props} />;
+    case "payments":
+      return <PaymentsStep {...props} />;
     case "calendar":
       return <CalendarStep {...props} />;
     default:

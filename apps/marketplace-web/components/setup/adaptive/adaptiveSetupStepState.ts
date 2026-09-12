@@ -21,6 +21,10 @@ const REVISION_CONFLICT_CODES = new Set([
   "profile_revision_conflict",
   "preferences_revision_conflict",
   "design_revision_conflict",
+  "guest_policy_revision_conflict",
+  "source_revision_conflict",
+  "payment_methods_revision_conflict",
+  "pricing_currency_revision_conflict",
 ]);
 
 export class AdaptiveStepManifestUnavailableError extends Error {
