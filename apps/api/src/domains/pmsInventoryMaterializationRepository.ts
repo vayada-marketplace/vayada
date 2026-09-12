@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -534,12 +535,18 @@ async function roomFactsStillMatch(
      ORDER BY id::text`,
     [configuration.propertyId],
   );
+  const operatingIds = new Set(
+    (await readPmsRoomOperatingEligibility(client, configuration.propertyId))
+      .filter((room) => room.state === "operating")
+      .map((room) => room.roomTypeId),
+  );
+  const operatingRows = result.rows.filter((row) => operatingIds.has(row.roomTypeId));
   const expected = [...configuration.sourceInputs.roomBindings].sort((left, right) =>
     compareCodeUnits(left.roomTypeId, right.roomTypeId),
   );
   return (
-    result.rows.length === expected.length &&
-    result.rows.every(
+    operatingRows.length === expected.length &&
+    operatingRows.every(
       (row, index) =>
         normalizeUuid(row.roomTypeId) === expected[index]?.roomTypeId &&
         positiveInteger(row.roomFactsRevision) === expected[index]?.sourceRoomFactsRevision,

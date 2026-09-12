@@ -182,6 +182,8 @@ jobs:
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
+          src/domains/pmsRoomOperatingEligibility.integration.test.ts
+          src/domains/pmsCalendarClosure.integration.test.ts
           src/domains/pmsPhysicalRoomUnitReconcileRepository.integration.test.ts
           src/domains/pmsPhysicalRoomManagementRepository.integration.test.ts
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
@@ -211,6 +213,7 @@ jobs:
           src/jobs/financeExpenseGeneration.integration.test.ts
           src/jobs/pmsChannexBookingRevisionTombstones.integration.test.ts
           src/jobs/channexBookings.integration.test.ts
+          src/jobs/channexStagingImport.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
@@ -235,6 +238,7 @@ jobs:
           src/workosBackfill.test.ts
           src/financeFolioRecipientCiphertextMigration.integration.test.ts
           src/channexBookingRevisionTombstonesMigration.integration.test.ts
+          src/channexAdoptionManifestFoundation.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
@@ -283,22 +287,10 @@ jobs:
           npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/routes/pendingBookingEdits.integration.test.ts
 
-      - name: Verify saved Channex pricing in an isolated database
-        env:
-          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_channex_pricing_test
-          TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_channex_pricing_test
-        run: |
-          node --input-type=module -e '
-            import pg from "pg";
-            const url = new URL(process.env.TEST_DATABASE_URL);
-            url.pathname = "/postgres";
-            const client = new pg.Client({ connectionString: url.href });
-            await client.connect();
-            await client.query("CREATE DATABASE vayada_channex_pricing_test");
-            await client.end();
-          '
-          npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/integrations/channexPricing.integration.test.ts
+      - name: Verify removed pricing boundaries
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/pricingReset.test.ts src/integrations/channexManagementPlans.test.ts
 
   setup_draft_reset_postgres:
     name: Setup Draft Reset PostgreSQL ${{ matrix.postgres }} Integration
@@ -424,10 +416,15 @@ jobs:
           persist-credentials: false
 
       - name: Install PostgreSQL client
+        timeout-minutes: 5
         run: |
+          if command -v psql >/dev/null 2>&1; then
+            psql --version
+            exit 0
+          fi
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y postgresql-client
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97

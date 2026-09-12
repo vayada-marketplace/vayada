@@ -61,6 +61,7 @@ describe("property setup Booking owner state", () => {
 
   it("maps only the typed first-visit absence source to not started", async () => {
     const absent = guestEvidence("guest-policy:absent");
+    absent.currentBaseRevisions["hotel_catalog.policy"] = `hotel_catalog.policy:${propertyId}:r0`;
     const provider = createPropertySetupBookingStateProvider({
       design: { getCurrentDesign: vi.fn(async () => design(2)) },
       catalog: { getState: vi.fn(async () => catalog()) },
