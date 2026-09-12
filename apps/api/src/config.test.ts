@@ -68,6 +68,7 @@ describe("api config", () => {
         bookingSync: "observe_only",
         markups: "observe_only",
         messaging: "observe_only",
+        reviews: "observe_only",
         iframe: "observe_only",
       },
     });
@@ -267,6 +268,29 @@ describe("api config", () => {
         CHANNEX_API_KEY: "secret",
       }),
     ).toThrow("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
+  });
+
+  it("requires explicit review cutover and credentials without a management worker", () => {
+    const env = {
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "test",
+      PMS_CHANNEX_WORKER_ENABLED: "false",
+    };
+    expect(loadConfig(env).channexManagement.capabilityModes.reviews).toBe("observe_only");
+    expect(
+      loadConfig({ ...env, PMS_CHANNEX_REVIEWS_MODE: "mutating" }).channexManagement,
+    ).toMatchObject({
+      workerEnabled: false,
+      capabilityModes: { reviews: "mutating", messaging: "observe_only" },
+    });
+    expect(() => loadConfig({ ...env, PMS_CHANNEX_REVIEWS_MODE: "invalid" })).toThrow(
+      "PMS_CHANNEX_REVIEWS_MODE",
+    );
+    expect(() =>
+      loadConfig({ ...env, CHANNEX_API_KEY: "", PMS_CHANNEX_REVIEWS_MODE: "mutating" }),
+    ).toThrow("CHANNEX_API_KEY");
   });
 
   it("does not require the durable worker for an iframe-only cutover", () => {

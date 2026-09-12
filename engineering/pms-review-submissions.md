@@ -83,3 +83,8 @@ These observations narrow VAY-1533's implementation to provider-exposed hidden
 opportunities. They do not establish that Channex exposes every eligible stay
 before the guest reviews it. VAY-1533 must represent that discovery limitation
 explicitly and keep guest-review receipts separate from public replies.
+
+Review writes require `PMS_CHANNEX_REVIEWS_MODE=mutating` with target PMS operations
+and configured Channex credentials. The default `observe_only` mode does not
+construct review providers; submission is unavailable while saved receipts remain
+readable. Reviews execute inline and do not require the Channex management worker.

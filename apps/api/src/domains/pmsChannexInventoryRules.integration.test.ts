@@ -145,6 +145,7 @@ describe.skipIf(!connectionString)("inventory rules durable Postgres path (mock 
         bookingSync: "observe_only",
         markups: "observe_only",
         messaging: "observe_only",
+        reviews: "observe_only",
         iframe: "observe_only",
       } as const,
     };

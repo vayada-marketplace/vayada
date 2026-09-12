@@ -441,6 +441,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           bookingSync: "observe_only",
           markups: "observe_only",
           messaging: "observe_only",
+          reviews: "observe_only",
           iframe: "observe_only",
         },
       },
