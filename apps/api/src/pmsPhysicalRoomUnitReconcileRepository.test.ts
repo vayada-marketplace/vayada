@@ -80,6 +80,10 @@ function harness(
         result(rows, rowCount) as Pick<QueryResult<T>, "rows" | "rowCount">;
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return queryResult();
       if (sql.includes("pg_advisory_xact_lock")) return queryResult([{ locked: true }]);
+      if (sql.includes("LEFT JOIN pms.room_type_closures"))
+        return queryResult([
+          { propertyId, roomTypeId, state: "operating", closureCommandId: null, cutoffDate: null },
+        ]);
       if (sql.includes("FROM hotel_catalog.properties property")) {
         return queryResult(options.scope === false ? [] : [{ id: propertyId }]);
       }
@@ -387,6 +391,25 @@ describe("PMS physical room unit reconcile repository", () => {
       ok: false,
       error: { code: "idempotency_key_conflict" },
     });
+  });
+
+  it("replays a stored closure rejection without weakening fingerprint checks", async () => {
+    const command = reconcileCommand();
+    const fingerprint = createHash("sha256")
+      .update(serializeReconcilePhysicalRoomUnitsFingerprint(command))
+      .digest("hex");
+    const result: ReconcilePhysicalRoomUnitsResult = {
+      ok: false,
+      error: { code: "room_type_not_found" },
+    };
+    const test = harness({ replay: { fingerprint, result } });
+    expect(await test.repository.reconcilePhysicalRoomUnits(command)).toEqual(result);
+    const changed = harness({ replay: { fingerprint, result } });
+    expect(
+      await changed.repository.reconcilePhysicalRoomUnits(
+        reconcileCommand({ targetActiveUnitCount: 4 }),
+      ),
+    ).toEqual({ ok: false, error: { code: "idempotency_key_conflict" } });
   });
 
   it("fails wrong-property scope before idempotency and rolls back injected audit failure", async () => {
