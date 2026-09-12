@@ -158,6 +158,15 @@ describe.skipIf(!url)("guest review PostgreSQL receipts", () => {
     });
     expect(provider.send).toHaveBeenCalledTimes(1);
   });
+  it("blocks submission without an enabled provider", async () => {
+    await commands.close();
+    commands = createPgGuestReviewCommands({ connectionString: url! });
+    expect(await commands.submit(context, property, "review", draft)).toMatchObject({
+      state: "unavailable",
+    });
+    expect((await db.query("SELECT * FROM pms.guest_review_submissions")).rows).toHaveLength(0);
+    expect(provider.send).not.toHaveBeenCalled();
+  });
   it("does not contact provider for a review outside the property", async () => {
     expect(await commands.submit(context, actor, "review", draft)).toMatchObject({
       state: "unavailable",
