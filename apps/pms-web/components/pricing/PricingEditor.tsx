@@ -8,6 +8,7 @@ import { type createReplacementPricingClient, type PricingSnapshot, type Pricing
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
 import { PricingStayDates } from "./PricingStayDates";
 import { PricingStayRules } from "./PricingStayRules";
@@ -20,6 +21,7 @@ import { PricingRules } from "./PricingRules";
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
+  const ownershipPending = Object.entries(pendingEntries).some(([key, pending]) => key.startsWith("ownership:") && pending);
   const hasPendingEntries = Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
@@ -129,28 +131,31 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomNames[room.roomTypeId] ?? `Room ${ri + 1}`}</h2>
         {room.offers.map((offer, oi) => <div key={offer.id} className="grid gap-4 border-b p-5 last:border-0 sm:grid-cols-[1fr_2fr]">
           <div><h3 className="font-medium">Offer {oi + 1}</h3><p className="text-sm text-gray-500">{offer.price.kind === "linked" ? "Linked rate · managed through its parent" : "Independent rate"}</p></div>
-          <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review}
+          <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review || ownershipPending}
             value={review ? decimalAmount(minor, scale) : inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></label>)}
             {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Add date prices below; other calendar editing is not available yet.</p>}</div>
-          <PricingDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`date:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingWeekdays room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingWeekdays room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`weekday:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingMonths room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingMonths room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`month:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingSeasons room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingSeasons room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`season:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStayRules room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingStayOwnership room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`ownership:${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+          <PricingStayRules room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`stay:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStayDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingStayDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`stayDate:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
-          <PricingStaySeasons room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+          <PricingStaySeasons room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || ownershipPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`staySeason:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
         </div>)}
