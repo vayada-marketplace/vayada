@@ -8,10 +8,13 @@ import { type createReplacementPricingClient, type PricingSnapshot, type Pricing
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
+  const [pendingDates, setPendingDates] = useState<Record<string, boolean>>({});
+  const hasPendingDates = Object.values(pendingDates).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
   const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
@@ -28,14 +31,14 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       setEmpty(saved === null);
       setCurrent(saved ? { currency: saved.currency, ownerReferences: { finance: saved.ownerReferences.finance },
         rooms: saved.rooms.map((room) => ({ ...room, revision: saved.revision + 1 })) } : null);
-      setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
+      setPendingDates({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
       pendingDraftId.current = crypto.randomUUID();
       setNotice(saved?.stale ? "Some source settings changed. Saving will check them again." : "");
     } catch (e) { if (alive.current) setError(message(e)); }
     finally { if (alive.current) setLoading(false); }
   }, [client]);
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; }; }, [load]); // Client is property-bound; parent keys this component by property.
-  const leaveRisk = dirty || retry || busy || (!!draft && !done);
+  const leaveRisk = hasPendingDates || dirty || retry || busy || (!!draft && !done);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (leaveRisk && !leaving.current) { event.preventDefault(); event.returnValue = ""; } };
     // Pricing is entered and left through document navigation so browser history also runs beforeunload.
@@ -78,7 +81,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     }, () => saved !== null); // Preparation is read-only; keep the accepted policy even after readiness is rejected.
   }
   function save() {
-    if (!current) return;
+    if (!current || hasPendingDates) return;
     let edited: PricingSnapshot;
     try { edited = editedSnapshot(current, inputs); } catch (e) { setError(message(e)); return; }
     const expected = draft?.revision ?? 0, id = draft?.draftId ?? pendingDraftId.current;
@@ -122,11 +125,14 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
           <div><h3 className="font-medium">Offer {oi + 1}</h3><p className="text-sm text-gray-500">{offer.price.kind === "linked" ? "Linked rate · managed through its parent" : "Independent rate"}</p></div>
           <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review}
             value={review ? decimalAmount(minor, scale) : inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></label>)}
-            {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Advanced editing is not available yet.</p>}</div>
+            {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Add date prices below; other calendar editing is not available yet.</p>}</div>
+          <PricingDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+            onPending={(pending) => setPendingDates((previous) => ({ ...previous, [`${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
         </div>)}
         <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">Retained rules and other charges</summary>
           <p className="mt-2">Adult prices apply from age {room.children.adultFromAge}. Younger guests use the child charges below, even when they count toward capacity.</p>
-          <p className="mt-2">Calendar overrides, linked adjustments, cancellation terms and stay restrictions remain unchanged.</p>
+          <p className="mt-2">Review date prices below. Other calendar rules, linked adjustments, cancellation terms and stay restrictions are preserved.</p>
           {room.children.bands.map((band) => <p key={band.fromAge}>Children aged {band.fromAge}–{band.throughAge}: {decimalAmount(band.nightlyMinor, scale)} {display.currency} per night.</p>)}
           {room.offers.map((offer, oi) => <div key={offer.id} className="mt-2"><p>Offer {oi + 1} · {offer.meal.kind.replaceAll("_", " ")}</p>
             {offer.meal.charge.kind === "room" ? <p>Meal: {decimalAmount(offer.meal.charge.amountMinor, scale)} {display.currency} per room per night.</p> : <>
@@ -144,8 +150,8 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
         {retry ? <button className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" disabled={busy} onClick={() => void run()}>Retry last action</button> : review ? <>
           <button disabled={disabled} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={() => { setReview(null); setAck(false); }}>Back to editing</button>
           <button disabled={disabled || !ack} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={approve}>Approve rates</button></> : <>
-          <button disabled={disabled} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={save}>Save draft</button>
-          <button disabled={disabled || dirty || !draft} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => { const next = await client.reviewCharges(draft!.draftId); if (!next) throw new ApiErrorResponse(409, { message: "The saved draft is missing. Reload pricing." }); if (alive.current) { setReview(next); setAck(false); } })}>Review saved charges</button></>}
+          <button disabled={disabled || hasPendingDates} className="rounded-lg border px-5 py-2 disabled:opacity-50" onClick={save}>Save draft</button>
+          <button disabled={disabled || hasPendingDates || dirty || !draft} className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => { const next = await client.reviewCharges(draft!.draftId); if (!next) throw new ApiErrorResponse(409, { message: "The saved draft is missing. Reload pricing." }); if (alive.current) { setReview(next); setAck(false); } })}>Review saved charges</button></>}
       </footer>
       <p className="text-xs text-gray-500">Keep this page open while saving or approving. Draft recovery after closing the page is not available yet.</p>
     </>}
