@@ -29,6 +29,31 @@ describe("PostgreSQL Hotel Catalog current-owner evidence", () => {
     ).toThrow("Hotel Catalog current-owner evidence pool requires a bounded checkout");
   });
 
+  it("reads initial policy absence as revision zero but preserves deleted-state failures", async () => {
+    const query = vi.fn(async () => result({ propertyId, ownerPropertyId: null, revision: null }));
+    const ports = createPgHotelCatalogCurrentOwnerEvidencePorts({ pool: pool(query) });
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toMatchObject({
+      outcome: "available",
+      evidence: { revision: 0, baseRevision: `hotel_catalog.policy:${propertyId}:r0` },
+    });
+    await expect(ports.location.getCurrentLocationOwnerEvidence(scope)).resolves.toEqual({
+      outcome: "missing",
+      reason: "owner_state",
+    });
+    query.mockImplementation(async () =>
+      result({ propertyId, ownerPropertyId: null, revision: "2" }),
+    );
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toEqual({
+      outcome: "missing",
+      reason: "owner_state",
+    });
+    query.mockImplementation(async () => result());
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toEqual({
+      outcome: "missing",
+      reason: "property_scope",
+    });
+  });
+
   it("reads independently scoped location and policy source identities", async () => {
     const query = vi.fn(
       async ({ text }: { text: string; values: unknown[]; query_timeout: number }) =>
