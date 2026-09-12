@@ -422,7 +422,10 @@ npm run target:channex:adopt -- consume \
 
 Rollback requires two fresh, unrevoked migration/security authority records
 bound to the original manifest, exact claim, reason hash, environment, and new
-expiry. Both records may name the same authorized human.
+expiry. Rollback validates the same approval policy as consumption. Both records
+may name the same human only when `singleHumanDualAuthority` matches that actor
+and principal and carries the exact `VAY-1320@2026-09-12` decision; otherwise
+two independent humans are required.
 Supply the reviewed reason through a file. Successful rollback only changes the
 matching adoption claim from `verified_non_active` to retained `released`.
 

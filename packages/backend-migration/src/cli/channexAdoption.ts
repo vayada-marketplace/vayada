@@ -4,6 +4,7 @@ import pg from "pg";
 import { consumeSignedChannexAdoptionManifest } from "../channexAdoptionConsumer.js";
 import { rollbackChannexAdoption } from "../channexAdoptionRollback.js";
 import { parseChannexAdoptionRunnerConfig } from "../channexAdoptionRunnerConfig.js";
+import { normalizePgConnectionString } from "../pgConnection.js";
 
 const [command, ...rawArgs] = process.argv.slice(2);
 
@@ -27,7 +28,10 @@ try {
     await readFile(required(args, "config"), "utf8"),
     executionPrincipal,
   );
-  const pool = new pg.Pool({ connectionString, max: 4 });
+  const pool = new pg.Pool({
+    connectionString: normalizePgConnectionString(connectionString),
+    max: 4,
+  });
   try {
     if (command === "consume") {
       const raw = await readFile(required(args, "manifest-file"), "utf8");
