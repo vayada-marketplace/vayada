@@ -46,6 +46,8 @@ type CalendarImpactReview = Readonly<{
   preview: PmsOperatingCalendarImpactPreview;
 }>;
 
+import { useReviewEntityFocus } from "../final/useReviewEntityFocus";
+
 export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
   const {
     propertyId,
@@ -72,6 +74,10 @@ export function CalendarStep(props: AdaptiveSetupStepComponentProps) {
   const [impactReview, setImpactReview] = useState<CalendarImpactReview | null>(null);
   const [workspace, setWorkspace] = useState<CalendarWorkspace | null>(null);
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
+  useReviewEntityFocus(
+    props.requestedEntityId ? `calendar-room-${props.requestedEntityId}` : null,
+    workspaceState === "ready" && !!draft,
+  );
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceReload, setWorkspaceReload] = useState(0);
   const [errors, setErrors] = useState<CalendarValidationErrors>({});
