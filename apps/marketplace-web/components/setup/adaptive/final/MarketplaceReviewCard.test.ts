@@ -329,3 +329,17 @@ it("withholds the unavailable public page while preserving active status", async
   expect(text(tree)).toContain("public Marketplace page is currently unavailable");
   expect(tree.root.findAllByType("a")).toHaveLength(0);
 });
+
+it("opens the verified public profile without submitting or leaving setup", async () => {
+  mocks.load.mockResolvedValue({
+    ...review,
+    activeSubmission: { revisionId: "active", status: "active" },
+    publishedUrl: `/hotels/${propertyId}`,
+  });
+  const tree = await mount();
+  const link = tree.root.findByType("a");
+  expect(link.props.href).toBe(`/hotels/${propertyId}`);
+  expect(link.props.target).toBe("_blank");
+  expect(link.props.rel).toBe("noopener noreferrer");
+  expect(mocks.submit).not.toHaveBeenCalled();
+});

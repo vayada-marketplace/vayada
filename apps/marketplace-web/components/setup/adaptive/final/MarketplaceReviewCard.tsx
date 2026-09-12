@@ -251,7 +251,18 @@ function ScopedMarketplaceReviewCard({ propertyId, organizationId, onEdit }: Pro
           )}
           {published && (
             <p className="mt-4 text-sm text-gray-600">
-              Your approved profile is active. Its public Marketplace page is currently unavailable.
+              {review.publishedUrl ? (
+                <a
+                  href={review.publishedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-primary-700 underline"
+                >
+                  View your Marketplace profile
+                </a>
+              ) : (
+                "Your approved profile is active. Its public Marketplace page is currently unavailable."
+              )}
             </p>
           )}
           <ProductReadinessGroups readiness={review.readiness} onEdit={onEdit} />
