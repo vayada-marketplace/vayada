@@ -82,6 +82,7 @@ afterEach(async () => {
     trees.forEach((tree) => tree.unmount());
   });
   trees = [];
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 async function mount(id = propertyId) {
@@ -120,6 +121,24 @@ it("only reads on entry and persists the exact command before publication", asyn
   expect(mocks.publish).toHaveBeenCalledTimes(1);
   expect(text(tree)).toContain("Publishing booking page");
   expect(text(tree)).not.toContain('"Published"');
+});
+it("explains when automatic status checks stop and restarts them on manual refresh", async () => {
+  vi.useFakeTimers();
+  mocks.load.mockResolvedValue({ ...review, latestOperation: operation });
+  const tree = await mount();
+  for (let count = 0; count < 5; count++) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  }
+  expect(mocks.load).toHaveBeenCalledTimes(6);
+  expect(text(tree)).toContain("Publication still pending");
+  expect(text(tree)).toContain("Automatic checking stopped");
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(mocks.load).toHaveBeenCalledTimes(6);
+  await click(tree, "Refresh Booking status");
+  expect(text(tree)).not.toContain("Automatic checking stopped");
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(mocks.load).toHaveBeenCalledTimes(8);
+  expect(mocks.publish).not.toHaveBeenCalled();
 });
 it("restores a lost response and retries the exact saved request", async () => {
   let tree = await mount();

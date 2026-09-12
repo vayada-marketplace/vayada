@@ -25,6 +25,7 @@ type Props = {
   organizationId: string;
   onEdit: (step: PropertySetupStepId, entityId?: string) => void;
 };
+const POLL_LIMIT = 5;
 export function BookingReviewCard(props: Props) {
   return <ScopedBookingReviewCard key={`${props.organizationId}:${props.propertyId}`} {...props} />;
 }
@@ -85,8 +86,9 @@ function ScopedBookingReviewCard({
       ? review?.recoveredOperation
       : review?.latestOperation;
   const pending = operation?.status === "pending" || operation?.status === "unknown";
+  const automaticChecksStopped = pollCount >= POLL_LIMIT && !busy;
   useEffect(() => {
-    if (!pending || pollCount >= 5) return;
+    if (!pending || pollCount >= POLL_LIMIT) return;
     const timer = setTimeout(() => {
       setPollCount((value) => value + 1);
       void refresh();
@@ -217,9 +219,11 @@ function ScopedBookingReviewCard({
         <>
           <p role="status" className="mt-5 font-semibold">
             {pending
-              ? published
-                ? "Updating booking page…"
-                : "Publishing booking page…"
+              ? automaticChecksStopped
+                ? "Publication still pending"
+                : published
+                  ? "Updating booking page…"
+                  : "Publishing booking page…"
               : unknownRequest
                 ? "Publication response unconfirmed"
                 : operation?.status === "failed"
@@ -238,8 +242,9 @@ function ScopedBookingReviewCard({
           </p>
           {pending && (
             <p className="mt-2 text-sm text-gray-600">
-              Your request is saved. We’ll check the existing operation; you can leave setup and
-              return.
+              {automaticChecksStopped
+                ? "Your request is saved. Automatic checking stopped. Use Refresh Booking status to check the existing operation."
+                : "Your request is saved. We’ll check the existing operation; you can leave setup and return."}
             </p>
           )}
           {unknownRequest && (
