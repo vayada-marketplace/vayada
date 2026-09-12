@@ -247,3 +247,22 @@ checked 2026-09-12. Fixtures validate parsing, not live compatibility. Freshness
 binding to the durable attempt/current authority, HTTP dispatch and outcome
 capture still need composition. Passing this helper does not enable provider writes
 or establish downstream OTA capability.
+
+## Creation identity recording (VAY-2001)
+
+`recordPublishedChannexOfferCreate` captures primitive property/room/rate IDs from
+a provider response before asynchronous work, rejecting malformed or contradictory
+identity fields. It verifies the same pending proposal and current authority, then
+matches the retained attempt's generation, scope and exact derived request under
+the active local room-mapping lock. Identification atomically claims external
+ownership. Exact repeats while the intent remains pending are idempotent; a
+different rate ID conflicts. No configuration version is sealed or activated.
+
+Only responses correlated by the dispatcher to this attempt belong here; a GET
+or title match is not creation/adoption proof.
+This records identity, not HTTP/ARI acceptance. Unknown transport outcomes remain
+unresolved, and late observations rejected by current authority require separate
+reconciliation. Durable raw-receipt capture after authority loss is not implemented.
+The database simulation composes room preflight, fresh claim, a mocked create,
+identity recording and configuration readback; it is not a production dispatcher
+or proof of live Channex/OTA behavior. Runtime sending remains disabled.

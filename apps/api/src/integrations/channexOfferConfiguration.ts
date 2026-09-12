@@ -151,6 +151,42 @@ export async function verifyChannexOfferRoom(
   return { ...expected, children: 0 as const, infants: 0 as const, roomKind: "room" as const };
 }
 
+/** Creation identity observation only, not configuration/ARI acceptance. */
+export function readChannexCreatedRateIdentity(response: unknown) {
+  const data = record(record(response).data),
+    attributes = record(data.attributes);
+  const relationships = record(data.relationships);
+  const valid = (id: unknown): id is string =>
+    typeof id === "string" && id.length > 0 && id === id.trim();
+  const mismatch = () => {
+    throw new ChannexMealSyncError("Invalid Channex creation identity");
+  };
+  const scopedId = (attribute: string, relationship: string) => {
+    const direct = attributes[attribute],
+      relation = relationships[relationship];
+    const related = record(record(relation).data).id,
+      value = direct ?? related;
+    if (
+      !valid(value) ||
+      (direct !== undefined && direct !== value) ||
+      (relation !== undefined && related !== value)
+    )
+      return mismatch();
+    return value;
+  };
+  if (
+    data.type !== "rate_plan" ||
+    !valid(data.id) ||
+    (attributes.id !== undefined && attributes.id !== data.id)
+  )
+    return mismatch();
+  return {
+    externalRatePlanId: data.id,
+    externalPropertyId: scopedId("property_id", "property"),
+    externalRoomTypeId: scopedId("room_type_id", "room_type"),
+  };
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
