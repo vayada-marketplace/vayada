@@ -255,8 +255,8 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   };
 }
 
-async function loadPropertyProfile(
-  pool: SharedHotelSetupStatusPool,
+export async function loadPropertyProfile(
+  pool: Pick<SharedHotelSetupStatusPool, "query">,
   organizationId: string,
   propertyId: string,
 ): Promise<SharedPropertyProfile | null> {
@@ -268,7 +268,7 @@ async function loadPropertyProfile(
   return row ? toSharedPropertyProfile(row) : null;
 }
 
-async function loadPublicPropertyProfile(
+export async function loadPublicPropertyProfile(
   queryable: SharedHotelSetupQueryClient,
   organizationId: string,
   propertyId: string,
