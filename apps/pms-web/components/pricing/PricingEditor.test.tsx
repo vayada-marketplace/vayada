@@ -1057,7 +1057,8 @@ it("creates final date prices using the displayed recurring mode and keeps other
   }
   const linked = { ...offer, id: "linked", price: { kind: "linked" as const, parentId: offer.id, adjustment: { kind: "fixed" as const, deltaMinor: "0" }, dateOverrides: [] } };
   expect(() => changeDatePrice({ ...room, offers: [offer, linked] }, "linked", "2026-12-25", ["100"], true)).toThrow("recurring");
-  expect(() => changeDatePrice({ ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base: null } } }] }, "flex", "2026-12-25", ["100"], true)).toThrow("recurring");
+  const independentPrice = offer.price;
+  expect(() => changeDatePrice({ ...room, offers: [{ ...offer, price: { ...independentPrice, calendar: { ...independentPrice.calendar, base: null } } }] }, "flex", "2026-12-25", ["100"], true)).toThrow("recurring");
 });
 it("protects date mode selection, resets inputs and saves a complete occupancy date price", async () => {
   const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
