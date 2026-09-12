@@ -230,6 +230,18 @@ describe("Booking guest-policy aggregate contract", () => {
         composition: null,
       }),
     ).not.toBeNull();
+    expect(
+      parseBookingGuestPolicySetupAggregate({
+        ...setup,
+        current: null,
+        draft: {
+          ...createBookingGuestPolicyNewDraft(),
+          checkInTime: "14:00",
+          checkInUntil: "00:00",
+        },
+        composition: null,
+      }),
+    ).not.toBeNull();
     const request = {
       ...command(),
       expectedSourceFingerprint: current.bundle.sourceFingerprint,

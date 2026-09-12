@@ -64,3 +64,16 @@ transaction. The management worker also schedules one full restriction sync per 
 day, retains existing failure/dead-letter reporting and excludes ARI work when
 `ariSync` is observe-only. Same-property management jobs are serialized. Manual
 sync, automatic sync and retries all use the same current-state planner.
+
+## Isolated deployed staging verification (VAY-1528)
+
+The shared canary keeps API_BACKGROUND_WORKERS_ENABLED=false. A separate
+PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID enables only the Channex management
+loop for that property. Startup requires the exact staging provider URL, a UUID,
+and ARI as the only mutating capability. Both daily restriction refresh and job
+claim are scoped; claims accept only sync_ari with restrictionsOnly=true. Full
+ARI, provisioning, connection lifecycle, booking, and message jobs remain untouched.
+The existing property-scoped sandbox key is injected by ECS. Bind and map the
+existing sandbox through an audited, bounded fixture repair before testing; do
+not use Enable to create another provider property. All other workers and the
+global ARI scheduler stay disabled. Default production behavior is unchanged.
