@@ -211,3 +211,38 @@ it("revokes completion and source access when a property assignment is removed",
   expect((await f.app.inject({ url: path + `/sources/${sourceId}` })).statusCode).toBe(403);
   expect(f.options.readListings).not.toHaveBeenCalled();
 });
+
+it.each(["changed", "disconnected", "unavailable"])(
+  "rejects %s binding during listing read before persisting",
+  async (outcome) => {
+    const f = await fixture();
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(f.options.readListings).mockImplementationOnce(async () => {
+      entered();
+      await blocked;
+      return data;
+    });
+    const response = f.post("/complete", { state, channelId }).then((result) => result);
+    await started;
+    if (outcome === "unavailable")
+      vi.mocked(f.options.resolveBinding).mockRejectedValue(new Error("private-binding-error"));
+    else
+      vi.mocked(f.options.resolveBinding).mockResolvedValue(
+        outcome === "disconnected" ? null : { ...binding, groupId: channelId },
+      );
+    release();
+    const result = await response;
+    expect(result.statusCode).toBe(outcome === "unavailable" ? 502 : 409);
+    expect(result.json()).toEqual({
+      code: outcome === "unavailable" ? "airbnb_source_unavailable" : "channex_binding_changed",
+    });
+    expect(f.options.repository.complete).not.toHaveBeenCalled();
+  },
+);

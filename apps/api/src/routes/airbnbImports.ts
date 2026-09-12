@@ -97,6 +97,8 @@ export async function registerAirbnbImportRoutes(
       if (!sameBinding(pending, await options.resolveBinding(scope)))
         return reply.code(409).send({ code: "channex_binding_changed" });
       const data = await options.readListings(pending, channelId);
+      if (!sameBinding(pending, await options.resolveBinding(scope)))
+        return reply.code(409).send({ code: "channex_binding_changed" });
       const sourceId = await options.repository.complete(scope, state, channelId, data);
       return sourceId ? { sourceId } : reply.code(409).send({ code: "import_attempt_unavailable" });
     } catch (error) {
