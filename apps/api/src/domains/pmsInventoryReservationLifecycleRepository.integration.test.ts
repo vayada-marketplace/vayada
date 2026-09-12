@@ -287,6 +287,135 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
     },
   );
 
+  it("records terminal canonical closure without advancing another inventory owner", async () => {
+    const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
+    await materialize(fixture, "2026-08-03", "2026-08-05");
+    const mark = (date: string, extra = "") =>
+      admin.query(
+        `UPDATE pms.inventory_days SET closure_source_revision=1,inventory_revision=inventory_revision+1,
+       status='closed',available_count=0 ${extra} WHERE property_id=$1 AND stay_date=$2`,
+        [fixture.propertyId, date],
+      );
+    await expect(mark("2026-08-04")).rejects.toMatchObject({
+      constraint: "chk_pms_inventory_closure_transition",
+    });
+    await admin.query(
+      `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+      booking_source_revision=booking_source_revision+1,inventory_revision=inventory_revision+1
+      WHERE property_id=$1 AND stay_date='2026-08-05'`,
+      [fixture.propertyId],
+    );
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+      [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+    );
+    // Copy the valid canonical envelope to cover an already-closed future day.
+    await admin.query(
+      `INSERT INTO pms.inventory_days SELECT
+      (jsonb_populate_record(NULL::pms.inventory_days,to_jsonb(day)||
+        jsonb_build_object('stay_date','2026-08-06','status','closed','available_count',0))).*
+      FROM pms.inventory_days day WHERE property_id=$1 AND stay_date='2026-08-04'`,
+      [fixture.propertyId],
+    );
+    await expect(
+      admin.query(
+        `INSERT INTO pms.inventory_days SELECT
+      (jsonb_populate_record(NULL::pms.inventory_days,to_jsonb(day)||
+        jsonb_build_object('stay_date','2026-08-07','closure_source_revision',1))).*
+      FROM pms.inventory_days day WHERE property_id=$1 AND stay_date='2026-08-06'`,
+        [fixture.propertyId],
+      ),
+    ).rejects.toMatchObject({ constraint: "chk_pms_inventory_closure_initial" });
+    await expect(mark("2026-08-03")).rejects.toMatchObject({
+      constraint: "chk_pms_inventory_closure_transition",
+    });
+    await expect(mark("2026-08-05", ",assigned_count=0")).rejects.toMatchObject({
+      constraint: "chk_pms_inventory_closure_transition",
+    });
+    await expect(
+      mark(
+        "2026-08-04",
+        ",manual_sellable_limit_count=0,manual_source_revision=manual_source_revision+1",
+      ),
+    ).rejects.toMatchObject({ constraint: "chk_pms_inventory_closure_transition" });
+    const snapshot = () =>
+      admin.query<{ row: Record<string, unknown> }>(
+        "SELECT to_jsonb(day) AS row FROM pms.inventory_days day WHERE property_id=$1 ORDER BY stay_date",
+        [fixture.propertyId],
+      );
+    const before = (await snapshot()).rows.map(({ row }) => row);
+    await mark("2026-08-04");
+    await mark("2026-08-06");
+    const after = (await snapshot()).rows.map(({ row }) => row);
+    expect(after).toEqual(
+      before.map((row) =>
+        ["2026-08-04", "2026-08-06"].includes(String(row.stay_date))
+          ? {
+              ...row,
+              status: "closed",
+              available_count: 0,
+              closure_source_revision: 1,
+              inventory_revision: Number(row.inventory_revision) + 1,
+            }
+          : row,
+      ),
+    );
+    await expect(mark("2026-08-04")).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      admin.query(
+        `UPDATE pms.inventory_days SET closure_source_revision=0,
+      inventory_revision=inventory_revision+1 WHERE property_id=$1 AND stay_date='2026-08-04'`,
+        [fixture.propertyId],
+      ),
+    ).rejects.toMatchObject({ constraint: "chk_pms_inventory_closure_transition" });
+  });
+
+  it("rejects a captured reservation command after its room closes", async () => {
+    const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
+    await materialize(fixture, "2026-08-04", "2026-08-04");
+    const input = await reserveCommand(admin, fixture, "closure-stale", 1, "2026-08-04");
+    await admin.query("BEGIN");
+    try {
+      await lockPmsInventoryMutationScope(admin, fixture.propertyId);
+      await admin.query(
+        `INSERT INTO pms.room_type_closures
+        (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+         expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+        VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+        [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+      );
+      // Deliberately retain captured open inventory to prove eligibility, rather
+      // than current availability alone, rejects the stale command.
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    expect(await fixture.reservation.reserveInventory(input)).toMatchObject({
+      ok: false,
+      error: { code: "configuration_not_current" },
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT assigned_count,available_count,status FROM pms.inventory_days WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ assigned_count: 0, available_count: 2, status: "open" }]);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.inventory_reservation_receipts WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
+
   it("reserves every day atomically and exact reserve/release retries return current state", async () => {
     const fixture = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
     await materialize(fixture, "2026-08-04", "2026-08-05");

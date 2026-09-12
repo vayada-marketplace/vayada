@@ -43,6 +43,8 @@ export type PmsInventoryMaterializationPlannerInput = Readonly<{
   configuration: PmsOperatingCalendarConfigurationSnapshot;
   horizon: PmsInventoryRequiredCoverage;
   currentDays: readonly PmsInventoryDaySnapshot[];
+  /** Immutable calendar that owns the stored materialization coverage. */
+  previousConfiguration?: PmsOperatingCalendarConfigurationSnapshot;
   generatedSellableLimitOverrides?: readonly Readonly<{
     roomTypeId: string;
     stayDate: string;
@@ -90,6 +92,18 @@ export function planPmsInventoryMaterialization(
   ) {
     return failure({ code: "configuration_scope_mismatch" });
   }
+  const previous =
+    input.previousConfiguration === undefined
+      ? undefined
+      : parseConfiguration(input.previousConfiguration);
+  if (
+    input.previousConfiguration !== undefined &&
+    (!previous ||
+      previous.propertyId !== configuration.propertyId ||
+      previous.calendarRevision >= configuration.calendarRevision)
+  ) {
+    return failure({ code: "configuration_scope_mismatch" });
+  }
   const dates = horizonDates(input.horizon);
   if (!dates) return failure({ code: "horizon_invalid" });
 
@@ -131,10 +145,19 @@ export function planPmsInventoryMaterialization(
     countByDate.set(current.stayDate, (countByDate.get(current.stayDate) ?? 0) + 1);
   }
 
+  // A newly introduced room has no historical days. Partial rows for a new
+  // room, or absent rows for a previously configured room, still fail closed.
+  const roomsWithDays = new Set(input.currentDays.map((day) => day.roomTypeId));
+  const previousRooms = new Set(previous?.sourceInputs.roomBindings.map((b) => b.roomTypeId));
+  const newEmptyRoomCount = previous
+    ? bindings.filter((b) => !previousRooms.has(b.roomTypeId) && !roomsWithDays.has(b.roomTypeId))
+        .length
+    : 0;
+  const historicalRoomCount = bindings.length - newEmptyRoomCount;
   let missingSuffix = false;
   for (const stayDate of dates) {
     const count = countByDate.get(stayDate) ?? 0;
-    if (count !== 0 && count !== bindings.length) {
+    if (count !== 0 && count !== historicalRoomCount) {
       return failure({ code: "current_day_coverage_gap", stayDate });
     }
     if (count === 0) missingSuffix = true;
@@ -165,7 +188,7 @@ export function planPmsInventoryMaterialization(
   const outcome =
     input.currentDays.length === 0
       ? "applied"
-      : changedExisting
+      : changedExisting || newEmptyRoomCount > 0
         ? "rematerialized"
         : missingSuffix
           ? "extended"
@@ -387,27 +410,18 @@ function safeConfigurationShape(
 }
 
 function validInputShape(value: unknown): value is PmsInventoryMaterializationPlannerInput {
-  const hasOverrides =
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.hasOwnProperty.call(value, "generatedSellableLimitOverrides");
+  const optionalKeys = ["generatedSellableLimitOverrides", "previousConfiguration"].filter(
+    (key) => value !== null && typeof value === "object" && Object.hasOwn(value, key),
+  );
   return (
-    (dataRecord(value, [
+    dataRecord(value, [
       "propertyId",
       "configurationSource",
       "configuration",
       "horizon",
       "currentDays",
-    ]) ||
-      (hasOverrides &&
-        dataRecord(value, [
-          "propertyId",
-          "configurationSource",
-          "configuration",
-          "horizon",
-          "currentDays",
-          "generatedSellableLimitOverrides",
-        ]))) &&
+      ...optionalKeys,
+    ]) &&
     dataRecord(value.configurationSource, ["ownerDomain", "entityType", "entityId", "revision"]) &&
     dataRecord(value.horizon, ["from", "through"]) &&
     denseArray(value.currentDays) &&

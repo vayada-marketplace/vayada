@@ -3,6 +3,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import { buildChannexManagementJobKey } from "@vayada/domain-pms-channex";
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { validateInventoryRules } from "./pmsChannexInventoryRules.js";
 
 import type {
   PmsChannexManagementCommandInput,
@@ -93,6 +94,15 @@ async function enqueue(
       if (!transactionClient) await client.query(replay.ok ? "COMMIT" : "ROLLBACK");
       return replay;
     }
+    if (input.operationType === "update_inventory_rules") {
+      const error = input.inventoryRules
+        ? await validateInventoryRules(client, propertyId, input.inventoryRules)
+        : "Inventory rules are required.";
+      if (error) {
+        if (!transactionClient) await client.query("ROLLBACK");
+        return { ok: false, code: "invalid_inventory_rules", message: error };
+      }
+    }
     if (input.restrictions) await replaceStayRestrictions(client, propertyId, input.restrictions);
     const job = await client.query<PmsChannexManagementJobRow>(
       `INSERT INTO platform.jobs (
@@ -126,6 +136,17 @@ async function enqueue(
     );
     const row = job.rows[0];
     if (!row) throw new Error("Channex management job was not created");
+    if (input.inventoryRules) {
+      await client.query(
+        `UPDATE pms.channel_connections SET connection_metadata =
+        connection_metadata || jsonb_build_object('inventoryRules', $2::jsonb), updated_at = now()
+        WHERE property_id = $1::uuid AND provider = 'channex'`,
+        [
+          propertyId,
+          JSON.stringify({ rules: input.inventoryRules.rules, operationId: row.operationId }),
+        ],
+      );
+    }
     await client.query(
       `UPDATE platform.idempotency_keys
        SET idempotency_metadata = idempotency_metadata || jsonb_build_object('jobId', $2::text)
@@ -226,7 +247,7 @@ async function hasConnection(client: Client, propertyId: string): Promise<boolea
   const result = await client.query(
     `SELECT 1 FROM pms.channel_connections
      WHERE property_id = $1::uuid AND provider = 'channex'
-       AND connection_status IN ('connected', 'degraded') FOR SHARE`,
+       AND connection_status IN ('connected', 'degraded') FOR UPDATE`,
     [propertyId],
   );
   return Boolean(result.rows[0]);
@@ -239,6 +260,7 @@ function requiresConnection(type: PmsChannexManagementCommandInput["operationTyp
 function fingerprintPayload(input: PmsChannexManagementCommandInput) {
   return {
     operationType: input.operationType,
+    ...(input.inventoryRules ? { inventoryRules: input.inventoryRules } : {}),
     ...(input.restrictions ? { restrictions: input.restrictions } : {}),
     ...(input.recoveryAlertId ? { recoveryAlertId: input.recoveryAlertId } : {}),
     markups: input.markups

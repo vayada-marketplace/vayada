@@ -1,6 +1,8 @@
 // Shared predicates for queries with canonical inventory and Channex connection aliases.
 export const CHANNEX_ARI_ACTIVE_ROOM_SQL = `EXISTS (SELECT 1 FROM pms.room_types room
-  WHERE room.id = inventory.room_type_id AND room.property_id = inventory.property_id AND room.active)`;
+  WHERE room.id = inventory.room_type_id AND room.property_id = inventory.property_id AND room.active
+    AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+      WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id))`;
 export const CHANNEX_ARI_MAPPING_MISSING_SQL = `(${CHANNEX_ARI_ACTIVE_ROOM_SQL} AND (
   NOT EXISTS (SELECT 1 FROM pms.channel_room_type_mappings mapping
     WHERE mapping.connection_id = connection.id

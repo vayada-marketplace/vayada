@@ -80,3 +80,19 @@ export interface BookingPublicationCommandPort {
   }): Promise<BookingPublicationOperation | null>;
   close?(): Promise<void>;
 }
+
+/** Read-only recovery does not require readiness to remain publishable. */
+export interface BookingPublicationReviewReadPort {
+  getPublicationReview(input: {
+    organizationId: string;
+    propertyId: string;
+    actorUserId: string;
+    idempotencyKey?: string;
+  }): Promise<{
+    propertyId: string;
+    activeContentRevisionId: string | null;
+    publishedUrl: string | null;
+    latestOperation: BookingPublicationOperation | null;
+    recoveredOperation: BookingPublicationOperation | null;
+  } | null>;
+}
