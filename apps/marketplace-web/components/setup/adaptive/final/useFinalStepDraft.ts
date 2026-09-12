@@ -173,7 +173,7 @@ export function useFinalStepDraft(props: AdaptiveSetupStepComponentProps, stepId
     [registerStaleRecovery, step.draft, resetOwnDraft, stepId],
   );
 
-  async function commit(save: () => Promise<void>) {
+  async function commit(save: () => Promise<void>, continueAfterSave = true) {
     if (busy.current) return;
     busy.current = true;
     setSaving(true);
@@ -184,8 +184,20 @@ export function useFinalStepDraft(props: AdaptiveSetupStepComponentProps, stepId
       await resetOwnDraft();
       dirty.current = false;
       dirtyFields.current.clear();
-      navigating.current = true;
-      await propsRef.current.saveAndContinue();
+      if (continueAfterSave) {
+        navigating.current = true;
+        await propsRef.current.saveAndContinue();
+      } else {
+        const fresh = await routeClient.getRoute(propsRef.current.propertyId, {
+          cache: "no-store",
+        });
+        const next = fresh.steps.find((step) => step.stepId === stepId);
+        if (!next || next.draft)
+          throw new Error("This setup draft changed again. Refresh before saving.");
+        revision.current = adaptiveStepDraftRevision(fresh, next, stepId);
+        sessionId.current = fresh.sessionId;
+        await propsRef.current.refreshRoute();
+      }
     } catch (cause) {
       if (
         isAdaptiveRevisionConflict(cause) ||

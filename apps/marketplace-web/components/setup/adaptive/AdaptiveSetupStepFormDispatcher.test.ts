@@ -12,6 +12,7 @@ const calls = vi.hoisted(() => ({
   pricing: vi.fn(),
   calendar: vi.fn(),
   guest: vi.fn(),
+  payments: vi.fn(),
 }));
 
 vi.mock("./presentation/PresentHotelStep", () => ({
@@ -52,6 +53,13 @@ vi.mock("./final/GuestExperienceStep", () => ({
   },
 }));
 
+vi.mock("./final/PaymentsStep", () => ({
+  PaymentsStep: (props: unknown) => {
+    calls.payments(props);
+    return null;
+  },
+}));
+
 import { AdaptiveSetupStepFormDispatcher } from "./AdaptiveSetupStepFormDispatcher";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
@@ -67,6 +75,7 @@ describe("AdaptiveSetupStepFormDispatcher", () => {
     ["pricing", "pricing"],
     ["calendar", "calendar"],
     ["guest_experience", "guest"],
+    ["payments", "payments"],
   ] as const)("dispatches %s with the stable shared component contract", async (stepId, target) => {
     let renderer: ReactTestRenderer | undefined;
     const registerBeforeLeave = vi.fn(() => vi.fn());
@@ -107,7 +116,8 @@ function context(
     | "rooms"
     | "pricing"
     | "calendar"
-    | "guest_experience",
+    | "guest_experience"
+    | "payments",
 ): AdaptiveSetupStepRenderContext {
   const route = setupRoute();
   return {
@@ -138,6 +148,7 @@ function setupRoute(): PropertySetupRouteReadModel {
       "pricing",
       "calendar",
       "guest_experience",
+      "payments",
     ].map((stepId, index) => ({
       stepId: stepId as PropertySetupRouteReadModel["steps"][number]["stepId"],
       position: index + 1,
