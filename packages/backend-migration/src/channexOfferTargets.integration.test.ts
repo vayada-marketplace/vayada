@@ -23,6 +23,11 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       "INSERT INTO pms.channel_connections(id,property_id,provider) VALUES($1,$2,'channex')",
       [connection, property],
     );
+    const generation = (
+      await pool.query("SELECT binding_generation FROM pms.channel_connections WHERE id=$1", [
+        connection,
+      ])
+    ).rows[0].binding_generation as string;
     const target = async (offer: string = randomUUID()) =>
       (
         await pool.query(
@@ -45,10 +50,10 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       pool.query(
         `INSERT INTO pms.channex_offer_target_versions
       (target_id,version,intent_id,binding_generation,external_property_id,external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
-      VALUES($1,$2,$3,1,$4,$5,$6,'{"currency":"EUR"}','{"verified":true}')`,
-        [id, i.version, i.id, property, room, external],
+      VALUES($1,$2,$3,$7,$4,$5,$6,'{"currency":"EUR"}','{"verified":true}')`,
+        [id, i.version, i.id, property, room, external, generation],
       );
-    return { property, connection, room, target, intent, seal };
+    return { property, connection, room, generation, target, intent, seal };
   }
   it("allocates retained versions, seals atomically and preserves active history on failure", async () => {
     const f = await fixture(),
@@ -57,6 +62,14 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       external = randomUUID();
     expect(first.version).toBe("1");
     await f.seal(t, first, external);
+    expect(
+      (
+        await pool.query(
+          "SELECT binding_generation FROM pms.channex_offer_target_versions WHERE target_id=$1",
+          [t],
+        )
+      ).rows[0].binding_generation,
+    ).toBe(f.generation);
     await pool.query("UPDATE pms.channex_offer_targets SET active_version=1 WHERE id=$1", [t]);
     const second = await f.intent(t);
     expect(second.version).toBe("2");

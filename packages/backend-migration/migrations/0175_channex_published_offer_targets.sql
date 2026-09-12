@@ -30,7 +30,7 @@ CREATE TABLE pms.channex_offer_target_versions (
   target_id UUID NOT NULL,
   version BIGINT NOT NULL,
   intent_id UUID NOT NULL UNIQUE,
-  binding_generation BIGINT NOT NULL CHECK (binding_generation > 0),
+  binding_generation UUID NOT NULL,
   external_property_id TEXT NOT NULL CHECK (external_property_id <> '' AND external_property_id = btrim(external_property_id)),
   external_room_type_id TEXT NOT NULL CHECK (external_room_type_id <> '' AND external_room_type_id = btrim(external_room_type_id)),
   external_rate_plan_id TEXT NOT NULL CHECK (external_rate_plan_id <> '' AND external_rate_plan_id = btrim(external_rate_plan_id)),
