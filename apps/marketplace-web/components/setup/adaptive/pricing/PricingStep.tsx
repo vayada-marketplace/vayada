@@ -41,6 +41,8 @@ import {
   propertySetupDraftResetApi,
 } from "@/services/api/propertySetupDraftResetClient";
 
+import { useReviewEntityFocus } from "../final/useReviewEntityFocus";
+
 type WorkspaceState = "loading" | "ready" | "error";
 
 export function PricingStep({
@@ -53,10 +55,15 @@ export function PricingStep({
   reportRevisionConflict,
   registerBeforeLeave,
   registerStaleRecovery,
+  requestedEntityId,
 }: AdaptiveSetupStepComponentProps) {
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
   const [workspace, setWorkspace] = useState<PricingCanonicalWorkspace | null>(null);
   const [draft, setDraft] = useState<PricingDraftState | null>(null);
+  useReviewEntityFocus(
+    requestedEntityId ? `base-${requestedEntityId}` : null,
+    workspaceState === "ready" && !!draft,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
