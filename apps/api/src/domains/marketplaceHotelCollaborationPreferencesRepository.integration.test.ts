@@ -5,7 +5,10 @@ import {
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./marketplaceHotelCollaborationPreferencesRepository.js";
+import {
+  createPgMarketplaceHotelCollaborationPreferencesRepository,
+  readLockedMarketplaceHotelCollaborationPreferences,
+} from "./marketplaceHotelCollaborationPreferencesRepository.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const actorUserId = "a1077000-0000-4000-8000-000000000001";
@@ -51,6 +54,23 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await repository.close();
       await cleanup();
       await admin.end();
+    });
+
+    it("reads preferences inside the caller's transaction without committing it", async () => {
+      await admin.query("BEGIN");
+      try {
+        const before = await admin.query("SELECT txid_current()::text AS id");
+        const result = await readLockedMarketplaceHotelCollaborationPreferences(
+          { query: admin.query.bind(admin), release() {} },
+          scope(),
+          new Date(acceptedAt),
+        );
+        expect(result).toMatchObject({ outcome: "available", readModel: { revision: 0 } });
+        const after = await admin.query("SELECT txid_current()::text AS id");
+        expect(after.rows[0].id).toBe(before.rows[0].id);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
     });
 
     it("creates revision one, reads exact evidence, and replays without another side effect", async () => {
