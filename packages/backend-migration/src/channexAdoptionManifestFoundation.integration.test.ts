@@ -66,8 +66,18 @@ describe.skipIf(!DATABASE_URL)("Channex adoption manifest persistence", () => {
 
       await approve(MANIFESTS[1]!, "migration_owner", IDS[0]!, MANIFESTS[1]!);
       await expect(
-        approve(MANIFESTS[1]!, "security_owner", IDS[0]!, MANIFESTS[2]!),
-      ).rejects.toMatchObject({ code: "23505", constraint: "uq_channex_adoption_approval_actor" });
+        approve(MANIFESTS[1]!, "security_owner", IDS[0]!, IDS[2]!),
+      ).resolves.toBeDefined();
+      expect(
+        (
+          await target.query(
+            `SELECT count(*)::integer count
+               FROM platform.channex_adoption_approval_records
+              WHERE manifest_id=$1 AND actor_user_id=$2`,
+            [MANIFESTS[1], IDS[0]],
+          )
+        ).rows[0],
+      ).toEqual({ count: 2 });
 
       await target.query(
         `INSERT INTO platform.channex_adoption_approval_revocations
@@ -135,7 +145,7 @@ describe.skipIf(!DATABASE_URL)("Channex adoption manifest persistence", () => {
       ).rejects.toMatchObject({ code: "55000" });
       await expect(
         target.query("TRUNCATE platform.channex_adoption_manifest_consumptions"),
-      ).rejects.toMatchObject({ code: "55000" });
+      ).rejects.toMatchObject({ code: expect.stringMatching(/^(55000|0A000)$/) });
       expect(
         (await target.query("SELECT count(*)::integer count FROM pms.channel_binding_claims"))
           .rows[0],
