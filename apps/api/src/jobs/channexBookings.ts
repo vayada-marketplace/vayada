@@ -620,6 +620,7 @@ async function repairStagingAssignments(
       canceled: false,
       rooms: assignmentRooms(revision.rooms),
       repair: true,
+      stagingCatalogBindingGeneration: generation,
     });
     if (repaired) {
       await linkAssignments(

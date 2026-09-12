@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { resolveStagingCatalogReference } from "./channexStagingCatalogReference.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
@@ -12,7 +13,11 @@ export type ChannexRoomStay = {
   adults: number;
   children: number;
 };
-type Stay = ChannexRoomStay & { roomTypeId: string; ratePlanId: string };
+type Stay = ChannexRoomStay & {
+  roomTypeId: string;
+  ratePlanId: string | null;
+  stagingCatalogReferenceId?: string;
+};
 type Assignment = Stay & {
   id: string;
   position: number;
@@ -36,6 +41,7 @@ export async function persistChannexAssignments(
     canceled: boolean;
     rooms: readonly ChannexRoomStay[];
     repair?: boolean;
+    stagingCatalogBindingGeneration?: string;
   },
 ) {
   const { propertyId, bookingId } = input;
@@ -75,7 +81,11 @@ export async function persistChannexAssignments(
   } else {
     const stays: Stay[] = [];
     for (const room of input.rooms) {
-      const mapped = (
+      let mapped: {
+        roomTypeId: string;
+        ratePlanId: string | null;
+        stagingCatalogReferenceId?: string;
+      }[] = (
         await client.query<{ roomTypeId: string; ratePlanId: string }>(
           `SELECT r.id::text AS "roomTypeId",rate.id::text AS "ratePlanId"
          FROM pms.channel_room_type_mappings rm
@@ -92,6 +102,12 @@ export async function persistChannexAssignments(
           [propertyId, input.connectionId, room.externalRoomTypeId, room.externalRatePlanId],
         )
       ).rows;
+      if (mapped.length === 0 && input.repair && input.stagingCatalogBindingGeneration)
+        mapped = await resolveStagingCatalogReference(client, {
+          ...input,
+          ...room,
+          bindingGeneration: input.stagingCatalogBindingGeneration,
+        });
       if (mapped.length !== 1)
         throw new ChannexAssignmentConflict("operational_mapping_unavailable");
       stays.push({ ...room, ...mapped[0]! });
@@ -124,6 +140,9 @@ export async function persistChannexAssignments(
         contractVersion: "channex-operational-assignment.v1",
         channexStay: input.rooms[index],
         channexRevision: input.revisionId,
+        ...(stay.stagingCatalogReferenceId
+          ? { stagingCatalogReferenceId: stay.stagingCatalogReferenceId }
+          : {}),
         version: input.revisionId,
       };
       await client.query(
