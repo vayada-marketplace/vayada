@@ -57,6 +57,95 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
+  it("rejects captured active-room evidence after closure without writing inventory", async () => {
+    const fixture = await createFixture(admin, repositories, [2]);
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+      [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+    );
+    expect(
+      await fixture.repository.materializeInventory(
+        materializationCommand(fixture, "closed", 1, "2026-08-04", "2026-08-06"),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.inventory_days WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
+
+  it("adds a new room to stored coverage and still rejects missing old-room rows", async () => {
+    const newRoom = randomUUID();
+    const fixture = await createFixture(admin, repositories, [2, 2], newRoom);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "before-add", 1, "2026-08-04", "2026-08-06"),
+    );
+    await admin.query(
+      "UPDATE pms.inventory_days SET assigned_count=1, available_count=1, booking_source_revision=1, inventory_revision=2 WHERE property_id=$1 AND stay_date='2026-08-05'",
+      [fixture.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'New room')",
+      [newRoom, fixture.propertyId],
+    );
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+    for (const [from, through] of [
+      ["2026-08-04", "2026-08-05"],
+      ["2026-08-05", "2026-08-06"],
+    ]) {
+      await expect(
+        fixture.repository.materializeInventory(
+          materializationCommand(fixture, `partial-add-${from}`, 2, from!, through!),
+        ),
+      ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT calendar_revision FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ calendar_revision: 1 }]);
+    const command = materializationCommand(fixture, "add-room", 2, "2026-08-04", "2026-08-06");
+    const result = await fixture.repository.materializeInventory(command);
+    expect(result).toMatchObject({ ok: true, outcome: "rematerialized" });
+    await expect(fixture.repository.materializeInventory(command)).resolves.toEqual(result);
+    const rows = await admin.query(
+      "SELECT room_type_id,stay_date::text,assigned_count,available_count FROM pms.inventory_days WHERE property_id=$1",
+      [fixture.propertyId],
+    );
+    expect(rows.rows).toHaveLength(6);
+    expect(
+      rows.rows.find((r) => r.room_type_id === fixture.roomTypeId && r.stay_date === "2026-08-05"),
+    ).toMatchObject({ assigned_count: 1, available_count: 1 });
+    await expect(
+      admin.query(
+        "DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-05'",
+        [fixture.propertyId, fixture.roomTypeId],
+      ),
+    ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
+  });
+
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {
     const fixture = await createFixture(admin, repositories, [2, 1]);
     const first = materializationCommand(fixture, "first", 1, "2026-08-04", "2026-08-06");
@@ -188,19 +277,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       materializationCommand(fixture, "initial-full", 1, "2026-08-04", "2026-08-07"),
     );
     await activateCalendarRevision(admin, fixture, 2);
-    await expect(fixture.repository.materializeInventory(
-      materializationCommand(fixture, "partial-new", 2, "2026-08-04", "2026-08-05"),
-    )).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
+    await expect(
+      fixture.repository.materializeInventory(
+        materializationCommand(fixture, "partial-new", 2, "2026-08-04", "2026-08-05"),
+      ),
+    ).resolves.toMatchObject({ ok: true, outcome: "rematerialized" });
     const retained = await readFirstDay(admin, fixture);
     const command = materializationCommand(fixture, "finish-new", 2, "2026-08-04", "2026-08-07");
     const completed = await fixture.repository.materializeInventory(command);
     expect(completed).toMatchObject({ ok: true, outcome: "rematerialized", changedDayCount: 2 });
     await expect(fixture.repository.materializeInventory(command)).resolves.toEqual(completed);
     await expect(readFirstDay(admin, fixture)).resolves.toEqual(retained);
-    await expect(fixture.repository.getInventoryLaunchReadiness({
-      propertyId: fixture.propertyId,
-      requiredCoverage: { from: "2026-08-04", through: "2026-08-07" },
-    })).resolves.toMatchObject({ ready: true, blockers: [] });
+    await expect(
+      fixture.repository.getInventoryLaunchReadiness({
+        propertyId: fixture.propertyId,
+        requiredCoverage: { from: "2026-08-04", through: "2026-08-07" },
+      }),
+    ).resolves.toMatchObject({ ready: true, blockers: [] });
   });
 
   it("stop-sells newly extended dates for an existing linked cause", async () => {
@@ -535,6 +628,7 @@ async function createFixture(
   admin: pg.Client,
   repositories: PmsInventoryMaterializationRepository[],
   startingLimits: readonly number[],
+  additionalRoomTypeId?: string,
 ): Promise<Fixture> {
   const organizationId = randomUUID();
   const propertyId = randomUUID();
@@ -621,11 +715,12 @@ async function createFixture(
   };
   const roomCapacity: RoomCapacityReadPort = {
     async getRoomTypeCapacity(requestedPropertyId, requestedRoomTypeId) {
-      return requestedPropertyId === propertyId && requestedRoomTypeId === roomTypeId
+      return requestedPropertyId === propertyId &&
+        (requestedRoomTypeId === roomTypeId || requestedRoomTypeId === additionalRoomTypeId)
         ? {
             contractVersion: "pms-room-facts.v1",
             propertyId,
-            roomTypeId,
+            roomTypeId: requestedRoomTypeId,
             roomUnitsRevision: capacityState.revision,
             activeUnitCount: capacityState.count,
             capturedAt: ACCEPTED_AT.toISOString(),
@@ -699,6 +794,7 @@ async function activateCalendarRevision(
     actorUserId: fixture.actorUserId,
     revision,
     startingLimit: binding.startingSellableLimitCount,
+    roomTypeIds: configuration.sourceInputs.roomBindings.map((b) => b.roomTypeId),
   });
   fixture.calendarState.currentRevision = revision;
 }
@@ -757,6 +853,7 @@ async function seedCalendarRevision(
     actorUserId: string;
     revision: number;
     startingLimit: number;
+    roomTypeIds?: readonly string[];
   },
 ): Promise<void> {
   const idempotencyId = randomUUID();
@@ -811,7 +908,7 @@ async function seedCalendarRevision(
          created_by_user_id, created_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3, 'pms-operating-calendar.v1', 1,
-         'Europe/Berlin', 'year_round', 0, 1, 1, $4::uuid, $5::uuid,
+         'Europe/Berlin', 'year_round', 0, $9, 1, $4::uuid, $5::uuid,
          $6::uuid, $7::uuid, $8::timestamptz, $8::timestamptz
        )`,
       [
@@ -823,16 +920,19 @@ async function seedCalendarRevision(
         outboxId,
         input.actorUserId,
         ACCEPTED_AT.toISOString(),
+        input.roomTypeIds?.length ?? 1,
       ],
     );
-    await admin.query(
-      `INSERT INTO pms.operating_calendar_room_bindings (
+    for (const roomId of input.roomTypeIds ?? [input.roomTypeId]) {
+      await admin.query(
+        `INSERT INTO pms.operating_calendar_room_bindings (
          property_id, calendar_revision, room_type_id,
          source_room_facts_revision, source_room_units_revision,
          physical_capacity_count, starting_sellable_limit_count
        ) VALUES ($1::uuid, $2, $3::uuid, 1, 1, 2, $4)`,
-      [input.propertyId, input.revision, input.roomTypeId, input.startingLimit],
-    );
+        [input.propertyId, input.revision, roomId, input.startingLimit],
+      );
+    }
     await admin.query("COMMIT");
   } catch (error) {
     await admin.query("ROLLBACK");

@@ -35,34 +35,37 @@ describe("Booking guest-policy Catalog current-owner evidence adapter", () => {
     expect(policy.getCurrentPolicyOwnerEvidence).toHaveBeenCalledWith(scope);
   });
 
-  it("supplies the two canonical Catalog keys to the six-owner Booking aggregate", async () => {
-    const catalog = createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter({
-      location: locationPort(availableLocation(3)),
-      policy: policyPort(availablePolicy(7)),
-    });
-    const aggregate = createBookingGuestPolicyCurrentOwnerEvidenceAdapter({
-      booking: {
-        async getCurrentGuestPolicy() {
-          return null;
+  it.each([0, 7])(
+    "supplies policy revision %i to the six-owner Booking aggregate",
+    async (revision) => {
+      const catalog = createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter({
+        location: locationPort(availableLocation(3)),
+        policy: policyPort(availablePolicy(revision)),
+      });
+      const aggregate = createBookingGuestPolicyCurrentOwnerEvidenceAdapter({
+        booking: {
+          async getCurrentGuestPolicy() {
+            return null;
+          },
         },
-      },
-      pms: availablePmsPort(),
-      catalog,
-    });
+        pms: availablePmsPort(),
+        catalog,
+      });
 
-    await expect(aggregate.getCurrentGuestPolicyOwnerEvidence(scope)).resolves.toEqual({
-      outcome: "available",
-      ...scope,
-      currentBaseRevisions: {
-        "booking.guest_experience": "guest-policy:absent",
-        "pms.pricing_settings": "pricing-settings:2",
-        "pms.rate_plans": "rate-plans:4",
-        "pms.room_types": "room-types:6",
-        "hotel_catalog.location": `hotel_catalog.location:${propertyId}:r3`,
-        "hotel_catalog.policy": `hotel_catalog.policy:${propertyId}:r7`,
-      },
-    });
-  });
+      await expect(aggregate.getCurrentGuestPolicyOwnerEvidence(scope)).resolves.toEqual({
+        outcome: "available",
+        ...scope,
+        currentBaseRevisions: {
+          "booking.guest_experience": "guest-policy:absent",
+          "pms.pricing_settings": "pricing-settings:2",
+          "pms.rate_plans": "rate-plans:4",
+          "pms.room_types": "room-types:6",
+          "hotel_catalog.location": `hotel_catalog.location:${propertyId}:r3`,
+          "hotel_catalog.policy": `hotel_catalog.policy:${propertyId}:r${revision}`,
+        },
+      });
+    },
+  );
 
   it("fails closed before calling owners for a malformed Booking scope", async () => {
     const location = locationPort(availableLocation(3));
