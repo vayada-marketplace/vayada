@@ -368,6 +368,64 @@ the target before commit. Rerun the same dry run and require unchanged parity.
 PMS success does not authorize legacy shutdown: VAY-1357 through VAY-1363,
 the rollback window, and the final human cutover approval remain mandatory.
 
+### Signed Channex adoption
+
+VAY-1963 consumes the VAY-1962 proof artifact only through a one-off migration
+runner. It rereads source and target evidence, then reserves the exact target
+property and Channex property as `verified_non_active`. It does not call
+Channex, create or activate a connection, schedule work, import bookings, or
+change the legacy runtime owner.
+
+The deployment-controlled JSON config has exactly these fields:
+
+```json
+{
+  "environment": "staging",
+  "allowedExecutionPrincipals": ["iam:approved-migration-runner"],
+  "verificationKeys": [
+    {
+      "id": "migration-staging-2026-01",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+      "principal": "kms:controlled-manifest-signer"
+    }
+  ],
+  "approvalPrincipals": {
+    "00000000-0000-4000-8000-000000000001": "user:flamur-maliqi"
+  },
+  "singleHumanDualAuthority": {
+    "actorUserId": "00000000-0000-4000-8000-000000000001",
+    "principal": "user:flamur-maliqi",
+    "decisionId": "VAY-1320@2026-09-12"
+  }
+}
+```
+
+The manifest still contains one immutable `migration_owner` record and one
+immutable `security_owner` record. Both may name the same registry-authorized
+target user; the restricted audit records
+`single_human_dual_authority.v1` together with the exact VAY-1320 decision ID.
+Set `singleHumanDualAuthority` to `null` when two independent humans approve.
+The signer and runner remain distinct machine principals and cannot satisfy
+either human authority.
+
+Consume reviewed files without putting the signature or manifest in command
+arguments:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+CHANNEX_ADOPTION_EXECUTION_PRINCIPAL=<runtime IAM principal> \
+npm run target:channex:adopt -- consume \
+  --config <deployment config.json> \
+  --manifest-file <manifest.json> \
+  --signature-file <manifest.sig>
+```
+
+Rollback requires two fresh, unrevoked migration/security authority records
+bound to the original manifest, exact claim, reason hash, environment, and new
+expiry. Both records may name the same authorized human.
+Supply the reviewed reason through a file. Successful rollback only changes the
+matching adoption claim from `verified_non_active` to retained `released`.
+
 ## Production Marketplace Migration
 
 VAY-1357 consumes creators, offers, collaborations, deliverables, chat, trips,

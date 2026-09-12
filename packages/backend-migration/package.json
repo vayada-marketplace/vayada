@@ -38,6 +38,7 @@
     "target:workos:backfill": "tsx src/cli/workosBackfill.ts",
     "target:workos:audit": "tsx src/cli/workosLinkAudit.ts",
     "target:next-smoke:backfill": "tsx src/cli/nextSmokeBackfill.ts",
+    "target:channex:adopt": "tsx src/cli/channexAdoption.ts",
     "target:booking-public-bookability:backfill": "tsx src/cli/bookingPublicBookabilityBackfill.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts",
     "target:migrate:dist": "node dist/cli/migrate.js",
@@ -61,6 +62,7 @@
     "target:workos:backfill:dist": "node dist/cli/workosBackfill.js",
     "target:workos:audit:dist": "node dist/cli/workosLinkAudit.js",
     "target:next-smoke:backfill:dist": "node dist/cli/nextSmokeBackfill.js",
+    "target:channex:adopt:dist": "node dist/cli/channexAdoption.js",
     "target:booking-public-bookability:backfill:dist": "node dist/cli/bookingPublicBookabilityBackfill.js"
   },
   "dependencies": {

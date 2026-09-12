@@ -244,6 +244,7 @@ jobs:
           src/channexBookingRevisionTombstonesMigration.integration.test.ts
           src/channexAdoptionManifestFoundation.integration.test.ts
           src/channexAdoptionConsumer.integration.test.ts
+          src/channexAdoptionEvidence.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
