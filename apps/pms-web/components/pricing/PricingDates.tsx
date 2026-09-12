@@ -2,15 +2,18 @@
 import { useState } from "react";
 import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { baseAmounts, decimalAmount, parseMinorInput } from "./pricingAmounts";
+import { recurringPrice, recurringAdjustments } from "./recurringPricingInputs";
 type Offer = PricingConfiguration["offers"][number];
 const datesOf = (offer: Offer) => offer.price.kind === "linked" ? offer.price.dateOverrides : offer.price.calendar.dates;
-export function changeDatePrice(room: PricingConfiguration, offerId: string, date: string, amount: string | null): PricingConfiguration {
+export function changeDatePrice(room: PricingConfiguration, offerId: string, date: string, amount: string | string[] | null): PricingConfiguration {
   const offer = room.offers.find((value) => value.id === offerId);
   if (!offer) throw new Error("The offer is unavailable. Reload pricing.");
-  const dates = datesOf(offer), exists = dates.some((entry) => entry.date === date);
-  if (amount !== null && exists) throw new Error("Clear the existing price for this date before adding a replacement.");
+  const dates = datesOf(offer), existing = dates.find((entry) => entry.date === date), exists = !!existing;
+  const editing = Array.isArray(amount);
+  if (editing && !existing) throw new Error("Choose an existing date price to edit.");
+  if (amount !== null && exists && !editing) throw new Error("Clear the existing price for this date before adding a replacement.");
   if (amount === null && !exists) throw new Error("There is no override to clear for this date.");
-  const nextDates = amount === null ? dates.filter((entry) => entry.date !== date) : [...dates, { date, price: { mode: "flat" as const, amountMinor: parseMinorInput(amount, pricingCurrencyScale(room.currency)!) } }];
+  const nextDates = Array.isArray(amount) ? dates.map((entry) => entry.date === date ? { ...entry, price: recurringPrice(offer, amount, room.currency, existing!.price) } : entry) : amount === null ? dates.filter((entry) => entry.date !== date) : [...dates, { date, price: { mode: "flat" as const, amountMinor: parseMinorInput(amount, pricingCurrencyScale(room.currency)!) } }];
   const price = offer.price.kind === "linked" ? { ...offer.price, dateOverrides: nextDates } : { ...offer.price, calendar: { ...offer.price.calendar, dates: nextDates } };
   const result = parsePricingConfiguration({ ...room, offers: room.offers.map((value) => value.id === offerId ? { ...offer, price } : value) });
   if (!result) throw new Error("Enter a valid calendar date and room price.");
@@ -18,25 +21,36 @@ export function changeDatePrice(room: PricingConfiguration, offerId: string, dat
 }
 export function PricingDates({ room, offer, label, disabled, onChange, onPending }: { room: PricingConfiguration; offer: Offer; label: string; disabled: boolean;
   onChange: (room: PricingConfiguration) => void; onPending: (pending: boolean) => void }) {
-  const [date, setDate] = useState(""), [amount, setAmount] = useState(""), [error, setError] = useState("");
-  const reset = () => { setDate(""); setAmount(""); setError(""); onPending(false); };
-  const apply = (day: string, value: string | null) => {
-    if (disabled) return;
+  const [date, setDate] = useState(""), [amounts, setAmounts] = useState<string[]>([]), [error, setError] = useState(""), [editing, setEditing] = useState(false);
+  const pending = editing || !!date || amounts.some(Boolean);
+  const reset = () => { setDate(""); setAmounts([]); setEditing(false); setError(""); onPending(false); };
+  const apply = (day: string, value: string | string[] | null) => {
+    if (disabled || (value === null && pending)) return;
     try { onChange(changeDatePrice(room, offer.id, day, value)); if (value !== null) reset(); else setError(""); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not change the date price."); }
   };
   const scale = pricingCurrencyScale(room.currency)!;
+  const template = editing ? datesOf(offer).find((entry) => entry.date === date)?.price : null;
+  const fields = template ? baseAmounts(template) : [["Per room", ""]];
   return <details className="sm:col-span-2 text-sm"><summary className="cursor-pointer">Date-specific prices · {label}</summary>
     <p className="mt-2 text-gray-600">A date price replaces the adult room tariff for that night. Child supplements and meals still apply. For linked offers, this replaces the parent price and this offer’s adjustment on that date. Clearing restores the normal calendar or parent rules; an unpriced fallback can be unavailable.</p>
     <ul className="my-3 space-y-2">{datesOf(offer).map((entry) => <li key={entry.date} className="flex flex-wrap items-center gap-3"><span>{entry.date}: {baseAmounts(entry.price).map(([name, minor]) => `${name} ${decimalAmount(minor, scale)} ${room.currency}`).join("; ")}</span>
-      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled} aria-label={`Clear ${entry.date} price for ${label}`} onClick={() => apply(entry.date, null)}>Clear date price</button></li>)}</ul>
+      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={`Edit ${entry.date} price for ${label}`} onClick={() => {
+        if (disabled || pending) return;
+        setEditing(true); setDate(entry.date); setAmounts(baseAmounts(entry.price).map(([, minor]) => decimalAmount(minor, scale))); setError(""); onPending(true);
+      }}>Edit date price</button>
+      <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={`Clear ${entry.date} price for ${label}`} onClick={() => apply(entry.date, null)}>Clear date price</button></li>)}</ul>
+    {editing && template && <p className="mb-3">Edit this date’s amounts while keeping its date, pricing mode and occupancy settings.{recurringAdjustments(template, room.currency, scale)}</p>}
+    {!editing && <p className="mb-3">New date prices use one final room price for every adult count.</p>}
     <div className="flex flex-wrap items-end gap-3">
-      <label>Date (YYYY-MM-DD)<input type="text" placeholder="YYYY-MM-DD" aria-label={`Override date for ${label}`} className="mt-1 block w-40 rounded border px-3 py-2" disabled={disabled} value={date} onChange={(event) => { setDate(event.target.value); setError(""); onPending(!!event.target.value || !!amount); }} /></label>
-      <label>Room price ({room.currency})<input aria-label={`Date room price for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={amount} onChange={(event) => { setAmount(event.target.value); setError(""); onPending(!!date || !!event.target.value); }} /></label>
-      <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(date, amount)}>Add date price</button>
-      {(date || amount) && <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={reset}>Cancel date entry</button>}
+      <label>Date (YYYY-MM-DD)<input type="text" placeholder="YYYY-MM-DD" aria-label={`Override date for ${label}`} className="mt-1 block w-40 rounded border px-3 py-2" disabled={disabled || editing} value={date} onChange={(event) => { if (disabled || editing) return; setDate(event.target.value); setError(""); onPending(!!event.target.value || amounts.some(Boolean)); }} /></label>
+      {fields.map(([name], index) => <label key={index}>{name} ({room.currency})<input aria-label={`${name === "Per room" ? "Date room price" : `Date ${name}`} for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={amounts[index] ?? ""} onChange={(event) => {
+        const next = Array.from({ length: fields.length }, (_, i) => i === index ? event.target.value : amounts[i] ?? ""); setAmounts(next); setError(""); onPending(editing || !!date || next.some(Boolean));
+      }} /></label>)}
+      <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(date, editing ? amounts : amounts[0] ?? "")}>{editing ? "Apply date price" : "Add date price"}</button>
+      {pending && <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={reset}>Cancel date entry</button>}
     </div>
-    {(date || amount) && <p className="mt-2">Add or cancel this date entry before saving the draft.</p>}
+    {pending && <p className="mt-2">{editing ? "Apply" : "Add"} or cancel this date entry before saving the draft.</p>}
     {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
   </details>;
 }
