@@ -85,15 +85,26 @@ export function createPgAirbnbImportSourceRepository(connectionString: string) {
     async find(
       scope: Scope,
       sourceId: string,
-    ): Promise<{ sourceId: string; channelId: string; data: PreparedHotelImport } | null> {
+    ): Promise<
+      (Binding & { sourceId: string; channelId: string; data: PreparedHotelImport }) | null
+    > {
       const result = await pool.query(
-        `SELECT id,channel_id,prepared_data FROM hotel_catalog.airbnb_import_sources
+        `SELECT id,channel_id,prepared_data,environment,external_group_id,external_property_id FROM hotel_catalog.airbnb_import_sources
         WHERE id=$1::uuid AND ${predicate} AND completed_at IS NOT NULL`,
         parameters(sourceId, scope),
       );
       const row = result.rows[0];
       const data = parsePreparedHotelImport(row?.prepared_data);
-      return row && data ? { sourceId: row.id, channelId: row.channel_id, data } : null;
+      return row && data
+        ? {
+            sourceId: row.id,
+            channelId: row.channel_id,
+            data,
+            environment: row.environment,
+            groupId: row.external_group_id,
+            externalPropertyId: row.external_property_id,
+          }
+        : null;
     },
     async close() {
       await pool.end();

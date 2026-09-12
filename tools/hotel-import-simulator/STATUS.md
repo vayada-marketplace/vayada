@@ -66,5 +66,9 @@ This storage slice adds hashed, expiring connection state and immutable source
 snapshots, checked with eight real local PostgreSQL tests. It remains unmounted;
 authenticated connection routes, save receipts and shared-review wiring are still pending.
 
+The following route slice adds an isolated authenticated start/complete/source-read
+plugin with synthetic provider ports. It is not registered in the running app.
+Production binding/link ports, callback UI, save receipts and live wiring remain pending.
+
 Do not infer deployment from a merged foundation PR. This record does not verify
 the running remote revision, invite redemption or a complete launch-ready hotel.

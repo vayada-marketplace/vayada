@@ -81,3 +81,30 @@ correlation, failed-attempt cleanup, and item-level application receipts remain 
 slices. No route is mounted and no provider connection is created by this change.
 Integration tests use bounded synthetic records in the reserved local database,
 including concurrent completion and conflicting channel bindings.
+
+## Authenticated route adapter slice
+
+The isolated Fastify route plugin exposes POST `/properties/:propertyId/airbnb-import/start`
+and `/complete`, plus GET `/sources/:sourceId` under that property path. It is not
+registered in the running application yet. Every request requires active actor,
+membership and hotel organization, hotel setup permission and owner/operator link,
+plus PMS management permission, owner/operator link and property entitlement.
+The shared property policy also enforces the member's current assigned-property
+scope; organization-wide property links alone are insufficient.
+Mutations require an exact configured browser Origin; bodies and IDs are bounded.
+
+Start accepts no provider IDs or redirects from the browser. Its injected server
+binding resolver supplies the property/group/environment; its connection-link port
+must use fixed configured success/failure destinations and validated provider URLs.
+Completion accepts only the opaque state and returned channel ID. It loads the
+pending attempt under current actor/organization/property scope, re-resolves the
+current binding and compares it to the saved one, reads/verifies the provider channel,
+and only then completes the source. `success=true` alone is not accepted as proof.
+
+The future frontend callback must POST through the authenticated API client from
+its configured origin, remove callback tokens from the address bar and avoid token
+logging. Provider rejection/temporary read failure leaves pending state retryable;
+expiry or already-completed state requires source retrieval/new flow rather than
+another completion. Failure redirects display failure without completing anything.
+Source retrieval rechecks the current binding before exposing its saved snapshot.
+Production binding/link ports, callback UI and live mounting remain later slices.
