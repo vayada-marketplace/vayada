@@ -1,4 +1,4 @@
-import { parseMinorInput } from "./pricingAmounts";
+import { baseAmounts, decimalAmount, parseMinorInput } from "./pricingAmounts";
 export type IncludedInput = { adults: string; adjustments: { kind: string; value: string }[] };
 export function includedPrice(input: IncludedInput, base: string, capacity: number, scale: number) {
   const baseGuests = Number(input.adults), baseMinor = parseMinorInput(base, scale);
@@ -16,10 +16,16 @@ export function includedPrice(input: IncludedInput, base: string, capacity: numb
   });
   return { mode: "included_guests" as const, baseGuests, baseMinor, adjustments };
 }
-export function IncludedPricing({ value, capacity, disabled, onChange }: { value: IncludedInput; capacity: number; disabled: boolean; onChange: (value: IncludedInput) => void }) {
+export function includedInput(price: Extract<Parameters<typeof baseAmounts>[0], { mode: "included_guests" }>, scale: number): IncludedInput {
+  return { adults: String(price.baseGuests), adjustments: price.adjustments.map((adjustment) => {
+    const minor = adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
+    return { kind: adjustment.kind, value: `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? scale : 2)}` };
+  }) };
+}
+export function IncludedPricing({ value, capacity, disabled, onChange, label = "" }: { label?: string; value: IncludedInput; capacity: number; disabled: boolean; onChange: (value: IncludedInput) => void }) {
   const inputClass = "mt-1 block w-full rounded-lg border px-3 py-2";
   return <div className="space-y-3 sm:col-span-2">
-    <label className="block text-sm">Adults included in the base price<select aria-label="Adults included in the base price" className={inputClass} disabled={disabled} value={value.adults}
+    <label className="block text-sm">Adults included in the base price<select aria-label={`Adults included in the base price${label ? ` for ${label}` : ""}`} className={inputClass} disabled={disabled} value={value.adults}
       onChange={(event) => onChange({ adults: event.target.value, adjustments: [] })}><option value="">Choose…</option>
       {Array.from({ length: capacity }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}
     </select></label>
@@ -29,9 +35,9 @@ export function IncludedPricing({ value, capacity, disabled, onChange }: { value
       const row = value.adjustments[index] ?? { kind: "", value: "" };
       const update = (patch: Partial<typeof row>) => onChange({ ...value, adjustments: Array.from({ length: capacity }, (_, i) => i === index ? { ...row, ...patch } : value.adjustments[i] ?? { kind: "", value: "" }) });
       return <div key={index} className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm">Adjustment type for {index + 1} adult{index ? "s" : ""}<select aria-label={`Adjustment type for ${index + 1} adult${index ? "s" : ""}`} className={inputClass} disabled={disabled} value={row.kind} onChange={(event) => update({ kind: event.target.value, value: "" })}>
+        <label className="text-sm">Adjustment type for {index + 1} adult{index ? "s" : ""}<select aria-label={`Adjustment type for ${index + 1} adult${index ? "s" : ""}${label ? ` for ${label}` : ""}`} className={inputClass} disabled={disabled} value={row.kind} onChange={(event) => update({ kind: event.target.value, value: "" })}>
           <option value="">Choose…</option><option value="fixed">Amount in the selected currency</option><option value="percentage">Percentage of the base price</option></select></label>
-        <label className="text-sm">Adjustment for {index + 1} adult{index ? "s" : ""}{row.kind === "percentage" ? " (%)" : ""}<input aria-label={`Adjustment for ${index + 1} adult${index ? "s" : ""}`} className={inputClass} disabled={disabled} value={row.value} onChange={(event) => update({ value: event.target.value })} /></label>
+        <label className="text-sm">Adjustment for {index + 1} adult{index ? "s" : ""}{row.kind === "percentage" ? " (%)" : ""}<input aria-label={`Adjustment for ${index + 1} adult${index ? "s" : ""}${label ? ` for ${label}` : ""}`} className={inputClass} disabled={disabled} value={row.value} onChange={(event) => update({ value: event.target.value })} /></label>
       </div>;
     })}
   </div>;
