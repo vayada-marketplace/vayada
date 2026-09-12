@@ -29,11 +29,15 @@ export type PreparedImportResponse = {
 export function PreparedHotelImportPanel({
   client,
   propertyId,
+  importEndpoint,
+  emptyMessage,
   roomsOnly = false,
   onSaved,
 }: {
   client: PreparedImportClient;
   propertyId: string;
+  importEndpoint?: string;
+  emptyMessage?: string;
   roomsOnly?: boolean;
   onSaved?: () => void;
 }) {
@@ -44,13 +48,20 @@ export function PreparedHotelImportPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<ImportItemResult[]>([]);
-  const endpoint = `/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/import`;
+  const endpoint =
+    importEndpoint ?? `/api/hotel-setup/properties/${encodeURIComponent(propertyId)}/import`;
   const generation = useRef(0);
   const load = useCallback(
     async (preserveSourceId?: string) => {
       const currentGeneration = generation.current;
-      const next = await client.get<PreparedImportResponse>(endpoint);
-      if (generation.current !== currentGeneration) return;
+      let next: PreparedImportResponse;
+      try {
+        next = await client.get<PreparedImportResponse>(endpoint);
+      } catch (error) {
+        if (generation.current !== currentGeneration) return false;
+        throw error;
+      }
+      if (generation.current !== currentGeneration) return false;
       setState(next);
       if (preserveSourceId && next.import?.sourceId === preserveSourceId) {
         setSelected((current) =>
@@ -60,6 +71,7 @@ export function PreparedHotelImportPanel({
         setDraft(next.import?.data ?? null);
         setSelected([]);
       }
+      return true;
     },
     [client, endpoint],
   );
@@ -98,7 +110,9 @@ export function PreparedHotelImportPanel({
           type="button"
           onClick={() =>
             void load()
-              .then(() => setError(""))
+              .then((loaded) => {
+                if (loaded) setError("");
+              })
               .catch(() => setError("Prepared hotel data could not be loaded."))
           }
         >
@@ -121,7 +135,12 @@ export function PreparedHotelImportPanel({
   const available =
     (!roomsOnly && Object.keys(draft.property).some((field) => !applied(`property:${field}`))) ||
     draft.rooms.some((room) => !applied(`room:${room.id}`));
-  if (!available && !results.length) return null;
+  if (!available && !results.length)
+    return emptyMessage ? (
+      <p role="status" className="my-4 text-sm text-gray-600">
+        {emptyMessage}
+      </p>
+    ) : null;
 
   async function save() {
     if (!draft || !state?.import || !state.profile) return;
@@ -280,7 +299,12 @@ export function PreparedHotelImportPanel({
                 type="button"
                 onClick={() =>
                   void load()
-                    .then(() => onSaved?.())
+                    .then((loaded) => {
+                      if (loaded) {
+                        setError("");
+                        onSaved?.();
+                      }
+                    })
                     .catch(() => setError("Prepared data could not be refreshed."))
                 }
                 className="px-3 text-sm"

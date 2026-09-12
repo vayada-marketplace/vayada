@@ -68,14 +68,27 @@ persist across reopening, failed items remain retryable, and exact actor/organiz
 property/source scope is required. Executors are synthetic; no canonical room
 commands are wired to this repository yet.
 
+## Shared Airbnb review and save
+
+The optional source review API (#1922) now reuses the canonical prepared-room
+executor with Airbnb receipts. It inherits the authenticated Airbnb property/Origin
+checks and rechecks the provider binding before commands. The callback embeds the
+shared review panel so owners select listings, complete missing facts, and save.
+Eleven browser scenarios pass with synthetic API/auth, including lost-save recovery
+and empty/all-imported states. Five shared-panel tests cover selection and stale
+property/source responses. Backend validation includes 104 combined tests followed
+by the expanded 30-test Airbnb route suite; PostgreSQL receipt tests are real,
+while route room-command ports remain mocked. Root workspace builds/typechecks and
+Marketplace lint passed (48 existing warnings, zero errors).
+
 ## Remaining boundary
 
 The callback is disabled by default, and provider routes are not mounted. Next:
-resolve trusted account/property bindings, redact initial callback request logs,
-and connect saved Airbnb sources to shared review/application. The current room
-application contract still uses invitation-prepared data. A full fresh-host
-authorization remains unverified; synthetic tests do not close that gap. No live
-provider write or deployment was performed for these connection lifecycle slices.
+resolve trusted account/property bindings and redact initial callback request logs
+before live enablement. The new review/save path needs one integrated canonical-DB
+smoke using the local harness; the existing database demo still starts from accepted
+invitation data. A full fresh-host authorization remains unverified. No live provider
+write or deployment was performed for these connection lifecycle slices.
 
 Follow-up: the [Airbnb source slice](../../engineering/airbnb-onboarding-source.md)
 adds an unmounted read-only adapter for channel scope checks, listing names and
