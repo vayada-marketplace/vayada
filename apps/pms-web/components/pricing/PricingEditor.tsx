@@ -8,6 +8,7 @@ import { type createReplacementPricingClient, type PricingSnapshot, type Pricing
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingMonths } from "./PricingMonths";
 import { PricingWeekdays } from "./PricingWeekdays";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
@@ -132,6 +133,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
           <PricingWeekdays room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`weekday:${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
+          <PricingMonths room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`month:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
         </div>)}
         <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">Retained rules and other charges</summary>
