@@ -14,7 +14,8 @@ local PostgreSQL evidence below separately verifies canonical room persistence.
 This is still a local, default-off implementation in draft PRs. Production callback
 log handling and fresh-host authorization remain unverified. Room settings now expose a separately gated Airbnb entry through Marketplace sign-in;
 its scoped navigation is browser-tested with mocked authentication. Invite
-acceptance/integration remains owned by the separate invite-code task. Historical
+prepared-data work is complete in the separate invite-code task; the Airbnb handoff
+now has scoped browser coverage here. Historical
 sections below describe evidence at each implementation stage.
 
 ## What can be demonstrated
@@ -208,3 +209,23 @@ zero errors). Authentication and downstream provider approval remain mocked.
 The PMS Docker build accepts `NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED` with a default of
 `false`. An explicitly configured Marketplace origin is required; missing or empty
 configuration hides the entry. The local PMS flag was restored to false after testing.
+
+## Invitation entry verification — 2026-09-11
+
+Invitations already redirect to Marketplace's shared `/setup` route, preserving
+Hotel Operations or combined product intent. No additional import component or
+invite redemption change is needed. Four scoped browser checks pass: earlier
+setup, adaptive setup, Hotel Operations invitation, and combined invitation. The
+invitation cases verify POST bodies, redemption, code removal from session storage,
+absence of the code in network URLs, and the selected property's connection link
+opening in a separate tab. Identity, invitation and setup APIs are mocked; this
+proves the UI handoff, not live authorization or provider import.
+
+The separate `Investigate TypeScript invite-code flow` task reports its prepared
+import work merged, deployed and verified. Its cleanup removed the shared
+`vay1009-import-test` container and anonymous volume on 2026-09-11. Historical
+PostgreSQL results above remain evidence of prior tests, not a currently runnable
+database demo. Saved evidence remains under the local testing evidence directory.
+
+Independent adversarial review found no actionable issues in this test-only slice.
+Local callback flag restored to false; the connection page returned HTTP 404.
