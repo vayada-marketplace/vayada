@@ -167,6 +167,12 @@ remain mandatory before exposing pricing commands. No routes are wired here.
 
 ## Booking offer terms owner (VAY-1561)
 
+The planned editor transition in
+[Offer terms stay in draft until pricing approval](pricing-offer-terms-drafts.md)
+(VAY-1996) extends this immediate-head writer with staged terms and atomic pricing
+activation. Until implemented, saving terms advances the current source before
+pricing approval; adding another offer also changes the property-wide source.
+
 Booking owns immutable replacement offer terms and a current pointer scoped by
 property, room and offer. This is the single writer for replacement commercial
 terms, independent of retired pricing-shaped guest-policy bundles. Preserve the
