@@ -358,3 +358,20 @@ validation, followed by the existing currency-conversion checks and atomic write
 This supersedes the earlier combined `lock(client, scope, proposed)` interface.
 Concrete live owner integration and route wiring remain required; fixture guards
 establish ordering coverage only.
+
+## Live room, terms and payment owner composition (VAY-1929)
+
+`lockReplacementPricingOfferOwners` runs inside the caller's database transaction
+with trusted RequestContext and a complete proposed snapshot. It rechecks live
+manage authorization, active PMS room ownership and the exact current Booking
+terms of every offer, then invokes Finance readiness with those verified terms,
+the proposed currency/revision and exact `ownerReferences.finance` evidence ID.
+Malformed or mixed-scope/revision snapshots fail. Existing owner locks remain held
+until the caller commits or rolls back; provider capability rules are not copied.
+
+The result reports verified terms/Finance evidence or a specific unavailable
+component, including Finance's reason. It does not validate other owner references,
+complete source revisions, mandatory-charge declarations, FX or separately owned
+amount conversion. It must be composed with those checks for publication; a
+`verified` result here alone never authorizes publication or checkout. No route or
+active pricing mutation is exposed by this owner-composition port.
