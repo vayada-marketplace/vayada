@@ -779,3 +779,39 @@ it("cancels new-offer setup without writes and protects pending entries and leav
   const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
   await click("Cancel new offer"); expect(client.termsAction).not.toHaveBeenCalled(); expect(button("Review saved charges").props.disabled).toBe(false);
 });
+
+it.each(["flat", "occupancy", "per_person", "included_guests"])("creates an independent %s offer without replacing existing child bands or offers", (mode) => {
+  const id = "61000000-0000-4000-8000-000000000004", offerId = "61000000-0000-4000-8000-000000000005";
+  const original = snapshot.rooms[0], root = { ...original.offers[0], meal: { kind: "room_only" as const, charge: { kind: "room" as const, amountMinor: "0" } } };
+  const existing = { ...original, roomTypeId: id, children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 2, nightlyMinor: "0", countsTowardCapacity: false }, { fromAge: 3, throughAge: 11, nightlyMinor: "2500", countsTowardCapacity: true }] }, offers: [root, { ...root, id: "linked", price: { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } }] };
+  const setupRoom = { roomTypeId: id, name: "Double", capacity: existing.capacity };
+  const values = { mode, occupancy: ["100", "130"], included: { adults: "1", adjustments: [{ kind: "fixed", value: "0" }, { kind: "fixed", value: "25" }] }, room: id, currency: "EUR", base: "130", adultAge: "", childPrice: "", countChildren: "", minimum: "2", maximum: "10", cancellation: "non_refundable", freeDays: "", payment: "full" };
+  const next = firstPricingInput(existing.propertyId, setupRoom, offerId, values, existing);
+  expect(next.configuration.children).toEqual(existing.children); expect(next.configuration.offers.slice(0, 2)).toEqual(existing.offers);
+  expect(next.configuration.capacity).toEqual(existing.capacity); expect(next.configuration.offers[2]).toMatchObject({ price: { kind: "independent", calendar: { base: { mode }, months: [], seasons: [], weekdays: [], dates: [] } }, restrictions: { kind: "own", rules: { minArrivalNights: 2, maxStayNights: 10 } } });
+  expect(() => firstPricingInput(existing.propertyId, setupRoom, offerId, { ...values, currency: "USD" }, existing)).toThrow("existing room");
+  expect(() => firstPricingInput(existing.propertyId, setupRoom, offerId, { ...values, mode: "occupancy", occupancy: ["100"] }, existing)).toThrow();
+  expect(() => firstPricingInput(existing.propertyId, setupRoom, offerId, { ...values, mode: "included_guests", included: { adults: "1", adjustments: [] } }, existing)).toThrow();
+});
+it("creates an independent offer through fixed-room setup and retains policy retry and saved review", async () => {
+  const id = "61000000-0000-4000-8000-000000000004", offerId = "61000000-0000-4000-8000-000000000005", room = { ...snapshot.rooms[0], roomTypeId: id };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false });
+  const policy = vi.fn().mockResolvedValue({ revision: offerId }); client.termsAction.mockReturnValue(policy);
+  await mount(); await click("Save draft"); const prior = saved;
+  await click("Edit child charges"); expect(button("Add independent offer").props.disabled).toBe(true); await click("Cancel child charges");
+  await click("Add independent offer"); expect(view.root.findByType(FirstPricingSetup).props.existingRoom).toMatchObject({ roomTypeId: id });
+  expect(view.root.findAllByProps({ "aria-label": "Room type" })).toHaveLength(0); expect(view.root.findAllByProps({ "aria-label": "Price per child per night (0 is allowed)" })).toHaveLength(0);
+  expect(view.root.findByProps({ "aria-label": "Currency code (for example EUR)" }).props.disabled).toBe(true);
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Change meal plan").props.disabled).toBe(true);
+  await click("Cancel new offer"); expect(client.termsAction).not.toHaveBeenCalled(); expect(button("Review saved charges").props.disabled).toBe(false);
+  await act(async () => input().props.onChange({ target: { value: "155.25" } })); await click("Add independent offer");
+  const next = firstPricingInput(room.propertyId, { roomTypeId: id, name: "Double", capacity: room.capacity }, offerId, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, room: id, currency: "EUR", base: "200", adultAge: "", childPrice: "", countChildren: "", minimum: "2", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" }, room);
+  client.prepare.mockRejectedValueOnce(new Error("lost preparation")); await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(next));
+  expect(button("Cancel new offer").props.disabled).toBe(true); const attempted = client.prepare.mock.calls.at(-1)![0]; await click("Retry last action");
+  expect(policy).toHaveBeenCalledOnce(); expect(client.prepare.mock.calls.at(-1)![0]).toEqual(attempted);
+  await click("Save draft"); expect(saved.draftId).toBe(prior.draftId); expect(saved.baseRevision).toBe(7); expect(saved.snapshot.rooms[0].revision).toBe(8);
+  expect(saved.snapshot.rooms[0].children).toEqual(room.children); expect(saved.snapshot.rooms[0].offers[0].termsRevision).toBe(room.offers[0].termsRevision);
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15525" } } });
+  expect(saved.snapshot.rooms[0].offers[1].price).toMatchObject({ kind: "independent", calendar: { base: { amountMinor: "20000" } } });
+  await click("Review saved charges"); expect(button("Add independent offer").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+});
