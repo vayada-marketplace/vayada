@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 const id = "61000000-0000-4000-8000-000000000001";
 const room = { roomTypeId: id, name: "Double", capacity: { total: 2, adults: 2, children: 1 } };
-const values = { mode: "flat", occupancy: [], room: id, currency: "EUR", base: "123.45", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "7", payment: "full" };
+const values = { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, room: id, currency: "EUR", base: "123.45", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "flexible", freeDays: "7", payment: "full" };
 afterEach(() => vi.unstubAllGlobals());
 it("builds exact explicit configuration without borrowing old prices or policies", () => {
   const { configuration, terms } = firstPricingInput(id, room, id, values);
@@ -56,4 +56,11 @@ it("clears prices on room and mode changes and cannot submit an incomplete table
   await act(async () => view.update(<FirstPricingSetup {...props} disabled />));
   expect(view.root.findAllByType("input").every((node) => node.props.disabled)).toBe(true);
   act(() => view.unmount());
+});
+it("validates included-adult setup before returning a policy command", () => {
+  const three = { ...room, capacity: { total: 3, adults: 3, children: 1 } };
+  const included = { adults: "2", adjustments: [{ kind: "fixed", value: "-30" }, { kind: "", value: "" }, { kind: "percentage", value: "25" }] };
+  const result = firstPricingInput(id, three, id, { ...values, mode: "included_guests", base: "130", included });
+  expect(result.configuration.offers[0].price).toMatchObject({ calendar: { base: { mode: "included_guests", baseGuests: 2, adjustments: [{ deltaMinor: "-3000" }, { deltaMinor: "0" }, { basisPoints: 2500 }] } } });
+  expect(() => firstPricingInput(id, three, id, { ...values, mode: "included_guests", included: { adults: "2", adjustments: [] } })).toThrow();
 });
