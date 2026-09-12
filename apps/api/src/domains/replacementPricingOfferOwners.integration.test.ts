@@ -164,6 +164,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       roomTypeId: f.snapshot.rooms[0].roomTypeId,
       offerId: "flex",
       operationKey: "setup-1",
+      primaryOccupancy: 1,
     };
     const result = await reservePublishedChannexOfferTarget(pool, f.input, selection);
     expect(result).toMatchObject({ kind: "reserved", version: "1" });
@@ -185,6 +186,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         room: f.snapshot.rooms[0],
         bindingGeneration: rows[0].binding_generation,
         offerId: "flex",
+        primaryOccupancy: 1,
       },
     });
     expect(
@@ -193,6 +195,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         operationKey: "setup-2",
       }),
     ).toEqual({ kind: "unavailable", reason: "pending_conflict" });
+    expect(
+      await reservePublishedChannexOfferTarget(pool, f.input, {
+        ...selection,
+        primaryOccupancy: 2,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "operation_conflict" });
     await pool.query(
       "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
       [f.scope.propertyId],
@@ -209,11 +217,28 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       roomTypeId: f.snapshot.rooms[0].roomTypeId,
       offerId: "flex",
       operationKey: "setup",
+      primaryOccupancy: 1,
     };
     for (const changed of [{ offerId: "missing" }, { roomTypeId: randomUUID() }])
       expect(
         await reservePublishedChannexOfferTarget(pool, f.input, { ...selection, ...changed }),
       ).toEqual({ kind: "unavailable", reason: "selection_unavailable" });
+    for (const primaryOccupancy of [
+      undefined,
+      null,
+      "1",
+      0,
+      -1,
+      1.5,
+      3,
+      Number.MAX_SAFE_INTEGER + 1,
+    ])
+      expect(
+        await reservePublishedChannexOfferTarget(pool, f.input, {
+          ...selection,
+          primaryOccupancy: primaryOccupancy as number,
+        }),
+      ).toEqual({ kind: "unavailable", reason: "invalid_primary_occupancy" });
     expect(
       await reservePublishedChannexOfferTarget(pool, f.input, { ...selection, operationKey: " " }),
     ).toEqual({ kind: "unavailable", reason: "invalid_selection" });
@@ -250,6 +275,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         roomTypeId: f.snapshot.rooms[0].roomTypeId,
         offerId: "flex",
         operationKey: "expires",
+        primaryOccupancy: 1,
       }),
     ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
     expect(reached).toBe(true);
