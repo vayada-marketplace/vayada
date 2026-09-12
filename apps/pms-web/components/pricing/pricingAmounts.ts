@@ -4,8 +4,8 @@ import type { PricingSnapshot } from "@/services/api/replacementPricingClient";
 type Base = Extract<PricingConfiguration["offers"][number]["price"], { kind: "independent" }>["calendar"]["base"];
 export function baseAmounts(base: Base): [string, string][] {
   if (!base) return [];
-  if (base.mode === "occupancy") return base.amountsMinor.map((amount, index) => [`${index + 1} guest${index ? "s" : ""}`, amount]);
-  if (base.mode === "per_person") return [["Per person", base.unitMinor]];
+  if (base.mode === "occupancy") return base.amountsMinor.map((amount, index) => [`${index + 1} adult${index ? "s" : ""}`, amount]);
+  if (base.mode === "per_person") return [["Per adult", base.unitMinor]];
   if (base.mode === "included_guests") return [[`${base.baseGuests} guests included`, base.baseMinor]];
   return [["Per room", base.amountMinor]];
 }

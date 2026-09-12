@@ -125,6 +125,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
             {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Advanced editing is not available yet.</p>}</div>
         </div>)}
         <details className="border-t px-5 py-3 text-sm text-gray-600"><summary className="cursor-pointer">Retained rules and other charges</summary>
+          <p className="mt-2">Adult prices apply from age {room.children.adultFromAge}. Younger guests use the child charges below, even when they count toward capacity.</p>
           <p className="mt-2">Calendar overrides, linked adjustments, cancellation terms and stay restrictions remain unchanged.</p>
           {room.children.bands.map((band) => <p key={band.fromAge}>Children aged {band.fromAge}–{band.throughAge}: {decimalAmount(band.nightlyMinor, scale)} {display.currency} per night.</p>)}
           {room.offers.map((offer, oi) => <div key={offer.id} className="mt-2"><p>Offer {oi + 1} · {offer.meal.kind.replaceAll("_", " ")}</p>
