@@ -6,7 +6,7 @@ export function baseAmounts(base: Base): [string, string][] {
   if (!base) return [];
   if (base.mode === "occupancy") return base.amountsMinor.map((amount, index) => [`${index + 1} adult${index ? "s" : ""}`, amount]);
   if (base.mode === "per_person") return [["Per adult", base.unitMinor]];
-  if (base.mode === "included_guests") return [[`${base.baseGuests} adults included`, base.baseMinor]];
+  if (base.mode === "included_guests") return [[`${base.baseGuests} adult${base.baseGuests === 1 ? "" : "s"} included`, base.baseMinor]];
   return [["Per room", base.amountMinor]];
 }
 export function decimalAmount(minor: string, scale: number) {
