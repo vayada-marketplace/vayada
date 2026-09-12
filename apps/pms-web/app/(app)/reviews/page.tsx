@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { GuestReviews } from "@/components/reviews/GuestReviews";
+import { ReviewReply } from "@/components/reviews/ReviewReply";
 import { StarIcon } from "@heroicons/react/24/solid";
 import { getStoredPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { listPmsReviews, type PmsReview } from "@/services/api/pmsReviewsClient";
@@ -8,6 +10,7 @@ import { useTranslation } from "@/lib/i18n";
 
 export default function ReviewsPage() {
   const { t, locale } = useTranslation();
+  const [propertyId, setPropertyId] = useState<string | null>(null);
   const [reviews, setReviews] = useState<PmsReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +19,7 @@ export default function ReviewsPage() {
 
   useEffect(() => {
     const propertyId = getStoredPmsPropertyId();
+    setPropertyId(propertyId);
     if (!propertyId) {
       setError(t("reviews.selectProperty"));
       setLoading(false);
@@ -37,6 +41,7 @@ export default function ReviewsPage() {
       <div className="max-w-4xl">
         <h1 className="text-xl font-bold text-gray-900">{t("reviews.title")}</h1>
         <p className="mt-1 text-sm text-gray-500">{t("reviews.description")}</p>
+        {propertyId && <GuestReviews key={propertyId} propertyId={propertyId} />}
         <div className="mt-5 flex flex-wrap gap-3">
           <select
             aria-label={t("calendar.newBookingModal.channelLabel")}
@@ -102,6 +107,14 @@ export default function ReviewsPage() {
                     {review.replyBody}
                   </p>
                 </div>
+              )}
+              {!review.replyBody && propertyId && (
+                <ReviewReply
+                  key={`${propertyId}:${review.reviewId}`}
+                  propertyId={propertyId}
+                  reviewId={review.reviewId}
+                  initialStatus={review.replySubmission}
+                />
               )}
               {review.reviewedAt && (
                 <time className="mt-3 block text-xs text-gray-400">
