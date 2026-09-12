@@ -142,3 +142,20 @@ flag, then run `E2E_AIRBNB_IMPORT_CALLBACK=1 E2E_MARKETPLACE_BASE_URL=<local-ori
 npx playwright test tests/e2e/marketplace-web/airbnb-import-return.spec.ts
 --project=marketplace-web-chromium`. The suite is opt-in because normal builds keep
 the callback disabled.
+
+## Application receipt prerequisite
+
+Airbnb room saves must reuse the canonical room commands and stable draft identity
+`import:<sourceId>:<listingId>`. Invitation receipt rows cannot represent Airbnb
+sources. A separate receipt table references the immutable Airbnb source; scope
+comes from its actor, organization and property. Per-source advisory locking
+serializes application callbacks and presents prior successful item receipts.
+Only successful receipts persist; failed items remain retryable. Existing receipts
+win on merge so later retries cannot replace an already-recorded room identity.
+
+This is an internal storage port, not a new save endpoint. Callers must reauthorize
+current hotel access and recheck the provider binding before canonical commands.
+A room command may commit before its receipt is written: the future consumer must
+reuse the existing draft-room binding lookup to recover that gap without creating
+a second room or overwriting subsequent edits. Tests in this slice validate receipt
+serialization and scope using synthetic executors, not actual room creation.
