@@ -211,3 +211,23 @@ The HTTP dispatcher and capture/reconciliation services remain unimplemented.
 There is deliberately no automatic reset or timeout-based takeover. Resolving a
 known no-mutation rejection requires separate verified semantics before adding a
 retry transition; titles alone cannot identify an ambiguous creation.
+
+## Job-authorized creation claims (VAY-1995)
+
+`claimPublishedChannexOfferCreate` shares the bounded published-pricing transaction
+with reservation and the read-only service reader. It derives the closed request
+from current published pricing, explicit primary occupancy, binding generation and
+the active local room mapping under locks. The provider title is display data,
+never a recovery/adoption key. Caller-supplied provider bodies and IDs are excluded.
+
+Only a newly inserted creation attempt can produce a claim, after final authority
+checks and commit. An existing attempt cannot reconstruct a claim, even after a
+lost commit response. A prior unresolved creation for the target blocks replacement
+work; identified attempts remain retained. Denials roll back new target/intent and
+attempt writes. Reservation and read-only entrypoints keep their prior responses.
+
+This entrypoint records local work; no runtime caller sends its body yet. Exact
+provider room identity/capability preflight and fenced HTTP dispatch remain required.
+Local mapping evidence alone cannot prove that the external room still belongs to
+the expected provider property. Initial ARI, readback sealing and activation stay
+separate gates. The returned creation claim is not activation permission.

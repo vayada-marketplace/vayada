@@ -9,7 +9,7 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob, reservePublishedChannexOfferTarget } from "./replacementPricingOfferOwners.js";
+import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob, reservePublishedChannexOfferTarget, claimPublishedChannexOfferCreate } from "./replacementPricingOfferOwners.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 const url = process.env["TEST_DATABASE_URL"];
@@ -157,6 +157,245 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
+  async function creationFixture() {
+    const f = await serviceFixture();
+    await f.publish();
+    const roomTypeId = f.snapshot.rooms[0].roomTypeId,
+      externalRoomTypeId = randomUUID();
+    await pool.query(
+      `INSERT INTO pms.channel_room_type_mappings
+      (property_id,connection_id,room_type_id,external_room_type_id)
+      SELECT property_id,id,$2,$3 FROM pms.channel_connections WHERE property_id=$1`,
+      [f.scope.propertyId, roomTypeId, externalRoomTypeId],
+    );
+    return {
+      ...f,
+      externalRoomTypeId,
+      selection: { roomTypeId, offerId: "flex", operationKey: "create", primaryOccupancy: 1 },
+    };
+  }
+  it("claims only a fresh creation and persists the derived closed request before return", async () => {
+    const f = await creationFixture();
+    const result = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
+    expect(result.kind).toBe("claimed");
+    if (result.kind !== "claimed") throw new Error("claim required");
+    expect(result.request).toEqual({
+      method: "POST",
+      path: "/api/v1/rate_plans",
+      body: {
+        rate_plan: {
+          property_id: f.scope.propertyId,
+          room_type_id: f.externalRoomTypeId,
+          title: `Vayada offer ${result.targetId} v1`,
+          currency: "EUR",
+          meal_type: "room_only",
+          sell_mode: "per_person",
+          rate_mode: "manual",
+          parent_rate_plan_id: null,
+          inherit_rate: false,
+          inherit_stop_sell: false,
+          auto_rate_settings: null,
+          options: [
+            { occupancy: 1, is_primary: true },
+            { occupancy: 2, is_primary: false },
+          ],
+          stop_sell: Array(7).fill(true),
+        },
+      },
+    });
+    const stored = (
+      await pool.query("SELECT * FROM pms.channex_offer_create_attempts WHERE id=$1", [
+        result.attemptId,
+      ])
+    ).rows[0];
+    expect(stored).toMatchObject({
+      intent_id: result.intentId,
+      target_id: result.targetId,
+      version: "1",
+      binding_generation: result.bindingGeneration,
+      state: "unresolved",
+      external_rate_plan_id: null,
+      request_body: result.request.body,
+    });
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    expect(await reservePublishedChannexOfferTarget(pool, f.input, f.selection)).toEqual({
+      kind: "reserved",
+      targetId: result.targetId,
+      intentId: result.intentId,
+      version: "1",
+    });
+    const read = await f.serviceRead();
+    expect(read).not.toHaveProperty("createClaim");
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [result.attemptId, randomUUID()],
+    );
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_already_identified",
+    });
+  });
+  it("requires an active mapping scoped to this property, connection and room", async () => {
+    const f = await creationFixture();
+    // A valid mapping on another property does not satisfy this selection.
+    await creationFixture();
+    for (const status of ["disabled", "stale"]) {
+      await pool.query("UPDATE pms.channel_room_type_mappings SET status=$2 WHERE property_id=$1", [
+        f.scope.propertyId,
+        status,
+      ]);
+      expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+        kind: "unavailable",
+        reason: "room_mapping_unavailable",
+      });
+    }
+    await pool.query("DELETE FROM pms.channel_room_type_mappings WHERE property_id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "room_mapping_unavailable",
+    });
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+          f.scope.propertyId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it("does not reuse a pending proposal after primary or binding changes", async () => {
+    const f = await creationFixture();
+    await reservePublishedChannexOfferTarget(pool, f.input, f.selection);
+    expect(
+      await claimPublishedChannexOfferCreate(pool, f.input, {
+        ...f.selection,
+        primaryOccupancy: 2,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "operation_conflict" });
+    await pool.query(
+      "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "operation_conflict",
+    });
+    expect(
+      (
+        await pool.query(
+          `SELECT 1 FROM pms.channex_offer_create_attempts a JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE t.property_id=$1`,
+          [f.scope.propertyId],
+        )
+      ).rowCount,
+    ).toBe(0);
+  });
+  it("allows at most one concurrent fresh claim and holds later retries", async () => {
+    const f = await creationFixture();
+    const results = await Promise.allSettled([
+      claimPublishedChannexOfferCreate(pool, f.input, f.selection),
+      claimPublishedChannexOfferCreate(pool, f.input, f.selection),
+    ]);
+    expect(
+      results.filter((r) => r.status === "fulfilled" && r.value.kind === "claimed"),
+    ).toHaveLength(1);
+    for (const result of results) {
+      if (result.status === "rejected") expect(["40001", "55P03"]).toContain(result.reason.code);
+      else if (result.value.kind !== "claimed")
+        expect(result.value).toEqual({
+          kind: "unavailable",
+          reason: "creation_reconciliation_required",
+        });
+    }
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    expect(
+      (
+        await pool.query(
+          `SELECT 1 FROM pms.channex_offer_create_attempts a JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE t.property_id=$1`,
+          [f.scope.propertyId],
+        )
+      ).rowCount,
+    ).toBe(1);
+  });
+  it("holds a replacement intent while an older create remains unresolved", async () => {
+    const f = await creationFixture();
+    const first = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
+    if (first.kind !== "claimed") throw new Error("claim required");
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      first.intentId,
+    ]);
+    expect(
+      await claimPublishedChannexOfferCreate(pool, f.input, {
+        ...f.selection,
+        operationKey: "replacement",
+      }),
+    ).toEqual({ kind: "unavailable", reason: "creation_reconciliation_required" });
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_target_intents WHERE target_id=$1", [
+          first.targetId,
+        ])
+      ).rows,
+    ).toEqual([{ id: first.intentId }]);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          first.attemptId,
+        ])
+      ).rows[0],
+    ).toEqual({ state: "unresolved" });
+  });
+  it("retains unresolved creation after the commit response is lost", async () => {
+    const f = await creationFixture();
+    const lostReply = interceptRead(async (c, sql) => {
+      if (sql === "COMMIT") {
+        await c.query("COMMIT");
+        throw new Error("lost commit reply");
+      }
+    });
+    await expect(claimPublishedChannexOfferCreate(lostReply, f.input, f.selection)).rejects.toThrow(
+      "lost commit reply",
+    );
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+  });
+  it("rolls back a new attempt and its intent when authority expires before commit", async () => {
+    const f = await creationFixture();
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '298 seconds' WHERE id=$1",
+      [f.input.jobId],
+    );
+    let reached = false;
+    const delayed = interceptRead(async (c, sql) => {
+      if (!reached && sql.includes("INSERT INTO pms.channex_offer_create_attempts")) {
+        reached = true;
+        await c.query(
+          "SELECT pg_sleep(GREATEST(0,extract(epoch FROM locked_at+interval '5 minutes'-clock_timestamp()))+0.02) FROM platform.jobs WHERE id=$1",
+          [f.input.jobId],
+        );
+      }
+    });
+    expect(await claimPublishedChannexOfferCreate(delayed, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "lease_unavailable",
+    });
+    expect(reached).toBe(true);
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+          f.scope.propertyId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
   it("reserves current offer work idempotently without activating and rejects conflicting work", async () => {
     const f = await serviceFixture();
     await f.publish();
