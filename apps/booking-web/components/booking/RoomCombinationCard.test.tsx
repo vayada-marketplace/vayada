@@ -88,8 +88,8 @@ it.each(["en", "de"] as const)("renders every room and distinct policy in %s", (
   expect(html).toContain("2 × Double");
   expect(html).toContain("1 × Twin");
   expect(html).toContain("EUR 600.00");
-  expect(html).toContain("Breakfast included");
-  expect(html).toContain("Room only");
+  expect(html).toContain(locale === "en" ? "Breakfast included" : "Frühstück inklusive");
+  expect(html).toContain(locale === "en" ? "Room only" : "Nur Übernachtung");
   expect(html).toContain("Europe/Athens");
   expect(html).toContain(locale === "en" ? "Accommodation for 6 guests" : "Unterkunft für 6 Gäste");
   expect(html).toContain(locale === "en" ? "Non-refundable" : de.home.nonRefundableDesc);

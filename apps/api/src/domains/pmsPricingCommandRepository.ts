@@ -42,6 +42,7 @@ export type PmsPricingCommandRepositoryConfig = {
   connectionString: string;
   currencyChangeGuard: PmsPricingCurrencyChangeGuardPort;
   channexMealSyncEnabled?: boolean;
+  channexMealSyncPropertyId?: string;
   max?: number;
   pool?: PmsPricingCommandPool;
   now?: () => Date;
@@ -192,6 +193,7 @@ export function createPgPmsPricingCommandRepository(
         : null;
       if (
         config.channexMealSyncEnabled &&
+        (!config.channexMealSyncPropertyId || config.channexMealSyncPropertyId === command.propertyId) &&
         domainEventId &&
         worked.change?.resourceType === "flexible_rate_plan" &&
         command.audit.actor.kind === "user"

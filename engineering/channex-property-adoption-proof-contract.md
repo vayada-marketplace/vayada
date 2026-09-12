@@ -1,371 +1,571 @@
 # Channex property adoption proof contract
 
 _VAY-1320 decision record. Builds on
-[`pms-channex-management-contract.md`](pms-channex-management-contract.md) and
-[`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md)._
+[`pms-channex-management-contract.md`](pms-channex-management-contract.md),
+[`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md), and the
+VAY-1366 binding-claim registry._
 
 ## Status
 
-The proposed proof contract is review-ready. Product, design, and security
-acceptance are still required. Executing or implementing an adoption remains
-blocked until that acceptance is recorded and a product-authorized property
-owner supplies one exact target property / external Channex property pair and
-proves provider control as described below.
+Approved product decision. Implementation and any production execution require
+their own reviewed tickets and rollout approval.
 
-No existing production pair is sanctioned by current evidence. In particular,
-target property `7e74ee43-517f-47bd-9167-6733568fea71` has no authoritative link
-to any audited legacy Channex binding and must not be paired by name, address,
-or operator guesswork.
+Approval-policy amendment approved 2026-09-12: Flamur Maliqi may be the sole
+human for both required authorities. The migration and security approvals remain
+separate immutable records bound to the exact evidence. The signer and executor
+remain separate controlled machine identities and cannot act as the human approver.
 
 ## Decision
 
-Adoption requires an ephemeral Channex API key scoped to exactly one property.
-The Channex billing account owner creates the key, selects only the external
-property being adopted, and retains it only for the proof handshake. The
-handshake first verifies control and stores secret-free pending evidence. A
-binding claim may be committed only after the billing owner withdraws the key
-and Vayada receives provider-specific evidence that the same key is permanently
-inactive. Channex's current public documentation says non-billing owners cannot
-access API-key management and documents manual withdrawal, but it does not
-document provider-enforced expiry, a key-status API, or a withdrawal receipt.
-A generic `401 Unauthorized` is therefore insufficient withdrawal evidence, and
-implementation remains blocked until Channex supplies a verifiable permanent
-inactivity signal.
+Controlled legacy-to-target migration uses a cryptographically signed adoption
+manifest. The manifest binds one immutable VAY-1351 source extraction run to
+exactly one legacy PMS hotel, one Channex external property, one canonical
+target property, and one target organization.
 
-Channex documents that API keys may cover all properties or selected
-properties, that a selected-property key can access only those properties, and
-that keys can be withdrawn. Its Properties API returns the properties available
-to the caller and rejects access to a property outside that key's scope.
-Channex also states that a key has the same powers as its user, so the proof key
-must be treated as write-capable even though Vayada uses it only for the
-required property reads and withdrawal confirmation.
+This is not a self-service ownership check. A hotel user cannot create or
+submit the manifest, and no Channex API key crosses the target API. Only the
+approved migration/cutover runner may verify and consume it.
 
-The production-wide Vayada key proves only account-level access. It must never
-be accepted as tenant proof.
+The manifest may create a `verified_non_active` claim in
+`pms.channel_binding_claims`. It does not activate a connection, import a
+booking, acknowledge a webhook, install an application, push ARI, stop legacy
+polling, or transfer mutation ownership. Those effects remain behind their
+separate cutover gates.
 
-Primary provider references:
+Self-service adoption remains deferred until Channex offers a provider-backed,
+machine-verifiable delegated authorization or ownership proof.
+
+## Why this replaces the temporary-key proposal
+
+Channex documents selected-property API keys and manual key withdrawal, but its
+public contract does not expose a key-status endpoint, provider-enforced expiry,
+or an immutable withdrawal receipt. A failed request cannot prove that a key is
+permanently inactive. Requiring such a key would therefore add a write-capable
+secret without completing the ownership proof.
+
+The migration already has a stronger closed-world source: the immutable source
+run contains the legacy connection, mappings, bookings, and hotel ownership.
+The runner recomputes the corresponding canonical target links, and both sides
+must agree before adoption. Signing the exact evidence set makes operator
+approval tamper-evident and replay-bound without creating a new provider
+credential.
+
+Provider references:
 
 - [Channex API key access](https://docs.channex.io/application-documentation/api-key-access)
 - [Channex Properties API](https://docs.channex.io/api-v.1-documentation/hotels-collection)
 
-## Rejected alternatives
+## Manifest contract
 
-- **Caller-supplied external property ID:** rejected because any authorized PMS
-  manager could otherwise bind another tenant's provider property.
-- **Name, address, slug, group, or contact similarity:** corroboration only;
-  these fields are mutable and are not a Vayada tenant identifier.
-- **Provider title/group challenge:** rejected as the default because it mutates
-  a live provider property before control is established.
-- **Ops-signed manifest:** allowed only after an authoritative legacy-owner to
-  target-organization record exists. The current audit found no such link, so
-  this is not an available proof method today.
+The canonical JSON payload uses contract version
+`channex-property-adoption.v1` and contains exactly:
 
-## Threat model
+| Field                     | Requirement                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `contractVersion`         | Literal `channex-property-adoption.v1`.                                                                                                    |
+| `manifestId`              | Unique UUID for this approval.                                                                                                             |
+| `issuedAt` / `expiresAt`  | UTC timestamps. Expiry must fall inside the approved migration window.                                                                     |
+| `environment`             | Exact target environment; production and non-production manifests cannot be reused.                                                        |
+| `sourceEnvironment`       | Exact VAY-1360 source environment paired with the target environment.                                                                      |
+| `sourceRunId`             | Completed immutable VAY-1351 extraction run ID.                                                                                            |
+| `sourceSchemaRevision`    | Exact source-inventory revision verified for the run.                                                                                      |
+| `sourceEvidenceSha256`    | SHA-256 of the ordered source database/table ledger used by the proof.                                                                     |
+| `legacyPmsHotelId`        | Exact staged `pms.hotels.id` owning the Channex connection.                                                                                |
+| `externalPropertyId`      | Exact `pms.channex_connections.channex_property_id`.                                                                                       |
+| `targetPropertyId`        | Exact canonical `hotel_catalog.properties.id`.                                                                                             |
+| `targetOrganizationId`    | Exact active hotel-group organization linked to the target property.                                                                       |
+| `targetSourceLinkId`      | Exact active `hotel_catalog.property_source_links` row linking `pms.hotels` to the target property.                                        |
+| `legacyResourceLinkId`    | Exact active `pms` / `pms_hotel` operator link from the legacy hotel to the target organization.                                           |
+| `targetResourceLinkId`    | Exact active owner/operator `hotel_catalog` / `property` canonical ownership link.                                                         |
+| `targetPmsResourceLinkId` | Exact active owner/operator `pms` / `pms_property` operational link for the canonical property.                                            |
+| `legacyEvidence`          | The exact typed source-row evidence defined below.                                                                                         |
+| `targetEvidence`          | The exact typed target-row evidence defined below.                                                                                         |
+| `approvalSubjectSha256`   | Domain-separated hash of the approval-neutral payload defined below.                                                                       |
+| `approvalEvidence`        | Separate immutable migration/security authority records, each bound to the approval-subject hash; both may name the same authorized human. |
+| `signingKeyId`            | Allowlisted deployment signing-key identifier and version.                                                                                 |
 
-The contract must prevent:
+The detached signature is calculated over the UTF-8 bytes of the RFC 8785 JSON
+Canonicalization Scheme payload. Input parsing rejects duplicate or unknown
+fields before canonicalization. All timestamps are RFC 3339 UTC values with
+exactly three fractional-second digits. UUIDs and SHA-256 hex values are
+lowercase. Evidence arrays are sorted by source table, row ordinal, and row
+checksum; approval records are sorted by authority and record ID. Numeric
+counts are non-negative JSON integers. No other numeric values are permitted.
 
-- a property manager adopting a different tenant's external property;
-- an account-wide Vayada credential being mistaken for tenant proof;
-- a multi-property proof key being narrowed only by a caller-supplied ID;
-- concurrent commands binding one external property to multiple targets;
-- replay after the actor loses property access or the target changes owner;
-- rebinding an external property with unresolved historical booking evidence;
-- proof secrets leaking through logs, traces, queues, errors, analytics, audit,
-  or support tooling;
-- a verified claim being committed while its write-capable proof key remains
-  active after a timeout, cancellation, or crash;
-- adoption enabling target booking, ARI, webhook, or provider mutation before a
-  separate cutover authorizes it.
+The following JSON Schema is normative. Every object rejects additional
+properties. `uuid`, `timestamp`, and `sha256` below mean the lowercase UUID,
+millisecond UTC timestamp, and lowercase 64-character hexadecimal forms just
+defined.
 
-## Authorized operator flow
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vayada.com/schemas/channex-property-adoption.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "manifestId",
+    "issuedAt",
+    "expiresAt",
+    "environment",
+    "sourceEnvironment",
+    "sourceRunId",
+    "sourceSchemaRevision",
+    "sourceEvidenceSha256",
+    "legacyPmsHotelId",
+    "externalPropertyId",
+    "targetPropertyId",
+    "targetOrganizationId",
+    "targetSourceLinkId",
+    "legacyResourceLinkId",
+    "targetResourceLinkId",
+    "targetPmsResourceLinkId",
+    "legacyEvidence",
+    "targetEvidence",
+    "approvalSubjectSha256",
+    "approvalEvidence",
+    "signingKeyId"
+  ],
+  "properties": {
+    "contractVersion": { "const": "channex-property-adoption.v1" },
+    "manifestId": { "$ref": "#/$defs/uuid" },
+    "issuedAt": { "$ref": "#/$defs/timestamp" },
+    "expiresAt": { "$ref": "#/$defs/timestamp" },
+    "environment": { "enum": ["local", "staging", "preprod", "production"] },
+    "sourceEnvironment": { "enum": ["local", "staging", "preprod"] },
+    "sourceRunId": { "type": "string", "pattern": "^vay1351-[0-9a-f]{24}$" },
+    "sourceSchemaRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sourceEvidenceSha256": { "$ref": "#/$defs/sha256" },
+    "legacyPmsHotelId": { "$ref": "#/$defs/uuid" },
+    "externalPropertyId": { "$ref": "#/$defs/uuid" },
+    "targetPropertyId": { "$ref": "#/$defs/uuid" },
+    "targetOrganizationId": { "$ref": "#/$defs/uuid" },
+    "targetSourceLinkId": { "$ref": "#/$defs/uuid" },
+    "legacyResourceLinkId": { "$ref": "#/$defs/uuid" },
+    "targetResourceLinkId": { "$ref": "#/$defs/uuid" },
+    "targetPmsResourceLinkId": { "$ref": "#/$defs/uuid" },
+    "legacyEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hotel",
+        "connection",
+        "roomTypeMappings",
+        "ratePlanMappings",
+        "bookingMappings",
+        "bookings"
+      ],
+      "properties": {
+        "hotel": { "$ref": "#/$defs/hotelEvidence" },
+        "connection": { "$ref": "#/$defs/rowEvidence" },
+        "roomTypeMappings": { "$ref": "#/$defs/aggregateEvidence" },
+        "ratePlanMappings": { "$ref": "#/$defs/aggregateEvidence" },
+        "bookingMappings": { "$ref": "#/$defs/aggregateEvidence" },
+        "bookings": { "$ref": "#/$defs/aggregateEvidence" }
+      }
+    },
+    "targetEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "property",
+        "sourceLink",
+        "legacyResourceLink",
+        "targetResourceLink",
+        "targetPmsResourceLink",
+        "organization",
+        "bindingClaims"
+      ],
+      "properties": {
+        "property": { "$ref": "#/$defs/targetRow" },
+        "sourceLink": { "$ref": "#/$defs/sourceLinkEvidence" },
+        "legacyResourceLink": { "$ref": "#/$defs/targetRow" },
+        "targetResourceLink": { "$ref": "#/$defs/targetRow" },
+        "targetPmsResourceLink": { "$ref": "#/$defs/targetRow" },
+        "organization": { "$ref": "#/$defs/targetRow" },
+        "bindingClaims": { "$ref": "#/$defs/aggregateEvidence" }
+      }
+    },
+    "approvalSubjectSha256": { "$ref": "#/$defs/sha256" },
+    "approvalEvidence": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "$ref": "#/$defs/approvalEvidence" },
+        { "$ref": "#/$defs/approvalEvidence" }
+      ],
+      "items": false
+    },
+    "signingKeyId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:/-]{0,127}$" }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rowEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rowOrdinal", "rowChecksumSha256"],
+      "properties": {
+        "rowOrdinal": { "type": "integer", "minimum": 1 },
+        "rowChecksumSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "hotelEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rowOrdinal", "rowChecksumSha256", "userId"],
+      "properties": {
+        "rowOrdinal": { "type": "integer", "minimum": 1 },
+        "rowChecksumSha256": { "$ref": "#/$defs/sha256" },
+        "userId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "aggregateEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rowCount", "orderedRowsSha256"],
+      "properties": {
+        "rowCount": { "type": "integer", "minimum": 0 },
+        "orderedRowsSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "targetRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rowStateSha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "rowStateSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sourceLinkEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "rowStateSha256",
+        "migrationRunId",
+        "migrationPhase",
+        "migrationDisposition"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "rowStateSha256": { "$ref": "#/$defs/sha256" },
+        "migrationRunId": { "type": "string", "pattern": "^vay1351-[0-9a-f]{24}$" },
+        "migrationPhase": { "const": "complete" },
+        "migrationDisposition": { "const": "canonical" }
+      }
+    },
+    "approvalEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approvalRecordId",
+        "authority",
+        "actorUserId",
+        "approvedAt",
+        "approvalSubjectSha256",
+        "registryRevision",
+        "rowStateSha256"
+      ],
+      "properties": {
+        "approvalRecordId": { "$ref": "#/$defs/uuid" },
+        "authority": { "enum": ["migration_owner", "security_owner"] },
+        "actorUserId": { "$ref": "#/$defs/uuid" },
+        "approvedAt": { "$ref": "#/$defs/timestamp" },
+        "approvalSubjectSha256": { "$ref": "#/$defs/sha256" },
+        "registryRevision": { "type": "integer", "minimum": 1 },
+        "rowStateSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}
+```
 
-1. Resolve the authenticated `RequestContext` and require:
-   - `pms.operations.manage`;
-   - an active `pms:property-management` entitlement for the exact target;
-   - a linked `pms_property` resource for the exact target;
-   - an `owner` or `operator` relationship. `front_desk` is not sufficient.
-2. For the `verify` phase, accept `targetPropertyId`, `externalPropertyId`,
-   `commandId`, and `idempotencyKey`, plus the proof key in the dedicated
-   redacted `X-Channex-Proof-Key` header over TLS. Reject the request before
-   provider access if any authorization or command identity check fails.
-3. Extract the inbound proof header into request-local memory, remove it from the
-   inbound request/log context, and set Channex's required `user-api-key` header
-   only on the allowlisted outbound requests. Do not forward
-   `X-Channex-Proof-Key`.
-4. Use the proof key to paginate an unfiltered `GET /api/v1/properties`.
-   Permit only `pagination[page]` and `pagination[limit]` query parameters;
-   never send `filter[id]`, `filter[title]`, `filter[is_active]`, or any
-   caller-derived filter. Require a consistent `meta.total === 1` on every page,
-   aggregate every returned property, reject duplicate IDs, require exactly one
-   property across the full result, and then require its ID to match
-   `externalPropertyId` exactly.
-5. Use the proof key to read `GET /api/v1/properties/:id`. Require the same ID
-   and a successful response. A list/detail mismatch fails closed.
-6. Independently read the same property with the canonical platform key.
-   Require the same provider ID and the same normalized stable fields. This
-   confirms that the provider object belongs to the production Channex account;
-   it does not replace the tenant proof in steps 4 and 5.
-7. Persist only a `pending_withdrawal` proof record containing the request
-   identity, key fingerprint, normalized detail hashes, and secret-free scope
-   evidence: verifier policy version, the fixed unfiltered query shape, page
-   count, each validated `meta.total`, the observed property-ID set, a canonical
-   scope-evidence hash, validation timestamp, and a 15-minute expiry. This record
-   is not a binding claim or reservation and contains no proof secret.
-8. The Channex billing account owner withdraws the key, then calls the same
-   redacted proof route in the `confirm_withdrawal` phase with the same request
-   identity and now-disabled proof key. Require its fingerprint to match the
-   pending record. In the same confirmation window, require a successful
-   canonical-platform-key read of the expected property as a positive control,
-   plus a Channex-specific permanent-withdrawal signal bound to the pending key
-   fingerprint or provider key identifier. A generic proof-key `401`, `200`,
-   redirect, timeout, `5xx`, or any ambiguous response does not prove permanent
-   withdrawal.
-9. Re-resolve authorization immediately before persistence. In one serialized
-   transaction, reject if:
-   - the target has a current or conflicting Channex binding;
-   - the external ID is currently reserved or bound by another target;
-   - authoritative binding history for either side is `conflict` or `unknown`;
-   - organization/resource ownership changed after initial authorization;
-   - command/idempotency replay does not match the original request fingerprint.
-10. Atomically consume the unexpired pending record and persist a verified,
-    non-active binding claim plus secret-free audit evidence. Do not write the
-    external ID into the active connection row, enqueue a provider job, or
-    include the proof key in a durable command. Vayada reports success or failure
-    without echoing any portion of the key.
+The `approvalSubjectSha256` preimage is the ASCII domain prefix
+`vayada:channex-property-adoption:v1:approval-subject\0` followed by the RFC
+8785 bytes of the complete manifest after removing both
+`approvalSubjectSha256` and `approvalEvidence`. Each approval record binds that
+hash. The final payload hash is SHA-256 over the ASCII domain prefix
+`vayada:channex-property-adoption:v1:payload\0` followed by the RFC 8785 bytes
+of the complete manifest, including approvals and `approvalSubjectSha256`.
 
-The route may perform the read-only proof synchronously through a dedicated
-integration verifier. This is a narrow exception to normal durable Channex
-management commands because putting the proof secret in a queue or job payload
-would violate the secret contract. The route handler itself must still delegate
-provider access to the integration boundary rather than calling `fetch`
-directly. Both proof phases use this same synchronous boundary; neither phase
-may enqueue the secret.
+All other evidence hashes are also domain-separated:
 
-## Key withdrawal and recovery
+- A staged row checksum is the existing VAY-1351 SHA-256 over the UTF-8 bytes
+  of PostgreSQL `row_data::text`; the runner must first recompute it and match
+  `row_checksum_sha256`.
+- A source `orderedRowsSha256` is SHA-256 over its ASCII domain prefix followed
+  by zero or more UTF-8 records of
+  `<row_ordinal>|<row_checksum_sha256>\n`, ordered by numeric row ordinal. The
+  suffixes are `pms-channex-room-type-mappings`,
+  `pms-channex-rate-plan-mappings`, `pms-channex-booking-mappings`, and
+  `pms-bookings`, each appended to
+  `vayada:channex-property-adoption:v1:` and terminated by `\0`. Single-row
+  evidence uses its staged row checksum directly and does not use the aggregate
+  hash. The target binding-claim aggregate instead uses the domain
+  `vayada:channex-property-adoption:v1:target-binding-claims\0` followed by
+  `<lowercase claim UUID>|<rowStateSha256>\n` records ordered by claim UUID.
+- A `rowStateSha256` is SHA-256 over
+  `vayada:channex-property-adoption:v1:target-row\0` followed by RFC 8785 bytes
+  of `{ "schema": string, "table": string, "primaryKey": string,
+"row": object }`. `row` contains every physical, non-generated column from
+  the deployed schema in `ordinal_position` order. UUID values use lowercase
+  text. `timestamptz` values use
+  `to_char(value AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')` and
+  preserve all six PostgreSQL fractional digits; `timestamp` values use the
+  same format without timezone conversion, and `date` values use
+  `to_char(value, 'YYYY-MM-DD')`. `smallint`, `integer`, `bigint`, `numeric`,
+  and `decimal` values are JSON strings produced by PostgreSQL `value::text`
+  with no client parsing, rounding, scale removal, or negative-zero rewrite.
+  Booleans remain JSON booleans; text remains text; SQL null remains JSON null;
+  arrays apply these rules element-by-element; and JSON/JSONB is parsed as
+  I-JSON before RFC 8785 canonicalization. The runner rejects non-finite or
+  unsupported PostgreSQL values rather than coercing them.
+- `sourceEvidenceSha256` is SHA-256 over
+  `vayada:channex-property-adoption:v1:source-ledger\0` followed by RFC 8785
+  bytes of `{ "run": object, "sources": array, "tables": array }`. `run`
+  projects `run_id`, `environment`, `source_schema_revision`,
+  `cutover_freeze_proof_sha256`, `status`, and `finished_at`; each source
+  projects `source_database`,
+  `snapshot_identifier_sha256`, `expected_database_name_sha256`,
+  `expected_schema_fingerprint`, `actual_schema_fingerprint`, `status`,
+  `row_count`, `checksum_sha256`, and `source_snapshot_at`; each table projects
+  `source_database`, `source_schema`, `source_table`, `status`, `row_count`,
+  and `checksum_sha256`. The two derived source hashes use the respective
+  domains `...:snapshot-identifier\0` and
+  `...:expected-database-name\0` followed by the raw UTF-8 string. Source
+  timestamps use the six-digit UTC extraction above, and a missing freeze proof
+  is represented by JSON null. Sources sort by `source_database`; tables sort
+  by `source_database`, `source_schema`, then `source_table`. The projected
+  JSON keys are exactly the snake-case names shown here.
 
-- Verification failure or a crash before the pending record commits creates no
-  claim. The billing owner must withdraw the key before retrying with a new key
-  and command identity.
-- A committed pending record must be confirmed before its 15-minute expiry. A
-  cancellation or expiry records a secret-free terminal outcome and creates no
-  claim; the billing owner still withdraws the key before starting again.
-- A successful proof-key read during `confirm_withdrawal` means the key remains
-  active and returns `proof_key_still_active` without creating a claim.
-- A generic `401`, timeout, `5xx`, redirect, failed positive control, or
-  ambiguous response records `withdrawal_unverified` and leaves the pending
-  record retryable with the same command identity until expiry. It never creates
-  a claim.
-- A crash after verifiable permanent-withdrawal evidence is received but before
-  the claim commits is retried idempotently. A crash after commit returns the
-  committed result on exact replay.
-- Operator assertion alone is not withdrawal evidence. The accepted
-  provider-specific signal and its binding to the pending fingerprint or key
-  identifier require explicit product and security review before implementation.
+The implementation pins one signature algorithm and allowlisted, versioned
+verification keys in deployment configuration; neither is selected by the
+manifest. Signature material and the SHA-256 of the canonical payload are
+stored with the result, never a private key.
 
-Acceptable lifecycle evidence is a provider-enforced expiry with a verifiable
-expiration or an immutable withdrawn-key status/receipt bound to the exact key.
-Temporary user/account suspension, a generic authentication failure, a
-screenshot, or an unbound operator attestation is not sufficient. The current
-public Channex contract exposes no acceptable signal, so the route must remain
-disabled even after the QA pair is supplied unless Channex confirms one.
+The manifest is generated from read-only evidence by the migration tooling,
+reviewed under both named authorities, signed by the controlled deployment
+identity, and supplied to the migration runner as an immutable artifact. Manual
+editing after signing invalidates it.
 
-## Provider comparison
+The signing identity may sign only after it verifies both approval records.
+Names, timestamps, or actor IDs copied into the payload without those bound
+records are not approval evidence.
 
-Normalize each detail response's `data` object into this fixed schema:
+`legacyEvidence` has this exact shape:
 
-| Normalized key | Exact Channex path                    | Accepted type                   |
-| -------------- | ------------------------------------- | ------------------------------- |
-| `id`           | `data.id`                             | canonical UUID string           |
-| `isActive`     | `data.attributes.is_active`           | boolean                         |
-| `title`        | `data.attributes.title`               | non-empty string                |
-| `currency`     | `data.attributes.currency`            | three-letter uppercase string   |
-| `country`      | `data.attributes.country`             | string or `null`                |
-| `state`        | `data.attributes.state`               | string or `null`                |
-| `city`         | `data.attributes.city`                | string or `null`                |
-| `address`      | `data.attributes.address`             | string or `null`                |
-| `postalCode`   | `data.attributes.zip_code`            | string or `null`                |
-| `timezone`     | `data.attributes.timezone`            | string or `null`                |
-| `propertyType` | `data.attributes.property_type`       | string or `null`                |
-| `groupIds`     | `data.relationships.groups.data[].id` | sorted unique UUID string array |
+- `hotel`: source row ordinal, row checksum SHA-256, and exact `user_id`;
+- `connection`: source row ordinal and row checksum SHA-256;
+- `roomTypeMappings`, `ratePlanMappings`, `bookingMappings`, and `bookings`:
+  row count plus SHA-256 of the ordered `row_ordinal|row_checksum_sha256` list.
 
-Reject duplicate JSON object keys before normalization. Every path in the table
-must be present with exactly the accepted type; a missing path, wrong type,
-invalid UUID, or duplicate group ID fails closed. Preserve string values exactly
-as returned, including whitespace and case. Preserve nullable fields as explicit
-JSON `null`; never omit a schema key. Sort `groupIds` by Unicode code point and
-serialize the normalized object with the table's fixed key order.
+`targetEvidence` has this exact shape:
 
-Exclude transport metadata, pagination, request IDs, photos, settings, contact
-fields, and provider field order. Hash the canonical JSON with SHA-256 for both
-proof-key and platform-key detail responses; the normalized objects and hashes
-must be equal before a pending record may be created.
+- canonical property ID and row-state SHA-256;
+- property source-link ID, state SHA-256, and `migrationRunId`;
+- legacy PMS-hotel resource-link ID and row-state SHA-256;
+- canonical property ownership resource-link ID and row-state SHA-256;
+- PMS property operational resource-link ID and row-state SHA-256;
+- target organization ID and row-state SHA-256; and
+- row count plus ordered aggregate SHA-256 for every binding claim matching
+  either the target property or Channex external property.
 
-## Secret handling and audit
+Every nested evidence ID must equal its corresponding top-level manifest ID.
+The approval array must contain exactly one `migration_owner` followed by one
+`security_owner`; duplicate authorities or approval-record IDs are invalid. The
+same registry-authorized human may acknowledge both authorities using two
+records. The signed actor IDs deterministically record
+`single_human_dual_authority.v1` when identical and
+`independent_humans.v1` when different; the runner writes that policy to the
+restricted audit evidence.
 
-- The proof key may transit the target API only for the synchronous `verify`
-  and `confirm_withdrawal` phases over TLS.
-- Configure ingress and application logging to redact the dedicated proof
-  header before the route can be enabled. Verified production edge/access-log,
-  application-log, trace, and error-scrubbing configuration is a route-enable
-  gate.
-- The verifier maps the extracted inbound `X-Channex-Proof-Key` value to a new
-  outbound `user-api-key` header only for the configured Channex origin and the
-  required `GET` property endpoints. It removes the inbound header before
-  transport and rejects redirects so neither header can reach another host.
-- Never persist the key in PostgreSQL, a job, idempotency payload, audit body,
-  trace, metric, analytics event, exception, or test fixture.
-- Keep only a SHA-256 fingerprint of the key for replay/correlation evidence.
-- Record actor/user ID, organization ID, target property ID, external property
-  ID, proof method and policy version, key fingerprint, both normalized detail
-  hashes, unfiltered query policy, page count, each validated `meta.total`,
-  observed property IDs, canonical scope-evidence hash, command/idempotency IDs,
-  pending expiry, positive-control and withdrawal-confirmation timestamps and
-  outcomes, pre-state, result/reason, and any rollback actor/result.
-- Store the event with `retention_class = security` and
-  `privacy_scope = restricted` for seven years. Retain no proof secret.
+## Evidence rules
 
-## Binding and cutover state
+The runner must independently reread and verify the manifest evidence before it
+writes a claim:
 
-Adoption creates a verified, non-active binding claim. It does not create or
-activate a `pms.channel_connections.external_property_id` binding. The adoption
-path must not reuse the existing `enable` operation, which may create or mark a
-provider property connected. Adoption must not:
+1. The source extraction run exists once, is `completed`, uses the declared
+   source environment and schema revision, and has complete, internally
+   consistent database and table ledgers. The VAY-1360 pairing is mandatory:
+   production targets use `preprod` source evidence; every other target uses a
+   source of the same environment.
+2. Staged `pms.channex_connections` resolves `externalPropertyId` to exactly one active
+   `legacyPmsHotelId`.
+3. Every retained `channex_room_type_mappings`,
+   `channex_rate_plan_mappings`, and `channex_booking_mappings` row for that
+   external property agrees with the same legacy hotel. Each referenced legacy
+   booking must have that `hotel_id`.
+4. The staged `pms.hotels` row exists once, its `id` and `user_id` match the
+   manifest, and its recomputed `row_data::text` checksum matches
+   `legacyEvidence.hotel.rowChecksumSha256`.
+5. The production identity and catalog plans are recomputed from this source
+   run and must finish with zero blockers or warnings. They must resolve staged
+   `pms.hotels.id = legacyPmsHotelId` to exactly `targetPropertyId`. The
+   complete planned source-link state must equal the declared row: active,
+   `source_system = 'pms'`, `source_table = 'hotels'`,
+   `source_id = legacyPmsHotelId`, `property_id = targetPropertyId`,
+   `relationship = 'operational_input'`, `metadata.migrationRunId =
+sourceRunId`, `metadata.migrationPhase = 'complete'`, and
+   `metadata.migrationDisposition = 'canonical'`. Its remaining fields and
+   metadata must also equal the recomputed plan and signed row-state hash.
+6. The declared active legacy resource link must have `product = 'pms'`,
+   `resource_type = 'pms_hotel'`, `resource_id = legacyPmsHotelId`, and
+   `relationship = 'operator'`. Enumerating the recomputed identity plan must
+   yield exactly one active legacy operator organization, and it must resolve
+   the staged hotel's migrated owner to `targetOrganizationId`.
+7. The organization must be an active `hotel_group`. Its declared canonical
+   resource link must have `product = 'hotel_catalog'`,
+   `resource_type = 'property'`, `resource_id = targetPropertyId`, and an
+   `owner` or `operator` relationship. Enumerating all active canonical
+   owner/operator links for the property must produce exactly this one
+   organization.
+8. The additional operational resource link must be active and have
+   `product = 'pms'`, `resource_type = 'pms_property'`,
+   `resource_id = targetPropertyId`, the same `targetOrganizationId`, and an
+   `owner` or `operator` relationship. It cannot substitute for the canonical
+   ownership link in rule 7.
+9. The source and target typed evidence recomputed by the runner matches every
+   signed count and hash.
+10. After resolving exact manifest replay, the VAY-1366 registry has no claim in
+    any state for either the target property or the external property, including
+    a claim for the same pair.
 
-- provision, rename, regroup, or delete provider resources;
-- import or acknowledge bookings;
-- push ARI or install provider applications;
-- change webhook configuration;
-- stop legacy polling or change legacy booking ownership.
+Webhook receipts and provider audit rows may corroborate the external property
+ID, but cannot establish ownership by themselves.
 
-The implementation must add an atomic binding-claim registry, with database
-uniqueness for provider plus external property ID and for one live Channex claim
-per target property. The registry is the canonical reservation boundary for
-every path that stores or activates an external property ID, including adoption,
-the existing `enable` checkpoint, cutover, migrations, and manual repair. Each
-path must acquire the same reservation in its binding transaction and reject a
-reservation owned by another target. Adoption must remain disabled until this
-cross-path invariant is enforced.
+## Verification and consumption
 
-Existing `pms.channel_connections` only guarantees one provider row per target
-property; it does not prevent one Channex external ID from being used by two
-target properties, and its current `enable` flow can mark an existing external
-ID connected without another provider request. A connection row must therefore
-reference a matching registry reservation, or an equivalent database constraint
-or trigger must make bypass impossible.
+Before persistence, the runner must perform these steps in order:
 
-Binding evaluation keeps target reservations separate from the expected legacy
-owner. Target reservation history is `clear`, `conflict`, or `unknown`.
-Initial backfill must cover every non-null target
-`pms.channel_connections.external_property_id` and every retained target
-binding/audit source. A prior target association with a different target is an
-unconditional conflict, and incomplete target coverage is `unknown`, not
-`clear`.
+1. require an allowlisted production migration IAM principal;
+2. reject an unknown contract version, signing key, or signature algorithm;
+3. verify the detached signature and canonical-payload SHA-256;
+4. lock and read manifest consumption by `manifestId` and payload hash; return
+   the stored successful result immediately for an exact replay, reject the
+   same ID with different bytes and any stored failed result, and only then
+   continue with new-consumption validation;
+5. require the exact execution environment and an unexpired migration window;
+6. validate the immutable source run and every evidence rule above;
+7. acquire the same serialized VAY-1366 reservations used by migration,
+   enablement, repair, and cutover;
+8. recompute target evidence inside the binding transaction; and
+9. atomically record manifest consumption, restricted audit evidence, and one
+   new `verified_non_active` adoption claim using `INSERT`, never an update or
+   upsert.
 
-Legacy ownership is independently `matched`, `conflict`, or `unknown`. Its
-authoritative inventory must include legacy `channex_connections`
-(`hotel_id`, `channex_property_id`, and `is_active`), the owning legacy
-`hotels` row, `channex_room_type_mappings`,
-`channex_rate_plan_mappings`, `channex_booking_mappings` plus their referenced
-`bookings.hotel_id`, and the active `poll_channex_bookings` ownership scope.
-Provider property IDs observed only in webhook/audit evidence corroborate that
-inventory but cannot establish ownership alone.
+`manifestId` and canonical-payload SHA-256 are idempotency identities. Exact
+replay returns the existing result. Reusing a manifest ID with different bytes,
+using the same signed payload for another pair/environment/run, or consuming an
+expired or already-failed manifest is rejected.
 
-For adoption, the external ID must resolve to exactly one active legacy
-`channex_connections.hotel_id`; every retained mapping and booking-ownership
-record must agree with that hotel; and the sanctioned VAY-1320 pair must link
-that derived legacy hotel/external ID to the exact target property and target
-organization. Missing sources, disagreement, multiple owners, or an unsanctioned
-link is `unknown` or `conflict` and fails closed. The matched legacy owner
-remains active throughout adoption and is not treated as a conflicting target
-claim.
-
-Any future target transfer requires a separate reviewed ownership-release
-contract defining approvers, authoritative ownership evidence, atomic
-consumption, audit, and retention; this adoption contract grants no such
-exception.
-
-A separate reviewed cutover command may promote a verified claim into
-`pms.channel_connections`. Promotion must recheck authorization, claim state,
-legacy ownership, scheduler/webhook freeze gates, and external-ID uniqueness in
-one transaction. It is not part of adoption.
+Immediately before signing and again before consumption, the runner reads two
+unrevoked approval records from the protected migration approval registry. One
+record must carry the active `migration_owner` authority and the other the active
+`security_owner` authority. Both may name the same authenticated,
+registry-authorized human, and both records must bind the exact manifest ID,
+environment, and expiry through `approvalSubjectSha256`. The signing and
+execution principals must be different controlled machine identities and cannot
+satisfy either human authority. Rollback requires two fresh authority records
+bound to the original manifest and rollback reason under the same policy.
 
 ## Failure and rollback
 
-Every ambiguous, multi-property, missing-property, mismatched-response,
-already-bound, cross-property, cross-organization, stale-authorization,
-provider-error, timeout, or persistence-conflict outcome fails closed with no
-partial binding.
+Unknown, incomplete, stale, ambiguous, or conflicting evidence fails closed
+before a claim is written. This includes:
 
-Rollback changes only the target binding claim to a retained `released` state,
-leaves the target connection absent or `disconnected`, and records a restricted
-audit event. A released claim remains binding history, is not an ownership
-release, and does not authorize another target to adopt the external property.
-It does not mutate Channex, delete provider mappings, replay or acknowledge
-bookings, or stop legacy polling. Legacy ownership remains active throughout
-adoption and rollback.
+- a signature, checksum, run, revision, environment, or time-window mismatch;
+- missing or duplicate legacy connections, source links, or resource links;
+- disagreement between connection, mapping, booking, or organization ownership;
+- target property or organization changes after approval;
+- any existing claim in any state for either key after exact replay is resolved;
+  same-pair history requires a separately reviewed repair/transition command;
+  and
+- concurrent consumption or payload drift.
 
-## Adoption-command acceptance criteria
+A partial transaction creates no claim. If a later rollback is approved, it may
+change only the exact `verified_non_active`, `claim_source = 'adoption'` claim
+created by this manifest to retained `released` state, and records the reason
+and actors. It cannot release or downgrade an active, historical, repair,
+migration, or different-manifest claim. Released history never proves that
+another target owns the external property.
 
-- The route uses `enforceRoutePolicy` and covers the full denial matrix.
-- Only `owner` and `operator` relationships may adopt; `front_desk` is denied.
-- A proof key exposing zero or more than one property is denied.
-- Scope enumeration is unfiltered, permits only pagination parameters, and
-  aggregates every page before accepting exactly one property.
-- List and detail proof responses must identify the requested external property.
-- Property detail normalization follows the fixed path/type/null/duplicate rules
-  above and never omits a schema key.
-- Proof-key and canonical-key normalized property responses must match.
-- The verifier permits only the configured Channex origin and required `GET`
-  endpoints and rejects redirects.
-- The proof key is redacted at ingress and never reaches durable storage.
-- Production edge/access logs, application logs, traces, errors, and outbound
-  client failures have verified secret redaction before the route is enabled.
-- A binding claim is committed only after an unexpired pending proof is matched
-  to the same key fingerprint, the canonical-key positive control succeeds, and
-  an approved provider-specific signal proves permanent key inactivity. A
-  generic `401` leaves the proof pending.
-- Authorization and ownership are rechecked in the binding transaction.
-- Concurrent attempts cannot bind one external property to two targets.
-- Adoption, existing enablement, cutover, migration, and repair paths acquire
-  the same provider/external-property reservation before storing or activating
-  an external ID.
-- Target reservation history and authoritative legacy ownership are reconciled
-  independently; only target `clear` plus legacy `matched` may proceed.
-- After resolving exact idempotent replay, an existing or retained target
-  reservation encountered by a new command, or unknown/conflicting target or
-  legacy ownership, fails closed.
-- Binding history is `clear`, `conflict`, or `unknown`; `conflict` and `unknown`
-  fail closed, and rollback cannot be interpreted as an ownership release.
-- Exact idempotent replay returns the original result; payload drift conflicts.
-- Success records the secret-free restricted detail, unfiltered-scope,
-  positive-control, and withdrawal evidence defined above.
-- Success stores only a non-active binding claim; it does not populate an active
-  connection, and legacy booking ownership remains active.
-- Rollback removes/disables only target state and is independently audited.
-- Tests cover authorization, scoping, mismatch, filtered-list rejection,
-  multi-property pagination, normalization validation, withdrawal
-  success/failure/timeout/cancellation/crash recovery, adoption-versus-enable
-  concurrency, legacy/target history reconciliation, replay, provider failure,
-  rollback-versus-release semantics, and cutover non-mutation.
-- Sentinel-secret tests cover pre-route ingress/access logging, application and
-  error logging, traces, analytics, outbound redirect/timeout/`5xx` exceptions,
-  jobs, idempotency/audit payloads, and fixture/source artifacts.
+Rollback does not mutate Channex, remove legacy mappings, replay or acknowledge
+bookings, stop polling, or alter webhook routing. The legacy system remains the
+only mutating owner until a separate cutover explicitly changes that state.
 
-## QA pair gate
+## Security and audit
 
-Before implementation or execution, a product-authorized property owner must
-record these two non-secret values in VAY-1320:
+- Private signing keys stay in the approved key-management boundary and never
+  enter PostgreSQL, source artifacts, CI logs, Linear, or GitHub.
+- The runner records manifest ID, signing key ID/version, payload SHA-256,
+  signature verification result, source run/revision, exact property and
+  organization IDs, evidence hashes/counts, approval record IDs, timestamps,
+  derived approval policy, pre-state, outcome, and failure reason.
+- Audit records use `retention_class = security` and
+  `privacy_scope = restricted` for seven years.
+- No provider credential, guest data, reservation payload, or raw source row is
+  copied into the manifest or audit event.
+- The approval registry independently authorizes active migration/security
+  actors and retains its revisions; manifest content cannot grant authority.
 
-```text
-targetPropertyId: <exact canonical target UUID>
-externalPropertyId: <exact Channex property UUID selected by the proof key>
-```
+Legacy scheduler status is not ownership proof for adoption and is not copied
+into the manifest. Adoption changes no runtime owner. The separate cutover must
+use its trusted, time-bound scheduler/deployment evidence to prove legacy
+polling is frozen before target booking mutation starts.
 
-The proof key itself must never be posted in Linear, GitHub, Slack, or a test
-fixture. Until both IDs are recorded and the Channex billing account owner
-confirms that a single-property key can be created for that external property,
-the sanctioned QA pair is **none** and Stage B remains blocked.
+## Acceptance criteria for implementation
 
-Supplying that pair does not by itself enable implementation. The accepted
-provider-specific permanent-inactivity signal described above is also required;
-the current public Channex contract does not provide one.
+- The manifest uses RFC 8785 canonicalization, the exact typed nested schemas
+  above, and rejects unknown or duplicate fields and non-canonical values.
+- Signature verification uses a pinned algorithm and allowlisted versioned
+  verification key; tampering any field fails.
+- Only the approved migration runner can consume a manifest; ordinary PMS
+  routes and hotel users cannot invoke adoption.
+- Source-run completeness, legacy ownership, canonical source link, target
+  organization/resource ownership, and all evidence counts and hashes are
+  reread rather than trusted from the payload.
+- Unknown or conflicting history fails closed.
+- Existing same-pair or cross-pair claim history is never updated by adoption;
+  only exact consumption replay succeeds.
+- Concurrent attempts cannot reserve one target property or Channex external
+  property for different pairs.
+- Exact replay is idempotent and payload drift conflicts.
+- Success creates only a `verified_non_active` claim with restricted audit
+  evidence.
+- No target connection becomes active, no provider call or job is made, and
+  legacy polling/webhook/booking ownership remains unchanged.
+- Tests cover valid consumption, each evidence mismatch, expiry, environment
+  mismatch, signature/key/version failure, duplicate/unknown JSON fields,
+  canonicalization edge cases, tampering, approval authority/revocation, the
+  authorized single-human dual-authority case, machine/human separation, replay,
+  same-pair/cross-pair history, payload drift,
+  concurrency, transaction failure, rollback isolation, and non-mutation of
+  provider and ownership state.
+
+## Execution gate
+
+No production manifest is authorized by this decision alone. Execution requires
+an implementation ticket, security review of the signing-key boundary, a
+read-only generated manifest for the exact production pair, both named approval
+authorities and the authenticated human covering them,
+and the normal cutover approval. Synthetic fixtures may validate the contract
+in staging but cannot authorize a production pair.
+
+The sanctioned staging regression pair is target property
+`65f6b2fc-c783-4963-9d6b-a85f82319769` and Channex property
+`8f4c1e47-3de1-4150-8bde-ad031a013842`. It is already bound and remains
+observe-only, so it validates exact identity resolution, existing-claim
+rejection, and non-mutation. The successful-adoption path must use a generated,
+isolated migration fixture; this pair must not be released or rebound to make a
+test pass.
