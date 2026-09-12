@@ -22,9 +22,9 @@ export function changeSeasonPrice(room: PricingConfiguration, offerId: string, s
     const price = included ? includedPrice(included, values[0], room.capacity.adults, pricingCurrencyScale(room.currency)!) : recurringPrice(offer, values, room.currency, seasons[index].price);
     seasons = seasons.map((entry, i) => i === index ? { ...entry, ...season, price } : entry);
   } else if (values) {
-    if (included) throw new Error("Choose an existing included-adult season price.");
+    if (included && (recurringTemplate(offer)?.mode !== "included_guests" || values.length !== 1)) throw new Error("Choose included-adult seasonal pricing.");
     if (!season.name.trim()) throw new Error("Enter a season name.");
-    seasons = [...seasons, { ...season, price: recurringPrice(offer, values, room.currency) }];
+    seasons = [...seasons, { ...season, price: included ? includedPrice(included, values[0], room.capacity.adults, pricingCurrencyScale(room.currency)!) : recurringPrice(offer, values, room.currency) }];
   } else {
     if (index < 0) throw new Error("This season is unavailable. Reload pricing.");
     seasons = seasons.filter((_, i) => i !== index);
@@ -41,7 +41,8 @@ export function PricingSeasons({ room, offer, label, disabled, onChange, onPendi
   const [entry, setEntry] = useState<SeasonInput>({ name: "", tier: "", from: "", through: "" }), [values, setValues] = useState<string[]>([]), [error, setError] = useState(""), [editing, setEditing] = useState<SeasonInput | null>(null);
   if (offer.price.kind !== "independent") return null;
   const template = editing ? offer.price.calendar.seasons.find((season) => season.from === editing.from && season.through === editing.through && season.name === editing.name && season.tier === editing.tier)?.price : recurringTemplate(offer), scale = pricingCurrencyScale(room.currency)!;
-  const pending = !!editing || Object.values(entry).some(Boolean) || values.some(Boolean);
+  const activeIncluded = included ?? (!editing && template?.mode === "included_guests" ? includedInput(template, scale) : null);
+  const pending = !!included || !!editing || Object.values(entry).some(Boolean) || values.some(Boolean);
   const reset = () => { setEntry({ name: "", tier: "", from: "", through: "" }); setValues([]); setIncluded(null); setEditing(null); setError(""); onPending(false); };
   const apply = (season: SeasonInput, amounts: string[] | null) => {
     if (disabled || (!amounts && pending)) return;
@@ -60,16 +61,16 @@ export function PricingSeasons({ room, offer, label, disabled, onChange, onPendi
       <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={`Clear season ${season.from} to ${season.through} for ${label}`} onClick={() => apply(season, null)}>Clear seasonal price</button>
     </li>)}</ul>
     {!template ? <p>Set up recurring pricing before adding seasonal prices. This offer has no recurring price template.</p> : <>
-      <p className="mb-3">{editing ? "Edit this season’s name, label, dates, prices and included-adult settings. Moving dates changes which nights use these prices; old dates fall back to remaining rules and may become unavailable. Separate stay restrictions remain unchanged." : "Seasonal prices use this offer’s current pricing mode."}{recurringAdjustments(template, room.currency, scale)}{!editing && template.mode === "included_guests" && " These included-adult settings stay the same when adding a season."}</p>
+      <p className="mb-3">{editing ? "Edit this season’s name, label, dates, prices and included-adult settings. Moving dates changes which nights use these prices; old dates fall back to remaining rules and may become unavailable. Separate stay restrictions remain unchanged." : "Seasonal prices use this offer’s current pricing mode."}{recurringAdjustments(template, room.currency, scale)}{!editing && template.mode === "included_guests" && " Adjust the included-adult settings below for this season."}</p>
       <div className="flex flex-wrap items-end gap-3">
         {([["name", "Season name"], ["tier", "Tier label (optional)"], ["from", "Start (MM-DD)"], ["through", "End (MM-DD)"]] as const).map(([key, name]) => <label key={key}>{name}<input aria-label={`${name} for ${label}`} className="mt-1 block w-40 rounded border px-3 py-2" disabled={disabled} value={entry[key]} onChange={(event) => {
           if (disabled) return;
-          const next = { ...entry, [key]: event.target.value }; setEntry(next); setError(""); onPending(!!editing || Object.values(next).some(Boolean) || values.some(Boolean));
+          const next = { ...entry, [key]: event.target.value }; setEntry(next); setError(""); onPending(!!included || !!editing || Object.values(next).some(Boolean) || values.some(Boolean));
         }} /></label>)}
-        {baseAmounts(included && template.mode === "included_guests" ? { ...template, baseGuests: Number(included.adults) || template.baseGuests } : template).map(([name], index) => <label key={index}>{name} ({room.currency})<input aria-label={`Seasonal ${name} for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={values[index] ?? ""} onChange={(event) => {
-          const next = Array.from({ length: baseAmounts(template).length }, (_, i) => i === index ? event.target.value : values[i] ?? ""); setValues(next); setError(""); onPending(!!editing || Object.values(entry).some(Boolean) || next.some(Boolean));
+        {baseAmounts(activeIncluded && template.mode === "included_guests" ? { ...template, baseGuests: Number(activeIncluded.adults) || template.baseGuests } : template).map(([name], index) => <label key={index}>{name} ({room.currency})<input aria-label={`Seasonal ${name} for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={values[index] ?? ""} onChange={(event) => {
+          const next = Array.from({ length: baseAmounts(template).length }, (_, i) => i === index ? event.target.value : values[i] ?? ""); setValues(next); setError(""); onPending(!!included || !!editing || Object.values(entry).some(Boolean) || next.some(Boolean));
         }} /></label>)}
-        {included && <div className="w-full"><p>The base amount above belongs to this seasonal price. Changing the included count clears its adjustments.</p><IncludedPricing value={included} label={`${label} seasonal price`} capacity={room.capacity.adults} disabled={disabled} onChange={(next) => { if (disabled) return; setIncluded(next); setError(""); }} /></div>}
+        {activeIncluded && <div className="w-full"><p>The base amount above belongs to this seasonal price. Changing the included count clears its adjustments.</p><IncludedPricing value={activeIncluded} label={`${label} seasonal price`} capacity={room.capacity.adults} disabled={disabled} onChange={(next) => { if (disabled) return; setIncluded(next); setError(""); onPending(true); }} /></div>}
         <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(entry, values)}>{editing ? "Apply seasonal price" : "Add seasonal price"}</button>
       </div>
     </>}

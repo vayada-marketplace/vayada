@@ -19,7 +19,7 @@ export function changeMonthPrice(room: PricingConfiguration, offerId: string, mo
   if (!values && !exists) throw new Error("There is no price to clear for this month.");
   let next = calendar.months.filter((entry) => entry.month !== Number(month));
   if (values) {
-    if (included && (!replace || existing?.price.mode !== "included_guests" || values.length !== 1)) throw new Error("Choose an existing included-adult month price.");
+    if (included && ((replace ? existing?.price : recurringTemplate(offer))?.mode !== "included_guests" || values.length !== 1)) throw new Error("Choose included-adult monthly pricing.");
     const price = included ? includedPrice(included, values[0], room.capacity.adults, pricingCurrencyScale(room.currency)!) : recurringPrice(offer, values, room.currency, replace ? existing!.price : recurringTemplate(offer));
     next = [...next, { month: Number(month), price }].sort((a, b) => a.month - b.month);
   }
@@ -35,7 +35,8 @@ export function PricingMonths({ room, offer, label, disabled, onChange, onPendin
   const [month, setMonth] = useState(""), [values, setValues] = useState<string[]>([]), [error, setError] = useState(""), [editing, setEditing] = useState(false);
   if (offer.price.kind !== "independent") return null;
   const template = editing ? offer.price.calendar.months.find((entry) => entry.month === Number(month))?.price : recurringTemplate(offer), scale = pricingCurrencyScale(room.currency)!;
-  const pending = !!month || values.some(Boolean);
+  const activeIncluded = included ?? (!editing && template?.mode === "included_guests" ? includedInput(template, scale) : null);
+  const pending = !!included || !!month || values.some(Boolean);
   const reset = () => { setMonth(""); setValues([]); setIncluded(null); setEditing(false); setError(""); onPending(false); };
   const apply = (selected: string, amounts: string[] | null) => {
     if (disabled || (!amounts && pending)) return;
@@ -54,15 +55,15 @@ export function PricingMonths({ room, offer, label, disabled, onChange, onPendin
       <button type="button" className="rounded border px-3 py-1 disabled:opacity-50" disabled={disabled || pending} aria-label={`Clear ${months[entry.month - 1]} price for ${label}`} onClick={() => apply(String(entry.month), null)}>Clear monthly price</button>
     </li>)}</ul>
     {!template ? <p>Set up recurring pricing before adding monthly prices. This offer currently has only date prices or no recurring price.</p> : <>
-      <p className="mb-3">{editing ? "Edit this month’s prices and included-adult settings while keeping its pricing mode. Other months and rules remain unchanged." : "Monthly prices use this offer’s current pricing mode."}{recurringAdjustments(template, room.currency, scale)}{!editing && template.mode === "included_guests" && " These included-adult settings stay the same when adding a month."}</p>
+      <p className="mb-3">{editing ? "Edit this month’s prices and included-adult settings while keeping its pricing mode. Other months and rules remain unchanged." : "Monthly prices use this offer’s current pricing mode."}{recurringAdjustments(template, room.currency, scale)}{!editing && template.mode === "included_guests" && " Adjust the included-adult settings below for this month."}</p>
       <div className="flex flex-wrap items-end gap-3">
-        <label>Month<select aria-label={`Month for ${label}`} className="mt-1 block rounded border px-3 py-2" disabled={disabled || editing} value={month} onChange={(event) => { if (disabled || editing) return; setMonth(event.target.value); setError(""); onPending(!!event.target.value || values.some(Boolean)); }}>
+        <label>Month<select aria-label={`Month for ${label}`} className="mt-1 block rounded border px-3 py-2" disabled={disabled || editing} value={month} onChange={(event) => { if (disabled || editing) return; setMonth(event.target.value); setError(""); onPending(!!included || !!event.target.value || values.some(Boolean)); }}>
           <option value="">Choose…</option>{months.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
         </select></label>
-        {baseAmounts(included && template.mode === "included_guests" ? { ...template, baseGuests: Number(included.adults) || template.baseGuests } : template).map(([name], index) => <label key={index}>{name} ({room.currency})<input aria-label={`Monthly ${name} for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={values[index] ?? ""} onChange={(event) => {
-          const next = Array.from({ length: baseAmounts(template).length }, (_, i) => i === index ? event.target.value : values[i] ?? ""); setValues(next); setError(""); onPending(!!month || next.some(Boolean));
+        {baseAmounts(activeIncluded && template.mode === "included_guests" ? { ...template, baseGuests: Number(activeIncluded.adults) || template.baseGuests } : template).map(([name], index) => <label key={index}>{name} ({room.currency})<input aria-label={`Monthly ${name} for ${label}`} className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={values[index] ?? ""} onChange={(event) => {
+          const next = Array.from({ length: baseAmounts(template).length }, (_, i) => i === index ? event.target.value : values[i] ?? ""); setValues(next); setError(""); onPending(!!included || !!month || next.some(Boolean));
         }} /></label>)}
-        {included && <div className="w-full"><p>The base amount above belongs to this monthly price. Changing the included count clears its adjustments.</p><IncludedPricing value={included} label={`${label} monthly price`} capacity={room.capacity.adults} disabled={disabled} onChange={(next) => { if (disabled) return; setIncluded(next); setError(""); }} /></div>}
+        {activeIncluded && <div className="w-full"><p>The base amount above belongs to this monthly price. Changing the included count clears its adjustments.</p><IncludedPricing value={activeIncluded} label={`${label} monthly price`} capacity={room.capacity.adults} disabled={disabled} onChange={(next) => { if (disabled) return; setIncluded(next); setError(""); onPending(true); }} /></div>}
         <button type="button" className="rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => apply(month, values)}>{editing ? "Apply monthly price" : "Add monthly price"}</button>
       </div>
     </>}

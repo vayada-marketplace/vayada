@@ -1147,7 +1147,49 @@ it.each([false, true])("edits date-specific included settings through save revie
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await edit();
   expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2"); expect(field(`Adjustment for 1 adult${suffix}`).props.value).toBe("-30.25");
   const entry = { adults: "2", adjustments: [{ kind: "fixed", value: "-30" }, { kind: "fixed", value: "0" }, { kind: "fixed", value: "20" }] };
-  expect(() => changeDatePrice(room, "target", "2026-12-26", ["400"], false, entry)).toThrow("existing included-adult");
-  expect(() => changeDatePrice(room, "flex", "2026-12-27", ["400"], true, entry)).toThrow("existing included-adult");
-  expect(() => changeDatePrice(room, "target", "2026-12-25", ["400", "500"], false, entry)).toThrow("existing included-adult");
+  expect(() => changeDatePrice(room, "target", "2026-12-26", ["400"], false, entry)).toThrow("included-adult");
+  expect(changeDatePrice(room, "flex", "2026-12-27", ["400"], true, entry).offers[0].price).toMatchObject({ calendar: { dates: [{}, { date: "2026-12-27", price: { baseGuests: 2, baseMinor: "40000" } }] } });
+  expect(() => changeDatePrice(room, "target", "2026-12-25", ["400", "500"], false, entry)).toThrow("included-adult");
+});
+
+it.each(["monthly", "seasonal", "date"] as const)("creates a %s price with its own included settings in one step", async (scope) => {
+  const room = includedRoom(); client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false }); await mount(); await click("Save draft");
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  const suffix = ` for Room 1 Offer 1 ${scope} price`;
+  if (scope === "date") await fill("New date pricing for Room 1 Offer 1", "recurring");
+  expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2"); expect(field(`Adjustment for 1 adult${suffix}`).props.value).toBe("-30.00"); expect(field(`Adjustment for 3 adults${suffix}`).props.value).toBe("19.25");
+  await fill(`Adults included in the base price${suffix}`, "1"); expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe(""); expect(button("Save draft").props.disabled).toBe(true);
+  // Clearing other fields must not drop the pending occupancy settings.
+  if (scope === "monthly") await fill("Month for Room 1 Offer 1", "");
+  if (scope === "seasonal") await fill("Season name for Room 1 Offer 1", "");
+  expect(button("Save draft").props.disabled).toBe(true);
+  await click(scope === "monthly" ? "Cancel month entry" : scope === "seasonal" ? "Cancel season entry" : "Cancel date entry"); expect(button("Review saved charges").props.disabled).toBe(false);
+  if (scope === "date") await fill("New date pricing for Room 1 Offer 1", "recurring");
+  expect(field(`Adults included in the base price${suffix}`).props.value).toBe("2");
+  await fill(`Adults included in the base price${suffix}`, "1");
+  if (scope === "monthly") await fill("Month for Room 1 Offer 1", "9");
+  else if (scope === "seasonal") for (const [label, value] of [["Season name", "Spring"], ["Start (MM-DD)", "03-01"], ["End (MM-DD)", "03-31"]]) await fill(`${label} for Room 1 Offer 1`, value);
+  else await fill("Override date for Room 1 Offer 1", "2027-03-01");
+  await fill(`${scope === "monthly" ? "Monthly" : scope === "seasonal" ? "Seasonal" : "Date"} 1 adult included for Room 1 Offer 1`, "240.25");
+  await click(`Add ${scope} price`); expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(1);
+  await fill(`Adjustment type for 2 adults${suffix}`, "fixed"); await fill(`Adjustment for 2 adults${suffix}`, "12.25");
+  await fill(`Adjustment type for 3 adults${suffix}`, "percentage"); await fill(`Adjustment for 3 adults${suffix}`, "15.75");
+  await click(`Add ${scope} price`); await click("Save draft");
+  const source = room.offers[0].price, result = saved.snapshot.rooms[0].offers[0].price; if (source.kind !== "independent" || result.kind !== "independent") throw new Error("fixture");
+  const key = scope === "monthly" ? "months" : scope === "seasonal" ? "seasons" : "dates";
+  const price = { mode: "included_guests", baseGuests: 1, baseMinor: "24025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "1225" }, { kind: "percentage", basisPoints: 1575 }] };
+  const row = scope === "monthly" ? { month: 9, price } : scope === "seasonal" ? { name: "Spring", tier: "", from: "03-01", through: "03-31", price } : { date: "2027-03-01", price };
+  expect(result.calendar).toEqual({ ...source.calendar, [key]: [...source.calendar[key], row] }); expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
+  await click("Review saved charges"); client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing");
+  const editLabel = scope === "monthly" ? "Edit September price" : scope === "seasonal" ? "Edit season 03-01 to 03-31" : "Edit 2027-03-01 price";
+  await act(async () => field(`${editLabel} for Room 1 Offer 1`).props.onClick()); expect(field(`Adults included in the base price${suffix}`).props.value).toBe("1"); expect(field(`Adjustment for 2 adults${suffix}`).props.value).toBe("12.25");
+});
+it("discards new-date included settings when switching to a flat final price", async () => {
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [includedRoom()], revision: 7, sources, stale: false }); await mount();
+  const fill = async (name: string, value: string) => act(async () => view.root.findByProps({ "aria-label": name }).props.onChange({ target: { value } }));
+  await fill("New date pricing for Room 1 Offer 1", "recurring"); await fill("Adults included in the base price for Room 1 Offer 1 date price", "1");
+  await fill("New date pricing for Room 1 Offer 1", "flat"); expect(view.root.findAllByProps({ "aria-label": "Adults included in the base price for Room 1 Offer 1 date price" })).toHaveLength(0);
+  await fill("Override date for Room 1 Offer 1", "2027-03-01"); await fill("Date room price for Room 1 Offer 1", "250"); await click("Add date price"); await click("Save draft");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { dates: [{}, { date: "2027-03-01", price: { mode: "flat", amountMinor: "25000" } }] } });
 });
