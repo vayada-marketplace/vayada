@@ -233,3 +233,20 @@ and the shared bounded response reader. No names, browser-supplied provider IDs 
 account-wide discovery are used. The resolver does not persist group data or mount
 the routes. Live composition and production callback logging remain separate
 enablement steps. Tests use synthetic database/provider responses.
+
+## Opt-in API composition
+
+`AIRBNB_IMPORT_ENABLED` defaults to `false`. Enabling it requires an exact official
+`CHANNEX_API_BASE_URL`, `CHANNEX_API_KEY`, and an HTTPS origin in
+`AIRBNB_IMPORT_CALLBACK_ORIGIN` that is present in `AUTH_ALLOWED_ORIGINS`.
+Startup also requires authentication/session configuration and canonical PMS room
+setup. The API mounts source/start/complete/review routes under `/api/hotel-setup`,
+using existing route policies, canonical room ports and durable source/receipt
+repositories. The provider binding pool closes with the application; source and
+receipt pools close through their route hooks.
+
+This wiring does not enable the separate frontend `AIRBNB_IMPORT_CALLBACK_ENABLED`
+flag. Operators must verify production callback request-log handling and required
+migrations 0179/0182 before enabling both sides. No environment was changed here.
+Configuration/composition tests use mocked SQL/provider responses, including a
+mounted-route authentication rejection; they do not establish fresh-host approval.
