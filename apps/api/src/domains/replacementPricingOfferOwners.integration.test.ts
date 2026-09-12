@@ -16,7 +16,7 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture(total = 2) {
+  async function fixture(total = 2, publishedAdults = 2) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
     const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
     const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
@@ -61,7 +61,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     if (finance.kind !== "ready" || !roomSource || !termsSource || !financeSource) throw new Error("fixture requires owner evidence");
     const snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
       rooms: [roomTypeId, secondRoomId].map((id) => ({
-        version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
+        version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: publishedAdults, adults: publishedAdults, children: 0 },
         children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
         offers: terms.filter((t) => t.roomTypeId === id).map((t) => ({ id: t.offerId, termsRevision: t.revision,
           meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
@@ -96,8 +96,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     }
     return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId, currentTermsSource };
   }
-  async function serviceFixture(total = 2) {
-    const f = await fixture(total),
+  async function serviceFixture(total = 2, publishedAdults = 2) {
+    const f = await fixture(total, publishedAdults),
       propertyId = f.scope.propertyId,
       jobId = randomUUID();
     await pool.query(
@@ -187,6 +187,17 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         bindingGeneration: rows[0].binding_generation,
         offerId: "flex",
         primaryOccupancy: 1,
+        providerConfiguration: {
+          sell_mode: "per_person",
+          rate_mode: "manual",
+          currency: "EUR",
+          meal_type: "room_only",
+          options: [
+            { occupancy: 1, is_primary: true },
+            { occupancy: 2, is_primary: false },
+          ],
+          stop_sell: Array(7).fill(true),
+        },
       },
     });
     expect(
@@ -279,6 +290,25 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }),
     ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
     expect(reached).toBe(true);
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+          f.scope.propertyId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it("does not reserve an unavailable provider configuration", async () => {
+    const f = await serviceFixture(101, 101);
+    await f.publish();
+    expect(
+      await reservePublishedChannexOfferTarget(pool, f.input, {
+        roomTypeId: f.snapshot.rooms[0].roomTypeId,
+        offerId: "flex",
+        operationKey: "oversized",
+        primaryOccupancy: 1,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "candidate_limit" });
     expect(
       (
         await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [

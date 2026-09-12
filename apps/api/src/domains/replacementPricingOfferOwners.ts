@@ -1,3 +1,4 @@
+import { planChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
 import { lockChannexPricingJobLease, type ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
@@ -197,8 +198,12 @@ async function withPublishedChannexPricing(
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
         return unavailable("selection_unavailable");
-      if (selection.primaryOccupancy > room.capacity.adults)
-        return unavailable("invalid_primary_occupancy");
+      const plan = planChannexOfferConfiguration(
+        room,
+        selection.offerId,
+        selection.primaryOccupancy,
+      );
+      if (plan.kind !== "planned") return plan;
       const binding = (
         await client.query(
           "SELECT binding_generation FROM pms.channel_connections WHERE id=$1 FOR SHARE NOWAIT",
@@ -216,6 +221,7 @@ async function withPublishedChannexPricing(
         room,
         offerId: selection.offerId,
         primaryOccupancy: selection.primaryOccupancy,
+        providerConfiguration: plan.configuration,
       });
       await client.query(
         `INSERT INTO pms.channex_offer_targets

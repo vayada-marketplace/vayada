@@ -145,3 +145,20 @@ Provider options must eventually mark exactly this guest count primary while
 retaining every supported occupancy price. Missing, unsupported or stale choices
 block activation. This slice adds backend validation/storage; the hotel-facing
 control, provider configuration and activation remain separate implementation work.
+
+## Closed configuration planning (VAY-1985)
+
+Pending proposals now retain a manual per-person configuration fragment with all
+adult occupancy options, the explicit selected primary, currency and meal type.
+Linked local prices are materialized manually; provider rate inheritance is off.
+No rate amounts or zero-price placeholders are introduced by this planner.
+
+Every default weekday starts stop-sell closed. This fragment is not a complete
+create request: exact provider identity, scoped request construction and closure
+readback are still required. Channex defaults alone do not establish a closed rate.
+Daily ARI, equivalent restrictions and initial price/readback must be complete
+before sales open. Provider capability/OTA support is not implied by this plan.
+
+Rooms permitting children currently return an explicit unsupported state; their
+child capacity is never silently removed. The local 100-option bound matches the
+nightly adapter and is not a claimed provider limit.

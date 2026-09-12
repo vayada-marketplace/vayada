@@ -1,3 +1,4 @@
+import { planChannexOfferConfiguration } from "./channexOfferConfiguration.js";
 import { describe, expect, it } from "vitest";
 import type { PricingConfiguration, RoomNightProjectionRequest } from "@vayada/domain-pms";
 import { prepareChannexAdultNightPrices } from "./channexNightlyPrices.js";
@@ -260,6 +261,81 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
       prepareChannexAdultNightPrices(
         { ...c, capacity: { total: 101, adults: 101, children: 0 } },
         request,
+      ),
+    ).toEqual({ kind: "unavailable", reason: "candidate_limit" });
+  });
+});
+
+
+describe("closed Channex offer configuration", () => {
+  function adultRoom() {
+    return { ...fixture(), capacity: { total: 3, adults: 3, children: 0 } };
+  }
+  it.each(["room_only", "breakfast", "half_board", "full_board", "all_inclusive"] as const)(
+    "preserves %s identity and explicit primary without price or markup",
+    (kind) => {
+      const room = adultRoom();
+      const offer = {
+        ...room.offers[0],
+        meal: { kind, charge: { kind: "room" as const, amountMinor: "0" } },
+      };
+      const result = planChannexOfferConfiguration({ ...room, offers: [offer] }, "flex", 2);
+      expect(result).toEqual({
+        kind: "planned",
+        configuration: {
+          sell_mode: "per_person",
+          rate_mode: "manual",
+          parent_rate_plan_id: null,
+          inherit_rate: false,
+          currency: "EUR",
+          meal_type: kind,
+          options: [
+            { occupancy: 1, is_primary: false },
+            { occupancy: 2, is_primary: true },
+            { occupancy: 3, is_primary: false },
+          ],
+          stop_sell: Array(7).fill(true),
+        },
+      });
+    },
+  );
+  it("materializes linked offers independently without provider derivation", () => {
+    expect(planChannexOfferConfiguration(adultRoom(), "nr", 3)).toMatchObject({
+      kind: "planned",
+      configuration: {
+        meal_type: "breakfast",
+        rate_mode: "manual",
+        parent_rate_plan_id: null,
+        inherit_rate: false,
+      },
+    });
+  });
+  it("rejects unsupported children, invalid selection and oversized plans without partial output", () => {
+    expect(planChannexOfferConfiguration(fixture(), "flex", 1)).toEqual({
+      kind: "unavailable",
+      reason: "child_representation_unavailable",
+    });
+    expect(planChannexOfferConfiguration(adultRoom(), "missing", 1)).toEqual({
+      kind: "unavailable",
+      reason: "selection_unavailable",
+    });
+    for (const primary of [0, 4, 1.5, NaN])
+      expect(planChannexOfferConfiguration(adultRoom(), "flex", primary)).toEqual({
+        kind: "unavailable",
+        reason: "invalid_primary_occupancy",
+      });
+    expect(planChannexOfferConfiguration({}, "flex", 1)).toEqual({
+      kind: "unavailable",
+      reason: "invalid_configuration",
+    });
+    expect(
+      planChannexOfferConfiguration(
+        {
+          ...withBase({ mode: "flat", amountMinor: "10000" }),
+          capacity: { adults: 101, total: 101, children: 0 },
+        },
+        "flex",
+        1,
       ),
     ).toEqual({ kind: "unavailable", reason: "candidate_limit" });
   });
