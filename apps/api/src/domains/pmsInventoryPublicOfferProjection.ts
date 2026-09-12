@@ -159,14 +159,23 @@ const CLAIM_PENDING_INVENTORY_EVENTS = `
 
 /** During the reset, refresh inventory visibility without generating any room price. */
 export const PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS = `
+  WITH inventory_lock AS (
+    SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))
+  )
   UPDATE distribution.public_room_offer_snapshots offer SET
     sellable_publicly = FALSE,
     availability_status = 'closed',
-    available_rooms = inventory.available_count,
+    available_rooms = CASE WHEN COALESCE(inventory.rate_gate_open, TRUE) AND room.active
+      AND NOT EXISTS (
+        SELECT 1 FROM pms.room_type_closures closure
+        WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
+      ) THEN inventory.available_count ELSE 0 END,
     unavailable_reasons = ARRAY['unpublished']::text[],
     freshness_status = 'unavailable',
     updated_at = $2::timestamptz
   FROM pms.inventory_days inventory
+  JOIN pms.room_types room ON room.property_id = inventory.property_id AND room.id = inventory.room_type_id
+  CROSS JOIN inventory_lock
   WHERE offer.property_id = $1::uuid
     AND inventory.property_id = offer.property_id
     AND inventory.room_type_id = offer.room_type_id
@@ -521,6 +530,11 @@ async function projectInventoryClaim(
       };
     }
 
+    // Acquire in a separate statement so a waiter reads a fresh snapshot after closure commits.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::text), 0))",
+      [claim.propertyId],
+    );
     const projected = await client.query<ProjectedRow>(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS, [
       claim.propertyId,
       projectedAt.toISOString(),
