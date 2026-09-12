@@ -85,6 +85,33 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     expect(await counts(id)).toEqual({ drafts: 1, revisions: 1, events: 1 });
     expect(await f.commands.read(id)).toMatchObject({ revision: 1, stale: false });
   });
+  it("retains distinct calendar occupancy settings through trusted publication and readback", async () => {
+    const f = await fixture(), id = f.scope.propertyId, room = f.proposed.rooms[0];
+    const base = { mode: "included_guests", baseGuests: 2, baseMinor: "13000", adjustments: [{ kind: "fixed", deltaMinor: "-3025" }, { kind: "fixed", deltaMinor: "0" }] };
+    const month = { mode: "included_guests", baseGuests: 1, baseMinor: "24025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 1575 }] };
+    const season = { mode: "included_guests", baseGuests: 2, baseMinor: "26025", adjustments: [{ kind: "percentage", basisPoints: -1250 }, { kind: "fixed", deltaMinor: "0" }] };
+    const date = { ...month, baseMinor: "30000", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "1825" }] };
+    const linkedDate = { ...month, baseMinor: "40000", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 2250 }] };
+    const proposed = { ...f.proposed, rooms: [{ ...room, offers: [
+      { ...room.offers[0], price: { kind: "independent", calendar: { base, months: [{ month: 9, price: month }],
+        seasons: [{ name: "Spring", tier: "high", from: "03-01", through: "03-31", price: season }],
+        weekdays: [{ day: 0, adjustment: { kind: "fixed", deltaMinor: "100" } }], dates: [{ date: "2027-03-01", price: date }] } } },
+      { ...room.offers[1], price: { kind: "linked", parentId: room.offers[0].id, adjustment: { kind: "percentage", basisPoints: -1000 },
+        dateOverrides: [{ date: "2027-03-01", price: linkedDate }] }, restrictions: { kind: "inherit" } },
+    ] }, f.proposed.rooms[1]] };
+    const prepared = await f.commands.prepare(id, proposed);
+    expect(prepared.snapshot.rooms).toEqual(proposed.rooms);
+    const draft = { ...f.draft, ...prepared }, command = await confirmed({ ...f, prepared, draft });
+    expect((await f.commands.readDraft(id, draft.draftId))?.snapshot.rooms).toEqual(proposed.rooms);
+    expect(await f.commands.publish(id, command)).toEqual({ revision: 1, replayed: false });
+    expect(await f.commands.publish(id, command)).toEqual({ revision: 1, replayed: true });
+    const published = await f.commands.read(id);
+    expect(published).toMatchObject({ revision: 1, stale: false });
+    expect(published?.rooms).toEqual([...proposed.rooms].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)));
+    const stored = await pool.query("SELECT configuration FROM pms.pricing_v2_rooms WHERE property_id=$1 AND revision=1 ORDER BY room_type_id", [id]);
+    expect(stored.rows.map((row) => row.configuration)).toEqual([...proposed.rooms].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)));
+    expect(await counts(id)).toEqual({ drafts: 1, revisions: 1, events: 1 });
+  });
   it("requires exact saved draft binding for every new publication", async () => {
     const f = await fixture(), id = f.scope.propertyId, command = await confirmed(f);
     for (const draft of [undefined, null])
