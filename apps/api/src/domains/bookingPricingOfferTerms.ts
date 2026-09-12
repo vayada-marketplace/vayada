@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
-import { parseFlexibleCancellationTerms, pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms";
+import { pricingKeys, pricingObject } from "@vayada/domain-pms";
+import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+export { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import type { Pool, PoolClient } from "pg";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
@@ -24,19 +26,6 @@ export async function lockBookingPricingTermsSource(client: PoolClient, property
   const terms = (await client.query(`SELECT room_type_id,offer_id,revision FROM booking.pricing_v2_offer_term_heads
     WHERE property_id=$1 ORDER BY room_type_id,offer_id COLLATE "C" FOR SHARE`, [propertyId])).rows;
   return "booking.pricing.terms.v2:" + createHash("sha256").update(canonical({ propertyId, terms })).digest("hex");
-}
-
-/** Strict owner boundary; no defaults that silently change a saved policy. */
-export function parseBookingPricingOfferTerms(value: unknown): ReplacementOfferTerms | null {
-  if (!pricingObject(value) || !pricingKeys(value, ["roomTypeId", "offerId", "revision", "cancellation", "payment"]) ||
-      !uuid(value.roomTypeId) || !text(value.offerId) || !uuid(value.revision) || !pricingObject(value.cancellation) || !pricingObject(value.payment)) return null;
-  const c = value.cancellation, p = value.payment;
-  if (!(c.kind === "non_refundable" && pricingKeys(c, ["kind"])) &&
-      !(c.kind === "flexible" && pricingKeys(c, ["kind", "terms"]) && parseFlexibleCancellationTerms(c.terms))) return null;
-  if (!(p.kind === "full" && pricingKeys(p, ["kind"])) &&
-      !(p.kind === "deposit" && pricingKeys(p, ["kind", "basisPoints", "balanceDaysBeforeArrival"]) &&
-        pricingInteger(p.basisPoints, 1) && p.basisPoints <= 10000 && pricingInteger(p.balanceDaysBeforeArrival))) return null;
-  return structuredClone({ ...value, roomTypeId: value.roomTypeId.toLowerCase(), revision: value.revision.toLowerCase() }) as ReplacementOfferTerms;
 }
 
 /** Booking-owned read port. Caller has authorized/locked the property transaction first.
