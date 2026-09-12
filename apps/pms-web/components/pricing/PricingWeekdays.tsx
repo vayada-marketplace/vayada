@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { decimalAmount, parseMinorInput } from "./pricingAmounts";
+import { decimalAmount, parseAdjustmentInput } from "./pricingAmounts";
 
 type Offer = PricingConfiguration["offers"][number];
 export const weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -14,10 +14,7 @@ export function changeWeekdayPrice(room: PricingConfiguration, offerId: string, 
   if (!input && !exists) throw new Error("There is no adjustment to clear for this weekday.");
   let next = weekdays.filter((entry) => entry.day !== Number(day));
   if (input) {
-    if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value)) throw new Error("Choose an adjustment type and enter a valid signed amount.");
-    const unsigned = parseMinorInput(input.value.replace(/^[+-]/, ""), input.kind === "fixed" ? pricingCurrencyScale(room.currency)! : 2, true);
-    const signed = BigInt(unsigned) * (input.value.startsWith("-") ? -BigInt("1") : BigInt("1"));
-    const adjustment = input.kind === "fixed" ? { kind: "fixed" as const, deltaMinor: signed.toString() } : { kind: "percentage" as const, basisPoints: Number(signed) };
+    const adjustment = parseAdjustmentInput(input, room.currency);
     next = [...next, { day: Number(day), adjustment }].sort((a, b) => a.day - b.day);
   }
   const price = { ...offer.price, calendar: { ...offer.price.calendar, weekdays: next } };

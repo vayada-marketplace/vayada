@@ -33,3 +33,11 @@ export function parseMinorInput(value: string, scale: number, allowZero = false)
   if (minor.length > 18) throw new Error("This price is too large.");
   return minor;
 }
+
+export function parseAdjustmentInput(input: { kind: string; value: string }, currency: string) {
+  if (!["fixed", "percentage"].includes(input.kind) || !/^[+-]?\d+(?:\.\d+)?$/.test(input.value)) throw new Error("Choose an adjustment type and enter a valid signed amount.");
+  const unsigned = parseMinorInput(input.value.replace(/^[+-]/, ""), input.kind === "fixed" ? pricingCurrencyScale(currency)! : 2, true);
+  const signed = BigInt(unsigned) * (input.value.startsWith("-") ? -BigInt("1") : BigInt("1"));
+  const adjustment = input.kind === "fixed" ? { kind: "fixed" as const, deltaMinor: signed.toString() } : { kind: "percentage" as const, basisPoints: Number(signed) };
+  return adjustment;
+}
