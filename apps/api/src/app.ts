@@ -1,3 +1,7 @@
+import {
+  registerAirbnbImportRoutes,
+  type AirbnbImportRoutesOptions,
+} from "./routes/airbnbImports.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
@@ -271,6 +275,10 @@ import {
   type BookingGuestPolicyRoutesOptions,
 } from "./routes/bookingGuestPolicy.js";
 import { registerFinanceOtaCommissionSettingsRoutes as registerOtaSettings } from "./routes/financeOtaCommissionSettings.js";
+import {
+  registerFinancePaymentReadinessRoutes,
+  type FinancePaymentReadinessRoutesOptions,
+} from "./routes/financePaymentReadiness.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -286,6 +294,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
   bookingHostActions?: BookingHostActions;
@@ -361,6 +370,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     "profileRepository" | "lifecycleCommandBus"
   >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
+    applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
+  };
   preparedImportRepository?: PreparedImportRepository;
   sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
   propertyNearbyRepository?: PropertyNearbyRepository;
@@ -621,6 +633,24 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth.propertyAccessRepository,
     });
   }
+  if (options.airbnbImports) {
+    if (
+      !options.auth?.propertyAccessRepository ||
+      !options.sharedHotelSetupStatusRepository ||
+      !options.pmsRoomSetup?.facts
+    )
+      throw new Error("Airbnb imports require authorization and canonical hotel room setup");
+    app.register(registerAirbnbImportRoutes, {
+      prefix: "/api/hotel-setup",
+      ...options.airbnbImports,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      review: {
+        profiles: options.sharedHotelSetupStatusRepository,
+        rooms: options.pmsRoomSetup.facts,
+        applications: options.airbnbImports.applications,
+      },
+    });
+  }
   if (options.preparedImportRepository && options.sharedHotelSetupStatusRepository) {
     app.register(registerPreparedHotelImportRoutes, {
       prefix: "/api/hotel-setup",
@@ -699,6 +729,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingPublicationRoutes, {
       prefix: "/api/hotel-setup",
       ...options.bookingPublication,
+    });
+  }
+  if (options.financePaymentSetup) {
+    app.register(registerFinancePaymentReadinessRoutes, {
+      prefix: "/api",
+      ...options.financePaymentSetup,
     });
   }
   if (options.identityPrivacyRepository) {
