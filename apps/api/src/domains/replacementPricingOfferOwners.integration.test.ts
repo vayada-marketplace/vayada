@@ -6,7 +6,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createBookingPricingOfferTermsStore } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockReplacementPricingOfferOwners as verify } from "./replacementPricingOfferOwners.js";
-import type { PricingStorageSnapshot } from "./replacementPricingStore.js";
+import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
+import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -59,19 +60,30 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
         })),
       })) };
-    async function read(proposed: unknown = snapshot, auth: RequestContext | null = context) {
+    // Source collection is a separate integration; these tokens are explicit fixture inputs.
+    const sources = { room: "fixture-room-source", terms: "fixture-terms-source", finance: finance.evidenceId }, draftId = randomUUID();
+    // Seed the draft boundary, then create evidence through the real authorized declaration writer.
+    await pool.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [propertyId]);
+    await pool.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
+      VALUES($1,$2,1,0,$3,$4,$5)`, [propertyId, draftId, sources, snapshot, actorUserId]);
+    const charges = await createReplacementChargeDeclarationStore(pool).confirm(context, scope, {
+      draftId, expectedDraftRevision: 1, claimedFingerprint: replacementChargeFingerprint(propertyId, snapshot, sources)!,
+      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
+    });
+    const declared = { ...snapshot, ownerReferences: { ...snapshot.ownerReferences, charges: charges.id } };
+    async function read(proposed: unknown = declared, auth: RequestContext | null = context, currentSources: PricingStorageSources = sources) {
       const client = await pool.connect();
-      try { await client.query("BEGIN"); return await verify(client, auth, scope, proposed); }
+      try { await client.query("BEGIN"); return await verify(client, auth, scope, proposed, currentSources); }
       finally { await client.query("ROLLBACK"); client.release(); }
     }
-    return { scope, context, membershipId, snapshot, read, booking, terms, termsInput, finance };
+    return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources };
   }
   it("verifies every offer across rooms with exact current Finance evidence", async () => {
     const f = await fixture();
-    expect(await f.read()).toEqual({ kind: "verified", terms: f.terms, finance: f.finance });
+    expect(await f.read()).toEqual({ kind: "verified", terms: f.terms, finance: f.finance, charges: f.charges });
     expect(await f.read({ ...f.snapshot, rooms: [...f.snapshot.rooms].reverse() })).toMatchObject({ kind: "verified" });
     expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0]] })).toMatchObject({ reason: "finance_unavailable", financeReason: "stale" });
-    expect((await pool.query("SELECT count(*)::int AS n FROM platform.domain_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(3); // only terms writer events
+    expect((await pool.query("SELECT count(*)::int AS n FROM platform.domain_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(4); // terms + declaration writers only
   });
   it("denies missing or revoked authorization and foreign or inactive room scope", async () => {
     const f = await fixture(), other = await fixture();
@@ -124,12 +136,32 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const command = { requestId: randomUUID(), expectedRevision: f.terms[0].revision, terms: f.termsInput };
     try {
       await writer.query("SET lock_timeout='150ms'");
-      await client.query("BEGIN"); expect(await verify(client, f.context, f.scope, f.snapshot)).toMatchObject({ kind: "verified" });
+      await client.query("BEGIN"); expect(await verify(client, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({ kind: "verified" });
       await expect(createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command)).rejects.toMatchObject({ code: "55P03" });
       await expect(writer.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId])).rejects.toMatchObject({ code: "55P03" });
       await client.query("COMMIT");
       await createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command);
       expect(await f.read()).toMatchObject({ reason: "terms_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); await writer.end(); }
+  });
+  it("requires the exact property declaration and rejects changed pricing or source evidence", async () => {
+    const f = await fixture(), other = await fixture();
+    for (const id of [undefined, "unconfirmed", randomUUID(), other.charges.id]) {
+      const ownerReferences: Record<string, string> = { finance: f.finance.evidenceId };
+      if (id !== undefined) ownerReferences.charges = id;
+      expect(await f.read({ ...f.snapshot, ownerReferences })).toMatchObject({ reason: "charges_stale" });
+    }
+    const first = f.snapshot.rooms[0], offer = first.offers[0];
+    const changes = [
+      { ...first, children: { ...first.children, bands: first.children.bands.map((b) => ({ ...b, nightlyMinor: "500" })) } },
+      { ...first, offers: [{ ...offer, meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "1500" } } }, first.offers[1]] },
+      { ...first, offers: [{ ...offer, price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "11000" }, months: [], seasons: [], weekdays: [], dates: [] } } }, first.offers[1]] },
+    ];
+    for (const changed of changes)
+      expect(await f.read({ ...f.snapshot, rooms: [changed, f.snapshot.rooms[1]] })).toMatchObject({ reason: "charges_stale" });
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, room: "changed" })).toMatchObject({ reason: "charges_stale" });
+    // Only the declaration's own reference is excluded from the fingerprint.
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, charges: f.charges.id })).toMatchObject({ kind: "verified", charges: f.charges });
+    expect((await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(4);
   });
 });
