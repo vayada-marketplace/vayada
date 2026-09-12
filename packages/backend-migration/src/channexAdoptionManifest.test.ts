@@ -121,6 +121,16 @@ describe("signed Channex adoption manifest", () => {
       "7d432cf4399419070e4a350c7ac5cfba39069404ce2c069ea343307262fa2b16",
     );
     expect(parsed.manifest).toEqual(manifest);
+
+    const singleHuman = structuredClone(manifest);
+    singleHuman.approvalEvidence[1].actorUserId = singleHuman.approvalEvidence[0].actorUserId;
+    expect(verifyFixture(singleHuman, privateKey, publicKey).manifest.approvalEvidence).toEqual([
+      expect.objectContaining({ authority: "migration_owner" }),
+      expect.objectContaining({
+        authority: "security_owner",
+        actorUserId: singleHuman.approvalEvidence[0].actorUserId,
+      }),
+    ]);
   });
 
   it("rejects duplicate and unknown fields before accepting a manifest", () => {
@@ -175,12 +185,6 @@ describe("signed Channex adoption manifest", () => {
       "reversed approvals",
       (m: ChannexAdoptionManifest) => m.approvalEvidence.reverse(),
       "INVALID_APPROVAL_ORDER",
-    ],
-    [
-      "same approver",
-      (m: ChannexAdoptionManifest) =>
-        (m.approvalEvidence[1].actorUserId = m.approvalEvidence[0].actorUserId),
-      "APPROVER_COLLISION",
     ],
     [
       "same approval record",
