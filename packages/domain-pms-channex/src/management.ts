@@ -12,6 +12,7 @@ export const CHANNEX_MANAGEMENT_OPERATION_TYPES = [
   "sync_bookings",
   "update_markups",
   "install_messaging",
+  "update_inventory_rules",
 ] as const;
 
 export type ChannexManagementOperationType = (typeof CHANNEX_MANAGEMENT_OPERATION_TYPES)[number];
@@ -65,6 +66,7 @@ export type ChannexRatePlanMapping = {
 };
 
 export type ChannexConnectedChannel = {
+  externalChannelId?: string;
   key: string;
   application: string;
   title: string | null;
@@ -87,6 +89,10 @@ export type ChannexManagementOperation = {
 };
 
 export type ChannexManagementSnapshot = {
+  inventoryRules?: {
+    rules: import("./inventoryRules.js").ChannexInventoryRule[];
+    operation: ChannexManagementOperation | null;
+  };
   contractVersion: typeof CHANNEX_MANAGEMENT_CONTRACT_VERSION;
   propertyId: string;
   connection: {
