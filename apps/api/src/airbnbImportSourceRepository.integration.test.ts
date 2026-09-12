@@ -1,7 +1,8 @@
 import pg from "pg";
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPgAirbnbImportSourceRepository } from "./domains/airbnbImportSourceRepository.js";
+import { createPgAirbnbImportApplicationRepository } from "./domains/airbnbImportApplicationRepository.js";
 import type { PreparedHotelImport } from "@vayada/domain-hotels";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -20,10 +21,22 @@ describe.skipIf(!url)("durable Airbnb source", () => {
   const data: PreparedHotelImport = {
     contractVersion: "prepared-hotel-import.v1",
     property: {},
-    rooms: [],
+    rooms: ["one", "two"].map((id) => ({
+      id: `abb_${id}`,
+      name: `Fixture ${id}`,
+      description: "",
+      maxGuests: 2,
+      maxAdults: null,
+      maxChildren: null,
+      bedType: "",
+      bedQuantity: null,
+      bathroomType: "",
+      sizeSquareMetres: null,
+    })),
   };
   const db = new pg.Client({ connectionString: url });
   const repository = createPgAirbnbImportSourceRepository(url ?? "postgresql://disabled");
+  const applications = createPgAirbnbImportApplicationRepository(url ?? "postgresql://disabled");
   let connected = false;
   beforeAll(async () => {
     if (url !== "postgresql://postgres@127.0.0.1:59709/vay1009_import_test")
@@ -46,6 +59,11 @@ describe.skipIf(!url)("durable Airbnb source", () => {
   afterAll(async () => {
     try {
       if (!connected) return;
+      await db.query(
+        `DELETE FROM hotel_catalog.airbnb_import_applications WHERE source_id IN
+        (SELECT id FROM hotel_catalog.airbnb_import_sources WHERE organization_id=$1)`,
+        [scope.organizationId],
+      );
       await db.query("DELETE FROM hotel_catalog.airbnb_import_sources WHERE organization_id=$1", [
         scope.organizationId,
       ]);
@@ -55,7 +73,7 @@ describe.skipIf(!url)("durable Airbnb source", () => {
       await db.query("DELETE FROM identity.organizations WHERE id=$1", [scope.organizationId]);
       await db.query("DELETE FROM identity.users WHERE id=$1", [scope.actorUserId]);
     } finally {
-      await Promise.allSettled([repository.close(), db.end()]);
+      await Promise.allSettled([repository.close(), applications.close(), db.end()]);
     }
   });
   it("persists the binding and only a digest of the random state", async () => {
@@ -153,5 +171,91 @@ describe.skipIf(!url)("durable Airbnb source", () => {
       } as PreparedHotelImport),
     ).rejects.toThrow("invalid_airbnb_import_snapshot");
     expect(await repository.pending(scope, attempt.state)).not.toBeNull();
+  });
+  async function completedSource() {
+    const attempt = await repository.begin(scope, binding);
+    await repository.complete(scope, attempt.state, randomUUID(), data);
+    return { ...scope, sourceId: attempt.sourceId };
+  }
+  it("serializes concurrent application and persists receipts across reopening", async () => {
+    const target = await completedSource();
+    const saved = { itemId: "room:abb_one", status: "applied" as const, resourceId: randomUUID() };
+    let executions = 0;
+    const execute = async (source: NonNullable<Awaited<ReturnType<typeof applications.find>>>) => {
+      if (source.results[saved.itemId]) return [source.results[saved.itemId]!];
+      executions++;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return [saved];
+    };
+    const results = await Promise.all(
+      Array.from({ length: 4 }, (_, index) =>
+        applications.apply(
+          { ...target, sourceId: index % 2 ? target.sourceId.toUpperCase() : target.sourceId },
+          execute,
+        ),
+      ),
+    );
+    expect(results).toEqual(Array.from({ length: 4 }, () => [saved]));
+    expect(executions).toBe(1);
+    const reopened = createPgAirbnbImportApplicationRepository(url!);
+    try {
+      expect(await reopened.find(target)).toEqual({
+        sourceId: target.sourceId,
+        propertyId: scope.propertyId,
+        data,
+        results: { [saved.itemId]: saved },
+      });
+    } finally {
+      await reopened.close();
+    }
+  });
+  it.each(["actorUserId", "organizationId", "propertyId", "sourceId"] as const)(
+    "denies application outside the exact %s scope",
+    async (key) => {
+      const target = { ...(await completedSource()), [key]: randomUUID() };
+      const execute = vi.fn(async () => []);
+      expect(await applications.find(target)).toBeNull();
+      await expect(applications.apply(target, execute)).rejects.toThrow("import_not_available");
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects incomplete sources before executing commands", async () => {
+    const attempt = await repository.begin(scope, binding);
+    const target = { ...scope, sourceId: attempt.sourceId };
+    const execute = vi.fn(async () => []);
+    expect(await applications.find(target)).toBeNull();
+    await expect(applications.apply(target, execute)).rejects.toThrow("import_not_available");
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("persists successes only and preserves original room identities on retry", async () => {
+    const target = await completedSource();
+    const first = { itemId: "room:abb_one", status: "applied" as const, resourceId: randomUUID() };
+    const second = { itemId: "room:abb_two", status: "applied" as const, resourceId: randomUUID() };
+    await applications.apply(target, async () => [
+      first,
+      { itemId: second.itemId, status: "failed", error: "synthetic_failure" },
+    ]);
+    expect((await applications.find(target))?.results).toEqual({ [first.itemId]: first });
+    expect(
+      await applications.apply(target, async () => [
+        { ...first, resourceId: randomUUID() },
+        second,
+      ]),
+    ).toEqual([first, second]);
+    expect((await applications.find(target))?.results).toEqual({
+      [first.itemId]: first,
+      [second.itemId]: second,
+    });
+    expect((await repository.find(scope, target.sourceId))?.data).toEqual(data);
+  });
+  it("releases its lock after executor failure and leaves failed work retryable", async () => {
+    const target = await completedSource();
+    await expect(
+      applications.apply(target, async () => {
+        throw new Error("synthetic_failure");
+      }),
+    ).rejects.toThrow("synthetic_failure");
+    expect((await applications.find(target))?.results).toEqual({});
+    await expect(applications.apply(target, async () => [])).resolves.toEqual([]);
   });
 });
