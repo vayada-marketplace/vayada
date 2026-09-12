@@ -24,8 +24,10 @@ import { PricingChildCharges } from "./PricingChildCharges";
 import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
+import { PricingStayPreview } from "./PricingStayPreview";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
+const noPreviewEdits = {};
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
   const [independentOffer, setIndependentOffer] = useState(false);
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
@@ -228,6 +230,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
           </div>)}
         </details>
       </div>)}
+      <PricingStayPreview snapshot={display} inputs={review ? noPreviewEdits : inputs} disabled={disabled || hasPendingEntries} saved={!!review} roomNames={roomNames} />
       {review && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5"><h2 className="font-semibold">Confirm the saved prices</h2><p className="mt-2 text-sm">Review the saved amounts above, including child and meal charges. Approving creates a saved pricing revision; it does not send rates to channels yet.</p>
         <label className="mt-4 flex gap-3 text-sm"><input type="checkbox" checked={ack} disabled={disabled} onChange={(e) => setAck(e.target.checked)} />All mandatory charges are included in these prices.</label></div>}
       <footer className="flex flex-wrap gap-3 border-t pt-5">

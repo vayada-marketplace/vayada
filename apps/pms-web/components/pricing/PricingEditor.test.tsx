@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
+import { PricingStayPreview } from "./PricingStayPreview";
 import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
@@ -1192,4 +1193,21 @@ it("discards new-date included settings when switching to a flat final price", a
   await fill("New date pricing for Room 1 Offer 1", "flat"); expect(view.root.findAllByProps({ "aria-label": "Adults included in the base price for Room 1 Offer 1 date price" })).toHaveLength(0);
   await fill("Override date for Room 1 Offer 1", "2027-03-01"); await fill("Date room price for Room 1 Offer 1", "250"); await click("Add date price"); await click("Save draft");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { dates: [{}, { date: "2027-03-01", price: { mode: "flat", amountMinor: "25000" } }] } });
+});
+
+
+it("binds the stay preview to raw editor inputs and the exact saved review", async () => {
+  await mount();
+  await act(async () => input().props.onChange({ target: { value: "150.25" } }));
+  expect(view.root.findByType(PricingStayPreview).props.inputs).toEqual({ "0:0:0": "150.25" });
+  await click("Save draft"); await click("Review saved charges");
+  const preview = view.root.findByType(PricingStayPreview).props;
+  expect(preview.saved).toBe(true); expect(preview.inputs).toEqual({}); expect(preview.snapshot).toEqual(saved.snapshot);
+  expect(preview.disabled).toBe(false);
+});
+
+it("disables the stay preview for unapplied calendar edits", async () => {
+  await mount();
+  await act(async () => view.root.findByProps({ "aria-label": "Month for Room 1 Offer 1" }).props.onChange({ target: { value: "9" } }));
+  expect(view.root.findByType(PricingStayPreview).props.disabled).toBe(true);
 });
