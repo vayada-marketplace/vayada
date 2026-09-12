@@ -131,12 +131,11 @@ export function createPgHotelCatalogStep1Repository(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const property = await lockAuthorizedProperty(client, scope);
-        if (!property) {
+        const state = await readLockedHotelCatalogStep1State(client, scope);
+        if (!state) {
           await rollback(client);
           return null;
         }
-        const state = await loadState(client, property);
         await client.query("COMMIT");
         return state;
       } catch (error) {
@@ -392,6 +391,15 @@ export function createPgHotelCatalogStep1Repository(config: {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+/** Read through the Catalog owner within an existing transaction. Holds the canonical property lock. */
+export async function readLockedHotelCatalogStep1State(
+  client: QueryClient,
+  scope: HotelCatalogStep1Scope,
+): Promise<HotelCatalogStep1State | null> {
+  const property = await lockAuthorizedProperty(client, scope);
+  return property ? loadState(client, property) : null;
 }
 
 async function lockAuthorizedProperty(
