@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ReviewReply } from "@/components/reviews/ReviewReply";
 import { StarIcon } from "@heroicons/react/24/solid";
 import { getStoredPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { listPmsReviews, type PmsReview } from "@/services/api/pmsReviewsClient";
@@ -8,6 +9,7 @@ import { useTranslation } from "@/lib/i18n";
 
 export default function ReviewsPage() {
   const { t, locale } = useTranslation();
+  const [propertyId, setPropertyId] = useState<string | null>(null);
   const [reviews, setReviews] = useState<PmsReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +18,7 @@ export default function ReviewsPage() {
 
   useEffect(() => {
     const propertyId = getStoredPmsPropertyId();
+    setPropertyId(propertyId);
     if (!propertyId) {
       setError(t("reviews.selectProperty"));
       setLoading(false);
@@ -102,6 +105,14 @@ export default function ReviewsPage() {
                     {review.replyBody}
                   </p>
                 </div>
+              )}
+              {!review.replyBody && propertyId && (
+                <ReviewReply
+                  key={`${propertyId}:${review.reviewId}`}
+                  propertyId={propertyId}
+                  reviewId={review.reviewId}
+                  initialStatus={review.replySubmission}
+                />
               )}
               {review.reviewedAt && (
                 <time className="mt-3 block text-xs text-gray-400">
