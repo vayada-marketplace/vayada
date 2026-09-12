@@ -215,3 +215,21 @@ contains the environment/external ID/job ID, and is removed on disconnect. It is
 additive metadata: no existing connection is retroactively certified. Group resolution
 still needs a provider read against this proven property; creating a property can use
 the default user group when no group_id is supplied, per the official Properties API.
+
+## Verified group binding
+
+The import binding resolver implements the route's `resolveBinding` port. It reads
+a connected canonical property's active enable claim and strict creation evidence,
+requires the configured provider environment and exact external property ID, then
+reads that property by ID using the documented
+[Properties API](https://docs.channex.io/api-v.1-documentation/hotels-collection).
+Only an exact matching property with one valid group is accepted; missing or multiple
+groups are ineligible. A second local read rejects disconnects or evidence replacement
+during provider I/O. The existing route policies remain responsible for actor,
+organization and property authorization before calling this internal port.
+
+Provider reads use fixed official origins, rejected redirects, a ten-second timeout
+and the shared bounded response reader. No names, browser-supplied provider IDs or
+account-wide discovery are used. The resolver does not persist group data or mount
+the routes. Live composition and production callback logging remain separate
+enablement steps. Tests use synthetic database/provider responses.
