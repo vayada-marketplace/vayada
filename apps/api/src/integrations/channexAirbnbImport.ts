@@ -1,3 +1,4 @@
+import { readChannexImportResponse } from "./channexImportResponse.js";
 import { parsePreparedHotelImport, type PreparedHotelImport } from "@vayada/domain-hotels";
 
 type Scope = { channelId: string; groupId: string; externalPropertyId: string };
@@ -33,26 +34,7 @@ export async function readChannexAirbnbImport(
         signal: AbortSignal.timeout(10_000),
         headers: { "user-api-key": options.apiKey, Accept: "application/json" },
       });
-      if (!response.ok || !response.body) {
-        await response.body?.cancel();
-        throw new Error();
-      }
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.byteLength;
-          if (size > 262_144) throw new Error();
-          chunks.push(value);
-        }
-        return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      } finally {
-        await reader.cancel();
-        reader.releaseLock();
-      }
+      return await readChannexImportResponse(response);
     } catch {
       throw new Error("Airbnb listing source could not be read");
     }

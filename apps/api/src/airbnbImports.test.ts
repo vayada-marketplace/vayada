@@ -113,7 +113,7 @@ it("starts from server binding and completes only after provider verification", 
   const start = await f.post("/start", {});
   expect(start.statusCode).toBe(200);
   expect(start.headers["cache-control"]).toBe("private, no-store");
-  expect(f.options.createLink).toHaveBeenCalledWith(binding, state);
+  expect(f.options.createLink).toHaveBeenCalledWith(binding, { state, sourceId, propertyId });
   const complete = await f.post("/complete", { state, channelId });
   expect(complete.json()).toEqual({ sourceId });
   expect(f.options.readListings).toHaveBeenCalledWith({ ...binding, sourceId }, channelId);

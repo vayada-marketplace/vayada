@@ -14,7 +14,10 @@ export type AirbnbImportRoutesOptions = {
   propertyAccessRepository: PropertyAccessRepository;
   allowedOrigins: string[];
   resolveBinding(scope: Scope): Promise<Binding | null>;
-  createLink(binding: Binding, state: string): Promise<string>;
+  createLink(
+    binding: Binding,
+    attempt: { state: string; sourceId: string; propertyId: string },
+  ): Promise<string>;
   readListings(binding: Binding, channelId: string): Promise<PreparedHotelImport>;
 };
 const completion = z.strictObject({
@@ -80,7 +83,7 @@ export async function registerAirbnbImportRoutes(
       const binding = await options.resolveBinding(scope);
       if (!binding) return reply.code(409).send({ code: "channex_binding_required" });
       const attempt = await options.repository.begin(scope, binding);
-      const url = await options.createLink(binding, attempt.state);
+      const url = await options.createLink(binding, { ...attempt, propertyId: scope.propertyId });
       return { sourceId: attempt.sourceId, url };
     } catch {
       return reply.code(502).send({ code: "airbnb_connection_unavailable" });
