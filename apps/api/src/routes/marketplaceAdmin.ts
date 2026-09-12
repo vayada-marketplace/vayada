@@ -1,3 +1,4 @@
+import { parsePreparedHotelImport, type PreparedHotelImport } from "@vayada/domain-hotels";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { requireAuthContext, type PermissionKey, type RequestContext } from "@vayada/backend-auth";
@@ -324,6 +325,7 @@ export type MarketplaceAdminInviteCode = {
 };
 
 export type MarketplaceAdminHotelAccountInviteCreateRequest = {
+  preparedData?: PreparedHotelImport;
   identity: {
     email: string;
   };
@@ -1609,7 +1611,7 @@ export function parseHotelAccountInviteCreateRequest(
   body: unknown,
 ): MarketplaceAdminHotelAccountInviteCreateRequest | string {
   if (!isRecord(body)) return "invite_body_required";
-  if (!hasOnlyKeys(body, HOTEL_ACCOUNT_INVITE_REQUEST_KEYS)) {
+  if (!hasOnlyKeys(body, [...HOTEL_ACCOUNT_INVITE_REQUEST_KEYS, "preparedData"])) {
     return "unsupported_invite_field";
   }
   if (!isRecord(body.identity) || !hasOnlyKeys(body.identity, ["email"])) {
@@ -1637,6 +1639,11 @@ export function parseHotelAccountInviteCreateRequest(
     return "invalid_selected_tracks";
   }
 
+  const preparedData =
+    body.preparedData === undefined ? undefined : parsePreparedHotelImport(body.preparedData);
+  if (preparedData === null) return "invalid_prepared_data";
+  if (preparedData?.rooms.length && !body.selectedTracks.includes("hotel_operations"))
+    return "rooms_require_hotel_operations";
   const uniqueTracks = new Set<SetupTrack>(body.selectedTracks as SetupTrack[]);
   if (uniqueTracks.size !== body.selectedTracks.length) return "invalid_selected_tracks";
   const selectedTracks: SetupTrack[] = [];
@@ -1644,6 +1651,7 @@ export function parseHotelAccountInviteCreateRequest(
   if (uniqueTracks.has("creator_marketplace")) selectedTracks.push("creator_marketplace");
 
   return {
+    ...(preparedData ? { preparedData } : {}),
     identity: { email },
     organization: { displayName: organizationName },
     property: { displayName: propertyName },
@@ -1659,9 +1667,11 @@ function parseStoredHotelAccountInvite(
     value,
     HOTEL_ACCOUNT_INVITE_REDEMPTION_KEY,
   );
-  const allowedKeys = hasRedemption
-    ? [...HOTEL_ACCOUNT_INVITE_PAYLOAD_KEYS, HOTEL_ACCOUNT_INVITE_REDEMPTION_KEY]
-    : HOTEL_ACCOUNT_INVITE_PAYLOAD_KEYS;
+  const allowedKeys = [
+    ...HOTEL_ACCOUNT_INVITE_PAYLOAD_KEYS,
+    ...(hasRedemption ? [HOTEL_ACCOUNT_INVITE_REDEMPTION_KEY] : []),
+    ...(Object.hasOwn(value, "preparedData") ? ["preparedData"] : []),
+  ];
   if (Object.keys(value).length !== allowedKeys.length || !hasOnlyKeys(value, allowedKeys)) {
     return null;
   }
@@ -1687,6 +1697,7 @@ function parseStoredHotelAccountInvite(
     organization: value.organization,
     property: value.property,
     selectedTracks: value.selectedTracks,
+    ...(Object.hasOwn(value, "preparedData") ? { preparedData: value.preparedData } : {}),
   });
   if (typeof parsed === "string") return null;
   return {

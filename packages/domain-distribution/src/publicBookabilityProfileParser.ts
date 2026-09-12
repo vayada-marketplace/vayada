@@ -63,7 +63,12 @@ const policiesSchema = z
     termsUrl: httpsUrl.nullable().optional(),
   })
   .superRefine((policy, context) => {
-    if (policy.checkInFrom && policy.checkInUntil && policy.checkInUntil <= policy.checkInFrom)
+    if (
+      policy.checkInFrom &&
+      policy.checkInUntil &&
+      policy.checkInUntil !== "00:00" &&
+      policy.checkInUntil <= policy.checkInFrom
+    )
       issue(context, ["checkInUntil"]);
     if (policy.checkOutFrom && policy.checkOutUntil && policy.checkOutFrom >= policy.checkOutUntil)
       issue(context, ["checkOutFrom"]);
