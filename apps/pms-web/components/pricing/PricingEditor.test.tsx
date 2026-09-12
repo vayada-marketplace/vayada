@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeWeekdayPrice } from "./PricingWeekdays";
 import { editedSnapshot } from "./pricingAmounts";
 import { ApiErrorResponse } from "@/services/api/client";
 import type { PricingSnapshot, PricingDraft, createReplacementPricingClient } from "@/services/api/replacementPricingClient";
@@ -184,4 +185,51 @@ it("blocks saving unfinished date entry, protects leaving and requires review fo
   expect(button("Clear date price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   await click("Back to editing"); await click("Clear date price"); await click("Save draft");
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "10000" }, dates: [] } });
+});
+
+it("adds exact weekday adjustments and clears only the selected rule", () => {
+  const room = changeDatePrice(snapshot.rooms[0], "flex", "2026-12-25", "150.25");
+  const monday = changeWeekdayPrice(room, "flex", "0", { kind: "percentage", value: "-10.25" });
+  const friday = changeWeekdayPrice(monday, "flex", "4", { kind: "fixed", value: "+20.05" });
+  expect(friday.offers[0].price).toMatchObject({ calendar: { weekdays: [
+    { day: 0, adjustment: { kind: "percentage", basisPoints: -1025 } }, { day: 4, adjustment: { kind: "fixed", deltaMinor: "2005" } },
+  ], dates: [{ date: "2026-12-25", price: { amountMinor: "15025" } }] } });
+  expect(changeWeekdayPrice(friday, "flex", "4", null)).toEqual(monday);
+  expect(changeWeekdayPrice(monday, "flex", "0", null)).toEqual(room);
+  for (const day of ["", "7", "-1", "00", "0.0"]) expect(() => changeWeekdayPrice(room, "flex", day, { kind: "fixed", value: "1" })).toThrow();
+  for (const value of ["", "NaN", "1e2", "1.001", "9999999999999999999"]) expect(() => changeWeekdayPrice(room, "flex", "0", { kind: "fixed", value })).toThrow();
+  for (const value of ["-100.01", "90071992547409.92", "1.001"]) expect(() => changeWeekdayPrice(room, "flex", "0", { kind: "percentage", value })).toThrow();
+  expect(() => changeWeekdayPrice(monday, "flex", "0", { kind: "fixed", value: "1" })).toThrow(/Clear/);
+  expect(() => changeWeekdayPrice(room, "flex", "0", null)).toThrow();
+  expect(changeWeekdayPrice({ ...room, currency: "KWD" }, "flex", "6", { kind: "fixed", value: "-1.123" }).offers[0].price).toMatchObject({ calendar: { weekdays: [{ day: 6, adjustment: { deltaMinor: "-1123" } }] } });
+  expect(() => changeWeekdayPrice({ ...room, currency: "JPY" }, "flex", "0", { kind: "fixed", value: "1.1" })).toThrow();
+  const linked = { ...room.offers[0], id: "linked", price: { kind: "linked" as const, parentId: "flex", adjustment: { kind: "fixed" as const, deltaMinor: "0" }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } };
+  expect(() => changeWeekdayPrice({ ...room, offers: [...room.offers, linked] }, "linked", "0", { kind: "fixed", value: "1" })).toThrow(/independent/);
+});
+
+it("keeps date and weekday pending entries separate and reviews saved weekday changes", async () => {
+  await mount(); await click("Save draft");
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  expect(field("Weekday for Room 1 Offer 1").props.value).toBe("");
+  expect(field("Weekday adjustment type for Room 1 Offer 1").props.value).toBe("");
+  await fill("Weekday for Room 1 Offer 1", "0");
+  await fill("Override date for Room 1 Offer 1", "2026-");
+  await click("Cancel date entry");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const listener = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: Event) => void;
+  const unload = new Event("beforeunload", { cancelable: true }); listener(unload); expect(unload.defaultPrevented).toBe(true);
+  await fill("Override date for Room 1 Offer 1", "2026-");
+  await click("Cancel weekday entry"); expect(button("Save draft").props.disabled).toBe(true);
+  await click("Cancel date entry"); expect(button("Save draft").props.disabled).toBe(false);
+  await fill("Weekday for Room 1 Offer 1", "4"); await fill("Weekday adjustment type for Room 1 Offer 1", "fixed");
+  await fill("Weekday adjustment for Room 1 Offer 1", "+20.05"); await click("Add weekday adjustment");
+  expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); await click("Review saved charges");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { weekdays: [{ day: 4, adjustment: { deltaMinor: "2005" } }] } });
+  expect(JSON.stringify(view.toJSON())).toContain("Friday");
+  expect(button("Clear weekday adjustment").props.disabled).toBe(true); expect(button("Add weekday adjustment").props.disabled).toBe(true);
+  expect(button("Approve rates").props.disabled).toBe(true);
+  await click("Back to editing"); await click("Clear weekday adjustment"); await click("Save draft");
+  expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
 });
