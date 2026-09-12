@@ -53,12 +53,16 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       VALUES($1,$2,$3,$7,$4,$5,$6,'{"currency":"EUR"}','{"verified":true}')`,
         [id, i.version, i.id, property, room, external, generation],
       );
-    const createAttempt = async (id: string, i: { id: string; version: string }) =>
+    const createAttempt = async (
+      id: string,
+      i: { id: string; version: string },
+      correlation?: { jobAttempt: string; worker: string },
+    ) =>
       (
         await pool.query(
           `INSERT INTO pms.channex_offer_create_attempts
-        (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,
+        (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body,job_attempt_id,worker_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING *`,
           [
             id,
             i.id,
@@ -67,6 +71,8 @@ describe.skipIf(!url)("Channex offer target storage", () => {
             property,
             room,
             JSON.stringify({ rate_plan: { property_id: property, room_type_id: room } }),
+            correlation?.jobAttempt ?? null,
+            correlation?.worker ?? null,
           ],
         )
       ).rows[0];
@@ -421,5 +427,165 @@ describe.skipIf(!url)("Channex offer target storage", () => {
         [loser.id, legacy],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+  });
+  async function correlatedFixture() {
+    const f = await fixture(),
+      t = await f.target(),
+      i = await f.intent(t);
+    const job = randomUUID(),
+      jobAttempt = randomUUID(),
+      worker = randomUUID();
+    await pool.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id)
+      VALUES($1::uuid,$1::text,'pms_channex_management','pms_channex_management','property',$2)`,
+      [job, f.property],
+    );
+    await pool.query(
+      `INSERT INTO platform.job_attempts(id,job_id,attempt_number,worker_id)
+      VALUES($1,$2,1,$3)`,
+      [jobAttempt, job, worker],
+    );
+    const a = await f.createAttempt(t, i, { jobAttempt, worker });
+    const receipt = (id = randomUUID(), evidence = {}, originalWorker: string = worker) =>
+      pool.query(
+        `INSERT INTO pms.channex_offer_create_receipts
+       (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,identity_evidence,captured_at)
+       VALUES($1,$2,$3,$4,'complete_json',201,$5,'2000-01-01') RETURNING *`,
+        [id, a.id, jobAttempt, originalWorker, JSON.stringify(evidence)],
+      );
+    return { ...f, t, i, a, job, jobAttempt, worker, receipt };
+  }
+  it("retains late correlated observations without identifying or activating", async () => {
+    const f = await correlatedFixture();
+    await pool.query(
+      "UPDATE platform.job_attempts SET status='timed_out',finished_at=now() WHERE id=$1",
+      [f.jobAttempt],
+    );
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      f.i.id,
+    ]);
+    await pool.query("UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1", [
+      f.connection,
+      randomUUID(),
+    ]);
+    const row = (await f.receipt()).rows[0];
+    expect(row.captured_at.getUTCFullYear()).toBeGreaterThan(2000);
+    expect(row.job_attempt_id).toBe(f.jobAttempt);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.a.id,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+    expect(
+      (await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [f.t]))
+        .rows[0].active_version,
+    ).toBeNull();
+  });
+  it("rejects cross-property correlation and historical correlation backfill", async () => {
+    const f = await correlatedFixture(),
+      other = await fixture(),
+      t = await other.target(),
+      i = await other.intent(t);
+    await expect(
+      other.createAttempt(t, i, { jobAttempt: f.jobAttempt, worker: f.worker }),
+    ).rejects.toMatchObject({ code: "23514" });
+    const old = await other.createAttempt(t, i);
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET job_attempt_id=$2,worker_id=$3 WHERE id=$1",
+        [old.id, f.jobAttempt, f.worker],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(f.receipt(randomUUID(), {}, "other-worker")).rejects.toMatchObject({
+      code: "23503",
+    });
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_offer_create_receipts(id,attempt_id,job_attempt_id,worker_id,outcome)
+      VALUES($1,$2,$3,$4,'transport_error')`,
+        [randomUUID(), old.id, f.jobAttempt, f.worker],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+  });
+  it("retains distinct concurrent receipts and prevents duplicate overwrite or deletion", async () => {
+    const f = await correlatedFixture(),
+      id = randomUUID();
+    const results = await Promise.allSettled([
+      f.receipt(id, { id: "one" }),
+      f.receipt(id, { id: "two" }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "23505" },
+    });
+    await Promise.all([
+      f.receipt(randomUUID(), { id: "three" }),
+      f.receipt(randomUUID(), { id: "four" }),
+    ]);
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.a.id,
+        ])
+      ).rows,
+    ).toHaveLength(3);
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_receipts SET identity_evidence='{}' WHERE id=$1",
+        [id],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("DELETE FROM pms.channex_offer_create_receipts WHERE id=$1", [id]),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+  it("rejects malformed or oversized receipt envelopes", async () => {
+    const f = await correlatedFixture();
+    await expect(f.receipt(randomUUID(), { value: "x".repeat(8192) })).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(f.receipt(randomUUID(), [])).rejects.toMatchObject({ code: "23514" });
+    for (const [outcome, status, evidence] of [
+      ["unknown", 201, {}],
+      ["transport_error", 201, {}],
+      ["invalid_json", 200, { id: "partial" }],
+      ["complete_json", null, {}],
+      ["complete_json", 999, {}],
+    ]) {
+      await expect(
+        pool.query(
+          `INSERT INTO pms.channex_offer_create_receipts
+        (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,identity_evidence)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [randomUUID(), f.a.id, f.jobAttempt, f.worker, outcome, status, JSON.stringify(evidence)],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+  it("serializes receipt capture on its logical target", async () => {
+    const f = await correlatedFixture(),
+      holder = await pool.connect(),
+      writer = await pool.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE", [f.t]);
+      await writer.query("SET lock_timeout='100ms'");
+      await expect(
+        writer.query(
+          `INSERT INTO pms.channex_offer_create_receipts
+        (id,attempt_id,job_attempt_id,worker_id,outcome) VALUES($1,$2,$3,$4,'transport_error')`,
+          [randomUUID(), f.a.id, f.jobAttempt, f.worker],
+        ),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await holder.query("ROLLBACK");
+      await f.receipt();
+    } finally {
+      await holder.query("ROLLBACK");
+      await writer.query("RESET lock_timeout");
+      holder.release();
+      writer.release();
+    }
   });
 });
