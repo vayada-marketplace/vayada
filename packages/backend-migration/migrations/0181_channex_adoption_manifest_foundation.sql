@@ -1,4 +1,4 @@
--- Migration: 0181_channex_adoption_manifest_foundation
+-- Migration: 0179_channex_adoption_manifest_foundation
 -- Owner: migration-cutover / VAY-1962
 -- See: engineering/channex-property-adoption-proof-contract.md
 

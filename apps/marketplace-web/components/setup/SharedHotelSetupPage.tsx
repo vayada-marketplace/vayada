@@ -55,10 +55,12 @@ export function SharedHotelSetupPage({
   defaultEntryProduct,
   defaultReturnTo,
   adaptiveShellEnabled = false,
+  airbnbImportEnabled = false,
 }: {
   defaultEntryProduct: SharedHotelSetupEntryProduct;
   defaultReturnTo: string;
   adaptiveShellEnabled?: boolean;
+  airbnbImportEnabled?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -329,6 +331,22 @@ export function SharedHotelSetupPage({
         propertyLaunchSettingsApi={PROPERTY_LAUNCH_SETTINGS_API}
         onContinue={handleContinue}
         onPropertySelected={handlePropertySelected}
+        renderSetupActions={
+          airbnbImportEnabled
+            ? (propertyId) => (
+                <div className="mx-auto max-w-4xl px-6 py-4">
+                  <a
+                    href={`/setup/airbnb-connect/${encodeURIComponent(propertyId)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-semibold text-primary-700 underline"
+                  >
+                    Connect Airbnb to import rooms (opens in a new tab)
+                  </a>
+                </div>
+              )
+            : undefined
+        }
         renderAfterHotelDetails={
           adaptiveShellEnabled
             ? (propertyId) => (
