@@ -102,7 +102,7 @@ export function createPgMarketplaceHotelCollaborationPreferencesRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        if (!(await lockAuthorizedProfile(client, command, acceptedAt))) {
+        if (!(await lockMarketplaceHotelProfileForSetup(client, command, acceptedAt))) {
           await rollbackQuietly(client);
           return failure({ code: "setup_scope_unavailable" });
         }
@@ -174,28 +174,13 @@ export function createPgMarketplaceHotelCollaborationPreferencesRepository(
       try {
         client = await pool.connect();
         await client.query("BEGIN");
-        const at = now();
-        if (
-          !validDate(at) ||
-          !(await lockReadableProfile(client, scope.organizationId, scope.propertyId)) ||
-          !(await hasActiveProfileEntitlement(client, scope.organizationId, scope.propertyId, at))
-        ) {
-          await rollbackQuietly(client);
-          return unavailable();
-        }
-        const result = await client.query<PreferenceRow>(
-          `SELECT ${PREFERENCE_COLUMNS}
-           FROM marketplace.hotel_collaboration_preferences
-           WHERE property_id = $1::uuid AND organization_id = $2::uuid
-           FOR SHARE`,
-          [scope.propertyId, scope.organizationId],
+        const result = await readLockedMarketplaceHotelCollaborationPreferences(
+          client,
+          scope,
+          now(),
         );
-        await client.query("COMMIT");
-        if (result.rows.length > 1) return malformed();
-        const readModel = result.rows[0]
-          ? preferenceReadModel(result.rows[0])
-          : missingReadModel(scope.propertyId);
-        return readModel ? { outcome: "available", readModel } : malformed();
+        await client.query(result.outcome === "unavailable" ? "ROLLBACK" : "COMMIT");
+        return result;
       } catch {
         if (client) await rollbackQuietly(client);
         return unavailable();
@@ -210,9 +195,39 @@ export function createPgMarketplaceHotelCollaborationPreferencesRepository(
   };
 }
 
-async function lockAuthorizedProfile(
+/** Reuse the preference owner's scope/entitlement checks in an existing transaction. */
+export async function readLockedMarketplaceHotelCollaborationPreferences(
   client: MarketplaceHotelCollaborationPreferencesClient,
-  command: ReplaceMarketplaceHotelCollaborationPreferencesCommand,
+  scope: { organizationId: string; propertyId: string },
+  at: Date,
+): Promise<MarketplaceHotelCollaborationPreferencesReadOutcome> {
+  if (
+    !validDate(at) ||
+    !(await lockReadableProfile(client, scope.organizationId, scope.propertyId)) ||
+    !(await hasActiveProfileEntitlement(client, scope.organizationId, scope.propertyId, at))
+  ) {
+    return unavailable();
+  }
+  const result = await client.query<PreferenceRow>(
+    `SELECT ${PREFERENCE_COLUMNS}
+           FROM marketplace.hotel_collaboration_preferences
+           WHERE property_id = $1::uuid AND organization_id = $2::uuid
+           FOR SHARE`,
+    [scope.propertyId, scope.organizationId],
+  );
+  if (result.rows.length > 1) return malformed();
+  const readModel = result.rows[0]
+    ? preferenceReadModel(result.rows[0])
+    : missingReadModel(scope.propertyId);
+  return readModel ? { outcome: "available", readModel } : malformed();
+}
+
+export async function lockMarketplaceHotelProfileForSetup(
+  client: MarketplaceHotelCollaborationPreferencesClient,
+  command: Pick<
+    ReplaceMarketplaceHotelCollaborationPreferencesCommand,
+    "organizationId" | "propertyId" | "audit"
+  >,
   at: Date,
 ): Promise<boolean> {
   if (command.audit.actor.kind !== "user") return false;
