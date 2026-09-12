@@ -381,6 +381,46 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0].state,
     ).toBe("unresolved");
   });
+  it("retains original creation correlation after the job is reclaimed", async () => {
+    const f = await creationFixture();
+    const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
+    if (claim.kind !== "claimed") throw new Error("claim required");
+    const original = (
+      await pool.query(
+        "SELECT id,worker_id FROM platform.job_attempts WHERE job_id=$1 AND attempt_number=1",
+        [f.input.jobId],
+      )
+    ).rows[0];
+    expect(claim.jobAttemptId).toBe(original.id);
+    expect(claim.workerId).toBe(original.worker_id);
+    await pool.query(
+      "UPDATE platform.job_attempts SET status='timed_out',finished_at=now() WHERE id=$1",
+      [original.id],
+    );
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,2,'replacement')",
+      [f.input.jobId],
+    );
+    await pool.query(
+      "UPDATE platform.jobs SET attempts_count=2,locked_by='replacement',locked_at=clock_timestamp() WHERE id=$1",
+      [f.input.jobId],
+    );
+    expect(
+      await claimPublishedChannexOfferCreate(
+        pool,
+        { ...f.input, attemptNumber: 2, workerId: "replacement" },
+        f.selection,
+      ),
+    ).toEqual({ kind: "unavailable", reason: "creation_reconciliation_required" });
+    expect(
+      (
+        await pool.query(
+          "SELECT job_attempt_id,worker_id FROM pms.channex_offer_create_attempts WHERE id=$1",
+          [claim.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ job_attempt_id: original.id, worker_id: original.worker_id });
+  });
   it("claims only a fresh creation and persists the derived closed request before return", async () => {
     const f = await creationFixture();
     const result = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
@@ -423,6 +463,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       state: "unresolved",
       external_rate_plan_id: null,
       request_body: result.request.body,
+      job_attempt_id: result.jobAttemptId,
+      worker_id: result.workerId,
     });
     expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
       kind: "unavailable",

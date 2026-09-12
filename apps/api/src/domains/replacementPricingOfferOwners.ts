@@ -256,6 +256,8 @@ async function withPublishedChannexPricing(
           intentId: string;
           version: string;
           bindingGeneration: string;
+          jobAttemptId: string;
+          workerId: string;
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
@@ -376,8 +378,11 @@ async function withPublishedChannexPricing(
           const attempt = (
             await client.query(
               `INSERT INTO pms.channex_offer_create_attempts
-           (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
-           VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
+           (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body,job_attempt_id,worker_id)
+           SELECT $1,$2,$3,$4,$5,$6,$7::jsonb,a.id,a.worker_id
+           FROM platform.job_attempts a
+           WHERE a.job_id=$8 AND a.attempt_number=$9 AND a.worker_id=$10
+           RETURNING id,job_attempt_id,worker_id`,
               [
                 target.id,
                 intent.id,
@@ -386,12 +391,18 @@ async function withPublishedChannexPricing(
                 authority.externalPropertyId,
                 mapping.external_room_type_id,
                 JSON.stringify(body),
+                lease.jobId,
+                lease.attemptNumber,
+                lease.workerId,
               ],
             )
           ).rows[0];
+          if (!attempt) return unavailable("creation_attempt_unavailable");
           createClaim = {
             ...reservation,
             attemptId: attempt.id,
+            jobAttemptId: attempt.job_attempt_id,
+            workerId: attempt.worker_id,
             bindingGeneration: binding.binding_generation,
             request: { method: "POST", path: "/api/v1/rate_plans", body },
           };

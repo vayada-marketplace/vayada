@@ -411,3 +411,8 @@ The capture service must implement exact-envelope idempotency and sanitization.
 This migration does not wire correlation into claims, implement the aggregate
 receipt gate or send HTTP. Those services and their race tests remain required
 before enabling dispatch. Uncorrelated old attempts grant no recovered send.
+
+VAY-2004 now populates original correlation in the authorized fresh-claim INSERT
+from the already locked job attempt and returns those persisted IDs only after
+commit. A reclaimed worker cannot replace that correlation or recover a send
+claim. Receipt sanitization/capture, aggregate gates and dispatch remain pending.
