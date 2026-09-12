@@ -557,3 +557,21 @@ Browser transport options use plain header records required by the existing API
 client, retaining idempotency keys through fetch. Successful null/empty responses
 are malformed; a private sentinel distinguishes the expected not_found404. The
 client itself is bundled with browser platform resolution to catch Node imports.
+
+## Pure room-night evaluation (VAY-1542)
+
+The calculator receives one scoped configuration, allocated guests, stay dates,
+expected configuration revision and expected terms revisions for the selected
+plan and its ancestors. These expectations come from trusted owner reads; the
+pure calculator cannot establish database freshness itself. It returns nightly
+room and meal amounts separately with source/adjustment provenance.
+
+A date RoomPrice replaces the adult-equivalent tariff and bypasses that plan's
+weekday/link adjustment. Child-band nightly supplements still apply once; they
+are a separate explicit policy. Normal weekday and linked adjustments apply to
+the whole room component including those supplements, before the selected meal.
+A linked final date price resets the room component; clearing it restores the
+parent calculation. Parents' meals never propagate to a child plan. Restrictions
+are resolved separately, including departure-day CTD. Booking promotions, taxes,
+add-ons, FX conversion and payments remain owner orchestration outside this PMS
+calculator. No runtime endpoint or provider write is activated by this module.
