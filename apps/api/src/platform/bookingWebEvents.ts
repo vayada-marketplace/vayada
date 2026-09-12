@@ -23,14 +23,16 @@ export function createPgBookingWebEventSink(
 
   return {
     async recordAffiliateClick(event) {
+      // Old callers have no retry identity; never collapse their whole session.
+      const clickId = event.clickId ?? crypto.randomUUID();
       await insertDomainEventWithAudit(pool, {
         sourceSystem: "marketplace",
         eventKey: eventKey(
           "booking-web",
-          "affiliate-click",
+          "affiliate-click-v2",
           event.slug,
           event.referralCode,
-          event.sessionId ?? event.requestId,
+          clickId,
         ),
         eventType: "marketplace.affiliate_click.recorded",
         occurredAt: event.occurredAt,
@@ -38,12 +40,9 @@ export function createPgBookingWebEventSink(
         resourceType: "affiliate_referral",
         resourceId: `${event.slug}:${event.referralCode}`,
         correlationId: event.sessionId ?? event.requestId,
-        idempotencyKeyHash: hashKey(
-          event.slug,
-          event.referralCode,
-          event.sessionId ?? event.requestId,
-        ),
+        idempotencyKeyHash: hashKey(event.slug, event.referralCode, clickId),
         payload: {
+          clickId,
           hotelSlug: event.slug,
           referralCode: event.referralCode,
           sessionId: event.sessionId ?? null,
