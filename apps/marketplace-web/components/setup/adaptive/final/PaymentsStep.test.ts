@@ -30,7 +30,7 @@ import { PaymentsStep } from "./PaymentsStep";
 const propertyId = "22222222-2222-4222-8222-222222222222";
 const pricing = { contractVersion: "pms-pricing.v1", currency: "EUR", pricingCurrencyRevision: 1 };
 function snapshot(
-  selectedMethods: ("card" | "pay_at_property")[] = [],
+  selectedMethods: ("card" | "pay_at_property" | "bank_transfer")[] = [],
   revision = 0,
   currentPricing: typeof pricing | null = pricing,
 ) {
@@ -61,12 +61,13 @@ beforeEach(() => {
 async function harness(
   track: "hotel_operations" | "combined" = "hotel_operations",
   resumed = false,
+  paymentRevision = 0,
 ) {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "payments",
     currentBaseRevisions: {
-      "finance.payment_methods": "payment-methods:0",
+      "finance.payment_methods": `payment-methods:${paymentRevision}`,
       "pms.pricing_settings": "pricing:1",
     },
     draft: resumed
@@ -175,6 +176,20 @@ it("saves pending cards without reporting readiness and preserves later edits on
       "pms.pricing_settings": "pricing:1",
     },
   });
+  h.view.unmount();
+});
+it("saves the complete selection when an unsupported method was previously selected", async () => {
+  mocks.load.mockResolvedValue(snapshot(["pay_at_property", "bank_transfer"], 1));
+  const h = await harness("hotel_operations", false, 1);
+  expect(h.text()).toContain("Selection not saved");
+  expect(h.button("Save and continue").props.disabled).toBe(true);
+  await act(async () => { await h.button("Save selection").props.onClick(); });
+  expect(mocks.save).toHaveBeenCalledWith(propertyId, {
+    expectedPaymentMethodsRevision: 1,
+    expectedPricingCurrencyRevision: 1,
+    selectedMethods: ["pay_at_property"],
+  });
+  expect(h.button("Save and continue").props.disabled).toBe(false);
   h.view.unmount();
 });
 it("resumes an incomplete card selection without writing or inventing readiness", async () => {

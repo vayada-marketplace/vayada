@@ -18,6 +18,10 @@ import { useFinalStepDraft } from "./useFinalStepDraft";
 import { StripeSetupControls } from "./StripeSetupControls";
 
 type Method = "pay_at_property" | "card";
+function matchesSelection(snapshot: FinancePaymentReadinessSnapshot, desired: Method[]) {
+  const stored = snapshot.methods.filter((item) => item.selected).map((item) => item.method);
+  return stored.length === desired.length && desired.every((method) => stored.includes(method));
+}
 const methods = [
   {
     method: "pay_at_property",
@@ -92,12 +96,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
     .filter(({ field }) => Array.isArray(fields) && fields.includes(field))
     .map(({ method }) => method);
   const matchesSaved =
-    !!snapshot &&
-    methods.every(({ method }) =>
-      snapshot.methods.some(
-        (item) => item.method === method && item.selected === selection.includes(method),
-      ),
-    );
+    !!snapshot && matchesSelection(snapshot, selection);
   async function save(advance: boolean) {
     setNotice("");
     await draft.commit(async () => {
@@ -114,11 +113,7 @@ export function PaymentsStep(props: AdaptiveSetupStepComponentProps) {
         props.reportRevisionConflict();
         throw new Error("Payment settings or currency changed. Refresh before saving.");
       }
-      const same = methods.every(({ method }) =>
-        current.methods.some(
-          (item) => item.method === method && item.selected === selected().includes(method),
-        ),
-      );
+      const same = matchesSelection(current, selected());
       const value =
         same && current.pricingCurrency.matchesCurrent
           ? current
