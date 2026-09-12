@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeMealPlan } from "./PricingMealPlan";
 import { changeMealCharges } from "./PricingMealCharges";
 import { changeChildCharges } from "./PricingChildCharges";
 import { changeLinkedAdjustment } from "./PricingLinkedAdjustment";
@@ -610,4 +611,49 @@ it("guards meal edits, cancels safely and reviews saved adult and child meal amo
   expect(saved.snapshot.rooms[0].offers[0].meal.charge).toEqual({ kind: "person", adultMinor: "1525", childBandAmountsMinor: ["0"] });
   expect(saved.snapshot.rooms[0].children).toEqual(room.children);
   await click("Review saved charges"); expect(button("Edit meal charges").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+});
+
+it("changes meal type and basis while preserving all other settings and canonical room-only zero", () => {
+  const room = snapshot.rooms[0], root = room.offers[0];
+  const linked = { ...root, id: "linked", price: { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } };
+  const original = { ...room, offers: [root, linked] };
+  for (const kind of ["breakfast", "half_board", "full_board", "all_inclusive"]) {
+    for (const basis of ["room", "person"]) {
+      const charge = basis === "room" ? { kind: "room", amountMinor: "1234" } : { kind: "person", adultMinor: "1234", childBandAmountsMinor: ["0"] };
+      expect(changeMealPlan(original, linked.id, { kind, basis, amounts: basis === "room" ? ["12.34"] : ["12.34", "0"] })).toEqual({ ...original, offers: [root, { ...linked, meal: { kind, charge } }] });
+    }
+  }
+  expect(changeMealPlan(original, linked.id, { kind: "room_only", basis: "room", amounts: [] }).offers[1].meal).toEqual({ kind: "room_only", charge: { kind: "room", amountMinor: "0" } });
+  for (const entry of [{ kind: "other", basis: "room", amounts: ["0"] }, { kind: "breakfast", basis: "unknown", amounts: ["0"] }, { kind: "room_only", basis: "person", amounts: [] }, { kind: "room_only", basis: "room", amounts: ["10"] }, { kind: "breakfast", basis: "person", amounts: ["1"] }, { kind: "breakfast", basis: "room", amounts: ["-1"] }, { kind: "breakfast", basis: "room", amounts: ["1.001"] }]) expect(() => changeMealPlan(original, linked.id, entry)).toThrow();
+  expect(() => changeMealPlan(original, "missing", { kind: "room_only", basis: "room", amounts: [] })).toThrow();
+  expect(changeMealPlan({ ...original, currency: "KWD" }, linked.id, { kind: "breakfast", basis: "room", amounts: ["1.234"] }).offers[1].meal.charge).toEqual({ kind: "room", amountMinor: "1234" });
+});
+it("requires fresh meal-plan confirmation, blocks competing edits, and reviews the saved plan", async () => {
+  await mount(); await click("Save draft"); await click("Edit meal charges");
+  expect(button("Change meal plan").props.disabled).toBe(true); await click("Change meal plan"); expect(button("Apply meal plan")).toBeUndefined();
+  await click("Cancel meal charges"); await click("Change meal plan");
+  const checkbox = () => view.root.findByProps({ type: "checkbox" });
+  const plan = () => view.root.findByProps({ "aria-label": "Meal plan for Room 1 Offer 1" });
+  const amount = () => view.root.findByProps({ "aria-label": "New meal charge Per room for Room 1 Offer 1" });
+  expect(checkbox().props.checked).toBe(false); expect(button("Apply meal plan").props.disabled).toBe(true);
+  expect(button("Edit meal charges").props.disabled).toBe(true); expect(button("Edit child charges").props.disabled).toBe(true); expect(input().props.disabled).toBe(true);
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  expect(view.root.findByProps({ "aria-label": "New meal charge Per adult for Room 1 Offer 1" }).props.value).toBe("12.00");
+  await click("Cancel meal plan"); expect(button("Review saved charges").props.disabled).toBe(false);
+  await click("Change meal plan"); await act(async () => checkbox().props.onChange({ target: { checked: true } }));
+  await act(async () => plan().props.onChange({ target: { value: "half_board" } })); expect(checkbox().props.checked).toBe(false);
+  expect(view.root.findByProps({ "aria-label": "New meal charge Per adult for Room 1 Offer 1" }).props.value).toBe("");
+  await act(async () => view.root.findByProps({ "aria-label": "Meal charging basis for Room 1 Offer 1" }).props.onChange({ target: { value: "room" } }));
+  expect(amount().props.value).toBe(""); await act(async () => checkbox().props.onChange({ target: { checked: true } })); await click("Apply meal plan"); expect(client.prepare).toHaveBeenCalledTimes(1);
+  await act(async () => amount().props.onChange({ target: { value: "20" } })); expect(checkbox().props.checked).toBe(false);
+  await act(async () => checkbox().props.onChange({ target: { checked: true } })); await click("Apply meal plan");
+  expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
+  expect(saved.snapshot.rooms[0].offers[0].meal).toEqual({ kind: "half_board", charge: { kind: "room", amountMinor: "2000" } });
+  await click("Review saved charges"); expect(button("Change meal plan").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  await click("Back to editing"); await click("Change meal plan"); await act(async () => plan().props.onChange({ target: { value: "room_only" } }));
+  expect(view.root.findAllByType("input").filter((node) => String(node.props["aria-label"]).startsWith("New meal charge"))).toHaveLength(0);
+  await act(async () => checkbox().props.onChange({ target: { checked: true } })); await click("Apply meal plan"); await click("Save draft");
+  expect(saved.snapshot.rooms[0].offers[0].meal).toEqual({ kind: "room_only", charge: { kind: "room", amountMinor: "0" } });
 });
