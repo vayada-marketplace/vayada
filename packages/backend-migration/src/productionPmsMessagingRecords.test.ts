@@ -84,23 +84,68 @@ describe("production PMS messaging", () => {
     },
   );
 
-  it.each([true, false])(
-    "handles flat meta identity without inventing context (identity: %s)",
-    (hasIdentity) => {
-      const source = explicitInquiryRows();
-      const raw: Record<string, unknown> = inquiryPayload(source);
-      delete raw["provider_inquiry_id"];
-      raw["inquiry"] = {};
-      raw["meta"] = hasIdentity ? { live_feed_event_id: "inquiry-ext" } : {};
+  it("uses a flat live-feed event identity only after another field proves an inquiry", () => {
+    const source = explicitInquiryRows();
+    const raw: Record<string, unknown> = inquiryPayload(source);
+    delete raw["provider_inquiry_id"];
+    raw["inquiry"] = {};
+    raw["message_type"] = "inquiry";
+    raw["meta"] = { live_feed_event_id: "inquiry-ext" };
+    const context = contextFor(source);
+    const records = buildPmsMessagingRecords(context);
+    expect(context.blockers).toEqual([]);
+    expect(records.find((entry) => entry.targetId === THREAD)?.row).toMatchObject({
+      conversationContextState: "inquiry",
+      sourceBookingId: "inquiry-ext",
+      inquiryArrivalDate: null,
+      inquiryAdults: null,
+    });
+  });
+
+  it.each([
+    { sender: "guest", direction: "inbound", message: "Ordinary guest message", read: true },
+    { sender: "property", direction: "outbound", message: null, read: false },
+  ])(
+    "does not treat a generic live-feed event as inquiry evidence: $sender/$direction",
+    ({ sender, direction, message, read }) => {
+      const source = explicitInquiryRows(sender);
+      const body = message ?? "";
+      Object.assign(source.find((entry) => entry.sourceTable === "messages")!.data, {
+        body,
+        direction,
+        read_at: read ? "2026-09-01T12:01:00Z" : null,
+        raw_payload: {
+          attachments: [],
+          inserted_at: "2026-09-01T12:00:00Z",
+          message,
+          meta: { live_feed_event_id: "message-event", name: "sender", role: sender },
+          sender,
+          updated_at: "2026-09-01T12:00:00Z",
+        },
+      });
+      Object.assign(source.find((entry) => entry.sourceTable === "message_threads")!.data, {
+        last_message_preview: body,
+        last_message_direction: direction,
+        unread_count: 0,
+      });
+      const checksum = sha256(source);
       const context = contextFor(source);
       const records = buildPmsMessagingRecords(context);
       expect(context.blockers).toEqual([]);
+      expect(records.find((entry) => entry.targetId === MESSAGE)?.row).toMatchObject({
+        body,
+        direction,
+        senderType: sender === "guest" ? "guest" : "property_user",
+        readAt: read ? "2026-09-01T12:01:00.000Z" : null,
+        rawPayload: {},
+      });
       expect(records.find((entry) => entry.targetId === THREAD)?.row).toMatchObject({
-        conversationContextState: hasIdentity ? "inquiry" : "unlinked",
-        sourceBookingId: hasIdentity ? "inquiry-ext" : null,
+        conversationContextState: "unlinked",
+        sourceBookingId: null,
         inquiryArrivalDate: null,
         inquiryAdults: null,
       });
+      expect(sha256(source)).toBe(checksum);
     },
   );
 
