@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import {
+  seedChannexAssignmentFixture,
+  clearChannexAssignmentFixture,
+} from "./channexAssignmentTestFixture.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../config.js";
 import { importChannexStagingReservation, runChannexBookingJobs } from "./channexBookings.js";
@@ -68,9 +72,11 @@ describe.skipIf(!databaseUrl)("scoped staging importer (PostgreSQL)", () => {
       "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected',$2)",
       [propertyId, providerPropertyId],
     );
+    await seedChannexAssignmentFixture(db, propertyId);
   });
   afterAll(async () => {
     await db.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await clearChannexAssignmentFixture(db, propertyId);
     for (const table of [
       "platform.product_audit_events",
       "platform.dead_letter_events",
@@ -244,7 +250,13 @@ function revision(selected: ReturnType<typeof input>) {
       amount: "100.00",
       currency: "GBP",
       inserted_at: "2026-09-11T10:00:00Z",
-      rooms: [{ occupancy: { adults: 1, children: 0 } }],
+      rooms: [
+        {
+          room_type_id: "provider-room",
+          rate_plan_id: "provider-rate",
+          occupancy: { adults: 1, children: 0 },
+        },
+      ],
     },
   };
 }
