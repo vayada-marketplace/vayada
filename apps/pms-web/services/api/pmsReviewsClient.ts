@@ -9,6 +9,7 @@ export type PmsReview = {
   replyBody: string | null;
   reviewedAt: string | null;
   updatedAt: string;
+  replySubmission?: ReviewReplyStatus | null;
 };
 
 export function listPmsReviews(
@@ -23,6 +24,30 @@ export function listPmsReviews(
   if (filters.minRating !== undefined) query.set("minRating", String(filters.minRating));
   return pmsOperationsClient.get(
     `/api/pms/properties/${encodeURIComponent(propertyId)}/reviews?${query}`,
+    pmsOperationsRequestOptions,
+  );
+}
+
+export type ReviewReplyStatus = {
+  state: "ready" | "accepted" | "failed" | "uncertain" | "unavailable";
+  reason?: string;
+  replyBody?: string;
+  draft?: string;
+};
+export function checkReviewReply(propertyId: string, reviewId: string): Promise<ReviewReplyStatus> {
+  return pmsOperationsClient.get(
+    `/api/pms/properties/${encodeURIComponent(propertyId)}/reviews/${encodeURIComponent(reviewId)}/reply`,
+    pmsOperationsRequestOptions,
+  );
+}
+export function submitReviewReply(
+  propertyId: string,
+  reviewId: string,
+  text: string,
+): Promise<ReviewReplyStatus> {
+  return pmsOperationsClient.post(
+    `/api/pms/properties/${encodeURIComponent(propertyId)}/reviews/${encodeURIComponent(reviewId)}/reply`,
+    { text },
     pmsOperationsRequestOptions,
   );
 }
