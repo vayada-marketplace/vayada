@@ -219,6 +219,8 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
+import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
+import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceTripRepository } from "./routes/marketplaceTrips.js";
@@ -1385,7 +1387,19 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  pmsReviewRepository: createPgPmsReviewRepository({ connectionString: targetDatabaseUrl }),
+  pmsReviewRepository: createPgPmsReviewRepository({
+    connectionString: targetDatabaseUrl,
+    replies: createPgReviewReplyCommands({
+      connectionString: targetDatabaseUrl,
+      provider:
+        config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+          ? createChannexReviewReplies({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+    }),
+  }),
   pmsOperationsCommandRepository,
   pmsRoomClosureRepository,
   pmsLinkedInventoryGroupCommandRepository,
