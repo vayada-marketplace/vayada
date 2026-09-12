@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+import { convertPricingConfigurationCurrency, type PricingConversionRate } from "@vayada/domain-pms";
 import { createReplacementPricingStore, type PricingStorageSnapshot } from "./replacementPricingStore.js";
+import { createReplacementPricingFxStore } from "./replacementPricingFxStore.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
   const pool = new pg.Pool({ connectionString: url, max: 6 });
@@ -23,9 +25,8 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
           proposed.rooms.some((r) => !owned.includes(r.roomTypeId) || r.offers.some((o) => o.termsRevision !== "terms-1")))) return null;
         return sources();
       },
-      async allowCurrencyChange(_client, _scope, before, after) {
-        return conversion && before.currency === "EUR" && after.currency === "USD" && after.ownerReferences.fx === "verified-fx-2";
-      },
+      // Deliberately permissive owner fixture: this does not establish real owner approval.
+      async allowCurrencyChange() { return conversion; },
     });
     const snapshot = (revision: number): PricingStorageSnapshot => ({ currency: "EUR", ownerReferences: { terms: "terms-1", finance: "finance-1", fx: "same-currency" }, rooms: [{
       version: "pricing.v2", propertyId, roomTypeId, revision, currency: "EUR", capacity: { total: 3, adults: 3, children: 1 },
@@ -37,6 +38,17 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     }] });
     const command = (expectedRevision = 0) => ({ requestId: randomUUID(), expectedRevision, sources: sources(), snapshot: snapshot(expectedRevision + 1) });
     return { scope, store, snapshot, command, sources, changeSources: () => { policy = "2"; }, allowConversion: () => { conversion = true; } };
+  }
+  async function fx(expirySeconds = 3600, target = "USD") {
+    const time = Math.floor((await pool.query("SELECT extract(epoch FROM clock_timestamp())::double precision AS time")).rows[0].time);
+    const body = JSON.stringify({ result: "success", provider: "https://www.exchangerate-api.com", base_code: "EUR", time_eol_unix: 0,
+      time_last_update_unix: time - 60, time_next_update_unix: time + expirySeconds, rates: { EUR: 1, USD: 1.1, JPY: 160 } });
+    const rate = await createReplacementPricingFxStore(pool, { fetch: async () => new Response(body), now: () => time * 1000 }).observe("EUR", target);
+    expect(rate).not.toBeNull(); return rate!;
+  }
+  function converted(before: PricingStorageSnapshot, rate: PricingConversionRate): PricingStorageSnapshot {
+    return { currency: rate.to, ownerReferences: { ...before.ownerReferences, fx: rate.id },
+      rooms: before.rooms.map((room) => convertPricingConfigurationCurrency(room, rate, Date.parse(rate.observedAt))!) };
   }
   it("round-trips complete independent tables and emits effects exactly once on replay", async () => {
     const f = await fixture(), command = f.command();
@@ -117,8 +129,8 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
   });
   it("requires conversion owner approval and atomically replaces currency and all room snapshots", async () => {
     const f = await fixture(); await f.store.save(f.scope, f.command());
-    const eur = f.snapshot(2);
-    const usd = { ...eur, currency: "USD", ownerReferences: { ...eur.ownerReferences, fx: "verified-fx-2" }, rooms: eur.rooms.map((r) => ({ ...r, currency: "USD",
+    const eur = f.snapshot(2), rate = await fx();
+    const usd = { ...eur, currency: "USD", ownerReferences: { ...eur.ownerReferences, fx: rate.id }, rooms: eur.rooms.map((r) => ({ ...r, currency: "USD",
       children: { ...r.children, bands: r.children.bands.map((b) => ({ ...b, nightlyMinor: "2200" })) },
       offers: r.offers.map((o) => ({ ...o, meal: { kind: "half_board", charge: { kind: "person", adultMinor: "1650", childBandAmountsMinor: ["550"] } },
         price: { kind: "independent", calendar: { base: { mode: "occupancy", amountsMinor: ["11000", "14300", "17050"] }, months: [], seasons: [], weekdays: [], dates: [] } } })) })) };
@@ -128,6 +140,71 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     f.allowConversion(); await f.store.save(f.scope, command);
     expect(await f.store.read(f.scope)).toMatchObject({ currency: "USD", revision: 2, rooms: [{ currency: "USD" }] });
   });
+  it("rejects missing/wrong FX and partial or edited multi-room conversion even with owner approval", async () => {
+    const f = await fixture(), initial = f.command(), room = initial.snapshot.rooms[0], secondId = randomUUID();
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name,base_rate_amount,currency) VALUES($1,$2,'Second',100,'EUR')", [secondId, f.scope.propertyId]);
+    const before = { ...initial.snapshot, rooms: [room, { ...room, roomTypeId: secondId }] };
+    await f.store.save(f.scope, { ...initial, snapshot: before }); f.allowConversion();
+    const rate = await fx(), usd = converted(before, rate), otherRate = await fx(3600, "JPY");
+    const variants = [
+      { ...usd, ownerReferences: { ...usd.ownerReferences, fx: "verified-fx-2" } },
+      { ...usd, ownerReferences: { ...usd.ownerReferences, fx: `exchange-rate-api:${"a".repeat(64)}` } },
+      { ...usd, ownerReferences: { ...usd.ownerReferences, fx: otherRate.id } },
+      { ...usd, rooms: usd.rooms.slice(0, 1) },
+      { ...usd, rooms: before.rooms.map((r) => ({ ...r, currency: "USD", revision: 2 })) },
+      { ...usd, rooms: usd.rooms.map((r) => ({ ...r, children: room.children })) },
+      { ...usd, rooms: usd.rooms.map((r) => ({ ...r, offers: r.offers.map((o) => ({ ...o, meal: room.offers[0].meal })) })) },
+      { ...usd, rooms: usd.rooms.map((r) => ({ ...r, capacity: { ...r.capacity, children: 2 } })) },
+    ];
+    for (const snapshot of variants)
+      await expect(f.store.save(f.scope, { ...f.command(1), snapshot })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    expect((await f.store.read(f.scope))?.revision).toBe(1);
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(1);
+    await f.store.save(f.scope, { ...f.command(1), snapshot: { ...usd, rooms: [...usd.rooms].reverse() } });
+    expect((await f.store.read(f.scope))?.rooms).toHaveLength(2);
+  });
+  it("replays the exact bound currency-change receipt after FX expiry but rejects new expired conversions", async () => {
+    const f = await fixture(), unpublished = await fixture(), draftId = randomUUID();
+    await f.store.save(f.scope, f.command()); await unpublished.store.save(unpublished.scope, unpublished.command());
+    f.allowConversion(); unpublished.allowConversion();
+    const rate = await fx(3), usd = converted(f.snapshot(1), rate);
+    const draft = { draftId, expectedDraftRevision: 0, baseRevision: 1, sources: f.sources(), snapshot: usd };
+    await f.store.saveDraft(f.scope, draft);
+    const command = { ...f.command(1), snapshot: usd, draft: { id: draftId, revision: 1 } };
+    await expect(f.store.save(f.scope, { ...command, snapshot: { ...usd, ownerReferences: { ...usd.ownerReferences, fx: "changed" } } })).rejects.toMatchObject({ code: "stale" });
+    expect(await f.store.save(f.scope, command)).toEqual({ revision: 2, replayed: false });
+    await pool.query("SELECT pg_sleep(3.1)");
+    expect(await f.store.save(f.scope, command)).toEqual({ revision: 2, replayed: true });
+    await expect(f.store.save(f.scope, { ...command, snapshot: { ...usd, ownerReferences: { ...usd.ownerReferences, fx: "changed" } } })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(unpublished.store.save(unpublished.scope, { ...unpublished.command(1), snapshot: converted(unpublished.snapshot(1), rate) })).rejects.toMatchObject({ code: "currency_conversion_required" });
+    expect((await pool.query("SELECT count(*)::int AS count FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(2);
+  }, 10_000);
+  it("rolls back every publication write if FX expires during the final outbox effect", async () => {
+    const f = await fixture(), draftId = randomUUID(); await f.store.save(f.scope, f.command()); f.allowConversion();
+    // Property-scoped trigger delays the real final write, after initial FX and owner approval.
+    const name = `pricing_fx_delay_${f.scope.propertyId.replaceAll("-", "")}`;
+    await pool.query(`CREATE SEQUENCE platform.${name}`);
+    await pool.query(`CREATE FUNCTION platform.${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN PERFORM nextval('platform.${name}'); PERFORM pg_sleep(3.1); RETURN NEW; END $$`);
+    await pool.query(`CREATE TRIGGER ${name} BEFORE INSERT ON platform.outbox_events
+      FOR EACH ROW WHEN (NEW.property_id='${f.scope.propertyId}'::uuid) EXECUTE FUNCTION platform.${name}()`);
+    try {
+      const rate = await fx(3), usd = converted(f.snapshot(1), rate);
+      await f.store.saveDraft(f.scope, { draftId, expectedDraftRevision: 0, baseRevision: 1, sources: f.sources(), snapshot: usd });
+      await expect(f.store.save(f.scope, { ...f.command(1), snapshot: usd, draft: { id: draftId, revision: 1 } })).rejects.toMatchObject({ code: "currency_conversion_required" });
+      // Sequence increments survive rollback: prove the delayed outbox write was actually reached.
+      expect((await pool.query(`SELECT is_called FROM platform.${name}`)).rows[0].is_called).toBe(true);
+      expect(await f.store.read(f.scope)).toMatchObject({ revision: 1, currency: "EUR" });
+      expect(await f.store.readDraft(f.scope, draftId)).toMatchObject({ revision: 1, stale: false, snapshot: usd });
+      for (const [schema, table, count] of [["pms", "pricing_v2_revisions", 1], ["pms", "pricing_v2_rooms", 1],
+        ["platform", "domain_events", 2], ["platform", "product_audit_events", 2], ["platform", "outbox_events", 1]])
+        expect((await pool.query(`SELECT count(*)::int AS count FROM ${schema}.${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].count).toBe(count);
+    } finally {
+      await pool.query(`DROP TRIGGER ${name} ON platform.outbox_events`);
+      await pool.query(`DROP FUNCTION platform.${name}()`);
+      await pool.query(`DROP SEQUENCE platform.${name}`);
+    }
+  }, 10_000);
   it("binds publication to saved draft contents and replays its receipt after later edits", async () => {
     const f = await fixture(), draftId = randomUUID();
     const draft = { draftId, expectedDraftRevision: 0, baseRevision: 0, sources: f.sources(), snapshot: f.snapshot(1) };

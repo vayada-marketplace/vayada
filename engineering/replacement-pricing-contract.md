@@ -320,3 +320,22 @@ can remain in history even if the final lookup correctly returns unavailable.
 The publication caller must recheck expiry at the mutation boundary and verify
 property scope, complete conversion and every other owner. Collection alone does
 not authorize a currency change, rewrite accepted bookings or publish prices.
+
+## Currency conversion at the storage publication boundary (VAY-1927)
+
+When an existing pricing revision changes currency, `createReplacementPricingStore.save`
+now requires the proposed `ownerReferences.fx` to identify an exact, currently valid
+persisted observation for the old/new pair. It checks every prior PMS room against
+the complete conversion using database wall time, then requires the additional
+`allowCurrencyChange` owner guard. Valid PMS arithmetic alone cannot approve amounts
+owned by other domains. The complete live source/authorization guard remains required
+before wiring routes; injected test guards are not evidence of that integration.
+
+After revision, room, head, audit and outbox writes, storage rechecks the immutable FX
+observation immediately before returning to commit. Expiry during those writes rolls
+back the whole publication and preserves its draft. This is validity at the final
+transaction check, not a promise about elapsed time during PostgreSQL commit. Exact
+successful request replay returns its historical receipt without a new conversion or
+new effects, even after expiry. Draft binding, source/base concurrency checks and
+same-currency writes retain their existing behavior. Provider fetching stays outside
+this transaction; there is no refresh or substitute rate inside publication.
