@@ -53,6 +53,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   ariSyncMutating?: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingInventoryEnabled?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -65,6 +66,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.ariSyncMutating ?? true,
         config.stagingRestrictionsPropertyId ?? null,
         config.stagingMealsEnabled ?? false,
+        config.stagingInventoryEnabled ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     succeed: (job, result, input) => complete(pool, config.targetState, job, result, input),
@@ -82,6 +84,7 @@ async function claim(
   ariSyncMutating: boolean,
   stagingRestrictionsPropertyId: string | null,
   stagingMealsEnabled: boolean,
+  stagingInventoryEnabled: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
     if (ariSyncMutating)
@@ -102,7 +105,8 @@ async function claim(
        FROM platform.jobs
        WHERE queue_name = $1
          AND ($4::uuid IS NULL OR (property_id = $4::uuid
-           AND ((payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
+           AND (($6::boolean AND $3::boolean AND payload->>'operationType' = 'update_inventory_rules')
+             OR (payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
              OR ($5::boolean AND payload->>'operationType' = 'provision'
                AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
@@ -123,6 +127,7 @@ async function claim(
         ariSyncMutating,
         stagingRestrictionsPropertyId,
         stagingMealsEnabled,
+        stagingInventoryEnabled,
       ],
     );
     const row = result.rows[0];
