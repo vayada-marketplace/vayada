@@ -188,3 +188,27 @@ using their frozen evidence rather than requiring current policy versions.
 No HTTP route, editor, Finance approval or complete publication guard is wired
 by this owner-storage slice. Replacement preview/publication consumes this owner
 port together with all other required owner evidence before becoming available.
+
+## Finance method readiness adapter (VAY-1541)
+
+`lockFinanceReplacementPricingReadiness` reads existing Finance-owned settings,
+provider capability and accepted execution evidence in the caller's authorized
+property transaction. It binds the result to the proposed replacement pricing
+revision, currency and exact verified Booking terms revisions. It does not read
+old PMS prices or invent a v1 currency revision. Settings, the selected provider
+and accepted execution evidence remain locked until transaction end.
+
+Pay-at-property can be available independently of card. Card requires Finance's
+existing currency gate and exact current provider/property execution evidence;
+revocation or capability changes suppress it. Unsupported selected methods do
+not become aliases for supported methods. At least one verified method is
+required. Currency mismatch fails without relabeling settings or converting data.
+
+Deposit schedules return `deposit_execution_unavailable`: the current execution
+contract does not prove split-payment support. VAY-1543 must implement and verify
+that execution before Finance can approve deposits. The evidence ID covers the
+locked sources; consumers must compare it on reuse. This is method capability,
+not proof of checkout, collection timing or complete publication readiness.
+The caller verifies terms through Booking and pricing through PMS before use;
+the adapter is not a parser for client-supplied approval evidence. No new Finance
+settings writer, HTTP endpoint or complete pricing guard is wired in this slice.
