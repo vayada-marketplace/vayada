@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { createChannexManagementProvider } from "../integrations/channexManagement.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -38,6 +41,64 @@ describe("PMS Channex management worker", () => {
       { workerId: "worker-1", now },
     );
   });
+
+  it.each([
+    [301, false],
+    [302, false],
+    [303, false],
+    [307, false],
+    [308, false],
+    [307, true],
+  ] as const)(
+    "does not follow or retry a property-creation HTTP %s redirect (stalled body: %s)",
+    async (status, stalledBody) => {
+      const requests: string[] = [];
+      const server = createServer((request, response) => {
+        requests.push(`${request.method} ${request.url}`);
+        response.writeHead(status, {
+          location: "/redirect-target",
+          ...(stalledBody ? { "content-length": "100" } : {}),
+        });
+        if (stalledBody) {
+          response.flushHeaders();
+          response.write("partial");
+        } else response.end();
+      });
+      await new Promise<void>((resolve) => server.listen(0, "localhost", resolve));
+      try {
+        const harness = store(job());
+        harness.fail.mockResolvedValue("dead_lettered");
+        const provider = createChannexManagementProvider({
+          apiBaseUrl: `http://localhost:${(server.address() as AddressInfo).port}`,
+          apiKey: "synthetic-test-key",
+          plans: {
+            plan: async () => ({
+              requests: [{ method: "POST", path: "/api/v1/properties", body: {} }],
+            }),
+          },
+        });
+        const result = await runPmsChannexManagementWorkerOnce({
+          store: harness.port,
+          provider,
+          workerId: "worker-1",
+          now,
+        });
+        expect(result.outcome).toBe("dead_lettered");
+        expect(harness.fail).toHaveBeenCalledWith(
+          job(),
+          expect.objectContaining({ code: "provider_rejected", statusCode: status }),
+          expect.objectContaining({ retryable: false, retryAt: null }),
+        );
+        expect(harness.succeed).not.toHaveBeenCalled();
+        expect(requests).toEqual(["POST /api/v1/properties"]);
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
 
   it("uses bounded exponential retry for timeouts, 429s, and 5xx failures", async () => {
     for (const failure of [
