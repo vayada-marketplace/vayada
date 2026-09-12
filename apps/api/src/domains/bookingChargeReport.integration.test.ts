@@ -1,3 +1,5 @@
+import Fastify from "fastify";
+import { registerBookingChargeReportRoutes } from "../routes/bookingChargeReports.js";
 import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AuthorizationError } from "@vayada/backend-authorization";
@@ -160,6 +162,39 @@ describe.skipIf(!databaseUrl)("native hotel charge report command", () => {
       await submit(input(), { ...runtime(), environment: "production", purpose: "live" }),
     ).toMatchObject({ code: "source_unavailable" });
     expect(await submit()).toMatchObject({ ok: true, status: "unverified" });
+  });
+  it("persists and replays an authorized HTTP report through the real command", async () => {
+    const app = Fastify();
+    app.decorateRequest("authContext", null);
+    app.addHook("onRequest", async (request) => {
+      if (request.headers.authorization === "Bearer test") request.authContext = auth();
+    });
+    await app.register(registerBookingChargeReportRoutes, {
+      refreshContext: async () => auth(),
+      submit: (value, freshContext) =>
+        submitBookingChargeReport(fixture.pool(), value, { ...runtime(), freshContext }),
+    });
+    try {
+      const { components, reportedItemReference, expectedReportId } = input();
+      const request = {
+        method: "POST" as const,
+        url: `/properties/${id(3)}/bookings/${id(50)}/charge-reports`,
+        headers: { authorization: "Bearer test", "idempotency-key": "http-1" },
+        payload: { components, reportedItemReference, expectedReportId },
+      };
+      const first = await app.inject(request),
+        replay = await app.inject(request);
+      expect(first.statusCode).toBe(201);
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toMatchObject({
+        reportId: first.json().reportId,
+        replayed: true,
+        status: "unverified",
+      });
+      expect(await count()).toBe(1);
+    } finally {
+      await app.close();
+    }
   });
   it("rolls failed insertion back and permits a clean retry", async () => {
     await fixture.pool()

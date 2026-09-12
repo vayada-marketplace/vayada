@@ -295,3 +295,14 @@ reported item/tax claims unverified. Server configuration owns source identity a
 purpose; diagnostic bindings cannot enter its live stream. Source-revision replay
 compares the payload and actor; corrections require the current report ID. No HTTP
 route, accepted item binding, provider ingestion or Finance consumer is enabled.
+
+## Protected HTTP adapter
+
+When explicitly composed, POST `/api/booking/properties/:propertyId/bookings/:bookingId/charge-reports`
+accepts the component report and expected predecessor, with `Idempotency-Key` as its
+source revision. URL scope and authenticated identity are enforced; source/purpose
+fields are rejected from the body. Fresh auth must retain the original actor and org.
+Responses are non-cacheable: 201 created, 200 replay, 422 invalid input, 404 unavailable
+scope, 409 source/revision conflict, and 401/403 auth failures. Unexpected errors are
+sanitized. `buildApp` registration requires explicit command and real auth-refresh
+providers; `server.ts` does not yet compose them. No hotel UI or earnings is enabled.
