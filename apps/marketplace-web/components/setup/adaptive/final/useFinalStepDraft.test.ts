@@ -29,12 +29,12 @@ beforeEach(() => {
 });
 async function harness(stepId: "guest_experience" | "payments", resumed = false) {
   const field = stepId === "payments" ? "payment.accepted_methods" : "guest.phone_required";
-  const value = stepId === "payments" ? ["pay_at_property"] : false;
+  const value = stepId === "payments" ? ["pay_at_hotel"] : false;
   let beforeLeave!: () => Promise<void>;
   let recover!: () => Promise<void>;
   const baseRevisions =
     stepId === "payments"
-      ? { "finance.payment_methods": "payment-methods:0", "pms.pricing_settings": "currency:1" }
+      ? { "finance.payment_methods": "payment-methods:0", "pms.pricing_settings": "pricing:1" }
       : { "booking.guest_experience": "guest-policy:absent" };
   const step = {
     stepId,
