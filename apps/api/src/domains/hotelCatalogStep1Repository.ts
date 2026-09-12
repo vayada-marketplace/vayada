@@ -402,6 +402,13 @@ export async function readLockedHotelCatalogStep1State(
   return property ? loadState(client, property) : null;
 }
 
+export async function lockHotelCatalogSetupScope(
+  client: QueryClient,
+  scope: HotelCatalogStep1Scope,
+): Promise<boolean> {
+  return (await lockAuthorizedProperty(client, scope)) !== null;
+}
+
 async function lockAuthorizedProperty(
   client: QueryClient,
   scope: HotelCatalogStep1Scope,
