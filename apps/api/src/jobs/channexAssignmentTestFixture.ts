@@ -46,6 +46,13 @@ export async function seedChannexAssignmentInventory(db: Pool, propertyId: strin
       VALUES($1,1,$2,1,1,100,100)`,
       [propertyId, room],
     );
+    // Preserve normal inventory triggers while committing the fixture atomically.
+    await client.query("SET LOCAL session_replication_role=origin");
+    await client.query(
+      `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count,calendar_revision,effective_sellable_limit_count,inventory_revision,generated_sellable_limit_count,generated_source_revision,channel_source_revision,manual_source_revision,block_source_revision,booking_source_revision)
+      SELECT $1,$2,day,100,100,1,100,1,100,1,0,0,0,0 FROM generate_series('2026-09-01'::date,'2026-09-30'::date,'1 day') day`,
+      [propertyId, room],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -53,11 +60,6 @@ export async function seedChannexAssignmentInventory(db: Pool, propertyId: strin
   } finally {
     client.release();
   }
-  await db.query(
-    `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count,calendar_revision,effective_sellable_limit_count,inventory_revision,generated_sellable_limit_count,generated_source_revision,channel_source_revision,manual_source_revision,block_source_revision,booking_source_revision)
-    SELECT $1,$2,day,100,100,1,100,1,100,1,0,0,0,0 FROM generate_series('2026-09-01'::date,'2026-09-30'::date,'1 day') day`,
-    [propertyId, room],
-  );
 }
 
 export async function clearChannexAssignmentFixture(db: Pool, propertyId: string) {
