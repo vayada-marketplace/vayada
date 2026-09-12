@@ -118,6 +118,15 @@ describe.skipIf(!url)("review reply PostgreSQL receipts", () => {
     await commands.submit(context, property, "review", "Thanks");
     expect(provider.send).toHaveBeenCalledTimes(2);
   });
+  it("blocks submission without an enabled provider", async () => {
+    await commands.close();
+    commands = createPgReviewReplyCommands({ connectionString: url! });
+    expect(await commands.submit(context, property, "review", "Thanks")).toMatchObject({
+      state: "unavailable",
+    });
+    expect((await db.query("SELECT * FROM pms.review_reply_submissions")).rows).toHaveLength(0);
+    expect(provider.send).not.toHaveBeenCalled();
+  });
   it("does not contact provider for a review outside the property", async () => {
     expect(await commands.submit(context, actor, "review", "Thanks")).toMatchObject({
       state: "unavailable",

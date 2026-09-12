@@ -22,6 +22,7 @@ const config: ChannexManagementConfig = {
     bookingSync: "observe_only",
     markups: "observe_only",
     messaging: "observe_only",
+    reviews: "observe_only",
     iframe: "observe_only",
   },
 };

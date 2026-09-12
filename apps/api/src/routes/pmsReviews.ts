@@ -68,8 +68,11 @@ export function createPgPmsReviewRepository(config: {
       };
     },
     async close() {
-      await config.replies?.close();
-      await pool.end();
+      try {
+        await config.replies?.close();
+      } finally {
+        await pool.end();
+      }
     },
   };
 }

@@ -84,6 +84,7 @@ export type ChannexManagementConfig = {
     bookingSync: ChannexManagementMode;
     markups: ChannexManagementMode;
     messaging: ChannexManagementMode;
+    reviews: ChannexManagementMode;
     iframe: ChannexManagementMode;
   };
 };
@@ -552,6 +553,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     bookingSync: mode("PMS_CHANNEX_BOOKING_SYNC_MODE"),
     markups: mode("PMS_CHANNEX_MARKUPS_MODE"),
     messaging: mode("PMS_CHANNEX_MESSAGING_MODE"),
+    reviews: mode("PMS_CHANNEX_REVIEWS_MODE"),
     iframe: mode("PMS_CHANNEX_IFRAME_MODE"),
   };
   const apiBaseUrl = readOptionalEnv(env, "CHANNEX_API_BASE_URL");
@@ -612,7 +614,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       : "frozen";
   const mutating = Object.values(capabilityModes).includes("mutating");
   const durableCommandsMutating = Object.entries(capabilityModes).some(
-    ([capability, value]) => capability !== "iframe" && value === "mutating",
+    ([capability, value]) =>
+      capability !== "iframe" && capability !== "reviews" && value === "mutating",
   );
   if (mutating && (!apiBaseUrl || !apiKey)) {
     throw new Error(

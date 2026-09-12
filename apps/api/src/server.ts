@@ -422,7 +422,8 @@ const pmsChannexManagementRepository = pmsOperationsRepository
   ? createPgPmsChannexManagementReadRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
-  ([capability, mode]) => capability !== "iframe" && mode === "mutating",
+  ([capability, mode]) =>
+    capability !== "iframe" && capability !== "reviews" && mode === "mutating",
 );
 const noShowReportPool = pmsOperationsRepository
   ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 })
@@ -1392,7 +1393,9 @@ const app = buildApp({
     replies: createPgReviewReplyCommands({
       connectionString: targetDatabaseUrl,
       provider:
-        config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+        config.channexManagement.capabilityModes.reviews === "mutating" &&
+        config.channexManagement.apiBaseUrl &&
+        config.channexManagement.apiKey
           ? createChannexReviewReplies({
               apiBaseUrl: config.channexManagement.apiBaseUrl,
               apiKey: config.channexManagement.apiKey,
