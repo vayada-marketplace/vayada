@@ -537,6 +537,22 @@ async def channex_iframe_url(
 WEBHOOK_HEADER_NAME = "X-Vayada-Webhook-Token"
 
 
+def _desired_channex_webhook_event_masks() -> tuple[str, ...]:
+    event_masks = tuple(
+        dict.fromkeys(
+            event_mask.strip()
+            for event_mask in settings.CHANNEX_WEBHOOK_EVENT_MASKS.split(",")
+            if event_mask.strip()
+        )
+    )
+    if not event_masks:
+        raise HTTPException(
+            status_code=500,
+            detail="CHANNEX_WEBHOOK_EVENT_MASKS must contain at least one event mask",
+        )
+    return event_masks
+
+
 @router.post("/channex/messaging/backfill")
 async def channex_messaging_backfill(
     request: Request,
@@ -659,9 +675,7 @@ async def channex_webhook_setup(
     callback_url: str,
     user_id: str = Depends(require_super_admin),
 ):
-    """One-time setup: register (or update) a single global Channex webhook
-    that pushes `message` events to our /webhooks/channex endpoint, with our
-    shared secret in the X-Vayada-Webhook-Token header.
+    """Reconcile one global Channex webhook per configured event mask.
 
     Pass the public callback URL (e.g.
     `https://api.vayada.com/webhooks/channex`)."""
@@ -681,44 +695,112 @@ async def channex_webhook_setup(
 
     api_key = channex_service.get_platform_api_key()
     headers = {WEBHOOK_HEADER_NAME: settings.CHANNEX_WEBHOOK_SECRET}
+    event_masks = _desired_channex_webhook_event_masks()
 
     try:
         existing = await channex_service.list_webhooks(api_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to list webhooks: {e}") from e
 
-    match = None
-    for w in existing:
-        attrs = w.get("attributes") or {}
-        if attrs.get("callback_url") == callback_url:
-            match = w
-            break
-
-    if match:
-        try:
-            updated = await channex_service.update_webhook(
-                api_key,
-                match["id"],
-                {
-                    "event_mask": "message",
-                    "is_global": True,
-                    "is_active": True,
-                    "send_data": True,
-                    "headers": headers,
-                },
+    matches_by_event_mask = {}
+    for event_mask in event_masks:
+        matches = [
+            webhook
+            for webhook in existing
+            if (webhook.get("attributes") or {}).get("event_mask") == event_mask
+            and (webhook.get("attributes") or {}).get("is_global") is True
+        ]
+        if len(matches) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Multiple global Channex webhooks exist for event mask {event_mask}",
             )
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Failed to update webhook: {e}") from e
-        return {"status": "updated", "webhook_id": updated.get("id", match["id"])}
+        matches_by_event_mask[event_mask] = matches
 
-    try:
-        created = await channex_service.create_webhook(
-            api_key,
-            callback_url=callback_url,
-            event_mask="message",
-            is_global=True,
-            headers=headers,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to create webhook: {e}") from e
-    return {"status": "created", "webhook_id": created.get("id")}
+    managed_callback_urls = {callback_url}
+    for matches in matches_by_event_mask.values():
+        if matches:
+            existing_callback_url = (matches[0].get("attributes") or {}).get("callback_url")
+            if existing_callback_url:
+                managed_callback_urls.add(existing_callback_url)
+
+    reconciled = []
+    for webhook in existing:
+        attrs = webhook.get("attributes") or {}
+        if (
+            attrs.get("is_global") is True
+            and attrs.get("event_mask") not in event_masks
+            and attrs.get("callback_url") in managed_callback_urls
+            and attrs.get("is_active") is not False
+        ):
+            try:
+                await channex_service.update_webhook(
+                    api_key,
+                    webhook["id"],
+                    {"is_active": False},
+                )
+                reconciled.append(
+                    {
+                        "event_mask": attrs.get("event_mask"),
+                        "status": "disabled",
+                        "webhook_id": webhook["id"],
+                    }
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to disable {attrs.get('event_mask')} webhook: {e}",
+                ) from e
+
+    for event_mask in event_masks:
+        matches = matches_by_event_mask[event_mask]
+        try:
+            if matches:
+                webhook_id = matches[0]["id"]
+                updated = await channex_service.update_webhook(
+                    api_key,
+                    webhook_id,
+                    {
+                        "callback_url": callback_url,
+                        "event_mask": event_mask,
+                        "is_global": True,
+                        "is_active": True,
+                        "send_data": True,
+                        "headers": headers,
+                    },
+                )
+                reconciled.append(
+                    {
+                        "event_mask": event_mask,
+                        "status": "updated",
+                        "webhook_id": updated.get("id", webhook_id),
+                    }
+                )
+            else:
+                created = await channex_service.create_webhook(
+                    api_key,
+                    callback_url=callback_url,
+                    event_mask=event_mask,
+                    is_global=True,
+                    headers=headers,
+                    send_data=True,
+                    is_active=True,
+                )
+                reconciled.append(
+                    {
+                        "event_mask": event_mask,
+                        "status": "created",
+                        "webhook_id": created.get("id"),
+                    }
+                )
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to reconcile {event_mask} webhook: {e}",
+            ) from e
+
+    return {
+        "status": "reconciled",
+        "event_masks": list(event_masks),
+        "webhooks": reconciled,
+    }

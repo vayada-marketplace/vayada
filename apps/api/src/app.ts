@@ -1,3 +1,6 @@
+import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
+import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
+import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -303,6 +306,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+  pmsRoomClosureRepository?: PmsRoomClosureRepository;
   pmsLinkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -354,6 +358,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     "profileRepository" | "lifecycleCommandBus"
   >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  preparedImportRepository?: PreparedImportRepository;
   sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
   propertyNearbyRepository?: PropertyNearbyRepository;
   publicNearby?: import("./routes/publicNearby.js").PublicNearbyOptions;
@@ -607,6 +612,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth.propertyAccessRepository,
     });
   }
+  if (options.preparedImportRepository && options.sharedHotelSetupStatusRepository) {
+    app.register(registerPreparedHotelImportRoutes, {
+      prefix: "/api/hotel-setup",
+      repository: options.preparedImportRepository,
+      profiles: options.sharedHotelSetupStatusRepository,
+      rooms: options.pmsRoomSetup?.facts,
+    });
+  }
   if (options.sharedHotelSetupStatusRepository) {
     if (!options.hotelSetupTrackCommandRepository) {
       throw new Error(
@@ -752,6 +765,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
+      roomClosureRepository: options.pmsRoomClosureRepository,
       linkedInventoryGroupCommandRepository: options.pmsLinkedInventoryGroupCommandRepository,
       resolveOnboardingRoomCurrency: async (propertyId) =>
         (await options.bookingSettingsRepository?.findPropertySettingsByHotelId?.(propertyId))

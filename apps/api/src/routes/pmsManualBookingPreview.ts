@@ -73,6 +73,8 @@ export async function registerPmsManualBookingPreviewRoutes(
           addOns,
         });
       } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "PRICING_UNAVAILABLE")
+          return reply.status(503).send({ code: "PRICING_UNAVAILABLE", message: error.message });
         if (error instanceof UnauthorizedError)
           return reply.status(401).send({ code: "unauthenticated" });
         if (error instanceof AuthorizationError)
@@ -95,6 +97,8 @@ export async function registerPmsManualBookingPreviewRoutes(
           ),
         );
       } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "PRICING_UNAVAILABLE")
+          return reply.status(503).send({ code: "PRICING_UNAVAILABLE", message: error.message });
         if (error instanceof UnauthorizedError)
           return reply
             .status(401)
