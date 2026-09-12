@@ -914,3 +914,45 @@ it("prefills monthly edits, protects pending values and saves the same monthly s
   await click("Review saved charges"); expect(button("Edit monthly price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit monthly price"); expect(field("Monthly 2 adults included for Room 1 Offer 1").props.value).toBe("210.25");
 });
+
+it("edits seasonal prices in all four modes without replacing the season's settings", () => {
+  const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  const winter = { name: "Winter", tier: "High", from: "12-15", through: "01-10" }, leap = { name: "Leap", tier: "", from: "02-29", through: "02-29" };
+  const bases = [{ mode: "flat" as const, amountMinor: "10000" }, { mode: "occupancy" as const, amountsMinor: ["10000", "13000"] }, { mode: "per_person" as const, unitMinor: "6000" }, { mode: "included_guests" as const, baseMinor: "13000", baseGuests: 2, adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }] }];
+  for (const base of bases) {
+    const different = base.mode === "included_guests" ? { ...base, baseGuests: 1, adjustments: [{ kind: "fixed" as const, deltaMinor: "0" }, { kind: "fixed" as const, deltaMinor: "2000" }] } : base;
+    const calendar = { ...offer.price.calendar, base: different, months: [{ month: 8, price: different }], seasons: [{ ...winter, price: base }, { ...leap, price: different }] };
+    const configured = { ...room, offers: [{ ...offer, price: { ...offer.price, calendar } }] }, original = structuredClone(calendar);
+    const amounts = base.mode === "occupancy" ? ["160.25", "190.99"] : ["190.99"];
+    const expected = base.mode === "flat" ? { ...base, amountMinor: "19099" } : base.mode === "per_person" ? { ...base, unitMinor: "19099" } : base.mode === "occupancy" ? { ...base, amountsMinor: ["16025", "19099"] } : { ...base, baseMinor: "19099" };
+    expect(changeSeasonPrice(configured, "flex", winter, amounts, true)).toEqual({ ...configured, offers: [{ ...configured.offers[0], price: { ...offer.price, calendar: { ...calendar, seasons: [{ ...winter, price: expected }, { ...leap, price: different }] } } }] });
+    expect(changeSeasonPrice(configured, "flex", leap, amounts, true).offers[0].price).toMatchObject({ calendar: { seasons: [{ ...winter, price: base }, { ...leap }] } });
+    for (const changed of [{ ...winter, name: "Other" }, { ...winter, tier: "" }, { ...winter, through: "01-11" }]) expect(() => changeSeasonPrice(configured, "flex", changed, amounts, true)).toThrow("existing");
+    for (const invalid of [null, [], [""], ["0"], ["1.001"], ["10000000000000000"]]) expect(() => changeSeasonPrice(configured, "flex", winter, invalid, true)).toThrow();
+    if (base.mode === "included_guests") expect(() => changeSeasonPrice(configured, "flex", winter, ["20"], true)).toThrow();
+    expect(calendar).toEqual(original);
+  }
+});
+it("prefills seasonal edits, protects pending values and retains settings through save review and reload", async () => {
+  const original = includedRoom();
+  const room = changeIncludedAdjustments(original, "flex", { adults: "1", adjustments: [{ kind: "fixed", value: "0" }, { kind: "fixed", value: "10" }, { kind: "fixed", value: "20" }] }, "130");
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false }); await mount(); await click("Save draft"); const draftId = saved.draftId;
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  await fill("Season name for Room 1 Offer 1", "New"); expect(button("Edit seasonal price").props.disabled).toBe(true); await click("Edit seasonal price"); expect(button("Apply seasonal price")).toBeUndefined(); await click("Cancel season entry");
+  await click("Edit seasonal price"); expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("250.00");
+  for (const [name, value] of [["Season name", "Winter"], ["Tier label (optional)", "high"], ["Start (MM-DD)", "12-01"], ["End (MM-DD)", "12-31"]]) { expect(field(`${name} for Room 1 Offer 1`).props.value).toBe(value); expect(field(`${name} for Room 1 Offer 1`).props.disabled).toBe(true); }
+  expect(button("Clear seasonal price").props.disabled).toBe(true); expect(button("Edit seasonal price").props.disabled).toBe(true); await click("Clear seasonal price"); expect(button("Apply seasonal price")).toBeDefined();
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true); expect(button("Edit included-adult adjustments").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void; const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  await fill("Seasonal 2 adults included for Room 1 Offer 1", "20"); await click("Apply seasonal price"); expect(JSON.stringify(view.toJSON())).toContain("check all adult prices");
+  await click("Cancel season entry"); expect(button("Review saved charges").props.disabled).toBe(false); expect(client.saveDraft).toHaveBeenCalledTimes(1);
+  await fill("Room 1 Offer 1 1 adult included", "150.25"); await click("Edit seasonal price"); expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("250.00");
+  await fill("Seasonal 2 adults included for Room 1 Offer 1", "260.25"); await click("Apply seasonal price"); expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
+  expect(saved).toMatchObject({ draftId, baseRevision: 7, revision: 2 }); expect(saved.snapshot.rooms[0].revision).toBe(8);
+  const price = saved.snapshot.rooms[0].offers[0].price, source = room.offers[0].price; if (price.kind !== "independent" || source.kind !== "independent") throw new Error("fixture");
+  expect(price.calendar.seasons).toEqual([{ ...source.calendar.seasons[0], price: { ...source.calendar.seasons[0].price, baseMinor: "26025" } }]); expect(price.calendar.base).toMatchObject({ baseGuests: 1, baseMinor: "15025" });
+  expect(price.calendar.months).toEqual(source.calendar.months); expect(price.calendar.dates).toEqual(source.calendar.dates); expect(saved.snapshot.rooms[0].offers.slice(1)).toEqual(room.offers.slice(1));
+  await click("Review saved charges"); expect(button("Edit seasonal price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit seasonal price"); expect(field("Seasonal 2 adults included for Room 1 Offer 1").props.value).toBe("260.25");
+});
