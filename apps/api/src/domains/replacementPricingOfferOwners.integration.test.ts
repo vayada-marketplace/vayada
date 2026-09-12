@@ -3,7 +3,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { createBookingPricingOfferTermsStore } from "./bookingPricingOfferTerms.js";
+import { createBookingPricingOfferTermsStore, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
@@ -46,14 +46,15 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await pool.query(`INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
       VALUES($1,true,ARRAY['pay_at_property'],'EUR')`, [propertyId]);
     const client = await pool.connect();
-    let finance, roomSource;
+    let finance, roomSource, termsSource;
     try {
       await client.query("BEGIN");
       expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(true);
       roomSource = await lockPmsReplacementPricingRoomSource(client, propertyId);
+      termsSource = await lockBookingPricingTermsSource(client, propertyId);
       finance = await lockFinanceReplacementPricingReadiness(client, { propertyId, currency: "EUR", pricingRevision: 1, terms });
     } finally { await client.query("ROLLBACK"); client.release(); }
-    if (finance.kind !== "ready" || !roomSource) throw new Error("fixture requires owner evidence");
+    if (finance.kind !== "ready" || !roomSource || !termsSource) throw new Error("fixture requires owner evidence");
     const snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
       rooms: [roomTypeId, secondRoomId].map((id) => ({
         version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
@@ -64,8 +65,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
         })),
       })) };
-    // PMS room evidence is owner-read; the aggregate terms source remains a fixture input.
-    const sources = { room: roomSource, terms: "fixture-terms-source", finance: finance.evidenceId }, draftId = randomUUID();
+    // Room and terms sources are owner-read; Finance is still proposal-specific readiness evidence.
+    const sources = { room: roomSource, terms: termsSource, finance: finance.evidenceId }, draftId = randomUUID();
     // Seed the draft boundary, then create evidence through the real authorized declaration writer.
     await pool.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [propertyId]);
     await pool.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
@@ -80,7 +81,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       try { await client.query("BEGIN"); return await verify(client, auth, scope, proposed, currentSources); }
       finally { await client.query("ROLLBACK"); client.release(); }
     }
-    return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId };
+    async function currentTermsSource() {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN"); expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(true);
+        const source = await lockBookingPricingTermsSource(client, propertyId);
+        expect(await lockBookingPricingTermsSource(client, propertyId.toUpperCase())).toBe(source);
+        return source!;
+      } finally { await client.query("ROLLBACK"); client.release(); }
+    }
+    return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId, currentTermsSource };
   }
   it("verifies every offer across rooms with exact current Finance evidence", async () => {
     const f = await fixture();
@@ -133,7 +143,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       terms: { ...f.termsInput, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } } });
     const rooms = [...f.snapshot.rooms];
     rooms[0] = { ...rooms[0], offers: rooms[0].offers.map((o, i) => i === 0 ? { ...o, termsRevision: saved.revision } : o) };
-    expect(await f.read({ ...f.snapshot, rooms })).toMatchObject({ financeReason: "deposit_execution_unavailable" });
+    expect(await f.read({ ...f.snapshot, rooms }, f.context, { ...f.sources, terms: await f.currentTermsSource() })).toMatchObject({ financeReason: "deposit_execution_unavailable" });
   });
   it("holds live owner locks until transaction end, then rejects the replaced terms", async () => {
     const f = await fixture(), client = await pool.connect(), writer = new pg.Pool({ connectionString: url, max: 1 });
@@ -163,7 +173,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     ];
     for (const changed of changes)
       expect(await f.read({ ...f.snapshot, rooms: [changed, f.snapshot.rooms[1]] })).toMatchObject({ reason: "charges_stale" });
-    expect(await f.read(f.snapshot, f.context, { ...f.sources, terms: "changed" })).toMatchObject({ reason: "charges_stale" });
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, finance: "changed" })).toMatchObject({ reason: "charges_stale" });
     // Only the declaration's own reference is excluded from the fingerprint.
     expect(await f.read(f.snapshot, f.context, { ...f.sources, charges: f.charges.id })).toMatchObject({ kind: "verified", charges: f.charges });
     expect((await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(4);
@@ -189,5 +199,38 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       const room = await lockPmsReplacementPricingRoomSource(client, f.scope.propertyId);
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, room: room! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  it("binds the complete Booking terms set and rejects even a matching forged-source declaration", async () => {
+    const f = await fixture(), other = await fixture();
+    expect(await f.currentTermsSource()).toBe(f.sources.terms);
+    expect(await other.currentTermsSource()).not.toBe(f.sources.terms);
+    for (const sources of [{ room: f.sources.room, finance: f.finance.evidenceId }, { ...f.sources, terms: other.sources.terms }])
+      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "terms_source_stale" });
+    const forged = { ...f.sources, terms: "forged" };
+    await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
+    const declaration = await createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+      draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
+      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
+    });
+    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: declaration.id } }, f.context, forged)).toMatchObject({ reason: "terms_source_stale" });
+    await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...f.termsInput, offerId: "unselected" } });
+    expect(await f.read()).toMatchObject({ reason: "terms_source_stale" });
+    const changed = await f.currentTermsSource(); expect(changed).not.toBe(f.sources.terms);
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, terms: changed })).toMatchObject({ reason: "charges_stale" });
+    const updated = await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.terms[0].revision, terms: f.termsInput });
+    expect(updated.revision).not.toBe(f.terms[0].revision);
+    expect(await f.currentTermsSource()).not.toBe(changed);
+  });
+  it("holds the complete terms source against new offers through the real Booking writer", async () => {
+    const f = await fixture(), reader = await pool.connect(), writer = new pg.Pool({ connectionString: url, max: 1 });
+    const command = { requestId: randomUUID(), expectedRevision: null, terms: { ...f.termsInput, offerId: "concurrent-new" } };
+    try {
+      await writer.query("SET lock_timeout='150ms'");
+      await reader.query("BEGIN"); expect(await verify(reader, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({ kind: "verified" });
+      await expect(createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command)).rejects.toMatchObject({ code: "55P03" });
+      await reader.query("COMMIT");
+      await createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command);
+      expect(await f.read()).toMatchObject({ reason: "terms_source_stale" });
+    } finally { await reader.query("ROLLBACK"); reader.release(); await writer.end(); }
   });
 });

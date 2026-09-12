@@ -410,3 +410,23 @@ Missing or changed evidence returns `room_source_stale`; substituting a newly re
 room token also invalidates any older charge declaration bound to the previous
 sources. The reader requires a caller-authorized transaction; it is not an access
 check. Other source owners and complete publication wiring remain required.
+
+## Authoritative Booking terms source (VAY-1932)
+
+`lockBookingPricingTermsSource` reads every current room/offer/terms-revision head
+for the property. It uses the same property mutation lock as the Booking writer,
+plus row share locks, so newly created heads cannot escape the transaction's source
+set. Its stable token includes normalized property identity and ordered tuples;
+immutable historical terms rows are not current sources. This reader requires a
+caller-authorized transaction and does not itself establish access.
+
+Combined verification requires exact `sources.terms` equality after validating
+selected term references. Creating an unselected offer also changes the complete
+source; refreshing that token requires a new charge declaration. A declaration
+matching a forged aggregate token cannot substitute for the live owner read.
+
+Room and Booking aggregate tokens are now owner-read. Finance readiness is still
+bound to a proposed currency/revision/selected terms set; it is not a generic
+settings revision. A proposal-independent Finance source remains required for
+the complete storage guard, along with remaining currency/owner obligations and
+publication command/route integration.

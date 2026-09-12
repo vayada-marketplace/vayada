@@ -2,7 +2,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
-import { lockBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
+import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness, type FinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
@@ -12,12 +12,12 @@ import type { PricingStorageScope, PricingStorageSnapshot, PricingStorageSources
 
 export type ReplacementPricingOfferOwners =
   | { kind: "verified"; terms: readonly ReplacementOfferTerms[]; finance: Extract<FinanceReplacementPricingReadiness, { kind: "ready" }>; charges: ReplacementChargeDeclaration }
-  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "finance_unavailable" | "charges_stale";
+  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "terms_source_stale" | "finance_unavailable" | "charges_stale";
       financeReason?: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"] };
 
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
  * holds PMS/Booking/Finance locks until its end and verifies the charge declaration.
- * Rechecks sources.room against the locked PMS room-facts set. Caller must verify
+ * Rechecks sources.room and sources.terms against their complete owner sets. Caller must verify
  * remaining sources; this is not complete source freshness or currency-change approval. */
 export async function lockReplacementPricingOfferOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<ReplacementPricingOfferOwners> {
@@ -45,6 +45,8 @@ export async function lockReplacementPricingOfferOwners(client: PoolClient, cont
   if (!roomSource || currentSources.room !== roomSource) return unavailable("room_source_stale");
   const terms = await lockBookingPricingOfferTerms(client, scope.propertyId, references);
   if (!terms) return unavailable("terms_stale");
+  const termsSource = await lockBookingPricingTermsSource(client, scope.propertyId);
+  if (!termsSource || currentSources.terms !== termsSource) return unavailable("terms_source_stale");
   const finance = await lockFinanceReplacementPricingReadiness(client, {
     propertyId: scope.propertyId, currency, pricingRevision: revision, terms, expectedEvidenceId,
   });
