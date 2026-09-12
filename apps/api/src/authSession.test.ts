@@ -295,6 +295,82 @@ describe("AuthKit session routes", () => {
     expect(authenticateWithOrganizationSelection).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "allowed",
+    "unoffered",
+    "inactive",
+    "wrong_surface",
+    "mismatched_session",
+    "direct_mismatched_session",
+  ])("guards requested Marketplace password workspace: %s", async (scenario) => {
+    const select = vi.fn(async () => ({
+      ...session,
+      organizationId: scenario === "mismatched_session" ? "org_other" : "org_hotel",
+    }));
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      surfacePolicies: {
+        "marketplace-web": {
+          requiredOrganizationKind: "hotel_group",
+          firstPartySession: true,
+          publicOrigin: "https://marketplace.localhost",
+        },
+      },
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => ({
+          organizationId: id,
+          workosOrgId: id,
+          name: id,
+          kind: scenario === "wrong_surface" ? "platform" : "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () =>
+          scenario === "inactive"
+            ? null
+            : {
+                membershipId: "membership",
+                workosMembershipId: "om_membership",
+                status: "active",
+                roleKey: "hotel_owner",
+                workosRoleSlugs: [],
+              },
+      }),
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          if (scenario === "direct_mismatched_session")
+            return { ...session, organizationId: "org_other" };
+          throw {
+            code: "organization_selection_required",
+            pending_authentication_token: "pending-secret",
+            organizations: [
+              { id: "org_hotel", name: "Hotel" },
+              { id: "org_other", name: "Other" },
+            ],
+          };
+        },
+        authenticateWithOrganizationSelection: select,
+      }),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://marketplace.localhost" },
+      payload: {
+        email: "owner@example.test",
+        password: "password",
+        surface: "marketplace-web",
+        organizationId: scenario === "unoffered" ? "org_unoffered" : "org_hotel",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(scenario === "allowed" ? 200 : 403);
+    if (scenario === "unoffered") expect(select).not.toHaveBeenCalled();
+    if (scenario === "allowed") {
+      expect(response.json()).toMatchObject({ workosOrganizationId: "org_hotel" });
+      expect(response.headers["set-cookie"]).toBeDefined();
+      expect(response.body).not.toContain("pending-secret");
+    }
+  });
+
   it("starts Google OAuth with a signed callback state", async () => {
     let authorizationInput: Parameters<AuthKitClient["getAuthorizationUrl"]>[0] | undefined;
     app = buildAuthSessionApp({

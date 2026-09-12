@@ -29,3 +29,39 @@ Provider references checked 2026-09-07:
 [Rate plans](https://docs.channex.io/api-v.1-documentation/rate-plans-collection),
 [Booking.com channel API](https://docs.channex.io/channel-api-examples/booking.com).
 Local PostgreSQL and mocked HTTP validation do not establish live provider delivery.
+
+## Isolated TypeScript staging delivery
+
+After the restrictions staging deployment and binding are verified, opt in with
+`PMS_CHANNEX_STAGING_MEALS_ENABLED=true` and provisioning mode `mutating`.
+This requires the existing staging restriction property scope, exact staging URL,
+ARI mutating, and all global background workers disabled. Other capability modes
+remain observe-only. Default restrictions-only behavior is unchanged.
+
+The scoped worker additionally claims only `provision` jobs with a valid
+`mealRatePlanId` for that property; full provisioning and all other operations
+remain unclaimed. Canonical meal-save enqueue is scoped to the same property.
+Staging meal plans update only established mappings and never provision missing
+room/rate variants; a plan without any mapped rate fails visibly. Normal production
+provisioning behavior is unchanged. Reuse the audited sandbox binding. Coordinate deployment
+and fixture ownership with VAY-1528 before opting in; use no live OTA mappings.
+
+## Replacement meal readback handoff
+
+The VAY-1530 helper accepts the five `PricingMeal.kind` values directly: room only,
+breakfast, half board, full board and all inclusive. These exact API values are
+listed in the Channex rate-plan documentation (rechecked 2026-09-12). No `none`,
+missing value or alternate breakfast label is inferred to equal a configured meal.
+
+`verifyChannexMealReadback(externalPropertyId, meal, request)` is read-only. It
+returns `{ externalPropertyId, externalRoomTypeId, externalRatePlanId, mealType }`
+only after exact provider identity and inclusion checks, rejecting conflicting
+attribute/relationship identities. Existing reconciliation shares this identity
+reader and retains its OTA-mapped-change guard and `Promise<void>` interface.
+
+The target writer owned by VAY-1545 must associate this observation with its exact
+logical offer, pending version, binding generation and current publication, and
+recheck freshness before activation. This helper does not establish those facts,
+verify inclusive amounts, authorize activation or prove OTA meal presentation.
+It does not wire replacement saves to live jobs. Target storage and the writer
+remain separate prerequisites; no legacy rate-plan rows are recreated here.
