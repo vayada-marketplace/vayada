@@ -319,7 +319,7 @@ function arrivalTimes(
   const checkInUntil = time(data["check_in_until"], "check_in_until", blockers, sourceId);
   const checkOutFrom = time(data["check_out_from"], "check_out_from", blockers, sourceId);
   if (
-    (checkInUntil && (!checkInTime || checkInUntil <= checkInTime)) ||
+    (checkInUntil && (!checkInTime || (checkInUntil !== "00:00" && checkInUntil <= checkInTime))) ||
     (checkOutFrom && (!checkOutTime || checkOutFrom >= checkOutTime))
   ) {
     addBlocker(
@@ -327,7 +327,7 @@ function arrivalTimes(
       "INVALID_CATALOG_POLICY_TIME",
       "booking.booking_hotels",
       sourceId,
-      "Arrival and departure windows require valid, ordered same-day bounds.",
+      "Arrival and departure windows require valid ordered bounds; 00:00 may end check-in.",
     );
   }
   return { checkInTime, checkOutTime, checkInUntil, checkOutFrom };
