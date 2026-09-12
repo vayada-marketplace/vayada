@@ -623,3 +623,4 @@ export interface ChannexNotificationSettingsReadPort {
 }
 
 export * from "./management.js";
+export * from "./inventoryRules.js";
