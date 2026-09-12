@@ -1,3 +1,4 @@
+import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
@@ -136,6 +137,7 @@ import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
+import { createFinancePaymentSetupRuntime } from "./domains/financePaymentSetupRuntime.js";
 import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
@@ -462,12 +464,13 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
     })
   : undefined;
-const pmsRoomClosureRepository = pmsOperationsRepository && config.pmsRoomClosureEnabled
-  ? createPgPmsRoomClosureRepository({
-      connectionString: targetDatabaseUrl,
-      channex: config.channexManagement,
-    })
-  : undefined;
+const pmsRoomClosureRepository =
+  pmsOperationsRepository && config.pmsRoomClosureEnabled
+    ? createPgPmsRoomClosureRepository({
+        connectionString: targetDatabaseUrl,
+        channex: config.channexManagement,
+      })
+    : undefined;
 const pmsLinkedInventoryGroupCommandRepository = pmsOperationsRepository
   ? createPgPmsLinkedInventoryGroupCommandRepository({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -817,6 +820,12 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
+  connectionString: targetDatabaseUrl,
+  pricing: pmsPricingReadModel,
+  finance: financePaymentReadinessReadModel,
+  scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
+});
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
 });
@@ -1144,7 +1153,17 @@ const platformAdminDashboardRepository = createTargetPlatformAdminDashboardRepos
   connectionString: targetDatabaseUrl,
 });
 
+if (config.airbnbImport && (!config.auth || !config.authSession || !pmsRoomSetupRuntime))
+  throw new Error("Airbnb imports require authentication and canonical room setup");
+const airbnbImportRuntime = config.airbnbImport
+  ? createAirbnbImportRuntime({
+      config: config.airbnbImport,
+      connectionString: targetDatabaseUrl,
+      allowedOrigins: config.authSession!.authAllowedOrigins,
+    })
+  : undefined;
 const app = buildApp({
+  airbnbImports: airbnbImportRuntime?.routes,
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
@@ -1284,6 +1303,7 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
+  financePaymentSetup: financePaymentSetupRuntime.routes,
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,
@@ -1688,6 +1708,9 @@ app.addHook("onReady", async () => {
 });
 
 app.addHook("onClose", async () => {
+  await airbnbImportRuntime?.close();
+});
+app.addHook("onClose", async () => {
   stopPostgresTelemetry();
   await postgresRuntime.close();
 });
@@ -1829,6 +1852,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
+    financePaymentSetupRuntime.close(),
     marketplaceSetupLifecycleStatusRepository.close(),
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),

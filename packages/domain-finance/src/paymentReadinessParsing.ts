@@ -31,7 +31,7 @@ export function parseFinancePaymentReadinessSnapshot(
     ]) ||
     value.contractVersion !== FINANCE_PAYMENT_READINESS_CONTRACT_VERSION ||
     !uuid(value.propertyId) ||
-    !revision(value.paymentMethodsRevision, false) ||
+    !revision(value.paymentMethodsRevision, true) ||
     typeof value.paymentsEnabled !== "boolean" ||
     typeof value.bookingPaymentReady !== "boolean" ||
     !count(value.selectedMethodCount) ||

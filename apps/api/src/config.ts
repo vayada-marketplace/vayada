@@ -1,3 +1,4 @@
+import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
 
@@ -178,6 +179,7 @@ export type ApiConfig = {
   pmsInventoryPublicOfferRetryIntervalMs: number;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
+  airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
@@ -969,6 +971,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
+    airbnbImport: loadAirbnbImportConfig(env),
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
