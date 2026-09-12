@@ -17,6 +17,8 @@ import { createPgAirbnbImportSourceRepository } from "../../apps/api/src/domains
 import { createPgAirbnbImportApplicationRepository } from "../../apps/api/src/domains/airbnbImportApplicationRepository.js";
 import { listings } from "./client.js";
 
+const importOrigins = ["https://pms.localhost:1380", "https://marketplace.localhost:1382"];
+
 async function main() {
   // Deliberately fixed isolated endpoint; never accepts a production DSN or provider key.
   const connectionString = "postgresql://postgres@127.0.0.1:59709/vay1009_import_test";
@@ -175,7 +177,7 @@ async function main() {
     prefix: "/api/hotel-setup",
     repository: createPgAirbnbImportSourceRepository(connectionString),
     propertyAccessRepository: propertyAccess,
-    allowedOrigins: ["https://pms.localhost:1380"],
+    allowedOrigins: importOrigins,
     resolveBinding: async () => ({
       environment: "staging",
       groupId: organization,
@@ -250,7 +252,7 @@ async function main() {
           headers: { "x-import-demo-token": token },
           bypass(req, res) {
             const origin = req.headers.origin;
-            if (origin && origin !== "https://pms.localhost:1380") {
+            if (origin && !importOrigins.includes(origin)) {
               res?.writeHead(403);
               res?.end();
               return false;

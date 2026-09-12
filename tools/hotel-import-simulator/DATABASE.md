@@ -20,7 +20,7 @@ PORTLESS_STATE_DIR=/tmp/vay1009-real-import-1380 PORTLESS_PORT=1380 PORTLESS_SYN
 
 Reuse the container when it already exists. Open
 [the database demo](https://pms.localhost:1380/database.html). The API binds loopback,
-requires an ephemeral token held by Vite, and rejects other browser origins at the
+requires an ephemeral token held by Vite, and accepts only the fixed PMS and Marketplace browser origins at the
 proxy. This is test authentication, not WorkOS evidence. Do not expose the proxy.
 
 ```sh
@@ -65,7 +65,7 @@ E2E_AIRBNB_IMPORT_DATABASE=1 E2E_MARKETPLACE_BASE_URL=https://marketplace.localh
 ```
 
 The test drives the actual callback/review UI. Its browser interceptor forwards
-import requests to the token-protected local harness; it does not mock import
+import requests to the token-protected local harness, preserving the browser Origin; it does not mock import
 responses. The provider link/listing ports and identity are synthetic. It verifies
 room persistence, a lost save response, reload, and concurrent replay after removing
 only that run's receipt. Real draft-room bindings recover the same room identity.

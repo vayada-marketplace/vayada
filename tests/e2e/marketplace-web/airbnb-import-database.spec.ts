@@ -6,6 +6,7 @@ import { corsHeaders, fulfillCorsPreflight } from "./utils/cors";
 
 // Fixed isolated fixture only; never accepts a remote DSN or provider credentials.
 const fixtureOrigin = "https://pms.localhost:1380";
+const marketplaceOrigin = "https://marketplace.localhost:1382";
 const database = "postgresql://postgres@127.0.0.1:59709/vay1009_import_test";
 test.skip(
   process.env.E2E_AIRBNB_IMPORT_DATABASE !== "1",
@@ -17,6 +18,11 @@ test("Airbnb review persists one canonical room and recovers a missing receipt",
 }) => {
   const { propertyId } = await (await request.get(`${fixtureOrigin}/api/import-demo`)).json();
   const api = `/api/hotel-setup/properties/${propertyId}/airbnb-import`;
+  const denied = await request.post(`${fixtureOrigin}${api}/start`, {
+    headers: { origin: "https://untrusted.example.test" },
+    data: {},
+  });
+  expect(denied.status()).toBe(403);
   const start = await request.post(`${fixtureOrigin}${api}/start`, {
     headers: { origin: fixtureOrigin },
     data: {},
@@ -30,9 +36,11 @@ test("Airbnb review persists one canonical room and recovers a missing receipt",
   await page.route(/\/api\/hotel-setup\/properties\/.*\/airbnb-import\//, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     const destination = fixtureOrigin + new URL(route.request().url()).pathname;
+    const origin = route.request().headers().origin;
+    if (route.request().method() === "POST") expect(origin).toBe(marketplaceOrigin);
     const response = await request.fetch(destination, {
       method: route.request().method(),
-      headers: { origin: fixtureOrigin, "content-type": "application/json" },
+      headers: { ...(origin ? { origin } : {}), "content-type": "application/json" },
       ...(route.request().postData() ? { data: route.request().postData()! } : {}),
     });
     if (route.request().method() === "POST" && destination.endsWith("/review")) {
