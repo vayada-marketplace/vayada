@@ -112,6 +112,7 @@ export type SharedFirstRunPropertySetupWizardProps = {
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
   renderAfterHotelDetails?: (propertyId: string) => ReactNode;
+  renderSetupActions?: (propertyId: string) => ReactNode;
   onExit?: (propertyId: string | null) => void;
 };
 
@@ -350,6 +351,7 @@ export default function SharedFirstRunPropertySetupWizard({
   propertyLaunchSettingsApi,
   onPropertySelected,
   renderAfterHotelDetails,
+  renderSetupActions,
   initialProfileSuggestions,
   propertyCreateIdempotencyKey,
   onExit,
@@ -768,7 +770,12 @@ export default function SharedFirstRunPropertySetupWizard({
   if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
     if (saving)
       return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
-    return renderAfterHotelDetails(view.selectedPropertyId);
+    return (
+      <>
+        {renderSetupActions?.(view.selectedPropertyId)}
+        {renderAfterHotelDetails(view.selectedPropertyId)}
+      </>
+    );
   }
 
   return (
@@ -779,6 +786,9 @@ export default function SharedFirstRunPropertySetupWizard({
       mapFirst={view.screen === "property_profile" && profileStep === 1}
       headingRef={view.screen === "property_profile" ? profileHeading : undefined}
     >
+      {view.screen === "setup_plan" &&
+        view.selectedPropertyId &&
+        renderSetupActions?.(view.selectedPropertyId)}
       {error && !(view.screen === "property_profile" && profileLoadFailed) && (
         <div
           className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
