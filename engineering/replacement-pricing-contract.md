@@ -470,3 +470,19 @@ The concrete guard accepts only Finance/charge owner references and the three
 implemented source keys. Currency changes fail closed until separate owner
 conversion obligations are implemented. This is storage integration, not HTTP
 publication/editor wiring or deployed provider evidence.
+
+## Trusted preparation and publication commands (VAY-1935)
+
+`createReplacementPricingCommands` binds a trusted server context and derives the
+actor/organization scope from it. Callers supply only the property ID. Preparation
+parses complete room configurations, gathers locked current owner sources and
+selected Booking terms, and derives Finance readiness. It returns a snapshot with
+that readiness reference, without writes or automatic charge confirmation. All
+returned evidence must still pass live checks when a draft/publication is saved.
+
+Draft operations and explicit charge confirmation use their existing owners.
+Publication requires a saved draft binding at runtime and retains the caller's
+complete original command for exact historical retries. It does not reload a
+possibly edited/deleted draft before storage checks its accepted receipt. Storage
+continues to enforce snapshot/source/base/draft identity for new publications.
+HTTP route policy enforcement, editor wiring and currency approval remain pending.
