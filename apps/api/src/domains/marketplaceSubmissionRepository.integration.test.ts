@@ -1,4 +1,3 @@
-import { readMarketplacePublicHotel } from "./marketplacePublicHotel.js";
 import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import { createPgSharedHotelSetupStatusRepository } from "../platform/sharedHotelSetupStatusReadModel.js";
@@ -353,34 +352,32 @@ describe.skipIf(!database)("Marketplace submission transactions", () => {
       });
       const resolver = createHotelMediaResolutionPort(adapter);
       try {
-        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        expect(await actual.getPublicHotel(propertyId, resolver)).toBeNull();
         await admin.query(
           `UPDATE marketplace.hotel_submission_moderation SET status='approved',decided_by_user_id=$2::uuid,decided_at=now() WHERE submission_revision_id=$1::uuid`,
           [receipt.revisionId, actorUserId],
         );
         // Approval without explicit activation still has no public projection.
-        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        expect(await actual.getPublicHotel(propertyId, resolver)).toBeNull();
         await admin.query(
           `INSERT INTO marketplace.active_hotel_submission_revisions (property_id,submission_revision_id,activated_by_user_id,status_changed_by_user_id) VALUES ($1::uuid,$2::uuid,$3::uuid,$3::uuid)`,
           [propertyId, receipt.revisionId, actorUserId],
         );
-        expect(await readMarketplacePublicHotel(admin, resolver, propertyId.toUpperCase())).toEqual(
-          {
-            propertyId,
-            revisionId: receipt.revisionId,
-            displayName: "Submission Test Hotel",
-            propertyType: "hotel",
-            shortDescription:
-              "A welcoming hotel with comfortable rooms and easy access to local parks and restaurants.",
-            locality: { city: "Berlin", countryCode: "DE" },
-            media: [{ mediaType: "logo", url: publicUrl, altText: "Hotel logo" }],
-          },
-        );
+        expect(await actual.getPublicHotel(propertyId.toUpperCase(), resolver)).toEqual({
+          propertyId,
+          revisionId: receipt.revisionId,
+          displayName: "Submission Test Hotel",
+          propertyType: "hotel",
+          shortDescription:
+            "A welcoming hotel with comfortable rooms and easy access to local parks and restaurants.",
+          locality: { city: "Berlin", countryCode: "DE" },
+          media: [{ mediaType: "logo", url: publicUrl, altText: "Hotel logo" }],
+        });
         await admin.query(
           `UPDATE hotel_catalog.properties SET display_name='Unsubmitted draft' WHERE id=$1::uuid`,
           [propertyId],
         );
-        expect((await readMarketplacePublicHotel(admin, resolver, propertyId))?.displayName).toBe(
+        expect((await actual.getPublicHotel(propertyId, resolver))?.displayName).toBe(
           "Submission Test Hotel",
         );
         await admin.query(`DELETE FROM platform.media_variants WHERE media_object_id=$1::uuid`, [
@@ -390,7 +387,7 @@ describe.skipIf(!database)("Marketplace submission transactions", () => {
           `UPDATE platform.media_objects SET public_approved=FALSE,visibility='private' WHERE id=$1::uuid`,
           [mediaId],
         );
-        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        expect(await actual.getPublicHotel(propertyId, resolver)).toBeNull();
         await admin.query(
           `UPDATE platform.media_objects SET public_approved=TRUE,visibility='public' WHERE id=$1::uuid`,
           [mediaId],
@@ -404,7 +401,7 @@ describe.skipIf(!database)("Marketplace submission transactions", () => {
             `UPDATE marketplace.active_hotel_submission_revisions SET activation_status=$2 WHERE property_id=$1::uuid`,
             [propertyId, status],
           );
-          expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+          expect(await actual.getPublicHotel(propertyId, resolver)).toBeNull();
         }
       } finally {
         await adapter.close?.();

@@ -1,3 +1,5 @@
+import type { HotelMediaResolutionPort } from "@vayada/domain-hotels";
+import { readMarketplacePublicHotel } from "./marketplacePublicHotel.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { MarketplaceHotelCollaborationPreferencesCommandAudit } from "@vayada/domain-marketplace";
 import {
@@ -93,6 +95,14 @@ export function createPgMarketplaceSubmissionRepository(config: {
     };
   }
   return {
+    async getPublicHotel(propertyId: string, mediaResolver: HotelMediaResolutionPort) {
+      const client = await pool.connect();
+      try {
+        return await readMarketplacePublicHotel(client, mediaResolver, propertyId);
+      } finally {
+        client.release();
+      }
+    },
     async submit(
       scope: MarketplaceSubmissionScope,
       idempotencyKey: string,

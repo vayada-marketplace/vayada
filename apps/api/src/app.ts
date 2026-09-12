@@ -3,6 +3,10 @@ import {
   type AirbnbImportRoutesOptions,
 } from "./routes/airbnbImports.js";
 import {
+  registerMarketplacePublicHotelRoutes,
+  type MarketplacePublicHotelRoutesOptions,
+} from "./routes/marketplacePublicHotel.js";
+import {
   registerMarketplaceSubmissionRoutes,
   type MarketplaceSubmissionRoutesOptions,
 } from "./routes/marketplaceSubmission.js";
@@ -390,6 +394,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
   marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
+  marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
@@ -704,6 +709,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerHotelCatalogStep1Routes, {
       prefix: "/api/hotel-setup",
       ...options.hotelCatalogStep1,
+    });
+  }
+  if (options.marketplacePublicHotel) {
+    app.register(registerMarketplacePublicHotelRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplacePublicHotel,
     });
   }
   if (options.marketplaceSubmission) {

@@ -1608,6 +1608,15 @@ const app = buildApp({
       }
     : undefined,
   marketplaceSubmission: { repository: marketplaceSubmissionRepository },
+  marketplacePublicHotel: {
+    read: async (propertyId) => {
+      if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
+      return marketplaceSubmissionRepository.getPublicHotel(
+        propertyId,
+        createHotelMediaResolutionPort(bookingDesignMediaAdapter),
+      );
+    },
+  },
   marketplaceHotelCollaborationPreferences: {
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
