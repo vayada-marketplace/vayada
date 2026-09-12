@@ -8,6 +8,7 @@ import { type createReplacementPricingClient, type PricingSnapshot, type Pricing
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
 import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
+import { PricingIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { PricingStayOwnership } from "./PricingStayOwnership";
 import { PricingStaySeasons } from "./PricingStaySeasons";
 import { PricingStayDates } from "./PricingStayDates";
@@ -30,7 +31,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
   const [addingOfferRoom, setAddingOfferRoom] = useState<string | null>(null);
   const [addingRoom, setAddingRoom] = useState(false);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
-  const exclusiveEditPending = addingRoom || addingOfferRoom !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:")) && pending);
+  const exclusiveEditPending = addingRoom || addingOfferRoom !== null || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:") || key.startsWith("included:")) && pending);
   const hasPendingEntries = addingRoom || addingOfferRoom !== null || Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
@@ -173,6 +174,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
           <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review || exclusiveEditPending}
             value={review ? decimalAmount(minor, scale) : inputs[`${ri}:${oi}:${ai}`] ?? decimalAmount(minor, scale)} onChange={(event) => { setInputs({ ...inputs, [`${ri}:${oi}:${ai}`]: event.target.value }); setDirty(true); setReview(null); setAck(false); setNotice(""); }} /></label>)}
             {offer.price.kind === "independent" && !offer.price.calendar.base && <p className="text-sm text-gray-500">Calendar-only rate. Add date prices below; other calendar editing is not available yet.</p>}</div>
+          <PricingIncludedAdjustments room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} baseValue={review ? undefined : inputs[`${ri}:${oi}:0`]} disabled={disabled || !!review} blocked={hasPendingEntries}
+            onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`included:${ri}:${oi}`]: pending }))}
+            onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
           <PricingDates room={room} offer={offer} label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1}`} disabled={disabled || !!review || exclusiveEditPending}
             onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`date:${ri}:${oi}`]: pending }))}
             onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />

@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
+import { changeIncludedAdjustments } from "./PricingIncludedAdjustments";
 import { changeDatePrice } from "./PricingDates";
 import { NewLinkedOffer, linkedOfferInput } from "./NewLinkedOffer";
 import { changeLinkedParent, linkedParentChoices } from "./PricingLinkedParent";
@@ -814,4 +815,57 @@ it("creates an independent offer through fixed-room setup and retains policy ret
   expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15525" } } });
   expect(saved.snapshot.rooms[0].offers[1].price).toMatchObject({ kind: "independent", calendar: { base: { amountMinor: "20000" } } });
   await click("Review saved charges"); expect(button("Add independent offer").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+});
+
+function includedRoom() {
+  const room = structuredClone(snapshot.rooms[0]), offer = room.offers[0];
+  const base = { mode: "included_guests" as const, baseGuests: 2, baseMinor: "13000", adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }, { kind: "percentage" as const, basisPoints: 1925 }] };
+  return { ...room, capacity: { ...room.capacity, total: 3, adults: 3 }, offers: [
+    { ...offer, price: { kind: "independent" as const, calendar: { base, months: [{ month: 8, price: { ...base, baseMinor: "20000" } }], seasons: [{ from: "12-01", through: "12-31", name: "Winter", tier: "high", price: { ...base, baseMinor: "25000" } }], weekdays: [{ day: 0, adjustment: { kind: "fixed" as const, deltaMinor: "100" } }], dates: [{ date: "2026-12-25", price: { mode: "flat" as const, amountMinor: "30000" } }] } } },
+    { ...offer, id: "linked", price: { kind: "linked" as const, parentId: offer.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" as const } },
+    { ...offer, id: "other" },
+  ] };
+}
+it("replaces included base settings exactly while preserving every other price and policy", () => {
+  const room = includedRoom(), original = structuredClone(room);
+  const originalPrice = room.offers[0].price; if (originalPrice.kind !== "independent") throw new Error("fixture");
+  const entry = { adults: "2", adjustments: [{ kind: "fixed", value: "-30" }, { kind: "fixed", value: "0" }, { kind: "fixed", value: "+25" }] };
+  const changed = changeIncludedAdjustments(room, "flex", entry, "130");
+  expect(changed).toEqual({ ...room, offers: [{ ...room.offers[0], price: { ...room.offers[0].price, calendar: { ...originalPrice.calendar, base: { mode: "included_guests", baseGuests: 2, baseMinor: "13000", adjustments: [{ kind: "fixed", deltaMinor: "-3000" }, { kind: "fixed", deltaMinor: "0" }, { kind: "fixed", deltaMinor: "2500" }] } } } }, ...room.offers.slice(1)] });
+  expect(changeIncludedAdjustments(room, "flex", { adults: "1", adjustments: [{ kind: "fixed", value: "0" }, { kind: "percentage", value: "+10.25" }, { kind: "percentage", value: "0" }] }, "150.25").offers[0].price).toMatchObject({ calendar: { base: { baseGuests: 1, baseMinor: "15025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 1025 }, { kind: "percentage", basisPoints: 0 }] } } });
+  for (const value of ["", "1e2", "NaN", "1.001", "-130", "10000000000000000"]) expect(() => changeIncludedAdjustments(room, "flex", { ...entry, adjustments: [{ kind: "fixed", value }, ...entry.adjustments.slice(1)] }, "130")).toThrow();
+  for (const adults of ["", "0", "4", "1.5"]) expect(() => changeIncludedAdjustments(room, "flex", { ...entry, adults }, "130")).toThrow();
+  expect(() => changeIncludedAdjustments(room, "flex", { ...entry, adjustments: [] }, "130")).toThrow();
+  expect(() => changeIncludedAdjustments(room, "flex", { ...entry, adjustments: [{ kind: "percentage", value: "-100" }, ...entry.adjustments.slice(1)] }, "130")).toThrow();
+  expect(() => changeIncludedAdjustments(room, "flex", entry, "bad")).toThrow();
+  for (const id of ["missing", "linked", "other"]) expect(() => changeIncludedAdjustments(room, id, entry, "130")).toThrow();
+  expect(room).toEqual(original);
+});
+it("prefills included settings, guards pending edits and saves current bases through review and reload", async () => {
+  const room = includedRoom(); const originalPrice = room.offers[0].price; if (originalPrice.kind !== "independent") throw new Error("fixture"); client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false });
+  await mount(); await click("Save draft"); const draftId = saved.draftId;
+  const field = (label: string) => view.root.findByProps({ "aria-label": label });
+  const set = async (label: string, value: string) => { await act(async () => field(label).props.onChange({ target: { value } })); };
+  expect(view.root.findAllByType("button").filter((node) => node.children.join("") === "Edit included-adult adjustments")).toHaveLength(1);
+  await click("Edit stay rules"); expect(button("Edit included-adult adjustments").props.disabled).toBe(true); await click("Cancel stay-rule edit");
+  await click("Edit included-adult adjustments");
+  expect(field("Adults included in the base price").props.value).toBe("2"); expect(field("Adjustment for 1 adult").props.value).toBe("-30.00"); expect(field("Adjustment for 3 adults").props.value).toBe("19.25");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true); expect(input().props.disabled).toBe(true);
+  expect(button("Add independent offer").props.disabled).toBe(true); expect(button("Change meal plan").props.disabled).toBe(true); expect(button("Edit stay rules").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  await set("Adjustment for 1 adult", "-200"); await click("Apply included-adult adjustments"); expect(view.root.findAllByProps({ role: "alert" })).toHaveLength(1);
+  await click("Cancel included-adult adjustments"); expect(button("Review saved charges").props.disabled).toBe(false); expect(client.saveDraft).toHaveBeenCalledTimes(1);
+  await set("Room 1 Offer 1 2 adults included", "150.25"); await set("Room 1 Offer 3 Per room", "199.99");
+  await click("Edit included-adult adjustments"); expect(JSON.stringify(view.toJSON())).toContain("150.25");
+  await set("Adults included in the base price", "1"); expect(field("Adjustment for 2 adults").props.value).toBe(""); expect(field("Adjustment for 3 adults").props.value).toBe("");
+  await click("Apply included-adult adjustments"); expect(button("Save draft").props.disabled).toBe(true);
+  await set("Adjustment type for 2 adults", "percentage"); await set("Adjustment for 2 adults", "10.25"); await set("Adjustment type for 3 adults", "fixed"); await set("Adjustment for 3 adults", "25");
+  await click("Apply included-adult adjustments"); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].revision).toBe(8);
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { baseGuests: 1, baseMinor: "15025", adjustments: [{ kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 1025 }, { kind: "fixed", deltaMinor: "2500" }] }, months: originalPrice.calendar.months } });
+  expect(saved.snapshot.rooms[0].offers[2].price).toMatchObject({ calendar: { base: { amountMinor: "19999" } } });
+  expect(client.termsAction).not.toHaveBeenCalled(); await click("Review saved charges"); expect(button("Edit included-adult adjustments").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true);
+  await click("Reload pricing"); await click("Edit included-adult adjustments"); expect(field("Adults included in the base price").props.value).toBe("1"); expect(field("Adjustment for 2 adults").props.value).toBe("10.25");
 });
