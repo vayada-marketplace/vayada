@@ -91,6 +91,7 @@ export type ProviderWebhookRoutesOptions = {
   secrets: ProviderWebhookSecrets;
   modes?: ProviderWebhookModeConfig;
   channexBookingPromotionEnabled?: boolean;
+  channexReviewMode?: ProviderWebhookMode;
   store: ProviderWebhookStore;
   pmsInboxDeliveryReceipts?: Pick<PmsInboxDeliveryReceiptPort, "recordTrustedProviderReceipt">;
   stripeTimestampToleranceSeconds?: number;
@@ -571,6 +572,8 @@ function channexModeFor(
   classification: ChannexClassification,
 ): ProviderWebhookMode {
   const mode = modeFor(options, "channex");
+  if (classification.family === "review" || classification.family === "updated_review")
+    return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
     ((classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
