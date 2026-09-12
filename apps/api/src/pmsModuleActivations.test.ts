@@ -494,6 +494,191 @@ describe("PMS review routes", () => {
   });
 });
 
+describe("PMS review reply authorization", () => {
+  it.each([
+    ["missing auth", {}, undefined, 401],
+    ["invalid auth", {}, { authorization: "Bearer invalid" }, 401],
+    [
+      "read only",
+      { permissions: ["pms.operations.read"] },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+    ["no entitlement", { entitlements: [] }, { authorization: "Bearer valid-token" }, 403],
+    [
+      "inactive entitlement",
+      { entitlements: [pmsEntitlement("suspended")] },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+    ["no assignment", { linkedPropertyId: null }, { authorization: "Bearer valid-token" }, 403],
+    [
+      "wrong property",
+      { linkedPropertyId: "f6853000-0000-0000-0000-000000000099" },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+  ] as const)("denies %s", async (_name, options, headers, expected) => {
+    const app = buildAuthenticatedApp({
+      ...options,
+      reviewRepository: { list: async () => ({ items: [], total: 0 }) },
+    } as Parameters<typeof buildAuthenticatedApp>[0]);
+    try {
+      for (const method of ["GET", "POST"] as const) {
+        const response = await app.inject({
+          method,
+          url: `/api/pms/properties/${propertyId}/reviews/review-1/reply`,
+          headers,
+          ...(method === "POST" ? { payload: { text: "Thank you" } } : {}),
+        });
+        expect(response.statusCode).toBe(expected);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+  it("rejects invalid text before submission and forwards valid text with actor context", async () => {
+    const app = buildAuthenticatedApp({
+      reviewRepository: {
+        list: async () => ({ items: [], total: 0 }),
+        replies: {
+          check: async () => ({ state: "ready" }),
+          close: async () => {},
+          submit: async (context, property, review, text) => {
+            expect([context.actor.internalUserId, property, review, text]).toEqual([
+              actorUserId,
+              propertyId,
+              "review-1",
+              "Thank you",
+            ]);
+            return { state: "accepted" };
+          },
+        },
+      },
+    });
+    try {
+      for (const text of ["", "   ", 42, "x".repeat(10001), "a\u0000b", " Thank you "]) {
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/pms/properties/${propertyId}/reviews/review-1/reply`,
+          headers: { authorization: "Bearer valid-token" },
+          payload: { text },
+        });
+        expect(response.statusCode).toBe(text === " Thank you " ? 200 : 400);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("PMS guest-review authorization", () => {
+  it.each([
+    ["missing auth", {}, undefined, 401],
+    ["invalid auth", {}, { authorization: "Bearer invalid" }, 401],
+    [
+      "read only",
+      { permissions: ["pms.operations.read"] },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+    ["no entitlement", { entitlements: [] }, { authorization: "Bearer valid-token" }, 403],
+    [
+      "inactive entitlement",
+      { entitlements: [pmsEntitlement("suspended")] },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+    ["no assignment", { linkedPropertyId: null }, { authorization: "Bearer valid-token" }, 403],
+    [
+      "wrong property",
+      { linkedPropertyId: "f6853000-0000-0000-0000-000000000099" },
+      { authorization: "Bearer valid-token" },
+      403,
+    ],
+  ] as const)("denies %s", async (_name, options, headers, expected) => {
+    const app = buildAuthenticatedApp({
+      ...options,
+      reviewRepository: { list: async () => ({ items: [], total: 0 }) },
+    } as Parameters<typeof buildAuthenticatedApp>[0]);
+    try {
+      for (const [method, path] of [
+        ["GET", "guest-reviews"],
+        ["GET", "guest-reviews/review-1"],
+        ["POST", "guest-reviews/review-1"],
+      ] as const) {
+        const response = await app.inject({
+          method,
+          url: `/api/pms/properties/${propertyId}/${path}`,
+          headers,
+          ...(method === "POST" ? { payload: { text: "Thank you" } } : {}),
+        });
+        expect(response.statusCode).toBe(expected);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+  it("validates guest-review input and forwards actor/property identity", async () => {
+    const draft = {
+      respectHouseRules: 5,
+      communication: 4,
+      cleanliness: 3,
+      publicReview: "Good guest",
+      privateReview: "",
+      recommended: true,
+    };
+    const opportunity = {
+      reviewId: "review-1",
+      guestName: "Ada",
+      reservationCode: "HM123",
+      state: "ready" as const,
+    };
+    let submitted = 0;
+    const app = buildAuthenticatedApp({
+      reviewRepository: {
+        list: async () => ({ items: [], total: 0 }),
+        guestReviews: {
+          list: async () => ({ items: [opportunity], stored: [], more: false, unavailable: false }),
+          check: async () => opportunity,
+          close: async () => {},
+          submit: async (context, property, review, value) => {
+            expect([context.actor.internalUserId, property, review, value]).toEqual([
+              actorUserId,
+              propertyId,
+              "review-1",
+              draft,
+            ]);
+            submitted++;
+            return { ...opportunity, state: "accepted" };
+          },
+        },
+      },
+    });
+    try {
+      for (const payload of [
+        {},
+        { ...draft, communication: 0 },
+        { ...draft, cleanliness: 6 },
+        { ...draft, publicReview: " " },
+        { ...draft, recommended: "yes" },
+        draft,
+      ]) {
+        const result = await app.inject({
+          method: "POST",
+          url: `/api/pms/properties/${propertyId}/guest-reviews/review-1`,
+          headers: { authorization: "Bearer valid-token" },
+          payload,
+        });
+        expect(result.statusCode).toBe(payload === draft ? 200 : 400);
+      }
+      expect(submitted).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe("PG PMS module activation repository", () => {
   const context = {
     actor: {

@@ -13,6 +13,7 @@ export function OperationFormShell({
   submitLabel,
   submitting,
   submittingLabel = "Saving...",
+  submitDisabled = false,
 }: {
   children: ReactNode;
   error?: string;
@@ -23,6 +24,7 @@ export function OperationFormShell({
   submitLabel: string;
   submitting: boolean;
   submittingLabel?: string;
+  submitDisabled?: boolean;
 }) {
   return (
     <form className="space-y-6" onSubmit={onSubmit}>
@@ -72,7 +74,8 @@ export function OperationFormShell({
           ) : null}
           <button
             className="min-h-11 rounded-full bg-primary-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={submitting}
+            disabled={submitting || submitDisabled}
+            aria-disabled={submitDisabled || submitting}
             type="submit"
           >
             {submitting ? submittingLabel : submitLabel}
