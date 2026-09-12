@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { createBookingPricingOfferTermsStore, lockBookingPricingOfferTerms, parseBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
+import { createBookingPricingOfferTermsStore, lockBookingPricingOfferTerms, lockBookingPricingTermsSource, lockBookingPricingDraftTerms, parseBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -106,4 +106,103 @@ describe.skipIf(!url)("Booking replacement offer terms PostgreSQL owner", () => 
     }
     expect((await pool.query("SELECT count(*)::int AS count FROM booking.pricing_v2_offer_terms WHERE property_id=$1", [f.scope.propertyId])).rows[0].count).toBe(0);
   });
+  async function locked<T>(f: Awaited<ReturnType<typeof fixture>>, work: (client: pg.PoolClient) => Promise<T>) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      expect(await lockReplacementPricingAuthorization(client, f.context, f.scope, "manage")).toBe(true);
+      return await work(client);
+    } finally { await client.query("ROLLBACK"); client.release(); }
+  }
+  it("stages full policies and new offers without changing active sources or distributing them", async () => {
+    const f = await fixture(), active = await store.save(f.context, f.scope, f.command());
+    const draft = { draftId: randomUUID(), baseRevision: 0 };
+    const before = await locked(f, (c) => lockBookingPricingTermsSource(c, f.scope.propertyId));
+    const command = { ...f.command(), expectedRevision: active.revision };
+    const [candidate, replay] = await Promise.all([store.stage(f.context, f.scope, command, draft), store.stage(f.context, f.scope, command, draft)]);
+    expect(candidate).toEqual(replay); expect(candidate).toMatchObject(f.terms);
+    const added = await store.stage(f.context, f.scope, { ...f.command(), terms: { ...f.terms, offerId: "new" } }, draft);
+    expect(await store.read(f.context, f.scope, f.terms.roomTypeId, "flex")).toEqual(active);
+    expect(await store.read(f.context, f.scope, f.terms.roomTypeId, "new")).toBeNull();
+    await locked(f, async (c) => {
+      expect(await lockBookingPricingTermsSource(c, f.scope.propertyId)).toBe(before);
+      expect(await lockBookingPricingOfferTerms(c, f.scope.propertyId, [candidate])).toBeNull();
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [candidate, added])).toEqual([candidate, added]);
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [active, added])).toEqual([active, added]);
+    });
+    expect((await pool.query("SELECT event_type FROM platform.domain_events WHERE property_id=$1 ORDER BY event_type", [f.scope.propertyId])).rows.map((r) => r.event_type))
+      .toEqual(["booking.pricing_terms.revised", "booking.pricing_terms.staged", "booking.pricing_terms.staged"]);
+    expect((await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(1);
+    await expect(store.save(f.context, f.scope, command)).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(store.stage(f.context, f.scope, command, { ...draft, draftId: randomUUID() })).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(store.stage(f.context, f.scope, { ...command, terms: { ...f.terms, payment: { kind: "full" } } }, draft)).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
+  it("isolates candidate draft, base, room, property and expected active head", async () => {
+    const f = await fixture(), other = await fixture(), active = await store.save(f.context, f.scope, f.command());
+    const draft = { draftId: randomUUID(), baseRevision: 0 }, command = { ...f.command(), expectedRevision: active.revision };
+    const candidate = await store.stage(f.context, f.scope, command, draft);
+    await locked(f, async (c) => {
+      for (const selected of [[candidate, candidate], [{ ...candidate, revision: randomUUID() }], [{ ...candidate, roomTypeId: other.terms.roomTypeId }], [{ ...candidate, offerId: "other" }]])
+        expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, selected)).toBeNull();
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, { ...draft, draftId: randomUUID() }, [candidate])).toBeNull();
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, { ...draft, baseRevision: 1 }, [candidate])).toBeNull();
+      expect(await lockBookingPricingDraftTerms(c, null, f.scope, draft, [candidate])).toBeNull();
+    });
+    await locked(other, async (c) => expect(await lockBookingPricingDraftTerms(c, other.context, other.scope, draft, [candidate])).toBeNull());
+    await store.save(f.context, f.scope, { ...f.command(), expectedRevision: active.revision });
+    await locked(f, async (c) => {
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [candidate])).toBeNull();
+      expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [active])).toBeNull();
+    });
+    expect(await store.stage(f.context, f.scope, command, draft)).toEqual(candidate);
+    await expect(store.stage(f.context, f.scope, { ...command, requestId: randomUUID() }, draft)).rejects.toMatchObject({ code: "stale" });
+  });
+  it("rejects invalid/stale/unauthorized staging and protects immutable candidate metadata", async () => {
+    const f = await fixture(), other = await fixture(), draft = { draftId: randomUUID(), baseRevision: 0 };
+    await expect(store.stage(f.context, f.scope, f.command(), { ...draft, baseRevision: 1 })).rejects.toMatchObject({ code: "stale" });
+    for (const invalid of [undefined, null, { ...draft, baseRevision: -1 }, { ...draft, extra: true }])
+      await expect(store.stage(f.context, f.scope, f.command(), invalid as typeof draft)).rejects.toMatchObject({ code: "invalid" });
+    await expect(store.stage(null, f.scope, f.command(), draft)).rejects.toMatchObject({ code: "denied" });
+    await expect(store.stage(other.context, f.scope, f.command(), draft)).rejects.toMatchObject({ code: "denied" });
+    await expect(store.stage(f.context, f.scope, { ...f.command(), terms: { ...f.terms, roomTypeId: other.terms.roomTypeId } }, draft)).rejects.toMatchObject({ code: "denied" });
+    const candidate = await store.stage(f.context, f.scope, f.command(), draft);
+    await expect(pool.query("UPDATE booking.pricing_v2_offer_term_candidates SET draft_id=$1 WHERE revision=$2", [randomUUID(), candidate.revision])).rejects.toThrow();
+    await expect(pool.query("DELETE FROM booking.pricing_v2_offer_term_candidates WHERE revision=$1", [candidate.revision])).rejects.toThrow();
+    await expect(pool.query("TRUNCATE booking.pricing_v2_offer_term_candidates")).rejects.toThrow();
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.terms.roomTypeId]);
+    await expect(store.stage(f.context, f.scope, f.command(), draft)).rejects.toMatchObject({ code: "denied" });
+  });
+  it("rolls back staged rows and events when their audit fails", async () => {
+    const f = await fixture(), command = f.command(), draft = { draftId: randomUUID(), baseRevision: 0 };
+    await pool.query(`INSERT INTO platform.product_audit_events
+      (audit_key,product,action,occurred_at,tenant_scope,property_id,target_resource_product,target_resource_type,target_resource_id)
+      VALUES($1,'booking','fixture',now(),'property',$2::uuid,'booking','offer_terms',$2::text)`,
+    [`booking.pricing_terms:${f.scope.propertyId}:${command.requestId}`, f.scope.propertyId]);
+    await expect(store.stage(f.context, f.scope, command, draft)).rejects.toThrow();
+    for (const table of ["booking.pricing_v2_offer_terms", "booking.pricing_v2_offer_term_candidates", "booking.pricing_v2_offer_term_heads", "platform.domain_events", "platform.outbox_events"])
+      expect((await pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE property_id=$1`, [f.scope.propertyId])).rows[0].n).toBe(0);
+  });
+
+  it("binds candidates to an existing pricing revision and rejects them after pricing advances", async () => {
+    const f = await fixture(), draft = { draftId: randomUUID(), baseRevision: 1 };
+    async function advance(revision: number) {
+      const c = await pool.connect();
+      try {
+        await c.query("BEGIN");
+        await c.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1) ON CONFLICT DO NOTHING", [f.scope.propertyId]);
+        await c.query(`INSERT INTO pms.pricing_v2_revisions(property_id,revision,room_count,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id)
+          VALUES($1,$2,0,'EUR','{}','{}',$3,$4,$5)`, [f.scope.propertyId, revision, randomUUID(), "a".repeat(64), f.scope.actorUserId]);
+        await c.query("UPDATE pms.pricing_v2_heads SET revision=$2 WHERE property_id=$1", [f.scope.propertyId, revision]);
+        await c.query("COMMIT");
+      } finally { await c.query("ROLLBACK"); c.release(); }
+    }
+    await advance(1);
+    const command = f.command(), candidate = await store.stage(f.context, f.scope, command, draft);
+    await locked(f, async (c) => expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [candidate])).toEqual([candidate]));
+    await advance(2);
+    await locked(f, async (c) => expect(await lockBookingPricingDraftTerms(c, f.context, f.scope, draft, [candidate])).toBeNull());
+    await expect(store.stage(f.context, f.scope, f.command(), draft)).rejects.toMatchObject({ code: "stale" });
+    expect(await store.stage(f.context, f.scope, command, draft)).toEqual(candidate);
+  });
+
 });
