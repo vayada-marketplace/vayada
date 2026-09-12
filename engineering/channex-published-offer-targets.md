@@ -392,3 +392,22 @@ reconciliation contract; never adopt by title, clear a timeout or mutate history
 - Authority expiry after identification UPDATE rolls back identity/ownership while
   preserving the independently committed receipt; concurrent identification cannot
   transfer ownership. Active pointers and `PRICING_UNAVAILABLE` remain unchanged.
+
+### Receipt storage foundation (VAY-2003)
+
+Migration 0195 adds optional immutable original job-attempt/worker correlation to
+creation attempts and append-only receipts referencing that exact tuple. Existing
+uncorrelated attempts cannot acquire correlation through an update. Correlation
+inserts require a matching job worker and property; the authorized claim service
+must still verify current lease and persist this tuple before any send.
+
+Receipt inserts lock the logical target and assign database capture time, without
+requiring current lease or pending intent. Storage enforces outcome/status shape,
+an 8 KiB identity object bound and a 512-byte provider-request-ID bound. These are
+structural checks, not response sanitization or provider acceptance. Distinct
+observations remain retained; duplicate UUID inserts cannot overwrite history.
+The capture service must implement exact-envelope idempotency and sanitization.
+
+This migration does not wire correlation into claims, implement the aggregate
+receipt gate or send HTTP. Those services and their race tests remain required
+before enabling dispatch. Uncorrelated old attempts grant no recovered send.
