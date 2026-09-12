@@ -231,3 +231,19 @@ provider room identity/capability preflight and fenced HTTP dispatch remain requ
 Local mapping evidence alone cannot prove that the external room still belongs to
 the expected provider property. Initial ARI, readback sealing and activation stay
 separate gates. The returned creation claim is not activation permission.
+
+## Provider room preflight (VAY-2000)
+
+The GET-only `verifyChannexOfferRoom` checks the exact room/property identity and
+whole-room representation against the strictly parsed published adult capacity.
+Conflicting attribute/relationship IDs, unsupported room kind, non-null dorm
+capacity, mismatched adult capacity and nonzero or missing child/infant capacity
+fail explicitly. It captures expectations before IO and returns metadata only.
+
+The provider room's `default_occupancy` is not the hotel's per-rate primary choice;
+preflight never copies or substitutes it. The exact supported room response shape
+follows the [official room-types documentation](https://docs.channex.io/api-v.1-documentation/room-types-collection),
+checked 2026-09-12. Fixtures validate parsing, not live compatibility. Freshness
+binding to the durable attempt/current authority, HTTP dispatch and outcome
+capture still need composition. Passing this helper does not enable provider writes
+or establish downstream OTA capability.

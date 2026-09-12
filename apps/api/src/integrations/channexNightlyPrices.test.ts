@@ -1,6 +1,7 @@
 import {
   planChannexOfferConfiguration,
   verifyChannexOfferConfiguration,
+  verifyChannexOfferRoom,
 } from "./channexOfferConfiguration.js";
 import { describe, expect, it, vi } from "vitest";
 import type { PricingConfiguration, RoomNightProjectionRequest } from "@vayada/domain-pms";
@@ -492,5 +493,118 @@ describe("closed offer configuration readback", () => {
       mealType: "room_only",
       configuration: planned.configuration,
     });
+  });
+});
+
+describe("Channex published adult room preflight", () => {
+  const identity = { externalPropertyId: "property", externalRoomTypeId: "room/encoded" };
+  function setup() {
+    const base = fixture(),
+      room = { ...base, capacity: { ...base.capacity, children: 0 } };
+    const response = {
+      data: {
+        type: "room_type",
+        id: identity.externalRoomTypeId,
+        attributes: {
+          id: identity.externalRoomTypeId,
+          property_id: identity.externalPropertyId,
+          room_kind: "room",
+          capacity: null,
+          occ_adults: 3,
+          occ_children: 0,
+          occ_infants: 0,
+          default_occupancy: 2,
+        },
+      },
+    };
+    const request = vi.fn(async () => response);
+    return { room, response, request };
+  }
+  it("verifies exact identity/capacity with one GET without choosing a rate primary", async () => {
+    const { room, response, request } = setup();
+    const expected = { ...identity, adults: 3, children: 0, infants: 0, roomKind: "room" };
+    expect(await verifyChannexOfferRoom(room, identity, request)).toEqual(expected);
+    expect(request.mock.calls).toEqual([["GET", "/api/v1/room_types/room%2Fencoded"]]);
+    response.data.attributes.default_occupancy = 1;
+    expect(await verifyChannexOfferRoom(room, identity, request)).toEqual(expected);
+  });
+  it("accepts relationship-only property identity and rejects contradictions", async () => {
+    const { room, response, request } = setup();
+    Object.assign(response.data, { relationships: { property: { data: { id: "property" } } } });
+    Object.assign(response.data.attributes, { property_id: undefined });
+    await expect(verifyChannexOfferRoom(room, identity, request)).resolves.toMatchObject(identity);
+    response.data.attributes.property_id = "other";
+    await expect(verifyChannexOfferRoom(room, identity, request)).rejects.toThrow();
+    response.data.attributes.property_id = "property";
+    Object.assign(response.data, { relationships: { property: { data: { id: "other" } } } });
+    await expect(verifyChannexOfferRoom(room, identity, request)).rejects.toThrow();
+  });
+  it.each([
+    ["id", "other"],
+    ["property_id", "other"],
+    ["property_id", undefined],
+    ["room_kind", "dorm"],
+    ["room_kind", undefined],
+    ["capacity", 3],
+    ["capacity", undefined],
+    ["occ_adults", 2],
+    ["occ_adults", 4],
+    ["occ_adults", "3"],
+    ["occ_adults", undefined],
+    ["occ_children", 1],
+    ["occ_children", undefined],
+    ["occ_children", "0"],
+    ["occ_infants", 1],
+    ["occ_infants", undefined],
+  ])("rejects mismatched or missing %s", async (key, value) => {
+    const { room, response, request } = setup();
+    (response.data.attributes as Record<string, unknown>)[key as string] = value;
+    await expect(verifyChannexOfferRoom(room, identity, request)).rejects.toThrow();
+  });
+  it("rejects wrong resource identity and malformed responses", async () => {
+    const { room, response } = setup();
+    for (const body of [
+      null,
+      {},
+      { data: [] },
+      { data: { ...response.data, id: "other" } },
+      { data: { ...response.data, type: "rate_plan" } },
+      { data: { ...response.data, relationships: { property: { data: null } } } },
+    ]) {
+      await expect(verifyChannexOfferRoom(room, identity, async () => body)).rejects.toThrow();
+    }
+  });
+  it("rejects unsupported local inputs before IO", async () => {
+    const { room, request } = setup();
+    for (const invalid of [null, {}, fixture()])
+      await expect(verifyChannexOfferRoom(invalid, identity, request)).rejects.toThrow();
+    for (const invalid of ["", " ", " room "])
+      await expect(
+        verifyChannexOfferRoom(room, { ...identity, externalRoomTypeId: invalid }, request),
+      ).rejects.toThrow();
+    await expect(
+      verifyChannexOfferRoom(room, { ...identity, externalPropertyId: "" }, request),
+    ).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("retains expected identity and capacity despite caller mutation during IO", async () => {
+    const { room, response } = setup(),
+      mutable = { ...identity };
+    expect(
+      await verifyChannexOfferRoom(room, mutable, async () => {
+        mutable.externalPropertyId = "other";
+        mutable.externalRoomTypeId = "other";
+        room.capacity.adults = 10;
+        return response;
+      }),
+    ).toEqual({ ...identity, adults: 3, children: 0, infants: 0, roomKind: "room" });
+  });
+  it("propagates transport failures without evidence", async () => {
+    const { room } = setup();
+    await expect(
+      verifyChannexOfferRoom(room, identity, async () => {
+        throw new Error("room unavailable");
+      }),
+    ).rejects.toThrow("room unavailable");
   });
 });

@@ -105,6 +105,52 @@ export async function verifyChannexOfferConfiguration(
   return { ...observed, configuration: expected };
 }
 
+/** Room metadata only; not current job authority, rate-primary selection or OTA proof. */
+export async function verifyChannexOfferRoom(
+  room: unknown,
+  identity: { externalPropertyId: string; externalRoomTypeId: string },
+  request: (method: "GET", path: string) => Promise<unknown>,
+) {
+  const configuration = parsePricingConfiguration(room);
+  if (!configuration || configuration.capacity.children !== 0)
+    throw new ChannexMealSyncError("Channex adult room configuration unavailable");
+  const expected = {
+    externalPropertyId: identity?.externalPropertyId,
+    externalRoomTypeId: identity?.externalRoomTypeId,
+    adults: configuration.capacity.adults,
+  };
+  if (
+    ![expected.externalPropertyId, expected.externalRoomTypeId].every(
+      (id) => typeof id === "string" && id.length > 0 && id === id.trim(),
+    )
+  )
+    throw new ChannexMealSyncError("Invalid Channex room identity");
+  const response = structuredClone(
+    await request("GET", `/api/v1/room_types/${encodeURIComponent(expected.externalRoomTypeId)}`),
+  );
+  const data = record(record(response).data);
+  const attributes = record(data.attributes);
+  const propertyRelationship = record(data.relationships).property;
+  const relatedProperty = record(record(propertyRelationship).data).id;
+  if (
+    data.type !== "room_type" ||
+    data.id !== expected.externalRoomTypeId ||
+    (attributes.id !== undefined && attributes.id !== expected.externalRoomTypeId) ||
+    (attributes.property_id !== expected.externalPropertyId &&
+      relatedProperty !== expected.externalPropertyId) ||
+    (attributes.property_id !== undefined &&
+      attributes.property_id !== expected.externalPropertyId) ||
+    (propertyRelationship !== undefined && relatedProperty !== expected.externalPropertyId) ||
+    attributes.room_kind !== "room" ||
+    attributes.capacity !== null ||
+    attributes.occ_adults !== expected.adults ||
+    attributes.occ_children !== 0 ||
+    attributes.occ_infants !== 0
+  )
+    throw new ChannexMealSyncError("Channex room identity or adult capacity mismatch");
+  return { ...expected, children: 0 as const, infants: 0 as const, roomKind: "room" as const };
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
