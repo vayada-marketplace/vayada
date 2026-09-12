@@ -1042,3 +1042,33 @@ it("prefills weekday edits and requires fresh saved review after replacing their
   await click("Review saved charges"); expect(button("Edit weekday adjustment").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit weekday adjustment"); expect(field("Weekday adjustment").props.value).toBe("-10.25"); expect(field("Weekday adjustment type").props.value).toBe("percentage");
 });
+
+it("creates final date prices using the displayed recurring mode and keeps other rules", () => {
+  const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  const bases = [{ mode: "flat" as const, amountMinor: "10000" }, { mode: "occupancy" as const, amountsMinor: ["10000", "13000"] }, { mode: "per_person" as const, unitMinor: "6000" }, { mode: "included_guests" as const, baseMinor: "13000", baseGuests: 2, adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }] }];
+  for (const base of bases) {
+    const configured = { ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base } } }] }, amounts = base.mode === "occupancy" ? ["150.25", "180.99"] : ["180.99"];
+    const result = changeDatePrice(configured, "flex", "2026-12-25", amounts, true), price = result.offers[0].price; if (price.kind !== "independent") throw new Error("fixture");
+    expect(price.calendar.base).toEqual(base); expect(price.calendar.dates[0].price.mode).toBe(base.mode); expect(result.children).toEqual(room.children); expect(result.offers[0].meal).toEqual(offer.meal);
+    if (base.mode === "included_guests") { expect(price.calendar.dates[0].price).toEqual({ ...base, baseMinor: "18099" }); expect(() => changeDatePrice(configured, "flex", "2026-12-25", ["20"], true)).toThrow(); }
+    if (base.mode === "occupancy") { expect(price.calendar.dates[0].price).toEqual({ mode: "occupancy", amountsMinor: ["15025", "18099"] }); expect(() => changeDatePrice(configured, "flex", "2026-12-25", ["150"], true)).toThrow(); }
+    if (base.mode === "per_person") expect(price.calendar.dates[0].price).toEqual({ mode: "per_person", unitMinor: "18099" });
+    expect(() => changeDatePrice(result, "flex", "2026-12-25", amounts, true)).toThrow(); expect(() => changeDatePrice(configured, "flex", "2026-02-30", amounts, true)).toThrow(); expect(() => changeDatePrice(configured, "flex", "2026-12-25", [], true)).toThrow();
+  }
+  const linked = { ...offer, id: "linked", price: { kind: "linked" as const, parentId: offer.id, adjustment: { kind: "fixed" as const, deltaMinor: "0" }, dateOverrides: [] } };
+  expect(() => changeDatePrice({ ...room, offers: [offer, linked] }, "linked", "2026-12-25", ["100"], true)).toThrow("recurring");
+  const independentPrice = offer.price;
+  expect(() => changeDatePrice({ ...room, offers: [{ ...offer, price: { ...independentPrice, calendar: { ...independentPrice.calendar, base: null } } }] }, "flex", "2026-12-25", ["100"], true)).toThrow("recurring");
+});
+it("protects date mode selection, resets inputs and saves a complete occupancy date price", async () => {
+  const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base: { mode: "occupancy", amountsMinor: ["10000", "13000"] } } } }] }], revision: 7, sources, stale: false }); await mount(); await click("Save draft"); const draftId = saved.draftId;
+  const field = (name: string) => view.root.findByProps({ "aria-label": `${name} for Room 1 Offer 1` }); const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  await fill("New date pricing", "recurring"); expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  await fill("Date 1 adult", "150.25"); await fill("New date pricing", "flat"); expect(field("Date room price").props.value).toBe(""); expect(button("Review saved charges").props.disabled).toBe(false);
+  await fill("New date pricing", "recurring"); await click("Cancel date entry"); expect(field("New date pricing").props.value).toBe("flat"); expect(client.saveDraft).toHaveBeenCalledTimes(1);
+  await fill("New date pricing", "recurring"); await fill("Override date", "2026-12-25"); await fill("Date 1 adult", "150.25"); await click("Add date price"); expect(button("Save draft").props.disabled).toBe(true); await fill("Date 2 adults", "180.99"); await click("Add date price"); expect(field("New date pricing").props.value).toBe("flat");
+  await click("Save draft"); expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { dates: [{ date: "2026-12-25", price: { mode: "occupancy", amountsMinor: ["15025", "18099"] } }] } });
+  await click("Review saved charges"); expect(field("New date pricing").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit date price"); expect(field("Date 2 adults").props.value).toBe("180.99");
+});
