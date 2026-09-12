@@ -47,6 +47,8 @@ export function ReviewReply({
       setBusy(false);
     }
   }
+  const reasonKey = `reviews.reply.reason.${status?.reason}`;
+  const reason = t(reasonKey);
   const editable = checked && (status?.state === "ready" || status?.state === "failed");
   return (
     <div className="mt-4 border-t border-gray-100 pt-3">
@@ -65,7 +67,7 @@ export function ReviewReply({
           </p>
           {status.reason && (
             <p className="mt-1 text-sm text-gray-500">
-              {t(`reviews.reply.reason.${status.reason}`)}
+              {reason === reasonKey ? t("reviews.reply.reason.provider_unreachable") : reason}
             </p>
           )}
           {status.state === "accepted" && !status.replyBody && status.draft && (

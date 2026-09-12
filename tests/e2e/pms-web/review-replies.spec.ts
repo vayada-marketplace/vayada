@@ -41,7 +41,7 @@ test("review replies preserve failures, reconcile uncertainty and survive reload
       state = sends === 1 ? "failed" : sends === 2 ? "unavailable" : "uncertain";
     }
     return route.fulfill({
-      json: { state, draft },
+      json: { state, draft, reason: state === "failed" ? "future_reason" : undefined },
     });
   });
   await page.goto("/reviews");
@@ -51,6 +51,9 @@ test("review replies preserve failures, reconcile uncertainty and survive reload
   await page.getByLabel("Your public response").fill("Thank you for staying with us.");
   await send.click();
   await expect(page.getByText("Reply was rejected.", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("Could not confirm status. Try Check status or verify in the channel."),
+  ).toBeVisible();
   await expect(page.getByLabel("Your public response")).toHaveValue(draft);
   await page.getByLabel("Your public response").fill("Thank you again for staying with us.");
   await send.click();
@@ -63,7 +66,13 @@ test("review replies preserve failures, reconcile uncertainty and survive reload
   await send.click();
   await expect(page.getByText("Submission outcome is uncertain.", { exact: false })).toBeVisible();
   await expect(send).toHaveCount(0);
+  const statusResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" && response.url().includes("/reviews/review-1/reply"),
+  );
   await page.getByRole("button", { name: "Check status", exact: true }).click();
+  await statusResponse;
+  await expect(page.getByRole("button", { name: "Check status", exact: true })).toBeEnabled();
   expect(sends).toBe(3);
   state = "accepted";
   await page.getByRole("button", { name: "Check status", exact: true }).click();
