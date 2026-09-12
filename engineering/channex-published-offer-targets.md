@@ -435,3 +435,19 @@ invalid UTF-8, timeout or an already consumed/locked body produce no partial
 identity evidence. Cancellation is best-effort and is never awaited. This bounds
 body consumption only: the future dispatcher must also bound fetch before headers.
 No HTTP request is initiated by this helper; database capture and gates remain.
+
+VAY-2007 adds `prepareChannexReceiptPersistence`: it snapshots original dispatch
+correlation, consumes/sanitizes the supplied Response once, and returns a closure
+that retries only database persistence. The closure matches exact property,
+connection, creation attempt, original job attempt and worker, locks the target,
+then inserts or compares the immutable receipt. Exact repeats return the retained
+UUID; changed evidence conflicts. Database capture commits independently of job
+completion and never identifies or activates a target. It remains valid after
+lease, intent or binding changes because it grants audit retention only.
+
+The caller must bound pool acquisition. Statements have a five-second timeout,
+locks a 150 ms timeout, and target contention fails immediately. A lost commit
+reply may be retried using the same closure without consuming or sending HTTP
+again. This entrypoint is trusted server code, not public authorization. Transport
+errors before a Response, aggregate reconciliation gates and dispatcher wiring
+remain pending. Retaining conflicting observations does not resolve them.

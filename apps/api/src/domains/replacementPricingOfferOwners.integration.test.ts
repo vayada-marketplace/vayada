@@ -1,3 +1,4 @@
+import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
 import { randomUUID } from "node:crypto";
@@ -194,6 +195,132 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     if (claim.kind !== "claimed") throw new Error("claim required");
     return { ...f, claim, response: createdResponse(claim.request.body) };
   }
+  async function receiptFixture() {
+    const f = await recordingFixture();
+    const connectionId = (
+      await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
+        f.claim.targetId,
+      ])
+    ).rows[0].connection_id as string;
+    const correlation = {
+      receiptId: randomUUID(),
+      attemptId: f.claim.attemptId,
+      jobAttemptId: f.claim.jobAttemptId,
+      workerId: f.claim.workerId,
+      propertyId: f.scope.propertyId,
+      connectionId,
+    };
+    const response = () =>
+      new Response(JSON.stringify(f.response), {
+        status: 201,
+        headers: { "x-request-id": "receipt-test" },
+      });
+    return { ...f, correlation, response };
+  }
+  it("persists late receipt independently and makes exact concurrent retries idempotent", async () => {
+    const f = await receiptFixture();
+    const save = await prepareChannexReceiptPersistence(pool, f.correlation, f.response());
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+      [f.input.jobId],
+    );
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      f.claim.intentId,
+    ]);
+    await pool.query("UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1", [
+      f.correlation.connectionId,
+      randomUUID(),
+    ]);
+    await save();
+    await save();
+    const results = await Promise.allSettled([save(), save()]);
+    expect(results.some((r) => r.status === "fulfilled")).toBe(true);
+    for (const result of results)
+      if (result.status === "rejected") expect(result.reason.code).toBe("55P03");
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+    expect(
+      (
+        await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
+          f.claim.targetId,
+        ])
+      ).rows[0].active_version,
+    ).toBeNull();
+  });
+  it("rejects changed receipt evidence and wrong original scope without overwriting", async () => {
+    const f = await receiptFixture();
+    await (
+      await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
+    )();
+    const changed = new Response(JSON.stringify({ data: { id: "different" } }), { status: 201 });
+    await expect(
+      (await prepareChannexReceiptPersistence(pool, f.correlation, changed))(),
+    ).rejects.toThrow("Channex receipt conflict");
+    for (const key of [
+      "attemptId",
+      "jobAttemptId",
+      "propertyId",
+      "connectionId",
+      "workerId",
+    ] as const) {
+      const bad = { ...f.correlation, [key]: randomUUID() };
+      await expect(
+        (await prepareChannexReceiptPersistence(pool, bad, f.response()))(),
+      ).rejects.toThrow("Channex receipt correlation unavailable");
+    }
+    await (
+      await prepareChannexReceiptPersistence(
+        pool,
+        { ...f.correlation, receiptId: randomUUID() },
+        f.response(),
+      )
+    )();
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows,
+    ).toHaveLength(2);
+  });
+  it("retries a lost persistence commit response without consuming the response again", async () => {
+    const f = await receiptFixture();
+    let lose = true;
+    const lost = interceptRead(async (c, sql) => {
+      if (sql === "COMMIT" && lose) {
+        lose = false;
+        await c.query("COMMIT");
+        throw new Error("lost receipt commit");
+      }
+    });
+    const response = f.response();
+    const save = await prepareChannexReceiptPersistence(lost, f.correlation, response);
+    const receiptId = f.correlation.receiptId;
+    f.correlation.receiptId = randomUUID();
+    f.correlation.workerId = "changed";
+    expect(response.bodyUsed).toBe(true);
+    await expect(save()).rejects.toThrow("lost receipt commit");
+    expect(await save()).toEqual({ kind: "retained", receiptId });
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows,
+    ).toEqual([{ id: receiptId }]);
+  });
   it("simulates room preflight, one creation, durable identity and configuration readback", async () => {
     const f = await creationFixture();
     const identity = {
