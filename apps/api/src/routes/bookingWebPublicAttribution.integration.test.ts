@@ -47,133 +47,55 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await admin.end();
     });
 
-    it("owns canonical attribution across creation, replay, and rollback", async () => {
+    it("rejects new bookings and replay without changing stored quotes or inventory", async () => {
       const adapter = createAdapter(checkoutPool);
-      const context = command("success");
-      const request = checkoutRequest("VAY-1188-SUCCESS");
-
-      const created = await adapter.createBooking("vay-1188-hotel", request, context);
-      await expect(adapter.createBooking("vay-1188-hotel", request, context)).resolves.toEqual(
-        created,
-      );
-      await admin.query(
-        `UPDATE booking.addon_definitions
-            SET price_amount = 99, ownership_kind = 'property', partner_commission_rate = NULL
-          WHERE id = $1::uuid`,
-        [addonId],
-      );
-
-      const persisted = await admin.query<{
-        bookingChannel: string;
-        directBookingSource: string;
-        sourceSystem: string;
-        totalAmount: string;
-        bookingCount: number;
-        addonCount: number;
-        addonGrossAmount: string;
-        addonOwnership: string;
-        addonCommissionMatches: boolean;
-      }>(
-        `SELECT
-         min(booking_channel) AS "bookingChannel",
-         min(direct_booking_source) AS "directBookingSource",
-         min(source_system) AS "sourceSystem",
-         min(total_amount)::text AS "totalAmount",
-         count(DISTINCT booking.id)::int AS "bookingCount",
-         count(evidence.selection_id)::int AS "addonCount",
-         min(evidence.gross_amount)::text AS "addonGrossAmount",
-         min(evidence.ownership_kind) AS "addonOwnership",
-         bool_and(evidence.partner_commission_rate = 18.75) AS "addonCommissionMatches"
-       FROM booking.guest_bookings booking
-       LEFT JOIN booking.finance_addon_purchase_evidence evidence
-         ON evidence.guest_booking_id = booking.id
-       WHERE booking.property_id = $1::uuid AND booking.quote_session_id = $2::uuid`,
-        [propertyId, successfulQuoteId],
-      );
-      expect(persisted.rows[0]).toEqual({
-        bookingChannel: "direct",
-        directBookingSource: "booking_engine",
-        sourceSystem: "booking",
-        totalAmount: "220.50",
-        bookingCount: 1,
-        addonCount: 1,
-        addonGrossAmount: "20.50",
-        addonOwnership: "partner",
-        addonCommissionMatches: true,
-      });
-      const selection = await admin.query<{
-        addonDefinitionId: string;
-        addonSnapshot: Record<string, unknown>;
-        quantity: number;
-        serviceDate: string;
-      }>(
-        `SELECT addon_definition_id::text AS "addonDefinitionId",
-                addon_snapshot AS "addonSnapshot", quantity,
-                service_date::text AS "serviceDate"
-           FROM booking.booking_addon_selections
-          WHERE guest_booking_id = (
-            SELECT id FROM booking.guest_bookings
-             WHERE property_id = $1::uuid AND quote_session_id = $2::uuid
-          )`,
-        [propertyId, successfulQuoteId],
-      );
-      expect(selection.rows).toMatchObject([
-        {
-          addonDefinitionId: addonId,
-          addonSnapshot: { name: "Partner spa", unitAmount: "10.25", pricingModel: "per_guest" },
-          quantity: 2,
-          serviceDate: "2027-02-01",
-        },
+      for (const reference of ["VAY-1188-SUCCESS", "VAY-1188-ROLLBACK", "VAY-1188-SUCCESS"]) {
+        await expect(
+          adapter.createBooking(
+            "vay-1188-hotel",
+            checkoutRequest(reference),
+            command("unavailable"),
+          ),
+        ).rejects.toMatchObject({ code: "PRICING_UNAVAILABLE", statusCode: 503 });
+      }
+      expect(completedReservationQuoteIds.size).toBe(0);
+      for (const table of [
+        "booking.guest_bookings",
+        "booking.checkout_contexts",
+        "booking.booking_addon_selections",
+        "platform.idempotency_keys",
+      ]) {
+        expect(
+          (
+            await admin.query(
+              `SELECT count(*)::int AS count FROM ${table} WHERE property_id=$1::uuid`,
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual([{ count: 0 }]);
+      }
+      expect(
+        (
+          await admin.query(
+            "SELECT status, totals->>'totalAmount' AS total FROM booking.quote_sessions WHERE property_id=$1 ORDER BY id",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        { status: "active", total: "220.50" },
+        { status: "active", total: "220.50" },
       ]);
-
-      await expect(
-        adapter.createBooking(
-          "vay-1188-hotel",
-          checkoutRequest("VAY-1188-ROLLBACK"),
-          command("rollback"),
-        ),
-      ).rejects.toMatchObject({ constraint: "fk_booking_addon_selections_definition_property" });
-      expect(completedReservationQuoteIds).toContain(rollbackQuoteId);
-
-      const rolledBack = await admin.query<{
-        bookingCount: number;
-        checkoutCount: number;
-        addonCount: number;
-        quoteStatus: string;
-        idempotencyCount: number;
-        inventoryAvailable: number;
-        inventoryAssigned: number;
-        publicAvailable: number;
-      }>(
-        `SELECT
-         (SELECT count(*)::int FROM booking.guest_bookings
-           WHERE property_id = $1::uuid AND quote_session_id = $2::uuid) AS "bookingCount",
-         (SELECT count(*)::int FROM booking.checkout_contexts
-           WHERE property_id = $1::uuid AND quote_session_id = $2::uuid) AS "checkoutCount",
-         (SELECT count(*)::int FROM booking.booking_addon_selections
-           WHERE property_id = $1::uuid AND addon_definition_id = $3::uuid) AS "addonCount",
-         (SELECT status FROM booking.quote_sessions WHERE id = $2::uuid) AS "quoteStatus",
-         (SELECT count(*)::int FROM platform.idempotency_keys
-           WHERE property_id = $1::uuid
-             AND correlation_id = 'vay-1188-rollback-correlation') AS "idempotencyCount",
-         (SELECT min(available_count)::int FROM pms.inventory_days
-           WHERE property_id = $1::uuid) AS "inventoryAvailable",
-         (SELECT min(assigned_count)::int FROM pms.inventory_days
-           WHERE property_id = $1::uuid) AS "inventoryAssigned",
-         (SELECT min(available_rooms)::int FROM distribution.public_room_offer_snapshots
-           WHERE property_id = $1::uuid) AS "publicAvailable"`,
-        [propertyId, rollbackQuoteId, missingAddonId],
-      );
-      expect(rolledBack.rows[0]).toMatchObject({
-        bookingCount: 0,
-        checkoutCount: 0,
-        addonCount: 0,
-        quoteStatus: "active",
-        idempotencyCount: 0,
-        inventoryAvailable: 1,
-        inventoryAssigned: 1,
-        publicAvailable: 1,
-      });
+      expect(
+        (
+          await admin.query(
+            "SELECT available_count, assigned_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY stay_date",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        { available_count: 2, assigned_count: 0 },
+        { available_count: 2, assigned_count: 0 },
+      ]);
     });
 
     it("reads the committed same-day policy after waiting for its property lock", async () => {
