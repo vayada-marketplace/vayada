@@ -370,6 +370,29 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
       ),
     ).rejects.toThrow("Staging catalog references are immutable");
   });
+  it("bounds the initial binding lock wait before any provider read", async () => {
+    const locker = new pg.Client({ connectionString: databaseUrl });
+    const before = await snapshot();
+    let reads = 0;
+    await locker.connect();
+    try {
+      await locker.query("BEGIN");
+      await locker.query("SELECT id FROM pms.channel_connections WHERE property_id=$1 FOR UPDATE", [
+        propertyId,
+      ]);
+      await expect(
+        adoptChannexStagingCatalog(config(), input, async () => {
+          reads++;
+          throw new Error("Provider must not be read while binding is locked");
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+      expect(reads).toBe(0);
+    } finally {
+      await locker.query("ROLLBACK");
+      await locker.end();
+    }
+    expect(await snapshot()).toEqual(before);
+  }, 12000);
   it("rejects a binding-generation change during provider reads", async () => {
     const { request } = provider(),
       before = await snapshot();
