@@ -53,7 +53,24 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       VALUES($1,$2,$3,$7,$4,$5,$6,'{"currency":"EUR"}','{"verified":true}')`,
         [id, i.version, i.id, property, room, external, generation],
       );
-    return { property, connection, room, generation, target, intent, seal };
+    const createAttempt = async (id: string, i: { id: string; version: string }) =>
+      (
+        await pool.query(
+          `INSERT INTO pms.channex_offer_create_attempts
+        (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,
+          [
+            id,
+            i.id,
+            i.version,
+            generation,
+            property,
+            room,
+            JSON.stringify({ rate_plan: { property_id: property, room_type_id: room } }),
+          ],
+        )
+      ).rows[0];
+    return { property, connection, room, generation, target, intent, seal, createAttempt };
   }
   it("allocates retained versions, seals atomically and preserves active history on failure", async () => {
     const f = await fixture(),
@@ -229,5 +246,180 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       f.seal(retainedTarget, await f.intent(retainedTarget), external),
     ).rejects.toMatchObject({ code: "23514" });
     await expect(old(randomUUID(), external)).rejects.toMatchObject({ code: "23514" });
+  });
+  it("retains unresolved creation across failed intents and competing retries", async () => {
+    const f = await fixture(),
+      target = await f.target(),
+      intent = await f.intent(target);
+    const starts = await Promise.allSettled([
+      f.createAttempt(target, intent),
+      f.createAttempt(target, intent),
+    ]);
+    expect(starts.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(starts.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "23505" },
+    });
+    const attempt = (
+      await pool.query("SELECT * FROM pms.channex_offer_create_attempts WHERE intent_id=$1", [
+        intent.id,
+      ])
+    ).rows[0];
+    expect(attempt).toMatchObject({
+      state: "unresolved",
+      external_rate_plan_id: null,
+      binding_generation: f.generation,
+      external_property_id: f.property,
+      external_room_type_id: f.room,
+      request_body: { rate_plan: { property_id: f.property, room_type_id: f.room } },
+    });
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      intent.id,
+    ]);
+    const replacement = await f.intent(target);
+    await expect(f.createAttempt(target, replacement)).rejects.toMatchObject({ code: "23505" });
+    // Knowing the rate ID retains ownership but is not a verified target version.
+    const external = randomUUID();
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [attempt.id, external],
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT owner_kind,owner_id FROM pms.channex_external_rate_owners WHERE connection_id=$1 AND external_rate_plan_id=$2",
+          [f.connection, external],
+        )
+      ).rows[0],
+    ).toEqual({ owner_kind: "offer", owner_id: target });
+    expect(
+      (
+        await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
+          target,
+        ])
+      ).rows[0].active_version,
+    ).toBeNull();
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_target_versions WHERE target_id=$1", [
+          target,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    await f.createAttempt(target, replacement);
+  });
+  it("requires a matching pending intent and an initially unknown outcome", async () => {
+    const f = await fixture(),
+      target = await f.target(),
+      intent = await f.intent(target),
+      other = await f.target();
+    await expect(f.createAttempt(other, intent)).rejects.toMatchObject({ code: "23514" });
+    await expect(f.createAttempt(target, { ...intent, version: "99" })).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_offer_create_attempts
+      (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body,state,external_rate_plan_id)
+      VALUES($1,$2,$3,$4,$5,$6,'{"rate_plan":{}}','identified','claimed')`,
+        [target, intent.id, intent.version, f.generation, f.property, f.room],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      intent.id,
+    ]);
+    await expect(f.createAttempt(target, intent)).rejects.toMatchObject({ code: "23514" });
+  });
+  it("keeps creation scope and request immutable and permits only one identification", async () => {
+    const f = await fixture(),
+      target = await f.target(),
+      intent = await f.intent(target),
+      attempt = await f.createAttempt(target, intent);
+    for (const assignment of [
+      "request_body='{\"changed\":true}'",
+      "binding_generation=gen_random_uuid()",
+      "external_property_id='other'",
+      "external_room_type_id='other'",
+      "created_at=created_at+interval '1 second'",
+      "id=gen_random_uuid()",
+      "version=version+1",
+      "intent_id=gen_random_uuid()",
+      "target_id=gen_random_uuid()",
+    ])
+      await expect(
+        pool.query(`UPDATE pms.channex_offer_create_attempts SET ${assignment} WHERE id=$1`, [
+          attempt.id,
+        ]),
+      ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("DELETE FROM pms.channex_offer_create_attempts WHERE id=$1", [attempt.id]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("UPDATE pms.channex_offer_create_attempts SET state='identified' WHERE id=$1", [
+        attempt.id,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=' ' WHERE id=$1",
+        [attempt.id],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [attempt.id, randomUUID()],
+    );
+    await expect(f.createAttempt(target, intent)).rejects.toMatchObject({ code: "23505" });
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET state='unresolved',external_rate_plan_id=NULL WHERE id=$1",
+        [attempt.id],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET external_rate_plan_id='other' WHERE id=$1",
+        [attempt.id],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+  it("rolls back identification on competing external ownership", async () => {
+    const f = await fixture(),
+      left = await f.target(),
+      right = await f.target();
+    const a = await f.createAttempt(left, await f.intent(left)),
+      b = await f.createAttempt(right, await f.intent(right)),
+      external = randomUUID();
+    const identify = (id: string) =>
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+        [id, external],
+      );
+    const results = await Promise.allSettled([identify(a.id), identify(b.id)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "23514" },
+    });
+    const loser = results[0].status === "rejected" ? a : b;
+    expect(
+      (
+        await pool.query(
+          "SELECT state,external_rate_plan_id FROM pms.channex_offer_create_attempts WHERE id=$1",
+          [loser.id],
+        )
+      ).rows[0],
+    ).toEqual({ state: "unresolved", external_rate_plan_id: null });
+    // Retained legacy claims use the same registry and cannot be adopted.
+    const legacy = randomUUID();
+    await pool.query("SELECT pms.claim_channex_external_rate($1,$2,'legacy',$3,'[]')", [
+      f.connection,
+      legacy,
+      randomUUID(),
+    ]);
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+        [loser.id, legacy],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 });

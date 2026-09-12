@@ -184,3 +184,30 @@ Binding evidence to the current pending intent and fresh authority, durable crea
 recovery, transactional sealing and initial ARI remain separate requirements.
 Provider response shapes follow the [official rate-plan documentation](https://docs.channex.io/api-v.1-documentation/rate-plans-collection),
 checked 2026-09-12; automated fixtures are not live provider proof.
+
+## Durable creation uncertainty (VAY-1994)
+
+Before a future HTTP create, persist one creation attempt for the pending intent.
+Its immutable record retains the reserved target/version, binding generation,
+external property/room and exact request body. It starts `unresolved`: this means
+creation may have happened, including a crash immediately after recording it.
+Neither a new worker nor a new intent may interpret that state as permission to
+send another create. At most one unresolved creation exists per logical target.
+Failing or superseding its intent does not clear this exclusion.
+
+An exact external rate identity transitions the record to `identified` and claims
+the existing cross-store ownership registry atomically. Conflicting ownership
+rolls back identification. The attempt and its request remain retained, and an
+identified attempt cannot change or be reused for another create. Recording an ID
+is not configuration verification, an active target or proof of supported OTA
+semantics. Immutable target versions are still sealed separately.
+
+The storage boundary does not authorize provider access or validate request
+semantics. The job-authorized writer must derive and persist the complete request
+under current publication/owner/binding checks, commit before HTTP, and only the
+successful fresh claimant may make the first send. Losing its commit response
+leaves unresolved work; a retry cannot reconstruct a send permit from the row.
+The HTTP dispatcher and capture/reconciliation services remain unimplemented.
+There is deliberately no automatic reset or timeout-based takeover. Resolving a
+known no-mutation rejection requires separate verified semantics before adding a
+retry transition; titles alone cannot identify an ambiguous creation.
