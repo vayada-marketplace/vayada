@@ -43,6 +43,16 @@ const financeFolioKmsEnv = {
 };
 
 describe("api config", () => {
+  it("parses a review-only webhook override without changing other intake modes", () => {
+    expect(loadConfig({}).providerWebhooks.channexReviewMode).toBeUndefined();
+    const config = loadConfig({ CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE: "mutating" });
+    expect(config.providerWebhooks.channexReviewMode).toBe("mutating");
+    expect(config.providerWebhooks.channexMode).toBe("observe_only");
+    expect(() => loadConfig({ CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE: "invalid" })).toThrow(
+      "CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE",
+    );
+  });
+
   it("parses the Inbox-only sending control without changing Channex or Booking email", () => {
     expect(loadConfig({}).pmsInboxSendingEnabled).toBe(true);
     expect(loadConfig({ PMS_INBOX_SENDING_ENABLED: "true" }).pmsInboxSendingEnabled).toBe(true);

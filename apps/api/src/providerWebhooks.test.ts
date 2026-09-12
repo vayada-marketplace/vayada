@@ -1152,6 +1152,68 @@ describe("target provider webhook routes", () => {
   );
 
   it.each(["review", "updated_review"] as const)(
+    "activates only %s intake and supports an independent rollback",
+    async (event) => {
+      for (const mode of ["mutating", "observe_only", "ack_only_with_receipt"] as const) {
+        const store = createMemoryProviderWebhookStore();
+        const app = buildApp({
+          providerWebhooks: {
+            secrets: { channex: "channex-secret" },
+            modes: { channex: mode === "mutating" ? "observe_only" : "mutating" },
+            channexReviewMode: mode,
+            store,
+          },
+        });
+        try {
+          const first = await postChannexPayload(app, channexReviewPayload(event));
+          const replay = await postChannexPayload(app, channexReviewPayload(event));
+          expect(first.statusCode).toBe(200);
+          expect(first.json().mode).toBe(mode);
+          expect(replay.statusCode).toBe(200);
+          expect(store.receipts).toHaveLength(1);
+          expect(store.jobs).toHaveLength(mode === "mutating" ? 1 : 0);
+        } finally {
+          await app.close();
+        }
+      }
+    },
+  );
+
+  it("keeps booking, messaging and unknown events observe-only when reviews are enabled", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { channex: "channex-secret" },
+        modes: { channex: "observe_only" },
+        channexReviewMode: "mutating",
+        channexBookingPromotionEnabled: true,
+        store,
+      },
+    });
+    try {
+      const payloads = [
+        channexMessagePayload({ propertyId: "prop", sourceMessageId: "msg", threadId: "thread" }),
+        channexBookingRevisionPayload({
+          propertyId: "prop",
+          bookingRevisionId: "rev",
+          channelBookingId: "booking",
+          revision: "1",
+        }),
+        { event: "ari", property_id: "prop", payload: { id: "ari" } },
+      ];
+      for (const payload of payloads) {
+        const response = await postChannexPayload(app, payload);
+        expect(response.statusCode).toBe(200);
+        expect(response.json().mode).toBe("observe_only");
+      }
+      expect(store.jobs).toHaveLength(0);
+      expect(store.domainEvents).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(["review", "updated_review"] as const)(
     "normalizes Channex %s with a stable provider review identity",
     async (event) => {
       const store = createMemoryProviderWebhookStore();
