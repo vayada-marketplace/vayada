@@ -15,6 +15,7 @@ import { PricingStayRules } from "./PricingStayRules";
 import { PricingSeasons } from "./PricingSeasons";
 import { PricingMonths } from "./PricingMonths";
 import { PricingWeekdays } from "./PricingWeekdays";
+import { PricingChildCharges } from "./PricingChildCharges";
 import { PricingLinkedAdjustment } from "./PricingLinkedAdjustment";
 import { PricingDates } from "./PricingDates";
 import { PricingRules } from "./PricingRules";
@@ -130,6 +131,9 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       <div className="flex justify-between text-sm"><strong>{display.currency} · Base nightly prices</strong><span>{done ? "Approved rates" : review ? "Saved draft review" : dirty ? "Unsaved changes" : draft ? "Draft saved" : "Current rates"}</span></div>
       {display.rooms.map((room, ri) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomNames[room.roomTypeId] ?? `Room ${ri + 1}`}</h2>
+        <PricingChildCharges room={room} label={roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} disabled={disabled || !!review || ownershipPending}
+          onPending={(pending) => setPendingEntries((previous) => ({ ...previous, [`children:${ri}`]: pending }))}
+          onChange={(nextRoom) => { setCurrent((previous) => previous ? { ...previous, rooms: previous.rooms.map((value, index) => index === ri ? nextRoom : value) } : null); setDirty(true); setReview(null); setAck(false); setNotice(""); }} />
         {room.offers.map((offer, oi) => <div key={offer.id} className="grid gap-4 border-b p-5 last:border-0 sm:grid-cols-[1fr_2fr]">
           <div><h3 className="font-medium">Offer {oi + 1}</h3><p className="text-sm text-gray-500">{offer.price.kind === "linked" ? "Linked rate · managed through its parent" : "Independent rate"}</p></div>
           <div className="flex flex-wrap gap-3">{offer.price.kind === "independent" && baseAmounts(offer.price.calendar.base).map(([label, minor], ai) => <label key={ai} className="text-sm text-gray-600">{label}<input aria-label={`${roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} Offer ${oi + 1} ${label}`} inputMode="decimal" className="mt-1 block w-36 rounded-lg border px-3 py-2 text-gray-950 disabled:bg-gray-50" disabled={disabled || !!review || ownershipPending}
