@@ -1,3 +1,4 @@
+import path from "node:path";
 import { mockAdaptiveSetupOwnerReads } from "../support/adaptiveSetupOwnerReads";
 import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
@@ -875,10 +876,73 @@ function isForbiddenSetupCall(request: Request): boolean {
   );
 }
 
+test("verified Marketplace link opens the public page while preserving Review", async ({
+  page,
+  baseURL,
+}) => {
+  await primeBrowserState(page);
+  await mockAuthSession(page);
+  await mockPropertySetupRoute(
+    page,
+    createPropertySetupRouteMock({
+      propertyId,
+      selectedTracks: ["creator_marketplace"],
+      resumeStepId: "review",
+    }),
+  );
+  const writes = await mockReviewProducts(page, false, false, true);
+  let available = true;
+  await page.context().route("https://public-hotel.example.test/logo.png", (route) =>
+    route.fulfill({
+      path: path.resolve("apps/marketplace-web/public/vayada-logo.png"),
+      contentType: "image/png",
+    }),
+  );
+  await page.context().route(`**/api/marketplace/hotels/${propertyId}`, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      status: available ? 200 : 404,
+      headers: corsHeaders(route),
+      json: available
+        ? {
+            propertyId,
+            revisionId: "33333333-3333-4333-8333-333333333333",
+            displayName: "Approved Marketplace Hotel",
+            propertyType: "hotel",
+            shortDescription: "An approved hotel profile for creators.",
+            locality: null,
+            media: [
+              {
+                mediaType: "logo",
+                url: "https://public-hotel.example.test/logo.png",
+                altText: "Hotel logo",
+              },
+            ],
+          }
+        : { code: "hotel_not_found" },
+    });
+  });
+  await page.goto(setupUrl(baseURL, { step: "review" }));
+  const link = page.getByRole("link", { name: "View your Marketplace profile" });
+  await expect(link).toBeVisible();
+  const opened = page.waitForEvent("popup");
+  await link.click();
+  const popup = await opened;
+  await expect(popup.getByRole("heading", { name: "Approved Marketplace Hotel" })).toBeVisible();
+  await expect(page).toHaveURL(/step=review/);
+  await popup.close();
+  available = false;
+  await page.getByRole("button", { name: "Refresh Marketplace status" }).click();
+  await expect(link).toHaveCount(0);
+  await expect(page.getByText(/public Marketplace page is currently unavailable/)).toBeVisible();
+  expect(writes).toEqual([]);
+});
+
 async function mockReviewProducts(
   page: Page | BrowserContext,
   loseResponse = false,
   blockedRooms = false,
+  publishedMarketplace = false,
 ) {
   const writes: Array<{ product: string; key: string | undefined; body: unknown }> = [];
   for (const product of ["marketplace", "booking"] as const) {
@@ -1003,7 +1067,9 @@ async function mockReviewProducts(
             : {
                 contractVersion: "marketplace-submission-review.v1",
                 propertyId,
-                activeSubmission: null,
+                activeSubmission: publishedMarketplace
+                  ? { revisionId: receipt.revisionId, status: "active" }
+                  : null,
                 latestSubmission: accepted ? receipt : null,
                 recoveredSubmission: recovered ? receipt : null,
                 readiness,

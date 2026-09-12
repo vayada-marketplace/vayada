@@ -139,3 +139,69 @@ it("rejects invalid moderation and activation states", async () => {
   });
   await expect(h.client.load(propertyId)).rejects.toThrow();
 });
+
+it("links only to the public projection matching the active revision", async () => {
+  const h = await harness();
+  h.http.get
+    .mockResolvedValueOnce({ ...h.review, activeSubmission: { revisionId, status: "active" } })
+    .mockResolvedValueOnce({
+      propertyId,
+      revisionId,
+      displayName: "Approved hotel",
+      propertyType: "hotel",
+      shortDescription: "Approved description",
+      locality: null,
+      media: [{ mediaType: "logo", url: "https://cdn.example.test/logo.webp", altText: null }],
+    });
+  expect((await h.client.load(propertyId, "saved")).publishedUrl).toBe(`/hotels/${propertyId}`);
+  expect(h.http.get.mock.calls[1]).toEqual([
+    `/api/marketplace/hotels/${propertyId}`,
+    { cache: "no-store", signal: expect.any(AbortSignal) },
+  ]);
+  expect(h.http.post).not.toHaveBeenCalled();
+});
+it("preserves recovery when the public revision differs or cannot be read", async () => {
+  for (const unavailable of [false, true]) {
+    const h = await harness();
+    h.http.get.mockResolvedValueOnce({
+      ...h.review,
+      activeSubmission: { revisionId, status: "active" },
+      publishedUrl: "https://untrusted.example.test",
+    });
+    if (unavailable) h.http.get.mockRejectedValueOnce(new Error("public reader unavailable"));
+    else
+      h.http.get.mockResolvedValueOnce({
+        propertyId,
+        revisionId: propertyId,
+        displayName: "Approved hotel",
+        propertyType: "hotel",
+        shortDescription: "Approved description",
+        locality: null,
+        media: [{ mediaType: "logo", url: "https://cdn.example.test/logo.webp", altText: null }],
+      });
+    const review = await h.client.load(propertyId, "saved");
+    expect(review.publishedUrl).toBeNull();
+    expect(review.recoveredSubmission).toEqual(h.receipt);
+    expect(h.http.post).not.toHaveBeenCalled();
+  }
+});
+
+it("returns recovered submission when the optional public lookup stalls", async () => {
+  const h = await harness();
+  h.http.get.mockResolvedValueOnce({
+    ...h.review,
+    activeSubmission: { revisionId, status: "active" },
+  });
+  h.http.get.mockImplementationOnce(
+    (_path, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), {
+          once: true,
+        });
+      }),
+  );
+  const loaded = await h.client.load(propertyId, "saved");
+  expect(loaded.publishedUrl).toBeNull();
+  expect(loaded.recoveredSubmission).toEqual(h.receipt);
+  expect(h.http.post).not.toHaveBeenCalled();
+}, 10_000);

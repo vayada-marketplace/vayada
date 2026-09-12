@@ -1,3 +1,4 @@
+import { marketplacePublicHotelPath, parseMarketplacePublicHotel } from "./marketplacePublicHotel";
 import {
   createProductReadinessResult,
   MARKETPLACE_MODERATION_STATUSES,
@@ -22,6 +23,7 @@ export type MarketplaceSubmissionReview = {
   latestSubmission: MarketplaceSubmissionReceipt | null;
   recoveredSubmission: MarketplaceSubmissionReceipt | null;
   activeSubmission: { revisionId: string; status: MarketplaceActivationStatus } | null;
+  publishedUrl?: string | null;
   readiness: ProductReadinessResult | ReadinessProviderFailure;
 };
 export type MarketplaceSubmissionAttempt = {
@@ -38,6 +40,25 @@ type Http = {
   post<T>(path: string, value?: unknown, options?: RequestInit): Promise<T>;
 };
 export function createMarketplaceSubmissionReviewClient(http: Http) {
+  async function withPublicUrl(
+    review: MarketplaceSubmissionReview,
+  ): Promise<MarketplaceSubmissionReview> {
+    let publishedUrl: string | null = null;
+    if (review.activeSubmission?.status === "active") {
+      try {
+        const raw = await http.get<unknown>(marketplacePublicHotelPath(review.propertyId), {
+          cache: "no-store",
+          signal: AbortSignal.timeout(5_000),
+        });
+        const hotel = parseMarketplacePublicHotel(raw, review.propertyId);
+        if (hotel.revisionId === review.activeSubmission.revisionId)
+          publishedUrl = `/hotels/${review.propertyId.toLowerCase()}`;
+      } catch {
+        /* Public availability must not block submission recovery. */
+      }
+    }
+    return { ...review, publishedUrl };
+  }
   return {
     async load(propertyId: string, idempotencyKey?: string): Promise<MarketplaceSubmissionReview> {
       if (!uuid(propertyId)) throw invalid();
@@ -85,7 +106,12 @@ export function createMarketplaceSubmissionReviewClient(http: Http) {
           )
         )
           throw invalid();
-        return { ...raw, latestSubmission, recoveredSubmission, readiness: verified };
+        return withPublicUrl({
+          ...raw,
+          latestSubmission,
+          recoveredSubmission,
+          readiness: verified,
+        });
       }
       if (
         readiness.outcome !== "provider_failure" ||
@@ -96,7 +122,7 @@ export function createMarketplaceSubmissionReviewClient(http: Http) {
         !readiness.error.retryable
       )
         throw invalid();
-      return { ...raw, latestSubmission, recoveredSubmission };
+      return withPublicUrl({ ...raw, latestSubmission, recoveredSubmission });
     },
     async submit(attempt: MarketplaceSubmissionAttempt): Promise<MarketplaceSubmissionReceipt> {
       if (
