@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
-import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
+import { IncludedPricing, includedPrice, includedInput, type IncludedInput } from "./IncludedPricing";
 import { decimalAmount } from "./pricingAmounts";
 
 type Offer = PricingConfiguration["offers"][number];
@@ -28,10 +28,7 @@ export function PricingIncludedAdjustments({ room, offer, label, baseValue, disa
     <p className="mt-2">The base price includes {base.baseGuests} adult{base.baseGuests === 1 ? "" : "s"}. Adjustments apply to the base adult room price. Monthly and seasonal prices keep their own included counts and adjustments; final date prices bypass the base. Linked offers follow the resulting adult room price. Child and meal charges are separate.</p>
     {!entry ? <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled || blocked} onClick={() => {
       if (disabled || blocked) return;
-      setEntry({ adults: String(base.baseGuests), adjustments: base.adjustments.map((adjustment) => {
-        const minor = adjustment.kind === "fixed" ? adjustment.deltaMinor : String(adjustment.basisPoints);
-        return { kind: adjustment.kind, value: `${minor.startsWith("-") ? "-" : ""}${decimalAmount(minor.replace(/^-/, ""), adjustment.kind === "fixed" ? scale : 2)}` };
-      }) }); setError(""); onPending(true);
+      setEntry(includedInput(base, scale)); setError(""); onPending(true);
     }}>Edit included-adult adjustments</button> : <div className="mt-3 space-y-3">
       <p>Base price used: {amount} {room.currency}. To change it, cancel this edit and update the base price first. Changing the included count clears the adjustments.</p>
       <IncludedPricing value={entry} capacity={room.capacity.adults} disabled={disabled} onChange={(value) => { setEntry(value); setError(""); }} />
