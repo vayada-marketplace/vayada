@@ -6,6 +6,7 @@ import { ApiErrorResponse } from "@/services/api/client";
 import { type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview } from "@/services/api/replacementPricingClient";
 
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
+import { PricingTerms } from "./PricingTerms";
 import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
@@ -116,6 +117,7 @@ export function PricingEditor({ client, roomNames = {} }: { client: Client; room
               {offer.meal.charge.childBandAmountsMinor.map((minor, bi) => <p key={bi}>Meal, ages {room.children.bands[bi].fromAge}–{room.children.bands[bi].throughAge}: {decimalAmount(minor, scale)} {display.currency} per child per night.</p>)}
             </>}
             <PricingRules room={room} offer={offer} scale={scale} />
+            <PricingTerms propertyId={room.propertyId} client={client} roomTypeId={room.roomTypeId} offerId={offer.id} revision={offer.termsRevision} />
           </div>)}
         </details>
       </div>)}

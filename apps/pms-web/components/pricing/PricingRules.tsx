@@ -26,6 +26,5 @@ export function PricingRules({ room, offer, scale }: { room: PricingConfiguratio
       {offer.restrictions.seasons.map((entry, index) => <p key={index}>{entry.from}–{entry.through}: {rules(entry.rules)}</p>)}
       {offer.restrictions.dates.map((entry) => <p key={entry.date}>{entry.date}: {rules(entry.rules)}</p>)}
     </>}
-    <p>Cancellation and payment terms are unchanged. Their details cannot be viewed in this editor yet.</p>
   </div>;
 }

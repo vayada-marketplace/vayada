@@ -17,7 +17,7 @@ const sources = { room: "room", terms: "terms", finance: "finance" };
 let view: ReactTestRenderer;
 let saved: PricingDraft;
 const confirm = vi.fn(), publish = vi.fn();
-const client = { read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn() };
+const client = { readTerms: vi.fn(), read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn() };
 const button = (label: string) => view.root.findAllByType("button").find((node) => node.children.join("") === label)!;
 const click = async (label: string) => { await act(async () => { button(label).props.onClick(); }); };
 const input = () => view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!;
@@ -91,7 +91,7 @@ it("shows retained adjustments, date prices and restrictions in the saved review
     { ...offer, id: "discount", price: { kind: "linked", parentId: offer.id, adjustment: { kind: "percentage", basisPoints: -1000 }, dateOverrides: [] }, restrictions: { kind: "inherit" } },
   ] }] });
   await mount(); await click("Save draft"); await click("Review saved charges");
-  const text = JSON.stringify(view.toJSON()); for (const value of ["−30.00 EUR", "2026-12-25", "200.00 EUR", "-10%", "Minimum arrival stay 1", "Stay restrictions inherited", "Their details cannot be viewed"]) expect(text).toContain(value);
+  const text = JSON.stringify(view.toJSON()); for (const value of ["−30.00 EUR", "2026-12-25", "200.00 EUR", "-10%", "Minimum arrival stay 1", "Stay restrictions inherited", "Show cancellation and payment terms"]) expect(text).toContain(value);
 });
 it("warns before leaving pending work and cancels property changes before selection mutates", async () => {
   await mount(); await act(async () => input().props.onChange({ target: { value: "120" } }));

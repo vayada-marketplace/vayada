@@ -1,6 +1,7 @@
 "use client";
 
 import { parsePricingConfiguration, pricingInteger, pricingKeys, pricingObject, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
+import { parseBookingPricingOfferTerms, type ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import { ApiErrorResponse } from "./client";
 import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperationsClient";
 
@@ -66,6 +67,15 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     catch (error) { if (error instanceof ApiErrorResponse && error.status === 404 && error.data.code === "not_found") return missing; throw error; }
   }
   return {
+    async readTerms(roomTypeId: string, offerId: string, revision: string): Promise<ReplacementOfferTerms | null> {
+      if (!uuid(roomTypeId) || !uuid(revision) || !offerId || offerId !== offerId.trim() || offerId.length > 200) return bad();
+      const value = await optionalRead(`${base}/rooms/${roomTypeId.toLowerCase()}/offers/${encodeURIComponent(offerId)}/terms`);
+      if (value === missing) return null;
+      const parsed = parseBookingPricingOfferTerms(value);
+      if (!parsed || parsed.roomTypeId !== roomTypeId.toLowerCase() || parsed.offerId !== offerId) return bad();
+      if (parsed.revision !== revision.toLowerCase()) throw new ApiErrorResponse(409, { code: "stale", detail: "These terms changed. Reload pricing to review the current rate." });
+      return parsed;
+    },
     async read() {
       const value = await optionalRead(base);
       if (value === missing) return null;
