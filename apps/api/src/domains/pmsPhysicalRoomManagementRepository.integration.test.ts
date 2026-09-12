@@ -1,3 +1,10 @@
+import {
+  parseReconcilePhysicalRoomUnitsCommand,
+  parseUpdateRoomTypeFactsCommand,
+  parseSafeDeleteRoomTypeCommand,
+} from "@vayada/domain-pms";
+import { createPgPmsPhysicalRoomUnitReconcileRepository } from "./pmsPhysicalRoomUnitReconcileRepository.js";
+import { createPgPmsRoomFactsCommandRepository } from "./pmsRoomFactsCommandRepository.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +57,114 @@ describe.skipIf(!url)("physical-room management PostgreSQL", () => {
       requestedAt: new Date().toISOString(),
     },
   });
+  it("rejects unit additions, reconciliation and facts edits after closure", async () => {
+    const initialCommand = command(1);
+    const initial = await repository.managePhysicalRoom(initialCommand);
+    expect(initial).toMatchObject({ ok: true });
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,2,1,2,'2026-09-09',now(),$5)`,
+      [propertyId, roomTypeId, randomUUID(), "a".repeat(64), actorUserId],
+    );
+    expect(await repository.managePhysicalRoom(initialCommand)).toEqual(initial);
+    expect(await repository.managePhysicalRoom(command(2))).toMatchObject({
+      ok: false,
+      error: { code: "room_type_not_found" },
+    });
+    if (!initial.ok) throw new Error("Initial room creation failed");
+    for (const action of ["update", "retire"] as const) {
+      expect(
+        await repository.managePhysicalRoom({
+          ...command(2),
+          action,
+          roomUnitId: initial.response.roomUnitId,
+          changes: { operationalLabel: "Forbidden after closure" },
+        }),
+      ).toMatchObject({ ok: false, error: { code: "room_type_not_found" } });
+    }
+    const reconcile = createPgPmsPhysicalRoomUnitReconcileRepository({ connectionString: url });
+    const facts = createPgPmsRoomFactsCommandRepository({
+      connectionString: url!,
+      vocabularyValidator: {
+        async validateRoomFactsVocabulary() {
+          return { ok: true };
+        },
+      },
+    });
+    try {
+      const { audit, idempotencyKey } = command(2);
+      const context = {
+        organizationId,
+        propertyId,
+        roomTypeId,
+        expectedRevision: 2,
+        audit,
+        idempotencyKey,
+      };
+      const input = parseReconcilePhysicalRoomUnitsCommand({
+        ...context,
+        targetActiveUnitCount: 2,
+      });
+      if (!input) throw new Error("Invalid closure reconciliation fixture");
+      expect(await reconcile.reconcilePhysicalRoomUnits(input)).toMatchObject({
+        ok: false,
+        error: { code: "room_type_not_found" },
+      });
+      const update = parseUpdateRoomTypeFactsCommand({
+        ...context,
+        expectedRevision: 1,
+        facts: {
+          name: "Changed after closure",
+          description: "",
+          category: "suite",
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "queen", quantity: 1 }],
+          bedrooms: 1,
+          bathrooms: 1,
+          bathroomType: "private",
+          size: { value: 28, unit: "sqm" },
+        },
+      });
+      if (!update) throw new Error("Invalid closure facts fixture");
+      expect(await facts.updateRoomTypeFacts(update)).toMatchObject({
+        ok: false,
+        error: { code: "room_type_not_found" },
+      });
+      const deletion = parseSafeDeleteRoomTypeCommand({ ...context, expectedRevision: 1 });
+      if (!deletion) throw new Error("Invalid closure deletion fixture");
+      expect(await facts.safeDeleteRoomType(deletion)).toMatchObject({
+        ok: false,
+        error: {
+          code: "room_type_delete_blocked",
+          blockers: expect.arrayContaining([
+            { code: "other_operational_reference", affectedCount: 4 },
+          ]),
+        },
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT room_facts_revision::int,room_units_revision::int FROM pms.room_types WHERE id=$1",
+            [roomTypeId],
+          )
+        ).rows,
+      ).toEqual([{ room_facts_revision: 1, room_units_revision: 2 }]);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS count FROM pms.rooms WHERE room_type_id=$1 AND status<>'retired'",
+            [roomTypeId],
+          )
+        ).rows,
+      ).toEqual([{ count: 1 }]);
+    } finally {
+      await reconcile.close();
+      await facts.close();
+    }
+  });
+
   it("creates, renames and retires exactly one stable room, replaying each command", async () => {
     const create = command(1);
     const first = await repository.managePhysicalRoom(create);

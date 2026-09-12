@@ -34,6 +34,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
   let guardBlockers: readonly PmsPricingCurrencyChangeBlocker[] = [];
   let guardThrows = false;
   let mealSyncEnabled = false;
+  let mealSyncPropertyId: string | undefined;
   const guardCalls: Array<{ currentCurrency: string; requestedCurrency: string }> = [];
   const repository = createPgPmsPricingCommandRepository({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
@@ -41,6 +42,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     get channexMealSyncEnabled() {
       return mealSyncEnabled;
     },
+    get channexMealSyncPropertyId() { return mealSyncPropertyId; },
     now: () => new Date(acceptedAt),
     randomId: () => planId,
     currencyChangeGuard: {
@@ -63,6 +65,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     guardBlockers = [];
     guardThrows = false;
     mealSyncEnabled = false;
+    mealSyncPropertyId = undefined;
     guardCalls.length = 0;
   });
 
@@ -72,8 +75,20 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     await admin.end();
   });
 
+  it("does not enqueue meal changes outside the staging property", async () => {
+    mealSyncEnabled = true;
+    mealSyncPropertyId = "16900000-0000-4000-8000-000000000099";
+    await repository.upsertPropertyPricingCurrency(currencyCommand("scope-currency", 0, "EUR"));
+    await seedRoomType(roomTypeId, "Suite");
+    await admin.query(`INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1,'channex','provider-property','active','enable')`, [propertyId]);
+    await admin.query(`INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1,'channex','connected','provider-property')`, [propertyId]);
+    expect((await repository.upsertFlexibleRatePlan({ ...planCommand("scope-save",roomTypeId,0,"120.00"),mealPlan:"breakfast" })).ok).toBe(true);
+    expect((await admin.query("SELECT id FROM platform.jobs WHERE property_id=$1",[propertyId])).rows).toHaveLength(0);
+  });
+
   it("atomically queues only connected-property meal reconciliation and replays once", async () => {
     mealSyncEnabled = true;
+    mealSyncPropertyId = propertyId;
     await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
     await seedRoomType(roomTypeId, "Inclusive Suite");
     await seedRoomType("16900000-0000-4000-8000-000000000009", "Unrelated room");
