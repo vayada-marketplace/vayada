@@ -12,7 +12,12 @@ import { createPmsRoomFactsVocabularyValidationPort } from "../../apps/api/src/d
 import { registerPreparedHotelImportRoutes } from "../../apps/api/src/routes/preparedHotelImports.js";
 import { registerPmsOperationsRoutes } from "../../apps/api/src/routes/pmsOperations.js";
 import { createTargetPmsOperationsReadRepository } from "../../apps/api/src/domains/pmsOperationsReadModel.js";
+import { registerAirbnbImportRoutes } from "../../apps/api/src/routes/airbnbImports.js";
+import { createPgAirbnbImportSourceRepository } from "../../apps/api/src/domains/airbnbImportSourceRepository.js";
+import { createPgAirbnbImportApplicationRepository } from "../../apps/api/src/domains/airbnbImportApplicationRepository.js";
 import { listings } from "./client.js";
+
+const importOrigins = ["https://pms.localhost:1380", "https://marketplace.localhost:1382"];
 
 async function main() {
   // Deliberately fixed isolated endpoint; never accepts a production DSN or provider key.
@@ -167,6 +172,59 @@ async function main() {
     },
   });
   const propertyAccess = createPgPropertyAccessRepository({ connectionString });
+  // No provider transport: connection identity/listing facts are explicitly synthetic.
+  await app.register(registerAirbnbImportRoutes, {
+    prefix: "/api/hotel-setup",
+    repository: createPgAirbnbImportSourceRepository(connectionString),
+    propertyAccessRepository: propertyAccess,
+    allowedOrigins: importOrigins,
+    resolveBinding: async () => ({
+      environment: "staging",
+      groupId: organization,
+      externalPropertyId: propertyId,
+    }),
+    createLink: async (_binding, attempt) => {
+      const url = new URL(
+        `/setup/airbnb-return/${propertyId}/${attempt.sourceId}`,
+        "https://marketplace.localhost:1382",
+      );
+      url.search = new URLSearchParams({
+        success: "true",
+        token: attempt.state,
+        channel_id: randomUUID(),
+      }).toString();
+      return url.href;
+    },
+    readListings: async () => ({
+      contractVersion: "prepared-hotel-import.v1",
+      property: {},
+      rooms: [
+        {
+          id: "abb_database_suite",
+          name: "Synthetic Airbnb Suite",
+          description: "",
+          maxGuests: 2,
+          maxAdults: null,
+          maxChildren: null,
+          bedType: "",
+          bedQuantity: null,
+          bathroomType: "",
+          sizeSquareMetres: null,
+        },
+      ],
+    }),
+    review: {
+      profiles,
+      applications: createPgAirbnbImportApplicationRepository(connectionString),
+      rooms: {
+        commandPort,
+        bindingReadPort: readPort,
+        factsReadPort: readPort,
+        unitReadPort: readPort,
+        capacityReadPort: readPort,
+      },
+    },
+  });
   await app.register(registerPmsOperationsRoutes, {
     prefix: "/api/pms",
     repository: createTargetPmsOperationsReadRepository({ connectionString }),
@@ -194,7 +252,7 @@ async function main() {
           headers: { "x-import-demo-token": token },
           bypass(req, res) {
             const origin = req.headers.origin;
-            if (origin && origin !== "https://pms.localhost:1380") {
+            if (origin && !importOrigins.includes(origin)) {
               res?.writeHead(403);
               res?.end();
               return false;

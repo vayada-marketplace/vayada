@@ -176,3 +176,13 @@ room types before returning to setup. The shared component's default invitation
 endpoint is unchanged. Source changes reset pending edits and ignore stale responses.
 Browser checks use simulated API/auth responses, including a lost save response followed
 by receipt refresh; actual Channex linking and production binding remain unverified.
+
+## Integrated local smoke
+
+The reserved database harness composes the optional Airbnb routes with real source,
+application receipt and canonical room repositories. Only identity and provider ports
+are synthetic. An opt-in Playwright test drives the actual callback and shared editor
+through that harness, discards the save response, reloads, removes only its own receipt,
+and concurrently replays a changed room draft. The saved room identity/name must remain
+unchanged and the receipt must be recovered without another room. Each run preserves
+one new synthetic room for inspection; the existing demo is not reset.
