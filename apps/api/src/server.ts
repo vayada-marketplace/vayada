@@ -47,6 +47,7 @@ import { createBookingGuestPolicyProductionApplication } from "./domains/booking
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createPgHotelCatalogCurrentOwnerEvidencePorts } from "./domains/hotelCatalogCurrentOwnerEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
+import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
@@ -1504,6 +1505,7 @@ const app = buildApp({
   }),
   marketplaceAffiliateAdminRepository,
   marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePolicyRepository: createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },

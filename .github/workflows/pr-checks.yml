@@ -182,6 +182,7 @@ jobs:
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
           src/domains/financeAffiliatePercentagePolicyResolver.test.ts
+          src/marketplaceAffiliatePolicyRoutes.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
           src/domains/pmsRoomFactsCommandRepository.integration.test.ts
           src/domains/pmsRoomOperatingEligibility.integration.test.ts

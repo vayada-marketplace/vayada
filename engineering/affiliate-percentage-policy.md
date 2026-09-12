@@ -88,3 +88,16 @@ Malformed identifiers also return not_found before querying. Database failures
 propagate rather than masquerading as missing policy. The operation accepts a pool
 or transaction client; authorized callers supply the canonical property from their
 resource scope. It is not a public read endpoint or a publication/settlement gate.
+
+## Marketplace policy HTTP adapter
+
+All paths below are under `/api/marketplace/properties/:propertyId/affiliate-policies`
+and require fresh Marketplace profile-manage permission, active hotel identity,
+owner/operator property access and active hotel-profile entitlement. Responses are
+no-store. POST `/` accepts exactly the Finance parser's `{percentageRate: string}`
+body and a single nonempty Idempotency-Key (maximum 200 characters, no commas). POST
+`/:policyVersionId/approve` uses that header with no body. Each returns 201 when
+created or 200 for replay; invalid requests are 422, unavailable scope 404 and
+conflicts (including already-approved) 409. GET `/:policyVersionId` returns the
+exact approved policy (200), missing/wrong-property reference (404), or an unavailable
+unapproved/invalid policy (409). Database failures remain server errors.
