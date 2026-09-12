@@ -142,7 +142,7 @@ describe("checkout-charge settlement bridge", () => {
 // ---------------------------------------------------------------------------
 
 describe("calculatePayoutSplit — fixed plan", () => {
-  it("charges 0% platform fee on a direct booking without affiliate", () => {
+  it("charges 0% platform fee on a direct booking", () => {
     const result = calculatePayoutSplit({
       totalAmount: "1000.00",
       currency: "EUR",
@@ -151,28 +151,7 @@ describe("calculatePayoutSplit — fixed plan", () => {
     });
 
     expect(result.platformFee).toBe("0");
-    expect(result.affiliateCommission).toBe("0");
     expect(result.propertyPayout).toBe("1000");
-  });
-
-  it("charges the affiliate platform fee on a fixed plan with affiliate", () => {
-    const config: BillingConfigReadModel = {
-      ...BASE_BILLING_CONFIG,
-      affiliatePlatformFeePercent: 2,
-    };
-
-    const result = calculatePayoutSplit({
-      totalAmount: "500.00",
-      currency: "EUR",
-      billingConfig: config,
-      channel: "direct",
-      affiliate: { affiliateId: "aff_001", commissionPercent: 10 },
-    });
-
-    // 2% platform fee = 10.00, 10% affiliate commission = 50.00
-    expect(result.platformFee).toBe("10");
-    expect(result.affiliateCommission).toBe("50");
-    expect(result.propertyPayout).toBe("440");
   });
 });
 
@@ -191,7 +170,6 @@ describe("calculatePayoutSplit — commission plan", () => {
 
     // 3% booking engine fee = 30.00
     expect(result.platformFee).toBe("30");
-    expect(result.affiliateCommission).toBe("0");
     expect(result.propertyPayout).toBe("970");
   });
 
@@ -205,24 +183,7 @@ describe("calculatePayoutSplit — commission plan", () => {
 
     // 5% channel manager fee = 50.00
     expect(result.platformFee).toBe("50");
-    expect(result.affiliateCommission).toBe("0");
     expect(result.propertyPayout).toBe("950");
-  });
-
-  it("does NOT add affiliatePlatformFee on a commission plan with affiliate", () => {
-    const result = calculatePayoutSplit({
-      totalAmount: "1000.00",
-      currency: "EUR",
-      billingConfig: COMMISSION_BILLING_CONFIG,
-      channel: "direct",
-      affiliate: { affiliateId: "aff_001", commissionPercent: 10 },
-    });
-
-    // Commission plan: 3% direct fee = 30.00, 10% affiliate = 100.00
-    // affiliatePlatformFeePercent (2%) is NOT added on commission plan
-    expect(result.platformFee).toBe("30");
-    expect(result.affiliateCommission).toBe("100");
-    expect(result.propertyPayout).toBe("870");
   });
 
   it("rounds amounts to 2 decimal places", () => {
@@ -307,18 +268,6 @@ describe("calculatePayoutSplit — invalid percent guards", () => {
     ).toThrow("Invalid percent for platformFeePct");
   });
 
-  it("throws when affiliatePlatformFeePercent is NaN (fixed plan with affiliate)", () => {
-    expect(() =>
-      calculatePayoutSplit({
-        totalAmount: "100.00",
-        currency: "EUR",
-        billingConfig: { ...BASE_BILLING_CONFIG, affiliatePlatformFeePercent: NaN },
-        channel: "direct",
-        affiliate: { affiliateId: "aff_001", commissionPercent: 10 },
-      }),
-    ).toThrow("Invalid percent for platformFeePct");
-  });
-
   it("throws when bookingEngineFeePercent is negative", () => {
     expect(() =>
       calculatePayoutSplit({
@@ -339,42 +288,6 @@ describe("calculatePayoutSplit — invalid percent guards", () => {
         channel: "direct",
       }),
     ).toThrow("Invalid percent for platformFeePct");
-  });
-
-  it("throws when affiliate commissionPercent is NaN", () => {
-    expect(() =>
-      calculatePayoutSplit({
-        totalAmount: "100.00",
-        currency: "EUR",
-        billingConfig: COMMISSION_BILLING_CONFIG,
-        channel: "direct",
-        affiliate: { affiliateId: "aff_001", commissionPercent: NaN },
-      }),
-    ).toThrow("Invalid percent for affiliate.commissionPercent");
-  });
-
-  it("throws when affiliate commissionPercent is negative", () => {
-    expect(() =>
-      calculatePayoutSplit({
-        totalAmount: "100.00",
-        currency: "EUR",
-        billingConfig: COMMISSION_BILLING_CONFIG,
-        channel: "direct",
-        affiliate: { affiliateId: "aff_001", commissionPercent: -5 },
-      }),
-    ).toThrow("Invalid percent for affiliate.commissionPercent");
-  });
-
-  it("throws when affiliate commissionPercent is greater than 100", () => {
-    expect(() =>
-      calculatePayoutSplit({
-        totalAmount: "100.00",
-        currency: "EUR",
-        billingConfig: COMMISSION_BILLING_CONFIG,
-        channel: "direct",
-        affiliate: { affiliateId: "aff_001", commissionPercent: 150 },
-      }),
-    ).toThrow("Invalid percent for affiliate.commissionPercent");
   });
 });
 

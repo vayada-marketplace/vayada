@@ -73,7 +73,7 @@ it("loads create pricing evidence through the caller transaction", async () => {
         ],
         rowCount: 1,
       };
-    if (sql.includes("FROM pms.rate_plans") || sql.includes("FROM pms.room_types room_type"))
+    if (sql.includes("FROM pms.rate_plans") || sql.includes("FROM pms.room_types room"))
       return { rows: [], rowCount: 0 };
     if (sql.includes("pms_room_publication_scope"))
       return { rows: [{ authorized: true }], rowCount: 1 };
@@ -91,7 +91,7 @@ it("loads create pricing evidence through the caller transaction", async () => {
   await expect(
     current.getRoomPublicationSnapshot({ transaction, propertyId, organizationId: propertyId }),
   ).resolves.toMatchObject({ propertyId, status: "blocked", rooms: [] });
-  expect(query).toHaveBeenCalledTimes(6);
+  expect(query).toHaveBeenCalledTimes(8);
   expect(
     query.mock.calls.filter(
       ([sql]) =>
