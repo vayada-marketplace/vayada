@@ -5,19 +5,20 @@ import type { PoolClient } from "pg";
 import { lockBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness, type FinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
+import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockReplacementChargeDeclaration, type ReplacementChargeDeclaration } from "./replacementChargeDeclarations.js";
 import type { PricingStorageScope, PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 
 export type ReplacementPricingOfferOwners =
   | { kind: "verified"; terms: readonly ReplacementOfferTerms[]; finance: Extract<FinanceReplacementPricingReadiness, { kind: "ready" }>; charges: ReplacementChargeDeclaration }
-  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "terms_stale" | "finance_unavailable" | "charges_stale";
+  | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "finance_unavailable" | "charges_stale";
       financeReason?: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"] };
 
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
  * holds PMS/Booking/Finance locks until its end and verifies the charge declaration.
- * Caller must supply current owner-verified sources locked for this transaction;
- * fingerprint matching is not source freshness or currency-change approval. */
+ * Rechecks sources.room against the locked PMS room-facts set. Caller must verify
+ * remaining sources; this is not complete source freshness or currency-change approval. */
 export async function lockReplacementPricingOfferOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<ReplacementPricingOfferOwners> {
   const unavailable = (reason: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>["reason"]): ReplacementPricingOfferOwners => ({ kind: "unavailable", reason });
@@ -35,11 +36,13 @@ export async function lockReplacementPricingOfferOwners(client: PoolClient, cont
     ownerReferences: structuredClone(proposed.ownerReferences) as PricingStorageSources };
   const currentSources = structuredClone(sources);
   if (!await lockReplacementPricingAuthorization(client, context, scope, "manage")) return unavailable("denied");
+  const roomSource = await lockPmsReplacementPricingRoomSource(client, scope.propertyId);
   const references = [];
   for (const room of rooms) {
     if (!await lockPmsPricingRoomScope(client, scope.propertyId, room!.roomTypeId)) return unavailable("room_unavailable");
     references.push(...room!.offers.map((o) => ({ roomTypeId: room!.roomTypeId, offerId: o.id, revision: o.termsRevision })));
   }
+  if (!roomSource || currentSources.room !== roomSource) return unavailable("room_source_stale");
   const terms = await lockBookingPricingOfferTerms(client, scope.propertyId, references);
   if (!terms) return unavailable("terms_stale");
   const finance = await lockFinanceReplacementPricingReadiness(client, {
