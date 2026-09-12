@@ -12,6 +12,8 @@ room types, missing calendar coverage, closed arrival inventory and insufficient
 physical capacity reject the entire mutation. Provider room order is the existing
 channel mapping slot identity; each slot becomes a one-based pending assignment
 with exact stay evidence, source `channel`, and no physical room selection.
+Migration 0185 permits that pending channel shape only with the versioned
+`channex-operational-assignment.v1` marker; manual and migration constraints remain.
 
 Acquire the property inventory mutation lock before booking/assignment writes.
 Reconcile old and new occupied spans, linked inventory and durable inventory
