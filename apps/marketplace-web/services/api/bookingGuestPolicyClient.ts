@@ -5,6 +5,7 @@ import {
   type BookingGuestPolicyChoices,
   type BookingGuestPolicyComposition,
   type BookingGuestPolicyRateDisclosure,
+  type BookingGuestPolicySourceBinding,
   type BookingGuestPolicySetupDraft,
   type UpsertBookingGuestPolicyRequest,
 } from "@vayada/domain-booking";
@@ -78,6 +79,7 @@ export function createBookingGuestPolicyClient(http: Http) {
         if (
           !scoped(value, scope) ||
           !parseBookingGuestPolicyHash(value.sourceFingerprint) ||
+          !validSources(value.sourceBindings) ||
           !Array.isArray(value.blockers) ||
           value.blockers.length === 0 ||
           value.blockers.some((blocker) => !record(blocker) || typeof blocker.code !== "string")
@@ -114,7 +116,13 @@ export function createBookingGuestPolicyClient(http: Http) {
       const body = { ...request, choices };
       const digest = await crypto.subtle.digest(
         "SHA-256",
-        new TextEncoder().encode(JSON.stringify({ scope, body })),
+        new TextEncoder().encode(
+          JSON.stringify({ scope, body }, (_key, value) =>
+            record(value)
+              ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+              : value,
+          ),
+        ),
       );
       const key = Array.from(new Uint8Array(digest), (byte) =>
         byte.toString(16).padStart(2, "0"),
@@ -161,6 +169,10 @@ function readBundle(value: unknown, scope: Scope) {
     value.contractVersion !== "booking-guest-policy.v1" ||
     !parseBookingGuestPolicyHash(value.sourceFingerprint) ||
     !parseBookingGuestPolicyHash(value.bundleHash) ||
+    typeof value.pricingSourceFingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(value.pricingSourceFingerprint) ||
+    !positiveRevision(value.mandatoryChargeConfirmationRevision) ||
+    !validSources(value.sourceBindings) ||
     typeof value.pricingCurrency !== "string" ||
     !/^[A-Z]{3}$/.test(value.pricingCurrency) ||
     typeof value.propertyTimeZone !== "string" ||
@@ -177,6 +189,49 @@ function readBundle(value: unknown, scope: Scope) {
     throw invalid();
   const choices = parseBookingGuestPolicyChoices(value.choices);
   if (!choices) throw invalid();
+  const sources = value.sourceBindings;
+  for (const entityType of [
+    "property_profile",
+    "pms_property_pricing_currency.v1",
+    "pms_optional_pricing_aggregate.v1",
+    "pms_mandatory_charge_confirmation.v1",
+  ]) {
+    const matches = sources.filter((source) => source.entityType === entityType);
+    if (
+      matches.length !== 1 ||
+      matches[0].entityId !== scope.propertyId ||
+      (entityType === "pms_mandatory_charge_confirmation.v1" &&
+        matches[0].revision !== String(value.mandatoryChargeConfirmationRevision))
+    )
+      throw invalid();
+  }
+  const hasSource = (expected: BookingGuestPolicySourceBinding) =>
+    sources.some(
+      (source) =>
+        source.ownerDomain === expected.ownerDomain &&
+        source.entityType === expected.entityType &&
+        source.entityId === expected.entityId &&
+        source.revision === expected.revision,
+    );
+  if (
+    sources.filter((source) => source.entityType === "pms_room_facts.v1").length !==
+      value.rates.length ||
+    sources.filter((source) => source.entityType === "pms_flexible_rate_plan.v1").length !==
+      value.rates.length ||
+    value.rates.some(
+      (rate: BookingGuestPolicyRateDisclosure) =>
+        !hasSource({
+          ownerDomain: "pms",
+          entityType: "pms_room_facts.v1",
+          entityId: rate.roomTypeId,
+          revision: String(rate.roomFactsRevision),
+        }) ||
+        !hasSource(rate.flexible.source) ||
+        (rate.nonRefundable !== null && !hasSource(rate.nonRefundable.source.source)) ||
+        (rate.additionalGuest !== null && !hasSource(rate.additionalGuest.source.source)),
+    )
+  )
+    throw invalid();
   return {
     ...value,
     choices,
@@ -185,10 +240,16 @@ function readBundle(value: unknown, scope: Scope) {
   };
 }
 function validRate(value: unknown): value is BookingGuestPolicyRateDisclosure {
-  if (!record(value) || typeof value.roomTypeId !== "string" || !record(value.flexible))
+  if (
+    !record(value) ||
+    typeof value.roomTypeId !== "string" ||
+    !positiveRevision(value.roomFactsRevision) ||
+    !record(value.flexible)
+  )
     return false;
   const rate = value.flexible;
   if (
+    !validSource(rate.source, "pms_flexible_rate_plan.v1") ||
     !Number.isSafeInteger(rate.freeCancellationDeadlineDays) ||
     Number(rate.freeCancellationDeadlineDays) < 0 ||
     !record(rate.cutoff) ||
@@ -202,6 +263,7 @@ function validRate(value: unknown): value is BookingGuestPolicyRateDisclosure {
   if (
     value.nonRefundable !== null &&
     (!record(value.nonRefundable) ||
+      !validRecurringSource(value.nonRefundable.source) ||
       value.nonRefundable.refundPolicy !== "no_refund" ||
       value.nonRefundable.noShowPenalty !== "full_booking_amount" ||
       value.nonRefundable.paymentTiming !== "prepay_full")
@@ -210,6 +272,7 @@ function validRate(value: unknown): value is BookingGuestPolicyRateDisclosure {
   if (
     value.additionalGuest !== null &&
     (!record(value.additionalGuest) ||
+      !validRecurringSource(value.additionalGuest.source) ||
       !Number.isSafeInteger(value.additionalGuest.includedGuestsPerRoom) ||
       Number(value.additionalGuest.includedGuestsPerRoom) < 1 ||
       typeof value.additionalGuest.amountDecimal !== "string" ||
@@ -222,6 +285,48 @@ function validRate(value: unknown): value is BookingGuestPolicyRateDisclosure {
   )
     return false;
   return true;
+}
+function positiveRevision(value: unknown) {
+  return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 2_147_483_647;
+}
+function validSource(value: unknown, entityType?: string): boolean {
+  if (
+    !record(value) ||
+    typeof value.entityId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value.entityId,
+    ) ||
+    typeof value.revision !== "string" ||
+    (entityType && value.entityType !== entityType)
+  )
+    return false;
+  if (value.ownerDomain === "hotel_catalog") {
+    return value.entityType === "property_profile" && /^profile:[1-9][0-9]*$/.test(value.revision);
+  }
+  return (
+    value.ownerDomain === "pms" &&
+    [
+      "pms_property_pricing_currency.v1",
+      "pms_optional_pricing_aggregate.v1",
+      "pms_room_facts.v1",
+      "pms_flexible_rate_plan.v1",
+      "pms_recurring_pricing_rule.v1",
+      "pms_mandatory_charge_confirmation.v1",
+    ].includes(String(value.entityType)) &&
+    /^(0|[1-9][0-9]*)$/.test(value.revision) &&
+    Number(value.revision) <= 2_147_483_647
+  );
+}
+function validSources(value: unknown): value is BookingGuestPolicySourceBinding[] {
+  return Array.isArray(value) && value.every((source) => validSource(source));
+}
+function validRecurringSource(value: unknown) {
+  return (
+    record(value) &&
+    validSource(value.source, "pms_recurring_pricing_rule.v1") &&
+    positiveRevision(value.validationRevision) &&
+    positiveRevision(value.materializationRevision)
+  );
 }
 function sameChoices(a: BookingGuestPolicyChoices, b: BookingGuestPolicyChoices) {
   return (
