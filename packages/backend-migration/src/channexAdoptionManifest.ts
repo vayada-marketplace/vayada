@@ -253,7 +253,6 @@ function validateManifest(value: unknown): ChannexAdoptionManifest {
   if (!Array.isArray(manifest["approvalEvidence"]) || manifest["approvalEvidence"].length !== 2)
     fail("INVALID_APPROVALS", "manifest.approvalEvidence");
   const approvals = manifest["approvalEvidence"] as unknown[];
-  const actors = new Set<string>();
   const records = new Set<string>();
   for (const [index, expectedAuthority] of ["migration_owner", "security_owner"].entries()) {
     const path = `manifest.approvalEvidence.${index}`;
@@ -273,13 +272,12 @@ function validateManifest(value: unknown): ChannexAdoptionManifest {
     records.add(string(approval["approvalRecordId"], UUID, `${path}.approvalRecordId`));
     if (approval["authority"] !== expectedAuthority)
       fail("INVALID_APPROVAL_ORDER", `${path}.authority`);
-    actors.add(string(approval["actorUserId"], UUID, `${path}.actorUserId`));
+    string(approval["actorUserId"], UUID, `${path}.actorUserId`);
     timestamp(approval["approvedAt"], `${path}.approvedAt`);
     if (approval["approvalSubjectSha256"] !== subject) fail("APPROVAL_SUBJECT_MISMATCH", path);
     integer(approval["registryRevision"], 1, `${path}.registryRevision`);
     string(approval["rowStateSha256"], SHA256, `${path}.rowStateSha256`);
   }
-  if (actors.size !== 2) fail("APPROVER_COLLISION", "manifest.approvalEvidence");
   if (records.size !== 2) fail("APPROVAL_RECORD_COLLISION", "manifest.approvalEvidence");
   string(manifest["signingKeyId"], SIGNING_KEY, "manifest.signingKeyId");
   return manifest as ChannexAdoptionManifest;

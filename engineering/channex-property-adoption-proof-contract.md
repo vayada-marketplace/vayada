@@ -10,6 +10,11 @@ VAY-1366 binding-claim registry._
 Approved product decision. Implementation and any production execution require
 their own reviewed tickets and rollout approval.
 
+Approval-policy amendment approved 2026-09-12: Flamur Maliqi may be the sole
+human for both required authorities. The migration and security approvals remain
+separate immutable records bound to the exact evidence. The signer and executor
+remain separate controlled machine identities and cannot act as the human approver.
+
 ## Decision
 
 Controlled legacy-to-target migration uses a cryptographically signed adoption
@@ -55,29 +60,29 @@ Provider references:
 The canonical JSON payload uses contract version
 `channex-property-adoption.v1` and contains exactly:
 
-| Field                     | Requirement                                                                                          |
-| ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `contractVersion`         | Literal `channex-property-adoption.v1`.                                                              |
-| `manifestId`              | Unique UUID for this approval.                                                                       |
-| `issuedAt` / `expiresAt`  | UTC timestamps. Expiry must fall inside the approved migration window.                               |
-| `environment`             | Exact target environment; production and non-production manifests cannot be reused.                  |
-| `sourceEnvironment`       | Exact VAY-1360 source environment paired with the target environment.                                |
-| `sourceRunId`             | Completed immutable VAY-1351 extraction run ID.                                                      |
-| `sourceSchemaRevision`    | Exact source-inventory revision verified for the run.                                                |
-| `sourceEvidenceSha256`    | SHA-256 of the ordered source database/table ledger used by the proof.                               |
-| `legacyPmsHotelId`        | Exact staged `pms.hotels.id` owning the Channex connection.                                          |
-| `externalPropertyId`      | Exact `pms.channex_connections.channex_property_id`.                                                 |
-| `targetPropertyId`        | Exact canonical `hotel_catalog.properties.id`.                                                       |
-| `targetOrganizationId`    | Exact active hotel-group organization linked to the target property.                                 |
-| `targetSourceLinkId`      | Exact active `hotel_catalog.property_source_links` row linking `pms.hotels` to the target property.  |
-| `legacyResourceLinkId`    | Exact active `pms` / `pms_hotel` operator link from the legacy hotel to the target organization.     |
-| `targetResourceLinkId`    | Exact active owner/operator `hotel_catalog` / `property` canonical ownership link.                   |
-| `targetPmsResourceLinkId` | Exact active owner/operator `pms` / `pms_property` operational link for the canonical property.      |
-| `legacyEvidence`          | The exact typed source-row evidence defined below.                                                   |
-| `targetEvidence`          | The exact typed target-row evidence defined below.                                                   |
-| `approvalSubjectSha256`   | Domain-separated hash of the approval-neutral payload defined below.                                 |
-| `approvalEvidence`        | Two distinct immutable migration/security approval records, each bound to the approval-subject hash. |
-| `signingKeyId`            | Allowlisted deployment signing-key identifier and version.                                           |
+| Field                     | Requirement                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `contractVersion`         | Literal `channex-property-adoption.v1`.                                                                                                    |
+| `manifestId`              | Unique UUID for this approval.                                                                                                             |
+| `issuedAt` / `expiresAt`  | UTC timestamps. Expiry must fall inside the approved migration window.                                                                     |
+| `environment`             | Exact target environment; production and non-production manifests cannot be reused.                                                        |
+| `sourceEnvironment`       | Exact VAY-1360 source environment paired with the target environment.                                                                      |
+| `sourceRunId`             | Completed immutable VAY-1351 extraction run ID.                                                                                            |
+| `sourceSchemaRevision`    | Exact source-inventory revision verified for the run.                                                                                      |
+| `sourceEvidenceSha256`    | SHA-256 of the ordered source database/table ledger used by the proof.                                                                     |
+| `legacyPmsHotelId`        | Exact staged `pms.hotels.id` owning the Channex connection.                                                                                |
+| `externalPropertyId`      | Exact `pms.channex_connections.channex_property_id`.                                                                                       |
+| `targetPropertyId`        | Exact canonical `hotel_catalog.properties.id`.                                                                                             |
+| `targetOrganizationId`    | Exact active hotel-group organization linked to the target property.                                                                       |
+| `targetSourceLinkId`      | Exact active `hotel_catalog.property_source_links` row linking `pms.hotels` to the target property.                                        |
+| `legacyResourceLinkId`    | Exact active `pms` / `pms_hotel` operator link from the legacy hotel to the target organization.                                           |
+| `targetResourceLinkId`    | Exact active owner/operator `hotel_catalog` / `property` canonical ownership link.                                                         |
+| `targetPmsResourceLinkId` | Exact active owner/operator `pms` / `pms_property` operational link for the canonical property.                                            |
+| `legacyEvidence`          | The exact typed source-row evidence defined below.                                                                                         |
+| `targetEvidence`          | The exact typed target-row evidence defined below.                                                                                         |
+| `approvalSubjectSha256`   | Domain-separated hash of the approval-neutral payload defined below.                                                                       |
+| `approvalEvidence`        | Separate immutable migration/security authority records, each bound to the approval-subject hash; both may name the same authorized human. |
+| `signingKeyId`            | Allowlisted deployment signing-key identifier and version.                                                                                 |
 
 The detached signature is calculated over the UTF-8 bytes of the RFC 8785 JSON
 Canonicalization Scheme payload. Input parsing rejects duplicate or unknown
@@ -350,7 +355,7 @@ manifest. Signature material and the SHA-256 of the canonical payload are
 stored with the result, never a private key.
 
 The manifest is generated from read-only evidence by the migration tooling,
-reviewed by the two named approvers, signed by the controlled deployment
+reviewed under both named authorities, signed by the controlled deployment
 identity, and supplied to the migration runner as an immutable artifact. Manual
 editing after signing invalidates it.
 
@@ -378,7 +383,12 @@ records are not approval evidence.
 
 Every nested evidence ID must equal its corresponding top-level manifest ID.
 The approval array must contain exactly one `migration_owner` followed by one
-`security_owner`; duplicate authorities are invalid.
+`security_owner`; duplicate authorities or approval-record IDs are invalid. The
+same registry-authorized human may acknowledge both authorities using two
+records. The signed actor IDs deterministically record
+`single_human_dual_authority.v1` when identical and
+`independent_humans.v1` when different; the runner writes that policy to the
+restricted audit evidence.
 
 ## Evidence rules
 
@@ -461,13 +471,13 @@ expired or already-failed manifest is rejected.
 
 Immediately before signing and again before consumption, the runner reads two
 unrevoked approval records from the protected migration approval registry. One
-actor must hold the active `migration_owner` authority and the other the active
-`security_owner` authority. They must be different people, and both records
-must bind the exact manifest ID, environment, and expiry through
-`approvalSubjectSha256`. The signer, either approver, and the execution
-principal cannot satisfy another required role. Rollback requires a new pair of
-equivalently separated approval records bound to the original manifest and
-rollback reason.
+record must carry the active `migration_owner` authority and the other the active
+`security_owner` authority. Both may name the same authenticated,
+registry-authorized human, and both records must bind the exact manifest ID,
+environment, and expiry through `approvalSubjectSha256`. The signing and
+execution principals must be different controlled machine identities and cannot
+satisfy either human authority. Rollback requires two fresh authority records
+bound to the original manifest and rollback reason under the same policy.
 
 ## Failure and rollback
 
@@ -501,7 +511,7 @@ only mutating owner until a separate cutover explicitly changes that state.
 - The runner records manifest ID, signing key ID/version, payload SHA-256,
   signature verification result, source run/revision, exact property and
   organization IDs, evidence hashes/counts, approval record IDs, timestamps,
-  pre-state, outcome, and failure reason.
+  derived approval policy, pre-state, outcome, and failure reason.
 - Audit records use `retention_class = security` and
   `privacy_scope = restricted` for seven years.
 - No provider credential, guest data, reservation payload, or raw source row is
@@ -537,8 +547,9 @@ polling is frozen before target booking mutation starts.
   legacy polling/webhook/booking ownership remains unchanged.
 - Tests cover valid consumption, each evidence mismatch, expiry, environment
   mismatch, signature/key/version failure, duplicate/unknown JSON fields,
-  canonicalization edge cases, tampering, approval authority/revocation and
-  separation of duties, replay, same-pair/cross-pair history, payload drift,
+  canonicalization edge cases, tampering, approval authority/revocation, the
+  authorized single-human dual-authority case, machine/human separation, replay,
+  same-pair/cross-pair history, payload drift,
   concurrency, transaction failure, rollback isolation, and non-mutation of
   provider and ownership state.
 
@@ -546,7 +557,8 @@ polling is frozen before target booking mutation starts.
 
 No production manifest is authorized by this decision alone. Execution requires
 an implementation ticket, security review of the signing-key boundary, a
-read-only generated manifest for the exact production pair, named approvers,
+read-only generated manifest for the exact production pair, both named approval
+authorities and the authenticated human covering them,
 and the normal cutover approval. Synthetic fixtures may validate the contract
 in staging but cannot authorize a production pair.
 

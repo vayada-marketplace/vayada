@@ -83,6 +83,17 @@ export const hashApprovalSubject = (manifest: Record<string, unknown>): string =
 export const hashManifestPayload = (manifest: unknown): string =>
   domainHash("payload", canonicalizeJson(manifest));
 export const hashTargetRow = (row: Json): string => domainHash("target-row", canonicalizeJson(row));
+export const hashRollbackReason = (reason: string): string => {
+  assertUnicode(reason);
+  return domainHash("rollback-reason", reason);
+};
+export const hashRollbackSubject = (input: {
+  manifestId: string;
+  claimId: string;
+  environment: string;
+  expiresAt: string;
+  rollbackReasonSha256: string;
+}): string => domainHash("rollback-subject", canonicalizeJson(input));
 
 export type SourceLedger = {
   run: {
