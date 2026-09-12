@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FirstPricingSetup, firstPricingInput } from "./FirstPricingSetup";
 import { PricingEditor } from "./PricingEditor";
 import { changeDatePrice } from "./PricingDates";
+import { changeSeasonPrice } from "./PricingSeasons";
 import { changeMonthPrice } from "./PricingMonths";
 import { changeWeekdayPrice } from "./PricingWeekdays";
 import { editedSnapshot } from "./pricingAmounts";
@@ -288,5 +289,59 @@ it("protects unfinished monthly prices independently and reviews only saved chan
   expect(button("Clear monthly price").props.disabled).toBe(true); expect(button("Add monthly price").props.disabled).toBe(true);
   expect(button("Approve rates").props.disabled).toBe(true); expect(JSON.stringify(view.toJSON())).toContain("August");
   await click("Back to editing"); await click("Clear monthly price"); await click("Save draft");
+  expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
+});
+
+it("validates recurring season dates and preserves the exact other pricing rules", () => {
+  const winter = { name: "Winter holidays", tier: "High", from: "12-15", through: "01-10" };
+  const leap = { name: "Leap day", tier: "", from: "02-29", through: "02-29" };
+  const original = changeMonthPrice(changeWeekdayPrice(changeDatePrice(snapshot.rooms[0], "flex", "2026-12-25", "250"), "flex", "4", { kind: "fixed", value: "20" }), "flex", "8", ["180"]);
+  const added = changeSeasonPrice(original, "flex", winter, ["200.25"]);
+  expect(added.offers[0].price).toMatchObject({ calendar: { seasons: [{ ...winter, price: { mode: "flat", amountMinor: "20025" } }] } });
+  const both = changeSeasonPrice(added, "flex", leap, ["190"]);
+  expect(changeSeasonPrice(both, "flex", leap, null)).toEqual(added);
+  expect(changeSeasonPrice(added, "flex", winter, null)).toEqual(original);
+  for (const season of [winter, { ...winter, from: "01-10", through: "02-01" }, { ...winter, from: "12-01", through: "12-15" }, { ...winter, from: "02-30" }, { ...winter, from: "2-01" }, { ...winter, name: " " }]) expect(() => changeSeasonPrice(added, "flex", season, ["200"])).toThrow();
+  expect(() => changeSeasonPrice(both, "flex", { ...leap, from: "02-28", through: "03-01" }, ["200"])).toThrow();
+  expect(() => changeSeasonPrice(original, "flex", winter, ["0"])).toThrow();
+  expect(() => changeSeasonPrice(original, "flex", winter, ["1.001"])).toThrow();
+  expect(() => changeSeasonPrice(original, "flex", winter, null)).toThrow();
+  const bases = [
+    { mode: "per_person" as const, unitMinor: "5000" },
+    { mode: "occupancy" as const, amountsMinor: ["10000", "13000"] },
+    { mode: "included_guests" as const, baseMinor: "13000", baseGuests: 2, adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }] },
+  ];
+  for (const base of bases) {
+    const room = snapshot.rooms[0], offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error();
+    const configured = { ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, base } } }] };
+    const result = changeSeasonPrice(configured, "flex", winter, base.mode === "occupancy" ? ["160", "190"] : ["190"]);
+    expect(result.offers[0].price).toMatchObject({ calendar: { base, seasons: [{ ...winter, price: { mode: base.mode } }] } });
+    expect(changeSeasonPrice(result, "flex", winter, null)).toEqual(configured);
+    if (base.mode === "included_guests") {
+      expect(result.offers[0].price).toMatchObject({ calendar: { seasons: [{ price: { baseMinor: "19000", baseGuests: 2, adjustments: base.adjustments } }] } });
+      expect(() => changeSeasonPrice(configured, "flex", winter, ["20"])).toThrow();
+    }
+    if (base.mode === "occupancy") expect(() => changeSeasonPrice(configured, "flex", winter, ["100"])).toThrow();
+  }
+});
+
+it("protects season text independently and requires review after adding or clearing", async () => {
+  await mount(); await click("Save draft");
+  const field = (name: string) => view.root.findByProps({ "aria-label": name });
+  const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  await fill("Tier label (optional) for Room 1 Offer 1", "High");
+  await fill("Month for Room 1 Offer 1", "8"); await click("Cancel month entry");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  const listener = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: Event) => void;
+  const unload = new Event("beforeunload", { cancelable: true }); listener(unload); expect(unload.defaultPrevented).toBe(true);
+  await fill("Month for Room 1 Offer 1", "8"); await click("Cancel season entry"); expect(button("Save draft").props.disabled).toBe(true);
+  await click("Cancel month entry"); expect(button("Save draft").props.disabled).toBe(false);
+  for (const [name, value] of [["Season name", "Summer"], ["Tier label (optional)", "High"], ["Start (MM-DD)", "06-15"], ["End (MM-DD)", "09-10"], ["Seasonal Per room", "180.25"]]) await fill(`${name} for Room 1 Offer 1`, value);
+  await click("Add seasonal price"); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); await click("Review saved charges");
+  expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { seasons: [{ name: "Summer", tier: "High", from: "06-15", through: "09-10", price: { amountMinor: "18025" } }] } });
+  expect(button("Clear seasonal price").props.disabled).toBe(true); expect(button("Add seasonal price").props.disabled).toBe(true);
+  expect(button("Approve rates").props.disabled).toBe(true); expect(JSON.stringify(view.toJSON())).toContain("Summer");
+  await click("Back to editing"); await click("Clear seasonal price"); await click("Save draft");
   expect(saved.snapshot.rooms[0]).toEqual({ ...snapshot.rooms[0], revision: 2 });
 });
