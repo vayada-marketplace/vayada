@@ -98,7 +98,7 @@ export async function readPublishedPricingForChannexJob(
 ) {
   const result = await withPublishedChannexPricing(pool, input);
   if (result.kind !== "available") return result;
-  const { reservation: _reservation, ...evidence } = result;
+  const { reservation: _reservation, createClaim: _createClaim, ...evidence } = result;
   return evidence;
 }
 
@@ -107,6 +107,30 @@ export async function reservePublishedChannexOfferTarget(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
   selection: TargetSelection,
+) {
+  const result = await withSelectedChannexTarget(pool, input, selection, false);
+  if (result.kind !== "available") return result;
+  if (!result.reservation) throw new Error("Target reservation missing");
+  return { kind: "reserved" as const, ...result.reservation };
+}
+
+/** Records a first creation attempt only; provider preflight/dispatch remain separate. */
+export async function claimPublishedChannexOfferCreate(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+) {
+  const result = await withSelectedChannexTarget(pool, input, selection, true);
+  if (result.kind !== "available") return result;
+  if (!result.createClaim) throw new Error("Creation claim missing");
+  return { kind: "claimed" as const, ...result.createClaim };
+}
+
+async function withSelectedChannexTarget(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  claimCreate: boolean,
 ) {
   if (
     !selection ||
@@ -117,16 +141,14 @@ export async function reservePublishedChannexOfferTarget(
     return { kind: "unavailable" as const, reason: "invalid_selection" };
   if (!Number.isSafeInteger(selection.primaryOccupancy) || selection.primaryOccupancy < 1)
     return { kind: "unavailable" as const, reason: "invalid_primary_occupancy" };
-  const result = await withPublishedChannexPricing(pool, input, { ...selection });
-  if (result.kind !== "available") return result;
-  if (!result.reservation) throw new Error("Target reservation missing");
-  return { kind: "reserved" as const, ...result.reservation };
+  return withPublishedChannexPricing(pool, input, { ...selection }, claimCreate);
 }
 
 async function withPublishedChannexPricing(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
   selection?: TargetSelection,
+  claimCreate = false,
 ) {
   const leaseInput = {
     jobId: input.jobId,
@@ -194,6 +216,16 @@ async function withPublishedChannexPricing(
       )
         return unavailable("owner_unavailable");
     let reservation: { targetId: string; intentId: string; version: string } | undefined;
+    let createClaim:
+      | {
+          attemptId: string;
+          targetId: string;
+          intentId: string;
+          version: string;
+          bindingGeneration: string;
+          request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
+        }
+      | undefined;
     if (selection) {
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
@@ -266,6 +298,69 @@ async function withPublishedChannexPricing(
           )
         ).rows[0];
       reservation = { targetId: target.id, intentId: intent.id, version: intent.version };
+      if (claimCreate) {
+        const recorded = (
+          await client.query(
+            `SELECT state FROM pms.channex_offer_create_attempts
+           WHERE target_id=$1 AND (intent_id=$2 OR state='unresolved')`,
+            [target.id, intent.id],
+          )
+        ).rows[0];
+        if (recorded)
+          return unavailable(
+            recorded.state === "unresolved"
+              ? "creation_reconciliation_required"
+              : "creation_already_identified",
+          );
+        const mapping = (
+          await client.query(
+            `SELECT external_room_type_id FROM pms.channel_room_type_mappings
+           WHERE connection_id=$1 AND property_id=$2 AND room_type_id=$3 AND status='active'
+           FOR SHARE NOWAIT`,
+            [authority.connectionId, lease.propertyId, room.roomTypeId],
+          )
+        ).rows[0];
+        if (
+          !mapping ||
+          typeof mapping.external_room_type_id !== "string" ||
+          !mapping.external_room_type_id.trim() ||
+          mapping.external_room_type_id !== mapping.external_room_type_id.trim()
+        )
+          return unavailable("room_mapping_unavailable");
+        const body = {
+          rate_plan: {
+            ...plan.configuration,
+            property_id: authority.externalPropertyId,
+            room_type_id: mapping.external_room_type_id,
+            // Display only. Recovery must never adopt a provider rate by this title.
+            title: `Vayada offer ${target.id} v${intent.version}`,
+            inherit_stop_sell: false,
+            auto_rate_settings: null,
+          },
+        };
+        const attempt = (
+          await client.query(
+            `INSERT INTO pms.channex_offer_create_attempts
+           (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
+           VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
+            [
+              target.id,
+              intent.id,
+              intent.version,
+              binding.binding_generation,
+              authority.externalPropertyId,
+              mapping.external_room_type_id,
+              JSON.stringify(body),
+            ],
+          )
+        ).rows[0];
+        createClaim = {
+          ...reservation,
+          attemptId: attempt.id,
+          bindingGeneration: binding.binding_generation,
+          request: { method: "POST", path: "/api/v1/rate_plans", body },
+        };
+      }
     }
     // Held source/owner locks protect existing evidence; repeat time-sensitive
     // readiness and authority at the final boundary before returning any prices.
@@ -283,6 +378,7 @@ async function withPublishedChannexPricing(
       publication: snapshot,
       owners: finalOwners,
       reservation,
+      createClaim,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
