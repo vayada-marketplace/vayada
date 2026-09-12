@@ -62,11 +62,11 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     const propertyId = f.scope.propertyId;
     expect(await f.commands.saveDraft(propertyId, f.draft)).toBe(1);
     const charges = await f.commands.confirmCharges(propertyId, { draftId: f.draft.draftId, expectedDraftRevision: 1,
-      claimedFingerprint: replacementChargeFingerprint(propertyId, f.prepared.snapshot, f.prepared.sources)!,
+      claimedFingerprint: replacementChargeFingerprint(propertyId, f.prepared.snapshot, f.prepared.effectiveSources ?? f.prepared.sources)!,
       declaration: "all_mandatory_charges_included", requestId: randomUUID() });
     const snapshot = { ...f.prepared.snapshot, ownerReferences: { ...f.prepared.snapshot.ownerReferences, charges: charges.id } };
     expect(await f.commands.saveDraft(propertyId, { ...f.draft, expectedDraftRevision: 1, snapshot })).toBe(2);
-    return { requestId: randomUUID(), expectedRevision: 0, sources: f.prepared.sources, snapshot, draft: { id: f.draft.draftId, revision: 2 } };
+    return { requestId: randomUUID(), expectedRevision: f.draft.baseRevision, sources: f.prepared.sources, ...(f.prepared.effectiveSources ? { effectiveSources: f.prepared.effectiveSources } : {}), snapshot, draft: { id: f.draft.draftId, revision: 2 } };
   }
   async function counts(propertyId: string) {
     return (await pool.query(`SELECT
@@ -219,4 +219,110 @@ describe.skipIf(!url)("trusted replacement pricing commands", () => {
     await expect(f.commands.reviewCharges(id, f.draft.draftId)).rejects.toMatchObject({ code: "stale" });
     expect((await pool.query("SELECT count(*)::int AS n FROM pms.pricing_v2_charge_declarations WHERE property_id=$1", [id])).rows[0].n).toBe(0);
   });
+  async function candidateFixture() {
+    const f = await fixture(), id = f.scope.propertyId;
+    const initial = await confirmed(f); await f.commands.publish(id, initial);
+    const baseline = (await f.commands.read(id))!, room = baseline.rooms[0]!, offer = room.offers[0]!;
+    const context = { draftId: randomUUID(), baseRevision: baseline.revision };
+    const policy = { roomTypeId: room.roomTypeId, offerId: offer.id, cancellation: { kind: "flexible", terms: {
+      type: "free_until_days_before_arrival", freeCancellationDeadlineDays: 14, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount", text: "Fourteen days" } }, payment: { kind: "full" } };
+    const changed = await f.commands.stageTerms(id, { requestId: randomUUID(), expectedRevision: offer.termsRevision, terms: policy }, context);
+    const added = await f.commands.stageTerms(id, { requestId: randomUUID(), expectedRevision: null, terms: { ...policy, offerId: "é😀" } }, context);
+    await f.commands.stageTerms(id, { requestId: randomUUID(), expectedRevision: null, terms: { ...policy, offerId: "unused" } }, context);
+    const rooms = baseline.rooms.map((r) => ({ ...r, revision: baseline.revision + 1, offers: r.roomTypeId !== room.roomTypeId ? r.offers : [
+      ...r.offers.map((o) => o.id === offer.id ? { ...o, termsRevision: changed.revision } : o), { ...offer, id: added.offerId, termsRevision: added.revision },
+    ] }));
+    const prepared = await f.commands.prepare(id, { currency: baseline.currency, rooms }, context);
+    const draft = { ...context, expectedDraftRevision: 0, ...prepared };
+    return { ...f, prepared, draft, baseline, changed, added, initial, policy };
+  }
+  it("keeps approved pricing current through review and atomically publishes complete candidate terms", async () => {
+    const f = await candidateFixture(), id = f.scope.propertyId;
+    expect(await f.commands.read(id)).toEqual(f.baseline);
+    expect(f.prepared.sources).toEqual(f.baseline.sources);
+    expect(f.prepared.effectiveSources?.terms).not.toBe(f.prepared.sources.terms);
+    const command = await confirmed(f);
+    const stored = (await f.commands.readDraft(id, f.draft.draftId))!;
+    expect(stored.stale).toBe(false); expect(stored.effectiveSources).toEqual(f.prepared.effectiveSources);
+    const review = (await f.commands.reviewCharges(id, f.draft.draftId))!;
+    expect(review.fingerprint).toBe(replacementChargeFingerprint(id, command.snapshot, f.prepared.effectiveSources!));
+    expect(review.fingerprint).not.toBe(replacementChargeFingerprint(id, command.snapshot, f.prepared.sources));
+    expect(await f.commands.read(id)).toEqual(f.baseline);
+    await expect(f.commands.publish(id, { ...command, effectiveSources: f.prepared.sources })).rejects.toMatchObject({ code: "stale" });
+    expect(await f.commands.publish(id, command)).toEqual({ revision: 2, replayed: false });
+    expect(await f.commands.read(id)).toMatchObject({ revision: 2, stale: false, sources: f.prepared.effectiveSources });
+    expect(await f.commands.readTerms(id, f.changed.roomTypeId, f.changed.offerId)).toEqual(f.changed);
+    expect(await f.commands.readTerms(id, f.added.roomTypeId, f.added.offerId)).toEqual(f.added);
+    expect(await f.commands.readTerms(id, f.changed.roomTypeId, "unused")).toBeNull();
+    expect((await pool.query("SELECT terms FROM booking.pricing_v2_offer_terms WHERE revision=$1", [f.baseline.rooms[0]!.offers[0]!.termsRevision])).rows[0].terms.payment).toEqual({ kind: "full" });
+  });
+  it("rolls both heads and activation effects back when publication fails after policy activation", async () => {
+    const f = await candidateFixture(), id = f.scope.propertyId, command = await confirmed(f);
+    const before = (await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [id])).rows[0].n;
+    await pool.query(`INSERT INTO platform.product_audit_events
+      (audit_key,product,action,occurred_at,tenant_scope,property_id,target_resource_product,target_resource_type,target_resource_id)
+      VALUES($1,'pms','fixture',now(),'property',$2::uuid,'pms','pricing_revision',$2::text)`, [`pricing.v2:${id}:pricing.v2.revised:${command.requestId}`, id]);
+    await expect(f.commands.publish(id, command)).rejects.toThrow();
+    expect(await f.commands.read(id)).toEqual(f.baseline);
+    expect((await f.commands.readTerms(id, f.changed.roomTypeId, f.changed.offerId))?.revision).not.toBe(f.changed.revision);
+    expect(await f.commands.readTerms(id, f.added.roomTypeId, f.added.offerId)).toBeNull();
+    expect((await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [id])).rows[0].n).toBe(before);
+    expect(await f.commands.publish(id, { ...command, requestId: randomUUID() })).toEqual({ revision: 2, replayed: false });
+  });
+  it("rejects competing drafts and returns historical receipts after a later publication without reactivating policies", async () => {
+    const f = await candidateFixture(), id = f.scope.propertyId, command = await confirmed(f);
+    const context = { draftId: randomUUID(), baseRevision: 1 };
+    const prepared = await f.commands.prepare(id, { currency: f.baseline.currency, rooms: f.baseline.rooms.map((r) => ({ ...r, revision: 2 })) }, context);
+    const competitor = await confirmed({ ...f, prepared, draft: { ...context, expectedDraftRevision: 0, ...prepared } });
+    const outcomes = await Promise.allSettled([f.commands.publish(id, command), f.commands.publish(id, competitor)]);
+    expect(outcomes.filter((v) => v.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.find((v) => v.status === "rejected")).toMatchObject({ reason: { code: "stale" } });
+    const winner = outcomes[0]!.status === "fulfilled" ? command : competitor;
+    const active = (await f.commands.read(id))!;
+    const next = await f.commands.prepare(id, { currency: active.currency, rooms: active.rooms.map((r) => ({ ...r, revision: 3 })) });
+    const third = await confirmed({ ...f, prepared: next, draft: { draftId: randomUUID(), baseRevision: 2, expectedDraftRevision: 0, ...next } });
+    await f.commands.publish(id, third);
+    const before = await f.commands.read(id), effects = await counts(id);
+    expect(await f.commands.publish(id, winner)).toEqual({ revision: 2, replayed: true });
+    expect(await f.commands.read(id)).toEqual(before); expect(await counts(id)).toEqual(effects);
+    await pool.query("UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1", [f.membershipId]);
+    await expect(f.commands.publish(id, winner)).rejects.toMatchObject({ code: "denied" });
+  });
+  it("rejects stale baselines, invalid candidate selection and unsupported deposit readiness", async () => {
+    const f = await candidateFixture(), id = f.scope.propertyId, context = { draftId: f.draft.draftId, baseRevision: 1 };
+    await expect(f.commands.prepare(id, { currency: "EUR", rooms: f.prepared.snapshot.rooms }, { ...context, draftId: randomUUID() })).rejects.toMatchObject({ code: "denied" });
+    const deposit = await f.commands.stageTerms(id, { requestId: randomUUID(), expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
+      terms: { ...f.policy, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } } }, context);
+    const rooms = f.prepared.snapshot.rooms.map((r) => ({ ...r, offers: r.offers.map((o) => r.roomTypeId === deposit.roomTypeId && o.id === deposit.offerId ? { ...o, termsRevision: deposit.revision } : o) }));
+    await expect(f.commands.prepare(id, { currency: "EUR", rooms }, context)).rejects.toMatchObject({ code: "denied" });
+    await f.commands.saveDraft(id, f.draft);
+    const review = (await f.commands.reviewCharges(id, f.draft.draftId))!;
+    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [id]);
+    await expect(f.commands.confirmCharges(id, { draftId: f.draft.draftId, expectedDraftRevision: 1, claimedFingerprint: review.fingerprint,
+      declaration: review.declaration, requestId: randomUUID() })).rejects.toMatchObject({ code: "denied" });
+    expect((await f.commands.readDraft(id, f.draft.draftId))?.stale).toBe(true);
+    await expect(f.commands.reviewCharges(id, f.draft.draftId)).rejects.toMatchObject({ code: "stale" });
+    await expect(f.commands.saveDraft(id, { ...f.draft, expectedDraftRevision: 1 })).rejects.toMatchObject({ code: "stale" });
+  });
+
+  it("requires new charge review after a candidate edit and rejects unauthorized draft operations", async () => {
+    const f = await candidateFixture(), id = f.scope.propertyId, command = await confirmed(f);
+    const context = { draftId: f.draft.draftId, baseRevision: 1 }, oldReview = (await f.commands.reviewCharges(id, context.draftId))!;
+    const replacement = await f.commands.stageTerms(id, { requestId: randomUUID(), expectedRevision: f.baseline.rooms[0]!.offers[0]!.termsRevision,
+      terms: { ...f.policy, cancellation: { kind: "non_refundable" } } }, context);
+    const rooms = f.prepared.snapshot.rooms.map((r) => ({ ...r, offers: r.offers.map((o) => r.roomTypeId === replacement.roomTypeId && o.id === replacement.offerId ? { ...o, termsRevision: replacement.revision } : o) }));
+    const prepared = await f.commands.prepare(id, { currency: "EUR", rooms }, context);
+    await f.commands.saveDraft(id, { ...f.draft, ...prepared, expectedDraftRevision: 2 });
+    await expect(f.commands.publish(id, command)).rejects.toMatchObject({ code: "stale" });
+    await expect(f.commands.confirmCharges(id, { draftId: context.draftId, expectedDraftRevision: 3, claimedFingerprint: oldReview.fingerprint,
+      declaration: oldReview.declaration, requestId: randomUUID() })).rejects.toMatchObject({ code: "stale" });
+    const denied = createReplacementPricingCommands(pool, null), foreign = await fixture();
+    for (const commands of [denied, foreign.commands]) {
+      await expect(commands.prepare(id, { currency: "EUR", rooms }, context)).rejects.toMatchObject({ code: "denied" });
+      await expect(commands.saveDraft(id, { ...f.draft, ...prepared, expectedDraftRevision: 3 })).rejects.toMatchObject({ code: "denied" });
+      await expect(commands.publish(id, command)).rejects.toMatchObject({ code: "denied" });
+    }
+    expect(await f.commands.read(id)).toEqual(f.baseline);
+  });
+
 });

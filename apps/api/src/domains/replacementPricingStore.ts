@@ -1,3 +1,4 @@
+import type { BookingPricingDraft } from "./bookingPricingOfferTerms.js";
 import { createHash } from "node:crypto";
 import { isCompletePricingCurrencyConversion, parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject,
   type PricingConfiguration } from "@vayada/domain-pms";
@@ -16,7 +17,10 @@ export interface PricingStorageGuard {
   lock(client: PoolClient, scope: PricingStorageScope, access: "read" | "manage"): Promise<PricingStorageSources | null>;
   /** Validate every proposed room/owner/terms reference against its owner and hold relevant locks.
    * Required for new publications and drafts, after historical receipt lookup. No default allow. */
-  validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<boolean>;
+  validate(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, intent: "draft" | "publish", draft?: BookingPricingDraft): Promise<boolean>;
+  /** Optional draft-policy support. Missing ports must fail closed for projected sources. */
+  project?(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, draft: BookingPricingDraft, access: "read" | "manage"): Promise<PricingStorageSources | null>;
+  activate?(client: PoolClient, scope: PricingStorageScope, proposed: PricingStorageSnapshot, sources: PricingStorageSources, draft: BookingPricingDraft): Promise<void>;
   /** Additional owner approval: verify separately owned amounts and conversion obligations.
    * Storage independently enforces persisted FX and complete PMS room conversion. No default allow. */
   allowCurrencyChange(client: PoolClient, scope: PricingStorageScope, before: StoredPricingRevision,
@@ -83,10 +87,11 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         return result && { ...result, stale: canonical(result.sources) !== canonical(sources) };
       });
     },
-    save(scope: PricingStorageScope, input: { requestId: string; expectedRevision: number; sources: PricingStorageSources; snapshot: unknown;
+    save(scope: PricingStorageScope, input: { requestId: string; expectedRevision: number; sources: PricingStorageSources; effectiveSources?: PricingStorageSources; snapshot: unknown;
       draft?: Readonly<{ id: string; revision: number }> }) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!text(input.requestId) || input.requestId.length > 200 || !pricingInteger(input.expectedRevision) || input.expectedRevision >= 2147483647 || !references(input.sources)) return Promise.reject(new PricingStorageError("invalid"));
+      if (input.effectiveSources !== undefined && (!references(input.effectiveSources) || !input.draft)) return Promise.reject(new PricingStorageError("invalid"));
       if (input.draft !== undefined && (!pricingObject(input.draft) || !pricingKeys(input.draft, ["id", "revision"]) ||
           typeof input.draft.id !== "string" || !uuid(input.draft.id) || !pricingInteger(input.draft.revision, 1) || input.draft.revision > 2147483647)) return Promise.reject(new PricingStorageError("invalid"));
       const next = snapshot(input.snapshot, scope.propertyId, input.expectedRevision + 1);
@@ -98,12 +103,22 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         if (command.draft) {
           const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2 FOR UPDATE", [scope.propertyId, command.draft.id])).rows[0];
           if (!draft || draft.draft_revision !== command.draft.revision || draft.base_revision !== command.expectedRevision ||
-              canonical(draft.source_revisions) !== canonical(command.sources) || canonical(draft.snapshot) !== canonical(next)) return fail("stale");
+              canonical(draft.source_revisions) !== canonical(command.sources) || canonical(draft.effective_source_revisions) !== canonical(command.effectiveSources ?? null) || canonical(draft.snapshot) !== canonical(next)) return fail("stale");
         }
         if (canonical(sources) !== canonical(command.sources)) return fail("stale");
         const previous = await current(client, scope.propertyId);
         if ((previous?.revision ?? 0) !== command.expectedRevision) return fail("stale");
-        if (!await guard.validate(client, scope, next, sources, "publish")) return fail("denied");
+        const effective = command.effectiveSources ?? sources;
+        if (command.effectiveSources) {
+          const draftContext = { draftId: command.draft!.id, baseRevision: command.expectedRevision };
+          const projected = await guard.project?.(client, scope, next, sources, draftContext, "manage");
+          if (!projected || canonical(projected) !== canonical(effective)) return fail("stale");
+          if (!next.ownerReferences.charges || !await guard.validate(client, scope, next, effective, "draft", draftContext) || !guard.activate) return fail("denied");
+          await guard.activate(client, scope, next, effective, draftContext);
+          const activated = await guard.lock(client, scope, "manage");
+          if (canonical(activated) !== canonical(effective)) return fail("stale");
+        }
+        if (!await guard.validate(client, scope, next, effective, "publish")) return fail("denied");
         const currencyChange = previous && previous.currency !== next.currency;
         if (currencyChange) {
           const rate = await lockReplacementPricingFxObservation(client, next.ownerReferences.fx ?? "", previous.currency, next.currency);
@@ -115,7 +130,7 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         const revision = command.expectedRevision + 1;
         await client.query(`INSERT INTO pms.pricing_v2_revisions
           (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [scope.propertyId, revision, next.currency, canonical(sources), canonical(next.ownerReferences), command.requestId, hash, scope.actorUserId, next.rooms.length]);
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [scope.propertyId, revision, next.currency, canonical(effective), canonical(next.ownerReferences), command.requestId, hash, scope.actorUserId, next.rooms.length]);
         for (const room of next.rooms) await client.query(`INSERT INTO pms.pricing_v2_rooms
           (property_id,revision,room_type_id,currency,configuration) VALUES($1,$2,$3,$4,$5)`, [scope.propertyId, revision, room.roomTypeId, next.currency, JSON.stringify(room)]);
         await client.query("UPDATE pms.pricing_v2_heads SET revision=$2 WHERE property_id=$1", [scope.propertyId, revision]);
@@ -125,23 +140,29 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
         return { revision, replayed: false };
       });
     },
-    saveDraft(scope: PricingStorageScope, input: { draftId: string; expectedDraftRevision: number; baseRevision: number; sources: PricingStorageSources; snapshot: unknown }) {
+    saveDraft(scope: PricingStorageScope, input: { draftId: string; expectedDraftRevision: number; baseRevision: number; sources: PricingStorageSources; effectiveSources?: PricingStorageSources; snapshot: unknown }) {
       scope = { propertyId: scope.propertyId.toLowerCase(), organizationId: scope.organizationId.toLowerCase(), actorUserId: scope.actorUserId.toLowerCase() };
       if (!uuid(input.draftId) || !pricingInteger(input.expectedDraftRevision) || input.expectedDraftRevision >= 2147483647 || !pricingInteger(input.baseRevision) || input.baseRevision >= 2147483647 || !references(input.sources)) return Promise.reject(new PricingStorageError("invalid"));
+      if (input.effectiveSources !== undefined && !references(input.effectiveSources)) return Promise.reject(new PricingStorageError("invalid"));
       const next = snapshot(input.snapshot, scope.propertyId, input.baseRevision + 1);
       const command = structuredClone({ ...input, snapshot: next });
       return transaction(scope, "manage", async (client, sources) => {
         if (canonical(sources) !== canonical(command.sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== command.baseRevision) return fail("stale");
-        if (!await guard.validate(client, scope, next, sources, "draft")) return fail("denied");
+        const draftContext = command.effectiveSources ? { draftId: command.draftId, baseRevision: command.baseRevision } : undefined;
+        if (draftContext) {
+          const projected = await guard.project?.(client, scope, next, sources, draftContext, "manage");
+          if (!projected || canonical(projected) !== canonical(command.effectiveSources)) return fail("stale");
+        }
+        if (!await guard.validate(client, scope, next, command.effectiveSources ?? sources, "draft", draftContext)) return fail("denied");
         const previous = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, command.draftId])).rows[0];
-        if (previous?.draft_revision === command.expectedDraftRevision + 1 && previous.base_revision === command.baseRevision && canonical(previous.snapshot) === canonical(next) && canonical(previous.source_revisions) === canonical(sources)) return previous.draft_revision as number;
+        if (previous?.draft_revision === command.expectedDraftRevision + 1 && previous.base_revision === command.baseRevision && canonical(previous.snapshot) === canonical(next) && canonical(previous.source_revisions) === canonical(sources) && canonical(previous.effective_source_revisions) === canonical(command.effectiveSources ?? null)) return previous.draft_revision as number;
         if ((previous?.draft_revision ?? 0) !== command.expectedDraftRevision) return fail("stale");
         await client.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1) ON CONFLICT DO NOTHING", [scope.propertyId]);
         const revision = command.expectedDraftRevision + 1;
-        await client.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
-          VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(property_id,draft_id) DO UPDATE SET
-          draft_revision=$3,base_revision=$4,source_revisions=$5,snapshot=$6,actor_user_id=$7`,
-        [scope.propertyId, command.draftId, revision, command.baseRevision, canonical(sources), canonical(next), scope.actorUserId]);
+        await client.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id,effective_source_revisions)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(property_id,draft_id) DO UPDATE SET
+          draft_revision=$3,base_revision=$4,source_revisions=$5,snapshot=$6,actor_user_id=$7,effective_source_revisions=$8`,
+        [scope.propertyId, command.draftId, revision, command.baseRevision, canonical(sources), canonical(next), scope.actorUserId, command.effectiveSources ? canonical(command.effectiveSources) : null]);
         await effects(client, scope, revision, "pricing.v2.drafted", `${command.draftId}:${revision}`, false);
         return revision;
       });
@@ -151,8 +172,11 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       if (!uuid(draftId)) return Promise.reject(new PricingStorageError("invalid"));
       return transaction(scope, "read", async (client, sources) => {
         const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2", [scope.propertyId, draftId])).rows[0];
-        return draft ? { snapshot: snapshot(draft.snapshot, scope.propertyId, draft.base_revision + 1), revision: draft.draft_revision as number,
-          baseRevision: draft.base_revision as number, sources: draft.source_revisions as PricingStorageSources, stale: canonical(draft.source_revisions) !== canonical(sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== draft.base_revision } : null;
+        const projected = draft?.effective_source_revisions ? await guard.project?.(client, scope,
+          snapshot(draft.snapshot, scope.propertyId, draft.base_revision + 1), sources, { draftId, baseRevision: draft.base_revision }, "read") : null;
+        return draft ? { ...(draft.effective_source_revisions ? { effectiveSources: draft.effective_source_revisions as PricingStorageSources } : {}),
+          snapshot: snapshot(draft.snapshot, scope.propertyId, draft.base_revision + 1), revision: draft.draft_revision as number,
+          baseRevision: draft.base_revision as number, sources: draft.source_revisions as PricingStorageSources, stale: (draft.effective_source_revisions !== null && canonical(projected) !== canonical(draft.effective_source_revisions)) || canonical(draft.source_revisions) !== canonical(sources) || ((await current(client, scope.propertyId))?.revision ?? 0) !== draft.base_revision } : null;
       });
     },
   };

@@ -2,7 +2,7 @@ import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import { parsePricingConfiguration, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { PoolClient } from "pg";
-import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
+import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource, projectBookingPricingDraftTerms, type BookingPricingDraft } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness, type FinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
@@ -20,8 +20,8 @@ type DraftPricingOwners = ReplacementPricingOfferOwners | { kind: "awaiting_char
 
 /** Drafts may await confirmation; a supplied declaration must still match. */
 export function lockReplacementPricingDraftOwners(client: PoolClient, context: RequestContext | null,
-  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<DraftPricingOwners> {
-  return lockOwners(client, context, scope, proposed, sources, "draft");
+  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources, draft?: BookingPricingDraft): Promise<DraftPricingOwners> {
+  return lockOwners(client, context, scope, proposed, sources, "draft", draft);
 }
 
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
@@ -35,7 +35,7 @@ export async function lockReplacementPricingOfferOwners(client: PoolClient, cont
 }
 
 async function lockOwners(client: PoolClient, context: RequestContext | null,
-  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<DraftPricingOwners> {
+  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources, intent: "draft" | "publish", draft?: BookingPricingDraft): Promise<DraftPricingOwners> {
   const unavailable = (reason: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>["reason"]): ReplacementPricingOfferOwners => ({ kind: "unavailable", reason });
   if (!pricingObject(proposed) || !pricingKeys(proposed, ["currency", "rooms", "ownerReferences"]) ||
       typeof proposed.currency !== "string" || !Array.isArray(proposed.rooms) || !proposed.rooms.length || !pricingObject(proposed.ownerReferences) ||
@@ -58,9 +58,10 @@ async function lockOwners(client: PoolClient, context: RequestContext | null,
     references.push(...room!.offers.map((o) => ({ roomTypeId: room!.roomTypeId, offerId: o.id, revision: o.termsRevision })));
   }
   if (!roomSource || currentSources.room !== roomSource) return unavailable("room_source_stale");
-  const terms = await lockBookingPricingOfferTerms(client, scope.propertyId, references);
+  const projection = draft ? await projectBookingPricingDraftTerms(client, context, scope, draft, references) : null;
+  const terms = draft ? projection?.terms : await lockBookingPricingOfferTerms(client, scope.propertyId, references);
   if (!terms) return unavailable("terms_stale");
-  const termsSource = await lockBookingPricingTermsSource(client, scope.propertyId);
+  const termsSource = draft ? projection?.source : await lockBookingPricingTermsSource(client, scope.propertyId);
   if (!termsSource || currentSources.terms !== termsSource) return unavailable("terms_source_stale");
   const financeSource = await lockFinanceReplacementPricingSource(client, scope.propertyId);
   const finance = await lockFinanceReplacementPricingReadiness(client, {

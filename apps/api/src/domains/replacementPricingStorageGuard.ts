@@ -1,6 +1,6 @@
 import type { RequestContext } from "@vayada/backend-auth";
 import type { PoolClient } from "pg";
-import { lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
+import { lockBookingPricingTermsSource, projectBookingPricingDraftTerms, activateBookingPricingDraftTerms } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
@@ -23,11 +23,20 @@ export function createReplacementPricingStorageGuard(context: RequestContext | n
   const trustedContext = structuredClone(context);
   return {
     lock: (client, scope, access) => lockReplacementPricingSources(client, trustedContext, scope, access),
-    async validate(client, scope, proposed, sources, intent) {
+    async project(client, scope, proposed, sources, draft, access) {
+      const projected = await projectBookingPricingDraftTerms(client, trustedContext, scope, draft,
+        proposed.rooms.flatMap((r) => r.offers.map((o) => ({ roomTypeId: r.roomTypeId, offerId: o.id, revision: o.termsRevision }))), access);
+      return projected ? { ...sources, terms: projected.source } : null;
+    },
+    async activate(client, scope, proposed, sources, draft) {
+      await activateBookingPricingDraftTerms(client, trustedContext, scope, draft,
+        proposed.rooms.flatMap((r) => r.offers.map((o) => ({ roomTypeId: r.roomTypeId, offerId: o.id, revision: o.termsRevision }))), sources.terms!);
+    },
+    async validate(client, scope, proposed, sources, intent, draft) {
       if (Object.keys(proposed.ownerReferences).some((key) => !["finance", "charges"].includes(key)) ||
           Object.keys(sources).length !== 3 || !["room", "terms", "finance"].every((key) => typeof sources[key] === "string")) return false;
       const result = await (intent === "draft" ? lockReplacementPricingDraftOwners : lockReplacementPricingOfferOwners)
-        (client, trustedContext, scope, proposed, sources);
+        (client, trustedContext, scope, proposed, sources, draft);
       return result.kind === "verified" || (intent === "draft" && result.kind === "awaiting_charge_confirmation");
     },
     async allowCurrencyChange() { return false; },

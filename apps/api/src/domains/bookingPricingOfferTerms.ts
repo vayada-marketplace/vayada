@@ -26,7 +26,7 @@ export async function lockBookingPricingTermsSource(client: PoolClient, property
   await lockPmsInventoryMutationScope(client, propertyId);
   const terms = (await client.query(`SELECT room_type_id,offer_id,revision FROM booking.pricing_v2_offer_term_heads
     WHERE property_id=$1 ORDER BY room_type_id,offer_id COLLATE "C" FOR SHARE`, [propertyId])).rows;
-  return "booking.pricing.terms.v2:" + createHash("sha256").update(canonical({ propertyId, terms })).digest("hex");
+  return termsSource(propertyId, terms);
 }
 
 /** Booking-owned read port. Caller has authorized/locked the property transaction first.
@@ -55,11 +55,11 @@ type TermsCommand = { requestId: string; expectedRevision: string | null; terms:
 /** Caller owns the transaction. References must come from the complete proposed snapshot. */
 export async function lockBookingPricingDraftTerms(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, draft: BookingPricingDraft,
-  references: readonly Pick<ReplacementOfferTerms, "roomTypeId" | "offerId" | "revision">[]): Promise<readonly ReplacementOfferTerms[] | null> {
+  references: readonly Pick<ReplacementOfferTerms, "roomTypeId" | "offerId" | "revision">[], access: "read" | "manage" = "manage"): Promise<readonly ReplacementOfferTerms[] | null> {
   scope = structuredClone(scope); draft = structuredClone(draft); references = structuredClone(references);
   if (!draftValid(draft) || !references.length || references.some((r) => !uuid(r.roomTypeId) || !text(r.offerId) || !uuid(r.revision)) ||
       new Set(references.map((r) => canonical([r.roomTypeId.toLowerCase(), r.offerId]))).size !== references.length ||
-      !await lockReplacementPricingAuthorization(client, context, scope, "manage") ||
+      !await lockReplacementPricingAuthorization(client, context, scope, access) ||
       !await lockPmsPricingBaseRevision(client, scope.propertyId, draft.baseRevision)) return null;
   const result: ReplacementOfferTerms[] = [];
   for (const ref of references) {
@@ -116,18 +116,7 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
         [scope.propertyId, terms.roomTypeId, terms.offerId, terms.revision, draft.draftId, draft.baseRevision, expected]);
         else await client.query(`INSERT INTO booking.pricing_v2_offer_term_heads(property_id,room_type_id,offer_id,revision)
           VALUES($1,$2,$3,$4) ON CONFLICT(property_id,room_type_id,offer_id) DO UPDATE SET revision=$4`, [scope.propertyId, terms.roomTypeId, terms.offerId, terms.revision]);
-        const eventType = draft ? "booking.pricing_terms.staged" : "booking.pricing_terms.revised";
-        const key = `booking.pricing_terms:${scope.propertyId}:${requestId}`, payload = canonical({ roomTypeId: terms.roomTypeId, offerId: terms.offerId, revision: terms.revision });
-        const event = (await client.query(`INSERT INTO platform.domain_events
-          (source_system,event_key,event_type,occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,actor_type,actor_user_id,payload)
-          VALUES('booking',$1,$6,now(),'property',$2::uuid,'booking','offer_terms',$3,'user',$4,$5) RETURNING id`,
-        [key, scope.propertyId, terms.revision, scope.actorUserId, payload, eventType])).rows[0].id;
-        await client.query(`INSERT INTO platform.product_audit_events
-          (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id)
-          VALUES($1,'booking',$6,now(),'property',$2,'user',$3,'booking','offer_terms',$4,$5)`, [key, scope.propertyId, scope.actorUserId, terms.revision, event, eventType]);
-        if (!draft) await client.query(`INSERT INTO platform.outbox_events
-          (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
-          VALUES($1,$2,'pricing.v2','booking.pricing_terms.revised','property',$3,'booking','offer_terms',$4,$5)`, [event, key, scope.propertyId, terms.revision, payload]);
+        await policyEffects(client, scope, terms, requestId, !!draft);
         return terms;
       });
     }
@@ -145,4 +134,62 @@ export function createBookingPricingOfferTermsStore(pool: Pool) {
       });
     },
   };
+}
+
+async function policyEffects(client: PoolClient, scope: PricingStorageScope, terms: ReplacementOfferTerms, requestId: string, staged: boolean) {
+  const eventType = staged ? "booking.pricing_terms.staged" : "booking.pricing_terms.revised";
+  const key = `booking.pricing_terms:${scope.propertyId}:${requestId}`, payload = canonical({ roomTypeId: terms.roomTypeId, offerId: terms.offerId, revision: terms.revision });
+  const event = (await client.query(`INSERT INTO platform.domain_events
+    (source_system,event_key,event_type,occurred_at,tenant_scope,property_id,resource_product,resource_type,resource_id,actor_type,actor_user_id,payload)
+    VALUES('booking',$1,$6,now(),'property',$2::uuid,'booking','offer_terms',$3,'user',$4,$5) RETURNING id`,
+  [key, scope.propertyId, terms.revision, scope.actorUserId, payload, eventType])).rows[0].id;
+  await client.query(`INSERT INTO platform.product_audit_events
+    (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,actor_user_id,target_resource_product,target_resource_type,target_resource_id,domain_event_id)
+    VALUES($1,'booking',$6,now(),'property',$2,'user',$3,'booking','offer_terms',$4,$5)`, [key, scope.propertyId, scope.actorUserId, terms.revision, event, eventType]);
+  if (!staged) await client.query(`INSERT INTO platform.outbox_events
+    (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+    VALUES($1,$2,'pricing.v2','booking.pricing_terms.revised','property',$3,'booking','offer_terms',$4,$5)`, [event, key, scope.propertyId, terms.revision, payload]);
+}
+
+type TermsHead = { room_type_id: string; offer_id: string; revision: string };
+function termsSource(propertyId: string, terms: TermsHead[]): string {
+  terms.sort((a, b) => a.room_type_id < b.room_type_id ? -1 : a.room_type_id > b.room_type_id ? 1 : Buffer.compare(Buffer.from(a.offer_id), Buffer.from(b.offer_id)));
+  return "booking.pricing.terms.v2:" + createHash("sha256").update(canonical({ propertyId: propertyId.toLowerCase(), terms })).digest("hex");
+}
+
+/** Projection only; all selected references must belong to the complete proposed snapshot. */
+export async function projectBookingPricingDraftTerms(client: PoolClient, context: RequestContext | null,
+  scope: PricingStorageScope, draft: BookingPricingDraft,
+  references: readonly Pick<ReplacementOfferTerms, "roomTypeId" | "offerId" | "revision">[], access: "read" | "manage" = "manage") {
+  scope = structuredClone(scope);
+  const terms = await lockBookingPricingDraftTerms(client, context, scope, draft, references, access);
+  if (!terms) return null;
+  const heads: TermsHead[] = (await client.query(`SELECT room_type_id,offer_id,revision FROM booking.pricing_v2_offer_term_heads
+    WHERE property_id=$1 FOR SHARE`, [scope.propertyId])).rows;
+  const changes: ReplacementOfferTerms[] = [];
+  for (const term of terms) {
+    const index = heads.findIndex((h) => h.room_type_id === term.roomTypeId && h.offer_id === term.offerId);
+    if (index >= 0 && heads[index]!.revision === term.revision) continue;
+    changes.push(term);
+    const head = { room_type_id: term.roomTypeId, offer_id: term.offerId, revision: term.revision };
+    if (index < 0) heads.push(head); else heads[index] = head;
+  }
+  return { terms, changes, source: termsSource(scope.propertyId, heads) };
+}
+
+/** Only the pricing publisher calls this inside its transaction, after exact draft/Finance/charge validation.
+ * No commit or standalone endpoint. Caller must roll back on any failure. */
+export async function activateBookingPricingDraftTerms(client: PoolClient, context: RequestContext | null,
+  scope: PricingStorageScope, draft: BookingPricingDraft,
+  references: readonly Pick<ReplacementOfferTerms, "roomTypeId" | "offerId" | "revision">[], expectedSource: string) {
+  scope = structuredClone(scope);
+  const projected = await projectBookingPricingDraftTerms(client, context, scope, draft, references);
+  if (!projected || projected.source !== expectedSource) return fail("stale");
+  for (const terms of projected.changes) {
+    await client.query(`INSERT INTO booking.pricing_v2_offer_term_heads(property_id,room_type_id,offer_id,revision)
+      VALUES($1,$2,$3,$4) ON CONFLICT(property_id,room_type_id,offer_id) DO UPDATE SET revision=$4`,
+    [scope.propertyId, terms.roomTypeId, terms.offerId, terms.revision]);
+    await policyEffects(client, scope, terms, `activate:${terms.revision}`, false);
+  }
+  if (await lockBookingPricingTermsSource(client, scope.propertyId) !== expectedSource) return fail("stale");
 }

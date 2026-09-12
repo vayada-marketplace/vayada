@@ -1,3 +1,4 @@
+import { lockReplacementPricingDraftOwners } from "./replacementPricingOfferOwners.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -68,11 +69,16 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
         const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2 FOR UPDATE", [scope.propertyId, command.draftId])).rows[0];
         const head = (await client.query("SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1", [scope.propertyId])).rows[0];
         if (!draft || draft.draft_revision !== command.expectedDraftRevision || draft.base_revision !== (head?.revision ?? 0)) return fail("stale");
-        const fingerprint = replacementChargeFingerprint(scope.propertyId, draft.snapshot, draft.source_revisions);
+        const fingerprint = replacementChargeFingerprint(scope.propertyId, draft.snapshot, draft.effective_source_revisions ?? draft.source_revisions);
         if (!fingerprint || fingerprint !== command.claimedFingerprint || draft.snapshot.rooms.some((r: { revision: number }) => r.revision !== draft.base_revision + 1)) return fail("stale");
+        if (draft.effective_source_revisions) {
+          const owners = await lockReplacementPricingDraftOwners(client, context, scope, draft.snapshot, draft.effective_source_revisions,
+            { draftId: command.draftId, baseRevision: draft.base_revision });
+          if (owners.kind === "unavailable") return fail("denied");
+        }
         for (const room of draft.snapshot.rooms as PricingStorageSnapshot["rooms"]) {
           if (!await lockPmsPricingRoomScope(client, scope.propertyId, room.roomTypeId)) return fail("denied");
-          if (!await lockBookingPricingOfferTerms(client, scope.propertyId, room.offers.map((o) => ({ roomTypeId: room.roomTypeId, offerId: o.id, revision: o.termsRevision })))) return fail("stale");
+          if (!draft.effective_source_revisions && !await lockBookingPricingOfferTerms(client, scope.propertyId, room.offers.map((o) => ({ roomTypeId: room.roomTypeId, offerId: o.id, revision: o.termsRevision })))) return fail("stale");
         }
         if (!currentSources.room || !currentSources.terms || !currentSources.finance ||
             canonical(currentSources) !== canonical(draft.source_revisions)) return fail("stale");
