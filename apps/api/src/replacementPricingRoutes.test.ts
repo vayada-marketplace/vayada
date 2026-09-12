@@ -27,15 +27,16 @@ const endpoints = [
   ["POST", "/charges", { draftId, expectedDraftRevision: 1, claimedFingerprint: "a".repeat(64), declaration: "all_mandatory_charges_included" }],
   ["POST", "/publish", publish],
   ["GET", `/rooms/${id}/offers/flex/terms`, undefined],
-  ["PUT", `/rooms/${id}/offers/flex/terms`, { expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }],
+  ["PUT", `/drafts/${draftId}/rooms/${id}/offers/flex/terms`, { baseRevision: 0, expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }],
   ["GET", `/drafts/${draftId}/charge-review`, undefined],
+  ["GET", `/drafts/${draftId}/rooms/${id}/offers/flex/terms?revision=1`, undefined],
 ] as const;
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
 async function fixture(auth: RequestContext | null = context) {
   const app = Fastify(); apps.push(app); app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => { if (request.headers.authorization === "Bearer valid") request.authContext = auth; });
-  const commands = { readTerms: vi.fn().mockResolvedValue({ revision: draftId }), saveTerms: vi.fn().mockResolvedValue({ revision: draftId }),
+  const commands = { readTerms: vi.fn().mockResolvedValue({ revision: draftId }), readDraftTerms: vi.fn().mockResolvedValue({ revision: draftId }), stageTerms: vi.fn().mockResolvedValue({ revision: draftId }),
     reviewCharges: vi.fn().mockResolvedValue({ fingerprint: "a".repeat(64) }), read: vi.fn().mockResolvedValue(snapshot), readDraft: vi.fn().mockResolvedValue({ snapshot, revision: 2 }),
     prepare: vi.fn().mockResolvedValue({ snapshot, sources }), saveDraft: vi.fn().mockResolvedValue(1),
     confirmCharges: vi.fn().mockResolvedValue({ id: draftId }), publish: vi.fn().mockResolvedValue({ revision: 1, replayed: false }) };
@@ -95,14 +96,22 @@ describe("replacement pricing HTTP boundary", () => {
     for (const body of [{ ...valid, actorUserId: id }, { ...valid, roomTypeId: id }, { ...valid, expectedRevision: 1 },
       { ...valid, payment: { kind: "deposit", basisPoints: 10001, balanceDaysBeforeArrival: 1 } },
       { ...valid, cancellation: { kind: "non_refundable", extra: true } }]) expect((await f.inject(7, body)).statusCode).toBe(400);
-    expect(f.commands.saveTerms).not.toHaveBeenCalled();
+    expect(f.commands.stageTerms).not.toHaveBeenCalled();
     expect((await f.inject(7)).statusCode).toBe(200);
-    expect(f.commands.saveTerms).toHaveBeenCalledWith(id, { requestId: "request-1", expectedRevision: null,
-      terms: { roomTypeId: id, offerId: "flex", cancellation: valid.cancellation, payment: valid.payment } });
+    expect(f.commands.stageTerms).toHaveBeenCalledWith(id, { requestId: "request-1", expectedRevision: null,
+      terms: { roomTypeId: id, offerId: "flex", cancellation: valid.cancellation, payment: valid.payment } }, { draftId, baseRevision: 0 });
     f.commands.reviewCharges.mockResolvedValue(null);
     expect((await f.inject(8)).statusCode).toBe(404);
     f.commands.reviewCharges.mockRejectedValue(new PricingStorageError("stale"));
     expect((await f.inject(8)).statusCode).toBe(409);
+  });
+  it("retires immediate policy mutation and validates candidate binding and effective evidence", async () => {
+    const f = await fixture(), base = `/api/pms/properties/${id}/pricing-v2`;
+    expect((await f.app.inject({ method: "PUT", url: `${base}/rooms/${id}/offers/flex/terms`, headers: { authorization: "Bearer valid" }, payload: endpoints[7][2] })).statusCode).toBe(403);
+    for (const baseRevision of [-1, null, 1.5, 2147483647]) expect((await f.inject(7, { ...endpoints[7][2], baseRevision })).statusCode).toBe(400);
+    for (const query of ["", "?revision=0", "?revision=1&revision=2", "?revision=1&extra=2"]) expect((await f.app.inject({ url: `${base}/drafts/${draftId}/rooms/${id}/offers/flex/terms${query}`, headers: { authorization: "Bearer valid" } })).statusCode).toBe(400);
+    for (const effectiveSources of [null, {}, { ...sources, extra: true }]) expect((await f.inject(5, { ...publish, effectiveSources })).statusCode).toBe(400);
+    expect(f.commands.stageTerms).not.toHaveBeenCalled(); expect(f.commands.readDraftTerms).not.toHaveBeenCalled(); expect(f.commands.publish).not.toHaveBeenCalled();
   });
   it("maps domain failures and sanitizes unexpected failures", async () => {
     const f = await fixture();

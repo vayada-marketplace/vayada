@@ -21,6 +21,10 @@ const owners = (v: unknown): v is PricingStorageSources => references(v) && Obje
 const snapshot = (v: unknown): v is PricingStorageSnapshot => exact(v, ["currency", "rooms", "ownerReferences"]) &&
   typeof v.currency === "string" && pricingCurrencyScale(v.currency) !== null && Array.isArray(v.rooms) && v.rooms.length > 0 && v.rooms.every((r) => parsePricingConfiguration(r) !== null) && owners(v.ownerReferences);
 const invalid = (): never => { throw new PricingStorageError("invalid"); };
+function effective(body: Record<string, unknown>) {
+  if (!Object.hasOwn(body, "effectiveSources")) return {};
+  return sources(body.effectiveSources) ? { effectiveSources: body.effectiveSources } : invalid();
+}
 function key(request: FastifyRequest): string {
   const count = request.raw.rawHeaders.filter((v, i) => i % 2 === 0 && v.toLowerCase() === "idempotency-key").length;
   const value = request.headers["idempotency-key"];
@@ -66,30 +70,38 @@ export async function registerReplacementPricingRoutes(app: FastifyInstance, opt
     });
   }
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!));
-  route("PUT", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => {
+  route("PUT", "/rooms/:roomTypeId/offers/:offerId/terms", async () => { throw new PricingStorageError("denied"); });
+  route("PUT", "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => {
     const requestId = key(request), body = request.body;
-    if (!exact(body, ["expectedRevision", "cancellation", "payment"]) || !(body.expectedRevision === null || uuid(body.expectedRevision))) return invalid();
+    if (!exact(body, ["expectedRevision", "baseRevision", "cancellation", "payment"]) || !revision(body.baseRevision) || !(body.expectedRevision === null || uuid(body.expectedRevision))) return invalid();
     const parsed = parseBookingPricingOfferTerms({ roomTypeId: request.params.roomTypeId, offerId: request.params.offerId,
       revision: request.params.roomTypeId, cancellation: body.cancellation, payment: body.payment });
     if (!parsed) return invalid();
     const { revision: _revision, ...terms } = parsed;
-    return commands.saveTerms(id, { requestId, expectedRevision: body.expectedRevision, terms });
+    return commands.stageTerms(id, { requestId, expectedRevision: body.expectedRevision, terms }, { draftId: request.params.draftId!, baseRevision: body.baseRevision as number });
+  });
+  route("GET", "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => {
+    const query = request.query;
+    if (!exact(query, ["revision"]) || typeof query.revision !== "string" || !/^[1-9][0-9]*$/.test(query.revision) || !revision(Number(query.revision))) return invalid();
+    return commands.readDraftTerms(id, request.params.draftId!, Number(query.revision), request.params.roomTypeId!, request.params.offerId!);
   });
   route("GET", "/drafts/:draftId/charge-review", (commands, id, request) => commands.reviewCharges(id, request.params.draftId!));
   route("GET", "", (commands, id) => commands.read(id));
   route("GET", "/drafts/:draftId", (commands, id, request) => commands.readDraft(id, request.params.draftId!));
   route("POST", "/prepare", (commands, id, request) => {
     const body = request.body;
-    if (!exact(body, ["currency", "rooms"]) || typeof body.currency !== "string" || pricingCurrencyScale(body.currency) === null || !Array.isArray(body.rooms) ||
+    if (!(exact(body, ["currency", "rooms"]) || exact(body, ["currency", "rooms", "draft"])) || typeof body.currency !== "string" || pricingCurrencyScale(body.currency) === null || !Array.isArray(body.rooms) ||
         !body.rooms.length || body.rooms.some((r) => parsePricingConfiguration(r) === null)) return invalid();
-    return commands.prepare(id, body);
+    const draft = body.draft;
+    if (draft !== undefined && (!exact(draft, ["draftId", "baseRevision"]) || !uuid(draft.draftId) || !revision(draft.baseRevision))) return invalid();
+    return commands.prepare(id, { currency: body.currency, rooms: body.rooms }, draft as { draftId: string; baseRevision: number } | undefined);
   });
   route("PUT", "/drafts/:draftId", async (commands, id, request) => {
     const body = request.body;
-    if (!exact(body, ["expectedDraftRevision", "baseRevision", "sources", "snapshot"]) || !revision(body.expectedDraftRevision) ||
+    if (!(exact(body, ["expectedDraftRevision", "baseRevision", "sources", "snapshot"]) || exact(body, ["expectedDraftRevision", "baseRevision", "sources", "snapshot", "effectiveSources"])) || !revision(body.expectedDraftRevision) ||
         !revision(body.baseRevision) || !sources(body.sources) || !snapshot(body.snapshot)) return invalid();
     const draftRevision = await commands.saveDraft(id, { draftId: request.params.draftId!, expectedDraftRevision: body.expectedDraftRevision as number,
-      baseRevision: body.baseRevision as number, sources: body.sources, snapshot: body.snapshot });
+      baseRevision: body.baseRevision as number, sources: body.sources, ...effective(body), snapshot: body.snapshot });
     return { revision: draftRevision };
   });
   route("POST", "/charges", (commands, id, request) => {
@@ -102,9 +114,9 @@ export async function registerReplacementPricingRoutes(app: FastifyInstance, opt
   });
   route("POST", "/publish", (commands, id, request) => {
     const requestId = key(request), body = request.body;
-    if (!exact(body, ["expectedRevision", "sources", "snapshot", "draft"]) || !revision(body.expectedRevision) || !sources(body.sources) || !snapshot(body.snapshot) ||
+    if (!(exact(body, ["expectedRevision", "sources", "snapshot", "draft"]) || exact(body, ["expectedRevision", "sources", "snapshot", "draft", "effectiveSources"])) || !revision(body.expectedRevision) || !sources(body.sources) || !snapshot(body.snapshot) ||
         !exact(body.draft, ["id", "revision"]) || !uuid(body.draft.id) || !revision(body.draft.revision) || body.draft.revision === 0) return invalid();
-    return commands.publish(id, { expectedRevision: body.expectedRevision as number, sources: body.sources, snapshot: body.snapshot,
+    return commands.publish(id, { expectedRevision: body.expectedRevision as number, sources: body.sources, ...effective(body), snapshot: body.snapshot,
       draft: { id: body.draft.id, revision: body.draft.revision as number }, requestId });
   });
 }

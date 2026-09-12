@@ -61,11 +61,25 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
     async stageTerms(propertyId: string, input: Parameters<typeof booking.stage>[2], draft: BookingPricingDraft) {
       return booking.stage(trustedContext, scope(propertyId), input, draft);
     },
+    async readDraftTerms(propertyId: string, draftId: string, revision: number, roomTypeId: string, offerId: string) {
+      const currentScope = scope(propertyId), client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const sources = await lockReplacementPricingSources(client, trustedContext, currentScope, "read");
+        if (!sources) return fail("denied");
+        const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2 FOR SHARE", [propertyId, draftId])).rows[0];
+        if (!draft) { await client.query("COMMIT"); return null; }
+        const canonical = (v: unknown): string => JSON.stringify(v, (_k, x) => pricingObject(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x);
+        if (draft.draft_revision !== revision || canonical(draft.source_revisions) !== canonical(sources)) throw new PricingStorageError("stale");
+        const references = (draft.snapshot as PricingStorageSnapshot).rooms.flatMap((r) => r.offers.map((o) => ({ roomTypeId: r.roomTypeId, offerId: o.id, revision: o.termsRevision })));
+        const projected = await projectBookingPricingDraftTerms(client, trustedContext, currentScope, { draftId, baseRevision: draft.base_revision }, references, "read");
+        if (!projected || projected.source !== (draft.effective_source_revisions ?? sources).terms) throw new PricingStorageError("stale");
+        const terms = projected.terms.find((t) => t.roomTypeId === roomTypeId.toLowerCase() && t.offerId === offerId) ?? null;
+        await client.query("COMMIT"); return terms;
+      } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
+    },
     async readTerms(propertyId: string, roomTypeId: string, offerId: string) {
       return booking.read(trustedContext, scope(propertyId), roomTypeId, offerId);
-    },
-    async saveTerms(propertyId: string, input: Parameters<typeof booking.save>[2]) {
-      return booking.save(trustedContext, scope(propertyId), input);
     },
     async reviewCharges(propertyId: string, draftId: string) {
       const currentScope = scope(propertyId), draft = await store.readDraft(currentScope, draftId);
