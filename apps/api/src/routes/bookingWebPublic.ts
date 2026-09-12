@@ -1,3 +1,4 @@
+import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
   evaluateSameDayBooking,
@@ -56,10 +57,12 @@ import {
   stripeAmountMinor,
   stripeApplicationFeeMinor,
 } from "../domains/stripeMoney.js";
+import { releasedPmsReservationOfferKeys } from "../domains/pmsInventoryReservation.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import {
   inventoryReservationReceiptFromBookingMetadata,
   type DirectBookingInventoryReservationPort,
+  type InventoryReservationReceipt,
 } from "../platform/inventoryReservation.js";
 import {
   serializePublicHotelQuoteProjection,
@@ -139,6 +142,7 @@ type BookingWebPromoValidationRequest = {
   bookingTotal?: number;
 };
 type BookingWebAttributionClickRequest = {
+  clickId?: string;
   referralCode?: string;
   referral_code?: string;
   sessionId?: string;
@@ -174,6 +178,7 @@ export type BookingWebAttributionSink = {
 };
 
 export type BookingWebAffiliateClickEvent = {
+  clickId?: string;
   slug: string;
   referralCode: string;
   sessionId?: string;
@@ -902,8 +907,16 @@ export async function registerBookingWebPublicRoutes(
       if (!referralCode) {
         throw createHttpError(400, "Referral code is required.");
       }
+      const clickId = request.body?.clickId;
+      if (
+        clickId !== undefined &&
+        (typeof clickId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clickId))
+      ) {
+        throw createHttpError(400, "Invalid click ID.");
+      }
       if (options.attributionSink) {
         await options.attributionSink.recordAffiliateClick({
+          clickId,
           slug: request.params.slug,
           referralCode,
           sessionId: firstString(request.body?.sessionId, request.body?.session_id),
@@ -2677,6 +2690,84 @@ export function serializeTargetCheckoutQuote(
     depositAmount: 0,
     balanceAmount: totalAmount,
   };
+}
+
+/** Pending edits may replace a bundle with a legacy single-type selection. */
+export async function revalidateTargetSingleEditQuote(
+  pool: BookingWebQueryExecutor,
+  property: TargetCheckoutPropertyRow,
+  quote: TargetCheckoutQuoteSnapshot,
+  now: Date,
+  replacingReservation: InventoryReservationReceipt,
+): Promise<void> {
+  if (quote.selectedOfferSnapshot["roomSelection"] !== undefined) return;
+  await lockPmsInventoryMutationScope(pool, property.propertyId);
+  const saved = quote.selectedOfferSnapshot;
+  const settings = await loadTargetCheckoutConfig(pool, property.propertyId);
+  const unavailable = () =>
+    createHttpError(409, "Room selection changed. Please refresh the checkout quote.");
+  if ((settings?.defaultCurrency ?? "EUR") !== quote.currency) throw unavailable();
+  const releasedOffers = await releasedPmsReservationOfferKeys(
+    pool,
+    property.propertyId,
+    replacingReservation,
+    now,
+  );
+  const offer = await loadTargetCheckoutOffer(pool, {
+    propertyId: property.propertyId,
+    checkIn: quote.checkIn,
+    checkOut: quote.checkOut,
+    currency: quote.currency,
+    adults: quote.adults,
+    children: quote.children,
+    roomCount: quote.roomCount,
+    nights: dateRange(quote.checkIn, quote.checkOut).length,
+    roomTypeId: String(saved["roomTypeId"]),
+    rateType: String(saved["rateType"] ?? ""),
+    exactPublicOfferKey: String(saved["publicOfferKey"]),
+    releasedSetupCredit: releasedOffers.has(String(saved["publicOfferKey"])),
+    requestedAt: now,
+  });
+  if (
+    await pmsRoomStayRestrictionReason(pool, {
+      propertyId: property.propertyId,
+      roomTypeId: offer.roomTypeId,
+      ratePlanId: offer.ratePlanId,
+      checkIn: quote.checkIn,
+      checkOut: quote.checkOut,
+    })
+  )
+    throw unavailable();
+  for (const key of ["ratePlanId", "rateSummary", "publicPolicy"] as const)
+    if (stableJson(saved[key]) !== stableJson(offer[key])) throw unavailable();
+  for (const key of ["roomTotal", "taxesAndFees", "discounts"] as const)
+    if (moneyToCents(quote.totals[key] as string) !== moneyToCents(offer[key])) throw unavailable();
+  const nightlyPayments = offer.nightlyPaymentOptions ?? [offer.paymentOptions];
+  if (
+    !quote.paymentMethod ||
+    !Array.isArray(nightlyPayments) ||
+    !nightlyPayments.every(
+      (options: unknown) => Array.isArray(options) && options.includes(quote.paymentMethod),
+    )
+  )
+    throw unavailable();
+  const automatic = bestBookingPromotion({
+    settings: settings?.promotionSettings,
+    roomTypeId: offer.roomTypeId,
+    today: targetPropertyDateOnly(property.timezone, now),
+    nights: targetNightlyRoomAmounts(
+      offer.promotionNightlyRoomAmounts ?? offer.nightlyRoomAmounts,
+      quote.checkIn,
+      quote.checkOut,
+    ),
+    roomTotal: Math.max(0, Number(offer.roomTotal) - Number(offer.discounts)),
+    roomCount: quote.roomCount,
+  });
+  const promotion =
+    automatic && automatic.discountAmount > Number(quote.totals["promoDiscount"] ?? 0)
+      ? automatic
+      : undefined;
+  if (stableJson(saved["promotion"]) !== stableJson(promotion)) throw unavailable();
 }
 
 export async function createTargetGuestBooking(
@@ -4568,7 +4659,7 @@ export async function redeemTargetPromo(
   if (validationMessage) throw createHttpError(409, validationMessage);
   const selection = parseBookingRoomSelection(quote.selectedOfferSnapshot["roomSelection"]);
   if (
-    selection &&
+    (selection || quote.selectedOfferSnapshot["editBookingId"]) &&
     (snapshot["discountType"] !== promo.discountType ||
       moneyToCents(snapshot["discountValue"] as string) !== moneyToCents(promo.discountValue))
   ) {
@@ -4594,11 +4685,18 @@ export async function redeemTargetPromo(
       WHERE property_id = $1::uuid AND id = $2::uuid`,
     [property.propertyId, promoDefinitionId, occurredAt.toISOString()],
   );
-  await pool.query(
+  const redemption = await pool.query(
     `INSERT INTO booking.promo_applications (
        property_id, guest_booking_id, promo_definition_id, promo_code,
        application_status, discount_amount, currency, metadata
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'applied', $5::numeric, $6, $7::jsonb)`,
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'applied', $5::numeric, $6, $7::jsonb)
+     ON CONFLICT (guest_booking_id) WHERE guest_booking_id IS NOT NULL DO UPDATE SET
+       promo_definition_id=EXCLUDED.promo_definition_id,promo_code=EXCLUDED.promo_code,
+       application_status='applied',discount_amount=EXCLUDED.discount_amount,
+       currency=EXCLUDED.currency,metadata=EXCLUDED.metadata
+     WHERE booking.promo_applications.property_id=EXCLUDED.property_id
+       AND booking.promo_applications.application_status='reversed'
+     RETURNING id`,
     [
       property.propertyId,
       booking.guestBookingId,
@@ -4609,6 +4707,7 @@ export async function redeemTargetPromo(
       JSON.stringify({ quoteReference: quote.publicQuoteReference }),
     ],
   );
+  if (redemption.rows.length !== 1) throw createHttpError(409, "Promo redemption changed. Please refresh.");
 }
 
 export async function reverseTargetPromoRedemption(
