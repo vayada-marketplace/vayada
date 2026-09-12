@@ -128,3 +128,20 @@ later generation proceeds. HTTP status alone never marks the whole batch accepte
 Keep `PRICING_UNAVAILABLE` until these gates and the meal/restriction dependencies
 are satisfied. Preserve shared fixtures owned by other active tasks. No production
 change, reservation, payment, deployment or merge follows from this decision.
+
+## Explicit primary occupancy (VAY-1983)
+
+The hotel chooses the standard adult guest count during channel setup. This is a
+provider setup choice, not a pricing formula or an inferred room-capacity default.
+Do not derive it from included-guests base counts; those can vary by calendar row.
+
+The reservation entrypoint requires `primaryOccupancy`, an integer from one to the
+current published room's adult capacity. The pending proposal retains the choice;
+changing it with the same operation key is a conflict. Existing intents without a
+choice cannot become valid by retrying with a guessed default. They require an
+explicit replacement operation through the later cancellation/reconciliation flow.
+
+Provider options must eventually mark exactly this guest count primary while
+retaining every supported occupancy price. Missing, unsupported or stale choices
+block activation. This slice adds backend validation/storage; the hotel-facing
+control, provider configuration and activation remain separate implementation work.

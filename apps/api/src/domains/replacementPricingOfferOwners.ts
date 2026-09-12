@@ -84,7 +84,12 @@ async function lockOwners(client: PoolClient,
  * authority, publication, owners and mapping generation in a fresh transaction.
  * Contention/serialization/timeouts propagate for durable-worker retry.
  */
-type TargetSelection = Readonly<{ roomTypeId: string; offerId: string; operationKey: string }>;
+type TargetSelection = Readonly<{
+  roomTypeId: string;
+  offerId: string;
+  operationKey: string;
+  primaryOccupancy: number;
+}>;
 
 export async function readPublishedPricingForChannexJob(
   pool: Pool,
@@ -109,6 +114,8 @@ export async function reservePublishedChannexOfferTarget(
     )
   )
     return { kind: "unavailable" as const, reason: "invalid_selection" };
+  if (!Number.isSafeInteger(selection.primaryOccupancy) || selection.primaryOccupancy < 1)
+    return { kind: "unavailable" as const, reason: "invalid_primary_occupancy" };
   const result = await withPublishedChannexPricing(pool, input, { ...selection });
   if (result.kind !== "available") return result;
   if (!result.reservation) throw new Error("Target reservation missing");
@@ -190,6 +197,8 @@ async function withPublishedChannexPricing(
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
         return unavailable("selection_unavailable");
+      if (selection.primaryOccupancy > room.capacity.adults)
+        return unavailable("invalid_primary_occupancy");
       const binding = (
         await client.query(
           "SELECT binding_generation FROM pms.channel_connections WHERE id=$1 FOR SHARE NOWAIT",
@@ -206,6 +215,7 @@ async function withPublishedChannexPricing(
         externalPropertyId: authority.externalPropertyId,
         room,
         offerId: selection.offerId,
+        primaryOccupancy: selection.primaryOccupancy,
       });
       await client.query(
         `INSERT INTO pms.channex_offer_targets
