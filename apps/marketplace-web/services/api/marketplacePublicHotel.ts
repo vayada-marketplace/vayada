@@ -66,9 +66,11 @@ export async function loadMarketplacePublicHotel(
   propertyId: string,
   signal?: AbortSignal,
 ): Promise<MarketplacePublicHotel | null> {
+  if (!uuid(propertyId)) return null;
+  const deadline = AbortSignal.timeout(10_000);
   const response = await fetch(
     `${VAYADA_API_BASE_URL.replace(/\/$/, "")}${marketplacePublicHotelPath(propertyId)}`,
-    { cache: "no-store", credentials: "omit", signal },
+    { cache: "no-store", credentials: "omit", signal: signal ? AbortSignal.any([signal, deadline]) : deadline },
   );
   if (response.status === 404) return null;
   if (!response.ok) throw new Error("Hotel details are temporarily unavailable");

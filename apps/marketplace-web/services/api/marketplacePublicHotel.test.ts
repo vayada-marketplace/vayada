@@ -45,3 +45,21 @@ it("rejects mismatched properties and unsafe media", () => {
     ).toThrow();
   }
 });
+
+it("treats malformed addresses as unavailable without a request", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  expect(await loadMarketplacePublicHotel("not-a-uuid")).toBeNull();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it.each(["deadline", "caller"])("terminates stalled requests on %s cancellation", async (source) => {
+  vi.stubGlobal("fetch", vi.fn((_url, options: RequestInit) => new Promise((_resolve, reject) => {
+    const signal = options.signal!;
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  })));
+  const controller = new AbortController();
+  const pending = loadMarketplacePublicHotel(propertyId, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: source === "caller" ? "AbortError" : "TimeoutError" });
+  if (source === "caller") controller.abort();
+  await rejected;
+}, 15_000);

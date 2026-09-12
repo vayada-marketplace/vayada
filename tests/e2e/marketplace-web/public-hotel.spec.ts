@@ -65,7 +65,7 @@ test("anonymous visitors see the approved profile without writes or simulated co
   await page.screenshot({ path: info.outputPath("approved-public-hotel.png"), fullPage: true });
   await healthy();
 });
-test("an unavailable profile remains unavailable after retry", async ({ page }) => {
+test("an unavailable profile does not offer a futile retry", async ({ page }) => {
   let reads = 0;
   await page.route(`**/api/marketplace/hotels/${propertyId}`, async (route) => {
     reads++;
@@ -77,8 +77,8 @@ test("an unavailable profile remains unavailable after retry", async ({ page }) 
   });
   await page.goto(`/hotels/${propertyId}`);
   await expect(page.getByRole("heading", { name: "Hotel profile unavailable" })).toBeVisible();
-  await page.getByRole("button", { name: "Try again" }).click();
-  await expect.poll(() => reads).toBe(2);
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  expect(reads).toBe(1);
   await expect(page.getByRole("heading", { name: "Hotel profile unavailable" })).toBeVisible();
 });
 test("provider failure can recover on mobile without revealing private locality", async ({
@@ -119,4 +119,13 @@ test("provider failure can recover on mobile without revealing private locality"
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+});
+
+test("a malformed address is unavailable without a request or retry", async ({ page }) => {
+  let reads = 0;
+  await page.route("**/api/marketplace/hotels/**", async (route) => { reads++; await route.abort(); });
+  await page.goto("/hotels/not-a-uuid");
+  await expect(page.getByRole("heading", { name: "Hotel profile unavailable" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  expect(reads).toBe(0);
 });

@@ -60,13 +60,13 @@ export default function HotelDetailPage() {
                 ? "Please try again in a moment."
                 : "This hotel does not have an active public Marketplace profile."}
             </p>
-            <button
+            {current.error && <button
               type="button"
               className="mt-6 rounded-lg bg-primary-600 px-5 py-3 font-semibold text-white"
               onClick={() => setRetry((value) => value + 1)}
             >
               Try again
-            </button>
+            </button>}
           </section>
         ) : (
           <article className="mt-8">
