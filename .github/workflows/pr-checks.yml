@@ -215,6 +215,7 @@ jobs:
           src/domains/financeOtaCommissionExpenseProjection.integration.test.ts
           src/jobs/financeExpenseGeneration.integration.test.ts
           src/jobs/pmsChannexBookingRevisionTombstones.integration.test.ts
+          src/jobs/channexAssignmentRepair.integration.test.ts
           src/jobs/channexBookings.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
