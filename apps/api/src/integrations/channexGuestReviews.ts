@@ -74,7 +74,9 @@ function opportunity(value: unknown, identity: ReviewIdentity): GuestReviewOppor
     };
   if (text(attributes.ota).toLowerCase() !== "airbnb")
     return { ...result, state: "unavailable", reason: "unsupported_channel" };
-  if (record(attributes.reply).guest_review) return { ...result, state: "accepted" };
+  const guestReview = record(attributes.reply).guest_review;
+  if (guestReview && typeof guestReview === "object" && !Array.isArray(guestReview))
+    return { ...result, state: "accepted" };
   const reason =
     attributes.is_expired === true
       ? "expired"

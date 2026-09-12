@@ -64,6 +64,9 @@ describe("Channex guest-review contract", () => {
     [{ ota_reservation_id: "" }, "unavailable"],
     [{ is_replied: true, reply: { reply: "Public reply" } }, "ready"],
     [{ reply: { guest_review: { public_review: "Good guest" } } }, "accepted"],
+    [{ reply: { guest_review: true } }, "ready"],
+    [{ reply: { guest_review: "accepted" } }, "ready"],
+    [{ reply: { guest_review: [] } }, "ready"],
   ])("requires explicit current eligibility %j", async (override, state) => {
     expect(
       (

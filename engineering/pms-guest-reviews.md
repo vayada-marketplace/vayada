@@ -60,3 +60,18 @@ audit events. Accepted means submitted, not immediately public.
 No sanctioned non-public Channex/Airbnb review fixture is available. Provider
 contract tests, isolated PostgreSQL tests and browser tests with mocked outcomes
 cannot prove live OTA delivery. Never publish a real guest review as a test.
+
+## Validation evidence
+
+On 2026-09-07, the shared staging property's scoped credential received HTTP403
+from GET `/api/v1/reviews?filter[property_id]=…`. This is an application/access
+blocker, not evidence of zero reviews. No POST or shared fixture mutation occurred.
+API/provider tests, isolated PostgreSQL receipts, production PMS build and real
+browser tests with synthetic API responses pass. Browser cases include preview,
+provider failure, dropped POST response, accepted reload, and retrying discovery
+without skipping the failed page. Live Airbnb delivery remains unverified.
+
+Review writes require `PMS_CHANNEX_REVIEWS_MODE=mutating` with target PMS operations
+and configured Channex credentials. The default `observe_only` mode does not
+construct review providers; submission is unavailable while saved receipts remain
+readable. Reviews execute inline and do not require the Channex management worker.
