@@ -3,6 +3,11 @@ import { pricingCurrencyScale, pricingInteger, pricingObject, type PricingConver
 
 export const REPLACEMENT_FX_ATTRIBUTION = { label: "Rates By Exchange Rate API", url: "https://www.exchangerate-api.com" } as const;
 const provider = REPLACEMENT_FX_ATTRIBUTION.url;
+/** Content identity shared with the immutable observation ledger; not a signature. */
+export function replacementPricingFxId(rate: Omit<PricingConversionRate, "id">): string {
+  const { from, to, numerator, denominator, observedAt, expiresAt } = rate;
+  return `exchange-rate-api:${createHash("sha256").update(JSON.stringify({ provider, from, to, numerator, denominator, observedAt, expiresAt })).digest("hex")}`;
+}
 const hour = 3_600_000, day = 24 * hour, maxBytes = 131_072;
 // Node 24+ source text avoids rounding JSON rate tokens through Number.
 class ExactNumber { constructor(readonly text: string | undefined) {} }
@@ -76,8 +81,7 @@ export function createReplacementPricingFxReader(dependencies: { fetch?: typeof 
       const rate = ratio(data.rates[to], fromScale, toScale);
       if (!rate) return null;
       const observation = { from, to, ...rate, observedAt: new Date(data.observed).toISOString(), expiresAt: new Date(data.expires).toISOString() };
-      const id = createHash("sha256").update(JSON.stringify({ provider, ...observation })).digest("hex");
-      return { id: `exchange-rate-api:${id}`, ...observation };
+      return { id: replacementPricingFxId(observation), ...observation };
     },
   };
 }
