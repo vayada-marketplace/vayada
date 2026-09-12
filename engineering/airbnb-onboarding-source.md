@@ -247,6 +247,6 @@ receipt pools close through their route hooks.
 
 This wiring does not enable the separate frontend `AIRBNB_IMPORT_CALLBACK_ENABLED`
 flag. Operators must verify production callback request-log handling and required
-migrations 0179/0180 before enabling both sides. No environment was changed here.
+migrations 0179/0182 before enabling both sides. No environment was changed here.
 Configuration/composition tests use mocked SQL/provider responses, including a
 mounted-route authentication rejection; they do not establish fresh-host approval.
