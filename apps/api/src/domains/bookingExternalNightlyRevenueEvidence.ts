@@ -86,7 +86,11 @@ export async function appendExternalNightlyRevenueEvidence(
     throw new Error("External evidence requires an open transaction");
   if (
     scope.roomTypeCount !== roomTypes.length ||
-    lines.some((line) => line.linePosition > scope.roomCount)
+    lines.some(
+      (line) =>
+        line.linePosition > scope.roomCount &&
+        !(command.sourceKind === "ota" && line.correctsEvidenceId),
+    )
   )
     throw new ExternalRevenueEvidenceScopeError("External room scope is unavailable");
   const stored = await client.query<StoredLine>(
