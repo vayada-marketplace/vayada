@@ -2,21 +2,18 @@ import type { PoolClient } from "pg";
 import { readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 
 /** Interprets tagged evidence; parsing JSON alone never establishes creation success. */
-export function matchesChannexCreationReceipt(
-  receipt: {
-    outcome: unknown;
-    http_status: unknown;
-    has_warnings: unknown;
-    identity_evidence: unknown;
-  },
-  expected: { externalPropertyId: string; externalRoomTypeId: string; externalRatePlanId: string },
-) {
+export function readChannexCreationReceiptIdentity(receipt: {
+  outcome: unknown;
+  http_status: unknown;
+  has_warnings: unknown;
+  identity_evidence: unknown;
+}) {
   if (
     receipt.outcome !== "complete_json" ||
     receipt.http_status !== 201 ||
     receipt.has_warnings !== false
   )
-    return false;
+    return undefined;
   try {
     const evidence = receipt.identity_evidence as Record<
       string,
@@ -33,14 +30,14 @@ export function matchesChannexCreationReceipt(
       if (kind !== "object" && kind !== "missing") throw new Error("invalid");
       return kind === "object";
     };
-    if (!container("data")) return false;
+    if (!container("data")) return undefined;
     const attributes = {
       id: value("attributeRateId"),
       property_id: value("propertyId"),
       room_type_id: value("roomId"),
     };
     if (!container("attributes") && Object.values(attributes).some((v) => v !== undefined))
-      return false;
+      return undefined;
     const relation = (key: string, idKey: string) => {
       const present = container(key),
         id = value(idKey);
@@ -52,18 +49,27 @@ export function matchesChannexCreationReceipt(
       room_type: relation("roomRelationship", "relatedRoomId"),
     };
     if (!container("relationships") && Object.values(relationships).some((v) => v !== undefined))
-      return false;
+      return undefined;
     const identity = readChannexCreatedRateIdentity({
       data: { type: value("type"), id: value("rateId"), attributes, relationships },
     });
-    return (
-      identity.externalPropertyId === expected.externalPropertyId &&
-      identity.externalRoomTypeId === expected.externalRoomTypeId &&
-      identity.externalRatePlanId === expected.externalRatePlanId
-    );
+    return identity;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export function matchesChannexCreationReceipt(
+  receipt: Parameters<typeof readChannexCreationReceiptIdentity>[0],
+  expected: { externalPropertyId: string; externalRoomTypeId: string; externalRatePlanId: string },
+) {
+  const identity = readChannexCreationReceiptIdentity(receipt);
+  return (
+    !!identity &&
+    identity.externalPropertyId === expected.externalPropertyId &&
+    identity.externalRoomTypeId === expected.externalRoomTypeId &&
+    identity.externalRatePlanId === expected.externalRatePlanId
+  );
 }
 
 /** Caller holds the target row lock before this query, as receipt capture does.
