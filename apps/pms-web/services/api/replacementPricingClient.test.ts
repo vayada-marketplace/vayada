@@ -148,3 +148,25 @@ describe("saved offer terms", () => {
     }
   });
 });
+
+describe("offer policy creation", () => {
+  const input = { roomTypeId: id, offerId: "first", expectedRevision: null, cancellation: { kind: "non_refundable" as const }, payment: { kind: "full" as const } };
+  it("captures exact initial policy and key once, and validates the returned policy", async () => {
+    const mutable = structuredClone(input), action = client().termsAction(mutable);
+    mutable.offerId = "changed";
+    http.put.mockRejectedValueOnce(new Error("lost response")).mockResolvedValue({ roomTypeId: id, offerId: "first", revision: draftId, cancellation: input.cancellation, payment: input.payment });
+    await expect(action()).rejects.toThrow("lost response"); expect(await action()).toMatchObject({ revision: draftId, offerId: "first" });
+    const [first, retry] = http.put.mock.calls;
+    expect(retry[1]).toEqual(first[1]); expect(first[1].expectedRevision).toBeNull();
+    expect(new Headers(retry[2].headers).get("Idempotency-Key")).toBe(new Headers(first[2].headers).get("Idempotency-Key"));
+    http.put.mockResolvedValue({ roomTypeId: id, offerId: "first", revision: draftId, cancellation: input.cancellation, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } });
+    await expect(action()).rejects.toBeInstanceOf(PricingResponseError);
+    expect(http.post).not.toHaveBeenCalled();
+  });
+  it("rejects incomplete or invalid policies before a request and preserves conflicts", async () => {
+    expect(() => client().termsAction({ ...input, expectedRevision: "invalid" })).toThrow();
+    expect(() => client().termsAction({ ...input, cancellation: { kind: "flexible", terms: {} } } as never)).toThrow();
+    expect(http.put).not.toHaveBeenCalled();
+    http.put.mockRejectedValue(new ApiErrorResponse(409, {})); await expect(client().termsAction(input)()).rejects.toMatchObject({ status: 409 });
+  });
+});

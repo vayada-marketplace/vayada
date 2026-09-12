@@ -6,22 +6,26 @@ import { ApiErrorResponse } from "@/services/api/client";
 import { type createReplacementPricingClient, type PricingSnapshot, type PricingDraft, type PricingChargeReview } from "@/services/api/replacementPricingClient";
 
 import { baseAmounts, decimalAmount, editedSnapshot } from "./pricingAmounts";
+import { FirstPricingSetup, type SetupRoom, type firstPricingInput } from "./FirstPricingSetup";
 import { PricingTerms } from "./PricingTerms";
 import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
-export function PricingEditor({ client, roomNames = {} }: { client: Client; roomNames?: Record<string, string> }) {
+export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
+  const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
   const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({}), [dirty, setDirty] = useState(false), [ack, setAck] = useState(false);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [needsReload, setNeedsReload] = useState(false), [done, setDone] = useState(false), [retry, setRetry] = useState(false);
+  const retainFailure = useRef<(() => boolean) | null>(null);
   const action = useRef<(() => Promise<void>) | null>(null), locked = useRef(false), alive = useRef(true);
   const pendingDraftId = useRef(crypto.randomUUID()), leaving = useRef(false);
   const load = useCallback(async () => {
-    setLoading(true); setError("");
+    setLoading(true); setEmpty(false); setError("");
     try {
       const saved = await client.read(); if (!alive.current) return;
+      setEmpty(saved === null);
       setCurrent(saved ? { currency: saved.currency, ownerReferences: { finance: saved.ownerReferences.finance },
         rooms: saved.rooms.map((room) => ({ ...room, revision: saved.revision + 1 })) } : null);
       setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
@@ -48,19 +52,30 @@ export function PricingEditor({ client, roomNames = {} }: { client: Client; room
     window.addEventListener("pms:before-property-change", switchProperty);
     return () => { window.removeEventListener("beforeunload", warn); document.removeEventListener("click", navigate, true); window.removeEventListener("pms:before-property-change", switchProperty); };
   }, [leaveRisk]);
-  async function run(next?: () => Promise<void>) {
+  async function run(next?: () => Promise<void>, keepFailure?: () => boolean) {
     if (locked.current) return;
-    if (next) action.current = next;
+    if (next) { action.current = next; retainFailure.current = keepFailure ?? null; }
     if (!action.current) return;
     locked.current = true; setBusy(true); setError("");
     try { await action.current(); action.current = null; if (alive.current) setRetry(false); }
     catch (e) {
       if (alive.current) {
         setError(message(e));
-        const definitive = e instanceof ApiErrorResponse && [400, 403, 409].includes(e.status);
+        const definitive = e instanceof ApiErrorResponse && [400, 403, 409].includes(e.status) && !retainFailure.current?.();
         if (definitive) { action.current = null; setNeedsReload(true); setRetry(false); } else setRetry(true);
       }
     } finally { locked.current = false; if (alive.current) setBusy(false); }
+  }
+  function createInitial(input: ReturnType<typeof firstPricingInput>) {
+    const saveTerms = client.termsAction(input.terms);
+    let saved: Awaited<ReturnType<typeof saveTerms>> | null = null;
+    void run(async () => {
+      saved ??= await saveTerms();
+      if (alive.current) setNotice("The offer policy is saved. Checking pricing readiness; pricing is not approved yet.");
+      const room = { ...input.configuration, offers: input.configuration.offers.map((offer) => ({ ...offer, termsRevision: saved!.revision })) };
+      const prepared = await client.prepare({ currency: room.currency, rooms: [room] });
+      if (alive.current) { setCurrent(prepared.snapshot); setBaseRevision(0); setDirty(true); setNotice("Setup is ready. Save your draft, then review its charges before approval."); }
+    }, () => saved !== null); // Preparation is read-only; keep the accepted policy even after readiness is rejected.
   }
   function save() {
     if (!current) return;
@@ -96,9 +111,10 @@ export function PricingEditor({ client, roomNames = {} }: { client: Client; room
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">Pricing</h1><p className="mt-1 text-sm text-gray-600">Edit base nightly prices, then review and approve your saved draft.</p></div>
       <button className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50" disabled={loading || busy || retry} onClick={() => { if (!leaveRisk || window.confirm("Discard this draft and reload pricing?")) void load(); }}>Reload pricing</button></header>
-    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}{retry && <p className="mt-2">Keep this page open and retry the same action. Do not start a new approval.</p>}</div>}
+    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}{retry && <p className="mt-2">Keep this page open and retry the same action. Do not start another pricing action.</p>}</div>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-900">{notice}</p>}
-    {loading ? <p role="status">Loading pricing…</p> : !display && error ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">Pricing is not configured yet</h2><p className="mt-2 text-sm text-gray-600">This editor works with configured rates. Initial pricing setup is not available here yet.</p></div> : <>
+    {loading ? <p role="status">Loading pricing…</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">Pricing is not configured yet</h2>{setup ? <FirstPricingSetup propertyId={setup.propertyId} rooms={setup.rooms} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">Room setup information is unavailable. Reload pricing before creating a rate.</p>}
+      {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>Retry last action</button>}</div> : <>
       <div className="flex justify-between text-sm"><strong>{display.currency} · Base nightly prices</strong><span>{done ? "Approved rates" : review ? "Saved draft review" : dirty ? "Unsaved changes" : draft ? "Draft saved" : "Current rates"}</span></div>
       {display.rooms.map((room, ri) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomNames[room.roomTypeId] ?? `Room ${ri + 1}`}</h2>
