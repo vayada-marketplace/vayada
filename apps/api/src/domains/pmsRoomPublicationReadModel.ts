@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import {
   createRoomMediaProjectionInput,
   type HotelMediaResolutionPort,
@@ -184,9 +185,7 @@ export function createPgPmsRoomPublicationReadModel(
       const scope = publicationScope(input.organizationId, input.propertyId);
       await requireAuthorizedScope(pool, scope);
 
-      const roomFacts = (await config.roomFacts.listRoomTypeFacts(scope.propertyId)).filter(
-        ({ lifecycle }) => lifecycle === "active",
-      );
+      const roomFacts = await readOperatingRoomFacts(config, pool, scope.propertyId);
       const roomTypeIds = roomFacts.map(({ roomTypeId }) => roomTypeId);
       const storedRows = await loadPublicationSourceRows(pool, scope.propertyId, roomTypeIds);
       const storedByRoomId = new Map(storedRows.map((row) => [row.roomTypeId, row]));
@@ -283,9 +282,7 @@ async function requireStablePublicationSources(
     storedRows: readonly RoomPublicationSourceRow[];
   },
 ): Promise<void> {
-  const currentFacts = (await config.roomFacts.listRoomTypeFacts(propertyId)).filter(
-    ({ lifecycle }) => lifecycle === "active",
-  );
+  const currentFacts = await readOperatingRoomFacts(config, pool, propertyId);
   const roomTypeIds = currentFacts.map(({ roomTypeId }) => roomTypeId);
   const currentCapacities = await Promise.all(
     currentFacts.map(async ({ roomTypeId }) => {
@@ -591,4 +588,19 @@ function isExactDataRecord(
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     return descriptor?.enumerable === true && Object.hasOwn(descriptor, "value");
   });
+}
+
+async function readOperatingRoomFacts(
+  config: Pick<PmsRoomPublicationReadModelConfig, "roomFacts">,
+  pool: PmsRoomPublicationReadPool,
+  propertyId: string,
+) {
+  const operatingIds = new Set(
+    (await readPmsRoomOperatingEligibility(pool, propertyId))
+      .filter((room) => room.state === "operating")
+      .map((room) => room.roomTypeId),
+  );
+  return (await config.roomFacts.listRoomTypeFacts(propertyId)).filter(
+    (room) => room.lifecycle === "active" && operatingIds.has(room.roomTypeId),
+  );
 }
