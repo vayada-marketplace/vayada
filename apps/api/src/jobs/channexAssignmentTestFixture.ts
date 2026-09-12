@@ -61,6 +61,8 @@ export async function clearChannexAssignmentFixture(db: Pool, propertyId: string
   for (const table of [
     "platform.outbox_events",
     "platform.domain_events",
+    "booking.nightly_revenue_evidence",
+    "booking.nightly_revenue_room_scopes",
     "pms.operational_booking_assignments",
     "pms.channel_booking_revision_tombstones",
     "pms.channel_rate_plan_mappings",
