@@ -42,7 +42,6 @@ export function createPgAirbnbImportApplicationRepository(connectionString: stri
       execute: (source: PreparedImportSource) => Promise<ImportItemResult[]>,
     ): Promise<ImportItemResult[]> {
       const client = await pool.connect();
-      let failed = false;
       try {
         await client.query("SELECT pg_advisory_lock(hashtextextended($1::uuid::text, 0))", [
           scope.sourceId,
@@ -61,18 +60,15 @@ export function createPgAirbnbImportApplicationRepository(connectionString: stri
           [scope.sourceId, JSON.stringify(successes)],
         );
         return items.map((item) => source.results[item.itemId] ?? item);
-      } catch (error) {
-        failed = true;
-        throw error;
       } finally {
         try {
           await client.query("SELECT pg_advisory_unlock(hashtextextended($1::uuid::text, 0))", [
             scope.sourceId,
           ]);
           client.release();
-        } catch (error) {
+        } catch {
+          // Destroy the session to release its lock without masking the application outcome.
           client.release(true);
-          if (!failed) throw error;
         }
       }
     },
