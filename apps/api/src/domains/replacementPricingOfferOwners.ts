@@ -84,9 +84,41 @@ async function lockOwners(client: PoolClient,
  * authority, publication, owners and mapping generation in a fresh transaction.
  * Contention/serialization/timeouts propagate for durable-worker retry.
  */
+type TargetSelection = Readonly<{ roomTypeId: string; offerId: string; operationKey: string }>;
+
 export async function readPublishedPricingForChannexJob(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
+) {
+  const result = await withPublishedChannexPricing(pool, input);
+  if (result.kind !== "available") return result;
+  const { reservation: _reservation, ...evidence } = result;
+  return evidence;
+}
+
+/** Reserves local work only; neither a provider configuration nor activation permission. */
+export async function reservePublishedChannexOfferTarget(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+) {
+  if (
+    !selection ||
+    ![selection.roomTypeId, selection.offerId, selection.operationKey].every(
+      (value) => typeof value === "string" && value.length > 0 && value === value.trim(),
+    )
+  )
+    return { kind: "unavailable" as const, reason: "invalid_selection" };
+  const result = await withPublishedChannexPricing(pool, input, { ...selection });
+  if (result.kind !== "available") return result;
+  if (!result.reservation) throw new Error("Target reservation missing");
+  return { kind: "reserved" as const, ...result.reservation };
+}
+
+async function withPublishedChannexPricing(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection?: TargetSelection,
 ) {
   const leaseInput = {
     jobId: input.jobId,
@@ -153,6 +185,72 @@ export async function readPublishedPricingForChannexJob(
         ))
       )
         return unavailable("owner_unavailable");
+    let reservation: { targetId: string; intentId: string; version: string } | undefined;
+    if (selection) {
+      const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
+      if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
+        return unavailable("selection_unavailable");
+      const binding = (
+        await client.query(
+          "SELECT binding_generation FROM pms.channel_connections WHERE id=$1 FOR SHARE NOWAIT",
+          [authority.connectionId],
+        )
+      ).rows[0];
+      if (!binding) return unavailable("connection_unavailable");
+      const proposal = JSON.stringify({
+        publicationRevision: snapshot.revision,
+        sources: snapshot.sources,
+        ownerReferences: snapshot.ownerReferences,
+        currency: snapshot.currency,
+        bindingGeneration: binding.binding_generation,
+        externalPropertyId: authority.externalPropertyId,
+        room,
+        offerId: selection.offerId,
+      });
+      await client.query(
+        `INSERT INTO pms.channex_offer_targets
+        (property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,$4)
+        ON CONFLICT(connection_id,room_type_id,offer_id) DO NOTHING`,
+        [lease.propertyId, authority.connectionId, room.roomTypeId, selection.offerId],
+      );
+      const target = (
+        await client.query(
+          `SELECT id FROM pms.channex_offer_targets
+        WHERE connection_id=$1 AND room_type_id=$2 AND offer_id=$3 FOR UPDATE NOWAIT`,
+          [authority.connectionId, room.roomTypeId, selection.offerId],
+        )
+      ).rows[0];
+      const existing = (
+        await client.query(
+          `SELECT id,version,status,proposal=$3::jsonb AS matches
+        FROM pms.channex_offer_target_intents WHERE target_id=$1 AND operation_key=$2`,
+          [target.id, selection.operationKey, proposal],
+        )
+      ).rows[0];
+      if (existing && (!existing.matches || existing.status !== "pending"))
+        return unavailable("operation_conflict");
+      if (
+        !existing &&
+        (
+          await client.query(
+            `SELECT 1 FROM pms.channex_offer_target_intents
+        WHERE target_id=$1 AND status='pending'`,
+            [target.id],
+          )
+        ).rowCount
+      )
+        return unavailable("pending_conflict");
+      const intent =
+        existing ??
+        (
+          await client.query(
+            `INSERT INTO pms.channex_offer_target_intents
+        (target_id,operation_key,proposal) VALUES($1,$2,$3::jsonb) RETURNING id,version`,
+            [target.id, selection.operationKey, proposal],
+          )
+        ).rows[0];
+      reservation = { targetId: target.id, intentId: intent.id, version: intent.version };
+    }
     // Held source/owner locks protect existing evidence; repeat time-sensitive
     // readiness and authority at the final boundary before returning any prices.
     const finalOwners = await lockOwners(client, lease, proposed, snapshot.sources, "publish");
@@ -168,6 +266,7 @@ export async function readPublishedPricingForChannexJob(
       authority: finalAuthority,
       publication: snapshot,
       owners: finalOwners,
+      reservation,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
