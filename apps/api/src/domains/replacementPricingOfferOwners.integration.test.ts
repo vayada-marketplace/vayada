@@ -9,7 +9,7 @@ import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPric
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob } from "./replacementPricingOfferOwners.js";
+import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob, reservePublishedChannexOfferTarget } from "./replacementPricingOfferOwners.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 const url = process.env["TEST_DATABASE_URL"];
@@ -157,6 +157,110 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
+  it("reserves current offer work idempotently without activating and rejects conflicting work", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    const selection = {
+      roomTypeId: f.snapshot.rooms[0].roomTypeId,
+      offerId: "flex",
+      operationKey: "setup-1",
+    };
+    const result = await reservePublishedChannexOfferTarget(pool, f.input, selection);
+    expect(result).toMatchObject({ kind: "reserved", version: "1" });
+    expect(await reservePublishedChannexOfferTarget(pool, f.input, selection)).toEqual(result);
+    const rows = (
+      await pool.query(
+        `SELECT t.active_version,i.proposal,c.binding_generation
+      FROM pms.channex_offer_targets t JOIN pms.channex_offer_target_intents i ON i.target_id=t.id
+      JOIN pms.channel_connections c ON c.id=t.connection_id WHERE t.property_id=$1`,
+        [f.scope.propertyId],
+      )
+    ).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      active_version: null,
+      proposal: {
+        publicationRevision: 1,
+        sources: f.sources,
+        room: f.snapshot.rooms[0],
+        bindingGeneration: rows[0].binding_generation,
+        offerId: "flex",
+      },
+    });
+    expect(
+      await reservePublishedChannexOfferTarget(pool, f.input, {
+        ...selection,
+        operationKey: "setup-2",
+      }),
+    ).toEqual({ kind: "unavailable", reason: "pending_conflict" });
+    await pool.query(
+      "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await reservePublishedChannexOfferTarget(pool, f.input, selection)).toEqual({
+      kind: "unavailable",
+      reason: "operation_conflict",
+    });
+  });
+  it("does not reserve invalid or unauthorized selections", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    const selection = {
+      roomTypeId: f.snapshot.rooms[0].roomTypeId,
+      offerId: "flex",
+      operationKey: "setup",
+    };
+    for (const changed of [{ offerId: "missing" }, { roomTypeId: randomUUID() }])
+      expect(
+        await reservePublishedChannexOfferTarget(pool, f.input, { ...selection, ...changed }),
+      ).toEqual({ kind: "unavailable", reason: "selection_unavailable" });
+    expect(
+      await reservePublishedChannexOfferTarget(pool, f.input, { ...selection, operationKey: " " }),
+    ).toEqual({ kind: "unavailable", reason: "invalid_selection" });
+    expect(
+      await reservePublishedChannexOfferTarget(pool, { ...f.input, workerId: "wrong" }, selection),
+    ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+          f.scope.propertyId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it("rolls back target and intent when authority expires during reservation", async () => {
+    const f = await serviceFixture();
+    await f.publish();
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '298 seconds' WHERE id=$1",
+      [f.input.jobId],
+    );
+    let reached = false;
+    const intercepted = interceptRead(async (c, sql) => {
+      if (!reached && sql.includes("INSERT INTO pms.channex_offer_target_intents")) {
+        reached = true;
+        await c.query(
+          "SELECT pg_sleep(GREATEST(0,extract(epoch FROM locked_at+interval '5 minutes'-clock_timestamp()))+0.02) FROM platform.jobs WHERE id=$1",
+          [f.input.jobId],
+        );
+      }
+    });
+    expect(
+      await reservePublishedChannexOfferTarget(intercepted, f.input, {
+        roomTypeId: f.snapshot.rooms[0].roomTypeId,
+        offerId: "flex",
+        operationKey: "expires",
+      }),
+    ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(reached).toBe(true);
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+          f.scope.propertyId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
   it("prepares exact nightly candidates from verified publication and retains evidence", async () => {
     const f = await serviceFixture();
     await f.publish();
