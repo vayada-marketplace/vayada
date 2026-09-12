@@ -60,6 +60,7 @@ export async function adoptChannexStagingCatalog(
   };
   try {
     await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='15s'");
     const before = await binding();
     await client.query("ROLLBACK");
     const facts = await readStagingCatalogEvidence(input, management.apiKey!, request);
