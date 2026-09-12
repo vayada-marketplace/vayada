@@ -21,7 +21,11 @@ export function createFinancePaymentReadinessSnapshot(
   const currentPricing = parsePricing(input.currentPricing);
   if (
     !uuid(input.propertyId) ||
-    !revision(input.paymentMethodsRevision, false) ||
+    !revision(input.paymentMethodsRevision, true) ||
+    (input.paymentMethodsRevision === 0 &&
+      (input.selectedMethods.length !== 0 ||
+        input.committedPricing !== null ||
+        input.updatedAt !== null)) ||
     !parseMethods(input.selectedMethods, true) ||
     !FINANCE_ONLINE_CARD_READINESS_DECISIONS.includes(input.onlineCardReadiness) ||
     !(input.updatedAt === null || isoDate(input.updatedAt)) ||
