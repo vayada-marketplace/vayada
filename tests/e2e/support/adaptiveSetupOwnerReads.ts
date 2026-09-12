@@ -20,6 +20,24 @@ const acceptedAt = "2026-08-04T12:00:00.000Z";
 // writes; step-specific suites exercise editing and canonical persistence.
 export async function mockAdaptiveSetupOwnerReads(page: Page) {
   const reads: Record<string, unknown> = {
+    [`/api/booking/properties/${propertyId}/booking-guest-policy`]: {
+      contractVersion: "booking-guest-policy.v1",
+      organizationId,
+      propertyId,
+      supportedLanguages: ["en", "de", "fr", "es", "id", "nl"],
+      current: null,
+      composition: null,
+      draft: {
+        defaultGuestLanguage: null,
+        childrenEnabled: null,
+        adultAgeThreshold: null,
+        phoneRequired: true,
+        arrivalTimeEnabled: false,
+        specialRequestsEnabled: true,
+        checkInTime: null,
+        checkOutTime: null,
+      },
+    },
     [`/api/hotel-setup/properties/${propertyId}/profile`]: propertyProfile(),
     [`/api/marketplace/properties/${propertyId}/hotel-collaboration-preferences`]: {
       contractVersion: "marketplace-hotel-collaboration-preferences.v1",

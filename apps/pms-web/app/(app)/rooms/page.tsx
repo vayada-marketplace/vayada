@@ -625,6 +625,7 @@ function RoomTypeCard({
   );
 }
 
+import { AirbnbImportLink } from "@/components/settings/AirbnbImportLink";
 import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
 import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
@@ -731,6 +732,9 @@ export default function RoomsPage() {
         </div>
       </div>
 
+      {importPropertyId && (
+        <AirbnbImportLink key={importPropertyId} propertyId={importPropertyId} />
+      )}
       {importPropertyId && (
         <PreparedHotelImportPanel
           key={importPropertyId}
