@@ -29,3 +29,23 @@ Provider references checked 2026-09-07:
 [Rate plans](https://docs.channex.io/api-v.1-documentation/rate-plans-collection),
 [Booking.com channel API](https://docs.channex.io/channel-api-examples/booking.com).
 Local PostgreSQL and mocked HTTP validation do not establish live provider delivery.
+
+## Replacement meal readback handoff
+
+The VAY-1530 helper accepts the five `PricingMeal.kind` values directly: room only,
+breakfast, half board, full board and all inclusive. These exact API values are
+listed in the Channex rate-plan documentation (rechecked 2026-09-12). No `none`,
+missing value or alternate breakfast label is inferred to equal a configured meal.
+
+`verifyChannexMealReadback(externalPropertyId, meal, request)` is read-only. It
+returns `{ externalPropertyId, externalRoomTypeId, externalRatePlanId, mealType }`
+only after exact provider identity and inclusion checks, rejecting conflicting
+attribute/relationship identities. Existing reconciliation shares this identity
+reader and retains its OTA-mapped-change guard and `Promise<void>` interface.
+
+The target writer owned by VAY-1545 must associate this observation with its exact
+logical offer, pending version, binding generation and current publication, and
+recheck freshness before activation. This helper does not establish those facts,
+verify inclusive amounts, authorize activation or prove OTA meal presentation.
+It does not wire replacement saves to live jobs. Target storage and the writer
+remain separate prerequisites; no legacy rate-plan rows are recreated here.
