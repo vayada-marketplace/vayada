@@ -9,6 +9,7 @@ import type {
   OnboardingLifecycleJsonObject,
   ReadyProductReadinessEvidence,
 } from "@vayada/domain-hotels";
+import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import type { BookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
@@ -124,7 +125,9 @@ export function createPgDistributionBookingPublicationProjection(config: {
   pool?: DistributionBookingPublicationPool;
   randomId?: () => string;
 }): DistributionBookingPublicationProjectionPort &
-  Pick<BookingContentLifecyclePort, "appendRevision" | "activate" | "getActive"> {
+  Pick<BookingContentLifecyclePort, "appendRevision" | "activate" | "getActive"> & {
+    getPublishedUrl(propertyId: string, revisionId: string): Promise<string | null>;
+  } {
   if (!config.connectionString.trim()) {
     throw new Error("Distribution Booking publication connectionString must not be empty");
   }
@@ -182,6 +185,28 @@ export function createPgDistributionBookingPublicationProjection(config: {
       } catch (error) {
         await rollback(client);
         throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async getPublishedUrl(propertyId, revisionId) {
+      const client = await pool.connect();
+      try {
+        const result = await client.query<{ publicContent: unknown }>(
+          `SELECT revision.public_content AS "publicContent"
+           FROM distribution.active_public_booking_revision active
+           JOIN distribution.public_booking_content_revisions revision
+             ON revision.id = active.content_revision_id AND revision.property_id = active.property_id
+           WHERE active.property_id = $1::uuid AND active.content_revision_id = $2::uuid`,
+          [propertyId, revisionId],
+        );
+        const content = parseBookingPublicContent(result.rows[0]?.publicContent);
+        if (!content || content.profile.hotel.propertyId !== propertyId) return null;
+        const url = new URL(content.profile.hotel.canonicalUrl);
+        return url.protocol === "https:" && !url.username && !url.password ? url.toString() : null;
+      } catch {
+        return null;
       } finally {
         client.release();
       }
