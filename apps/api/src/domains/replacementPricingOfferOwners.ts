@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom } from "../integrations/channexOfferConfiguration.js";
-import { channexCreationReceiptsResolved } from "./channexCreationReceiptGate.js";
+import { channexCreationReceiptsResolved, readChannexCreationReceiptIdentity } from "./channexCreationReceiptGate.js";
 import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
 import { lockChannexPricingJobLease, type ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
@@ -138,6 +138,7 @@ export async function claimPublishedChannexOfferCreate(
 type TargetWork =
   | "reserve"
   | "claim"
+  | { kind: "retained"; attemptId: string }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
 
@@ -159,6 +160,27 @@ export async function recordPublishedChannexOfferCreate(
     ...readChannexCreatedRateIdentity(receipt.response),
   };
   const result = await withSelectedChannexTarget(pool, input, selection, work);
+  if (result.kind !== "available") return result;
+  if (!result.identification) throw new Error("Creation identification missing");
+  return { kind: "identified" as const, ...result.identification };
+}
+
+/** Reconcile only durable original-dispatch evidence; current authority is still required. */
+export async function recordRetainedChannexOfferCreate(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+) {
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const result = await withSelectedChannexTarget(pool, input, selection, {
+    kind: "retained",
+    attemptId,
+  });
   if (result.kind !== "available") return result;
   if (!result.identification) throw new Error("Creation identification missing");
   return { kind: "identified" as const, ...result.identification };
@@ -519,7 +541,7 @@ async function withPublishedChannexPricing(
             )
           ).rows[0];
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
-          if ("kind" in work) {
+          if ("kind" in work && work.kind === "dispatch") {
             if (
               attempt.state !== "unresolved" ||
               attempt.job_attempt_id !== work.jobAttemptId ||
@@ -543,22 +565,51 @@ async function withPublishedChannexPricing(
             )
               return unavailable("creation_reconciliation_required");
           } else {
+            let identity;
+            if ("kind" in work) {
+              if (!attempt.job_attempt_id || !attempt.worker_id)
+                return unavailable("creation_reconciliation_required");
+              const receipts = (
+                await client.query(
+                  `SELECT outcome,http_status,has_warnings,identity_evidence FROM pms.channex_offer_create_receipts
+                 WHERE attempt_id=$1 AND job_attempt_id=$2 AND worker_id=$3 LIMIT 1001`,
+                  [attempt.id, attempt.job_attempt_id, attempt.worker_id],
+                )
+              ).rows;
+              if (!receipts.length || receipts.length > 1000)
+                return unavailable("creation_reconciliation_required");
+              identity = readChannexCreationReceiptIdentity(receipts[0]);
+              if (
+                !identity ||
+                receipts.some((receipt) => {
+                  const other = readChannexCreationReceiptIdentity(receipt);
+                  return (
+                    !other ||
+                    other.externalPropertyId !== identity!.externalPropertyId ||
+                    other.externalRoomTypeId !== identity!.externalRoomTypeId ||
+                    other.externalRatePlanId !== identity!.externalRatePlanId
+                  );
+                }) ||
+                !(await channexCreationReceiptsResolved(client, target.id, attempt.id))
+              )
+                return unavailable("creation_reconciliation_required");
+            } else identity = work;
             if (
-              work.externalPropertyId !== authority.externalPropertyId ||
-              work.externalRoomTypeId !== mapping.external_room_type_id
+              identity.externalPropertyId !== authority.externalPropertyId ||
+              identity.externalRoomTypeId !== mapping.external_room_type_id
             )
               return unavailable("creation_identity_mismatch");
             if (
               attempt.state === "identified" &&
-              attempt.external_rate_plan_id !== work.externalRatePlanId
+              attempt.external_rate_plan_id !== identity.externalRatePlanId
             )
               return unavailable("creation_identity_conflict");
             if (attempt.state === "unresolved")
               await client.query(
                 "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
-                [attempt.id, work.externalRatePlanId],
+                [attempt.id, identity.externalRatePlanId],
               );
-            identification = { attemptId: attempt.id, externalRatePlanId: work.externalRatePlanId };
+            identification = { attemptId: attempt.id, externalRatePlanId: identity.externalRatePlanId };
           }
         }
       }

@@ -1,4 +1,4 @@
-import { prepareChannexOfferDispatch } from "./replacementPricingOfferOwners.js";
+import { prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
@@ -218,6 +218,92 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       });
     return { ...f, correlation, response };
   }
+  it("identifies from retained evidence and retries the same identity without changing receipts", async () => {
+    const f = await receiptFixture();
+    await (
+      await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
+    )();
+    const result = await recordRetained(pool, f.input, f.selection, f.claim.attemptId);
+    expect(result).toMatchObject({ kind: "identified", attemptId: f.claim.attemptId });
+    expect(await recordRetained(pool, f.input, f.selection, f.claim.attemptId)).toEqual(result);
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+  });
+  it.each(["missing", "warning", "scope", "conflict", "malformed"])(
+    "holds %s retained creation evidence",
+    async (variant) => {
+      const f = await receiptFixture();
+      if (variant !== "missing") {
+        const body = (await f.response().json()) as {
+          data: { id: string | null; attributes: Record<string, unknown> };
+          warnings?: string[];
+        };
+        if (variant === "warning") body.warnings = ["ambiguous"];
+        if (variant === "scope") body.data.attributes.property_id = randomUUID();
+        if (variant === "malformed") body.data.id = null;
+        await (
+          await prepareChannexReceiptPersistence(
+            pool,
+            f.correlation,
+            new Response(JSON.stringify(body), { status: 201 }),
+          )
+        )();
+        if (variant === "conflict") {
+          body.data.id = randomUUID();
+          body.data.attributes.id = body.data.id;
+          await (
+            await prepareChannexReceiptPersistence(
+              pool,
+              { ...f.correlation, receiptId: randomUUID() },
+              new Response(JSON.stringify(body), { status: 201 }),
+            )
+          )();
+        }
+      }
+      expect(await recordRetained(pool, f.input, f.selection, f.claim.attemptId)).toMatchObject({
+        kind: "unavailable",
+      });
+      expect(
+        (
+          await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+            f.claim.attemptId,
+          ])
+        ).rows[0].state,
+      ).toBe("unresolved");
+    },
+  );
+  it("preserves retained evidence when current authority has expired", async () => {
+    const f = await receiptFixture();
+    await (
+      await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
+    )();
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '6 minutes' WHERE id=$1",
+      [f.input.jobId],
+    );
+    expect(await recordRetained(pool, f.input, f.selection, f.claim.attemptId)).toMatchObject({
+      kind: "unavailable",
+    });
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
   it("persists late receipt independently and makes exact concurrent retries idempotent", async () => {
     const f = await receiptFixture();
     const save = await prepareChannexReceiptPersistence(pool, f.correlation, f.response());

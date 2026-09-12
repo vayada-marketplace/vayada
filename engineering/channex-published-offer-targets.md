@@ -483,3 +483,19 @@ Retained means audit capture, not identification or success. Pre-Response failur
 receipts, configuration sealing and activation remain pending. Revocation after
 the final local check cannot cancel a provider mutation; reconciliation is still
 required for that in-flight window.
+
+
+### Retained response identity handoff (VAY-2010)
+
+`recordRetainedChannexOfferCreate` accepts an attempt ID with the current job
+lease and target selection. It reads original correlated receipts under the
+existing target lock, reuses tagged evidence parsing, and requires at least one
+complete, warning-free HTTP 201 response with consistent exact identity across
+all receipts. More than 1000 current-attempt receipts fails closed; other attempt
+history uses the existing bounded gate. Current proposal, binding, room mapping,
+request and owner checks still precede atomic identity ownership recording.
+
+Exact pending retries return the same identity. Failed authority or conflicting
+evidence never removes independently committed receipts. The older raw-observation
+recorder remains an internal compatibility helper; retained evidence consumers
+use this entrypoint. Neither path seals configuration or activates delivery.
