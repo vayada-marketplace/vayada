@@ -111,3 +111,21 @@ The executable examples assert agreed minor-unit arithmetic (184.50, 510, 315,
 calendar precedence, promotion eligibility, FX feed, checkout or OTA integration.
 VAY-1542 must run these same expected outcomes against the real evaluator and add
 eligibility, calendar, restriction, child allocation, zero and overflow scenarios.
+
+## Pure room-night evaluation (VAY-1542)
+
+The calculator receives one scoped configuration, allocated guests, stay dates,
+expected configuration revision and expected terms revisions for the selected
+plan and its ancestors. These expectations come from trusted owner reads; the
+pure calculator cannot establish database freshness itself. It returns nightly
+room and meal amounts separately with source/adjustment provenance.
+
+A date RoomPrice replaces the adult-equivalent tariff and bypasses that plan's
+weekday/link adjustment. Child-band nightly supplements still apply once; they
+are a separate explicit policy. Normal weekday and linked adjustments apply to
+the whole room component including those supplements, before the selected meal.
+A linked final date price resets the room component; clearing it restores the
+parent calculation. Parents' meals never propagate to a child plan. Restrictions
+are resolved separately, including departure-day CTD. Booking promotions, taxes,
+add-ons, FX conversion and payments remain owner orchestration outside this PMS
+calculator. No runtime endpoint or provider write is activated by this module.

@@ -422,3 +422,5 @@ export type {
 } from "./roomOperatingEligibility.js";
 export * from "./replacementPricing.js";
 export * from "./replacementPricingConfiguration.js";
+
+export * from "./replacementPricingCalculator.js";
