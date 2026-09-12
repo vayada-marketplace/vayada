@@ -805,11 +805,14 @@ type ChannexClassification = {
 
 function classifyChannexPayload(payload: Record<string, unknown>): ChannexClassification {
   const nestedPayload = optionalRecord(payload, "payload") ?? {};
-  const eventType =
+  const providerEventType =
     optionalString(payload, "event") ??
     optionalString(payload, "event_type") ??
     optionalString(payload, "type") ??
     "unknown";
+  // Keep the persisted/UI event name compatible with existing alert incidents.
+  const eventType =
+    providerEventType === "disconnect_channel" ? "disconnected_channel" : providerEventType;
   const envelope: ChannexEventEnvelope = {
     eventType,
     family: channexEventFamily(eventType),
