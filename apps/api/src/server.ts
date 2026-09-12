@@ -1,4 +1,7 @@
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
+import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
+import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
+import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -46,6 +49,8 @@ import { createBookingGuestPolicyProductionApplication } from "./domains/booking
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
 import { createPgHotelCatalogCurrentOwnerEvidencePorts } from "./domains/hotelCatalogCurrentOwnerEvidence.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
+import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
+import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
@@ -133,6 +138,7 @@ import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
+import { createFinancePaymentSetupRuntime } from "./domains/financePaymentSetupRuntime.js";
 import {
   createBookingPublicationProductionRuntime,
   startBookingPublicationWorker,
@@ -216,6 +222,10 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
+import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
+import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
+import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
+import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceTripRepository } from "./routes/marketplaceTrips.js";
@@ -394,6 +404,7 @@ const bankTransferBookings = bankTransferCodec
   : undefined;
 
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -416,14 +427,17 @@ const pmsChannexManagementRepository = pmsOperationsRepository
   ? createPgPmsChannexManagementReadRepository({ connectionString: targetDatabaseUrl })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
-  ([capability, mode]) => capability !== "iframe" && mode === "mutating",
+  ([capability, mode]) =>
+    capability !== "iframe" && capability !== "reviews" && mode === "mutating",
 );
 const noShowReportPool = pmsOperationsRepository
   ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 })
   : undefined;
 const noShowReportingEnabled =
-  config.channexManagement.capabilityModes.bookingSync === "mutating" &&
-  config.channexManagement.workerEnabled;
+  config.channexManagement.workerEnabled &&
+  (config.channexManagement.stagingNoShowEnabled ||
+    (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
+      config.backgroundWorkersEnabled));
 const pmsChannexManagementCommandPort = channexCommandsMutating
   ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -451,6 +465,13 @@ const pmsOperationsCommandRepository = pmsOperationsRepository
       roomAssignmentOptimization: createPmsRoomAssignmentOptimizationTriggerPort(),
     })
   : undefined;
+const pmsRoomClosureRepository =
+  pmsOperationsRepository && config.pmsRoomClosureEnabled
+    ? createPgPmsRoomClosureRepository({
+        connectionString: targetDatabaseUrl,
+        channex: config.channexManagement,
+      })
+    : undefined;
 const pmsLinkedInventoryGroupCommandRepository = pmsOperationsRepository
   ? createPgPmsLinkedInventoryGroupCommandRepository({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -644,6 +665,9 @@ const channexManagementPlans =
   channexCommandsMutating && config.channexManagement.workerEnabled
     ? createPgChannexManagementPlanPort({
         connectionString: targetDatabaseUrl,
+        stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
+          ? config.channexManagement.stagingRestrictionsPropertyId
+          : undefined,
         bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
           if (!channexBookingRevisionStore) {
             if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
@@ -677,6 +701,9 @@ const channexManagementWorkerStore = channexManagementProvider
       connectionString: targetDatabaseUrl,
       targetState: createPmsChannexManagementTargetState(),
       ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
+      stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
+      stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
+      stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
   : undefined;
 
@@ -793,6 +820,12 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionString: targetDatabaseUrl,
   connectionTimeoutMillis: 5_000,
   max: 5,
+});
+const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
+  connectionString: targetDatabaseUrl,
+  pricing: pmsPricingReadModel,
+  finance: financePaymentReadinessReadModel,
+  scope: createPgPropertySetupFinanceOwnerScopePort({ pool: propertySetupOwnerPool }),
 });
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
@@ -1121,7 +1154,17 @@ const platformAdminDashboardRepository = createTargetPlatformAdminDashboardRepos
   connectionString: targetDatabaseUrl,
 });
 
+if (config.airbnbImport && (!config.auth || !config.authSession || !pmsRoomSetupRuntime))
+  throw new Error("Airbnb imports require authentication and canonical room setup");
+const airbnbImportRuntime = config.airbnbImport
+  ? createAirbnbImportRuntime({
+      config: config.airbnbImport,
+      connectionString: targetDatabaseUrl,
+      allowedOrigins: config.authSession!.authAllowedOrigins,
+    })
+  : undefined;
 const app = buildApp({
+  airbnbImports: airbnbImportRuntime?.routes,
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
   auth: buildAuthOptions(config.auth),
   browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
@@ -1261,6 +1304,7 @@ const app = buildApp({
       }
     : undefined,
   bookingReservationsRepository,
+  financePaymentSetup: financePaymentSetupRuntime.routes,
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,
@@ -1294,6 +1338,9 @@ const app = buildApp({
         repository: pmsChannexManagementRepository,
         noShowReports: noShowReportPool ? createNoShowReportingStore(noShowReportPool) : undefined,
         noShowReportingEnabled,
+        noShowReportingPropertyId: config.channexManagement.stagingNoShowEnabled
+          ? config.channexManagement.stagingRestrictionsPropertyId
+          : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
         commandPort: pmsChannexManagementCommandPort,
@@ -1367,8 +1414,35 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
-  pmsReviewRepository: createPgPmsReviewRepository({ connectionString: targetDatabaseUrl }),
+  pmsReviewRepository: createPgPmsReviewRepository({
+    connectionString: targetDatabaseUrl,
+    guestReviews: createPgGuestReviewCommands({
+      connectionString: targetDatabaseUrl,
+      provider:
+        config.channexManagement.capabilityModes.reviews === "mutating" &&
+        config.channexManagement.apiBaseUrl &&
+        config.channexManagement.apiKey
+          ? createChannexGuestReviews({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+    }),
+    replies: createPgReviewReplyCommands({
+      connectionString: targetDatabaseUrl,
+      provider:
+        config.channexManagement.capabilityModes.reviews === "mutating" &&
+        config.channexManagement.apiBaseUrl &&
+        config.channexManagement.apiKey
+          ? createChannexReviewReplies({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+    }),
+  }),
   pmsOperationsCommandRepository,
+  pmsRoomClosureRepository,
   pmsLinkedInventoryGroupCommandRepository,
   bookingAcceptanceSettings,
   sameDayBookingSettings,
@@ -1477,6 +1551,7 @@ const app = buildApp({
   marketplaceAdminLegacySuperadminFallbackEnabled:
     config.marketplaceAdminLegacySuperadminFallbackEnabled,
   hotelAccountInvites: { repository: hotelAccountInviteRepository },
+  preparedImportRepository: createPgPreparedImportRepository(targetDatabaseUrl),
   marketplaceHotelProfileStatusRepository: createPgMarketplaceHotelProfileStatusRepository({
     connectionString: targetDatabaseUrl,
   }),
@@ -1484,6 +1559,8 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
+  marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePolicyRepository: createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1635,6 +1712,9 @@ app.addHook("onReady", async () => {
 });
 
 app.addHook("onClose", async () => {
+  await airbnbImportRuntime?.close();
+});
+app.addHook("onClose", async () => {
   stopPostgresTelemetry();
   await postgresRuntime.close();
 });
@@ -1776,6 +1856,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
+    financePaymentSetupRuntime.close(),
     marketplaceSetupLifecycleStatusRepository.close(),
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
@@ -1806,7 +1887,8 @@ app.addHook("onClose", async () => {
 // VAY-1546: automatic rate delivery resumes with the replacement pricing system.
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
-  if (!config.backgroundWorkersEnabled) return;
+  if (!config.backgroundWorkersEnabled && !config.channexManagement.stagingRestrictionsPropertyId)
+    return;
   if (!channexManagementWorkerStore || !channexManagementProvider || activeChannexManagementRun) {
     return;
   }
@@ -1844,7 +1926,7 @@ let activeNoShowRun: Promise<void> | undefined;
 const noShowTimer =
   noShowReportPool && noShowReportingEnabled
     ? setInterval(() => {
-        if (!config.backgroundWorkersEnabled || activeNoShowRun) return;
+        if (activeNoShowRun) return;
         activeNoShowRun = runNoShowReport(
           noShowReportPool,
           {
@@ -1852,6 +1934,9 @@ const noShowTimer =
             apiKey: config.channexManagement.apiKey!,
           },
           `no-show:${process.pid}`,
+          config.channexManagement.stagingNoShowEnabled
+            ? config.channexManagement.stagingRestrictionsPropertyId
+            : undefined,
         )
           .catch((error: unknown) =>
             app.log.warn({ err: error }, "No-show reporting worker failed"),
