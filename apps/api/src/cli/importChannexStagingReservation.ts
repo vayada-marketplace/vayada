@@ -9,6 +9,7 @@ try {
       "booking-id": { type: "string" },
       "revision-id": { type: "string" },
       "approval-ref": { type: "string" },
+      "repair-assignments": { type: "boolean", default: false },
     },
   });
   const result = await importChannexStagingReservation(loadConfig(), {
@@ -16,6 +17,7 @@ try {
     channelBookingId: values["booking-id"] ?? "",
     revision: values["revision-id"] ?? "",
     approvalRef: values["approval-ref"] ?? "",
+    repairAssignments: values["repair-assignments"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");
   if (result.status !== "succeeded") process.exitCode = 1;
