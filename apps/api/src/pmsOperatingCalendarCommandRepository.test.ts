@@ -314,6 +314,17 @@ function repositoryFixture(options: FixtureOptions = {}) {
       if (text.includes("FROM identity.product_entitlements")) {
         return dbResult([{ status: "active", startsAt: null, expiresAt: null }]);
       }
+      if (text.includes("LEFT JOIN pms.room_type_closures")) {
+        return dbResult(
+          (options.facts ?? [facts(roomTypeB, 4), facts(roomTypeA, 3)]).map((room) => ({
+            propertyId,
+            roomTypeId: room.roomTypeId,
+            state: "operating",
+            closureCommandId: null,
+            cutoffDate: null,
+          })),
+        );
+      }
       if (text.includes("FROM platform.idempotency_keys")) return dbResult(replay ? [replay] : []);
       if (text.includes("INSERT INTO platform.idempotency_keys")) {
         return dbResult([{ id: "a5200000-0000-4000-8000-000000000021", attempt: 1 }]);
