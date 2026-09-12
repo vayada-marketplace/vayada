@@ -266,3 +266,129 @@ reconciliation. Durable raw-receipt capture after authority loss is not implemen
 The database simulation composes room preflight, fresh claim, a mocked create,
 identity recording and configuration readback; it is not a production dispatcher
 or proof of live Channex/OTA behavior. Runtime sending remains disabled.
+
+## Late creation receipts (VAY-2002 decision)
+
+The next implementation must separate retained observations from authorized
+completion. `pmsChannexManagementWorkerStore.complete` checks its lease before
+writing its outcome, and `recordPublishedChannexOfferCreate` requires current
+pricing authority. Neither is a late-response inbox. Do not weaken either check
+or put receipt retention in the transaction that can roll back identification.
+This section is a contract; receipt storage and dispatch are not implemented yet.
+
+### Correlation and send boundary
+
+Extend the fresh creation claim with immutable correlation to the original
+`platform.job_attempts` row and worker. Persist that correlation in the same
+transaction as the creation attempt, matching the verified lease. Existing
+attempts lacking it remain held; never backfill a new worker as their sender.
+The retained attempt already supplies target, intent, generation, exact external
+scope and request body. Avoid copying these into an independently mutable receipt.
+
+The dispatcher owns a closure containing the fresh committed claim and its
+original correlation. It accepts no caller-selected provider body, receipt
+destination or external IDs. Only that fresh invocation can send once; database
+recovery, job replay and receipt retries cannot reconstruct a send permit.
+Before POST, recheck current authority/proposal/mapping and verify provider room
+preflight against those exact expectations. Recheck local authority after the
+GET. Any mismatch or failed check leaves the durable attempt held without POST.
+Release transaction locks before HTTP. The last local check cannot prevent a
+provider mutation after a subsequent revocation; preserve that uncertainty and
+require current authority again for identification and later activation.
+
+### Append-only capture
+
+Add a server-only receipt writer with no product route. It appends observations
+to an existing attempt using the dispatcher's original job-attempt correlation,
+even when the lease expires, the binding changes or the intent stops being
+pending. Validate that persisted correlation, not current worker ownership.
+Knowing a target ID or presenting a replacement lease is insufficient. This is
+an internal trusted-code boundary, not proof supplied by a UUID alone.
+
+Each observation has a UUID generated once when the transport outcome is
+captured, the attempt foreign key, database capture time and an immutable outcome
+envelope. Persisting the same UUID and identical envelope is idempotent, including
+after a lost commit reply; the same UUID with different content is a conflict.
+Different observations are retained separately, never last-write-wins. Conflicting
+identities or outcomes keep reconciliation required; do not pick the first or
+latest as truth. Updates, deletes and reassignment to another attempt are denied.
+
+The existing unresolved-attempt index is insufficient once an attempt has become
+`identified`. Fresh claims, sends, sealing and activation must also check retained
+observations across the logical target's attempts. Missing required correlation
+or receipts, incomplete/error/warning observations and incompatible identities
+are a reconciliation hold even after identification. Derive this gate from retained
+evidence rather than resetting immutable attempt state. Only the current fresh
+dispatch closure's newly committed, not-yet-sent attempt is exempt from the
+missing-receipt check for its first POST. Prior or recovered attempts are never
+exempt; neither sealing nor activation has this exemption. Clearing a hold needs
+a separately defined, audited reconciliation decision; this contract adds no reset.
+Capture, identification and claim/gate checks serialize on the same logical target
+row, acquired before intent/attempt locks, so concurrent inserts cannot evade the
+check. A conflict arriving after an authorized send cannot cancel that request;
+it blocks subsequent work and activation, retaining the in-flight uncertainty.
+
+Capture must commit before calling current-authority identity recording. It must
+not read unpublished/current pricing, claim external ownership, identify attempts,
+seal versions, complete jobs, release unresolved exclusion or activate sales.
+This narrow audit write remains permitted after authority loss; it does not grant
+the old worker permission to continue provider IO. Reads of retained evidence
+remain an internal reconciliation operation with property/connection scope.
+
+### Bounded evidence
+
+Retain a sanitized transport observation, not arbitrary response dumps. Limit
+response consumption to 64 KiB decoded bytes and a finite request/body deadline;
+this is a local resource bound, not a claimed Channex limit. The envelope records
+HTTP status when received, an allowlisted bounded provider request ID, and one of
+`complete_json`, `invalid_json`, `body_limit`, `body_interrupted` or
+`transport_error`. Do not persist headers, cookies, authorization, URLs containing
+credentials, stack traces, arbitrary error text or unknown response metadata.
+
+For complete JSON, retain only the resource type and identity fields consumed by
+`readChannexCreatedRateIdentity`, including both attribute and relationship IDs
+and explicit missing/invalid markers. Do not coerce, trim or discard contradictory
+IDs to make them valid. Identity strings have a local 512-byte bound; over-limit
+values become invalid markers, never truncated IDs. Non-identity warnings are a
+bounded presence/classification marker, not free-form text. This evidence is for
+identity reconciliation only; it cannot replace configuration or ARI readback.
+Malformed, oversized and interrupted bodies retain their outcome classification,
+not a partial body mistaken for a complete response. No receipt means unknown,
+not proof that a request was never sent. The earlier phrase “raw receipt” refers
+to an unaccepted observation; it does not require storing unfiltered wire bytes.
+
+### Failure and reconciliation
+
+Only persistence of a captured observation may be retried using its original
+UUID and envelope. A database outage or process crash after POST can still lose
+the response before persistence; do not promise exactly-once provider creation.
+The retained unresolved attempt blocks another POST, and an operational failure
+must report reconciliation required using identifiers and sanitized codes only.
+
+A retained receipt is evidence, not permission to identify. Reconciliation must
+check its original dispatch correlation, all conflicting observations, exact
+identity and current authority/proposal/binding through the existing recorder.
+An HTTP error containing an ID or a warning is not successful creation proof;
+keep it held for separately verified provider semantics. A failed, replaced or
+stale intent may retain evidence without becoming eligible for the current
+recorder. Transferring such an identity to a new intent needs a separate explicit
+reconciliation contract; never adopt by title, clear a timeout or mutate history.
+
+### Required implementation checks
+
+- Real PostgreSQL tests: retain a receipt after lease expiry, publication/binding
+  change and failed intent; identification denial does not roll back the receipt.
+- Reject missing/wrong attempt or original job correlation. Concurrent duplicate
+  capture yields one identical row; changed duplicate payload conflicts and
+  distinct conflicting observations remain visible. History is immutable.
+- A conflict appended after identification blocks a replacement claim and sealing;
+  concurrent capture/identification/claim tests verify target-lock ordering and
+  the retained-evidence gate. A conflict during HTTP prevents later activation.
+- Simulated dispatcher: at most one POST after preflight/current checks; changed
+  scope after GET prevents POST. Crash/lost commit before send grants no replay.
+- After POST, timeout, body failure, oversized response, capture failure and lost
+  receipt commit reply never cause another POST. Persistence-only retry preserves
+  the receipt UUID; malformed evidence and warnings do not become success.
+- Authority expiry after identification UPDATE rolls back identity/ownership while
+  preserving the independently committed receipt; concurrent identification cannot
+  transfer ownership. Active pointers and `PRICING_UNAVAILABLE` remain unchanged.
