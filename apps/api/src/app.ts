@@ -1,3 +1,7 @@
+import {
+  registerBookingChargeReportRoutes,
+  type BookingChargeReportRoutesOptions,
+} from "./routes/bookingChargeReports.js";
 import type { AffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { registerMarketplaceAffiliateCompletionRoutes } from "./routes/marketplaceAffiliateCompletion.js";
 import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
@@ -290,6 +294,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
   bookingHostActions?: BookingHostActions;
+  bookingChargeReports?: BookingChargeReportRoutesOptions;
   pmsOperationsRepository?: PmsOperationsReadRepository;
   pmsInboxAssistancePort?: PmsInboxAssistancePort;
   pmsInboxReadPort?: PmsInboxReadPort;
@@ -755,6 +760,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     repository: options.affiliateDashboardRepository,
     financeRepository: options.financeRepository,
   });
+  if (options.bookingChargeReports) {
+    app.register(registerBookingChargeReportRoutes, {
+      prefix: "/api/booking",
+      ...options.bookingChargeReports,
+    });
+  }
   if (options.bookingHostActions && options.auth) {
     app.register(registerBookingHostActionRoutes, {
       prefix: "/api/pms",
