@@ -1,3 +1,7 @@
+import {
+  clearChannexAssignmentFixture,
+  seedChannexAssignmentFixture,
+} from "../jobs/channexAssignmentTestFixture.js";
 import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
@@ -30,6 +34,9 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
     audit: { requestId: "vay846", correlationId: "vay846" },
   } as RequestContext;
   beforeAll(async () => {
+    await db.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await clearChannexAssignmentFixture(db, P);
+    await db.query("COMMIT");
     await db.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM pms.channel_operational_alert_occurrences WHERE alert_id IN (SELECT id FROM pms.channel_operational_alerts WHERE property_id='${P}');
       DELETE FROM pms.channel_operational_alerts WHERE property_id='${P}';
@@ -62,6 +69,7 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
       "INSERT INTO pms.channel_connections(property_id,provider,external_property_id,connection_status) VALUES($1,'channex','provider-846','connected')",
       [P],
     );
+    await seedChannexAssignmentFixture(db, P);
     await app.register(registerProviderWebhookRoutes, {
       store: createPgProviderWebhookStore({ connectionString: url! }),
       secrets: { channex: "synthetic" },
@@ -176,8 +184,8 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
         inserted_at: "2026-09-06T01:00:00Z",
         rooms: [
           {
-            room_type_id: "room-846",
-            rate_plan_id: "rate-846",
+            room_type_id: "provider-room",
+            rate_plan_id: "provider-rate",
             occupancy: { adults: 1, children: 0 },
           },
         ],
@@ -352,7 +360,9 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
               inserted_at: "2026-09-06T01:00:00Z",
               rooms: [
                 {
-                  ...(corrected ? { room_type_id: "room-846" } : {}),
+                  ...(corrected
+                    ? { room_type_id: "provider-room", rate_plan_id: "provider-rate" }
+                    : {}),
                   occupancy: { adults: 1, children: 0 },
                 },
               ],

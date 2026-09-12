@@ -89,6 +89,21 @@ describe("PMS Channex management command routes", () => {
     }
     expect((await datePrice(app)).statusCode).toBe(statusCode);
     expect(harness.putDatePrice).not.toHaveBeenCalled();
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/properties/${propertyId}/channex/inventory-rules`,
+          headers: { authorization: "Bearer valid" },
+          payload: {
+            commandId: "rule-command",
+            idempotencyKey: "rule-key",
+            expectedOperationId: null,
+            rules: [],
+          },
+        })
+      ).statusCode,
+    ).toBe(statusCode);
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(
       (
@@ -101,6 +116,45 @@ describe("PMS Channex management command routes", () => {
       ).statusCode,
     ).toBe(statusCode);
     expect(harness.reportSubmit).not.toHaveBeenCalled();
+  });
+
+  it("denies an authorized property outside the staged reporting scope on GET and POST", async () => {
+    const harness = await testApp({}, { ...mutating, bookingSync: "observe_only" }, operationId);
+    app = harness.app;
+    const request = {
+      url: `/properties/${propertyId}/reservations/booking-1/no-show-report`,
+      headers: { authorization: "Bearer valid" },
+    };
+    expect((await app.inject({ ...request, method: "GET" })).json()).toMatchObject({
+      eligible: false,
+      retryable: false,
+    });
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          payload: { waivedFees: false, retry: false },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(harness.reportSubmit).not.toHaveBeenCalled();
+    await app.close();
+    const scoped = await testApp({}, { ...mutating, bookingSync: "observe_only" }, propertyId);
+    app = scoped.app;
+    expect((await app.inject({ ...request, method: "GET" })).json()).toMatchObject({
+      eligible: true,
+    });
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          payload: { waivedFees: false, retry: false },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(scoped.reportSubmit).toHaveBeenCalledOnce();
   });
 
   it("requires an explicit fee choice and property-scoped authorization for reporting", async () => {
@@ -282,6 +336,60 @@ describe("PMS Channex management command routes", () => {
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts rule replacement only through the guarded inventory route", async () => {
+    const harness = await testApp();
+    app = harness.app;
+    const request = {
+      method: "PUT" as const,
+      url: `/properties/${propertyId}/channex/inventory-rules`,
+      headers: { authorization: "Bearer valid" },
+      payload: {
+        commandId: "rules",
+        idempotencyKey: "rules",
+        expectedOperationId: null,
+        rules: [],
+      },
+    };
+    expect((await app.inject(request)).statusCode).toBe(202);
+    expect(harness.enqueue).toHaveBeenCalledWith(expect.anything(), propertyId, {
+      commandId: "rules",
+      idempotencyKey: "rules",
+      operationType: "update_inventory_rules",
+      inventoryRules: { expectedOperationId: null, rules: [] },
+    });
+    expect(
+      (await app.inject({ ...request, url: `/properties/${operationId}/channex/inventory-rules` }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          payload: { ...request.payload, expectedOperationId: "invalid" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          method: "POST",
+          url: `/properties/${propertyId}/channex/commands`,
+          payload: {
+            commandId: "rules",
+            idempotencyKey: "rules",
+            operationType: "update_inventory_rules",
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    await app.close();
+    const observe = await testApp({}, { ...mutating, ariSync: "observe_only" });
+    app = observe.app;
+    expect((await app.inject(request)).statusCode).toBe(409);
+    expect(observe.enqueue).not.toHaveBeenCalled();
+  });
+
   it("validates restriction scope and queues explicit empty resets", async () => {
     const harness = await testApp();
     app = harness.app;
@@ -345,20 +453,19 @@ describe("PMS Channex management command routes", () => {
 async function testApp(
   access: Access = {},
   capabilityModes: ChannexManagementCapabilityModes = mutating,
+  reportScope?: string,
 ) {
   const app = Fastify({ logger: false });
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
   const enqueue = vi.fn<PmsChannexManagementCommandPort["enqueue"]>();
-  const reportSubmit = vi
-    .fn()
-    .mockResolvedValue({
-      eligible: true,
-      reason: null,
-      localNoShow: true,
-      status: "pending",
-      retryable: false,
-      waivedFees: false,
-    });
+  const reportSubmit = vi.fn().mockResolvedValue({
+    eligible: true,
+    reason: null,
+    localNoShow: true,
+    status: "pending",
+    retryable: false,
+    waivedFees: false,
+  });
   enqueue.mockResolvedValue({ ok: true, operation: operation(), replayed: false });
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
@@ -399,8 +506,12 @@ async function testApp(
     },
     capabilityModes,
     commandPort: { enqueue, recoverAlert },
-    noShowReports: { get: vi.fn(), submit: reportSubmit },
-    noShowReportingEnabled: capabilityModes.bookingSync === "mutating",
+    noShowReports: {
+      get: vi.fn().mockResolvedValue({ eligible: true, retryable: true }),
+      submit: reportSubmit,
+    },
+    noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
+    noShowReportingPropertyId: reportScope,
   });
   return { app, enqueue, putDatePrice, recoverAlert, reportSubmit };
 }
