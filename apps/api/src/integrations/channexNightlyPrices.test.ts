@@ -1,5 +1,8 @@
-import { planChannexOfferConfiguration } from "./channexOfferConfiguration.js";
-import { describe, expect, it } from "vitest";
+import {
+  planChannexOfferConfiguration,
+  verifyChannexOfferConfiguration,
+} from "./channexOfferConfiguration.js";
+import { describe, expect, it, vi } from "vitest";
 import type { PricingConfiguration, RoomNightProjectionRequest } from "@vayada/domain-pms";
 import { prepareChannexAdultNightPrices } from "./channexNightlyPrices.js";
 
@@ -266,7 +269,6 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
   });
 });
 
-
 describe("closed Channex offer configuration", () => {
   function adultRoom() {
     return { ...fixture(), capacity: { total: 3, adults: 3, children: 0 } };
@@ -338,5 +340,157 @@ describe("closed Channex offer configuration", () => {
         1,
       ),
     ).toEqual({ kind: "unavailable", reason: "candidate_limit" });
+  });
+});
+
+describe("closed offer configuration readback", () => {
+  const identity = {
+    externalPropertyId: "property",
+    externalRoomTypeId: "room",
+    externalRatePlanId: "rate",
+  };
+  function setup() {
+    const base = fixture();
+    const room = { ...base, capacity: { ...base.capacity, children: 0 } };
+    const planned = planChannexOfferConfiguration(room, "flex", 2);
+    if (planned.kind !== "planned") throw new Error(planned.reason);
+    const response = {
+      data: {
+        id: "rate",
+        attributes: {
+          ...structuredClone(planned.configuration),
+          property_id: "property",
+          room_type_id: "room",
+          inherit_stop_sell: false,
+          auto_rate_settings: null,
+          options: planned.configuration.options.map((option) => ({
+            ...option,
+            derived_option: null,
+            rate: "100.00",
+          })),
+        },
+      },
+    };
+    const request = vi.fn(async () => response);
+    return { room, response, request, planned };
+  }
+  it("verifies one GET and accepts reordered options without claiming amounts", async () => {
+    const { room, response, request, planned } = setup();
+    response.data.attributes.options.reverse();
+    expect(await verifyChannexOfferConfiguration(room, "flex", 2, identity, request)).toEqual({
+      ...identity,
+      mealType: "room_only",
+      configuration: planned.configuration,
+    });
+    expect(request.mock.calls).toEqual([["GET", "/api/v1/rate_plans/rate"]]);
+  });
+  it.each([
+    ["sell_mode", "per_room"],
+    ["rate_mode", "derived"],
+    ["currency", "USD"],
+    ["inherit_rate", true],
+    ["inherit_stop_sell", true],
+    ["auto_rate_settings", {}],
+    ["parent_rate_plan_id", "parent"],
+    ["parent_rate_plan_id", undefined],
+    ["stop_sell", [true]],
+    ["stop_sell", [true, true, true, true, true, true, false]],
+    ["stop_sell", Array(7).fill("true")],
+    ["stop_sell", undefined],
+    ["stop_sell", Array(7)],
+    ["inherit_rate", undefined],
+    ["inherit_stop_sell", undefined],
+    ["auto_rate_settings", undefined],
+    ["options", []],
+    ["options", null],
+    ["meal_type", "breakfast"],
+    ["property_id", "other"],
+    ["room_type_id", "other"],
+    ["id", "other"],
+  ])("rejects changed or absent %s", async (key, value) => {
+    const { room, response, request } = setup();
+    (response.data.attributes as Record<string, unknown>)[key as string] = value;
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).rejects.toThrow();
+  });
+  it.each([
+    "duplicate",
+    "extra",
+    "missing",
+    "primary",
+    "derived",
+    "unknown_derivation",
+    "string_occupancy",
+  ])("rejects %s options", async (kind) => {
+    const { room, response, request } = setup();
+    const options = response.data.attributes.options;
+    if (kind === "duplicate") options[0] = options[1];
+    if (kind === "extra") options.push({ ...options[0], occupancy: 4 });
+    if (kind === "missing") options.pop();
+    if (kind === "primary") options[0].is_primary = true;
+    if (kind === "derived") Object.assign(options[0], { derived_option: {} });
+    if (kind === "unknown_derivation") Object.assign(options[0], { derived_option: undefined });
+    if (kind === "string_occupancy") Object.assign(options[0], { occupancy: "1" });
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).rejects.toThrow();
+  });
+  it("rejects conflicting relationships and wrong rate IDs", async () => {
+    for (const patch of [
+      { id: "other" },
+      { relationships: { property: { data: { id: "other" } } } },
+      { relationships: { parent_rate_plan: { data: { id: "parent" } } } },
+    ]) {
+      const { room, response, request } = setup();
+      Object.assign(response.data, patch);
+      await expect(
+        verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+      ).rejects.toThrow();
+    }
+  });
+  it("accepts explicit absent-parent relationship evidence", async () => {
+    const { room, response, request } = setup();
+    Object.assign(response.data.attributes, { parent_rate_plan_id: undefined });
+    Object.assign(response.data, { relationships: { parent_rate_plan: { data: null } } });
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).resolves.toMatchObject(identity);
+  });
+  it("propagates failed transport without returning evidence", async () => {
+    const { room } = setup();
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, async () => {
+        throw new Error("transport unavailable");
+      }),
+    ).rejects.toThrow("transport unavailable");
+  });
+  it("rejects unsupported configuration before IO", async () => {
+    const { request } = setup();
+    await expect(
+      verifyChannexOfferConfiguration(fixture(), "flex", 2, identity, request),
+    ).rejects.toThrow("child_representation_unavailable");
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("snapshots expectations before asynchronous IO", async () => {
+    const { room, response, planned } = setup();
+    const mutableIdentity = { ...identity };
+    const result = await verifyChannexOfferConfiguration(
+      room,
+      "flex",
+      2,
+      mutableIdentity,
+      async () => {
+        mutableIdentity.externalRatePlanId = "other";
+        room.currency = "USD";
+        Object.assign(room.offers[0].meal, { kind: "breakfast" });
+        return response;
+      },
+    );
+    expect(result).toEqual({
+      ...identity,
+      mealType: "room_only",
+      configuration: planned.configuration,
+    });
   });
 });
