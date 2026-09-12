@@ -185,6 +185,7 @@ export function createChannexManagementProvider(config: {
       }
       let lastRequestId: string | undefined;
       let revisions: unknown[] = [];
+      let createdProperty: ChannexManagementProviderSuccess["createdProperty"];
       let externalPropertyId = plan.externalPropertyId;
       let connectionStatus: ChannexManagementProviderSuccess["connectionStatus"];
       let messagingAppInstalled: boolean | undefined;
@@ -214,6 +215,9 @@ export function createChannexManagementProvider(config: {
           await input?.onProgress?.();
           const response = await fetcher(requestUrl(apiBaseUrl, request), {
             method: request.method,
+            ...(request.method === "POST" && request.path === "/api/v1/properties"
+              ? { redirect: "manual" as const }
+              : {}),
             headers: {
               "content-type": "application/json",
               "user-api-key": apiKey,
@@ -291,6 +295,25 @@ export function createChannexManagementProvider(config: {
             if (request.capture?.kind === "property") {
               externalPropertyId = externalId;
               connectionStatus = "connected";
+              const environment =
+                new URL(apiBaseUrl).href === "https://staging.channex.io/"
+                  ? "staging"
+                  : new URL(apiBaseUrl).href === "https://app.channex.io/"
+                    ? "production"
+                    : null;
+              if (
+                job.input.operationType === "enable" &&
+                request.method === "POST" &&
+                request.path === "/api/v1/properties" &&
+                response.status === 201 &&
+                environment &&
+                externalId &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                  externalId,
+                )
+              ) {
+                createdProperty = { environment, externalPropertyId: externalId.toLowerCase() };
+              }
             }
             if (request.capture?.kind === "property_list") {
               externalPropertyId = findByTitle(responseBody, request.capture.title)?.id;
@@ -354,6 +377,7 @@ export function createChannexManagementProvider(config: {
           await plan.checkpoint?.(
             progress({
               lastRequestId,
+              createdProperty,
               externalPropertyId,
               connectionStatus,
               messagingAppInstalled,
@@ -408,6 +432,7 @@ export function createChannexManagementProvider(config: {
       return {
         ...progress({
           lastRequestId,
+          createdProperty,
           externalPropertyId,
           connectionStatus,
           messagingAppInstalled,
@@ -433,6 +458,16 @@ async function responseFailure(
   response: Response,
   providerRequestId?: string,
 ): Promise<ChannexManagementProviderFailure> {
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      ok: false,
+      code: "provider_rejected",
+      message: `Channex request rejected an HTTP ${response.status} redirect`,
+      statusCode: response.status,
+      providerRequestId,
+    };
+  }
   const message = await safeResponseMessage(response);
   const code =
     response.status === 429
@@ -610,6 +645,7 @@ function isMessagingApplication(value: unknown) {
 
 function progress(input: {
   lastRequestId?: string;
+  createdProperty?: ChannexManagementProviderSuccess["createdProperty"];
   externalPropertyId?: string;
   connectionStatus?: ChannexManagementProviderSuccess["connectionStatus"];
   messagingAppInstalled?: boolean;
@@ -620,6 +656,7 @@ function progress(input: {
   return {
     ok: true,
     providerRequestId: input.lastRequestId,
+    ...(input.createdProperty ? { createdProperty: input.createdProperty } : {}),
     externalPropertyId: input.externalPropertyId,
     connectionStatus: input.connectionStatus,
     messagingAppInstalled: input.messagingAppInstalled,

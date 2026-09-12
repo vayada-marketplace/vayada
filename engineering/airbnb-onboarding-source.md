@@ -200,3 +200,18 @@ Next.js development request logging now excludes the fixed Airbnb callback path,
 including disabled/invalid callback requests. This closes a local terminal log leak;
 it does not configure production ingress, load-balancer, error-reporting or tracing
 systems. Those layers still require explicit verification before remote enablement.
+
+## Creation provenance
+
+The enable plan can recover a property by mutable title before creating one. An
+active enable claim alone therefore does not prove that Vayada created that resource.
+New creation evidence is recorded only for an enable operation's exact POST to
+`/api/v1/properties`, with HTTP 201 and a valid returned UUID, through a fixed official
+Channex environment and with redirects rejected. Title recovery, existing bindings,
+nonstandard origins and ambiguous responses receive no evidence.
+
+Evidence is attached to the matching connection after its active claim is established,
+contains the environment/external ID/job ID, and is removed on disconnect. It is
+additive metadata: no existing connection is retroactively certified. Group resolution
+still needs a provider read against this proven property; creating a property can use
+the default user group when no group_id is supplied, per the official Properties API.

@@ -57,11 +57,35 @@ export async function applyPmsChannexManagementProgress(
       [job.propertyId, result.externalPropertyId ?? null, now.toISOString()],
     );
   }
+  if (result.createdProperty) {
+    const proof = result.createdProperty;
+    if (
+      job.input.operationType !== "enable" ||
+      connectionStatus !== "connected" ||
+      proof.externalPropertyId.toLowerCase() !== result.externalPropertyId?.toLowerCase() ||
+      !["staging", "production"].includes(proof.environment)
+    )
+      throw new Error("Invalid Channex creation evidence");
+    await client.query(
+      `UPDATE pms.channel_connections
+      SET connection_metadata = jsonb_set(connection_metadata, '{airbnbCreationEvidence}', $3::jsonb)
+      WHERE property_id=$1::uuid AND provider='channex' AND external_property_id=$2`,
+      [
+        job.propertyId,
+        result.externalPropertyId,
+        JSON.stringify({
+          contractVersion: "channex-property-creation.v1",
+          ...proof,
+          jobId: job.jobId,
+        }),
+      ],
+    );
+  }
   if (connectionStatus === "disconnected") {
     await client.query(
       `UPDATE pms.channel_connections SET connection_status = 'disconnected',
          external_property_id = NULL, messaging_app_installed = FALSE,
-         connection_metadata = connection_metadata - 'connectedChannels' - 'inventoryRules',
+         connection_metadata = connection_metadata - 'connectedChannels' - 'inventoryRules' - 'airbnbCreationEvidence',
          updated_at = $2::timestamptz
        WHERE property_id = $1::uuid AND provider = 'channex'`,
       [job.propertyId, now.toISOString()],
