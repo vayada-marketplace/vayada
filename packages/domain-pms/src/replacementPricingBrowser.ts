@@ -1,0 +1,3 @@
+/** Browser-safe pricing validation; excludes operational modules with Node imports. */
+export { pricingInteger, pricingKeys, pricingObject } from "./replacementPricing.js";
+export { parsePricingConfiguration, type PricingConfiguration } from "./replacementPricingConfiguration.js";

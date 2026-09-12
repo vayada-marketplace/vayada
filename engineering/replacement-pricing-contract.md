@@ -537,3 +537,23 @@ the same transaction. A source change after review therefore returns stale befor
 creating a declaration. Historical confirmation receipt lookup remains ahead of
 freshness checks, following current authorization, so an accepted retry survives
 later source changes without creating another declaration.
+
+## PMS browser draft client (VAY-1938)
+
+The replacement browser client binds one canonical property and uses the existing
+PMS authenticated target transport with no-store/omitted legacy hotel context.
+The browser-safe domain-pms/replacement-pricing export checks response pricing data, property/currency/revision,
+source/owner keys and saved review identity. Only the expected not_found404 is
+mapped to a missing read; authorization/conflict/network errors remain visible.
+
+Reads, preparation and draft saves never confirm or publish. The editor creates
+an explicit confirmation or publication action from verified saved data; each
+action captures an independent copy and one idempotency key. Re-executing that
+same action retries the exact command after a lost response, regardless of later
+editor changes. These closures are in-memory only; durable/reload recovery and
+visual editor integration are separate work. No pricing UI uses this client yet.
+
+Browser transport options use plain header records required by the existing API
+client, retaining idempotency keys through fetch. Successful null/empty responses
+are malformed; a private sentinel distinguishes the expected not_found404. The
+client itself is bundled with browser platform resolution to catch Node imports.
