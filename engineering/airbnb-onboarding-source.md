@@ -275,3 +275,21 @@ the existing Channex enable command. A brand-new canonical hotel therefore recei
 is an explicit, authorized preparation action using the existing durable enable
 command and its completion status, followed by binding verification and connection
 start. Do not equate exposing the button with completing new-hotel onboarding.
+
+## New-hotel preparation implementation
+
+The connection page now handles only `channex_binding_required` by reading the
+existing PMS connection snapshot. It queues the existing durable `enable` command
+only for a disconnected property with no external property ID. The per-property
+command identity is retained in session storage so retries in that tab reuse it.
+It checks property, command and operation type while polling for up to one minute,
+then retries import start, which independently verifies creation evidence and group.
+Existing connections are never recertified or modified by this preparation path.
+
+Requests abort when the component unmounts, and a 70-second deadline covers stalled requests.
+Failed/dead-lettered jobs stop; timed-out
+waiting does not cancel the durable server job. A retry reuses the command; terminal
+job recovery remains an operator action. The existing PMS connection capability
+must be configured as mutating with its worker available. No capability or feature
+flag is automatically enabled. Unit/browser coverage uses synthetic provider/API
+responses and does not prove live Channex creation or fresh-host authorization.

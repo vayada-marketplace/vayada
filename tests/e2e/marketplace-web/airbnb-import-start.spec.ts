@@ -111,3 +111,72 @@ for (const adaptive of [false, true]) {
     await popup.close();
   });
 }
+
+for (const outcome of ["succeeded", "failed", "existing"] as const) {
+  test(`Airbnb preparation: ${outcome}`, async ({ page }) => {
+    let starts = 0;
+    let commands = 0;
+    let commandId = "";
+    await page.route("https://www.airbnb.com/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<h1>Simulated Airbnb authorization</h1>" }),
+    );
+    await page.route(/\/api\/(hotel-setup|pms)\/properties\//, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      const pathname = new URL(route.request().url()).pathname;
+      const send = (json: unknown, status = 200) =>
+        route.fulfill({ status, headers: corsHeaders(route), json });
+      if (pathname.endsWith("/start")) {
+        starts++;
+        return starts === 1
+          ? send({ code: "channex_binding_required" }, 409)
+          : send({
+              sourceId: propertyId,
+              url: "https://www.airbnb.com/oauth2/auth?synthetic=true",
+            });
+      }
+      if (pathname.endsWith("/channex"))
+        return send({
+          propertyId,
+          connection: {
+            status: outcome === "existing" ? "connected" : "disconnected",
+            externalPropertyId: outcome === "existing" ? propertyId : null,
+          },
+        });
+      if (pathname.endsWith("/commands")) {
+        commands++;
+        commandId = route.request().postDataJSON().commandId;
+        return send(
+          {
+            operationId: propertyId,
+            propertyId,
+            commandId,
+            operationType: "enable",
+            status: "queued",
+          },
+          202,
+        );
+      }
+      if (pathname.endsWith(`/operations/${propertyId}`))
+        return send({
+          operationId: propertyId,
+          propertyId,
+          commandId,
+          operationType: "enable",
+          status: outcome,
+        });
+      return send({}, 404);
+    });
+    await page.goto(path);
+    await page.getByRole("button", { name: "Continue to Airbnb" }).click();
+    if (outcome === "succeeded")
+      await expect(
+        page.getByRole("heading", { name: "Simulated Airbnb authorization" }),
+      ).toBeVisible();
+    else
+      await expect(page.getByRole("main").getByRole("alert")).toContainText(
+        outcome === "existing" ? "existing connection" : "did not finish",
+      );
+    expect(commands).toBe(outcome === "existing" ? 0 : 1);
+    expect(starts).toBe(outcome === "succeeded" ? 2 : 1);
+  });
+}
