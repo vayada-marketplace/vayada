@@ -152,10 +152,14 @@ export function createPgReviewReplyCommands(config: {
         client.release();
       }
       // Persist the reservation before calling the provider. A crash cannot permit a blind retry.
-      const result = await config.provider!.send(
+      const sent = await config.provider!.send(
         { reviewId, externalPropertyId: row.externalPropertyId! },
         text,
       );
+      const result =
+        sent.state === "ready" || sent.state === "unavailable"
+          ? { state: "uncertain" as const, reason: "confirmation_pending" }
+          : sent;
       await finish(context, propertyId, row, result);
       return { ...result, draft: text };
     },
