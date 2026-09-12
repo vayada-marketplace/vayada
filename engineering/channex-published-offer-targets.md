@@ -416,3 +416,14 @@ VAY-2004 now populates original correlation in the authorized fresh-claim INSERT
 from the already locked job attempt and returns those persisted IDs only after
 commit. A reclaimed worker cannot replace that correlation or recover a send
 claim. Receipt sanitization/capture, aggregate gates and dispatch remain pending.
+
+VAY-2005 adds a pure projection of already collected HTTP response text. It checks
+the 64 KiB UTF-8 limit before parsing and keeps only tagged identity fields and
+container presence, with 512-byte field bounds. Control characters are invalid
+markers; other strings retain exact whitespace and contradictory values. Request
+IDs allow ASCII letters, digits, dot, underscore, colon and hyphen only. Warnings
+and errors become conservative boolean markers, never arbitrary message text.
+The tagged evidence is not a provider response to pass directly to the identity
+parser. Later reconciliation must interpret the markers explicitly. Streaming
+limits/deadlines before this helper, transport-error capture, database idempotency
+and aggregate gates still need implementation. Parsed JSON never implies success.
