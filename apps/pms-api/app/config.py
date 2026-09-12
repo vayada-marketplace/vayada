@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # header — Channex does not natively sign webhooks). Compared against
     # X-Vayada-Webhook-Token on incoming requests.
     CHANNEX_WEBHOOK_SECRET: str = ""
+    # One global Channex webhook is reconciled for each comma-separated event
+    # mask. Override with "message" to restore the legacy message-only policy.
+    CHANNEX_WEBHOOK_EVENT_MASKS: str = "message,booking,review,updated_review"
     # Legacy Channex admin cutover guards. Supported modes are:
     # legacy-owned, read-only, disabled, proxy-to-target, target-owned.
     CHANNEX_ADMIN_DEFAULT_MODE: str = "legacy-owned"
