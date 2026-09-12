@@ -427,3 +427,11 @@ The tagged evidence is not a provider response to pass directly to the identity
 parser. Later reconciliation must interpret the markers explicitly. Streaming
 limits/deadlines before this helper, transport-error capture, database idempotency
 and aggregate gates still need implementation. Parsed JSON never implies success.
+
+VAY-2006 adds `readChannexCreationResponse` after headers arrive. It snapshots
+status/request ID, reads at most 64 KiB of stream bytes within five seconds and
+uses fatal streaming UTF-8 decoding before the sanitizer. Oversize, read failure,
+invalid UTF-8, timeout or an already consumed/locked body produce no partial
+identity evidence. Cancellation is best-effort and is never awaited. This bounds
+body consumption only: the future dispatcher must also bound fetch before headers.
+No HTTP request is initiated by this helper; database capture and gates remain.

@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { sanitizeChannexCreationResponse as sanitize } from "./channexCreationReceipt.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  readChannexCreationResponse as readResponse,
+  sanitizeChannexCreationResponse as sanitize,
+} from "./channexCreationReceipt.js";
 
 const project = (data: unknown, extra = {}) =>
   sanitize({
@@ -123,5 +126,105 @@ describe("Channex creation receipt projection", () => {
       relationships: { property: { data: { id } }, room_type: { data: { id } } },
     });
     expect(Buffer.byteLength(JSON.stringify(result.identityEvidence))).toBeLessThanOrEqual(8192);
+  });
+});
+
+describe("bounded Channex response consumption", () => {
+  const response = (stream: ReadableStream<Uint8Array>) =>
+    new Response(stream, { status: 201, headers: { "x-request-id": "original" } });
+  it("decodes split UTF-8 and snapshots response headers", async () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ data: { id: "é" } }));
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const input = response(
+      new ReadableStream({
+        start(controller) {
+          source = controller;
+        },
+      }),
+    );
+    const result = readResponse(input);
+    input.headers.set("x-request-id", "changed");
+    for (const byte of bytes) source.enqueue(new Uint8Array([byte]));
+    source.close();
+    expect(await result).toMatchObject({
+      outcome: "complete_json",
+      providerRequestId: "original",
+      identityEvidence: { rateId: { kind: "value", value: "é" } },
+    });
+  });
+  it("accepts exactly64KiB and cancels oversized streams without retaining partial identities", async () => {
+    const text = JSON.stringify({ data: { id: "rate" } }).padEnd(65536);
+    expect((await readResponse(new Response(text, { status: 201 }))).outcome).toBe("complete_json");
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const input = response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array(65537));
+        },
+        cancel,
+      }),
+    );
+    expect(await readResponse(input)).toMatchObject({
+      outcome: "body_limit",
+      identityEvidence: {},
+      hasWarnings: true,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+  it("finishes after5seconds even if reading and cancellation both stall", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const input = response(
+        new ReadableStream({
+          pull() {
+            return new Promise<void>(() => {});
+          },
+          cancel,
+        }),
+      );
+      const result = readResponse(input);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await result).toMatchObject({
+        outcome: "body_interrupted",
+        httpStatus: 201,
+        identityEvidence: {},
+      });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("classifies stream errors, invalid UTF-8 and consumed/locked bodies without error text", async () => {
+    const failed = response(
+      new ReadableStream({
+        start(c) {
+          c.error(new Error("private-details"));
+        },
+      }),
+    );
+    const invalid = response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array([0xff]));
+          c.close();
+        },
+      }),
+    );
+    const consumed = new Response("{}");
+    await consumed.text();
+    const locked = new Response("{}");
+    const reader = locked.body!.getReader();
+    try {
+      for (const input of [failed, invalid, consumed, locked]) {
+        const result = await readResponse(input);
+        expect(result).toMatchObject({ outcome: "body_interrupted", identityEvidence: {} });
+        expect(JSON.stringify(result)).not.toContain("private-details");
+      }
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
+    expect((await readResponse(new Response(null, { status: 204 }))).outcome).toBe("invalid_json");
   });
 });
