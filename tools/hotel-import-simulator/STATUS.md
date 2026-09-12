@@ -91,3 +91,8 @@ Production binding/link ports, callback UI, save receipts and live wiring remain
 
 Do not infer deployment from a merged foundation PR. This record does not verify
 the running remote revision, invite redemption or a complete launch-ready hotel.
+
+Migration numbering coordination: the unmerged Airbnb receipt migration is now
+0182, reserving Finance0180 and Channex adoption0181. SQL is byte-identical. The
+earlier local0180 evidence above is historical; that local database was removed
+by the separate prepared-import task. No deployed migration ledger was changed.
