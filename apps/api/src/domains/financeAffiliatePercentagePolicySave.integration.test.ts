@@ -5,6 +5,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { saveFinanceAffiliatePercentagePolicyFromMarketplace as save } from "./financeAffiliatePercentagePolicySave.js";
 import { approveFinanceAffiliatePercentagePolicyFromMarketplace as approve } from "./financeAffiliatePercentagePolicyApprove.js";
+import { resolvePgFinanceAffiliatePercentagePolicy as resolve } from "./financeAffiliatePercentagePolicyResolver.js";
 const databaseUrl = process.env["TEST_DATABASE_URL"];
 const id = (n: number) => `15100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
@@ -350,5 +351,88 @@ describe.skipIf(!databaseUrl)("affiliate percentage save (PostgreSQL)", () => {
         )
       ).rows,
     ).toEqual([{ rate_basis_points: 1250 }]);
+  });
+  it("resolves the exact approved rate without falling back to newer versions", async () => {
+    const command = await approvalInput();
+    await expect(resolve(pool, command)).resolves.toEqual({
+      status: "unavailable",
+      reason: "not_approved",
+    });
+    await approve(pool, command);
+    const next = await save(pool, {
+      ...input(),
+      idempotencyKey: "new-rate",
+      policy: { percentageRate: "20" },
+    });
+    if (!next.ok) throw new Error("Save fixture failed");
+    await expect(
+      resolve(pool, { ...command, policyVersionId: next.policyVersionId }),
+    ).resolves.toEqual({ status: "unavailable", reason: "not_approved" });
+    await approve(pool, {
+      ...command,
+      policyVersionId: next.policyVersionId,
+      idempotencyKey: "approve-new",
+    });
+    await expect(
+      resolve(pool, { ...command, policyVersionId: command.policyVersionId.toUpperCase() }),
+    ).resolves.toMatchObject({
+      status: "available",
+      propertyId: id(3),
+      policyVersionId: command.policyVersionId,
+      policy: {
+        percentageRate: "12.50",
+        rateBasisPoints: 1250,
+        revenueBasis: "accommodation_excluding_taxes_and_extras",
+        eligibility: "verified_completion",
+      },
+    });
+  });
+  it("does not expose or substitute another property's policy", async () => {
+    const command = await approvalInput();
+    await approve(pool, command);
+    for (const request of [
+      { ...command, propertyId: id(6) },
+      { ...command, policyVersionId: id(99) },
+      { ...command, propertyId: "invalid" },
+      { ...command, policyVersionId: "invalid" },
+    ])
+      await expect(resolve(pool, request)).resolves.toEqual({
+        status: "unavailable",
+        reason: "not_found",
+      });
+  });
+  it("does not accept approval evidence from a different organization", async () => {
+    const command = await approvalInput();
+    await pool.query(
+      `INSERT INTO finance.affiliate_percentage_policy_approvals
+      (policy_version_id,property_id,approved_by_user_id,approved_by_organization_id,request_id)
+      VALUES($1,$2,$3,$4,'wrong-org-fixture')`,
+      [command.policyVersionId, id(3), id(1), id(5)],
+    );
+    await expect(resolve(pool, command)).resolves.toEqual({
+      status: "unavailable",
+      reason: "not_approved",
+    });
+  });
+  it("preserves explicitly chosen zero and fractional percentage rates", async () => {
+    for (const percentageRate of ["0", "0.01", "99.99", "100"]) {
+      const saved = await save(pool, {
+        ...input(),
+        idempotencyKey: percentageRate,
+        policy: { percentageRate },
+      });
+      if (!saved.ok) throw new Error("Save fixture failed");
+      const command = {
+        context: context(),
+        propertyId: id(3),
+        policyVersionId: saved.policyVersionId,
+        idempotencyKey: percentageRate,
+      };
+      await approve(pool, command);
+      await expect(resolve(pool, command)).resolves.toMatchObject({
+        status: "available",
+        policy: { percentageRate: Number(percentageRate).toFixed(2) },
+      });
+    }
   });
 });
