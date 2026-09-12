@@ -1,3 +1,4 @@
+import { registerReplacementPricingRoutes, type ReplacementPricingRoutesOptions } from "./routes/replacementPricing.js";
 import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
@@ -329,6 +330,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
+  replacementPricing?: ReplacementPricingRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
@@ -850,6 +852,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
+  if (options.replacementPricing) app.register(registerReplacementPricingRoutes, { prefix: "/api/pms", ...options.replacementPricing });
   if (options.pmsPricing) {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",

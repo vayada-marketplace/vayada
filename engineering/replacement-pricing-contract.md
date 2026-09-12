@@ -486,3 +486,31 @@ complete original command for exact historical retries. It does not reload a
 possibly edited/deleted draft before storage checks its accepted receipt. Storage
 continues to enforce snapshot/source/base/draft identity for new publications.
 HTTP route policy enforcement, editor wiring and currency approval remain pending.
+
+## Protected replacement pricing HTTP API (VAY-1936)
+
+Target PMS runtime registers these routes under
+`/api/pms/properties/:propertyId/pricing-v2` using its existing target pool:
+
+| Method/path suffix | Request | Successful response |
+| --- | --- | --- |
+| GET root | None | Current stored revision, sources and stale flag |
+| POST `/prepare` | currency, rooms | Current sources and snapshot with Finance readiness |
+| GET `/drafts/:draftId` | None | Saved draft snapshot/version/base/sources/stale flag |
+| PUT `/drafts/:draftId` | expectedDraftRevision, baseRevision, sources, snapshot | `{ revision }` |
+| POST `/charges` | draftId, expectedDraftRevision, claimedFingerprint, declaration | Immutable charge declaration |
+| POST `/publish` | expectedRevision, sources, snapshot, draft `{ id, revision }` | `{ revision, replayed }` |
+
+Charges/publication require exactly one nonblank `Idempotency-Key` header (maximum
+200 characters; comma-joined values are rejected). Body fields are exact; no request identity or requestId is accepted.
+Reads require `pms.rooms_rates.read`; all other routes require
+`pms.rooms_rates.manage`. Route checks require hotel-group scope, active PMS
+entitlement and an owner/operator property link before body handling. Existing
+commands independently recheck live database authorization, including retries.
+
+Responses: malformed input400, unauthenticated401, permission/owner denial403,
+missing read404, stale/idempotency/currency conflict409, unexpected backend failure
+503 with no internal error detail. Preparation does not approve publication or
+confirm charges. Currency changes remain blocked. Local HTTP/database tests use
+synthetic identities; no editor, deployed/provider or public-booking evidence is
+implied. Route registration does not schedule a publication/outbox consumer.
