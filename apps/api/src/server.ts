@@ -1292,6 +1292,7 @@ const app = buildApp({
           xendit: config.providerWebhooks.xenditMode,
           channex: config.providerWebhooks.channexMode,
         },
+        channexReviewMode: config.providerWebhooks.channexReviewMode,
         channexBookingPromotionEnabled:
           config.channexManagement.capabilityModes.bookingSync === "mutating" &&
           config.channexManagement.bookingMutationOwner === "target",
