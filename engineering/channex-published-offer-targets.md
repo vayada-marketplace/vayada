@@ -162,3 +162,25 @@ before sales open. Provider capability/OTA support is not implied by this plan.
 Rooms permitting children currently return an explicit unsupported state; their
 child capacity is never silently removed. The local 100-option bound matches the
 nightly adapter and is not a claimed provider limit.
+
+## Configuration metadata readback (VAY-1988)
+
+The GET-only verifier derives expectations from the strict planner and checks
+meal identity against the same response through the existing meal helper. It
+requires exact property/room/rate identity, currency and manual per-person mode,
+all independent occupancy options with the chosen primary, disabled rate and
+stop-sell inheritance, no automatic pricing and seven closed default weekdays.
+Provider option ordering and unrelated metadata do not affect comparison.
+
+Missing explicit evidence fails closed: option derivation must be null, automatic
+pricing must be null, and no parent must be explicit in attributes or the parent
+relationship without a contradictory identity. A provider response omitting those
+fields is unavailable until its semantics are verified; absence is not inferred
+to mean independent pricing. Caller expectations are captured before provider IO.
+
+This returns metadata evidence only. It does not verify option rate amounts, daily
+ARI closure, restriction equivalence, OTA capability or activation readiness.
+Binding evidence to the current pending intent and fresh authority, durable create
+recovery, transactional sealing and initial ARI remain separate requirements.
+Provider response shapes follow the [official rate-plan documentation](https://docs.channex.io/api-v.1-documentation/rate-plans-collection),
+checked 2026-09-12; automated fixtures are not live provider proof.
