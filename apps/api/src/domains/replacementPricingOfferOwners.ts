@@ -1,3 +1,4 @@
+import { channexCreationReceiptsResolved } from "./channexCreationReceiptGate.js";
 import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
 import { lockChannexPricingJobLease, type ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
@@ -348,6 +349,8 @@ async function withPublishedChannexPricing(
               ? "creation_reconciliation_required"
               : "creation_already_identified",
           );
+        if (work === "claim" && !await channexCreationReceiptsResolved(client, target.id))
+          return unavailable("creation_reconciliation_required");
         const mapping = (
           await client.query(
             `SELECT external_room_type_id FROM pms.channel_room_type_mappings
