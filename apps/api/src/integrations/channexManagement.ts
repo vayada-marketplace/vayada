@@ -216,7 +216,7 @@ export function createChannexManagementProvider(config: {
           const response = await fetcher(requestUrl(apiBaseUrl, request), {
             method: request.method,
             ...(request.method === "POST" && request.path === "/api/v1/properties"
-              ? { redirect: "error" as const }
+              ? { redirect: "manual" as const }
               : {}),
             headers: {
               "content-type": "application/json",
@@ -458,6 +458,16 @@ async function responseFailure(
   response: Response,
   providerRequestId?: string,
 ): Promise<ChannexManagementProviderFailure> {
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      ok: false,
+      code: "provider_rejected",
+      message: `Channex request rejected an HTTP ${response.status} redirect`,
+      statusCode: response.status,
+      providerRequestId,
+    };
+  }
   const message = await safeResponseMessage(response);
   const code =
     response.status === 429

@@ -43,7 +43,7 @@ it("carries direct creation evidence through checkpoint and final result", async
   const proof = { environment: "staging", externalPropertyId: id };
   expect(result).toMatchObject({ ok: true, createdProperty: proof });
   expect(checkpoint).toHaveBeenCalledWith(expect.objectContaining({ createdProperty: proof }));
-  expect(fetcher.mock.calls[0]![1]?.redirect).toBe("error");
+  expect(fetcher.mock.calls[0]![1]?.redirect).toBe("manual");
 });
 it("records the configured official production environment", async () => {
   expect((await run(201, "https://app.channex.io")).result).toMatchObject({
