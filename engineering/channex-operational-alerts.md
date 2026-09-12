@@ -30,3 +30,8 @@ promotion; VAY-947 owns callback cutover in the VAY-1362 window. This change doe
 not modify subscriptions, callback URLs or mutation ownership. Provider replay
 and subscription coverage remain required before activation, including confirming
 the disconnected_channel payload against the deployed provider version.
+
+Provider compatibility (September 12, 2026): subscribe to the documented
+`disconnect_channel` event. Intake normalizes it to the existing
+`disconnected_channel` alert category while retaining the raw provider payload;
+legacy receipts and the PMS recovery contract keep their existing name.

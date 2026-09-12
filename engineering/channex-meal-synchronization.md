@@ -30,6 +30,22 @@ Provider references checked 2026-09-07:
 [Booking.com channel API](https://docs.channex.io/channel-api-examples/booking.com).
 Local PostgreSQL and mocked HTTP validation do not establish live provider delivery.
 
+## Isolated TypeScript staging delivery
+
+After the restrictions staging deployment and binding are verified, opt in with
+`PMS_CHANNEX_STAGING_MEALS_ENABLED=true` and provisioning mode `mutating`.
+This requires the existing staging restriction property scope, exact staging URL,
+ARI mutating, and all global background workers disabled. Other capability modes
+remain observe-only. Default restrictions-only behavior is unchanged.
+
+The scoped worker additionally claims only `provision` jobs with a valid
+`mealRatePlanId` for that property; full provisioning and all other operations
+remain unclaimed. Canonical meal-save enqueue is scoped to the same property.
+Staging meal plans update only established mappings and never provision missing
+room/rate variants; a plan without any mapped rate fails visibly. Normal production
+provisioning behavior is unchanged. Reuse the audited sandbox binding. Coordinate deployment
+and fixture ownership with VAY-1528 before opting in; use no live OTA mappings.
+
 ## Replacement meal readback handoff
 
 The VAY-1530 helper accepts the five `PricingMeal.kind` values directly: room only,

@@ -1227,6 +1227,43 @@ describe("target provider webhook routes", () => {
     await app.close();
   });
 
+  it.each(["disconnect_channel", "disconnected_channel"])(
+    "retains %s as an idempotent, non-mutating disconnection alert",
+    async (event) => {
+      const store = createMemoryProviderWebhookStore({ provider_property: "canonical_property" });
+      const app = buildApp({
+        providerWebhooks: {
+          secrets: { channex: "channex-secret" },
+          modes: { channex: "mutating" },
+          store,
+          now: () => fixedNow,
+        },
+      });
+      const payload = {
+        event,
+        property_id: "provider_property",
+        timestamp: fixedNow.toISOString(),
+        payload: { channel_id: "channel_fixture" },
+      };
+      const first = await postChannexPayload(app, payload);
+      const replay = await postChannexPayload(app, payload);
+      expect(first.statusCode).toBe(200);
+      expect(replay.json()).toMatchObject({ status: "duplicate_observed" });
+      expect(store.receipts).toHaveLength(1);
+      expect(store.receipts[0]).toMatchObject({
+        eventType: "disconnected_channel",
+        mode: "observe_only",
+        rawPayload: payload,
+        normalizedPreview: {
+          payload: { propertyId: "canonical_property", propertyOwnerResolved: true },
+        },
+      });
+      expect(store.jobs).toHaveLength(0);
+      expect(store.domainEvents).toHaveLength(0);
+      await app.close();
+    },
+  );
+
   it("keeps unknown Channex events in the generic provider-review fallback", async () => {
     const store = createMemoryProviderWebhookStore();
     const app = buildApp({
