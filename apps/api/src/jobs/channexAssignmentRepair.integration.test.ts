@@ -136,8 +136,8 @@ describe.skipIf(!url)("Channex operational handoff and repair", () => {
       )
     ).rows;
   }
-  async function update(f: ReturnType<typeof fixture>, status = "modified") {
-    f.revision.id = randomUUID();
+  async function update(f: ReturnType<typeof fixture>, status = "modified", replay = false) {
+    if (!replay) f.revision.id = randomUUID();
     f.revision.attributes.status = status;
     f.revision.attributes.inserted_at = "2026-09-12T11:00:00Z";
     await db.query(
@@ -380,6 +380,11 @@ describe.skipIf(!url)("Channex operational handoff and repair", () => {
       "canceled",
     ]);
     expect((await inventory()).find((d) => d.stay_date === "2026-09-14")!.assigned_count).toBe(0);
+    const canceled = await assignments(f.input.channelBookingId),
+      canceledInventory = await inventory();
+    expect(await update(f, "cancelled", true)).toMatchObject({ succeeded: 1 });
+    expect(await assignments(f.input.channelBookingId)).toEqual(canceled);
+    expect(await inventory()).toEqual(canceledInventory);
     const touched = fixture();
     await importChannexStagingReservation(config, touched.input, touched.request);
     const booking = (await assignments(touched.input.channelBookingId))[0].guest_booking_id;
