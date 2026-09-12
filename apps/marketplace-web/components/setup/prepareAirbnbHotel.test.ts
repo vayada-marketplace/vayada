@@ -108,7 +108,7 @@ it("times out a stalled API request", async () => {
   vi.useFakeTimers();
   const get = vi.fn(
     (_path, options) =>
-      new Promise((_resolve, reject) =>
+      new Promise<never>((_resolve, reject) =>
         options.signal.addEventListener("abort", () => reject(options.signal.reason)),
       ),
   );
