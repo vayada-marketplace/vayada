@@ -12,6 +12,8 @@ import type {
 import type { BookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
+
 export type DistributionBookingPublicationTransaction = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -68,6 +70,13 @@ export class BookingPublicationActiveRevisionConflictError extends Error {
     super("The active Booking content revision changed before publication");
     this.name = "BookingPublicationActiveRevisionConflictError";
     this.currentActiveRevisionId = currentActiveRevisionId;
+  }
+}
+
+export class BookingPublicationRoomClosureConflictError extends Error {
+  constructor() {
+    super("Booking content includes rooms that are no longer operating");
+    this.name = "BookingPublicationRoomClosureConflictError";
   }
 }
 
@@ -405,6 +414,32 @@ async function persistActive(
     activatedAt: Date;
   },
 ): Promise<BookingActiveContentPointer> {
+  // The publication lock serializes this check with the atomic closure writer.
+  // Do not acquire PMS inventory/facts locks here: closure acquires those first.
+  const eligibility = await readPmsRoomOperatingEligibility(client, input.propertyId);
+  if (eligibility.some((room) => room.closureCommandId !== null)) {
+    const revision = await selectRevision(client, input.revisionId);
+    const content = revision?.publicContent;
+    const rooms =
+      content && typeof content === "object" && "rooms" in content ? content.rooms : null;
+    const operatingIds = new Set(
+      eligibility.filter((room) => room.state === "operating").map((room) => room.roomTypeId),
+    );
+    if (
+      revision?.propertyId !== input.propertyId ||
+      !Array.isArray(rooms) ||
+      rooms.some(
+        (room: unknown) =>
+          !room ||
+          typeof room !== "object" ||
+          !("roomTypeId" in room) ||
+          typeof room.roomTypeId !== "string" ||
+          !operatingIds.has(room.roomTypeId),
+      )
+    ) {
+      throw new BookingPublicationRoomClosureConflictError();
+    }
+  }
   const result = await client.query<ActiveRow>(
     `INSERT INTO distribution.active_public_booking_revision (
        property_id, content_revision_id, activated_by_user_id, activated_at

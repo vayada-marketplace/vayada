@@ -76,3 +76,19 @@ Validation (2026-09-07):
   and example.invalid staging configuration; no controlled Booking.com fixture is
   documented. Recheck current configuration after deployment without enabling
   capabilities, changing infrastructure or touching real reservations.
+
+## Scoped deployed validation
+
+`PMS_CHANNEX_STAGING_NO_SHOW_ENABLED` defaults false. Opt-in requires the
+existing validated staging property scope, exact staging URL and disabled global
+background workers. Booking sync stays observe-only; no import/polling capability
+is enabled by this option. The existing Channex worker pause also disables report
+submission and delivery. Read status remains available while paused.
+
+When enabled, report submission is limited to the configured property and the
+no-show worker claims only that property's pending or abandoned jobs. Existing
+eligibility, provider identity checks, dispatch fencing and fee-choice rules
+remain mandatory. Other properties' jobs and production behavior are preserved.
+A supported imported Booking.com test reservation and its canonical binding must
+exist before end-to-end testing; do not fabricate production mappings or enable
+unscoped booking sync to create that prerequisite.

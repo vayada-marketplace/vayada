@@ -75,6 +75,8 @@ export type ChannexManagementConfig = {
   workerEnabled: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingInventoryEnabled?: boolean;
+  stagingNoShowEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -155,6 +157,7 @@ export type ApiConfig = {
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
+  pmsRoomClosureEnabled: boolean;
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
@@ -557,6 +560,18 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     env,
     "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
   );
+  const stagingNoShowEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_NO_SHOW_ENABLED", false);
+  if (stagingNoShowEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex no-show reporting requires a staging property");
+  }
+  const stagingInventoryEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_STAGING_INVENTORY_ENABLED",
+    false,
+  );
+  if (stagingInventoryEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex inventory requires a staging property");
+  }
   const stagingMealsEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_MEALS_ENABLED", false);
   if (
     stagingMealsEnabled &&
@@ -620,6 +635,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     bookingMutationOwner,
     stagingRestrictionsPropertyId,
     stagingMealsEnabled,
+    stagingInventoryEnabled,
+    stagingNoShowEnabled,
     workerEnabled,
     capabilityModes,
   };
@@ -899,6 +916,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
     financeFolioRecipientKms,
+    pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
     financeBankTransferKms: loadBankTransferKms(env),
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
