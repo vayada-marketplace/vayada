@@ -89,7 +89,7 @@ export default function RoomSelectionSummary({
             )}
             {["breakfast", "room_only"].includes(String(line.rateSummary.mealPlan)) && (
               <p className="text-sm text-gray-600">
-                {line.rateSummary.mealPlan === "breakfast" ? "Breakfast included" : "Room only"}
+                {line.rateSummary.mealPlan === "breakfast" ? t("breakfastIncluded") : t("roomOnly")}
               </p>
             )}
             <ul className="mt-1 text-sm text-gray-600">

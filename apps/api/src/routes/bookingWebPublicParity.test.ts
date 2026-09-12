@@ -228,6 +228,7 @@ describe("Booking Web public bootstrap parity", () => {
       url: "/api/booking-web/hotels/hotel-alpenrose/attribution/clicks",
       payload: {
         referralCode: "REF-123",
+        clickId: "click-123",
         sessionId: "sid_123",
         landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
       },
@@ -238,11 +239,47 @@ describe("Booking Web public bootstrap parity", () => {
       {
         slug: "hotel-alpenrose",
         referralCode: "REF-123",
+        clickId: "click-123",
         sessionId: "sid_123",
         landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
       },
     ]);
     await app.close();
+  });
+
+  it("rejects malformed click IDs before intake and accepts older callers without one", async () => {
+    const events: unknown[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      bookingWebAttributionSink: {
+        async recordAffiliateClick(event) {
+          events.push(event);
+        },
+        async recordTelemetryEvent() {},
+      },
+    });
+    try {
+      for (const clickId of [null, 12, {}, "", "a b", "a".repeat(129)]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/booking-web/hotels/hotel/attribution/clicks",
+          payload: { referralCode: "A", clickId },
+        });
+        expect(response.statusCode).toBe(400);
+      }
+      expect(events).toEqual([]);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel/attribution/clicks",
+        payload: { referral_code: "A", session_id: "old-session" },
+      });
+      expect(response.statusCode).toBe(204);
+      expect(events).toMatchObject([{ referralCode: "A", sessionId: "old-session" }]);
+    } finally {
+      await app.close();
+    }
   });
 
   it("records booking-web telemetry through the configured sink without legacy forwarding", async () => {

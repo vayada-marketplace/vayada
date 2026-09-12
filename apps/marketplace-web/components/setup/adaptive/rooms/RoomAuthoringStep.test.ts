@@ -22,6 +22,7 @@ vi.mock("@/services/api/roomAuthoringClient", () => ({
   roomAuthoringApi: mocks,
 }));
 
+import { RoomImportRevisionContext } from "../../RoomImportRevisionContext";
 import { RoomAuthoringStep, type RoomAuthoringSessionStore } from "./RoomAuthoringStep";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
@@ -71,6 +72,79 @@ describe("RoomAuthoringStep first-visit recovery", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it("adds newly imported rooms without replacing unfinished local input", async () => {
+    const store: RoomAuthoringSessionStore = {};
+    const props = { ...context(routeWithRoomsDraft(null)), sessionStore: store };
+    const render = (revision: number) =>
+      createElement(
+        RoomImportRevisionContext.Provider,
+        { value: revision },
+        createElement(RoomAuthoringStep, props),
+      );
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(render(0));
+    });
+    const nameInput = () =>
+      renderer.root.find(
+        (node) =>
+          node.type === "input" &&
+          typeof node.props.id === "string" &&
+          node.props.id.endsWith("-name"),
+      );
+    await act(async () => {
+      nameInput().props.onChange({ target: { value: "Unfinished local room" } });
+    });
+    mocks.loadWorkspace.mockResolvedValue([
+      {
+        draftRoomId: "room:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        roomTypeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        roomFactsRevision: 1,
+        roomUnitsRevision: 0,
+        roomMediaRevision: 0,
+        roomAmenitiesRevision: 0,
+        facts: {
+          name: "Imported Suite",
+          description: "",
+          category: null,
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "queen", quantity: 1 }],
+          bedrooms: null,
+          bathrooms: null,
+          bathroomType: "private",
+          size: null,
+        },
+        activeUnitCount: 0,
+        photos: [],
+        amenityKeys: [],
+        amenitiesReviewed: false,
+      },
+    ]);
+    await act(async () => {
+      renderer.update(render(1));
+    });
+    expect(mocks.loadWorkspace).toHaveBeenCalledTimes(2);
+    expect(nameInput().props.value).toBe("Unfinished local room");
+    expect(store.rooms).toHaveLength(2);
+    expect(
+      renderer!.root.findAll(
+        (node) => node.type === "h3" && node.children.includes("Imported Suite"),
+      ),
+    ).toHaveLength(1);
+    expect(store.rooms?.find((room) => room.name === "Imported Suite")).toMatchObject({
+      roomTypeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      unitCount: "0",
+    });
+    expect(store.dirty).toBe(true);
+    expect(mocks.saveRoom).not.toHaveBeenCalled();
+    expect(mocks.saveDraft).not.toHaveBeenCalled();
+    await act(async () => {
+      renderer.update(render(1));
+    });
+    expect(mocks.loadWorkspace).toHaveBeenCalledTimes(2);
+    await act(async () => renderer.unmount());
+  });
 
   it("saves draft:null first-visit edits with the exact current owner manifest", async () => {
     const store: RoomAuthoringSessionStore = {};
