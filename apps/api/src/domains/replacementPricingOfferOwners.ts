@@ -16,12 +16,26 @@ export type ReplacementPricingOfferOwners =
   | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "terms_source_stale" | "finance_unavailable" | "finance_source_stale" | "charges_stale";
       financeReason?: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"] };
 
+type DraftPricingOwners = ReplacementPricingOfferOwners | { kind: "awaiting_charge_confirmation" };
+
+/** Drafts may await confirmation; a supplied declaration must still match. */
+export function lockReplacementPricingDraftOwners(client: PoolClient, context: RequestContext | null,
+  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<DraftPricingOwners> {
+  return lockOwners(client, context, scope, proposed, sources, "draft");
+}
+
 /** Caller must BEGIN/COMMIT the transaction. Rechecks live manage authorization and
  * holds PMS/Booking/Finance locks until its end and verifies the charge declaration.
  * Rechecks room/terms/Finance sources through their owners. Other source keys and
  * currency conversion still require explicit validation before publication. */
 export async function lockReplacementPricingOfferOwners(client: PoolClient, context: RequestContext | null,
   scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources): Promise<ReplacementPricingOfferOwners> {
+  const result = await lockOwners(client, context, scope, proposed, sources, "publish");
+  return result.kind === "awaiting_charge_confirmation" ? { kind: "unavailable", reason: "charges_stale" } : result;
+}
+
+async function lockOwners(client: PoolClient, context: RequestContext | null,
+  scope: PricingStorageScope, proposed: unknown, sources: PricingStorageSources, intent: "draft" | "publish"): Promise<DraftPricingOwners> {
   const unavailable = (reason: Extract<ReplacementPricingOfferOwners, { kind: "unavailable" }>["reason"]): ReplacementPricingOfferOwners => ({ kind: "unavailable", reason });
   if (!pricingObject(proposed) || !pricingKeys(proposed, ["currency", "rooms", "ownerReferences"]) ||
       typeof proposed.currency !== "string" || !Array.isArray(proposed.rooms) || !proposed.rooms.length || !pricingObject(proposed.ownerReferences) ||
@@ -54,6 +68,7 @@ export async function lockReplacementPricingOfferOwners(client: PoolClient, cont
   });
   if (finance.kind !== "ready") return { kind: "unavailable", reason: "finance_unavailable", financeReason: finance.reason };
   if (!financeSource || currentSources.finance !== financeSource) return unavailable("finance_source_stale");
+  if (intent === "draft" && snapshot.ownerReferences.charges === undefined) return { kind: "awaiting_charge_confirmation" };
   const charges = await lockReplacementChargeDeclaration(client, scope.propertyId, snapshot.ownerReferences.charges ?? "", snapshot, currentSources);
   return charges ? { kind: "verified", terms, finance, charges } : unavailable("charges_stale");
 }
