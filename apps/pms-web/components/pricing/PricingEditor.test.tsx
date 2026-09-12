@@ -982,3 +982,39 @@ it("keeps a cleared season edit pending and saves renamed dates with the origina
   await click("Review saved charges"); expect(button("Edit seasonal price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit seasonal price"); expect(field("Season name").props.value).toBe("Holiday"); expect(field("End (MM-DD)").props.value).toBe("01-10");
 });
+
+it.each([false, true])("edits every stored date-price mode without flattening it (linked=%s)", (linked) => {
+  const room = snapshot.rooms[0], root = room.offers[0]; if (root.price.kind !== "independent") throw new Error("fixture");
+  const bases = [{ mode: "flat" as const, amountMinor: "10000" }, { mode: "occupancy" as const, amountsMinor: ["10000", "13000"] }, { mode: "per_person" as const, unitMinor: "6000" }, { mode: "included_guests" as const, baseMinor: "13000", baseGuests: 2, adjustments: [{ kind: "fixed" as const, deltaMinor: "-3000" }, { kind: "fixed" as const, deltaMinor: "0" }] }];
+  for (const base of bases) {
+    const dates = [{ date: "2026-12-25", price: base }, { date: "2026-12-26", price: { mode: "flat" as const, amountMinor: "50000" } }];
+    const offer = { ...root, id: "target", price: linked ? { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: dates } : { ...root.price, calendar: { ...root.price.calendar, dates } } };
+    const configured = { ...room, offers: [root, offer] }, original = structuredClone(configured);
+    const values = base.mode === "occupancy" ? ["150.25", "180.99"] : ["180.99"];
+    const expected = base.mode === "flat" ? { ...base, amountMinor: "18099" } : base.mode === "per_person" ? { ...base, unitMinor: "18099" } : base.mode === "occupancy" ? { ...base, amountsMinor: ["15025", "18099"] } : { ...base, baseMinor: "18099" };
+    const result = changeDatePrice(configured, "target", "2026-12-25", values), price = result.offers[1].price;
+    expect(price.kind === "linked" ? price.dateOverrides : price.calendar.dates).toEqual([{ ...dates[0], price: expected }, dates[1]]);
+    expect(result.offers[0]).toEqual(root); expect(result.children).toEqual(room.children); expect(result.offers[1].restrictions).toEqual(offer.restrictions);
+    for (const values of [[], [""], ["0"], ["1.001"], ["10000000000000000"]]) expect(() => changeDatePrice(configured, "target", "2026-12-25", values)).toThrow();
+    expect(() => changeDatePrice(configured, "target", "2026-12-24", ["100"])).toThrow("existing");
+    if (base.mode === "included_guests") expect(() => changeDatePrice(configured, "target", "2026-12-25", ["20"])).toThrow();
+    expect(configured).toEqual(original);
+  }
+});
+it("prefills a linked occupancy override and preserves pending guards through save review and reload", async () => {
+  const room = snapshot.rooms[0], root = room.offers[0], dates = [{ date: "2026-12-25", price: { mode: "occupancy" as const, amountsMinor: ["10000", "13000"] } }];
+  const offer = { ...root, id: "linked", price: { kind: "linked" as const, parentId: root.id, adjustment: { kind: "percentage" as const, basisPoints: -1000 }, dateOverrides: dates }, restrictions: { kind: "inherit" as const } };
+  client.read.mockResolvedValueOnce({ ...snapshot, rooms: [{ ...room, offers: [root, offer] }], revision: 7, sources, stale: false }); await mount(); await click("Save draft"); const draftId = saved.draftId;
+  const field = (name: string) => view.root.findByProps({ "aria-label": name }); const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  await fill("Override date for Room 1 Offer 2", "2026-"); expect(button("Edit date price").props.disabled).toBe(true); await click("Edit date price"); expect(button("Apply date price")).toBeUndefined();
+  // The first editor has no pending input; cancel the pending linked editor directly.
+  await act(async () => view.root.findAllByType("button").find((node) => node.children.join("") === "Cancel date entry")!.props.onClick());
+  await click("Edit date price"); expect(field("Override date for Room 1 Offer 2").props.disabled).toBe(true); expect(field("Date 2 adults for Room 1 Offer 2").props.value).toBe("130.00");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true); expect(button("Clear date price").props.disabled).toBe(true); await click("Clear date price");
+  await fill("Date 2 adults for Room 1 Offer 2", ""); await click("Apply date price"); expect(button("Save draft").props.disabled).toBe(true); expect(view.root.findAllByProps({ role: "alert" }).length).toBeGreaterThan(0);
+  await click("Cancel date entry"); expect(button("Review saved charges").props.disabled).toBe(false); expect(client.saveDraft).toHaveBeenCalledTimes(1);
+  await fill("Room 1 Offer 1 Per room", "150.25"); await click("Edit date price"); await fill("Date 2 adults for Room 1 Offer 2", "180.99"); await click("Apply date price"); await click("Save draft");
+  expect(saved).toMatchObject({ draftId, baseRevision: 7, revision: 2 }); expect(saved.snapshot.rooms[0].offers[1].price).toEqual({ ...offer.price, dateOverrides: [{ date: "2026-12-25", price: { mode: "occupancy", amountsMinor: ["10000", "18099"] } }] }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15025" } } });
+  await click("Review saved charges"); expect(button("Edit date price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit date price"); expect(field("Date 2 adults for Room 1 Offer 2").props.value).toBe("180.99");
+});
