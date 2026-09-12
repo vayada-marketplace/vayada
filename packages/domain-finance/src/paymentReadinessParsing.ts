@@ -1,5 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
-
 import {
   FINANCE_PAYMENT_READINESS_BLOCKERS,
   FINANCE_PAYMENT_READINESS_CONTRACT_VERSION,
@@ -31,7 +29,7 @@ export function parseFinancePaymentReadinessSnapshot(
     ]) ||
     value.contractVersion !== FINANCE_PAYMENT_READINESS_CONTRACT_VERSION ||
     !uuid(value.propertyId) ||
-    !revision(value.paymentMethodsRevision, false) ||
+    !revision(value.paymentMethodsRevision, true) ||
     typeof value.paymentsEnabled !== "boolean" ||
     typeof value.bookingPaymentReady !== "boolean" ||
     !count(value.selectedMethodCount) ||
@@ -100,7 +98,7 @@ export function parseFinancePaymentReadinessSnapshot(
   } catch {
     return null;
   }
-  return isDeepStrictEqual(canonical, value) ? canonical : null;
+  return sameJsonData(canonical, value) ? canonical : null;
 }
 
 export function parseReplaceFinancePaymentMethodsResult(
@@ -242,4 +240,32 @@ function deepFreeze<T>(value: T): T {
     for (const nested of Object.values(value)) deepFreeze(nested);
   }
   return value;
+}
+
+// Both browser and server consumers validate the same JSON contract.
+function sameJsonData(expected: unknown, actual: unknown): boolean {
+  if (Object.is(expected, actual)) return true;
+  if (
+    !expected ||
+    !actual ||
+    typeof expected !== "object" ||
+    typeof actual !== "object" ||
+    Object.getPrototypeOf(expected) !== Object.getPrototypeOf(actual)
+  )
+    return false;
+  const keys = Reflect.ownKeys(expected);
+  return (
+    keys.length === Reflect.ownKeys(actual).length &&
+    keys.every((key) => {
+      const left = Object.getOwnPropertyDescriptor(expected, key);
+      const right = Object.getOwnPropertyDescriptor(actual, key);
+      return (
+        !!left &&
+        !!right &&
+        "value" in left &&
+        "value" in right &&
+        sameJsonData(left.value, right.value)
+      );
+    })
+  );
 }

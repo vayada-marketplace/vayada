@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -23,6 +24,7 @@ import {
   type RefObject,
 } from "react";
 
+import { RoomImportRevisionContext } from "../../RoomImportRevisionContext";
 import type { AdaptiveSetupStepRenderContext } from "../AdaptiveHotelSetupController";
 import {
   ROOM_AMENITY_GROUPS,
@@ -93,6 +95,7 @@ export function RoomAuthoringStep({
   );
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const roomImportRevision = useContext(RoomImportRevisionContext);
   const [workspaceReload, setWorkspaceReload] = useState(0);
   const [photoPlan, setPhotoPlan] = useState<RoomPhotoPlan | null>(null);
   const [errors, setErrors] = useState<RoomValidationErrors>({});
@@ -269,7 +272,7 @@ export function RoomAuthoringStep({
     return () => controller.abort();
     // The explicit reload counter controls owner reads; local edits do not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftManifestMissing, propertyId, step.draft, workspaceReload]);
+  }, [draftManifestMissing, propertyId, step.draft, workspaceReload, roomImportRevision]);
 
   const activeRoom = rooms.find(({ draftRoomId }) => draftRoomId === activeRoomId) ?? null;
   const firstIncompleteRoom = rooms.find(
@@ -719,8 +722,10 @@ export function RoomAuthoringStep({
         </div>
       )}
 
-      {rooms.filter(({ draftRoomId, saved }) => saved && draftRoomId !== activeRoomId).length >
-        0 && (
+      {rooms.filter(
+        ({ draftRoomId, saved, roomTypeId }) =>
+          (saved || roomTypeId !== null) && draftRoomId !== activeRoomId,
+      ).length > 0 && (
         <section aria-labelledby="saved-room-types-heading">
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 id="saved-room-types-heading" className="text-sm font-semibold text-gray-950">
@@ -743,7 +748,10 @@ export function RoomAuthoringStep({
           </div>
           <div className="space-y-3">
             {rooms
-              .filter(({ draftRoomId, saved }) => saved && draftRoomId !== activeRoomId)
+              .filter(
+                ({ draftRoomId, saved, roomTypeId }) =>
+                  (saved || roomTypeId !== null) && draftRoomId !== activeRoomId,
+              )
               .map((room) => (
                 <RoomSummary
                   key={room.draftRoomId}

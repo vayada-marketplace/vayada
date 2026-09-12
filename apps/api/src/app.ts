@@ -1,3 +1,10 @@
+import {
+  registerAirbnbImportRoutes,
+  type AirbnbImportRoutesOptions,
+} from "./routes/airbnbImports.js";
+import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
+import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
+import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -93,6 +100,10 @@ import {
   type MarketplaceHotelSelfServiceRepository,
 } from "./routes/marketplaceHotelSelfService.js";
 import { registerMarketplaceAffiliateAdminRoutes } from "./routes/marketplaceAffiliateAdmin.js";
+import { registerMarketplaceAffiliatePolicyRoutes } from "./routes/marketplaceAffiliatePolicies.js";
+import type { AffiliatePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
+import { registerMarketplaceAffiliateDraftRoutes } from "./routes/marketplaceAffiliateDrafts.js";
+import type { AffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import type { MarketplaceAffiliateAdminRepository } from "@vayada/domain-marketplace";
 import {
   registerFinanceAffiliateCommissionRoutes,
@@ -264,6 +275,10 @@ import {
   type BookingGuestPolicyRoutesOptions,
 } from "./routes/bookingGuestPolicy.js";
 import { registerFinanceOtaCommissionSettingsRoutes as registerOtaSettings } from "./routes/financeOtaCommissionSettings.js";
+import {
+  registerFinancePaymentReadinessRoutes,
+  type FinancePaymentReadinessRoutesOptions,
+} from "./routes/financePaymentReadiness.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -279,6 +294,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
   bookingHostActions?: BookingHostActions;
@@ -301,6 +317,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+  pmsRoomClosureRepository?: PmsRoomClosureRepository;
   pmsLinkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -343,6 +360,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
+  marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
+  marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -351,6 +370,10 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     "profileRepository" | "lifecycleCommandBus"
   >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
+    applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
+  };
+  preparedImportRepository?: PreparedImportRepository;
   sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
   propertyNearbyRepository?: PropertyNearbyRepository;
   publicNearby?: import("./routes/publicNearby.js").PublicNearbyOptions;
@@ -561,6 +584,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceAffiliateAdminRepository,
     });
   }
+  if (options.marketplaceAffiliatePolicyRepository) {
+    app.register(registerMarketplaceAffiliatePolicyRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliatePolicyRepository,
+    });
+  }
+  if (options.marketplaceAffiliateDraftRepository) {
+    app.register(registerMarketplaceAffiliateDraftRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateDraftRepository,
+    });
+  }
   if (options.financeAffiliateCommissions) {
     app.register(registerFinanceAffiliateCommissionRoutes, {
       prefix: "/api/finance",
@@ -596,6 +631,32 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.propertyNearbyRepository,
       discovery: options.propertyNearbyDiscovery,
       propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.airbnbImports) {
+    if (
+      !options.auth?.propertyAccessRepository ||
+      !options.sharedHotelSetupStatusRepository ||
+      !options.pmsRoomSetup?.facts
+    )
+      throw new Error("Airbnb imports require authorization and canonical hotel room setup");
+    app.register(registerAirbnbImportRoutes, {
+      prefix: "/api/hotel-setup",
+      ...options.airbnbImports,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      review: {
+        profiles: options.sharedHotelSetupStatusRepository,
+        rooms: options.pmsRoomSetup.facts,
+        applications: options.airbnbImports.applications,
+      },
+    });
+  }
+  if (options.preparedImportRepository && options.sharedHotelSetupStatusRepository) {
+    app.register(registerPreparedHotelImportRoutes, {
+      prefix: "/api/hotel-setup",
+      repository: options.preparedImportRepository,
+      profiles: options.sharedHotelSetupStatusRepository,
+      rooms: options.pmsRoomSetup?.facts,
     });
   }
   if (options.sharedHotelSetupStatusRepository) {
@@ -668,6 +729,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingPublicationRoutes, {
       prefix: "/api/hotel-setup",
       ...options.bookingPublication,
+    });
+  }
+  if (options.financePaymentSetup) {
+    app.register(registerFinancePaymentReadinessRoutes, {
+      prefix: "/api",
+      ...options.financePaymentSetup,
     });
   }
   if (options.identityPrivacyRepository) {
@@ -743,6 +810,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
+      roomClosureRepository: options.pmsRoomClosureRepository,
       linkedInventoryGroupCommandRepository: options.pmsLinkedInventoryGroupCommandRepository,
       resolveOnboardingRoomCurrency: async (propertyId) =>
         (await options.bookingSettingsRepository?.findPropertySettingsByHotelId?.(propertyId))
