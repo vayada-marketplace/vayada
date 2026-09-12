@@ -58,6 +58,16 @@ and saved-source recovery. Eight browser scenarios pass with synthetic API/auth
 responses; the link/route/reader suite has 58 passing tests. See
 [the source design](../../engineering/airbnb-onboarding-source.md) for contracts.
 
+## Airbnb application receipts
+
+A separate internal receipt repository now records completed Airbnb source items
+without invitation rows. The local migration 0180 was applied and its rerun was
+a no-op. The focused suite passes 74 tests, including 16 real PostgreSQL source/
+receipt tests. Concurrent mixed-case source IDs share one lock; successful receipts
+persist across reopening, failed items remain retryable, and exact actor/organization/
+property/source scope is required. Executors are synthetic; no canonical room
+commands are wired to this repository yet.
+
 ## Remaining boundary
 
 The callback is disabled by default, and provider routes are not mounted. Next:
@@ -81,3 +91,8 @@ Production binding/link ports, callback UI, save receipts and live wiring remain
 
 Do not infer deployment from a merged foundation PR. This record does not verify
 the running remote revision, invite redemption or a complete launch-ready hotel.
+
+Migration numbering coordination: the unmerged Airbnb receipt migration is now
+0182, reserving Finance0180 and Channex adoption0181. SQL is byte-identical. The
+earlier local0180 evidence above is historical; that local database was removed
+by the separate prepared-import task. No deployed migration ledger was changed.
