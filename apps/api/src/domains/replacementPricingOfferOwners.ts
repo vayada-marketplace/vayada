@@ -1,4 +1,4 @@
-import { planChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
+import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
 import { lockChannexPricingJobLease, type ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
@@ -98,7 +98,12 @@ export async function readPublishedPricingForChannexJob(
 ) {
   const result = await withPublishedChannexPricing(pool, input);
   if (result.kind !== "available") return result;
-  const { reservation: _reservation, createClaim: _createClaim, ...evidence } = result;
+  const {
+    reservation: _reservation,
+    createClaim: _createClaim,
+    identification: _identification,
+    ...evidence
+  } = result;
   return evidence;
 }
 
@@ -108,7 +113,7 @@ export async function reservePublishedChannexOfferTarget(
   input: ChannexPricingJobLeaseInput,
   selection: TargetSelection,
 ) {
-  const result = await withSelectedChannexTarget(pool, input, selection, false);
+  const result = await withSelectedChannexTarget(pool, input, selection, "reserve");
   if (result.kind !== "available") return result;
   if (!result.reservation) throw new Error("Target reservation missing");
   return { kind: "reserved" as const, ...result.reservation };
@@ -120,17 +125,45 @@ export async function claimPublishedChannexOfferCreate(
   input: ChannexPricingJobLeaseInput,
   selection: TargetSelection,
 ) {
-  const result = await withSelectedChannexTarget(pool, input, selection, true);
+  const result = await withSelectedChannexTarget(pool, input, selection, "claim");
   if (result.kind !== "available") return result;
   if (!result.createClaim) throw new Error("Creation claim missing");
   return { kind: "claimed" as const, ...result.createClaim };
+}
+
+type TargetWork =
+  | "reserve"
+  | "claim"
+  | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
+
+/** Records identity only; fresh authority still applies to late provider observations. */
+export async function recordPublishedChannexOfferCreate(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  receipt: { attemptId: string; response: unknown },
+) {
+  if (
+    !receipt ||
+    typeof receipt.attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receipt.attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const work = {
+    attemptId: receipt.attemptId,
+    ...readChannexCreatedRateIdentity(receipt.response),
+  };
+  const result = await withSelectedChannexTarget(pool, input, selection, work);
+  if (result.kind !== "available") return result;
+  if (!result.identification) throw new Error("Creation identification missing");
+  return { kind: "identified" as const, ...result.identification };
 }
 
 async function withSelectedChannexTarget(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
   selection: TargetSelection,
-  claimCreate: boolean,
+  work: TargetWork,
 ) {
   if (
     !selection ||
@@ -141,14 +174,14 @@ async function withSelectedChannexTarget(
     return { kind: "unavailable" as const, reason: "invalid_selection" };
   if (!Number.isSafeInteger(selection.primaryOccupancy) || selection.primaryOccupancy < 1)
     return { kind: "unavailable" as const, reason: "invalid_primary_occupancy" };
-  return withPublishedChannexPricing(pool, input, { ...selection }, claimCreate);
+  return withPublishedChannexPricing(pool, input, { ...selection }, work);
 }
 
 async function withPublishedChannexPricing(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
   selection?: TargetSelection,
-  claimCreate = false,
+  work: TargetWork = "reserve",
 ) {
   const leaseInput = {
     jobId: input.jobId,
@@ -226,6 +259,7 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
+    let identification: { attemptId: string; externalRatePlanId: string } | undefined;
     if (selection) {
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
@@ -298,7 +332,7 @@ async function withPublishedChannexPricing(
           )
         ).rows[0];
       reservation = { targetId: target.id, intentId: intent.id, version: intent.version };
-      if (claimCreate) {
+      if (work !== "reserve") {
         const recorded = (
           await client.query(
             `SELECT state FROM pms.channex_offer_create_attempts
@@ -306,7 +340,7 @@ async function withPublishedChannexPricing(
             [target.id, intent.id],
           )
         ).rows[0];
-        if (recorded)
+        if (work === "claim" && recorded)
           return unavailable(
             recorded.state === "unresolved"
               ? "creation_reconciliation_required"
@@ -338,28 +372,64 @@ async function withPublishedChannexPricing(
             auto_rate_settings: null,
           },
         };
-        const attempt = (
-          await client.query(
-            `INSERT INTO pms.channex_offer_create_attempts
+        if (work === "claim") {
+          const attempt = (
+            await client.query(
+              `INSERT INTO pms.channex_offer_create_attempts
            (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
            VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
-            [
-              target.id,
-              intent.id,
-              intent.version,
-              binding.binding_generation,
-              authority.externalPropertyId,
-              mapping.external_room_type_id,
-              JSON.stringify(body),
-            ],
+              [
+                target.id,
+                intent.id,
+                intent.version,
+                binding.binding_generation,
+                authority.externalPropertyId,
+                mapping.external_room_type_id,
+                JSON.stringify(body),
+              ],
+            )
+          ).rows[0];
+          createClaim = {
+            ...reservation,
+            attemptId: attempt.id,
+            bindingGeneration: binding.binding_generation,
+            request: { method: "POST", path: "/api/v1/rate_plans", body },
+          };
+        } else {
+          const attempt = (
+            await client.query(
+              `SELECT id,state,external_rate_plan_id,
+              binding_generation=$4 AND external_property_id=$5 AND external_room_type_id=$6 AND request_body=$7::jsonb AS matches
+             FROM pms.channex_offer_create_attempts WHERE id=$1 AND target_id=$2 AND intent_id=$3 FOR UPDATE NOWAIT`,
+              [
+                work.attemptId,
+                target.id,
+                intent.id,
+                binding.binding_generation,
+                authority.externalPropertyId,
+                mapping.external_room_type_id,
+                JSON.stringify(body),
+              ],
+            )
+          ).rows[0];
+          if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
+          if (
+            work.externalPropertyId !== authority.externalPropertyId ||
+            work.externalRoomTypeId !== mapping.external_room_type_id
           )
-        ).rows[0];
-        createClaim = {
-          ...reservation,
-          attemptId: attempt.id,
-          bindingGeneration: binding.binding_generation,
-          request: { method: "POST", path: "/api/v1/rate_plans", body },
-        };
+            return unavailable("creation_identity_mismatch");
+          if (
+            attempt.state === "identified" &&
+            attempt.external_rate_plan_id !== work.externalRatePlanId
+          )
+            return unavailable("creation_identity_conflict");
+          if (attempt.state === "unresolved")
+            await client.query(
+              "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+              [attempt.id, work.externalRatePlanId],
+            );
+          identification = { attemptId: attempt.id, externalRatePlanId: work.externalRatePlanId };
+        }
       }
     }
     // Held source/owner locks protect existing evidence; repeat time-sensitive
@@ -379,6 +449,7 @@ async function withPublishedChannexPricing(
       owners: finalOwners,
       reservation,
       createClaim,
+      identification,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")

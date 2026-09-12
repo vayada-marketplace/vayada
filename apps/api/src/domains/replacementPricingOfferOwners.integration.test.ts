@@ -1,15 +1,16 @@
+import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createBookingPricingOfferTermsStore, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob, reservePublishedChannexOfferTarget, claimPublishedChannexOfferCreate } from "./replacementPricingOfferOwners.js";
+import { lockReplacementPricingOfferOwners as verify, readPublishedPricingForChannexJob, reservePublishedChannexOfferTarget, claimPublishedChannexOfferCreate, recordPublishedChannexOfferCreate as recordCreation } from "./replacementPricingOfferOwners.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 const url = process.env["TEST_DATABASE_URL"];
@@ -174,6 +175,212 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       selection: { roomTypeId, offerId: "flex", operationKey: "create", primaryOccupancy: 1 },
     };
   }
+  function createdResponse(body: unknown) {
+    const plan = (body as { rate_plan: Record<string, unknown> }).rate_plan;
+    const id = randomUUID();
+    const attributes: Record<string, unknown> = {
+      ...plan,
+      id,
+      options: (plan.options as { occupancy: number; is_primary: boolean }[]).map((option) => ({
+        ...option,
+        derived_option: null,
+      })),
+    };
+    return { data: { type: "rate_plan", id, attributes } };
+  }
+  async function recordingFixture() {
+    const f = await creationFixture();
+    const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
+    if (claim.kind !== "claimed") throw new Error("claim required");
+    return { ...f, claim, response: createdResponse(claim.request.body) };
+  }
+  it("simulates room preflight, one creation, durable identity and configuration readback", async () => {
+    const f = await creationFixture();
+    const identity = {
+      externalPropertyId: f.scope.propertyId,
+      externalRoomTypeId: f.externalRoomTypeId,
+    };
+    const room = f.snapshot.rooms[0];
+    await verifyChannexOfferRoom(room, identity, async () => ({
+      data: {
+        type: "room_type",
+        id: f.externalRoomTypeId,
+        attributes: {
+          property_id: f.scope.propertyId,
+          room_kind: "room",
+          capacity: null,
+          occ_adults: 2,
+          occ_children: 0,
+          occ_infants: 0,
+        },
+      },
+    }));
+    const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
+    if (claim.kind !== "claimed") throw new Error("claim required");
+    const send = vi.fn(async (_method: string, _path: string, _body: unknown) =>
+      createdResponse(claim.request.body),
+    );
+    const response = await send(claim.request.method, claim.request.path, claim.request.body);
+    const receipt = { attemptId: claim.attemptId, response };
+    const result = await recordCreation(pool, f.input, f.selection, receipt);
+    expect(result).toEqual({
+      kind: "identified",
+      attemptId: claim.attemptId,
+      externalRatePlanId: response.data.id,
+    });
+    expect(await recordCreation(pool, f.input, f.selection, receipt)).toEqual(result);
+    await expect(
+      verifyChannexOfferConfiguration(
+        room,
+        "flex",
+        1,
+        { ...identity, externalRatePlanId: response.data.id },
+        async () => response,
+      ),
+    ).resolves.toMatchObject({
+      ...identity,
+      externalRatePlanId: response.data.id,
+      mealType: "room_only",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
+          claim.targetId,
+        ])
+      ).rows[0].active_version,
+    ).toBeNull();
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_target_versions WHERE target_id=$1", [
+          claim.targetId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+    expect(await f.serviceRead()).not.toHaveProperty("identification");
+    const changed = createdResponse(claim.request.body);
+    expect(
+      await recordCreation(pool, f.input, f.selection, {
+        attemptId: claim.attemptId,
+        response: changed,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "creation_identity_conflict" });
+  });
+  it("rejects malformed, contradictory or wrong-scope creation responses", async () => {
+    const f = await recordingFixture(),
+      response = f.response;
+    for (const bad of [
+      null,
+      {},
+      { data: { ...response.data, type: "room_type" } },
+      { data: { ...response.data, attributes: { ...response.data.attributes, id: "other" } } },
+      { data: { ...response.data, relationships: { property: { data: null } } } },
+      { data: { ...response.data, attributes: { ...response.data.attributes, property_id: "" } } },
+    ])
+      await expect(
+        recordCreation(pool, f.input, f.selection, { attemptId: f.claim.attemptId, response: bad }),
+      ).rejects.toThrow();
+    response.data.attributes.room_type_id = "other";
+    expect(
+      await recordCreation(pool, f.input, f.selection, { attemptId: f.claim.attemptId, response }),
+    ).toEqual({ kind: "unavailable", reason: "creation_identity_mismatch" });
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
+  it("captures primitive identity before asynchronous work and accepts relationship-only scope", async () => {
+    const f = await recordingFixture(),
+      response = f.response,
+      id = response.data.id;
+    delete response.data.attributes.property_id;
+    delete response.data.attributes.room_type_id;
+    Object.assign(response.data, {
+      relationships: {
+        property: { data: { id: f.scope.propertyId } },
+        room_type: { data: { id: f.externalRoomTypeId } },
+      },
+    });
+    const changing = interceptRead(async () => {
+      response.data.id = randomUUID();
+      response.data.attributes.id = response.data.id;
+    });
+    expect(
+      await recordCreation(changing, f.input, f.selection, {
+        attemptId: f.claim.attemptId,
+        response,
+      }),
+    ).toEqual({ kind: "identified", attemptId: f.claim.attemptId, externalRatePlanId: id });
+  });
+  it("does not identify stale attempts or claim a rate retained by another owner", async () => {
+    const f = await recordingFixture(),
+      receipt = { attemptId: f.claim.attemptId, response: f.response };
+    expect(
+      await recordCreation(pool, f.input, f.selection, { ...receipt, attemptId: randomUUID() }),
+    ).toEqual({ kind: "unavailable", reason: "creation_attempt_unavailable" });
+    await pool.query(
+      "SELECT pms.claim_channex_external_rate(id,$2,'legacy',$3,'[]') FROM pms.channel_connections WHERE property_id=$1",
+      [f.scope.propertyId, f.response.data.id, randomUUID()],
+    );
+    await expect(recordCreation(pool, f.input, f.selection, receipt)).rejects.toMatchObject({
+      code: "23514",
+    });
+    await pool.query(
+      "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1",
+      [f.scope.propertyId, randomUUID()],
+    );
+    expect(await recordCreation(pool, f.input, f.selection, receipt)).toEqual({
+      kind: "unavailable",
+      reason: "creation_attempt_unavailable",
+    });
+    await pool.query(
+      "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await recordCreation(pool, f.input, f.selection, receipt)).toEqual({
+      kind: "unavailable",
+      reason: "operation_conflict",
+    });
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
+  it("holds ambiguous simulated transport and late unauthorized receipts", async () => {
+    const f = await recordingFixture();
+    const send = vi.fn(async () => {
+      throw new Error("provider timeout");
+    });
+    await expect(send()).rejects.toThrow("provider timeout");
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, f.selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '6 minutes' WHERE id=$1",
+      [f.input.jobId],
+    );
+    expect(
+      await recordCreation(pool, f.input, f.selection, {
+        attemptId: f.claim.attemptId,
+        response: f.response,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          f.claim.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
   it("claims only a fresh creation and persists the derived closed request before return", async () => {
     const f = await creationFixture();
     const result = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
