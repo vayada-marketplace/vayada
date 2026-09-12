@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import {
   parsePmsOperatingCalendarConfigurationSnapshot,
   parsePmsOperatingCalendarSourceRevision,
@@ -234,7 +235,14 @@ async function readCurrentWithOwnerEvidence(
       registry,
     );
     if (!configuration) throw new Error("PMS operating-calendar current revision disappeared");
-    const facts = await readRoomFacts(roomEvidence, propertyId);
+    const operatingIds = new Set(
+      (await readPmsRoomOperatingEligibility(client, propertyId))
+        .filter((room) => room.state === "operating")
+        .map((room) => room.roomTypeId),
+    );
+    const facts = (await readRoomFacts(roomEvidence, propertyId)).filter((room) =>
+      operatingIds.has(room.roomTypeId),
+    );
     const lockIds = sortedUnique([
       ...facts
         .filter(({ lifecycle }) => lifecycle === "active")

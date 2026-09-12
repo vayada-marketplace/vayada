@@ -380,6 +380,45 @@ describe("hotel account invite routes", () => {
 });
 
 describe("Postgres hotel account invite repository", () => {
+  it("accepts prepared invitations without exposing their payload in public lookup", async () => {
+    const row = inviteRow();
+    const preparedData = {
+      contractVersion: "prepared-hotel-import.v1",
+      property: { city: "Private prepared city" },
+      rooms: [],
+    };
+    const repository = createPgHotelAccountInviteRepository({
+      connectionString: "postgresql://unused",
+      pool: {
+        query: async () => ({
+          rows: [{ ...row, payload: { ...row.payload, preparedData } }],
+          rowCount: 1,
+        }),
+        end: async () => {},
+      } as never,
+    });
+    const app = buildInviteApp(repository, createMemoryTrackCommands().repository);
+    try {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: "/api/marketplace/hotel-account-invites/lookup",
+        payload: { code: INVITE_CODE },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(JSON.stringify(response.body)).not.toContain("Private prepared city");
+      expect(JSON.stringify(response.body)).not.toContain("preparedData");
+      expect(
+        await repository.resolveForOnboarding({
+          code: INVITE_CODE,
+          now: NOW,
+          actorEmail: "owner@example.test",
+        }),
+      ).not.toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("derives the internal onboarding binding from the validated invite row, never the code", async () => {
     const queries: Array<{ sql: string; values: unknown[] }> = [];
     const repository = createPgHotelAccountInviteRepository({
