@@ -23,6 +23,11 @@ export async function seedChannexAssignmentFixture(db: Pool, propertyId: string)
     SELECT $1,id,$2,$3,'provider-room','provider-rate' FROM pms.channel_connections WHERE property_id=$1`,
     [propertyId, room, rate],
   );
+  await seedChannexAssignmentInventory(db, propertyId, room);
+  return { room, rate };
+}
+
+export async function seedChannexAssignmentInventory(db: Pool, propertyId: string, room: string) {
   const client = await db.connect();
   try {
     await client.query("BEGIN; SET LOCAL session_replication_role=replica");
@@ -53,7 +58,6 @@ export async function seedChannexAssignmentFixture(db: Pool, propertyId: string)
     SELECT $1,$2,day,100,100,1,100,1,100,1,0,0,0,0 FROM generate_series('2026-09-01'::date,'2026-09-30'::date,'1 day') day`,
     [propertyId, room],
   );
-  return { room, rate };
 }
 
 export async function clearChannexAssignmentFixture(db: Pool, propertyId: string) {
