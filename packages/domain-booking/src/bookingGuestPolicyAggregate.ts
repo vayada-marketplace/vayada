@@ -1044,7 +1044,7 @@ function parseNewDraft(value: unknown): BookingGuestPolicySetupDraft | null {
     (!Object.hasOwn(value, "checkInUntil") ||
       (localTime(value.checkInTime) &&
         localTime(value.checkInUntil) &&
-        value.checkInUntil > value.checkInTime)) &&
+        (value.checkInUntil === "00:00" || value.checkInUntil > value.checkInTime))) &&
     (!Object.hasOwn(value, "checkOutFrom") ||
       (localTime(value.checkOutTime) &&
         localTime(value.checkOutFrom) &&

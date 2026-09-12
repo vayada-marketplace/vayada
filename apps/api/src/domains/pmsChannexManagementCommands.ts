@@ -15,6 +15,7 @@ export type PmsChannexManagementCommandInput = {
   restrictionsOnly?: boolean;
   recoveryAlertId?: string;
   markups?: Array<{ channel: string; markupPercent: number }>;
+  inventoryRules?: import("@vayada/domain-pms-channex").ChannexInventoryRulesInput;
 };
 
 export type PmsChannexManagementCommandResult =
@@ -24,6 +25,7 @@ export type PmsChannexManagementCommandResult =
       code:
         | "connection_required"
         | "idempotency_conflict"
+        | "invalid_inventory_rules"
         | "invalid_stay_restrictions"
         | "stay_restriction_scope_not_found";
       message: string;
