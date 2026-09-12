@@ -183,3 +183,31 @@ it("requotes an unchanged allocation when its selection lease is refreshed", asy
     room.combination!.expiresAt = originalExpiry;
   }
 });
+
+it("accepts a replay whose JSON object keys were reordered by storage", async () => {
+  const replaySelection = {
+    lines: selection.lines.map((line) => ({
+      guests: line.guests.map((guest) => ({ children: guest.children, adults: guest.adults })),
+      publicOfferKey: line.publicOfferKey,
+      roomTypeId: line.roomTypeId,
+    })),
+    contractVersion: selection.contractVersion,
+  };
+  vi.mocked(bookingService.quote).mockResolvedValue({
+    roomSelection: replaySelection,
+    roomLines: [],
+    quoteId: "replay",
+    expiresAt: "2027-01-01T10:15:00Z",
+    totalAmount: 610.25,
+    addonTotal: 10.25,
+    promoDiscount: 0,
+    currency: "EUR",
+  } as never);
+  await act(async () => root.render(createElement(Probe, { value: input })));
+  expect(latest).toMatchObject({
+    quoteReady: true,
+    roomTotal: 600,
+    grandTotal: 610.25,
+    promoError: null,
+  });
+});
