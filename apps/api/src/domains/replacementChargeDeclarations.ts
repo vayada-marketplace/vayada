@@ -1,8 +1,10 @@
+import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
+import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import { parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool, PoolClient } from "pg";
-import { lockBookingPricingOfferTerms } from "./bookingPricingOfferTerms.js";
+import { lockBookingPricingOfferTerms, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { PricingStorageError, type PricingStorageScope, type PricingStorageSnapshot, type PricingStorageSources } from "./replacementPricingStore.js";
@@ -61,6 +63,8 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
           if (prior.request_hash !== requestHash) return fail("idempotency_conflict");
           await client.query("COMMIT"); return { id: prior.id, fingerprint: prior.fingerprint, declaration: prior.declaration };
         }
+        const currentSources = { room: await lockPmsReplacementPricingRoomSource(client, scope.propertyId),
+          terms: await lockBookingPricingTermsSource(client, scope.propertyId), finance: await lockFinanceReplacementPricingSource(client, scope.propertyId) };
         const draft = (await client.query("SELECT * FROM pms.pricing_v2_drafts WHERE property_id=$1 AND draft_id=$2 FOR UPDATE", [scope.propertyId, command.draftId])).rows[0];
         const head = (await client.query("SELECT revision FROM pms.pricing_v2_heads WHERE property_id=$1", [scope.propertyId])).rows[0];
         if (!draft || draft.draft_revision !== command.expectedDraftRevision || draft.base_revision !== (head?.revision ?? 0)) return fail("stale");
@@ -70,6 +74,8 @@ export function createReplacementChargeDeclarationStore(pool: Pool) {
           if (!await lockPmsPricingRoomScope(client, scope.propertyId, room.roomTypeId)) return fail("denied");
           if (!await lockBookingPricingOfferTerms(client, scope.propertyId, room.offers.map((o) => ({ roomTypeId: room.roomTypeId, offerId: o.id, revision: o.termsRevision })))) return fail("stale");
         }
+        if (!currentSources.room || !currentSources.terms || !currentSources.finance ||
+            canonical(currentSources) !== canonical(draft.source_revisions)) return fail("stale");
         const id = randomUUID(), key = `pricing.v2.charges:${scope.propertyId}:${command.requestId}`;
         await client.query(`INSERT INTO pms.pricing_v2_charge_declarations
           (id,property_id,fingerprint,declaration,draft_id,draft_revision,request_id,request_hash,actor_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

@@ -514,3 +514,26 @@ missing read404, stale/idempotency/currency conflict409, unexpected backend fail
 confirm charges. Currency changes remain blocked. Local HTTP/database tests use
 synthetic identities; no editor, deployed/provider or public-booking evidence is
 implied. Route registration does not schedule a publication/outbox consumer.
+
+## Offer editing and saved charge review (VAY-1937)
+
+Under the existing pricing-v2 HTTP root, GET/PUT
+`/rooms/:roomTypeId/offers/:offerId/terms` delegate to the Booking owner. PUT takes
+exactly expectedRevision (UUID or null for creation), cancellation and payment,
+plus Idempotency-Key. Path identity cannot be overridden by body fields. Booking
+keeps revision CAS, immutable history and retry/effect semantics; saving deposit
+terms still does not approve Finance deposit execution.
+
+GET `/drafts/:draftId/charge-review` returns the exact saved snapshot/sources,
+draft/base revisions, a server-calculated fingerprint and the explicit
+`all_mandatory_charges_included` declaration. Missing drafts return404; stale source
+or base returns409. Reading never confirms charges. The editor must present this
+saved data and send its revision/fingerprint for explicit confirmation; any later
+edit is still rejected by the existing owner fingerprint/version checks.
+
+For every new charge confirmation, the charge owner now locks current PMS room,
+Booking terms and Finance sources and compares them with saved draft sources in
+the same transaction. A source change after review therefore returns stale before
+creating a declaration. Historical confirmation receipt lookup remains ahead of
+freshness checks, following current authorization, so an accepted retry survives
+later source changes without creating another declaration.
