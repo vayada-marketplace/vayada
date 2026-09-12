@@ -152,7 +152,7 @@ describe("saved offer terms", () => {
 describe("offer policy creation", () => {
   const input = { roomTypeId: id, offerId: "first", expectedRevision: null, cancellation: { kind: "non_refundable" as const }, payment: { kind: "full" as const } };
   it("captures exact initial policy and key once, and validates the returned policy", async () => {
-    const mutable = structuredClone(input), action = client().termsAction(mutable);
+    const mutable = structuredClone(input), action = client().termsAction(mutable, { draftId, baseRevision: 0 });
     mutable.offerId = "changed";
     http.put.mockRejectedValueOnce(new Error("lost response")).mockResolvedValue({ roomTypeId: id, offerId: "first", revision: draftId, cancellation: input.cancellation, payment: input.payment });
     await expect(action()).rejects.toThrow("lost response"); expect(await action()).toMatchObject({ revision: draftId, offerId: "first" });
@@ -164,9 +164,31 @@ describe("offer policy creation", () => {
     expect(http.post).not.toHaveBeenCalled();
   });
   it("rejects incomplete or invalid policies before a request and preserves conflicts", async () => {
-    expect(() => client().termsAction({ ...input, expectedRevision: "invalid" })).toThrow();
-    expect(() => client().termsAction({ ...input, cancellation: { kind: "flexible", terms: {} } } as never)).toThrow();
+    expect(() => client().termsAction({ ...input, expectedRevision: "invalid" }, { draftId, baseRevision: 0 })).toThrow();
+    expect(() => client().termsAction({ ...input, cancellation: { kind: "flexible", terms: {} } } as never, { draftId, baseRevision: 0 })).toThrow();
     expect(http.put).not.toHaveBeenCalled();
-    http.put.mockRejectedValue(new ApiErrorResponse(409, {})); await expect(client().termsAction(input)()).rejects.toMatchObject({ status: 409 });
+    http.put.mockRejectedValue(new ApiErrorResponse(409, {})); await expect(client().termsAction(input, { draftId, baseRevision: 0 })()).rejects.toMatchObject({ status: 409 });
   });
+});
+it("binds candidate preparation, saved review and publication to effective source evidence", async () => {
+  const api = client(), selected = { draftId, baseRevision: 0 }, effectiveSources = { ...sources, terms: `booking.pricing.terms.v2:${"b".repeat(64)}` };
+  const input = { currency: "EUR", rooms: snapshot.rooms };
+  http.post.mockResolvedValue({ sources, effectiveSources, snapshot });
+  expect(await api.prepare(input, selected)).toEqual({ sources, effectiveSources, snapshot });
+  expect(http.post.mock.calls[0][1]).toEqual({ ...input, draft: selected });
+  http.put.mockResolvedValue({ revision: 1 }); await api.saveDraft({ ...draft, effectiveSources, expectedDraftRevision: 0 });
+  expect(http.put.mock.calls[0][1].effectiveSources).toEqual(effectiveSources);
+  http.get.mockResolvedValue({ ...review, effectiveSources }); expect(await api.reviewCharges(draftId)).toEqual({ ...review, effectiveSources });
+  http.post.mockResolvedValue({ revision: 1, replayed: false }); await api.publicationAction({ ...draft, effectiveSources, snapshot: { ...snapshot, ownerReferences: { ...snapshot.ownerReferences, charges: draftId } } })();
+  expect(http.post.mock.calls.at(-1)![1].effectiveSources).toEqual(effectiveSources);
+  for (const malformed of [null, {}, { ...effectiveSources, extra: true }]) {
+    http.get.mockResolvedValue({ ...review, effectiveSources: malformed }); await expect(api.reviewCharges(draftId)).rejects.toBeInstanceOf(PricingResponseError);
+  }
+  http.post.mockResolvedValue({ sources, snapshot }); await expect(api.prepare(input, selected)).rejects.toBeInstanceOf(PricingResponseError);
+});
+it("reads an exact saved draft policy revision through the draft-scoped route", async () => {
+  const policy = { roomTypeId: id, offerId: "flex", revision: draftId, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+  http.get.mockResolvedValue(policy); expect(await client().readTerms(id, "flex", draftId, { draftId, revision: 3 })).toEqual(policy);
+  expect(http.get.mock.calls[0][0]).toBe(`/api/pms/properties/${id}/pricing-v2/drafts/${draftId}/rooms/${id}/offers/flex/terms?revision=3`);
+  http.get.mockResolvedValue({ ...policy, revision: id }); await expect(client().readTerms(id, "flex", draftId, { draftId, revision: 3 })).rejects.toMatchObject({ status: 409 });
 });

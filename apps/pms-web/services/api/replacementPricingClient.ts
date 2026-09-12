@@ -7,9 +7,10 @@ import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperation
 
 type Http = Pick<typeof pmsOperationsClient, "get" | "put" | "post">;
 export type PricingTermsInput = Omit<ReplacementOfferTerms, "revision"> & { expectedRevision: string | null };
+export type PricingDraftContext = { draftId: string; baseRevision: number };
 export type PricingSources = { room: string; terms: string; finance: string };
 export type PricingSnapshot = { currency: string; rooms: readonly PricingConfiguration[]; ownerReferences: { finance: string; charges?: string } };
-export type PricingDraft = { draftId: string; revision: number; baseRevision: number; sources: PricingSources; snapshot: PricingSnapshot; stale: boolean };
+export type PricingDraft = { draftId: string; revision: number; baseRevision: number; sources: PricingSources; effectiveSources?: PricingSources; snapshot: PricingSnapshot; stale: boolean };
 export type PricingChargeReview = PricingDraft & { fingerprint: string; declaration: "all_mandatory_charges_included" };
 export class PricingResponseError extends Error { constructor() { super("Pricing data could not be verified. Reload before continuing."); } }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => pricingObject(item)
@@ -50,16 +51,21 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     return { ...pmsOperationsRequestOptions, headers, cache: "no-store" };
   };
   const path = (id: string) => uuid(id) ? `${base}/drafts/${id.toLowerCase()}` : bad();
+  const context = (value: PricingDraftContext) => {
+    if (!exact(value, ["draftId", "baseRevision"]) || !uuid(value.draftId) || !rev(value.baseRevision) || value.baseRevision === 2147483647) return bad();
+    return { draftId: value.draftId.toLowerCase(), baseRevision: value.baseRevision };
+  };
+  const effective = (value: Record<string, unknown>) => Object.hasOwn(value, "effectiveSources") ? { effectiveSources: sources(value.effectiveSources) } : {};
   function draft(value: unknown, id: string): PricingDraft {
-    if (!uuid(id) || !exact(value, ["snapshot", "revision", "baseRevision", "sources", "stale"]) || !rev(value.revision, 1) || !rev(value.baseRevision) ||
+    if (!uuid(id) || !(exact(value, ["snapshot", "revision", "baseRevision", "sources", "stale"]) || exact(value, ["snapshot", "revision", "baseRevision", "sources", "stale", "effectiveSources"])) || !rev(value.revision, 1) || !rev(value.baseRevision) ||
         value.baseRevision === 2147483647 || typeof value.stale !== "boolean") return bad();
-    return { draftId: id.toLowerCase(), revision: value.revision, baseRevision: value.baseRevision, stale: value.stale,
+    return { draftId: id.toLowerCase(), revision: value.revision, baseRevision: value.baseRevision, stale: value.stale, ...effective(value),
       snapshot: snapshot(value.snapshot, propertyId, value.baseRevision + 1), sources: sources(value.sources) };
   }
   function review(value: unknown, id: string): PricingChargeReview {
-    if (!uuid(id) || !exact(value, ["draftId", "snapshot", "revision", "baseRevision", "sources", "stale", "fingerprint", "declaration"]) ||
+    if (!uuid(id) || !(exact(value, ["draftId", "snapshot", "revision", "baseRevision", "sources", "stale", "fingerprint", "declaration"]) || exact(value, ["draftId", "snapshot", "revision", "baseRevision", "sources", "stale", "fingerprint", "declaration", "effectiveSources"])) ||
         value.draftId !== id.toLowerCase() || !hash(value.fingerprint) || value.declaration !== "all_mandatory_charges_included" || value.stale !== false) return bad();
-    const stored = { snapshot: value.snapshot, revision: value.revision, baseRevision: value.baseRevision, sources: value.sources, stale: value.stale };
+    const stored = { ...effective(value), snapshot: value.snapshot, revision: value.revision, baseRevision: value.baseRevision, sources: value.sources, stale: value.stale };
     return { ...draft(stored, id), fingerprint: value.fingerprint, declaration: value.declaration };
   }
   const missing = Symbol("missing");
@@ -68,24 +74,26 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     catch (error) { if (error instanceof ApiErrorResponse && error.status === 404 && error.data.code === "not_found") return missing; throw error; }
   }
   return {
-    termsAction(input: PricingTermsInput) {
+    termsAction(input: PricingTermsInput, draftContext: PricingDraftContext) {
+      const selected = context(draftContext);
       const sent = structuredClone(input);
       if (!exact(sent, ["roomTypeId", "offerId", "expectedRevision", "cancellation", "payment"]) ||
           !(sent.expectedRevision === null || uuid(sent.expectedRevision))) return bad();
       const parsed = parseBookingPricingOfferTerms({ roomTypeId: sent.roomTypeId, offerId: sent.offerId, revision: sent.roomTypeId, cancellation: sent.cancellation, payment: sent.payment });
       if (!parsed) return bad();
-      const requestId = crypto.randomUUID(), body = { expectedRevision: sent.expectedRevision?.toLowerCase() ?? null, cancellation: parsed.cancellation, payment: parsed.payment };
+      const requestId = crypto.randomUUID(), body = { baseRevision: selected.baseRevision, expectedRevision: sent.expectedRevision?.toLowerCase() ?? null, cancellation: parsed.cancellation, payment: parsed.payment };
       return async () => {
-        const value = await http.put<unknown>(`${base}/rooms/${parsed.roomTypeId}/offers/${encodeURIComponent(parsed.offerId)}/terms`, structuredClone(body), options(requestId));
+        const value = await http.put<unknown>(`${path(selected.draftId)}/rooms/${parsed.roomTypeId}/offers/${encodeURIComponent(parsed.offerId)}/terms`, structuredClone(body), options(requestId));
         const saved = parseBookingPricingOfferTerms(value);
         if (!saved || saved.roomTypeId !== parsed.roomTypeId || saved.offerId !== parsed.offerId ||
             canonical({ cancellation: saved.cancellation, payment: saved.payment }) !== canonical({ cancellation: parsed.cancellation, payment: parsed.payment })) return bad();
         return saved;
       };
     },
-    async readTerms(roomTypeId: string, offerId: string, revision: string): Promise<ReplacementOfferTerms | null> {
+    async readTerms(roomTypeId: string, offerId: string, revision: string, savedDraft?: { draftId: string; revision: number }): Promise<ReplacementOfferTerms | null> {
       if (!uuid(roomTypeId) || !uuid(revision) || !offerId || offerId !== offerId.trim() || offerId.length > 200) return bad();
-      const value = await optionalRead(`${base}/rooms/${roomTypeId.toLowerCase()}/offers/${encodeURIComponent(offerId)}/terms`);
+      if (savedDraft && (!uuid(savedDraft.draftId) || !rev(savedDraft.revision, 1))) return bad();
+      const value = await optionalRead(`${savedDraft ? path(savedDraft.draftId) : base}/rooms/${roomTypeId.toLowerCase()}/offers/${encodeURIComponent(offerId)}/terms${savedDraft ? `?revision=${savedDraft.revision}` : ""}`);
       if (value === missing) return null;
       const parsed = parseBookingPricingOfferTerms(value);
       if (!parsed || parsed.roomTypeId !== roomTypeId.toLowerCase() || parsed.offerId !== offerId) return bad();
@@ -99,19 +107,20 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
       return { ...snapshot({ currency: value.currency, rooms: value.rooms, ownerReferences: value.ownerReferences }, propertyId, value.revision),
         revision: value.revision, sources: sources(value.sources), stale: value.stale };
     },
-    async prepare(input: Pick<PricingSnapshot, "currency" | "rooms">) {
-      const sent = structuredClone(input), value = await http.post<unknown>(`${base}/prepare`, sent, options());
-      if (!exact(value, ["sources", "snapshot"])) return bad();
+    async prepare(input: Pick<PricingSnapshot, "currency" | "rooms">, draftContext?: PricingDraftContext) {
+      const sent = structuredClone(input), selected = draftContext ? context(draftContext) : null;
+      const value = await http.post<unknown>(`${base}/prepare`, { ...sent, ...(selected ? { draft: selected } : {}) }, options());
+      if (!exact(value, selected ? ["sources", "snapshot", "effectiveSources"] : ["sources", "snapshot"])) return bad();
       const prepared = snapshot(value.snapshot, propertyId);
       if (prepared.ownerReferences.charges || canonical({ currency: prepared.currency, rooms: prepared.rooms }) !== canonical(sent)) return bad();
-      return { sources: sources(value.sources), snapshot: prepared };
+      return { sources: sources(value.sources), ...effective(value), snapshot: prepared };
     },
     async readDraft(id: string) { const value = await optionalRead(path(id)); return value === missing ? null : draft(value, id); },
     async reviewCharges(id: string) { const value = await optionalRead(`${path(id)}/charge-review`); return value === missing ? null : review(value, id); },
     async saveDraft(input: Omit<PricingDraft, "revision" | "stale"> & { expectedDraftRevision: number }) {
       if (!rev(input.expectedDraftRevision) || input.expectedDraftRevision === 2147483647 || !rev(input.baseRevision) || input.baseRevision === 2147483647) return bad();
       const body = { expectedDraftRevision: input.expectedDraftRevision, baseRevision: input.baseRevision,
-        sources: sources(input.sources), snapshot: snapshot(input.snapshot, propertyId, input.baseRevision + 1) };
+        sources: sources(input.sources), ...effective(input), snapshot: snapshot(input.snapshot, propertyId, input.baseRevision + 1) };
       const value = await http.put<unknown>(path(input.draftId), body, options());
       if (!exact(value, ["revision"]) || value.revision !== body.expectedDraftRevision + 1) return bad();
       return value.revision as number;
@@ -128,7 +137,7 @@ export function createReplacementPricingClient(propertyId: string, http: Http = 
     publicationAction(input: PricingDraft) {
       const { draftId, ...stored } = structuredClone(input), saved = draft(stored, draftId);
       if (!uuid(draftId) || saved.stale || !saved.snapshot.ownerReferences.charges) return bad();
-      const requestId = crypto.randomUUID(), body = { expectedRevision: saved.baseRevision, sources: saved.sources, snapshot: saved.snapshot, draft: { id: saved.draftId, revision: saved.revision } };
+      const requestId = crypto.randomUUID(), body = { expectedRevision: saved.baseRevision, sources: saved.sources, ...effective(saved), snapshot: saved.snapshot, draft: { id: saved.draftId, revision: saved.revision } };
       return async () => {
         const value = await http.post<unknown>(`${base}/publish`, structuredClone(body), options(requestId));
         if (!exact(value, ["revision", "replayed"]) || value.revision !== saved.baseRevision + 1 || typeof value.replayed !== "boolean") return bad();
