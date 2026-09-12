@@ -1,3 +1,6 @@
+import { readMarketplacePublicHotel } from "./marketplacePublicHotel.js";
+import { createPgHotelMediaResolutionPort } from "../platform/hotelMediaResolver.js";
+import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import { createPgSharedHotelSetupStatusRepository } from "../platform/sharedHotelSetupStatusReadModel.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./marketplaceHotelCollaborationPreferencesRepository.js";
 import pg from "pg";
@@ -330,6 +333,82 @@ describe.skipIf(!database)("Marketplace submission transactions", () => {
         preferences: { compensationTypes: ["free_stay"] },
         preferencesRevision: 1,
       });
+      const storageKey = `public/media/${mediaId}/original_safe/logo.webp`;
+      const publicUrl = `https://cdn.example.test/${storageKey.slice("public/".length)}`;
+      await admin.query(
+        `UPDATE platform.media_objects SET storage_key=$2,resource_product='hotel_catalog',resource_type='property' WHERE id=$1::uuid`,
+        [mediaId, storageKey],
+      );
+      await admin.query(
+        `UPDATE platform.media_variants SET storage_key=$2,public_cdn_url=$3 WHERE media_object_id=$1::uuid`,
+        [mediaId, storageKey, publicUrl],
+      );
+      const adapter = createPgHotelMediaResolutionPort({
+        connectionString: database!,
+        serving: {
+          bucketName: "test-media",
+          cdnBaseUrl: "https://cdn.example.test",
+          publicPathPrefix: "media",
+        },
+      });
+      const resolver = createHotelMediaResolutionPort(adapter);
+      try {
+        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        await admin.query(
+          `UPDATE marketplace.hotel_submission_moderation SET status='approved',decided_by_user_id=$2::uuid,decided_at=now() WHERE submission_revision_id=$1::uuid`,
+          [receipt.revisionId, actorUserId],
+        );
+        // Approval without explicit activation still has no public projection.
+        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        await admin.query(
+          `INSERT INTO marketplace.active_hotel_submission_revisions (property_id,submission_revision_id,activated_by_user_id,status_changed_by_user_id) VALUES ($1::uuid,$2::uuid,$3::uuid,$3::uuid)`,
+          [propertyId, receipt.revisionId, actorUserId],
+        );
+        expect(await readMarketplacePublicHotel(admin, resolver, propertyId.toUpperCase())).toEqual(
+          {
+            propertyId,
+            revisionId: receipt.revisionId,
+            displayName: "Submission Test Hotel",
+            propertyType: "hotel",
+            shortDescription:
+              "A welcoming hotel with comfortable rooms and easy access to local parks and restaurants.",
+            locality: { city: "Berlin", countryCode: "DE" },
+            media: [{ mediaType: "logo", url: publicUrl, altText: "Hotel logo" }],
+          },
+        );
+        await admin.query(
+          `UPDATE hotel_catalog.properties SET display_name='Unsubmitted draft' WHERE id=$1::uuid`,
+          [propertyId],
+        );
+        expect((await readMarketplacePublicHotel(admin, resolver, propertyId))?.displayName).toBe(
+          "Submission Test Hotel",
+        );
+        await admin.query(`DELETE FROM platform.media_variants WHERE media_object_id=$1::uuid`, [
+          mediaId,
+        ]);
+        await admin.query(
+          `UPDATE platform.media_objects SET public_approved=FALSE,visibility='private' WHERE id=$1::uuid`,
+          [mediaId],
+        );
+        expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        await admin.query(
+          `UPDATE platform.media_objects SET public_approved=TRUE,visibility='public' WHERE id=$1::uuid`,
+          [mediaId],
+        );
+        await admin.query(
+          `INSERT INTO platform.media_variants (media_object_id,variant_name,visibility,storage_key,content_type,size_bytes,public_cdn_url) VALUES ($1::uuid,'original_safe','public',$2,'image/webp',1024,$3)`,
+          [mediaId, storageKey, publicUrl],
+        );
+        for (const status of ["suspended", "deactivated"]) {
+          await admin.query(
+            `UPDATE marketplace.active_hotel_submission_revisions SET activation_status=$2 WHERE property_id=$1::uuid`,
+            [propertyId, status],
+          );
+          expect(await readMarketplacePublicHotel(admin, resolver, propertyId)).toBeNull();
+        }
+      } finally {
+        await adapter.close?.();
+      }
     } finally {
       await actual.close();
       await preferences.close();

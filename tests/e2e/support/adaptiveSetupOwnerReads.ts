@@ -60,6 +60,35 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       propertyId,
       blocker: { code: "booking_design_missing", evidencePort: "design" },
     },
+    [`/api/pms/properties/${propertyId}/plan-limits`]: {
+      contractVersion: "pms-operations.v1",
+      propertyId,
+      propertyPlan: {
+        propertyId,
+        plan: "commission",
+        limits: { maxRoomPhotosPerType: 10, maxAddons: 3, guestContactAccess: "after_acceptance" },
+      },
+    },
+    [`/api/pms/properties/${propertyId}/room-publication-snapshot`]: {
+      contractVersion: "pms-room-publication.v1",
+      propertyId,
+      rooms: [
+        {
+          propertyId,
+          roomTypeId,
+          facts: roomList().items[0]!.facts,
+          activeUnitCount: 4,
+          media: [],
+          amenities: [],
+          sourceRevisions: {
+            roomFactsRevision: 3,
+            roomUnitsRevision: 5,
+            roomMediaRevision: 1,
+            roomAmenitiesRevision: 1,
+          },
+        },
+      ],
+    },
     [`/api/pms/setup/properties/${propertyId}/room-types`]: roomList(),
     [`/api/pms/properties/${propertyId}/room-types`]: roomList(),
     [`/api/pms/setup/properties/${propertyId}/room-types/${roomTypeId}/capacity`]: {
@@ -109,6 +138,18 @@ export async function mockAdaptiveSetupOwnerReads(page: Page) {
       },
     );
   }
+  await page.route(
+    /\/api\/pms\/setup\/properties\/[^/]+\/room-type-bindings\/[^/]+$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({
+        status: 404,
+        headers: corsHeaders(route),
+        json: { code: "binding_not_found" },
+      });
+    },
+  );
   await page.route("https://fonts.googleapis.com/**", (route) =>
     route.fulfill({ status: 200, contentType: "text/css", body: "" }),
   );

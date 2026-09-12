@@ -255,7 +255,12 @@ export function AdaptiveHotelSetupController({
     requestedHistoryStepRef.current = requestedActiveStep.stepId;
 
     void runAfterDraftSave({
-      navigate: () => navigateToStep(requestedActiveStep.stepId, "replace"),
+      navigate: () =>
+        navigateToStep(
+          requestedActiveStep.stepId,
+          "replace",
+          searchParams.get("entity") ?? undefined,
+        ),
       restore: () => {
         programmaticStepRef.current = activeStepId;
         router.replace(setupStepPath(searchParams, activeStepId), {
@@ -379,12 +384,13 @@ export function AdaptiveHotelSetupController({
     const priorStepId = previousActiveStepId.current;
     previousActiveStepId.current = activeStep.stepId;
     if (!priorStepId || priorStepId === activeStep.stepId) return;
+    if (requestedStepId === activeStep.stepId && searchParams.get("entity")) return;
 
     const frame = requestAnimationFrame(() => {
       document.getElementById("adaptive-setup-heading")?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeStep]);
+  }, [activeStep, requestedStepId, searchParams]);
 
   const handleBack = useCallback(() => {
     const previousStep = route
