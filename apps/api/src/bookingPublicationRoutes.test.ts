@@ -10,6 +10,7 @@ import type { MembershipPropertyScope } from "@vayada/backend-authorization";
 import { injectJson } from "@vayada/backend-test";
 import type {
   BookingPublicationCommandPort,
+  BookingPublicationReviewReadPort,
   BookingPublicationOperation,
   RequestBookingPublicationCommand,
 } from "@vayada/domain-booking";
@@ -33,15 +34,17 @@ type AuthOptions = {
   membershipStatus?: RequestContext["membership"]["status"];
   propertyScope?: Partial<MembershipPropertyScope> | null;
 };
-type FakeRepository = BookingPublicationCommandPort & {
-  requestCalls: RequestBookingPublicationCommand[];
-  statusCalls: Array<{
-    organizationId: string;
-    propertyId: string;
-    operationId: string;
-    actorUserId: string;
-  }>;
-};
+type FakeRepository = BookingPublicationCommandPort &
+  BookingPublicationReviewReadPort & {
+    reviewCalls: Array<Parameters<BookingPublicationReviewReadPort["getPublicationReview"]>[0]>;
+    requestCalls: RequestBookingPublicationCommand[];
+    statusCalls: Array<{
+      organizationId: string;
+      propertyId: string;
+      operationId: string;
+      actorUserId: string;
+    }>;
+  };
 const authorizationDenials: Array<[string, string | null, AuthOptions]> = [
   ["missing authentication", null, {}],
   ["invalid authentication", "invalid", {}],
@@ -75,6 +78,64 @@ describe("Booking publication routes", () => {
     await app?.close();
     app = null;
   });
+
+  it("reads readiness and recovers an accepted operation without writing", async () => {
+    const repository = fakeRepository();
+    const readiness = await readyEvidence();
+    app = testApp(repository, readinessProvider(readiness));
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
+      headers: { authorization: "Bearer valid-token", "Idempotency-Key": "lost-response-key" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: "booking-publication-review.v1",
+      propertyId,
+      readiness,
+      recoveredOperation: { operationId, status: "pending" },
+    });
+    expect(repository.reviewCalls).toEqual([
+      { organizationId, propertyId, actorUserId, idempotencyKey: "lost-response-key" },
+    ]);
+    expect(repository.requestCalls).toHaveLength(0);
+  });
+  it("keeps operation recovery available when readiness evaluation fails", async () => {
+    const repository = fakeRepository(operation("succeeded"));
+    app = testApp(repository, {
+      getBookingReadiness: async () => {
+        throw new Error("private source failure");
+      },
+    });
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      latestOperation: { status: "succeeded" },
+      readiness: { outcome: "provider_failure", status: "error" },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private source failure");
+    expect(repository.requestCalls).toHaveLength(0);
+  });
+  it.each(authorizationDenials)(
+    "denies review GET for %s before owner reads",
+    async (_name, token, options) => {
+      const repository = fakeRepository();
+      const provider = readinessProvider(await readyEvidence());
+      app = testApp(repository, provider, options);
+      const response = await injectJson(app, {
+        method: "GET",
+        url: `/api/hotel-setup/properties/${propertyId}/publications/booking`,
+        headers: token === null ? {} : { authorization: `Bearer ${token}` },
+      });
+      expect(response.statusCode).toBe(token === null || token === "invalid" ? 401 : 403);
+      expect(repository.reviewCalls).toHaveLength(0);
+      expect(provider.calls).toBe(0);
+    },
+  );
 
   it("authorizes and delegates with server-evaluated readiness", async () => {
     const readiness = await readyEvidence();
@@ -353,6 +414,7 @@ function fakeRepository(
   const statusCalls: FakeRepository["statusCalls"] = [];
   return {
     requestCalls,
+    reviewCalls: [],
     statusCalls,
     statusResult: initialStatus,
     async requestPublication(command) {
@@ -362,6 +424,16 @@ function fakeRepository(
     async getPublicationStatus(input) {
       statusCalls.push(input);
       return this.statusResult;
+    },
+    async getPublicationReview(input) {
+      this.reviewCalls.push(input);
+      return {
+        propertyId,
+        activeContentRevisionId: null,
+        publishedUrl: null,
+        latestOperation: this.statusResult,
+        recoveredOperation: input.idempotencyKey ? this.statusResult : null,
+      };
     },
     async close() {},
   };

@@ -47,7 +47,7 @@ describe.skipIf(!url)("Catalog arrival range migration", () => {
             propertyId: id,
             checkInTime: "15:00",
             checkOutTime: "11:00",
-            checkInUntil: "23:00",
+            checkInUntil: "00:00",
             checkOutFrom: "07:00",
             cancellationSummary: null,
             paymentPolicySummary: null,
@@ -60,11 +60,11 @@ describe.skipIf(!url)("Catalog arrival range migration", () => {
       expect(Number(await revision())).toBe(Number(before) + 1);
       const row = (
         await client.query(
-          "SELECT to_char(check_in_time,'HH24:MI') AS arrival, to_char(check_out_time,'HH24:MI') AS departure FROM hotel_catalog.property_policy_summaries WHERE property_id=$1",
+          "SELECT to_char(check_in_time,'HH24:MI') AS arrival, to_char(check_in_until,'HH24:MI') AS arrival_until, to_char(check_out_time,'HH24:MI') AS departure FROM hotel_catalog.property_policy_summaries WHERE property_id=$1",
           [id],
         )
       ).rows[0];
-      expect(row).toEqual({ arrival: "15:00", departure: "11:00" });
+      expect(row).toEqual({ arrival: "15:00", arrival_until: "00:00", departure: "11:00" });
       await client.query("SAVEPOINT invalid_window");
       await expect(
         client.query(

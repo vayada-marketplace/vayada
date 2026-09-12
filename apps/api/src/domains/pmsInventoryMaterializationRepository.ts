@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -373,12 +374,51 @@ async function executeMaterialization(
             acceptedAt,
           );
         }
+        const priorRevision = coverage ? positiveInteger(coverage.calendarRevision) : null;
+        const previousConfiguration =
+          priorRevision !== null && priorRevision < exact.calendarRevision
+            ? await loadPmsOperatingCalendarConfigurationByRevision(
+                client,
+                command.propertyId,
+                priorRevision,
+                config.propertyProfileEvidence,
+              )
+            : null;
+        const previousRooms = new Set(
+          previousConfiguration?.sourceInputs.roomBindings.map((binding) => binding.roomTypeId),
+        );
+        // Adding a room must fill the retained horizon before coverage advances;
+        // otherwise a later extension cannot distinguish missing new rows from corruption.
+        const partialRoomAddition =
+          coverage &&
+          previousConfiguration &&
+          exact.sourceInputs.roomBindings.some(
+            (binding) => !previousRooms.has(binding.roomTypeId),
+          ) &&
+          (command.horizon.from > requireDatabaseDate(coverage.coverageFrom) ||
+            command.horizon.through < requireDatabaseDate(coverage.coverageThrough));
+        if (
+          (priorRevision !== null &&
+            priorRevision < exact.calendarRevision &&
+            !previousConfiguration) ||
+          partialRoomAddition
+        ) {
+          return finalizeMaterialization(
+            client,
+            command,
+            reservation,
+            keyHash,
+            failure("inventory_invariant_violation"),
+            acceptedAt,
+          );
+        }
         const plan = planPmsInventoryMaterialization({
           propertyId: command.propertyId,
           configurationSource: command.configurationSource,
           configuration: exact,
           horizon: command.horizon,
           currentDays,
+          ...(previousConfiguration ? { previousConfiguration } : {}),
         });
         if (!plan.ok) {
           const generatedRevision = maxGeneratedRevision(currentDays);
@@ -495,12 +535,18 @@ async function roomFactsStillMatch(
      ORDER BY id::text`,
     [configuration.propertyId],
   );
+  const operatingIds = new Set(
+    (await readPmsRoomOperatingEligibility(client, configuration.propertyId))
+      .filter((room) => room.state === "operating")
+      .map((room) => room.roomTypeId),
+  );
+  const operatingRows = result.rows.filter((row) => operatingIds.has(row.roomTypeId));
   const expected = [...configuration.sourceInputs.roomBindings].sort((left, right) =>
     compareCodeUnits(left.roomTypeId, right.roomTypeId),
   );
   return (
-    result.rows.length === expected.length &&
-    result.rows.every(
+    operatingRows.length === expected.length &&
+    operatingRows.every(
       (row, index) =>
         normalizeUuid(row.roomTypeId) === expected[index]?.roomTypeId &&
         positiveInteger(row.roomFactsRevision) === expected[index]?.sourceRoomFactsRevision,
