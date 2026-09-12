@@ -128,7 +128,10 @@ export async function registerMarketplaceHotelCollaborationPreferencesRoutes(
   );
 }
 
-function authorizeRequest(request: FastifyRequest, reply: FastifyReply): AuthorizedScope | null {
+export function authorizeRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): AuthorizedScope | null {
   const policy = MARKETPLACE_HOTEL_COLLABORATION_PREFERENCES_AUTHORIZATION;
   try {
     const baseContext = enforceRoutePolicy(request, { permission: policy.permission });
@@ -170,7 +173,7 @@ function authorizeRequest(request: FastifyRequest, reply: FastifyReply): Authori
   }
 }
 
-function commandAudit(
+export function commandAudit(
   context: AuthorizedScope["context"],
 ): MarketplaceHotelCollaborationPreferencesCommandAudit {
   return {
@@ -192,7 +195,7 @@ function requireAuthorizedScope(
   return scope;
 }
 
-function readIdempotencyKey(request: FastifyRequest): string | null {
+export function readIdempotencyKey(request: FastifyRequest): string | null {
   const occurrences = request.raw.rawHeaders.filter(
     (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
   ).length;
