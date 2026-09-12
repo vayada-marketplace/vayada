@@ -13,7 +13,9 @@ export type PreparedImportSource = {
   results: Record<string, ImportItemResult>;
 };
 export type PreparedImportRepository = {
-  find(scope: ImportScope): Promise<PreparedImportSource | null>;
+  find(
+    scope: ImportScope & { propertyId?: string; sourceId?: string },
+  ): Promise<PreparedImportSource | null>;
   apply(
     scope: ImportScope & { sourceId: string; propertyId: string },
     execute: (source: PreparedImportSource) => Promise<ImportItemResult[]>,
