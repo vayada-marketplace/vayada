@@ -146,3 +146,21 @@ saved source revisions so callers need not substitute newly read evidence.
 The unbound save remains an internal complete-snapshot primitive; editor routes
 must never omit the draft binding. Concrete owner/auth/FX guard adapters and
 preview orchestration remain VAY-1541 prerequisites before any runtime wiring.
+
+## Live identity authorization (VAY-1560)
+
+`lockReplacementPricingAuthorization` consumes trusted RequestContext and the
+same property/organization/actor scope as storage, within its transaction. Read
+uses `pms.rooms_rates.read`; mutations use `pms.rooms_rates.manage`, following
+the current staff-access contract rather than broad compatibility permissions.
+It rechecks active identity records, canonical and PMS property links, assigned
+property scope, role grants and validated staff overrides. Disabled catalog
+profiles deny; incomplete/private profiles remain editable. The canonical PMS
+inventory lock comes first. Authorization row locks remain until transaction
+end; the organization lock also serializes new FK-backed entitlement rows.
+Entitlement applicability is evaluated using the database clock after locking.
+
+This helper supplies only the identity portion of the required storage guard.
+It does not validate room configurations, Booking terms, Finance readiness,
+mandatory charges or FX evidence. Those owner adapters and route-policy checks
+remain mandatory before exposing pricing commands. No routes are wired here.
