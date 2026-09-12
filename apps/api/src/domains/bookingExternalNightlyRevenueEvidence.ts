@@ -86,11 +86,8 @@ export async function appendExternalNightlyRevenueEvidence(
     throw new Error("External evidence requires an open transaction");
   if (
     scope.roomTypeCount !== roomTypes.length ||
-    lines.some(
-      (line) =>
-        line.linePosition > scope.roomCount &&
-        !(command.sourceKind === "ota" && line.correctsEvidenceId),
-    )
+    // prettier-ignore
+    lines.some((line)=>line.linePosition > scope.roomCount && !(command.sourceKind === "ota" && line.correctsEvidenceId && line.economicEvent === "occupancy_adjustment" && line.occupiedRoomNights === -1))
   )
     throw new ExternalRevenueEvidenceScopeError("External room scope is unavailable");
   const stored = await client.query<StoredLine>(
