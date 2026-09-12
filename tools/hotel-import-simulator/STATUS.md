@@ -162,3 +162,12 @@ connection provider and shared canonical room editor routes. It is default-off v
 auth-allowlisted HTTPS callback origin, auth/session configuration and room setup.
 No local or remote feature flag was enabled. Frontend entry wiring, production
 callback logging and fresh-host authorization still require verification.
+
+## Hotel setup entry
+
+Both onboarding form modes now expose the gated Airbnb connection entry for the
+wizard's selected hotel. It opens a separate connection tab, preserving the
+original setup page, with explicit start, retry and manual continuation. Seven
+synthetic browser scenarios pass, including automatic hotel selection in both
+forms. Independent review's initial selection issue was fixed and re-reviewed.
+The local callback flag was restored to false after testing.

@@ -250,3 +250,28 @@ flag. Operators must verify production callback request-log handling and require
 migrations 0179/0182 before enabling both sides. No environment was changed here.
 Configuration/composition tests use mocked SQL/provider responses, including a
 mounted-route authentication rejection; they do not establish fresh-host approval.
+
+## Hotel setup connection entry
+
+The frontend callback flag also gates a connection entry and the UUID-scoped
+`/setup/airbnb-connect/[propertyId]` page. The shared wizard renders an optional
+setup-actions slot using its resolved canonical property selection in both form
+modes, including automatic selection. The connection page opens in a separate
+tab, starts only after an explicit click, validates the returned Airbnb origin,
+and provides retry/manual continuation when connection setup fails or is not ready.
+Users refresh their original setup tab after saving imported rooms.
+
+Seven browser scenarios use synthetic API/provider responses: authorization
+navigation, unavailable binding, failure, unsafe URL, retry, and automatic selection
+with a new tab in both form modes. They do not verify a real Airbnb host session
+or saving arbitrary unsaved edits. The feature remains default-off.
+
+## New-hotel provisioning gap
+
+The setup entry currently starts import only for an already provisioned, verified
+Channex binding. Neither the shared setup wizard nor the Airbnb start route queues
+the existing Channex enable command. A brand-new canonical hotel therefore receives
+`channex_binding_required` until provisioning completes. The next integration step
+is an explicit, authorized preparation action using the existing durable enable
+command and its completion status, followed by binding verification and connection
+start. Do not equate exposing the button with completing new-hotel onboarding.
