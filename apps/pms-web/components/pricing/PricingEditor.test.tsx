@@ -696,3 +696,44 @@ it("confirms parent changes with exclusive pending guards and fresh saved review
   expect(saved.snapshot.rooms[0].offers[1].price).toMatchObject({ parentId: "alternate" }); expect(saved.snapshot.rooms[0].offers[1].restrictions).toEqual({ kind: "inherit" });
   await click("Review saved charges"); expect(button("Change parent rate").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
 });
+
+it("appends another room at the existing revision, preserving edits and retrying accepted terms once", async () => {
+  const id = "61000000-0000-4000-8000-000000000004", room = { roomTypeId: id, name: "Family", capacity: { total: 3, adults: 3, children: 2 } };
+  client.read.mockResolvedValueOnce({ ...snapshot, revision: 7, sources, stale: false });
+  const policy = vi.fn().mockResolvedValue({ revision: id }); client.termsAction.mockReturnValue(policy);
+  await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} setup={{ propertyId: "property", rooms: [{ roomTypeId: "room", name: "Existing", capacity: snapshot.rooms[0].capacity }, room] }} />); });
+  await click("Save draft"); const prior = saved;
+  await act(async () => input().props.onChange({ target: { value: "155.25" } }));
+  await click("Add another room");
+  expect(view.root.findByType(FirstPricingSetup).props.rooms).toEqual([room]);
+  expect(view.root.findByProps({ "aria-label": "Currency code (for example EUR)" }).props.disabled).toBe(true);
+  expect(view.root.findByProps({ "aria-label": "Currency code (for example EUR)" }).props.value).toBe("EUR");
+  expect(view.root.findByProps({ "aria-label": "Room 1 Offer 1 Per room" }).props.disabled).toBe(true);
+  const next = firstPricingInput("property", room, id, { mode: "occupancy", occupancy: ["100", "130", "155"], included: { adults: "", adjustments: [] }, room: id, currency: "EUR", base: "", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+  client.prepare.mockRejectedValueOnce(new ApiErrorResponse(403, {}));
+  await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate(next));
+  expect(button("Cancel room setup").props.disabled).toBe(true); expect(view.root.findByType(FirstPricingSetup).props.disabled).toBe(true);
+  const attempted = client.prepare.mock.calls.at(-1)![0];
+  await click("Retry last action"); expect(policy).toHaveBeenCalledOnce(); expect(client.termsAction).toHaveBeenCalledOnce(); expect(client.prepare.mock.calls.at(-1)![0]).toEqual(attempted);
+  expect(client.saveDraft).toHaveBeenCalledTimes(1); expect(button("Review saved charges").props.disabled).toBe(true);
+  await click("Save draft"); expect(saved.draftId).toBe(prior.draftId); expect(saved.revision).toBe(prior.revision + 1); expect(saved.baseRevision).toBe(7);
+  expect(saved.snapshot.rooms).toHaveLength(2); expect(saved.snapshot.rooms.map((value) => value.revision)).toEqual([8, 8]);
+  expect(saved.snapshot.rooms[0]).toEqual(editedSnapshot({ ...snapshot, rooms: [{ ...snapshot.rooms[0], revision: 8 }] }, { "0:0:0": "155.25" }).rooms[0]);
+  expect(saved.snapshot.rooms[1].offers[0]).toMatchObject({ termsRevision: id, price: { calendar: { base: { amountsMinor: ["10000", "13000", "15500"] } } } });
+  expect(button("Add another room")).toBeUndefined(); await click("Review saved charges"); expect(button("Approve rates").props.disabled).toBe(true);
+});
+it("cancels room setup without changing the draft and rejects duplicate rooms or currency before policy writes", async () => {
+  const id = "61000000-0000-4000-8000-000000000004", room = { roomTypeId: id, name: "Family", capacity: { total: 3, adults: 3, children: 2 } };
+  await act(async () => { view = create(<PricingEditor client={client as ReturnType<typeof createReplacementPricingClient>} setup={{ propertyId: "property", rooms: [room] }} />); });
+  await click("Save draft"); await click("Edit child charges"); expect(button("Add another room").props.disabled).toBe(true);
+  await click("Add another room"); expect(button("Cancel room setup")).toBeUndefined(); await click("Cancel child charges"); await click("Add another room");
+  expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true); expect(button("Change meal plan").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event); expect(event.preventDefault).toHaveBeenCalled();
+  const next = firstPricingInput("property", room, id, { mode: "flat", occupancy: [], included: { adults: "", adjustments: [] }, room: id, currency: "EUR", base: "100", adultAge: "12", childPrice: "0", countChildren: "yes", minimum: "1", maximum: "", cancellation: "non_refundable", freeDays: "", payment: "full" });
+  for (const configuration of [{ ...next.configuration, currency: "USD" }, { ...next.configuration, roomTypeId: "room" }]) {
+    await act(async () => view.root.findByType(FirstPricingSetup).props.onCreate({ ...next, configuration }));
+  }
+  expect(client.termsAction).not.toHaveBeenCalled(); await click("Cancel room setup"); expect(button("Review saved charges").props.disabled).toBe(false);
+  await click("Review saved charges"); expect(button("Add another room").props.disabled).toBe(true);
+});

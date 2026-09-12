@@ -25,9 +25,10 @@ import { PricingRules } from "./PricingRules";
 
 type Client = ReturnType<typeof createReplacementPricingClient>;
 export function PricingEditor({ client, roomNames = {}, setup }: { client: Client; roomNames?: Record<string, string>; setup?: { propertyId: string; rooms: readonly SetupRoom[] } }) {
+  const [addingRoom, setAddingRoom] = useState(false);
   const [pendingEntries, setPendingEntries] = useState<Record<string, boolean>>({});
-  const exclusiveEditPending = Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:")) && pending);
-  const hasPendingEntries = Object.values(pendingEntries).some(Boolean);
+  const exclusiveEditPending = addingRoom || Object.entries(pendingEntries).some(([key, pending]) => (key.startsWith("ownership:") || key.startsWith("mealPlan:") || key.startsWith("parent:")) && pending);
+  const hasPendingEntries = addingRoom || Object.values(pendingEntries).some(Boolean);
   const [empty, setEmpty] = useState(false);
   const [current, setCurrent] = useState<PricingSnapshot | null>(null), [baseRevision, setBaseRevision] = useState(0);
   const [draft, setDraft] = useState<PricingDraft | null>(null), [review, setReview] = useState<PricingChargeReview | null>(null);
@@ -44,7 +45,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
       setEmpty(saved === null);
       setCurrent(saved ? { currency: saved.currency, ownerReferences: { finance: saved.ownerReferences.finance },
         rooms: saved.rooms.map((room) => ({ ...room, revision: saved.revision + 1 })) } : null);
-      setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
+      setAddingRoom(false); setPendingEntries({}); setBaseRevision(saved?.revision ?? 0); setInputs({}); setDraft(null); setReview(null); setDirty(false); setAck(false); setNeedsReload(false); setDone(false);
       pendingDraftId.current = crypto.randomUUID();
       setNotice(saved?.stale ? "Some source settings changed. Saving will check them again." : "");
     } catch (e) { if (alive.current) setError(message(e)); }
@@ -83,14 +84,21 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     } finally { locked.current = false; if (alive.current) setBusy(false); }
   }
   function createInitial(input: ReturnType<typeof firstPricingInput>) {
+    if (locked.current || busy || retry || needsReload || done || review) return;
+    if (current && (!addingRoom || current.currency !== input.configuration.currency || current.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) ||
+        !setup?.rooms.some((room) => room.roomTypeId === input.configuration.roomTypeId) || setup.propertyId !== input.configuration.propertyId)) {
+      setError("Choose an unconfigured room in this property using its current pricing currency."); return;
+    }
+    let existing: PricingSnapshot | null;
+    try { existing = current ? editedSnapshot(current, inputs) : null; } catch (e) { setError(message(e)); return; }
     const saveTerms = client.termsAction(input.terms);
     let saved: Awaited<ReturnType<typeof saveTerms>> | null = null;
     void run(async () => {
       saved ??= await saveTerms();
       if (alive.current) setNotice("The offer policy is saved. Checking pricing readiness; pricing is not approved yet.");
-      const room = { ...input.configuration, offers: input.configuration.offers.map((offer) => ({ ...offer, termsRevision: saved!.revision })) };
-      const prepared = await client.prepare({ currency: room.currency, rooms: [room] });
-      if (alive.current) { setCurrent(prepared.snapshot); setBaseRevision(0); setDirty(true); setNotice("Setup is ready. Save your draft, then review its charges before approval."); }
+      const room = { ...input.configuration, revision: baseRevision + 1, offers: input.configuration.offers.map((offer) => ({ ...offer, termsRevision: saved!.revision })) };
+      const prepared = await client.prepare({ currency: room.currency, rooms: [...(existing?.rooms ?? []), room] });
+      if (alive.current) { setCurrent(prepared.snapshot); setInputs({}); setAddingRoom(false); setDirty(true); setReview(null); setAck(false); setNotice("Setup is ready. Save your draft, then review its charges before approval."); }
     }, () => saved !== null); // Preparation is read-only; keep the accepted policy even after readiness is rejected.
   }
   function save() {
@@ -123,6 +131,7 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     });
   }
   const disabled = busy || retry || needsReload || done, display = review?.snapshot ?? current;
+  const unconfiguredRooms = setup?.rooms.filter((room) => !display?.rooms.some((value) => value.roomTypeId === room.roomTypeId)) ?? [];
   const scale = display ? pricingCurrencyScale(display.currency)! : 2;
   return <section className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-950">Pricing</h1><p className="mt-1 text-sm text-gray-600">Edit nightly prices and calendar rules, then review and approve your saved draft.</p></div>
@@ -132,6 +141,10 @@ export function PricingEditor({ client, roomNames = {}, setup }: { client: Clien
     {loading ? <p role="status">Loading pricing…</p> : !display && !empty ? null : !display ? <div className="rounded-xl border bg-white p-8"><h2 className="font-semibold">Pricing is not configured yet</h2>{setup ? <FirstPricingSetup propertyId={setup.propertyId} rooms={setup.rooms} disabled={disabled} onDirty={() => setDirty(true)} onCreate={createInitial} /> : <p className="mt-2 text-sm text-gray-600">Room setup information is unavailable. Reload pricing before creating a rate.</p>}
       {retry && <button disabled={busy} className="mt-4 rounded-lg border px-4 py-2" onClick={() => void run()}>Retry last action</button>}</div> : <>
       <div className="flex justify-between text-sm"><strong>{display.currency} · Base nightly prices</strong><span>{done ? "Approved rates" : review ? "Saved draft review" : dirty ? "Unsaved changes" : draft ? "Draft saved" : "Current rates"}</span></div>
+      {setup && (addingRoom ? <div className="rounded-xl border bg-white p-5">
+        <FirstPricingSetup propertyId={setup.propertyId} rooms={unconfiguredRooms} fixedCurrency={display.currency} disabled={disabled} onDirty={() => {}} onCreate={createInitial} />
+        <button type="button" className="mt-3 rounded border px-3 py-2 disabled:opacity-50" disabled={disabled} onClick={() => { if (!disabled) { setAddingRoom(false); setError(""); } }}>Cancel room setup</button>
+      </div> : unconfiguredRooms.length > 0 ? <button type="button" className="rounded-lg border px-4 py-2 disabled:opacity-50" disabled={disabled || !!review || hasPendingEntries} onClick={() => { if (!disabled && !review && !hasPendingEntries) { setAddingRoom(true); setError(""); } }}>Add another room</button> : <p className="text-sm text-gray-600">All available room types have pricing configured.</p>)}
       {display.rooms.map((room, ri) => <div key={room.roomTypeId} className="overflow-hidden rounded-xl border bg-white">
         <h2 className="border-b bg-gray-50 px-5 py-3 font-semibold">{roomNames[room.roomTypeId] ?? `Room ${ri + 1}`}</h2>
         <PricingChildCharges room={room} label={roomNames[room.roomTypeId] ?? `Room ${ri + 1}`} disabled={disabled || !!review || exclusiveEditPending}
