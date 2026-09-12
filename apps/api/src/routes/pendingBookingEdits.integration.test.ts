@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { recordTargetCheckoutCommand } from "./bookingWebPublic.js";
 import { describe, expect, it } from "vitest";
 import { createPgBookingLifecycleStore } from "../jobs/bookingLifecycle.js";
 import {
@@ -5,7 +7,6 @@ import {
   loadBookingNotificationSnapshot,
 } from "../jobs/bookingEmails.js";
 import { createTargetBookingReservationsReadRepository } from "../platform/bookingReservations.js";
-import { authorizeStripeBookingPayment } from "../domains/stripeBookingSettlement.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
 import { enableCard, propertyId, roomTypeId } from "./pendingBookingEdits.fixtures.js";
@@ -15,7 +16,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
   () => {
     const fixture = pendingEditFixture();
     const { pool, now, adapter, command, edit, url, intents, stripe } = fixture;
-    it("returns edit eligibility immediately after pending checkout creation", () => {
+    it("reads edit eligibility for a historical pending request", () => {
       expect(fixture.created.booking).toMatchObject({ status: "pending", canEditRequest: true });
     });
 
@@ -118,258 +119,91 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       ).rejects.toMatchObject({ statusCode: 400 });
     });
 
-    it("preserves the original sold-out offer when repricing the reserved room", async () => {
-      const details = await edit("details", {});
-      await pool.query(
-        `UPDATE distribution.public_room_offer_snapshots SET available_rooms=0,
-          availability_status='sold_out',sellable_publicly=FALSE WHERE property_id=$1
-          AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
-        [propertyId],
-      );
-      await pool.query(
-        `INSERT INTO distribution.public_room_offer_snapshots
-          (property_id,room_type_id,stay_date,public_offer_key,available_rooms,
-           base_price_amount,currency,payment_options,freshness_status,rate_summary,
-           availability_status,sellable_publicly)
-          SELECT property_id,room_type_id,stay_date,'cheaper-flex',0,50,currency,
-            payment_options,freshness_status,rate_summary,'sold_out',FALSE
-          FROM distribution.public_room_offer_snapshots WHERE property_id=$1`,
-        [propertyId],
-      );
-      try {
-        const quote = await edit("quote", {
-          ...details.input,
-          revision: details.revision,
-          adults: 1,
-          addonIds: [],
-          addonQuantities: {},
-        });
-        expect(quote.totalAmount).toBe(200);
-        await pool.query(
-          `UPDATE distribution.public_room_offer_snapshots SET availability_status='closed'
-            WHERE property_id=$1 AND public_offer_key='vay-959-flex'`,
-          [propertyId],
-        );
-        await expect(
-          edit("quote", {
-            ...details.input,
-            revision: details.revision,
-            adults: 1,
-            addonIds: [],
-            addonQuantities: {},
-          }),
-        ).rejects.toMatchObject({ statusCode: 409 });
-      } finally {
-        await pool.query(
-          `DELETE FROM distribution.public_room_offer_snapshots WHERE property_id=$1 AND public_offer_key='cheaper-flex'`,
-          [propertyId],
-        );
-        await pool.query(
-          `UPDATE distribution.public_room_offer_snapshots SET available_rooms=1,
-            availability_status='limited',sellable_publicly=TRUE WHERE property_id=$1
-            AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
-          [propertyId],
-        );
-        await pool.query(
-          `UPDATE distribution.public_room_offer_snapshots SET availability_status='available'
-            WHERE property_id=$1 AND stay_date >= '2027-02-03'`,
-          [propertyId],
-        );
+    async function snapshot() {
+      const result: Record<string, unknown> = {};
+      for (const table of [
+        "booking.guest_bookings",
+        "booking.quote_sessions",
+        "booking.pending_booking_edit_attempts",
+        "platform.idempotency_keys",
+        "platform.jobs",
+        "finance.payments",
+        "pms.inventory_days",
+        "pms.inventory_reservation_statuses",
+      ]) {
+        result[table] = (
+          await pool.query(
+            `SELECT to_jsonb(row) AS row FROM ${table} row WHERE property_id=$1 ORDER BY to_jsonb(row)::text`,
+            [propertyId],
+          )
+        ).rows;
       }
-    });
-
-    it("rejects a pending edit when Finance disables its payment method", async () => {
-      const details = await edit("details", {});
-      const input = { ...details.input, revision: details.revision };
-      const quote = await edit("quote", input);
+      return result;
+    }
+    async function seedPreparedAttempt() {
+      const id = randomUUID();
       await pool.query(
-        "UPDATE finance.payment_settings SET payments_enabled=FALSE WHERE property_id=$1",
-        [propertyId],
+        `INSERT INTO booking.pending_booking_edit_attempts
+          (id,property_id,guest_booking_id,expected_revision,idempotency_key,request_fingerprint,quote_session_id,payment_method,request_snapshot,expires_at)
+         SELECT $1::uuid,property_id,id,edit_revision,$1::text,repeat('a',64),quote_session_id,'pay_at_property',
+           '{"quoteId":"edit-original","revision":0}'::jsonb,'2027-01-02T10:00:00Z'
+         FROM booking.guest_bookings WHERE id=$2`,
+        [id, fixture.created.booking.id],
       );
-      try {
-        await expect(
-          edit("prepare", {
-            ...input,
-            quoteId: quote.quoteId,
-            expectedTotalAmount: quote.totalAmount,
-          }),
-        ).rejects.toMatchObject({
-          statusCode: 409,
-          message: "Selected payment method is no longer available. Please refresh.",
-        });
-      } finally {
-        await pool.query(
-          "UPDATE finance.payment_settings SET payments_enabled=TRUE WHERE property_id=$1",
-          [propertyId],
-        );
-      }
-    });
-
-    it("updates the same pending request, preserves evidence, and replays one hotel email", async () => {
+      return id;
+    }
+    it("rejects pricing edits and new checkout without changing the historical request or holds", async () => {
       const details = await edit("details", {});
       expect(details.revision).toBe(0);
       expect(details.input.addonIds).toEqual(["spa_partner"]);
-      const input = {
-        ...details.input,
-        revision: 0,
-        adults: 1,
-        numberOfRooms: 2,
-        checkOut: "2027-02-04",
-        addonQuantities: { spa_partner: 1 },
-        specialRequests: "Quiet room, please.",
-      };
-      const quote = await edit("quote", input);
-      const prepared = await edit("prepare", {
-        ...input,
-        quoteId: quote.quoteId,
-        expectedTotalAmount: quote.totalAmount,
+      const attemptId = await seedPreparedAttempt();
+      const before = await snapshot();
+      const input = { ...details.input, revision: 0, adults: 1, quoteId: "edit-original" };
+      for (const [action, request] of [
+        ["quote", input],
+        ["prepare", input],
+        ["save", { revision: 0, attemptId }],
+      ] as const) {
+        await expect(edit(action, request)).rejects.toMatchObject({
+          statusCode: 503,
+          code: "PRICING_UNAVAILABLE",
+        });
+        expect(await snapshot()).toEqual(before);
+      }
+      await expect(adapter.createBooking("vay-959-hotel", input, command())).rejects.toMatchObject({
+        statusCode: 503,
+        code: "PRICING_UNAVAILABLE",
       });
+      expect(await snapshot()).toEqual(before);
+      expect(intents.size).toBe(0);
+    });
+    it("replays a committed historical save after acceptance and still requires credentials", async () => {
       const context = command();
-      const saveInput = { revision: 0, attemptId: prepared.attemptId };
-      const saved = await edit("save", saveInput, context);
-      expect(saved.booking.id).toBe(fixture.created.booking.id);
-      expect(saved.booking.bookingReference).toBe(fixture.created.booking.bookingReference);
-      expect(saved.booking.status).toBe("pending");
-      expect(saved.booking).toMatchObject({ adults: 1, numberOfRooms: 2, checkOut: "2027-02-04" });
-      expect(await edit("save", saveInput, context)).toEqual(saved);
-      expect(
-        (
-          await pool.query(`SELECT edit_revision FROM booking.guest_bookings WHERE id=$1`, [
-            fixture.created.booking.id,
-          ])
-        ).rows[0],
-      ).toEqual({ edit_revision: 1 });
-      expect(
-        (
-          await pool.query(
-            `SELECT special_requests FROM booking.booking_guests WHERE guest_booking_id=$1 AND guest_role='booker'`,
-            [fixture.created.booking.id],
-          )
-        ).rows[0].special_requests,
-      ).toBe("Quiet room, please.");
-      expect(
-        (
-          await pool.query(
-            `SELECT * FROM booking.finance_addon_purchase_evidence WHERE guest_booking_id=$1`,
-            [fixture.created.booking.id],
-          )
-        ).rows,
-      ).toHaveLength(2);
-      expect(
-        (
-          await pool.query(
-            `SELECT quantity FROM booking.active_booking_addon_selections WHERE guest_booking_id=$1`,
-            [fixture.created.booking.id],
-          )
-        ).rows,
-      ).toEqual([{ quantity: 1 }]);
-      const notifications = (
-        await pool.query(
-          `SELECT payload FROM platform.jobs WHERE property_id=$1 AND job_type='email.booking-host-request-updated'`,
-          [propertyId],
-        )
-      ).rows;
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].payload).toMatchObject({
-        to: "hotel@example.test",
-        recipientRole: "host",
+      const body = { booking: fixture.created.booking, historicalReplay: true };
+      await recordTargetCheckoutCommand(pool, {
+        propertyId,
+        context,
+        resourceType: "guest_booking",
+        resourceId: fixture.created.booking.id,
+        body,
       });
-      await expect(edit("quote", input)).rejects.toMatchObject({ statusCode: 409 });
-    });
-
-    it("isolates replacement card attempts and releases only superseded or abandoned holds", async () => {
-      await enableCard(pool);
-      const details = await edit("details", {});
-      const input = { ...details.input, revision: details.revision, paymentMethod: "card" };
-      const quote = await edit("quote", input);
-      const prepared = await edit("prepare", {
-        ...input,
-        quoteId: quote.quoteId,
-        expectedTotalAmount: quote.totalAmount,
-      });
-      expect(
-        (
-          await pool.query("SELECT id FROM finance.payments WHERE guest_booking_id=$1", [
-            fixture.created.booking.id,
-          ])
-        ).rows,
-      ).toHaveLength(0);
-      await expect(
-        edit("save", { revision: 1, attemptId: prepared.attemptId }),
-      ).rejects.toMatchObject({ statusCode: 409 });
-      const intent = [...intents.values()].at(-1)!;
-      intent.status = "requires_capture";
-      const saved = await edit("save", { revision: 1, attemptId: prepared.attemptId });
-      expect(saved.booking.status).toBe("pending");
-      expect(
-        (
-          await pool.query(
-            "SELECT payment_status,active_card_payment_id FROM booking.guest_bookings WHERE id=$1",
-            [fixture.created.booking.id],
-          )
-        ).rows[0],
-      ).toMatchObject({ payment_status: "authorized", active_card_payment_id: expect.any(String) });
-      const second = await edit("details", {});
-      const abandonInput = { ...second.input, revision: second.revision };
-      const abandonQuote = await edit("quote", abandonInput);
-      const abandoned = await edit("prepare", {
-        ...abandonInput,
-        quoteId: abandonQuote.quoteId,
-        expectedTotalAmount: abandonQuote.totalAmount,
-      });
-      const replacement = [...intents.values()].at(-1)!;
-      replacement.status = "requires_capture";
-      // Move only the attempt's fixture timestamps, preserving the original booking deadline.
       await pool.query(
-        "UPDATE booking.pending_booking_edit_attempts SET created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' WHERE id=$1",
-        [abandoned.attemptId],
+        "UPDATE booking.guest_bookings SET lifecycle_status='confirmed' WHERE id=$1",
+        [fixture.created.booking.id],
       );
-      await releaseAbandonedBookingEdits(pool, {
-        connectionString: url!,
-        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-        stripePaymentProvider: stripe,
-      });
-      expect(replacement.status).toBe("canceled");
-      expect(intent.status).toBe("requires_capture");
-      const away = {
-        ...second.input,
-        revision: second.revision,
-        paymentMethod: "pay_at_property",
-        addonIds: [],
-        addonQuantities: {},
-      };
-      const awayQuote = await edit("quote", away);
-      const awayPrepared = await edit("prepare", {
-        ...away,
-        quoteId: awayQuote.quoteId,
-        expectedTotalAmount: awayQuote.totalAmount,
-      });
-      await edit("save", { revision: second.revision, attemptId: awayPrepared.attemptId });
-      await releaseAbandonedBookingEdits(pool, {
-        connectionString: url!,
-        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
-        stripePaymentProvider: stripe,
-      });
-      expect(intent.status).toBe("canceled");
-      expect(
-        (
-          await pool.query(
-            "SELECT payment_status,active_card_payment_id FROM booking.guest_bookings WHERE id=$1",
-            [fixture.created.booking.id],
-          )
-        ).rows[0],
-      ).toEqual({ payment_status: "unpaid", active_card_payment_id: null });
-      expect(
-        (
-          await pool.query(
-            "SELECT id FROM booking.active_booking_addon_selections WHERE guest_booking_id=$1",
-            [fixture.created.booking.id],
-          )
-        ).rows,
-      ).toHaveLength(0);
+      try {
+        expect(await edit("save", { revision: 0 }, context)).toEqual(body);
+        await expect(
+          adapter.editRequest!("vay-959-hotel", fixture.created.booking.id, "save", {}, context),
+        ).rejects.toMatchObject({ statusCode: 404 });
+      } finally {
+        await pool.query(
+          "UPDATE booking.guest_bookings SET lifecycle_status='pending_payment' WHERE id=$1",
+          [fixture.created.booking.id],
+        );
+      }
     });
-
-    it("projects current requests and payment method into PMS, notifications, and delayed create", async () => {
+    it("reads historical requests in PMS and notifications without pricing", async () => {
       const repository = createTargetBookingReservationsReadRepository({
         connectionString: url!,
         pool,
@@ -387,73 +221,10 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         propertyId,
         guestBookingId: fixture.created.booking.id,
       });
-      expect(snapshot?.addons).toBeNull();
-      const jobs = (
-        await pool.query(
-          "SELECT payload FROM platform.jobs WHERE property_id=$1 AND job_type='pms.reservation.create'",
-          [propertyId],
-        )
-      ).rows;
-      expect(jobs[0].payload).toMatchObject({
-        bookingEditRevision: 3,
-        specialRequests: "Quiet room, please.",
-        stay: { numberOfRooms: 2 },
-        bookedOffer: { addonRequest: { addonIds: [] } },
-      });
-      const superseded = [...intents.values()][0];
-      expect(
-        await authorizeStripeBookingPayment(pool, {
-          paymentIntentId: superseded.paymentIntentId,
-          providerAccountRef: superseded.providerAccountRef,
-          amountMinor: superseded.amountMinor,
-          currency: superseded.currency,
-          occurredAt: now,
-        }),
-      ).toBe("not_found");
+      expect(snapshot).toMatchObject({ hostEmail: "hotel@example.test" });
       const lifecycle = createPgBookingLifecycleStore({ connectionString: url!, pool });
       await expect(lifecycle.findPendingBookingExpiryCandidates(now, 10)).resolves.toEqual([]);
       await expect(lifecycle.findExpiredDraftCandidates(now, 10)).resolves.toEqual([]);
-    });
-
-    it("rolls back a lost-inventory save without changing the old request", async () => {
-      const details = await edit("details", {});
-      const input = {
-        ...details.input,
-        revision: details.revision,
-        checkIn: "2027-02-04",
-        checkOut: "2027-02-05",
-      };
-      const quote = await edit("quote", input);
-      const attempt = await edit("prepare", {
-        ...input,
-        quoteId: quote.quoteId,
-        expectedTotalAmount: quote.totalAmount,
-      });
-      await pool.query(
-        "UPDATE pms.inventory_days SET assigned_count=2,available_count=0,inventory_revision=inventory_revision+1,booking_source_revision=booking_source_revision+1 WHERE property_id=$1 AND stay_date='2027-02-04'",
-        [propertyId],
-      );
-      try {
-        await expect(
-          edit("save", { revision: details.revision, attemptId: attempt.attemptId }),
-        ).rejects.toMatchObject({ statusCode: 409 });
-        const unchanged = await edit("details", {});
-        expect(unchanged.revision).toBe(details.revision);
-        expect(unchanged.input.checkIn).toBe(details.input.checkIn);
-        expect(
-          (
-            await pool.query(
-              "SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date='2027-02-01'",
-              [propertyId],
-            )
-          ).rows[0].assigned_count,
-        ).toBe(2);
-      } finally {
-        await pool.query(
-          "UPDATE pms.inventory_days SET assigned_count=0,available_count=2,inventory_revision=inventory_revision+1,booking_source_revision=booking_source_revision+1 WHERE property_id=$1 AND stay_date='2027-02-04'",
-          [propertyId],
-        );
-      }
     });
 
     it("rejects closed lifecycle states and expired credentials", async () => {
@@ -531,7 +302,16 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
     });
 
     it("drains releases even when another account's recovery fails", async () => {
-      const source = [...intents.values()][0];
+      await enableCard(pool);
+      await pool.query(
+        `INSERT INTO booking.pending_booking_edit_attempts
+          (property_id,guest_booking_id,expected_revision,idempotency_key,request_fingerprint,quote_session_id,provider_account_id,payment_method,provider_request,created_at,expires_at,updated_at)
+         SELECT b.property_id,b.id,0,'poison-recovery',repeat('a',64),b.quote_session_id,a.id,'card',
+           '{"idempotencyKey":"poison"}'::jsonb,now()-interval '2 hours',now()-interval '1 hour',now()-interval '2 hours'
+         FROM booking.guest_bookings b JOIN finance.payment_provider_accounts a ON a.property_id=b.property_id
+         WHERE b.id=$1`,
+        [fixture.created.booking.id],
+      );
       const recovery = await stripe.createPaymentIntent({
         propertyId,
         bookingReference: fixture.created.booking.bookingReference,
@@ -547,11 +327,6 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         `INSERT INTO booking.edit_authorization_releases(provider_payment_intent_id,provider_account_ref,property_id) VALUES($1,'acct_vay959',$2)`,
         [recovery.paymentIntentId, propertyId],
       );
-      await pool.query(`INSERT INTO booking.pending_booking_edit_attempts
-      (property_id,guest_booking_id,expected_revision,idempotency_key,request_fingerprint,quote_session_id,provider_account_id,payment_method,provider_request,created_at,expires_at,updated_at)
-      SELECT property_id,guest_booking_id,expected_revision,'poison-recovery',request_fingerprint,quote_session_id,provider_account_id,'card',
-      provider_request || '{"idempotencyKey":"poison"}'::jsonb,now()-interval '2 hours',now()-interval '1 hour',now()-interval '2 hours'
-      FROM booking.pending_booking_edit_attempts WHERE payment_method='card' LIMIT 1`);
       await releaseAbandonedBookingEdits(pool, {
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -564,7 +339,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         },
       });
       expect(recovery.status).toBe("canceled");
-      expect(source.status).toBe("canceled");
+
       expect(
         (
           await pool.query(
@@ -574,15 +349,104 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
       ).toBe("prepared");
     });
 
+    it("releases an expired replacement card hold and preserves the booking's active authorization", async () => {
+      const providerRequest = {
+        propertyId,
+        bookingReference: fixture.created.booking.bookingReference,
+        providerAccountRef: "acct_vay959",
+        amountMinor: 22050,
+        currency: "EUR",
+        applicationFeeAmountMinor: 1103,
+        captureMethod: "manual" as const,
+      };
+      const active = await stripe.createPaymentIntent({
+        ...providerRequest,
+        idempotencyKey: "historical-active-card",
+      });
+      const abandoned = await stripe.createPaymentIntent({
+        ...providerRequest,
+        idempotencyKey: "historical-abandoned-card",
+      });
+      active.status = "requires_capture";
+      abandoned.status = "requires_capture";
+      const paymentId = randomUUID();
+      const attemptId = randomUUID();
+      await pool.query(
+        `INSERT INTO finance.payments
+          (id,property_id,guest_booking_id,provider_account_id,payment_kind,payment_method,status,amount,currency,provider_payment_intent_id)
+         SELECT $1::uuid,$2::uuid,$3::uuid,id,'full','card','authorized',220.50,'EUR',$4
+         FROM finance.payment_provider_accounts WHERE property_id=$2`,
+        [paymentId, propertyId, fixture.created.booking.id, active.paymentIntentId],
+      );
+      await pool.query(
+        "UPDATE booking.guest_bookings SET payment_status='authorized',active_card_payment_id=$2 WHERE id=$1",
+        [fixture.created.booking.id, paymentId],
+      );
+      await pool.query(
+        `INSERT INTO booking.pending_booking_edit_attempts
+          (id,property_id,guest_booking_id,expected_revision,idempotency_key,request_fingerprint,quote_session_id,provider_account_id,payment_method,provider_request,provider_payment_intent_id,request_snapshot,created_at,expires_at,updated_at)
+         SELECT $1::uuid,b.property_id,b.id,0,'historical-abandoned-card',repeat('a',64),b.quote_session_id,a.id,'card',$3::jsonb,$4,
+           '{"specialRequests":"abandoned edit"}'::jsonb,now()-interval '2 hours',now()-interval '1 hour',now()-interval '2 hours'
+         FROM booking.guest_bookings b JOIN finance.payment_provider_accounts a ON a.property_id=b.property_id WHERE b.id=$2`,
+        [
+          attemptId,
+          fixture.created.booking.id,
+          JSON.stringify({ ...providerRequest, idempotencyKey: "historical-abandoned-card" }),
+          abandoned.paymentIntentId,
+        ],
+      );
+      const before = await snapshot();
+      await releaseAbandonedBookingEdits(pool, {
+        connectionString: url!,
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        stripePaymentProvider: {
+          ...stripe,
+          async createPaymentIntent(input) {
+            if (input.idempotencyKey === "poison") throw new Error("Disconnected account");
+            return stripe.createPaymentIntent(input);
+          },
+        },
+      });
+      expect(abandoned.status).toBe("canceled");
+      expect(active.status).toBe("requires_capture");
+      expect(
+        (
+          await pool.query(
+            "SELECT status,request_snapshot FROM booking.pending_booking_edit_attempts WHERE id=$1",
+            [attemptId],
+          )
+        ).rows,
+      ).toEqual([{ status: "released", request_snapshot: {} }]);
+      expect(
+        (
+          await pool.query(
+            "SELECT released_at IS NOT NULL AS released,attempts FROM booking.edit_authorization_releases WHERE provider_payment_intent_id=$1",
+            [abandoned.paymentIntentId],
+          )
+        ).rows,
+      ).toEqual([{ released: true, attempts: 1 }]);
+      expect(
+        (
+          await pool.query(
+            "SELECT count(*)::int AS count FROM booking.edit_authorization_releases WHERE provider_payment_intent_id=$1",
+            [active.paymentIntentId],
+          )
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+      const after = await snapshot();
+      for (const table of [
+        "booking.guest_bookings",
+        "finance.payments",
+        "pms.inventory_days",
+        "pms.inventory_reservation_statuses",
+      ]) {
+        expect(after[table]).toEqual(before[table]);
+      }
+    });
+
     it("rejects a prepared save when acceptance wins the booking lock", async () => {
       const details = await edit("details", {});
-      const input = {
-        ...details.input,
-        revision: details.revision,
-        specialRequests: "This must not replace the accepted request.",
-      };
-      const quote = await edit("quote", input);
-      const prepared = await edit("prepare", { ...input, quoteId: quote.quoteId });
+      const prepared = { attemptId: await seedPreparedAttempt() };
       const hotel = await pool.connect();
       await hotel.query("BEGIN");
       await hotel.query("SELECT id FROM booking.guest_bookings WHERE id=$1 FOR UPDATE", [
@@ -613,67 +477,31 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
   () => {
     const fixture = pendingEditFixture(1);
     const { pool, edit } = fixture;
-    it("allows only the sold-out reason through quote, prepare and atomic replacement", async () => {
+    it("keeps sold-out historical requests readable while pricing remains unavailable", async () => {
       const details = await edit("details", {});
-      const input = {
-        ...details.input,
-        revision: details.revision,
-        adults: 1,
-        addonIds: [],
-        addonQuantities: {},
-      };
-      const original = (
+      const input = { ...details.input, revision: details.revision, adults: 1 };
+      for (const missing of [
+        ["sellable_availability"],
+        ["sellable_availability", "payment_methods"],
+      ]) {
         await pool.query(
-          "SELECT booking_metadata->>'hostResponseDeadlineAt' deadline FROM booking.guest_bookings WHERE id=$1",
-          [fixture.created.booking.id],
-        )
-      ).rows[0];
-      const readiness = async (missing: string[]) =>
-        pool.query(
-          `UPDATE distribution.public_hotel_bookability_profiles
-        SET public_setup_completeness=jsonb_build_object('status','incomplete','missing',$2::jsonb)
-        WHERE property_id=$1`,
+          `UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness=jsonb_build_object('status','incomplete','missing',$2::jsonb) WHERE property_id=$1`,
           [propertyId, JSON.stringify(missing)],
         );
-      await readiness(["sellable_availability"]);
-      await expect(
-        fixture.adapter.quoteBooking("vay-959-hotel", input, fixture.command()),
-      ).rejects.toMatchObject({ statusCode: 404 });
-      const quote = await edit("quote", input);
-      expect(quote.totalAmount).toBe(200);
-      const prepareInput = {
-        ...input,
-        quoteId: quote.quoteId,
-        expectedTotalAmount: quote.totalAmount,
-      };
-      const prepared = await edit("prepare", prepareInput);
-      await readiness(["sellable_availability", "payment_methods"]);
-      await expect(edit("quote", input)).rejects.toMatchObject({ statusCode: 409 });
-      await expect(edit("prepare", prepareInput)).rejects.toMatchObject({ statusCode: 409 });
-      await expect(
-        edit("save", { revision: 0, attemptId: prepared.attemptId }),
-      ).rejects.toMatchObject({ statusCode: 409 });
-      await readiness(["sellable_availability"]);
-      const saved = await edit("save", { revision: 0, attemptId: prepared.attemptId });
-      expect(saved.booking).toMatchObject({
-        id: fixture.created.booking.id,
-        bookingReference: fixture.created.booking.bookingReference,
-        status: "pending",
-        adults: 1,
-      });
+        expect((await edit("details", {})).revision).toBe(details.revision);
+        await expect(edit("quote", input)).rejects.toMatchObject({
+          statusCode: 503,
+          code: "PRICING_UNAVAILABLE",
+        });
+        await expect(edit("prepare", input)).rejects.toMatchObject({
+          statusCode: 503,
+          code: "PRICING_UNAVAILABLE",
+        });
+      }
       expect(
         (
           await pool.query(
-            "SELECT booking_metadata->>'hostResponseDeadlineAt' deadline FROM booking.guest_bookings WHERE id=$1",
-            [fixture.created.booking.id],
-          )
-        ).rows[0],
-      ).toEqual(original);
-      expect(
-        (
-          await pool.query(
-            `SELECT available_count FROM pms.inventory_days WHERE property_id=$1
-      AND stay_date >= '2027-02-01' AND stay_date < '2027-02-03'`,
+            "SELECT available_count FROM pms.inventory_days WHERE property_id=$1 AND stay_date<'2027-02-03' ORDER BY stay_date",
             [propertyId],
           )
         ).rows,

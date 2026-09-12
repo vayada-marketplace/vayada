@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import {
@@ -272,7 +273,14 @@ async function previewLocked(
           await rollbackQuietly(client);
           return previewFailure({ code: "calendar_revision_conflict", currentRevision });
         }
-        const factsBeforeLocks = await readRoomFacts(config.roomEvidence, command.propertyId);
+        const operatingIds = new Set(
+          (await readPmsRoomOperatingEligibility(client, command.propertyId))
+            .filter((room) => room.state === "operating")
+            .map((room) => room.roomTypeId),
+        );
+        const factsBeforeLocks = (
+          await readRoomFacts(config.roomEvidence, command.propertyId)
+        ).filter((room) => operatingIds.has(room.roomTypeId));
         const activeIds = factsBeforeLocks
           .filter(({ lifecycle }) => lifecycle === "active")
           .map(({ roomTypeId }) => roomTypeId);
@@ -285,7 +293,7 @@ async function previewLocked(
           await lockPmsPhysicalRoomUnitMutationScope(client, command.propertyId, roomTypeId);
         }
         const facts = (await readRoomFacts(config.roomEvidence, command.propertyId)).filter(
-          ({ lifecycle }) => lifecycle === "active",
+          ({ lifecycle, roomTypeId }) => lifecycle === "active" && operatingIds.has(roomTypeId),
         );
         if (facts.length === 0) {
           await rollbackQuietly(client);
