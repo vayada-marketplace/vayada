@@ -36,6 +36,13 @@ describe("Hotel Catalog current-owner evidence", () => {
     });
   });
 
+  it("represents only a never-created policy with revision zero", () => {
+    const policy = available("hotel_catalog.policy", 0);
+    expect(parseHotelCatalogPolicyCurrentOwnerEvidenceResult(policy, scope)).toEqual(policy);
+    expect(createHotelCatalogCurrentOwnerEvidence("hotel_catalog.location", scope, 0)).toBeNull();
+    expect(createHotelCatalogCurrentOwnerEvidence("hotel_catalog.policy", scope, -1)).toBeNull();
+  });
+
   it("parses and freezes exact independently typed owner evidence", () => {
     const location = available("hotel_catalog.location", 4);
     const policy = available("hotel_catalog.policy", 6);
