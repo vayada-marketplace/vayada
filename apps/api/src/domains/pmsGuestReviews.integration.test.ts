@@ -80,8 +80,33 @@ describe.skipIf(!url)("guest review PostgreSQL receipts", () => {
     );
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.actor_user_id === actor)).toBe(true);
-    expect(rows[1].redacted_payload).toEqual({ outcome: "accepted" });
+    expect(rows.map((row) => row.redacted_payload)).toEqual(
+      expect.arrayContaining([{ outcome: "submitting" }, { outcome: "accepted" }]),
+    );
   });
+  it.each(["ready", "unavailable"] as const)(
+    "preserves uncertainty after unexpected send state %s",
+    async (state) => {
+      vi.mocked(provider.send).mockResolvedValue({ state });
+      expect(await commands.submit(context, property, "review", draft)).toMatchObject({
+        state: "uncertain",
+        reason: "confirmation_pending",
+      });
+      expect((await db.query("SELECT state FROM pms.guest_review_submissions")).rows[0].state).toBe(
+        "uncertain",
+      );
+      vi.mocked(provider.check).mockResolvedValue({
+        ...opportunity,
+        state: "failed",
+        reason: "provider_rejected",
+      });
+      expect(await commands.check(context, property, "review")).toMatchObject({
+        state: "uncertain",
+      });
+      await commands.submit(context, property, "review", draft);
+      expect(provider.send).toHaveBeenCalledTimes(1);
+    },
+  );
   it("never resends uncertain outcomes; read-back can confirm them", async () => {
     vi.mocked(provider.send).mockResolvedValue({ state: "uncertain" });
     expect(await commands.submit(context, property, "review", draft)).toMatchObject({

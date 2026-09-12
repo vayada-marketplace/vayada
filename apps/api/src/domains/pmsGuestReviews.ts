@@ -189,10 +189,14 @@ export function createPgGuestReviewCommands(config: {
       } finally {
         client.release();
       }
-      const result = await config.provider!.send(
+      const sent = await config.provider!.send(
         { reviewId, externalPropertyId: externalPropertyId! },
         draft,
       );
+      const result =
+        sent.state === "ready" || sent.state === "unavailable"
+          ? { state: "uncertain" as const, reason: "confirmation_pending" }
+          : sent;
       await finish(
         context,
         propertyId,
