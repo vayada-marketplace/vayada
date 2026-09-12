@@ -2,7 +2,7 @@ import {
   parseReplaceFinancePaymentMethodsCommand,
   type ReplaceFinancePaymentMethodsCommand,
 } from "@vayada/domain-finance";
-import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
+import { parsePmsPricingCurrency, PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -48,6 +48,72 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Finance payment-readiness comman
     await cleanup();
     await admin.end();
   });
+
+  it.each(["charge confirmation", "currency writer"])(
+    "avoids competing locks with %s",
+    async (writer) => {
+      const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+      let scopeStarted!: () => void;
+      const scopeQuery = new Promise<void>((resolve) => {
+        scopeStarted = resolve;
+      });
+      const guarded = createPgFinancePaymentReadinessCommandRepository({
+        connectionString: TEST_DATABASE_URL!,
+        now: () => new Date(acceptedAt),
+        pricingReadPort: {
+          getPropertyPricingCurrency: async () => ({
+            ...pricing,
+            currency: parsePmsPricingCurrency("EUR")!,
+            propertyId,
+            createdAt: acceptedAt,
+            updatedAt: acceptedAt,
+          }),
+        },
+        pool: {
+          end: () => pool.end(),
+          async connect() {
+            const client = await pool.connect();
+            return {
+              query<T extends QueryResultRow>(sql: string, values?: readonly unknown[]) {
+                const result = client.query<T>(sql, values ? [...values] : undefined);
+                if (sql.includes("FROM hotel_catalog.properties property")) scopeStarted();
+                return result;
+              },
+              release: () => client.release(),
+            };
+          },
+        },
+      });
+      let pending: ReturnType<typeof guarded.replacePaymentMethods> | undefined;
+      try {
+        await admin.query("BEGIN");
+        await admin.query("SET LOCAL statement_timeout = '2s'");
+        const currencyLock =
+          "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-pricing-currency:', $1::uuid::text), 0))";
+        const propertyLock = "SELECT id FROM hotel_catalog.properties WHERE id = $1 FOR SHARE";
+        await admin.query(writer === "currency writer" ? currencyLock : propertyLock, [propertyId]);
+        pending = guarded.replacePaymentMethods({
+          command: command("competing-charge-confirmation", {
+            selectedMethods: ["pay_at_property"],
+          }),
+          currentPricing: null,
+        });
+        await scopeQuery;
+        await admin.query(writer === "currency writer" ? propertyLock : currencyLock, [propertyId]);
+        await admin.query("COMMIT");
+        await expect(pending).resolves.toMatchObject({
+          ok: true,
+          response: {
+            paymentReadiness: { paymentMethodsRevision: 1, bookingPaymentReady: true },
+          },
+        });
+      } finally {
+        await admin.query("ROLLBACK");
+        await pending?.catch(() => undefined);
+        await pool.end();
+      }
+    },
+  );
 
   it("creates one versioned aggregate and exactly replays without duplicate side effects", async () => {
     const request = command("accept-once", { selectedMethods: ["pay_at_property", "card"] });

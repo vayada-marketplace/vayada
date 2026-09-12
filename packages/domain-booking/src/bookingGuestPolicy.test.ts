@@ -28,6 +28,11 @@ describe("Booking guest-policy contract", () => {
   it("preserves optional arrival windows and rejects malformed or reversed bounds", () => {
     const window = { ...choices, checkInUntil: "23:00", checkOutFrom: "07:00" };
     expect(parseBookingGuestPolicyChoices(window)).toEqual(window);
+    expect(parseBookingGuestPolicyChoices({ ...window, checkInUntil: "00:00" })).toEqual({
+      ...window,
+      checkInUntil: "00:00",
+    });
+    expect(bookingArrivalTimeErrors({ ...window, checkInUntil: "00:00" })).toEqual([]);
     expect(parseBookingGuestPolicyChoices(choices)).toEqual(choices);
     for (const change of [
       { checkInUntil: "14:00" },

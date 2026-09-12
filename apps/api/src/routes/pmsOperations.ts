@@ -1,3 +1,4 @@
+import type { PmsRoomClosureRepository } from "../domains/pmsRoomClosureCommandRepository.js";
 import { DEFAULT_FLEXIBLE_CANCELLATION_POLICY } from "../domains/pmsDefaultCancellationPolicy.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
@@ -1023,6 +1024,7 @@ export type PmsOperationsRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
   commandRepository?: PmsOperationsCommandRepository;
+  roomClosureRepository?: PmsRoomClosureRepository;
   linkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   resolveOnboardingRoomCurrency?: (propertyId: string) => Promise<string | null>;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -1226,6 +1228,7 @@ export async function registerPmsOperationsRoutes(
   app.addHook("onClose", async () => {
     await repository.close?.();
     await commandRepository?.close?.();
+    await options.roomClosureRepository?.dispose();
     await options.linkedInventoryGroupCommandRepository?.close();
     await bookingGuestPiiPort?.close?.();
     await options.propertyPlanReadRepository?.close?.();
@@ -1251,6 +1254,8 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/room-types/:roomTypeId",
     "/properties/:propertyId/room-types/:roomTypeId/duplicate",
     "/properties/:propertyId/room-types/:roomTypeId/retirement-impact",
+    "/properties/:propertyId/room-types/:roomTypeId/closure-impact",
+    "/properties/:propertyId/room-types/:roomTypeId/close",
     "/properties/:propertyId/linked-inventory-groups",
     "/properties/:propertyId/linked-inventory-groups/:groupId",
     "/properties/:propertyId/plan-limits",
@@ -3342,6 +3347,92 @@ export async function registerPmsOperationsRoutes(
     handleCheckoutChargeMarkPaid,
   );
 
+  if (options.roomClosureRepository) {
+    const closure = options.roomClosureRepository;
+    for (const method of ["GET", "POST"] as const)
+      app.route<{ Params: PmsRoomTypeParams; Body: unknown }>({
+        method,
+        url: `/properties/:propertyId/room-types/:roomTypeId/${method === "GET" ? "closure-impact" : "close"}`,
+        handler: async (request, reply) => {
+          if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? []))
+            return sendPmsOperationsError(reply, originNotAllowed());
+          const { propertyId, roomTypeId } = request.params;
+          if (!enforcePmsOperationsManagePolicy(request, reply, propertyId, ["owner", "operator"]))
+            return reply;
+          if (!isUuid(propertyId) || !isUuid(roomTypeId))
+            return sendPmsOperationsError(
+              reply,
+              invalidBody("Property and room IDs must be UUIDs."),
+            );
+          const context = request.authContext!;
+          if (context.selectedOrganization.kind !== "hotel_group")
+            return reply.code(403).send({ ok: false, error: { code: "setup_scope_unavailable" } });
+          const scope = {
+            propertyId,
+            roomTypeId,
+            organizationId: context.selectedOrganization.organizationId,
+            actorUserId: context.actor.internalUserId,
+          };
+          let result;
+          if (method === "GET") result = await closure.preview(scope);
+          else {
+            const raw = objectBody(request.body);
+            const idempotencyKey = singleIdempotencyKey(request);
+            const revisions = [
+              "expectedRoomFactsRevision",
+              "expectedRoomUnitsRevision",
+              "expectedCalendarRevision",
+            ] as const;
+            if (
+              !raw ||
+              !idempotencyKey ||
+              Object.keys(raw).length !== 4 ||
+              !revisions.every(
+                (key) =>
+                  Number.isSafeInteger(raw[key]) &&
+                  Number(raw[key]) > 0 &&
+                  Number(raw[key]) <= 2147483647,
+              ) ||
+              !(
+                raw.expectedActivePublicationRevisionId === null ||
+                (typeof raw.expectedActivePublicationRevisionId === "string" &&
+                  isUuid(raw.expectedActivePublicationRevisionId))
+              )
+            )
+              return sendPmsOperationsError(
+                reply,
+                invalidBody(
+                  "Closure requires three source revisions, the active publication revision (or null), and one Idempotency-Key header.",
+                ),
+              );
+            result = await closure.closeRoom({
+              ...scope,
+              idempotencyKey,
+              expectedRoomFactsRevision: Number(raw.expectedRoomFactsRevision),
+              expectedRoomUnitsRevision: Number(raw.expectedRoomUnitsRevision),
+              expectedCalendarRevision: Number(raw.expectedCalendarRevision),
+              expectedActivePublicationRevisionId: raw.expectedActivePublicationRevisionId as
+                | string
+                | null,
+              requestId: context.audit.requestId,
+              correlationId: context.audit.correlationId,
+            });
+          }
+          return reply
+            .code(
+              result.ok
+                ? 200
+                : result.error.code === "setup_scope_unavailable"
+                  ? 403
+                  : result.error.code === "room_type_not_found"
+                    ? 404
+                    : 409,
+            )
+            .send(result);
+        },
+      });
+  }
+
   if (commandRepository) {
     app.post<{ Params: PmsPropertyParams; Body: unknown }>(
       "/properties/:propertyId/room-types",
@@ -4384,6 +4475,11 @@ function enforcePmsOperationsManagePolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyId: string,
+  allowedRelationships: readonly ("owner" | "operator" | "front_desk")[] = [
+    "owner",
+    "operator",
+    "front_desk",
+  ],
 ): boolean {
   try {
     enforceRoutePolicy(request, {
@@ -4401,7 +4497,7 @@ function enforcePmsOperationsManagePolicy(
         product: "pms",
         resourceType: "pms_property",
         resourceId: propertyId,
-        allowedRelationships: ["owner", "operator", "front_desk"],
+        allowedRelationships,
       },
     });
     return true;
