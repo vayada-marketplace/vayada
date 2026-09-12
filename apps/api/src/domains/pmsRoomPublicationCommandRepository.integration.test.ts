@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
 import {
@@ -359,48 +359,66 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-publication adapters", 
     });
   });
 
-  it("leaves populated legacy pmsOperations amenities at revision one and unreviewed", async () => {
-    const created = await legacyRepository.createRoomType({
-      propertyId,
-      commandId: "legacy-room-command",
-      idempotencyKey: "legacy-room-command",
-      initialSetupOnly: true,
-      name: "Legacy Suite",
-      description: "Legacy command fixture",
-      category: "double",
-      occupancyLimits: { adults: 2, children: 0, total: 2 },
-      attributes: {},
-      amenities: ["balcony", "minibar"],
-      media: [],
-      baseRate: { amountDecimal: "120.00", currency: "EUR" },
-      nonRefundableRate: null,
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [
-        {
-          name: "Year-round",
-          tier: "standard",
-          from: "01-01",
-          to: "12-31",
-          rate: { amountDecimal: "120.00", currency: "EUR" },
-          minStayNights: 1,
-          maxStayNights: null,
+  it("rejects legacy room creation without seeding room facts or prices", async () => {
+    await expect(
+      legacyRepository.createRoomType({
+        propertyId,
+        commandId: "legacy-room-command",
+        idempotencyKey: "legacy-room-command",
+        initialSetupOnly: true,
+        name: "Legacy Suite",
+        description: "Legacy command fixture",
+        category: "double",
+        occupancyLimits: { adults: 2, children: 0, total: 2 },
+        attributes: {},
+        amenities: ["balcony", "minibar"],
+        media: [],
+        baseRate: { amountDecimal: "120.00", currency: "EUR" },
+        nonRefundableRate: null,
+        operatingPeriods: [{ from: "01-01", to: "12-31" }],
+        seasons: [
+          {
+            name: "Year-round",
+            tier: "standard",
+            from: "01-01",
+            to: "12-31",
+            rate: { amountDecimal: "120.00", currency: "EUR" },
+            minStayNights: 1,
+            maxStayNights: null,
+          },
+        ],
+        active: true,
+        sortOrder: 0,
+        roomCount: 1,
+        audit: {
+          actor: { kind: "user", userId: actorUserId, organizationId },
+          requestId: "legacy-room-command",
+          correlationId: "legacy-room-command",
+          reason: "Verify legacy amenity review defaults",
+          requestedAt: acceptedAt,
         },
-      ],
-      active: true,
-      sortOrder: 0,
-      roomCount: 1,
-      audit: {
-        actor: { kind: "user", userId: actorUserId, organizationId },
-        requestId: "legacy-room-command",
-        correlationId: "legacy-room-command",
-        reason: "Verify legacy amenity review defaults",
-        requestedAt: acceptedAt,
-      },
-    });
-    expect(created).toMatchObject({ ok: true });
-    if (!created.ok) throw new Error("Expected legacy room creation to succeed");
+      }),
+    ).rejects.toMatchObject({ code: "PRICING_UNAVAILABLE", statusCode: 503 });
+    for (const table of ["pms.room_types", "pms.rate_plans", "pms.rate_rules"]) {
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS count FROM ${table} WHERE property_id=$1::uuid`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+    }
+  });
 
-    await expect(readPublicationState(created.roomType.roomTypeId)).resolves.toMatchObject({
+  it("keeps historical legacy amenities unreviewed at revision one", async () => {
+    const roomTypeId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.room_types(id, property_id, name, amenities_snapshot)
+       VALUES ($1::uuid, $2::uuid, 'Historical Legacy Suite', '["balcony","minibar"]'::jsonb)`,
+      [roomTypeId, propertyId],
+    );
+    await expect(readPublicationState(roomTypeId)).resolves.toMatchObject({
       roomAmenitiesRevision: "1",
       roomAmenitiesReviewedAt: null,
       amenitiesSnapshot: ["balcony", "minibar"],

@@ -116,6 +116,8 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
             AND inventory.stay_date = offer.stay_date
            WHERE offer.property_id = $1::uuid
              AND offer.room_type_id::text = $2
+             AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+               WHERE closure.property_id=offer.property_id AND closure.room_type_id=offer.room_type_id)
              AND offer.public_offer_key = $3
              AND pms.stay_restrictions_allow(offer.property_id,offer.room_type_id,offer.rate_plan_id,$4::date,$5::date)
              AND offer.stay_date >= $4::date

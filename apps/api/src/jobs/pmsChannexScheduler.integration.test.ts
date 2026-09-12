@@ -44,16 +44,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     now: () => now,
   });
 
-  beforeAll(() => assertSafeTestDatabase(TEST_DATABASE_URL!));
-  afterAll(async () =>
-    Promise.all([
-      admin.end(),
-      store.close(),
-      worker.close?.(),
-      propertyProfileEvidence.close(),
-      publicOfferProjection.close?.(),
-    ]),
-  );
+  beforeAll(async () => {
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
+    await cleanupSchedulerFixtures(admin);
+  });
+  afterAll(async () => {
+    try {
+      if (TEST_DATABASE_URL) {
+        assertSafeTestDatabase(TEST_DATABASE_URL);
+        await cleanupSchedulerFixtures(admin);
+      }
+    } finally {
+      await Promise.all([
+        admin.end(),
+        store.close(),
+        worker.close?.(),
+        propertyProfileEvidence.close(),
+        publicOfferProjection.close?.(),
+      ]);
+    }
+  });
 
   // This scenario materializes multiple long horizons; allow CI to finish before the next test starts.
   it("paginates canonical property settings without Channex and reselects changed sources", async () => {
@@ -276,20 +286,30 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
          '{"status":"ready"}'::jsonb)`,
       [first.propertyId, `vay-925-${first.propertyId}`],
     );
+    // Historical offers remain evidence; inventory refresh must close them without repricing.
+    await admin.query(
+      `INSERT INTO distribution.public_room_offer_snapshots
+        (property_id,room_type_id,stay_date,public_offer_key,available_rooms,base_price_amount,currency)
+       VALUES ($1::uuid,$2::uuid,'2026-09-03','historical-offer',2,137,'EUR')`,
+      [first.propertyId, first.roomTypeId],
+    );
     await expect(
       publicOfferProjection.projectPending({ propertyId: first.propertyId }),
     ).resolves.toEqual({
       profileAvailable: true,
       pendingEvents: 2,
-      projectedOfferDays: 576,
+      projectedOfferDays: 1,
     });
     expect(
       await admin.query(
-        `SELECT max(stay_date)::text AS "openThrough", bool_and(sellable_publicly) AS sellable
+        `SELECT max(stay_date)::text AS "openThrough", bool_and(sellable_publicly) AS sellable,
+                min(base_price_amount)::text AS price, min(available_rooms)::int AS available
          FROM distribution.public_room_offer_snapshots WHERE property_id=$1::uuid`,
         [first.propertyId],
       ),
-    ).toMatchObject({ rows: [{ openThrough: "2028-03-31", sellable: true }] });
+    ).toMatchObject({
+      rows: [{ openThrough: "2026-09-03", sellable: false, price: "137.00", available: 1 }],
+    });
     const connectionId = randomUUID();
     await admin.query(
       `INSERT INTO pms.channel_binding_claims
@@ -376,24 +396,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
         operationType: "sync_ari" as const,
       },
     };
-    const forceResync = await managementPlans.plan(forceResyncJob);
-    const forceResyncAvailability = forceResync.requests[1]?.body as {
-      values: Array<{ date_from: string; date_to: string }>;
-    };
-    expect(forceResyncAvailability.values).toHaveLength(576);
-    expect(forceResyncAvailability.values[0]).toMatchObject({
-      date_from: "2026-09-03",
-      date_to: "2026-09-03",
-    });
-    expect(forceResyncAvailability.values.at(-1)).toMatchObject({
-      date_from: "2028-03-31",
-      date_to: "2028-03-31",
-    });
-    expect(forceResync.requests[2]?.body).toMatchObject({
-      values: expect.arrayContaining([
-        expect.objectContaining({ rate_plan_id: "vay-925-rate", date_to: "2028-03-31" }),
-        expect.objectContaining({ rate_plan_id: "vay-925-airbnb-rate", date_to: "2028-03-31" }),
-      ]),
+    await expect(managementPlans.plan(forceResyncJob)).rejects.toMatchObject({
+      code: "PRICING_UNAVAILABLE",
+      statusCode: 503,
     });
     const managementProvider = createChannexManagementProvider({
       apiBaseUrl: "https://channex.example.test",
@@ -431,7 +436,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       );
       await expect(managementProvider.execute(forceResyncJob)).resolves.toMatchObject({
         ok: false,
-        code: "mapping_missing",
+        code: "invalid_state",
       });
       const snapshot = await readSnapshot();
       expect(snapshot.sync.ari).toMatchObject({
@@ -450,7 +455,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     );
     await expect(managementProvider.execute(forceResyncJob)).resolves.toMatchObject({
       ok: false,
-      code: "mapping_missing",
+      code: "invalid_state",
     });
     expect((await readSnapshot()).sync.ari).toMatchObject({
       status: "failed",
@@ -1164,6 +1169,59 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
     ).toMatchObject({ rows: [{ coverageThrough: "2026-09-30", days: 56, changed: 56 }] });
   });
 });
+
+// Candidate selection is global, so abandoned fixtures from a previous run must not
+// contribute extra incomplete sources or pending jobs to this suite.
+async function cleanupSchedulerFixtures(pool: pg.Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const fixtures = await client.query<{ id: string }>(
+      "SELECT id FROM hotel_catalog.properties WHERE public_id LIKE 'vay-1435-%'",
+    );
+    const ids = fixtures.rows.map(({ id }) => id);
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      "DELETE FROM platform.job_attempts WHERE job_id IN (SELECT id FROM platform.jobs WHERE property_id=ANY($1::uuid[]))",
+      [ids],
+    );
+    for (const table of [
+      "platform.dead_letter_events",
+      "platform.product_audit_events",
+      "platform.outbox_events",
+      "platform.domain_events",
+      "platform.idempotency_keys",
+      "platform.jobs",
+      "distribution.public_room_offer_snapshots",
+      "distribution.public_hotel_bookability_profiles",
+      "pms.inventory_days",
+      "pms.inventory_materialization_coverage",
+      "pms.channel_sync_status",
+      "pms.channel_rate_plan_mappings",
+      "pms.channel_room_type_mappings",
+      "pms.channel_connections",
+      "pms.channel_binding_claims",
+      "pms.rate_plans",
+      "pms.rooms",
+      "pms.room_types",
+      "pms.operating_calendar_room_bindings",
+      "pms.operating_calendar_revisions",
+      "pms.calendar_auto_open_settings",
+      "pms.property_pricing_settings",
+      "hotel_catalog.property_public_profile_read_model",
+      "hotel_catalog.property_locations",
+    ]) {
+      await client.query(`DELETE FROM ${table} WHERE property_id=ANY($1::uuid[])`, [ids]);
+    }
+    await client.query("DELETE FROM hotel_catalog.properties WHERE id=ANY($1::uuid[])", [ids]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 type SeededProperty = { propertyId: string; roomTypeId: string; organizationId: string };
 
