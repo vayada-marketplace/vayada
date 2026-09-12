@@ -219,6 +219,8 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
+import { createPgGuestReviewCommands } from "./domains/pmsGuestReviews.js";
+import { createChannexGuestReviews } from "./integrations/channexGuestReviews.js";
 import { createPgReviewReplyCommands } from "./domains/pmsReviewReplies.js";
 import { createChannexReviewReplies } from "./integrations/channexReviewReplies.js";
 import { createPgPmsReviewRepository } from "./routes/pmsReviews.js";
@@ -1390,6 +1392,18 @@ const app = buildApp({
   pmsModuleActivationRepository,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
+    guestReviews: createPgGuestReviewCommands({
+      connectionString: targetDatabaseUrl,
+      provider:
+        config.channexManagement.capabilityModes.reviews === "mutating" &&
+        config.channexManagement.apiBaseUrl &&
+        config.channexManagement.apiKey
+          ? createChannexGuestReviews({
+              apiBaseUrl: config.channexManagement.apiBaseUrl,
+              apiKey: config.channexManagement.apiKey,
+            })
+          : undefined,
+    }),
     replies: createPgReviewReplyCommands({
       connectionString: targetDatabaseUrl,
       provider:

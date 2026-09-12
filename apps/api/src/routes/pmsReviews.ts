@@ -2,6 +2,8 @@ import pg from "pg";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReviewReplyCommands, ReviewReplyStatus } from "../domains/pmsReviewReplies.js";
+import type { GuestReviewCommands } from "../domains/pmsGuestReviews.js";
+import { parseGuestReviewDraft } from "../integrations/channexGuestReviews.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export type PmsReview = {
@@ -23,16 +25,19 @@ export type PmsReviewRepository = {
     filters: { channel?: string; minRating?: number; limit: number; offset: number },
   ): Promise<{ items: PmsReview[]; total: number }>;
   replies?: ReviewReplyCommands;
+  guestReviews?: GuestReviewCommands;
   close?(): Promise<void>;
 };
 
 export function createPgPmsReviewRepository(config: {
   connectionString: string;
   replies?: ReviewReplyCommands;
+  guestReviews?: GuestReviewCommands;
 }): PmsReviewRepository {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: 5 });
   return {
     replies: config.replies,
+    guestReviews: config.guestReviews,
     async list(_context, propertyId, filters) {
       const values: unknown[] = [propertyId];
       const where = ["property_id = $1"];
@@ -71,7 +76,11 @@ export function createPgPmsReviewRepository(config: {
       try {
         await config.replies?.close();
       } finally {
-        await pool.end();
+        try {
+          await config.guestReviews?.close();
+        } finally {
+          await pool.end();
+        }
       }
     },
   };
@@ -82,6 +91,56 @@ export async function registerPmsReviewRoutes(
   options: { repository: PmsReviewRepository },
 ): Promise<void> {
   app.addHook("onClose", () => options.repository.close?.());
+  app.get<{ Params: { propertyId: string }; Querystring: { page?: string } }>(
+    "/properties/:propertyId/guest-reviews",
+    async (request) => {
+      const { propertyId } = request.params;
+      const context = enforceReviewPolicy(request, propertyId, true);
+      const page = boundedInteger(request.query.page, 1, 1, 2000);
+      return (
+        options.repository.guestReviews?.list(context, propertyId, page) ?? {
+          items: [],
+          stored: [],
+          more: false,
+          unavailable: true,
+        }
+      );
+    },
+  );
+  app.get<{ Params: { propertyId: string; reviewId: string } }>(
+    "/properties/:propertyId/guest-reviews/:reviewId",
+    async (request) => {
+      const { propertyId, reviewId } = request.params;
+      const context = enforceReviewPolicy(request, propertyId, true);
+      return (
+        options.repository.guestReviews?.check(context, propertyId, reviewId) ?? {
+          reviewId,
+          guestName: "",
+          reservationCode: "",
+          state: "unavailable",
+          reason: "connection_unavailable",
+        }
+      );
+    },
+  );
+  app.post<{ Params: { propertyId: string; reviewId: string }; Body: unknown }>(
+    "/properties/:propertyId/guest-reviews/:reviewId",
+    async (request, reply) => {
+      const { propertyId, reviewId } = request.params;
+      const context = enforceReviewPolicy(request, propertyId, true);
+      const draft = parseGuestReviewDraft(request.body);
+      if (!draft) return reply.status(400).send({ code: "invalid_guest_review" });
+      return (
+        options.repository.guestReviews?.submit(context, propertyId, reviewId, draft) ?? {
+          reviewId,
+          guestName: "",
+          reservationCode: "",
+          state: "unavailable",
+          reason: "connection_unavailable",
+        }
+      );
+    },
+  );
   app.get<{ Params: { propertyId: string; reviewId: string } }>(
     "/properties/:propertyId/reviews/:reviewId/reply",
     async (request) => {
