@@ -1,16 +1,12 @@
-import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 import { createHash, randomUUID } from "node:crypto";
+import { enqueueChannexMealChange } from "./pmsChannexMealChange.js";
 
 import {
   PMS_PRICING_CONTRACT_VERSION,
   PMS_PRICING_CURRENCY_CHANGE_BLOCKER_CODES,
-  parseFlexibleRatePlanCommandResult,
   parsePropertyPricingCurrencyCommandResult,
-  serializeFlexibleRatePlanFingerprint,
   serializePropertyPricingCurrencyFingerprint,
-  type FlexibleRatePlanCommandError,
   type FlexibleRatePlanCommandResult,
-  type FlexibleCancellationTerms,
   type PmsPricingCommandPort,
   type PmsPricingCurrency,
   type PmsPricingCurrencyChangeBlocker,
@@ -23,13 +19,11 @@ import {
 } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { PMS_PRICING_CURRENCY_CAPABILITIES_PORT } from "./pmsPricingCurrencyCapabilities.js";
 import {
-  pmsFlexibleRatePlanSnapshotFromRow,
   pmsPricingCurrencySnapshotFromRow,
-  type PmsFlexibleRatePlanRow,
   type PmsPricingCurrencyRow,
 } from "./pmsPricingReadModel.js";
-import { PMS_PRICING_CURRENCY_CAPABILITIES_PORT } from "./pmsPricingCurrencyCapabilities.js";
 
 export type PmsPricingCommandClient = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -89,7 +83,6 @@ type AcceptedChange = {
 type CommandWorkResult<R extends AnyResult> = { result: R; change?: AcceptedChange };
 
 type LockedCurrencyRow = PmsPricingCurrencyRow;
-type LockedRoomTypeRow = { roomFactsRevision: number | string };
 type LocalBlockerCountsRow = {
   flexibleRatePlanCount: number | string;
   legacyRoomTypePriceCount: number | string;
@@ -99,27 +92,12 @@ type LocalBlockerCountsRow = {
 type LegacyCurrencyRow = { currency: string };
 
 const CURRENCY_OPERATION = "pms.pricing_currency.upsert";
-const PLAN_OPERATION = "pms.flexible_rate_plan.upsert";
 const MANAGE_PERMISSION = "pms.operations.manage";
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const CURRENCY_RETURNING = `
   property_id::text AS "propertyId",
   currency::text AS currency,
   pricing_currency_revision AS "pricingCurrencyRevision",
-  created_at AS "createdAt",
-  updated_at AS "updatedAt"`;
-
-const PLAN_RETURNING = `
-  property_id::text AS "propertyId",
-  room_type_id::text AS "roomTypeId",
-  id::text AS "flexibleRatePlanId",
-  flexible_rate_plan_revision AS "flexibleRatePlanRevision",
-  source_room_facts_revision AS "sourceRoomFactsRevision",
-  base_rate_amount::text AS "amountDecimal",
-  currency::text AS currency,
-  meal_plan AS "mealPlan",
-  cancellation_policy_snapshot AS "cancellationTerms",
   created_at AS "createdAt",
   updated_at AS "updatedAt"`;
 
@@ -132,14 +110,6 @@ const CURRENCY_SPEC: CommandSpec<
   parseResult: parsePropertyPricingCurrencyCommandResult,
   scopeFailure: () => currencyFailure({ code: "setup_scope_unavailable" }),
   coordinationFailure: (code) => currencyFailure({ code }),
-};
-
-const PLAN_SPEC: CommandSpec<UpsertFlexibleRatePlanCommand, FlexibleRatePlanCommandResult> = {
-  operation: PLAN_OPERATION,
-  serializeFingerprint: serializeFlexibleRatePlanFingerprint,
-  parseResult: parseFlexibleRatePlanCommandResult,
-  scopeFailure: () => planFailure({ code: "setup_scope_unavailable" }),
-  coordinationFailure: (code) => planFailure({ code }),
 };
 
 export function createPgPmsPricingCommandRepository(
@@ -341,8 +311,9 @@ export function createPgPmsPricingCommandRepository(
     },
 
     async upsertFlexibleRatePlan(command) {
-      return runCommand(command, PLAN_SPEC, (client, acceptedAt) =>
-        upsertPlan(client, command, makeId, acceptedAt),
+      throw Object.assign(
+        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
       );
     },
 
@@ -477,218 +448,6 @@ async function upsertCurrency(
   };
 }
 
-async function upsertPlan(
-  client: PmsPricingCommandClient,
-  command: UpsertFlexibleRatePlanCommand,
-  makeId: () => string,
-  at: Date,
-): Promise<CommandWorkResult<FlexibleRatePlanCommandResult>> {
-  const currencyRow = await lockPricingCurrency(client, command.propertyId);
-  if (!currencyRow) return { result: planFailure({ code: "pricing_currency_not_configured" }) };
-  const pricingCurrency = pmsPricingCurrencySnapshotFromRow(currencyRow);
-  if (pricingCurrency.pricingCurrencyRevision !== command.expectedPricingCurrencyRevision) {
-    return {
-      result: planFailure({
-        code: "pricing_currency_revision_conflict",
-        currentRevision: pricingCurrency.pricingCurrencyRevision,
-      }),
-    };
-  }
-
-  const room = await client.query<LockedRoomTypeRow>(
-    `SELECT room_facts_revision AS "roomFactsRevision"
-     FROM pms.room_types
-     WHERE property_id = $1::uuid AND id = $2::uuid AND active
-     FOR UPDATE`,
-    [command.propertyId, command.roomTypeId],
-  );
-  if (!room.rows[0]) return { result: planFailure({ code: "room_type_not_found" }) };
-  const roomFactsRevision = positiveDatabaseInteger(room.rows[0].roomFactsRevision);
-  if (roomFactsRevision !== command.expectedRoomFactsRevision) {
-    return {
-      result: planFailure({
-        code: "room_facts_revision_conflict",
-        currentRevision: roomFactsRevision,
-      }),
-    };
-  }
-
-  const canonical = await lockCanonicalPlan(client, command.propertyId, command.roomTypeId);
-  let outcome: "created" | "updated";
-  let planRow: PmsFlexibleRatePlanRow;
-  if (canonical) {
-    const currentRevision = positiveDatabaseInteger(canonical.flexibleRatePlanRevision);
-    if (currentRevision !== command.expectedFlexibleRatePlanRevision) {
-      return {
-        result: planFailure({
-          code: "flexible_rate_plan_revision_conflict",
-          currentRevision,
-        }),
-      };
-    }
-    const updated = await client.query<PmsFlexibleRatePlanRow>(
-      `UPDATE pms.rate_plans
-       SET rate_type = 'flexible',
-           meal_plan = COALESCE($11::text, meal_plan, 'room_only'),
-           payment_policy = '{}'::jsonb,
-           deposit_policy = '{}'::jsonb,
-           cancellation_policy_snapshot = $4::jsonb,
-           base_rate_amount = $5::numeric(15, 2),
-           currency = $6,
-           active = TRUE,
-           flexible_rate_plan_revision = flexible_rate_plan_revision + 1,
-           source_room_facts_revision = $7,
-           source_pricing_currency_revision = $8,
-           updated_at = $9::timestamptz
-       WHERE property_id = $1::uuid
-         AND room_type_id = $2::uuid
-         AND id = $3::uuid
-         AND pricing_contract_version = '${PMS_PRICING_CONTRACT_VERSION}'
-         AND flexible_rate_plan_revision = $10
-       RETURNING ${PLAN_RETURNING}`,
-      [
-        command.propertyId,
-        command.roomTypeId,
-        canonical.flexibleRatePlanId,
-        JSON.stringify(canonicalCancellationTerms(command.cancellationTerms)),
-        command.baseAmountDecimal,
-        pricingCurrency.currency,
-        roomFactsRevision,
-        pricingCurrency.pricingCurrencyRevision,
-        at.toISOString(),
-        command.expectedFlexibleRatePlanRevision,
-        command.mealPlan ?? null,
-      ],
-    );
-    if (!updated.rows[0]) throw new Error("PMS flexible pricing plan compare-and-set failed");
-    planRow = updated.rows[0];
-    outcome = "updated";
-  } else {
-    if (command.expectedFlexibleRatePlanRevision !== 0) {
-      return {
-        result: planFailure({
-          code: "flexible_rate_plan_revision_conflict",
-          currentRevision: 0,
-        }),
-      };
-    }
-    const planId = makeId().toLowerCase();
-    if (!UUID_PATTERN.test(planId)) {
-      throw new Error("PMS pricing command ID generator returned an invalid UUID");
-    }
-    const inserted = await client.query<PmsFlexibleRatePlanRow>(
-      `INSERT INTO pms.rate_plans (
-         id, property_id, room_type_id, code, name, rate_type, meal_plan,
-         payment_policy, deposit_policy, cancellation_policy_snapshot,
-         base_rate_amount, currency, active, pricing_contract_version,
-         flexible_rate_plan_revision, source_room_facts_revision,
-         source_pricing_currency_revision, created_at, updated_at
-       ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, $4, 'Flexible', 'flexible', $11,
-         '{}'::jsonb, '{}'::jsonb, $5::jsonb, $6::numeric(15, 2), $7, TRUE,
-         '${PMS_PRICING_CONTRACT_VERSION}', 1, $8, $9,
-         $10::timestamptz, $10::timestamptz
-       )
-       RETURNING ${PLAN_RETURNING}`,
-      [
-        planId,
-        command.propertyId,
-        command.roomTypeId,
-        `ONB15-FLEX-${planId}`,
-        JSON.stringify(canonicalCancellationTerms(command.cancellationTerms)),
-        command.baseAmountDecimal,
-        pricingCurrency.currency,
-        roomFactsRevision,
-        pricingCurrency.pricingCurrencyRevision,
-        at.toISOString(),
-        command.mealPlan ?? "room_only",
-      ],
-    );
-    if (!inserted.rows[0]) throw new Error("PMS flexible pricing plan insert failed");
-    planRow = inserted.rows[0];
-    outcome = "created";
-  }
-
-  await persistFlexibleCancellationExtension(client, command, planRow.flexibleRatePlanId, at);
-  const flexibleRatePlan = pmsFlexibleRatePlanSnapshotFromRow({
-    ...planRow,
-    cancellationTerms: command.cancellationTerms,
-  });
-  const response = {
-    contractVersion: PMS_PRICING_CONTRACT_VERSION,
-    outcome,
-    flexibleRatePlan,
-    acceptedAt: at.toISOString(),
-  };
-  return {
-    result: { ok: true, response },
-    change: pricingChange(
-      command.propertyId,
-      pricingCurrency.pricingCurrencyRevision,
-      {
-        id: flexibleRatePlan.flexibleRatePlanId,
-        revision: flexibleRatePlan.flexibleRatePlanRevision,
-      },
-      {
-        eventOutcome: outcome === "created" ? "flexible_plan_created" : "flexible_plan_updated",
-        resourceType: "flexible_rate_plan",
-        resourceId: flexibleRatePlan.flexibleRatePlanId,
-      },
-    ),
-  };
-}
-
-function canonicalCancellationTerms(terms: FlexibleCancellationTerms) {
-  return {
-    type: terms.type,
-    freeCancellationDeadlineDays: terms.freeCancellationDeadlineDays,
-    afterDeadlinePenalty: terms.afterDeadlinePenalty,
-    noShowPenalty: terms.noShowPenalty,
-  };
-}
-
-async function persistFlexibleCancellationExtension(
-  client: PmsPricingCommandClient,
-  command: UpsertFlexibleRatePlanCommand,
-  flexibleRatePlanId: string,
-  at: Date,
-): Promise<void> {
-  const hasExtension = Object.keys(command.cancellationTerms).some(
-    (key) =>
-      !["type", "freeCancellationDeadlineDays", "afterDeadlinePenalty", "noShowPenalty"].includes(
-        key,
-      ),
-  );
-  if (!hasExtension) {
-    await client.query(
-      `DELETE FROM pms.flexible_rate_plan_cancellation_extensions
-       WHERE property_id = $1::uuid
-         AND room_type_id = $2::uuid
-         AND flexible_rate_plan_id = $3::uuid`,
-      [command.propertyId, command.roomTypeId, flexibleRatePlanId],
-    );
-    return;
-  }
-  await client.query(
-    `INSERT INTO pms.flexible_rate_plan_cancellation_extensions (
-       flexible_rate_plan_id, property_id, room_type_id, cancellation_terms,
-       created_at, updated_at
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5::timestamptz, $5::timestamptz)
-     ON CONFLICT (flexible_rate_plan_id) DO UPDATE SET
-       cancellation_terms = EXCLUDED.cancellation_terms,
-       updated_at = EXCLUDED.updated_at
-     WHERE pms.flexible_rate_plan_cancellation_extensions.property_id = EXCLUDED.property_id
-       AND pms.flexible_rate_plan_cancellation_extensions.room_type_id = EXCLUDED.room_type_id`,
-    [
-      flexibleRatePlanId,
-      command.propertyId,
-      command.roomTypeId,
-      JSON.stringify(command.cancellationTerms),
-      at.toISOString(),
-    ],
-  );
-}
-
 function pricingChange(
   propertyId: string,
   pricingCurrencyRevision: number,
@@ -804,24 +563,6 @@ async function lockPricingCurrency(
     [propertyId],
   );
   if (result.rows.length > 1) throw new Error("PMS property pricing currency is not unique");
-  return result.rows[0] ?? null;
-}
-
-async function lockCanonicalPlan(
-  client: PmsPricingCommandClient,
-  propertyId: string,
-  roomTypeId: string,
-): Promise<PmsFlexibleRatePlanRow | null> {
-  const result = await client.query<PmsFlexibleRatePlanRow>(
-    `SELECT ${PLAN_RETURNING}
-     FROM pms.rate_plans
-     WHERE property_id = $1::uuid
-       AND room_type_id = $2::uuid
-       AND pricing_contract_version = '${PMS_PRICING_CONTRACT_VERSION}'
-     FOR UPDATE`,
-    [propertyId, roomTypeId],
-  );
-  if (result.rows.length > 1) throw new Error("PMS canonical flexible pricing plan is not unique");
   return result.rows[0] ?? null;
 }
 
@@ -1249,18 +990,6 @@ function currencyFailure(
   error: PropertyPricingCurrencyCommandError,
 ): PropertyPricingCurrencyCommandResult {
   return { ok: false, error };
-}
-
-function planFailure(error: FlexibleRatePlanCommandError): FlexibleRatePlanCommandResult {
-  return { ok: false, error };
-}
-
-function positiveDatabaseInteger(value: number | string): number {
-  const parsed = databaseInteger(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new Error("PMS pricing database revision is invalid");
-  }
-  return parsed;
 }
 
 function nonNegativeDatabaseInteger(value: number | string): number {
