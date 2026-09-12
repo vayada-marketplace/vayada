@@ -54,7 +54,13 @@ export function PreparedHotelImportPanel({
   const load = useCallback(
     async (preserveSourceId?: string) => {
       const currentGeneration = generation.current;
-      const next = await client.get<PreparedImportResponse>(endpoint);
+      let next: PreparedImportResponse;
+      try {
+        next = await client.get<PreparedImportResponse>(endpoint);
+      } catch (error) {
+        if (generation.current !== currentGeneration) return false;
+        throw error;
+      }
       if (generation.current !== currentGeneration) return false;
       setState(next);
       if (preserveSourceId && next.import?.sourceId === preserveSourceId) {

@@ -101,44 +101,52 @@ describe("prepared import review", () => {
     await act(async () => button("Save selected items").props.onClick());
     expect(post.mock.calls[0][1].data.property).toEqual({ displayName: "Prepared" });
   });
-  it.each(["property", "source"])(
-    "ignores delayed manual refresh after switching %s",
-    async (dimension) => {
-      let resolveOld!: (value: PreparedImportResponse) => void;
-      const get = vi.fn().mockResolvedValue(response());
-      const post = vi.fn();
-      const client = { get, post };
-      const onSaved = vi.fn();
-      await act(async () => {
-        renderer = create(
-          <PreparedHotelImportPanel client={client} propertyId="a" onSaved={onSaved} />,
-        );
-      });
-      await act(async () => button("Review prepared hotel data").props.onClick());
-      get.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveOld = resolve;
-          }),
+  it.each([
+    ["property", "success"],
+    ["property", "failure"],
+    ["source", "success"],
+    ["source", "failure"],
+  ])("ignores delayed manual refresh after switching %s (%s)", async (dimension, outcome) => {
+    let rejectOld!: (error: Error) => void;
+    let resolveOld!: (value: PreparedImportResponse) => void;
+    const get = vi.fn().mockResolvedValue(response());
+    const post = vi.fn();
+    const client = { get, post };
+    const onSaved = vi.fn();
+    await act(async () => {
+      renderer = create(
+        <PreparedHotelImportPanel client={client} propertyId="a" onSaved={onSaved} />,
       );
-      await act(async () => button("Refresh").props.onClick());
-      get.mockResolvedValue(response("Hotel B"));
-      await act(async () =>
-        renderer.update(
-          <PreparedHotelImportPanel
-            client={client}
-            propertyId={dimension === "property" ? "b" : "a"}
-            importEndpoint={dimension === "source" ? "/other-source/review" : undefined}
-            onSaved={onSaved}
-          />,
-        ),
-      );
-      await act(async () => resolveOld(response("Hotel A")));
-      await act(async () => button("Review prepared hotel data").props.onClick());
-      expect(renderer.root.findByType("strong").children).toEqual(["Hotel B"]);
-      expect(onSaved).not.toHaveBeenCalled();
-    },
-  );
+    });
+    await act(async () => button("Review prepared hotel data").props.onClick());
+    get.mockImplementationOnce(
+      () =>
+        new Promise((resolve, reject) => {
+          resolveOld = resolve;
+          rejectOld = reject;
+        }),
+    );
+    await act(async () => button("Refresh").props.onClick());
+    get.mockResolvedValue(response("Hotel B"));
+    await act(async () =>
+      renderer.update(
+        <PreparedHotelImportPanel
+          client={client}
+          propertyId={dimension === "property" ? "b" : "a"}
+          importEndpoint={dimension === "source" ? "/other-source/review" : undefined}
+          onSaved={onSaved}
+        />,
+      ),
+    );
+    await act(async () => {
+      if (outcome === "failure") rejectOld(new Error("Old request failed"));
+      else resolveOld(response("Hotel A"));
+    });
+    await act(async () => button("Review prepared hotel data").props.onClick());
+    expect(renderer.root.findByType("strong").children).toEqual(["Hotel B"]);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+  });
   it("does not expose imported fields again while unselected fields remain", async () => {
     const next = response();
     next.import!.results["property:displayName"] = {

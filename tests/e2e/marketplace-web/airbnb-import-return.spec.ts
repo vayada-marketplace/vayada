@@ -196,6 +196,10 @@ for (const scenario of [
       ).not.toBeChecked();
       await page.reload();
       await expect(page.getByRole("status").first()).toContainText("saved for review");
+      await page.getByRole("button", { name: "Review prepared room data" }).click();
+      await expect(
+        page.getByText("Already imported. Your saved edits are preserved."),
+      ).toBeVisible();
       expect(posts).toBe(1);
       expect(reads).toBe(2);
     }
