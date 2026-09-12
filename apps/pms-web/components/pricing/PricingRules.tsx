@@ -19,7 +19,7 @@ export function PricingRules({ room, offer, scale }: { room: PricingConfiguratio
     {calendar?.base?.mode === "included_guests" && <p>Occupancy adjustments from base: {calendar.base.adjustments.map((value, index) => `${index + 1} adult${index ? "s" : ""} ${adjustment(value)}`).join("; ")}</p>}
     {calendar?.months.map((entry) => <p key={entry.month}>Month {entry.month}: {price(entry.price)}</p>)}
     {calendar?.seasons.map((entry, index) => <p key={index}>{entry.name} ({entry.tier}), {entry.from}–{entry.through}: {price(entry.price)}</p>)}
-    {calendar?.weekdays.map((entry) => <p key={entry.day}>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][entry.day]}: {adjustment(entry.adjustment)}</p>)}
+    {calendar?.weekdays.map((entry) => <p key={entry.day}>{["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][entry.day]}: {adjustment(entry.adjustment)}</p>)}
     {dates.map((entry) => <p key={entry.date}>{entry.date}: {price(entry.price)}</p>)}
     {offer.restrictions.kind === "inherit" ? <p>Stay restrictions inherited from parent.</p> : <>
       <p>{rules(offer.restrictions.rules)}</p>
