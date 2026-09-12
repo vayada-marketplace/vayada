@@ -62,8 +62,19 @@ code. It is not authentication or a substitute for stored evidence. Bind the
 public quote additionally to its server-issued reference, property, explicit
 calculation version, complete owner revisions, issue/expiry times and acceptance
 method. No client-supplied hash, source revision or cancellation snapshot is
-accepted as owner evidence. Define deterministic cross-runtime ordering before
-persisting durable keys; the current helper uses `localeCompare` for selections.
+accepted as owner evidence. Request keys use UTF-16 code-unit ordering rather
+than locale collation for selection/add-on IDs. This is defined before the
+replacement quote persistence adapter is introduced.
+
+`publicPricingSelection.ts` implements `public-pricing-selection.v1` as a pure
+Booking boundary. It bounds requests to 99 physical rooms, 99 guests per room,
+366 nights, 99 distinct extras and quantity99 per extra; these are resource
+ceilings, not inventory or capacity permission. IDs/promo codes are at most200
+UTF-16 code units and public offer keys512. The eventual HTTP adapter must also
+bound raw body bytes before JSON decoding. Only the server supplies property
+scope and exact current public-offer mappings. Missing/ambiguous selected mappings
+fail. Selected-person extras are rejected until their versioned input exists.
+No public route or stored evidence is activated by this parser.
 
 Selected-person add-ons are a known contract gap: `ReplacementStay.addons` has
 quantity/dates but no selected-person identity. Extend the versioned input and

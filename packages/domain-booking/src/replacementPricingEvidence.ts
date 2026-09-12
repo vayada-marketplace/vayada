@@ -56,6 +56,7 @@ export type ReplacementPricingResult = { kind: "priced"; evidence: ReplacementPr
     "unsupported_currency" | "overflow" | "stale" };
 
 const nonempty = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v === v.trim();
+const compareKey = (a: unknown[], b: unknown[]): number => String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0;
 function validTerms(t: ReplacementOfferTerms): boolean {
   const c = t.cancellation, p = t.payment;
   return nonempty(t.roomTypeId) && nonempty(t.offerId) && nonempty(t.revision) &&
@@ -91,8 +92,8 @@ export function parseReplacementStay(value: unknown): ReplacementStay | null {
 export function replacementStayKey(stay: ReplacementStay): string {
   return createHash("sha256").update(JSON.stringify([stay.propertyId, stay.checkIn, stay.checkOut, stay.currency,
     stay.rooms.map((r) => [r.selectionId, r.roomTypeId, r.offerId, r.guests.adults, [...r.guests.childAgesAtCheckIn].sort((a, b) => a - b)])
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    stay.addons.map((a) => [a.id, a.quantity, a.dates === null ? null : [...a.dates].sort()]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), stay.promoCode])).digest("hex");
+      .sort(compareKey),
+    stay.addons.map((a) => [a.id, a.quantity, a.dates === null ? null : [...a.dates].sort()]).sort(compareKey), stay.promoCode])).digest("hex");
 }
 /** Arithmetic/staleness check on trusted evaluator output, NOT client quote authorization. */
 export function replacementEvidenceStatus(e: ReplacementPricingEvidence, stay: ReplacementStay,
