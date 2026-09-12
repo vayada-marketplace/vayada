@@ -451,3 +451,19 @@ reply may be retried using the same closure without consuming or sending HTTP
 again. This entrypoint is trusted server code, not public authorization. Transport
 errors before a Response, aggregate reconciliation gates and dispatcher wiring
 remain pending. Retaining conflicting observations does not resolve them.
+
+VAY-2008 adds the fresh-claim retained-evidence gate. All prior attempts must be
+identified with original correlation and at least one complete HTTP 201 receipt;
+every retained receipt must be warning-free and match that attempt's exact
+property/room/rate through the existing identity parser. Tagged missing/invalid
+fields are interpreted explicitly. More than 1000 joined evidence rows is a local
+work-limit hold, never permission to ignore older history. A target with no prior
+attempts passes this history check, subject to the existing authority checks.
+
+Receipt persistence also performs a no-value-change target UPDATE under its lock.
+This advances the PostgreSQL row version so an older SERIALIZABLE claim snapshot
+cannot miss a committed receipt merely because it acquired the row lock later.
+Runtime receipt writers must use this persistence path; the storage-only INSERT
+trigger's row lock does not provide snapshot invalidation. The gate assumes its
+caller already holds the target lock. Dispatcher, sealing and activation must
+apply the same gate separately; this slice wires fresh creation claims only.

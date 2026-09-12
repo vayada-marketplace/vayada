@@ -321,6 +321,114 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows,
     ).toEqual([{ id: receiptId }]);
   });
+  it("blocks replacement creation when an identified attempt has missing or conflicting receipts", async () => {
+    const f = await recordingFixture();
+    await recordCreation(pool, f.input, f.selection, {
+      attemptId: f.claim.attemptId,
+      response: f.response,
+    });
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      f.claim.intentId,
+    ]);
+    const selection = { ...f.selection, operationKey: "replacement" };
+    expect(await claimPublishedChannexOfferCreate(pool, f.input, selection)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    const connectionId = (
+      await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
+        f.claim.targetId,
+      ])
+    ).rows[0].connection_id;
+    const scope = {
+      receiptId: randomUUID(),
+      attemptId: f.claim.attemptId,
+      jobAttemptId: f.claim.jobAttemptId,
+      workerId: f.claim.workerId,
+      propertyId: f.scope.propertyId,
+      connectionId,
+    };
+    await (
+      await prepareChannexReceiptPersistence(
+        pool,
+        scope,
+        new Response(JSON.stringify(f.response), { status: 201 }),
+      )
+    )();
+    const ready = await claimPublishedChannexOfferCreate(pool, f.input, selection);
+    expect(ready.kind).toBe("claimed");
+    if (ready.kind !== "claimed") throw new Error("claim required");
+    // A separate logical target exercises an already identified conflicting history.
+    const other = await recordingFixture();
+    await recordCreation(pool, other.input, other.selection, {
+      attemptId: other.claim.attemptId,
+      response: other.response,
+    });
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      other.claim.intentId,
+    ]);
+    const conn = (
+      await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
+        other.claim.targetId,
+      ])
+    ).rows[0].connection_id;
+    const correlation = {
+      ...scope,
+      receiptId: randomUUID(),
+      attemptId: other.claim.attemptId,
+      jobAttemptId: other.claim.jobAttemptId,
+      workerId: other.claim.workerId,
+      propertyId: other.scope.propertyId,
+      connectionId: conn,
+    };
+    await (
+      await prepareChannexReceiptPersistence(
+        pool,
+        correlation,
+        new Response(JSON.stringify(other.response), { status: 201 }),
+      )
+    )();
+    await (
+      await prepareChannexReceiptPersistence(
+        pool,
+        { ...correlation, receiptId: randomUUID() },
+        new Response(JSON.stringify(createdResponse(other.claim.request.body)), { status: 201 }),
+      )
+    )();
+    expect(
+      await claimPublishedChannexOfferCreate(pool, other.input, {
+        ...other.selection,
+        operationKey: "replacement",
+      }),
+    ).toEqual({ kind: "unavailable", reason: "creation_reconciliation_required" });
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_target_intents WHERE target_id=$1", [
+          other.claim.targetId,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+  });
+  it("invalidates an older claim snapshot when receipt capture commits", async () => {
+    const f = await receiptFixture();
+    const save = await prepareChannexReceiptPersistence(pool, f.correlation, f.response());
+    const reader = await pool.connect();
+    try {
+      await reader.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      await reader.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1", [
+        f.claim.targetId,
+      ]);
+      await save();
+      await expect(
+        reader.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE NOWAIT", [
+          f.claim.targetId,
+        ]),
+      ).rejects.toMatchObject({ code: "40001" });
+    } finally {
+      await reader.query("ROLLBACK");
+      reader.release();
+    }
+  });
   it("simulates room preflight, one creation, durable identity and configuration readback", async () => {
     const f = await creationFixture();
     const identity = {

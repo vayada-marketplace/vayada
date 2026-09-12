@@ -67,6 +67,11 @@ export async function prepareChannexReceiptPersistence(
         [scope.attemptId, scope.jobAttemptId, scope.workerId, scope.propertyId, scope.connectionId],
       );
       if (!target.rows.length) throw new Error("Channex receipt correlation unavailable");
+      // A row lock alone does not invalidate an older SERIALIZABLE snapshot.
+      await client.query(
+        "UPDATE pms.channex_offer_targets SET next_version=next_version WHERE id=$1",
+        [target.rows[0].id],
+      );
       await client.query(
         `INSERT INTO pms.channex_offer_create_receipts
          (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,provider_request_id,identity_evidence,has_warnings)
