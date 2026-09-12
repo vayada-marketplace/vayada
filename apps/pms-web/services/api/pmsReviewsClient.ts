@@ -51,3 +51,56 @@ export function submitReviewReply(
     pmsOperationsRequestOptions,
   );
 }
+
+export type GuestReviewDraft = {
+  respectHouseRules: number;
+  communication: number;
+  cleanliness: number;
+  publicReview: string;
+  privateReview: string;
+  recommended: boolean;
+};
+export type GuestReviewOpportunity = {
+  reviewId: string;
+  guestName: string;
+  reservationCode: string;
+  state: ReviewReplyStatus["state"];
+  reason?: string;
+  draft?: GuestReviewDraft;
+};
+const guestReviewPath = (propertyId: string) =>
+  `/api/pms/properties/${encodeURIComponent(propertyId)}/guest-reviews`;
+export function listGuestReviews(
+  propertyId: string,
+  page: number,
+): Promise<{
+  items: GuestReviewOpportunity[];
+  stored: GuestReviewOpportunity[];
+  more: boolean;
+  unavailable: boolean;
+}> {
+  return pmsOperationsClient.get(
+    `${guestReviewPath(propertyId)}?page=${page}`,
+    pmsOperationsRequestOptions,
+  );
+}
+export function checkGuestReview(
+  propertyId: string,
+  reviewId: string,
+): Promise<GuestReviewOpportunity> {
+  return pmsOperationsClient.get(
+    `${guestReviewPath(propertyId)}/${encodeURIComponent(reviewId)}`,
+    pmsOperationsRequestOptions,
+  );
+}
+export function submitGuestReview(
+  propertyId: string,
+  reviewId: string,
+  draft: GuestReviewDraft,
+): Promise<GuestReviewOpportunity> {
+  return pmsOperationsClient.post(
+    `${guestReviewPath(propertyId)}/${encodeURIComponent(reviewId)}`,
+    draft,
+    pmsOperationsRequestOptions,
+  );
+}
