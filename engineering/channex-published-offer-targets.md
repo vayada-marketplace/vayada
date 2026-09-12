@@ -467,3 +467,19 @@ Runtime receipt writers must use this persistence path; the storage-only INSERT
 trigger's row lock does not provide snapshot invalidation. The gate assumes its
 caller already holds the target lock. Dispatcher, sealing and activation must
 apply the same gate separately; this slice wires fresh creation claims only.
+
+VAY-2009 adds `prepareChannexOfferDispatch`, which obtains a fresh claim internally
+and returns a one-shot dispatch closure. It snapshots lease/selection, consumes
+the closure before asynchronous work, and checks current authority, exact derived
+request, generation and original job correlation before GET and after room
+preflight. Only its own unresolved attempt with no receipt may be excluded from
+the history gate. Prior/recovered attempts never gain a dispatch closure.
+
+Injected GET/create ports receive abort signals and 15-second deadlines; this
+composition has no runtime HTTP adapter. An ambiguous failure leaves retained
+unresolved work. A received Response uses bounded receipt persistence: a failed
+database write returns a persistence-only retry closure, never a second send.
+Retained means audit capture, not identification or success. Pre-Response failure
+receipts, configuration sealing and activation remain pending. Revocation after
+the final local check cannot cancel a provider mutation; reconciliation is still
+required for that in-flight window.

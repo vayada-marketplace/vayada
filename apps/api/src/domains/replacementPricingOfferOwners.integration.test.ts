@@ -1,3 +1,4 @@
+import { prepareChannexOfferDispatch } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
@@ -428,6 +429,98 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await reader.query("ROLLBACK");
       reader.release();
     }
+  });
+  function providerRoom(f: Awaited<ReturnType<typeof creationFixture>>) {
+    return {
+      data: {
+        type: "room_type",
+        id: f.externalRoomTypeId,
+        attributes: {
+          property_id: f.scope.propertyId,
+          room_kind: "room",
+          capacity: null,
+          occ_adults: 2,
+          occ_children: 0,
+          occ_infants: 0,
+        },
+      },
+    };
+  }
+  it("dispatches once through fresh checks and retains a simulated create response", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const getRoom = vi.fn(async () => providerRoom(f));
+    const create = vi.fn(
+      async (request: { body: unknown }) =>
+        new Response(JSON.stringify(createdResponse(request.body)), { status: 201 }),
+    );
+    const first = prepared.dispatch({ getRoom, create });
+    expect(await prepared.dispatch({ getRoom, create })).toEqual({
+      kind: "unavailable",
+      reason: "dispatch_already_used",
+    });
+    const result = await first;
+    expect(result.kind).toBe("retained");
+    expect(getRoom).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledOnce();
+    if (result.kind !== "retained") throw new Error("receipt required");
+    expect(
+      (
+        await pool.query("SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1", [
+          result.attemptId,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_create_attempts WHERE id=$1", [
+          result.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+    expect((await prepareChannexOfferDispatch(pool, f.input, f.selection)).kind).toBe(
+      "unavailable",
+    );
+  });
+  it("does not send after authority changes during provider preflight", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const create = vi.fn(async () => new Response("{}", { status: 201 }));
+    const result = await prepared.dispatch({
+      getRoom: async () => {
+        await pool.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+        return providerRoom(f);
+      },
+      create,
+    });
+    expect(result).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(create).not.toHaveBeenCalled();
+  });
+  it("holds an ambiguous create failure without allowing another dispatch", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const create = vi.fn(async () => {
+      throw new Error("private provider failure");
+    });
+    const ports = { getRoom: async () => providerRoom(f), create };
+    expect(await prepared.dispatch(ports)).toEqual({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    expect(await prepared.dispatch(ports)).toEqual({
+      kind: "unavailable",
+      reason: "dispatch_already_used",
+    });
+    expect(create).toHaveBeenCalledOnce();
+    expect((await prepareChannexOfferDispatch(pool, f.input, f.selection)).kind).toBe(
+      "unavailable",
+    );
   });
   it("simulates room preflight, one creation, durable identity and configuration readback", async () => {
     const f = await creationFixture();

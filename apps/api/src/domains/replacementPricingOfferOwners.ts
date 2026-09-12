@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
+import { verifyChannexOfferRoom } from "../integrations/channexOfferConfiguration.js";
 import { channexCreationReceiptsResolved } from "./channexCreationReceiptGate.js";
 import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
@@ -135,6 +138,7 @@ export async function claimPublishedChannexOfferCreate(
 type TargetWork =
   | "reserve"
   | "claim"
+  | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
 
 /** Records identity only; fresh authority still applies to late provider observations. */
@@ -158,6 +162,94 @@ export async function recordPublishedChannexOfferCreate(
   if (result.kind !== "available") return result;
   if (!result.identification) throw new Error("Creation identification missing");
   return { kind: "identified" as const, ...result.identification };
+}
+
+/** Only a newly committed claim can create this one-shot closure. No runtime adapter is wired. */
+export async function prepareChannexOfferDispatch(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+) {
+  const lease = { ...input },
+    selected = { ...selection };
+  const claimed = await withSelectedChannexTarget(pool, lease, selected, "claim");
+  if (claimed.kind !== "available") return claimed;
+  const claim = claimed.createClaim;
+  if (!claim) throw new Error("Creation claim missing");
+  const request = claim.request;
+  const room = claimed.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const body = claim.request.body as { rate_plan: { property_id: string; room_type_id: string } };
+  const work = {
+    kind: "dispatch" as const,
+    attemptId: claim.attemptId,
+    jobAttemptId: claim.jobAttemptId,
+    workerId: claim.workerId,
+  };
+  let used = false;
+  return {
+    kind: "prepared" as const,
+    async dispatch(ports: {
+      getRoom(path: string, signal: AbortSignal): Promise<unknown>;
+      create(payload: typeof request, signal: AbortSignal): Promise<Response>;
+    }) {
+      if (used) return { kind: "unavailable" as const, reason: "dispatch_already_used" };
+      used = true;
+      const before = await withSelectedChannexTarget(pool, lease, selected, work);
+      if (before.kind !== "available") return before;
+      let response: Response;
+      try {
+        await verifyChannexOfferRoom(
+          room,
+          {
+            externalPropertyId: body.rate_plan.property_id,
+            externalRoomTypeId: body.rate_plan.room_type_id,
+          },
+          (_method, path) => boundedProviderCall((signal) => ports.getRoom(path, signal)),
+        );
+        const current = await withSelectedChannexTarget(pool, lease, selected, work);
+        if (current.kind !== "available") return current;
+        response = await boundedProviderCall((signal) =>
+          ports.create(structuredClone(claim.request), signal),
+        );
+      } catch {
+        return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
+      }
+      const persist = await prepareChannexReceiptPersistence(
+        pool,
+        {
+          receiptId: randomUUID(),
+          attemptId: claim.attemptId,
+          jobAttemptId: claim.jobAttemptId,
+          workerId: claim.workerId,
+          propertyId: claimed.authority.lease.propertyId,
+          connectionId: claimed.authority.connectionId,
+        },
+        response,
+      );
+      try {
+        await persist();
+        return { kind: "retained" as const, attemptId: claim.attemptId };
+      } catch {
+        return { kind: "receipt_pending" as const, persist };
+      }
+    },
+  };
+}
+
+async function boundedProviderCall<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("Channex request deadline"));
+    }, 15000);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(() => run(controller.signal)), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function withSelectedChannexTarget(
@@ -349,7 +441,7 @@ async function withPublishedChannexPricing(
               ? "creation_reconciliation_required"
               : "creation_already_identified",
           );
-        if (work === "claim" && !await channexCreationReceiptsResolved(client, target.id))
+        if (work === "claim" && !(await channexCreationReceiptsResolved(client, target.id)))
           return unavailable("creation_reconciliation_required");
         const mapping = (
           await client.query(
@@ -412,7 +504,7 @@ async function withPublishedChannexPricing(
         } else {
           const attempt = (
             await client.query(
-              `SELECT id,state,external_rate_plan_id,
+              `SELECT id,state,external_rate_plan_id,job_attempt_id,worker_id,
               binding_generation=$4 AND external_property_id=$5 AND external_room_type_id=$6 AND request_body=$7::jsonb AS matches
              FROM pms.channex_offer_create_attempts WHERE id=$1 AND target_id=$2 AND intent_id=$3 FOR UPDATE NOWAIT`,
               [
@@ -427,22 +519,47 @@ async function withPublishedChannexPricing(
             )
           ).rows[0];
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
-          if (
-            work.externalPropertyId !== authority.externalPropertyId ||
-            work.externalRoomTypeId !== mapping.external_room_type_id
-          )
-            return unavailable("creation_identity_mismatch");
-          if (
-            attempt.state === "identified" &&
-            attempt.external_rate_plan_id !== work.externalRatePlanId
-          )
-            return unavailable("creation_identity_conflict");
-          if (attempt.state === "unresolved")
-            await client.query(
-              "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
-              [attempt.id, work.externalRatePlanId],
+          if ("kind" in work) {
+            if (
+              attempt.state !== "unresolved" ||
+              attempt.job_attempt_id !== work.jobAttemptId ||
+              attempt.worker_id !== work.workerId ||
+              lease.workerId !== work.workerId
+            )
+              return unavailable("creation_attempt_unavailable");
+            const original = await client.query(
+              "SELECT id FROM platform.job_attempts WHERE id=$1 AND job_id=$2 AND attempt_number=$3",
+              [work.jobAttemptId, lease.jobId, lease.attemptNumber],
             );
-          identification = { attemptId: attempt.id, externalRatePlanId: work.externalRatePlanId };
+            if (
+              !original.rows.length ||
+              (
+                await client.query(
+                  "SELECT id FROM pms.channex_offer_create_receipts WHERE attempt_id=$1 LIMIT 1",
+                  [attempt.id],
+                )
+              ).rows.length ||
+              !(await channexCreationReceiptsResolved(client, target.id, attempt.id))
+            )
+              return unavailable("creation_reconciliation_required");
+          } else {
+            if (
+              work.externalPropertyId !== authority.externalPropertyId ||
+              work.externalRoomTypeId !== mapping.external_room_type_id
+            )
+              return unavailable("creation_identity_mismatch");
+            if (
+              attempt.state === "identified" &&
+              attempt.external_rate_plan_id !== work.externalRatePlanId
+            )
+              return unavailable("creation_identity_conflict");
+            if (attempt.state === "unresolved")
+              await client.query(
+                "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+                [attempt.id, work.externalRatePlanId],
+              );
+            identification = { attemptId: attempt.id, externalRatePlanId: work.externalRatePlanId };
+          }
         }
       }
     }
