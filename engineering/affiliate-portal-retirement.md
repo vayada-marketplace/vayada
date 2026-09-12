@@ -179,3 +179,42 @@ Booking Finance access and pool cleanup. Writer removal follows separately.
 The unused commission reader/writer and its command/view/result exports are now
 removed. The remaining repository only reads Booking Finance access and closes
 its pool; it cannot change commission rules, balances, audit or payment evidence.
+
+## VAY-1500 affiliate dispatch retirement
+
+The unused affiliate payout runner and its exclusive provider port, result types
+and unit-test fixtures are removed. A source search across apps, packages, scripts
+and workflows found no application caller; the removed tests were its only callers.
+This follows the user's authorization to clean up the customer-free TypeScript
+system. It does not establish the absence of external jobs or stored obligations.
+
+The PostgreSQL affiliate store remains for a separate cleanup slice. Shared property
+dispatch, provider attempts, historical queue keys, platform payout operations and
+manual mark-paid guards remain unchanged. No job is replayed, record deleted or
+provider ownership changed.
+
+The next slice removes the unused affiliate PostgreSQL store factory, candidate
+query and exclusive store/row types and normalizers. No application callers remain.
+Its private mutation helpers are removed separately; shared property SQL, platform
+payout read/mark-paid paths and stored evidence remain unchanged.
+
+The final dispatcher slice removes private affiliate claim/success/failure and
+notification-audit writers, their job-update helper and exclusive candidate/context/
+mutation types and job-key exports. Shared property dispatch and provider-attempt
+evidence encoding remain intact, including nullable historical affiliate metadata.
+Platform manual mark-paid still checks the historical affiliate queue directly;
+this cleanup neither deletes queued records nor releases in-flight payment guards.
+
+## VAY-1500 affiliate fee-split retirement
+
+The next bounded change removes the obsolete affiliate argument, affiliate commission
+result and affiliate-only fee branch from the pure calculatePayoutSplit contract.
+Source search found only tests calling this helper. It retains the shared property
+calculation: fixed plans charge zero platform fee; commission plans use the direct
+booking or channel-manager rate, with existing rounding and validation.
+
+BillingConfigReadModel, stored affiliate fee metadata, Booking checkout snapshots,
+migrations, payout history and operational Finance APIs remain unchanged. Their
+retained fields are financial evidence, not authorization to calculate new affiliate
+commissions using the retired product rules. New earning calculations belong to the
+accepted Marketplace affiliate agreement/booking/commission design.
