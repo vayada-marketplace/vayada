@@ -32,6 +32,7 @@ export * from "./manualBookingSettlement.js";
 export * from "./subscriptions.js";
 export * from "./platformAffiliatePayouts.js";
 export * from "./affiliateCommission.js";
+export * from "./affiliatePercentagePolicy.js";
 export * from "./otaCommissionRules.js";
 export * from "./financialExpenses.js";
 export * from "./financialFolios.js";
