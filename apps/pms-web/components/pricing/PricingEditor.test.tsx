@@ -1018,3 +1018,27 @@ it("prefills a linked occupancy override and preserves pending guards through sa
   await click("Review saved charges"); expect(button("Edit date price").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
   client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit date price"); expect(field("Date 2 adults for Room 1 Offer 2").props.value).toBe("180.99");
 });
+
+it("replaces weekday adjustments exactly and preserves other rules", () => {
+  const room = changeWeekdayPrice(changeWeekdayPrice(snapshot.rooms[0], "flex", "0", { kind: "fixed", value: "-30.25" }), "flex", "6", { kind: "percentage", value: "10" });
+  const offer = room.offers[0]; if (offer.price.kind !== "independent") throw new Error("fixture");
+  for (const [kind, value, expected] of [["percentage", "-10.25", { kind: "percentage", basisPoints: -1025 }], ["fixed", "0", { kind: "fixed", deltaMinor: "0" }], ["fixed", "90071992547409.93", { kind: "fixed", deltaMinor: "9007199254740993" }]] as const) {
+    expect(changeWeekdayPrice(room, "flex", "0", { kind, value }, true)).toEqual({ ...room, offers: [{ ...offer, price: { ...offer.price, calendar: { ...offer.price.calendar, weekdays: [{ day: 0, adjustment: expected }, offer.price.calendar.weekdays[1]] } } }] });
+  }
+  expect(() => changeWeekdayPrice(room, "flex", "1", { kind: "fixed", value: "1" }, true)).toThrow("existing"); expect(() => changeWeekdayPrice(room, "flex", "0", null, true)).toThrow("existing");
+  for (const value of ["", "1e2", "1.001", "-100.01", "NaN"]) expect(() => changeWeekdayPrice(room, "flex", "0", { kind: "percentage", value }, true)).toThrow();
+  expect(changeWeekdayPrice({ ...room, currency: "KWD" }, "flex", "0", { kind: "fixed", value: "-1.234" }, true).offers[0].price).toMatchObject({ calendar: { weekdays: [{ adjustment: { deltaMinor: "-1234" } }, {}] } });
+});
+it("prefills weekday edits and requires fresh saved review after replacing their type", async () => {
+  const room = changeWeekdayPrice(snapshot.rooms[0], "flex", "0", { kind: "fixed", value: "-30.25" }); client.read.mockResolvedValueOnce({ ...snapshot, rooms: [room], revision: 7, sources, stale: false }); await mount(); await click("Save draft"); const draftId = saved.draftId;
+  const field = (name: string) => view.root.findByProps({ "aria-label": `${name} for Room 1 Offer 1` }); const fill = async (name: string, value: string) => act(async () => field(name).props.onChange({ target: { value } }));
+  await fill("Weekday", "1"); expect(button("Edit weekday adjustment").props.disabled).toBe(true); await click("Edit weekday adjustment"); expect(button("Apply weekday adjustment")).toBeUndefined(); await click("Cancel weekday entry");
+  await click("Edit weekday adjustment"); expect(field("Weekday").props.value).toBe("0"); expect(field("Weekday").props.disabled).toBe(true); expect(field("Weekday adjustment").props.value).toBe("-30.25");
+  expect(button("Clear weekday adjustment").props.disabled).toBe(true); await click("Clear weekday adjustment"); expect(button("Save draft").props.disabled).toBe(true); expect(button("Review saved charges").props.disabled).toBe(true);
+  await fill("Weekday adjustment type", "percentage"); expect(field("Weekday adjustment").props.value).toBe(""); await click("Apply weekday adjustment"); expect(view.root.findAllByProps({ role: "alert" }).length).toBeGreaterThan(0);
+  await click("Cancel weekday entry"); expect(button("Review saved charges").props.disabled).toBe(false); expect(client.saveDraft).toHaveBeenCalledTimes(1);
+  await act(async () => input().props.onChange({ target: { value: "150.25" } })); await click("Edit weekday adjustment"); await fill("Weekday adjustment type", "percentage"); await fill("Weekday adjustment", "-10.25"); await click("Apply weekday adjustment"); expect(button("Review saved charges").props.disabled).toBe(true); await click("Save draft");
+  expect(saved).toMatchObject({ draftId, revision: 2, baseRevision: 7 }); expect(saved.snapshot.rooms[0].offers[0].price).toMatchObject({ calendar: { base: { amountMinor: "15025" }, weekdays: [{ day: 0, adjustment: { kind: "percentage", basisPoints: -1025 } }] } });
+  await click("Review saved charges"); expect(button("Edit weekday adjustment").props.disabled).toBe(true); expect(button("Approve rates").props.disabled).toBe(true);
+  client.read.mockResolvedValueOnce({ ...saved.snapshot, revision: 8, sources, stale: false }); vi.mocked(window.confirm).mockReturnValue(true); await click("Reload pricing"); await click("Edit weekday adjustment"); expect(field("Weekday adjustment").props.value).toBe("-10.25"); expect(field("Weekday adjustment type").props.value).toBe("percentage");
+});
