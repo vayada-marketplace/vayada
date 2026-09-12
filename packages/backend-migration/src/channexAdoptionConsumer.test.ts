@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { consumeSignedChannexAdoptionManifest } from "./channexAdoptionConsumer.js";
+import { rollbackChannexAdoption } from "./channexAdoptionRollback.js";
 import * as manifestModule from "./channexAdoptionManifest.js";
 import type { ParsedChannexAdoptionManifest } from "./channexAdoptionManifest.js";
 
@@ -137,6 +138,35 @@ describe("Channex adoption consumer boundary", () => {
       expect(release).toHaveBeenCalledWith(failurePoint === "unlock" ? cleanupFailure : undefined);
     },
   );
+
+  it("preserves a rollback rejection when advisory unlock also fails", async () => {
+    const cleanupFailure = new Error("unlock failed");
+    const query = vi.fn(async (text: string) => {
+      if (text.includes("pg_advisory_unlock")) throw cleanupFailure;
+      return { rows: [] };
+    });
+    const release = vi.fn();
+
+    let caught: unknown;
+    try {
+      await rollbackChannexAdoption(
+        { connect: async () => ({ query, release }) } as never,
+        {
+          manifestId: uuid("1"),
+          reason: "test rollback",
+          expiresAt: "2026-09-13T10:00:00.000Z",
+          approvalRecordIds: [uuid("4"), uuid("5")],
+        },
+        config,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "ROLLBACK_MANIFEST_MISMATCH" });
+    expect(caught).not.toBe(cleanupFailure);
+    expect(release).toHaveBeenCalledWith(cleanupFailure);
+  });
 
   it.each([
     ["manifest", 0],

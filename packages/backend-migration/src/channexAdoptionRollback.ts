@@ -34,6 +34,7 @@ export async function rollbackChannexAdoption(
   const client = await pool.connect();
   let transactionOpen = false;
   let manifestLocked = false;
+  let activeError: unknown;
   const bindingLocks: string[] = [];
   const manifestLockKey = `channex.adoption.manifest:${input.manifestId}`;
   try {
@@ -150,21 +151,32 @@ export async function rollbackChannexAdoption(
     transactionOpen = false;
     return { manifestId: input.manifestId, claimId: consumption.claimId, replayed: false };
   } catch (error) {
+    activeError = error;
     if (transactionOpen) await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
-    if (!manifestLocked) client.release();
-    else {
-      try {
+    let cleanupError: unknown;
+    try {
+      if (manifestLocked) {
         for (const key of bindingLocks.reverse())
           await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [key]);
         await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [manifestLockKey]);
-        client.release();
-      } catch (error) {
-        client.release(error instanceof Error ? error : true);
-        throw error;
       }
+    } catch (error) {
+      cleanupError = error;
     }
+    try {
+      client.release(
+        cleanupError === undefined
+          ? undefined
+          : cleanupError instanceof Error
+            ? cleanupError
+            : true,
+      );
+    } catch (error) {
+      cleanupError ??= error;
+    }
+    if (activeError === undefined && cleanupError !== undefined) throw cleanupError;
   }
 }
 
