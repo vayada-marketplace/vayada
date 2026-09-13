@@ -13,8 +13,13 @@ describe("property setup draft request safety", () => {
     expect(snapshotPropertySetupDraftRequest(value)).toEqual({ ok: true, value });
   });
 
-  it("allows UUID source revisions without hiding adjacent sensitive values", () => {
-    const source = "hotel_catalog.policy:6fbb5870-a269-4f5e-bb09-52f752169470:r1";
+  it.each([
+    "6fbb5870-a269-4f5e-bb09-52f752169470",
+    "DE893704-0044-6F5E-BB09-52F752169470",
+    "DE893704-0044-7F5E-BB09-52F752169470",
+    "DE893704-0044-8F5E-BB09-52F752169470",
+  ])("allows UUID %s without hiding adjacent sensitive values", (id) => {
+    const source = `hotel_catalog.policy:${id}:r1`;
     expect(snapshotPropertySetupDraftRequest({ source })).toEqual({ ok: true, value: { source } });
     for (const secret of [
       "DE89 3704 0044 0532 0130 00",
