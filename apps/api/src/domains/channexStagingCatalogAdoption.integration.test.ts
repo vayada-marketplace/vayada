@@ -442,6 +442,7 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
       departure_date: "2026-09-15",
       amount: "100.00",
       ota_reservation_code: "6431849020",
+      ota_name: "BookingCom",
     });
     revision.rooms[0].days = { "2026-09-14": "100.00" };
     revision.rooms[0].meta.rate_plan_code = "16385048";
