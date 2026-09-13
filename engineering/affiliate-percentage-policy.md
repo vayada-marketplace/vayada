@@ -108,3 +108,14 @@ points, timestamp and approval state. This is editing history, not an active-rat
 selector: no version becomes effective merely because it is newest. Existing offer
 references and agreements retain their exact version. Empty history returns an empty
 list. The same route permission, entitlement and property checks apply.
+
+## Hotel commission editor
+
+The hotel profile Offers tab now includes an explicit percentage input, recent
+draft/approved rates, and review-before-approval for each immutable version. It uses
+the authenticated target API and canonical profile property ID, remounting when
+the selected property changes. Failed writes retain their retry key within the
+current editor session. Loading and recoverable failures are visible; refreshing
+reads stored history. Approval does not attach a policy to an offer, select an
+active rate or activate links. Offer-term association remains a subsequent step.
+The old collaboration-offering form also no longer invents a 5% commission.
