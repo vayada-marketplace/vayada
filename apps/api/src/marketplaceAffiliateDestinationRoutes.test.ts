@@ -82,7 +82,9 @@ async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure
 describe("Marketplace affiliate destination HTTP", () => {
   it("passes authorized scope to save and scoped reads", async () => {
     const { app, repository } = await setup();
-    expect((await app.inject({ ...endpoints[1]!, headers })).statusCode).toBe(201);
+    const saved = await app.inject({ ...endpoints[1]!, headers });
+    expect(saved.statusCode).toBe(201);
+    expect(saved.headers["cache-control"]).toBe("no-store");
     expect(repository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         propertyId,
@@ -92,7 +94,10 @@ describe("Marketplace affiliate destination HTTP", () => {
     );
     expect((await app.inject({ ...endpoints[0]!, headers })).statusCode).toBe(404);
     expect(repository.get).toHaveBeenCalledWith(propertyId, "hotel-org", versionId);
-    expect((await app.inject({ method: "GET", url: path, headers })).json()).toEqual({
+    const listed = await app.inject({ method: "GET", url: path, headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json()).toEqual({
       destinations: [],
     });
     expect(repository.list).toHaveBeenCalledWith(propertyId, "hotel-org");
@@ -203,16 +208,19 @@ describe("Marketplace affiliate destination HTTP", () => {
       destinationVersionId: versionId,
       replayed: true,
     });
-    expect((await app.inject({ ...endpoints[1]!, headers })).statusCode).toBe(200);
+    const replayed = await app.inject({ ...endpoints[1]!, headers });
+    expect(replayed.statusCode).toBe(200);
+    expect(replayed.headers["cache-control"]).toBe("no-store");
     repository.get.mockResolvedValue({
       destinationVersionId: versionId,
       configuration: { displayName: "Hotel", bookingUrl: "https://booking.example.com/" },
       createdAt: new Date(),
       trackingStatus: "not_validated",
     });
-    expect((await app.inject({ ...endpoints[0]!, headers })).json().trackingStatus).toBe(
-      "not_validated",
-    );
+    const exact = await app.inject({ ...endpoints[0]!, headers });
+    expect(exact.statusCode).toBe(200);
+    expect(exact.headers["cache-control"]).toBe("no-store");
+    expect(exact.json().trackingStatus).toBe("not_validated");
     repository.get.mockRejectedValue(new Error("database unavailable"));
     const failed = await app.inject({ ...endpoints[0]!, headers });
     expect(failed.statusCode).toBe(500);
