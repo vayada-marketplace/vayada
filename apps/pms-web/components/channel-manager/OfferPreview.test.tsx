@@ -101,7 +101,7 @@ it("requires explicit selection even for one guest and shows a verified preview 
   expect(view.root.findByProps({ "aria-label": "Primary guest count" }).props.value).toBe("");
   expect(JSON.stringify(view.toJSON())).not.toContain("Currency:");
 });
-it("ignores delayed results after selection or property changes", async () => {
+it("ignores delayed results after selection changes", async () => {
   await setup();
   await select();
   let finish!: (v: unknown) => void;
@@ -116,10 +116,6 @@ it("ignores delayed results after selection or property changes", async () => {
   await choose("Published offer", "other");
   await act(async () => finish(response));
   expect(JSON.stringify(view.toJSON())).not.toContain("Currency:");
-  await act(async () =>
-    view.update(<OfferPreview propertyId="61000000-0000-4000-8000-000000000002" />),
-  );
-  expect(view.root.findAllByType("select").every((s) => s.props.value === "")).toBe(true);
 });
 it("requires refresh after stale pricing and clears old results on errors or new publication", async () => {
   const read = await setup();
@@ -161,4 +157,61 @@ it("handles missing, stale and denied published reads without exposing controls"
   read.mockRejectedValue(new ApiErrorResponse(403, { code: "forbidden" }));
   await act(async () => view.root.findByType("button").props.onClick());
   expect(view.toJSON()).toBeNull();
+});
+
+it("discards a pending preview when switching to another property's publication", async () => {
+  const read = await setup();
+  await select();
+  let finish!: (v: unknown) => void;
+  vi.mocked(pmsOperationsClient.get).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() => button().props.onClick());
+  const nextId = "61000000-0000-4000-8000-000000000002";
+  read.mockResolvedValue({
+    ...publication,
+    rooms: [{ ...room, propertyId: nextId, currency: "USD" }],
+  });
+  await act(async () => view.update(<OfferPreview propertyId={nextId} />));
+  expect(createReplacementPricingClient).toHaveBeenLastCalledWith(nextId);
+  expect(view.root.findAllByType("select")).toHaveLength(3);
+  expect(view.root.findAllByType("select").every((s) => s.props.value === "")).toBe(true);
+  await select();
+  vi.mocked(pmsOperationsClient.get).mockResolvedValueOnce({
+    ...response,
+    propertyId: nextId,
+    configuration: { ...response.configuration, currency: "USD" },
+  });
+  await act(async () => button().props.onClick());
+  expect(JSON.stringify(view.toJSON())).toContain("USD");
+  await act(async () => finish(response));
+  expect(JSON.stringify(view.toJSON())).toContain("USD");
+  expect(JSON.stringify(view.toJSON())).not.toContain("EUR");
+  expect(vi.mocked(pmsOperationsClient.get).mock.calls[1][0]).toContain(`/properties/${nextId}/`);
+});
+it("discards a pending publication read after switching properties", async () => {
+  const read = await setup();
+  let finish!: (v: unknown) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  act(() =>
+    view.root
+      .findAllByType("button")
+      .find((b) => b.children.includes("Refresh published pricing"))!
+      .props.onClick(),
+  );
+  const nextId = "61000000-0000-4000-8000-000000000002";
+  read.mockResolvedValue(null);
+  await act(async () => view.update(<OfferPreview propertyId={nextId} />));
+  expect(JSON.stringify(view.toJSON())).toContain("Publish pricing first.");
+  await act(async () => finish(publication));
+  expect(JSON.stringify(view.toJSON())).toContain("Publish pricing first.");
+  expect(view.root.findAllByType("select")).toHaveLength(0);
 });
