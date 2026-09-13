@@ -11,6 +11,10 @@ import { lockReplacementPricingAuthorization } from "./replacementPricingAuthori
 import { lockReplacementPricingOfferOwners as verify } from "./replacementPricingOfferOwners.js";
 import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
+import { createReplacementPricingStore } from "./replacementPricingStore.js";
+import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
+import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
+import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -256,5 +260,227 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       const finance = await lockFinanceReplacementPricingSource(client, f.scope.propertyId);
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
+  });
+  async function publicFixture(publish = true) {
+    const f = await fixture(),
+      propertyId = f.scope.propertyId;
+    await pool.query(
+      "UPDATE hotel_catalog.properties SET profile_status='complete',lifecycle_status='active' WHERE id=$1",
+      [propertyId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1::uuid,$1::text,'canonical')",
+      [propertyId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+      (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+      VALUES($1::uuid,$1::text,'Published pricing test',$1::text,'en',ARRAY['en'],'complete')`,
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+      (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,supported_currencies,
+      profile_status,freshness_status,public_setup_completeness,capabilities)
+      VALUES($1::uuid,$1::text,$1::text,'https://example.test','https://example.test','Etc/UTC','EUR',ARRAY['EUR'],
+      'public','fresh','{"status":"ready"}','{"paymentMethods":["pay_at_property"]}')`,
+      [propertyId],
+    );
+    const authority = createBookingPricingAuthorityStore(pool);
+    const choice = await authority.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      authority: "vayada",
+    });
+    const publishPrices = () =>
+      createReplacementPricingStore(pool, createReplacementPricingStorageGuard(f.context)).save(
+        f.scope,
+        {
+          requestId: randomUUID(),
+          expectedRevision: 0,
+          sources: f.sources,
+          snapshot: f.snapshot,
+        },
+      );
+    if (publish) await publishPrices();
+    const readPublic = async (slug: unknown = propertyId) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockPublicPricingPublication(client, slug);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, authority, choice, readPublic, publishPrices };
+  }
+  it("reads only the complete current publication with real owner evidence, never a draft", async () => {
+    const f = await publicFixture(false);
+    expect(await f.readPublic()).toBeNull();
+    await f.publishPrices();
+    const result = await f.readPublic();
+    expect(result).toMatchObject({
+      scope: { propertyId: f.scope.propertyId, authorityRevision: f.choice.revision },
+      publication: { revision: 1, currency: "EUR", sources: f.sources },
+      finance: f.finance,
+      charges: f.charges,
+    });
+    expect(result?.publication.rooms).toHaveLength(2);
+    expect(result?.terms).toHaveLength(3);
+    expect(result?.pmsSourceRevision).toMatch(/^booking\.pms\.publication\.v2:[a-f0-9]{64}$/);
+    await pool.query(
+      "UPDATE pms.pricing_v2_drafts SET draft_revision=draft_revision+1 WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect((await f.readPublic())?.pmsSourceRevision).toBe(result?.pmsSourceRevision);
+    expect(await f.readPublic(randomUUID())).toBeNull();
+  });
+  it("changes the source identity after a new authority choice and refuses external or hidden properties", async () => {
+    const f = await publicFixture(),
+      initial = await f.readPublic();
+    const same = await f.authority.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: f.choice.revision,
+      authority: "vayada",
+    });
+    expect((await f.readPublic())?.pmsSourceRevision).not.toBe(initial?.pmsSourceRevision);
+    await f.authority.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: same.revision,
+      authority: "external",
+    });
+    expect(await f.readPublic()).toBeNull();
+    const hidden = await publicFixture();
+    await pool.query(
+      "UPDATE distribution.public_hotel_bookability_profiles SET profile_status='unpublished' WHERE property_id=$1",
+      [hidden.scope.propertyId],
+    );
+    expect(await hidden.readPublic()).toBeNull();
+  });
+  it("rejects complete publications after room or Finance source changes", async () => {
+    const f = await publicFixture(),
+      client = await pool.connect();
+    try {
+      for (const sql of [
+        "UPDATE pms.room_types SET active=false WHERE property_id=$1",
+        "UPDATE pms.room_types SET room_attributes='{\"changed\":true}' WHERE property_id=$1",
+        "INSERT INTO pms.room_types(property_id,name) VALUES($1,'Added room')",
+        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+        "UPDATE finance.payment_settings SET default_currency='USD' WHERE property_id=$1",
+      ]) {
+        await client.query("BEGIN");
+        try {
+          await client.query(sql, [f.scope.propertyId]);
+          expect(await lockPublicPricingPublication(client, f.scope.propertyId)).toBeNull();
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      }
+    } finally {
+      client.release();
+    }
+    expect(await f.readPublic()).not.toBeNull();
+  });
+  it("rejects a changed policy on any published offer", async () => {
+    const f = await publicFixture();
+    const last = f.terms[2];
+    await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: last.revision,
+      terms: { ...f.termsInput, roomTypeId: last.roomTypeId, offerId: last.offerId },
+    });
+    expect(await f.readPublic()).toBeNull();
+  });
+  it("keeps publication and owner writes serialized through the consuming transaction", async () => {
+    const f = await publicFixture(),
+      client = await pool.connect();
+    const writer = new pg.Pool({ connectionString: url, max: 1, options: "-c lock_timeout=100ms" });
+    try {
+      await client.query("BEGIN");
+      expect(await lockPublicPricingPublication(client, f.scope.propertyId)).not.toBeNull();
+      await expect(
+        writer.query("UPDATE pms.room_types SET active=false WHERE property_id=$1", [
+          f.scope.propertyId,
+        ]),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        writer.query(
+          "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+          [f.scope.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, {
+          requestId: randomUUID(),
+          expectedRevision: f.terms[0].revision,
+          terms: f.termsInput,
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        createBookingPricingAuthorityStore(writer).save(f.context, f.scope, {
+          requestId: randomUUID(),
+          expectedRevision: f.choice.revision,
+          authority: "external",
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await writer.end();
+    }
+  });
+
+  it("rejects unknown, forged and mismatched saved owner evidence", async () => {
+    const f = await publicFixture(false),
+      client = await pool.connect();
+    try {
+      for (const change of [
+        { sources: { ...f.sources, room: "forged" } },
+        { sources: { ...f.sources, terms: "forged" } },
+        { sources: { ...f.sources, finance: "forged" } },
+        { sources: { ...f.sources, extra: "unverified" } },
+        { owners: { ...f.snapshot.ownerReferences, finance: "foreign" } },
+        { owners: { ...f.snapshot.ownerReferences, charges: randomUUID() } },
+        { owners: { ...f.snapshot.ownerReferences, extra: "unverified" } },
+      ]) {
+        await client.query("BEGIN");
+        try {
+          // Construct a new uncommitted publication; never mutate sealed history or disable guards.
+          await client.query(
+            `INSERT INTO pms.pricing_v2_revisions
+            (property_id,revision,room_count,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id)
+            VALUES($1,1,2,'EUR',$2,$3,$4,$5,$6)`,
+            [
+              f.scope.propertyId,
+              change.sources ?? f.sources,
+              change.owners ?? f.snapshot.ownerReferences,
+              randomUUID(),
+              "a".repeat(64),
+              f.scope.actorUserId,
+            ],
+          );
+          for (const room of f.snapshot.rooms)
+            await client.query(
+              `INSERT INTO pms.pricing_v2_rooms
+            (property_id,revision,room_type_id,currency,configuration) VALUES($1,1,$2,'EUR',$3)`,
+              [f.scope.propertyId, room.roomTypeId, room],
+            );
+          await client.query("UPDATE pms.pricing_v2_heads SET revision=1 WHERE property_id=$1", [
+            f.scope.propertyId,
+          ]);
+          expect(await lockPublicPricingPublication(client, f.scope.propertyId)).toBeNull();
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      }
+    } finally {
+      client.release();
+    }
+    expect(await f.readPublic()).toBeNull();
   });
 });
