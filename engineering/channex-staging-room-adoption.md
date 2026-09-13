@@ -135,3 +135,51 @@ with the same scope, `--catalog-hash HASH --retained-revision`. Do not pass a
 channel ID. The original failed job, protected bookings, provider stop-sell and
 global observe-only guards remain intact. This mode supplies catalog evidence
 only; it does not supply missing canonical room facts or authorize production use.
+
+## Approved single-date staging readiness (VAY-2013)
+
+The retained test reservation stays on 2026-09-14, outside the shared property's
+09-20–09-21 recurring operating schedule. The user approved exactly one double
+bed, a private bathroom, one physical unit, and a staging-only correction for
+that room/date. Those facts and capacity are established by the ordinary owned
+commands. Changing recurrence, year-round operation, or materializing the full
+shared horizon would exceed this authorization.
+
+First use the owned calendar preview/upsert to add only the approved target room
+binding (facts/units revisions 2, capacity/limit one), preserving the existing
+recurring schedule and other room limits. This advances revision 8 to 9 without
+materializing other dates or advancing property-wide coverage. The existing
+calendar-room foreign key remains mandatory.
+
+A dedicated PMS-owned staging command may preview/apply one explicit operational
+inventory exception for canonical room `487d717d-6e61-4696-9ea9-3338f069ca06` on
+`2026-09-14`, exclusively for the retained VAY-2013 tuple above. It reuses the
+existing catalog evidence/binding verification, property inventory lock, and
+inventory day persistence. It is not mounted as a product API and is unavailable
+outside the exact next/staging/observe-only scope. It creates no provider writes,
+public projection, recurring configuration, property coverage claim, or units.
+
+Preview is read-only. Its deterministic hash binds the exact catalog receipt,
+active binding generation, canonical facts/unit revisions, physical unit identity,
+accepted immutable calendar revision 9, date, capacity one and explicit approval.
+Apply revalidates under the existing inventory lock and room/binding locks. It
+rejects publication, closure, blocks, linked inventory, missing/changed facts or
+capacity, any pre-existing target inventory without its own receipt, and stale
+preview hashes. The current recurring calendar and coverage remain unchanged.
+The immutable audit receipt records the explicit date exception, its base
+calendar source and the resulting inventory signature. The deterministic key
+binds this receipt to the exact inventory identity. This provenance does not claim that the recurring schedule opens the
+date or that the new room has full-horizon coverage.
+
+Day creation and its receipt commit together. Replay verifies the same receipt
+and owned row without resetting subsequent booking occupancy. An altered,
+removed, re-materialized or conflicting row rejects; replay never recreates it.
+The existing scoped importer remains responsible for all booking/evidence writes
+and normal provider ACK. General materialization and production closed-day guards
+remain unchanged. No automatic provider ARI or public publication is triggered.
+
+Verify wrong scope/configuration, changed evidence/revisions, stale apply,
+concurrent apply, rollback and replay on PostgreSQL 16/17. A deployed canary
+must prove only the target date/room changed and normal import produces exactly
+one OTA GBP100 nightly evidence row; protected bookings, original failed job,
+recurrence, coverage, all other inventory rows and provider state remain intact.
