@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { saveFinanceAffiliatePercentagePolicyFromMarketplace as save } from "./financeAffiliatePercentagePolicySave.js";
 import { approveFinanceAffiliatePercentagePolicyFromMarketplace as approve } from "./financeAffiliatePercentagePolicyApprove.js";
 import { resolvePgFinanceAffiliatePercentagePolicy as resolve } from "./financeAffiliatePercentagePolicyResolver.js";
+import { createPgFinanceAffiliatePercentagePolicyRepository } from "./financeAffiliatePercentagePolicyRepository.js";
 const databaseUrl = process.env["TEST_DATABASE_URL"];
 const id = (n: number) => `15100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
@@ -50,6 +51,7 @@ describe.skipIf(!databaseUrl)("affiliate percentage save (PostgreSQL)", () => {
   const name = `vay1510_test_${randomUUID().replaceAll("-", "")}`;
   const admin = new pg.Client({ connectionString: databaseUrl });
   let pool: pg.Pool;
+  let isolatedUrl: string;
   beforeAll(async () => {
     if (!/(^|[_-])test([_-]|$)/i.test(new URL(databaseUrl!).pathname.slice(1)))
       throw new Error("Requires isolated test database");
@@ -57,7 +59,8 @@ describe.skipIf(!databaseUrl)("affiliate percentage save (PostgreSQL)", () => {
     await admin.query(`CREATE DATABASE ${name}`);
     const url = new URL(databaseUrl!);
     url.pathname = `/${name}`;
-    pool = new pg.Pool({ connectionString: url.toString(), max: 3 });
+    isolatedUrl = url.toString();
+    pool = new pg.Pool({ connectionString: isolatedUrl, max: 3 });
   });
   beforeEach(async () => {
     await pool.query(`DROP SCHEMA IF EXISTS finance,platform,identity,hotel_catalog CASCADE;
@@ -433,6 +436,30 @@ describe.skipIf(!databaseUrl)("affiliate percentage save (PostgreSQL)", () => {
         status: "available",
         policy: { percentageRate: Number(percentageRate).toFixed(2) },
       });
+    }
+  });
+  it("lists saved rates only for the authorized property and authoring organization", async () => {
+    const command = await approvalInput();
+    await approve(pool, command);
+    await save(pool, { ...input(), idempotencyKey: "second", policy: { percentageRate: "20" } });
+    const repository = createPgFinanceAffiliatePercentagePolicyRepository(isolatedUrl);
+    try {
+      const result = await repository.list(id(3), id(4));
+      expect(result.policies).toHaveLength(2);
+      expect(result.policies).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: command.policyVersionId,
+            rateBasisPoints: 1250,
+            approved: true,
+          }),
+          expect.objectContaining({ rateBasisPoints: 2000, approved: false }),
+        ]),
+      );
+      expect(await repository.list(id(6), id(4))).toEqual({ policies: [] });
+      expect(await repository.list(id(3), id(5))).toEqual({ policies: [] });
+    } finally {
+      await repository.close();
     }
   });
 });
