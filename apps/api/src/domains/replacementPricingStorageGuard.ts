@@ -9,7 +9,7 @@ import type { PricingStorageGuard, PricingStorageScope, PricingStorageSources } 
 
 /** Caller owns the transaction. No proposal/readiness requirements on historical retries. */
 export async function lockReplacementPricingSources(client: PoolClient, context: RequestContext | null,
-  scope: PricingStorageScope, access: "read" | "manage"): Promise<PricingStorageSources | null> {
+  scope: PricingStorageScope, access: "read" | "manage" | "preview"): Promise<PricingStorageSources | null> {
   if (!await lockReplacementPricingAuthorization(client, context, scope, access)) return null;
   const room = await lockPmsReplacementPricingRoomSource(client, scope.propertyId);
   const terms = await lockBookingPricingTermsSource(client, scope.propertyId);
