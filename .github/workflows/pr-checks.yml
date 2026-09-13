@@ -219,6 +219,7 @@ jobs:
           src/jobs/pmsChannexBookingRevisionTombstones.integration.test.ts
           src/jobs/channexAssignmentRepair.integration.test.ts
           src/domains/channexStagingCatalogAdoption.integration.test.ts
+          src/domains/pmsChannexStagingDay.integration.test.ts
           src/domains/channexStagingCatalogEvidence.test.ts
           src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
