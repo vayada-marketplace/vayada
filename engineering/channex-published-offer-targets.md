@@ -535,3 +535,90 @@ attempt unresolved. Database failure exposes the same persistence-only retry
 closure. No path restores the consumed send opportunity or treats an abort as
 proof of no provider mutation. A provider that ignores abort may finish later;
 this receipt records ambiguity, not cancellation or safe retry.
+
+
+## Hotel configuration preview (VAY-2014 decision)
+
+The first visible integration is a preview inside PMS Channel Manager. It uses
+published replacement offers, not legacy rate-plan mappings. The pricing editor
+remains owned by the pricing task; Booking authority migration 0202 is not a
+prerequisite. Existing connected-channel status remains unchanged.
+
+### Selection and read contract
+
+Use `GET /properties/:propertyId/channex/offer-preview` with exactly
+`roomTypeId`, `offerId`, `publicationRevision`, and `primaryOccupancy` query fields.
+Require canonical UUID property/room IDs, a nonempty trimmed offer ID up to 200
+characters, an integer revision from 1 through 2147483646, and an integer primary
+count from 1 through 100. Reject duplicate, unknown, fractional and noncanonical numeric query values
+with 400. Accept primary only within the selected published room's adult capacity;
+the existing planner's 100-option bound and unsupported-child checks still apply.
+
+Authorize through the real request context before reading pricing. Require both
+`pms.operations.read` and `pms.rooms_rates.read`, active PMS property-management
+entitlement, and owner/operator relationship to the exact selected property in the
+selected hotel organization. Channel Manager's broader front-desk read access does
+not automatically authorize pricing preview. Reuse `enforceRoutePolicy` and the
+existing user/property-authorized pricing read boundary; do not call the worker
+reader with a fabricated lease. Both permission checks and property authorization must be repeated by the storage
+guard in the read transaction. Never accept caller-selected organization/actor IDs.
+
+Read only the current published snapshot through the shared decoder and source
+freshness guard. A missing publication returns 404; a revision mismatch or stale
+source result returns 409 with a refresh-required code. Missing room/offer returns
+404. Invalid stored evidence or unavailable storage returns a sanitized 503.
+Do not silently use a draft, stale publication, another offer, or a legacy rate.
+The bounded metadata preview does not establish current delivery-owner readiness.
+
+Call `planChannexOfferConfiguration` with the server-read room and explicit choice.
+Return a versioned response with property/room/offer IDs, publication revision,
+primary count, and either `preview` plus the planner's validated configuration or
+`unsupported` plus a stable allowlisted reason. Never return arbitrary errors,
+provider credentials, operation IDs, jobs or external rate IDs. The response has
+`canProvision: false` and `canSend: false`; no fields imply an active mapping.
+The adapter must bound connection acquisition/query duration and response size;
+project only this one offer's configuration (at most 100 occupancy options).
+
+This endpoint makes no provider calls and writes no target, intent, preference,
+job, audit/outbox mutation or mapping. No creation/reservation helper is needed.
+Use `Cache-Control: no-store`; publication/source checks describe the time of the
+read, not a continuing promise of freshness or actual Channex support.
+
+### Hotel interaction
+
+List rooms and offers from the existing authorized published-pricing read. Render
+labels as text. Hide the preview controls when the user lacks either permission;
+the server remains authoritative. Do not relabel existing legacy mappings.
+
+The primary guest-count selector starts empty even when capacity is one. Label
+it “Primary guest count” and explain that it is the default occupancy option for
+the channel rate, not a price multiplier. The hotel must choose it. A room/offer,
+property or publication change clears the choice and preview. Preview selection
+is local component state only; reloading does not save or restore it. A later
+provisioning command must explicitly persist a validated choice under its own
+contract, not assume this preview saved a preference.
+
+Disable preview until selection is complete; show loading while reading. Discard
+responses for previous property/room/offer/revision/count selections. A stale
+response prompts a published-pricing refresh and a new selection. Missing pricing
+links to the existing pricing setup. Unsupported child/capacity cases and storage
+errors have clear messages and do not display an old successful preview.
+
+Show currency, meal identity, supported occupancy options and chosen primary in
+human-readable form. State “Preview only — nothing has been sent to channels.”
+Explain that live setup still requires connection/mapping, supported booking-rule
+semantics, and verified initial price/restriction delivery. These are outstanding
+requirements, not a diagnostic claim about this property's provider account.
+Do not add a functional create/sync button or change existing sync controls in
+this slice. Existing provider connection status is not inferred from this preview.
+
+### Implementation verification
+
+Require route tests for missing/invalid auth, either permission missing, inactive
+entitlement, wrong/unlinked property, front-desk-only relationship and an allowed
+owner/operator. Test strict query parsing, missing/stale publication, exact
+selection, unsupported planner states, bounded output and no mutation/provider
+calls. Use meaningful PostgreSQL source-freshness and tenant-isolation coverage.
+UI tests and browser verification cover explicit selection, preview values,
+loading/error/unsupported states, property/selection races and clearing stale
+results. Report simulated preview evidence separately from provider validation.
