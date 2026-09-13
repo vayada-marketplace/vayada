@@ -1,3 +1,6 @@
+import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
+import type { FixedChargePolicy } from "./replacementFixedCharges.js";
+import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { lockPublicPricingComponents } from "./publicPricingComponents.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
@@ -264,7 +267,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
-  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot) {
+  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, policy?: FixedChargePolicy) {
     const f = await fixture(configure),
       propertyId = f.scope.propertyId;
     await pool.query(
@@ -309,6 +312,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           snapshot: f.snapshot,
         },
       );
+    if (policy) {
+      const saved = await createFixedChargePolicyStore(pool).save(f.context, f.scope, {
+        requestId: randomUUID(), expectedRevision: null, policy,
+      });
+      f.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + saved.revision;
+    }
     if (publish) await publishPrices();
     const readPublic = async (slug: unknown = propertyId) => {
       const client = await pool.connect();
@@ -488,8 +497,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   });
   async function stayFixture(
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
+    policy?: FixedChargePolicy,
   ) {
-    const f = await publicFixture(true, configure),
+    const f = await publicFixture(true, configure, policy),
       owner = await f.readPublic();
     if (!owner) throw new Error("published owner required");
     const bindings = publicPricingOfferBindings(owner);
@@ -737,8 +747,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }),
     ).toBeNull();
   });
-  async function componentsFixture() {
-    const f = await stayFixture(familyPrices),
+  async function componentsFixture(policy?: FixedChargePolicy) {
+    const f = await stayFixture(familyPrices, policy),
       id = randomUUID();
     await pool.query(
       `INSERT INTO booking.booking_settings(property_id,default_currency,last_minute_discount)
@@ -851,5 +861,136 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       f.scope.propertyId,
     ]);
     expect(await f.components()).toBeNull();
+  });
+  const fixedPolicy = (included = false): FixedChargePolicy => ({
+    version: "booking.fixed-charges.v1",
+    currency: "EUR",
+    charges: [
+      {
+        id: "city",
+        name: "Configured city fee",
+        unit: "person_night",
+        amountMinor: "300",
+        minimumAge: 18,
+        included,
+        collect: "property",
+      },
+    ],
+  });
+  async function chargeTotals(
+    f: Awaited<ReturnType<typeof componentsFixture>>,
+    input: unknown = f.selection,
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      return await lockPublicPricingChargeTotals(client, f.scope.propertyId, input);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  it("publishes an explicitly adopted fee policy and adds current fees after discounts", async () => {
+    const f = await componentsFixture(fixedPolicy()),
+      result = await chargeTotals(f);
+    expect(result).toMatchObject({
+      kind: "pricing_charge_totals",
+      subtotalMinor: "20000",
+      totalMinor: "20600",
+      additionalChargeMinor: "600",
+      includedChargeMinor: "0",
+      propertyCollectedMinor: "600",
+      onlineCollectibleMinor: "20000",
+    });
+    expect(result?.charges.charges[0]).toMatchObject({ quantity: 2, amountMinor: "600" });
+    expect(result?.charges.requestKey).toBe(result?.requestKey);
+    expect(result?.componentSources.charges).toBe(result?.charges.sourceRevision);
+    expect(result).not.toHaveProperty("dueNowMinor");
+    const dates = (
+      await pool.query(
+        "SELECT (current_date+10)::text AS arrival,(current_date+13)::text AS departure",
+      )
+    ).rows[0];
+    const longer = await chargeTotals(f, {
+      ...f.selection,
+      checkIn: dates.arrival,
+      checkOut: dates.departure,
+    });
+    expect(longer?.additionalChargeMinor).toBe("1800");
+    expect(longer?.charges.basisEvidenceId).not.toBe(result?.charges.basisEvidenceId);
+  });
+  it("does not add included amounts twice and distinguishes explicit none from legacy confirmation", async () => {
+    const included = await componentsFixture(fixedPolicy(true));
+    expect(await chargeTotals(included)).toMatchObject({
+      subtotalMinor: "20000",
+      totalMinor: "20000",
+      includedChargeMinor: "600",
+      additionalChargeMinor: "0",
+      onlineCollectibleMinor: "19400",
+    });
+    const empty = await componentsFixture({ ...fixedPolicy(), charges: [] });
+    expect(await chargeTotals(empty)).toMatchObject({
+      totalMinor: "20000",
+      additionalChargeMinor: "0",
+    });
+    const legacy = await componentsFixture();
+    expect(await legacy.components()).not.toBeNull();
+    expect(await chargeTotals(legacy)).toBeNull();
+    // Saving a policy does not silently replace a legacy publication's confirmation.
+    await createFixedChargePolicyStore(pool).save(legacy.context, legacy.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      policy: fixedPolicy(),
+    });
+    expect(await chargeTotals(legacy)).toBeNull();
+  });
+  it("invalidates publications after fee edits and rejects stale, foreign and wrong-currency adoption", async () => {
+    const f = await componentsFixture(fixedPolicy()),
+      before = await chargeTotals(f);
+    await createFixedChargePolicyStore(pool).save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: before!.charges.policyRevision,
+      policy: { ...fixedPolicy(), charges: [] },
+    });
+    expect(await f.readPublic()).toBeNull();
+    expect(await chargeTotals(f)).toBeNull();
+    expect(before?.totalMinor).toBe("20600");
+    const other = await publicFixture(false);
+    other.snapshot.ownerReferences.charges = f.snapshot.ownerReferences.charges!;
+    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+    other.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + randomUUID();
+    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+    const saved = await createFixedChargePolicyStore(pool).save(other.context, other.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      policy: { ...fixedPolicy(), currency: "USD" },
+    });
+    other.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + saved.revision;
+    await expect(other.publishPrices()).rejects.toMatchObject({ code: "denied" });
+  });
+  it("rejects overallocated included charges and retains current fee locks through consumption", async () => {
+    const policy = fixedPolicy(true);
+    policy.charges[0]!.amountMinor = "999999";
+    const excessive = await componentsFixture(policy);
+    expect(await chargeTotals(excessive)).toBeNull();
+    const f = await componentsFixture(fixedPolicy()),
+      client = await pool.connect();
+    const writer = new pg.Pool({ connectionString: url, options: "-c lock_timeout=100", max: 1 });
+    try {
+      await client.query("BEGIN");
+      const read = await lockPublicPricingChargeTotals(client, f.scope.propertyId, f.selection);
+      expect(read).not.toBeNull();
+      await expect(
+        createFixedChargePolicyStore(writer).save(f.context, f.scope, {
+          requestId: randomUUID(),
+          expectedRevision: read!.charges.policyRevision,
+          policy: { ...fixedPolicy(), charges: [] },
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await writer.end();
+    }
   });
 });

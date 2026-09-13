@@ -402,3 +402,21 @@ identity include current policy revision and exact selected stay. This does not
 claim coverage of unsupported tax types or replace public visibility/Finance
 checks. Connecting this fixed-rule owner to complete quotes requires explicit
 coverage and removal/replacement of the older all-included publication gate.
+
+
+A publication may explicitly adopt `booking.fixed-charge-policy.v1:<revision>`
+as its charges owner reference. This selects the entire saved fixed-rule policy
+(including explicit none), not a default inferred from the older inclusion
+confirmation. Draft/publish/public reads require that exact current property
+policy revision and currency; editing the policy invalidates the publication
+until republished. Unsupported rule types remain unavailable. The legacy
+all-included declaration remains readable but cannot supply charge amounts.
+
+`lockPublicPricingChargeTotals` joins current public components with the adopted
+policy's selected-stay amounts under one READ COMMITTED transaction. It returns
+subtotal, total, included/additional and online/property collectible portions,
+plus request/source/basis provenance. It adds excluded charges after discounts,
+never adds included charges twice, and rejects included allocations above the
+subtotal or invalid money. Authority and property-local day are rechecked after
+charge reads. This internal amount result is not a payment schedule, complete
+quote, inventory reservation, legal tax certification or checkout approval.
