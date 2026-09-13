@@ -209,7 +209,13 @@ pricing-manage authority, exact room scope, expected revision and an idempotent
 request. Actor/organization/history persist; retries reauthorize without resetting
 the current head. Tiers reject overlap and unrepresentable percentage precision.
 Hotel settings remain in Booking's existing settings owner; no room attributes or
-retired PMS rate rules are repurposed. The current reader follows separately.
+retired PMS rate rules are repurposed. `replacementLastMinute.ts` reads the current hotel and room choices under the
+caller transaction. The database clock supplies property-local lead days. Hotel
+off suppresses every room; room off opts out; nonempty room tiers override; empty
+or absent room tiers inherit. It returns exact basis-point decisions and the saved
+stacking choice, binding hotel/room heads/timezone/local date into source identity.
+Missing/malformed hotel state and active generalized promotions remain unavailable
+until their owner exists; this is not calendar/inventory or full quote approval.
 
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
