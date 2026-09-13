@@ -61,6 +61,18 @@ The gate targets locale-less canonical slugs, matching Distribution publication
 reservation and the existing unique slug/locale index. Localized catalog slugs
 are not booking URL identities for this adapter.
 
+`publicPricingPublication.ts` composes the public gate with the complete current
+publication and concrete PMS/Booking/Finance/charge owner ports. It rejects
+unknown source/owner keys, missing publications, stale complete sources, inactive
+rooms, changed offer policies, unavailable or mismatched Finance evidence and
+mismatched charge declarations. The complete offer set includes linked ancestors.
+Lock order is public authority/inventory/identity/catalog, room facts and rooms,
+Booking terms, Finance settings/account/evidence, then the immutable charge read.
+Public expiry is rechecked after owner reads. `booking.pms.publication.v2` binds
+property, organization, authority revision, published revision and all three
+current source keys. The returned object is internal composition input, never a
+public response or permission to accept a stay. Routes remain unavailable.
+
 ## Selection and identity
 
 A public request identifies the hotel by its resolved route, dates, selected
