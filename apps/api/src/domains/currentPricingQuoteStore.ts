@@ -18,7 +18,7 @@ const canonical = (v: unknown): string =>
         )
       : value,
   );
-function decode(payload: unknown, propertyId: string, id: string) {
+export function decodeCurrentPricingQuoteRecord(payload: unknown, propertyId: string, id: string) {
   if (
     !pricingObject(payload) ||
     !pricingKeys(payload, ["quote", "calculation"]) ||
@@ -68,7 +68,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         if (prior) {
           if (prior.organization_id !== scope.organizationId) return fail("denied");
           if (prior.request_hash !== requestHash) return fail("idempotency_conflict");
-          const record = decode(prior.payload, scope.propertyId, prior.id);
+          const record = decodeCurrentPricingQuoteRecord(prior.payload, scope.propertyId, prior.id);
           if (!record) return fail("invalid");
           if (!(await lockPublicPricingAuthority(client, slug))) return fail("denied");
           await client.query("COMMIT");
@@ -123,7 +123,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
           )
         ).rows[0];
         if (!(await lockPublicPricingAuthority(client, slug))) return null;
-        return row ? decode(row.payload, scope.propertyId, row.id) : null;
+        return row ? decodeCurrentPricingQuoteRecord(row.payload, scope.propertyId, row.id) : null;
       } finally {
         await client.query("ROLLBACK");
         client.release();

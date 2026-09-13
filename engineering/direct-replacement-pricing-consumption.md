@@ -467,3 +467,24 @@ The stored envelope is decoded and bound to the record's property/id on read;
 calculation details are retained server-side as archival JSON, not public output
 or independently validated input to settlement. No quote acceptance status is
 fabricated; atomic acceptance will reference this record after fresh checks.
+
+
+Fresh quote revalidation loads the exact scoped immutable record under current
+public authority, rebuilds current same-currency amounts from the stored selection,
+and checks original expiry, evaluator, all source identities, nightly data and
+exact monetary/terms evidence. It never replaces the stored price or extends its
+lifetime. Same-day checks reuse Booking's established default policy and current
+configured cutoff under the caller transaction with a fresh database clock;
+past arrivals are rejected separately. Source locks remain held for subsequent
+acceptance operations. A successful result means only current price and same-day
+eligibility, not inventory reservation or booking acceptance.
+
+The existing `pmsInventoryReservation` port depends on legacy Distribution offer
+snapshots and keys. Replacement acceptance must add a PMS-owned reservation path
+for verified replacement selections; it must not forge old offer snapshots or
+skip canonical calendar, linked inventory, capacity and closure checks. Accepted
+command replay still precedes fresh revalidation in the future atomic command.
+
+The future acceptance writer must recheck expiry and same-day time eligibility
+after any later inventory/other-owner waits, immediately before its final write.
+A clock-based decision cannot be kept fresh merely by retaining row locks.
