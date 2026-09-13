@@ -4,6 +4,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { convertPricingConfigurationCurrency, type PricingConversionRate } from "@vayada/domain-pms";
 import { createReplacementPricingStore, type PricingStorageSnapshot } from "./replacementPricingStore.js";
 import { createReplacementPricingFxStore } from "./replacementPricingFxStore.js";
+import { readCurrentPricingSnapshot, PricingStorageError } from "./replacementPricingSnapshot.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
   const pool = new pg.Pool({ connectionString: url, max: 6 });
@@ -42,6 +44,42 @@ describe.skipIf(!url)("replacement pricing PostgreSQL repository", () => {
     return { scope, store, snapshot, command, sources, changeSources: () => { policy = "2"; }, allowConversion: () => { conversion = true; },
       changeTerms: () => { termsRevision = "2"; }, revokeAccess: () => { authorized = false; } };
   }
+  it("uses the caller transaction and never substitutes a foreign property publication", async () => {
+    const f = await fixture(); await f.store.save(f.scope, f.command());
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN"); await lockPmsInventoryMutationScope(client, f.scope.propertyId);
+      expect(await readCurrentPricingSnapshot(client, randomUUID())).toBeNull();
+      expect(await readCurrentPricingSnapshot(client, f.scope.propertyId)).toMatchObject({ revision: 1, rooms: f.snapshot(1).rooms });
+      await client.query("UPDATE pms.pricing_v2_heads SET revision=0 WHERE property_id=$1", [f.scope.propertyId]);
+      expect(await readCurrentPricingSnapshot(client, f.scope.propertyId)).toBeNull();
+    } finally { await client.query("ROLLBACK"); client.release(); }
+    expect((await f.store.read(f.scope))?.revision).toBe(1);
+  });
+  it.each(["dangling_head", "room_count", "missing_room", "sources", "owners", "configuration"])(
+    "rejects an uncommitted malformed publication: %s", async (fault) => {
+    const f = await fixture(); await f.store.save(f.scope, f.command());
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN"); await lockPmsInventoryMutationScope(client, f.scope.propertyId);
+      // Published revisions are immutable. Stage malformed NEW rows under deferred
+      // constraints, then always roll back; no schema guards are disabled.
+      if (fault !== "dangling_head") {
+        const next = f.snapshot(2), config = next.rooms[0];
+        await client.query(`INSERT INTO pms.pricing_v2_revisions
+          (property_id,revision,currency,source_revisions,owner_references,request_id,request_hash,actor_user_id,room_count)
+          VALUES($1,2,'EUR',$2,$3,$4,$5,$6,$7)`, [f.scope.propertyId,
+          JSON.stringify(fault === "sources" ? {} : f.sources()), JSON.stringify(fault === "owners" ? {} : next.ownerReferences),
+          randomUUID(), "a".repeat(64), f.scope.actorUserId, fault === "room_count" ? 2 : 1]);
+        if (fault !== "missing_room") await client.query(`INSERT INTO pms.pricing_v2_rooms
+          (property_id,revision,room_type_id,currency,configuration) VALUES($1,2,$2,'EUR',$3)`, [f.scope.propertyId, config.roomTypeId,
+          JSON.stringify(fault === "configuration" ? { ...config, children: { adultFromAge: -1, bands: [] } } : config)]);
+      }
+      await client.query("UPDATE pms.pricing_v2_heads SET revision=2 WHERE property_id=$1", [f.scope.propertyId]);
+      await expect(readCurrentPricingSnapshot(client, f.scope.propertyId)).rejects.toBeInstanceOf(PricingStorageError);
+    } finally { await client.query("ROLLBACK"); client.release(); }
+    expect((await f.store.read(f.scope))?.revision).toBe(1);
+  });
   async function fx(expirySeconds = 3600, target = "USD") {
     const time = Math.floor((await pool.query("SELECT extract(epoch FROM clock_timestamp())::double precision AS time")).rows[0].time);
     const body = JSON.stringify({ result: "success", provider: "https://www.exchangerate-api.com", base_code: "EUR", time_eol_unix: 0,
