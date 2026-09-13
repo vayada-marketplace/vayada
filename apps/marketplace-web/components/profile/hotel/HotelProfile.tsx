@@ -11,6 +11,7 @@ import { ProfilePictureModal } from "../ProfilePictureModal";
 import { DeleteConfirmModal } from "../DeleteConfirmModal";
 import { HotelOverviewTab } from "./HotelOverviewTab";
 import { ListingViewCard } from "./ListingViewCard";
+import { AffiliateOfferTermsEditor } from "./AffiliateOfferTermsEditor";
 import { AffiliateCommissionEditor } from "./AffiliateCommissionEditor";
 import { ListingEditorForm } from "./ListingEditorForm";
 import { ManagePhotosModal } from "./ManagePhotosModal";
@@ -259,29 +260,37 @@ export function HotelProfile() {
                   }
 
                   return (
-                    <ListingViewCard
-                      key={listingItem.id}
-                      listing={listingItem}
-                      index={index}
-                      isCollapsed={isCollapsed}
-                      onToggleCollapse={() => {
-                        const newCollapsed = new Set(collapsedListingCards);
-                        if (isCollapsed) {
-                          newCollapsed.delete(listingItem.id);
-                        } else {
-                          newCollapsed.add(listingItem.id);
+                    <div key={listingItem.id} className="space-y-3">
+                      <ListingViewCard
+                        listing={listingItem}
+                        index={index}
+                        isCollapsed={isCollapsed}
+                        onToggleCollapse={() => {
+                          const newCollapsed = new Set(collapsedListingCards);
+                          if (isCollapsed) {
+                            newCollapsed.delete(listingItem.id);
+                          } else {
+                            newCollapsed.add(listingItem.id);
+                          }
+                          setCollapsedListingCards(newCollapsed);
+                        }}
+                        onEdit={() => listing.openEditListingModal(listingItem)}
+                        onDelete={() =>
+                          listing.openDeleteConfirmModal(
+                            listingItem.id,
+                            listingItem.name || `Collaboration Offer ${index + 1}`,
+                          )
                         }
-                        setCollapsedListingCards(newCollapsed);
-                      }}
-                      onEdit={() => listing.openEditListingModal(listingItem)}
-                      onDelete={() =>
-                        listing.openDeleteConfirmModal(
-                          listingItem.id,
-                          listingItem.name || `Collaboration Offer ${index + 1}`,
-                        )
-                      }
-                      canDelete={hotelProfile.listings.length > 1}
-                    />
+                        canDelete={hotelProfile.listings.length > 1}
+                      />
+                      {!isCollapsed && listingItem.collaborationTypes.includes("Affiliate") && (
+                        <AffiliateOfferTermsEditor
+                          key={`${hotelProfile.id}:${listingItem.id}`}
+                          propertyId={hotelProfile.id}
+                          offerId={listingItem.id}
+                        />
+                      )}
+                    </div>
                   );
                 })}
               </div>
