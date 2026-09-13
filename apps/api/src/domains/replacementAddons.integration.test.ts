@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+import { lockReplacementAddonAmounts } from "./replacementAddonAmounts.js";
+import type { ReplacementStay } from "@vayada/domain-booking";
 import { lockReplacementAddons } from "./replacementAddons.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("current Booking add-on owner", () => {
@@ -170,5 +172,155 @@ describe.skipIf(!url)("current Booking add-on owner", () => {
       reader.release();
       writer.release();
     }
+  });
+  async function amountFixture() {
+    const f = await fixture();
+    const stay: ReplacementStay = {
+      propertyId: f.input.propertyId,
+      currency: "EUR",
+      checkIn: "2026-10-01",
+      checkOut: "2026-10-04",
+      rooms: [
+        {
+          selectionId: "room",
+          roomTypeId: randomUUID(),
+          offerId: "offer",
+          guests: { adults: 2, childAgesAtCheckIn: [8] },
+        },
+      ],
+      addons: [{ version: "addon-selection.v2", id: f.id, quantity: 1, dates: null, people: null }],
+      promoCode: null,
+    };
+    const amounts = async (value: unknown = stay) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockReplacementAddonAmounts(client, value);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, stay, amounts };
+  }
+  it("calculates all four models from saved definitions and selected people/dates", async () => {
+    const f = await amountFixture();
+    await pool.query(
+      "UPDATE booking.addon_definitions SET price_amount=20,metadata='{\"maxQuantity\":3}' WHERE id=$1",
+      [f.id],
+    );
+    const selected = f.stay.addons[0];
+    const people = [
+      { selectionId: "room", kind: "adult", index: 0 },
+      { selectionId: "room", kind: "child", index: 0 },
+    ];
+    for (const [model, quantity, participants, dates, total] of [
+      ["per_stay", 3, null, null, "6000"],
+      ["per_night", 1, null, null, "6000"],
+      ["per_night", 1, null, ["2026-10-01", "2026-10-03"], "4000"],
+      ["per_guest", 1, people, null, "4000"],
+      ["per_guest_night", 1, people, ["2026-10-01", "2026-10-03"], "8000"],
+      ["per_guest_night", 1, people.slice(0, 1), ["2026-10-03"], "2000"],
+    ]) {
+      await pool.query("UPDATE booking.addon_definitions SET pricing_model=$2 WHERE id=$1", [
+        f.id,
+        model,
+      ]);
+      const result = await f.amounts({
+        ...f.stay,
+        addons: [{ ...selected, quantity, people: participants, dates }],
+      });
+      expect(result?.totalMinor).toBe(total);
+      expect(result?.lines[0].definition.amountMinor).toBe("2000");
+      expect(result?.sourceRevision).toMatch(/^booking.addons.v2:/);
+    }
+  });
+  it("enforces model-specific selections, limits and date boundaries without legacy inference", async () => {
+    const f = await amountFixture(),
+      a = f.stay.addons[0];
+    for (const addon of [
+      { id: f.id, quantity: 1, dates: null },
+      { ...a, quantity: 2 },
+      { ...a, people: [{ selectionId: "room", kind: "adult", index: 0 }] },
+      { ...a, dates: ["2026-10-01", "2026-10-02"] },
+    ])
+      expect(await f.amounts({ ...f.stay, addons: [addon] })).toBeNull();
+    expect(
+      (await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-04"] }] }))?.totalMinor,
+    ).toBe("1250");
+    await pool.query("UPDATE booking.addon_definitions SET pricing_model='per_night' WHERE id=$1", [
+      f.id,
+    ]);
+    expect(await f.amounts({ ...f.stay, addons: [{ ...a, dates: ["2026-10-04"] }] })).toBeNull();
+    await pool.query(
+      "UPDATE booking.addon_definitions SET pricing_model='per_guest',metadata='{\"maxQuantity\":3,\"maxGuests\":1}' WHERE id=$1",
+      [f.id],
+    );
+    expect(await f.amounts()).toBeNull();
+    const people = [0, 1].map((index) => ({ selectionId: "room", kind: "adult", index }));
+    expect(await f.amounts({ ...f.stay, addons: [{ ...a, people }] })).toBeNull();
+    expect(
+      await f.amounts({ ...f.stay, addons: [{ ...a, quantity: 2, people: people.slice(0, 1) }] }),
+    ).toBeNull();
+    expect(
+      (await f.amounts({ ...f.stay, addons: [{ ...a, people: people.slice(0, 1) }] }))?.totalMinor,
+    ).toBe("1250");
+  });
+  it("fails unavailable owners/lead-time rules and retains economic snapshots and empty evidence", async () => {
+    const f = await amountFixture();
+    await pool.query(
+      'UPDATE booking.addon_definitions SET metadata=\'{"leadTime":"24 hours"}\' WHERE id=$1',
+      [f.id],
+    );
+    expect(await f.amounts()).toBeNull();
+    await pool.query(
+      "UPDATE booking.addon_definitions SET metadata='{}',ownership_kind='partner',partner_commission_rate=15.1234 WHERE id=$1",
+      [f.id],
+    );
+    const result = await f.amounts();
+    expect(result?.lines[0].definition).toMatchObject({
+      ownershipKind: "partner",
+      partnerCommissionRate: "15.1234",
+    });
+    expect(await f.amounts({ ...f.stay, addons: [] })).toMatchObject({
+      totalMinor: "0",
+      lines: [],
+    });
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=false WHERE id=$1", [
+      f.id,
+    ]);
+    expect(await f.amounts()).toBeNull();
+    expect(result?.totalMinor).toBe("1250");
+    await pool.query(
+      "UPDATE booking.addon_definitions SET public_visible=true,metadata='{\"maxGuests\":2}' WHERE id=$1",
+      [f.id],
+    );
+    expect(await f.amounts()).toBeNull();
+    await pool.query("UPDATE booking.addon_definitions SET metadata='{}' WHERE id=$1", [f.id]);
+    const scheduled = await f.amounts({
+      ...f.stay,
+      addons: [{ ...f.stay.addons[0], dates: ["2026-10-04"] }],
+    });
+    expect(scheduled?.totalMinor).toBe(result?.totalMinor);
+    expect(scheduled?.requestKey).not.toBe(result?.requestKey);
+  });
+  it("bounds aggregate arithmetic and uses exact saved KWD unit prices", async () => {
+    const f = await amountFixture();
+    await pool.query(
+      "UPDATE booking.addon_definitions SET currency='KWD',price_amount=12.50 WHERE id=$1",
+      [f.id],
+    );
+    expect((await f.amounts({ ...f.stay, currency: "KWD" }))?.totalMinor).toBe("12500");
+    await pool.query(
+      "UPDATE booking.addon_definitions SET currency='EUR',price_amount=9999999999999.99,pricing_model='per_night',metadata='{\"maxQuantity\":99}' WHERE id=$1",
+      [f.id],
+    );
+    expect(
+      await f.amounts({
+        ...f.stay,
+        checkOut: "2027-10-02",
+        addons: [{ ...f.stay.addons[0], quantity: 99 }],
+      }),
+    ).toBeNull();
   });
 });

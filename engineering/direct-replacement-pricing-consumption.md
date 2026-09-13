@@ -336,3 +336,15 @@ unit tariffs apply equally to selected adults and children; different child
 prices require a new owner contract. Nightly services exclude checkout; one-time
 services allow at most one date, including checkout. Free-text lead-time rules
 cannot be treated as executable eligibility.
+
+`lockReplacementAddonAmounts` now combines a bounded v2 selection with locked
+current definitions in the same authorized transaction. It returns exact bigint
+unit × quantity × selected-people × service-days components, source revision,
+request key and definition/economic snapshots. Null nightly dates mean all stay
+nights; explicit dates count only selected nights. One-time extras have at most
+one scheduled date, optionally checkout. Quantity limits apply to service units;
+per-person models require quantity1 and at most the saved guest limit. For
+non-person services a saved guest limit applies to the whole allocated party.
+Nonempty free-text lead time is unavailable until an executable owner rule exists.
+Missing owners, v1 extras, mismatched models, FX needs and overflow fail closed.
+This subtotal does not authorize capacity, payouts or quote acceptance.
