@@ -1416,7 +1416,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);
     const dates = (
-      await pool.query("SELECT current_date::text AS arrival,(current_date+1)::text AS departure")
+      await pool.query(
+        "SELECT today::text AS arrival,(today+1)::text AS departure FROM (SELECT (clock_timestamp() AT TIME ZONE 'Etc/UTC')::date AS today) dates",
+      )
     ).rows[0];
     await pool.query(
       "INSERT INTO booking.same_day_booking_policies(property_id,enabled,cutoff_local_time) VALUES($1,true,NULL)",

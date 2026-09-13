@@ -2,6 +2,11 @@ import { createPmsOperatingCalendarSourceRevision } from "@vayada/domain-pms";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { lockPmsCurrentOperatingCalendar } from "./pmsCurrentOperatingCalendar.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { lockPmsRoomFactsMutationScope } from "./pmsRoomFactsMutationLock.js";
+import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
+
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsOperatingCalendarReadModel } from "./pmsOperatingCalendarReadModel.js";
 import { createPgPmsRoomFactsReadModel } from "./pmsRoomFactsReadModel.js";
@@ -123,6 +128,76 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar read mode
       ],
     });
     expect(JSON.stringify(result)).not.toContain("Asia/Kolkata");
+  });
+
+  it("reads uncommitted owner changes on the caller connection and leaves rollback to the caller", async () => {
+    await admin.query("BEGIN");
+    try {
+      expect(await lockPmsCurrentOperatingCalendar(admin, propertyId)).toEqual({
+        configuration: expectedLatestConfiguration(),
+        sourceStatus: "current",
+        sourceConflicts: [],
+      });
+      await admin.query("UPDATE hotel_catalog.properties SET profile_revision = 8 WHERE id = $1", [
+        propertyId,
+      ]);
+      await admin.query(
+        "UPDATE pms.room_types SET room_facts_revision = 4, room_units_revision = 6 WHERE id = $1",
+        [roomTypeA],
+      );
+      expect(await lockPmsCurrentOperatingCalendar(admin, propertyId)).toMatchObject({
+        sourceStatus: "stale",
+        sourceConflicts: [
+          { code: "property_profile_revision_conflict", currentRevision: 8 },
+          { code: "room_facts_revision_conflict", roomTypeId: roomTypeA, currentRevision: 4 },
+          { code: "room_units_revision_conflict", roomTypeId: roomTypeA, currentRevision: 6 },
+        ],
+      });
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    expect(await readModel.getCurrentOperatingCalendarConfiguration(propertyId)).toMatchObject({
+      sourceStatus: "current",
+      sourceConflicts: [],
+    });
+  });
+
+  it("retains inventory, profile, room-facts and physical-unit locks until caller rollback", async () => {
+    const contender = new pg.Client({ connectionString });
+    await contender.connect();
+    const locks = [
+      () => lockPmsInventoryMutationScope(contender, propertyId),
+      () =>
+        contender.query("SELECT id FROM hotel_catalog.properties WHERE id = $1 FOR UPDATE", [
+          propertyId,
+        ]),
+      () => lockPmsRoomFactsMutationScope(contender, propertyId),
+      () => lockPmsPhysicalRoomUnitMutationScope(contender, propertyId, roomTypeA),
+      () => lockPmsPhysicalRoomUnitMutationScope(contender, propertyId, roomTypeB),
+    ];
+    await admin.query("BEGIN");
+    try {
+      expect(await lockPmsCurrentOperatingCalendar(admin, propertyId)).toMatchObject({
+        sourceStatus: "current",
+      });
+      for (const lock of locks) {
+        await contender.query("BEGIN");
+        await contender.query("SET LOCAL lock_timeout = '100ms'");
+        try {
+          await expect(lock()).rejects.toMatchObject({ code: "55P03" });
+        } finally {
+          await contender.query("ROLLBACK");
+        }
+      }
+      await admin.query("ROLLBACK");
+      await contender.query("BEGIN");
+      await contender.query("SET LOCAL lock_timeout = '1s'");
+      for (const lock of locks) await lock();
+    } finally {
+      await admin.query("ROLLBACK");
+      await contender.query("ROLLBACK");
+      await contender.end();
+    }
   });
 
   async function seedFixture(): Promise<void> {

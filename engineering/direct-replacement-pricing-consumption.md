@@ -488,3 +488,14 @@ command replay still precedes fresh revalidation in the future atomic command.
 The future acceptance writer must recheck expiry and same-day time eligibility
 after any later inventory/other-owner waits, immediately before its final write.
 A clock-based decision cannot be kept fresh merely by retaining row locks.
+
+
+`lockPmsCurrentOperatingCalendar` provides current owner evidence on the caller's
+READ COMMITTED transaction. It acquires inventory, Hotel Catalog profile,
+room-facts and sorted physical-unit locks and uses that same connection for room
+facts and capacity reads. It reuses existing calendar decoding and stale-source
+checks without nested transactions or a second pool. The caller must reject
+missing/stale evidence and keep locks until its acceptance commit or rollback.
+This is an internal PMS prerequisite, not public authorization or a reservation:
+selected-night coverage, closures, linked inventory, capacity consumption and
+lifecycle receipts still belong to the replacement reservation writer.

@@ -46,7 +46,7 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
-    ...TIME_ZONE_REGISTRY,
+    ...HOTEL_CATALOG_OPERATING_CALENDAR_TIME_ZONE_REGISTRY,
 
     async runWithPropertyProfileEvidence(input, guarded) {
       const propertyId = canonicalUuid(input.propertyId);
@@ -54,32 +54,10 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const selected = await client.query<PropertyProfileRow>(
-          `SELECT property.id::text AS "propertyId",
-                  property.profile_revision AS "profileRevision",
-                  location.timezone AS "timeZone"
-           FROM hotel_catalog.properties property
-           LEFT JOIN hotel_catalog.property_locations location
-             ON location.property_id = property.id
-           WHERE property.id = $1::uuid
-           FOR SHARE OF property`,
-          [propertyId],
+        const evidence = await lockHotelCatalogOperatingCalendarPropertyProfileEvidence(
+          client,
+          propertyId,
         );
-        if (selected.rows.length > 1) {
-          throw new Error("Hotel Catalog property-profile evidence is not unique");
-        }
-        const row = selected.rows[0];
-        if (!row) throw new Error("Hotel Catalog property-profile evidence is unavailable");
-        if (canonicalUuid(row.propertyId) !== propertyId) {
-          throw new Error("Hotel Catalog property-profile evidence escaped its property scope");
-        }
-        const source = Object.freeze({
-          ownerDomain: "hotel_catalog" as const,
-          entityType: "property_profile" as const,
-          entityId: propertyId,
-          revision: `profile:${positiveRevision(row.profileRevision)}`,
-        });
-        const evidence = evidenceResult(source, row.timeZone);
         const result = await guarded(evidence);
         await client.query("COMMIT");
         return result;
@@ -97,6 +75,40 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
   };
 }
 
+/** Reads on the caller's transaction; retains the profile lock until it ends. */
+export async function lockHotelCatalogOperatingCalendarPropertyProfileEvidence(
+  client: Pick<HotelCatalogOperatingCalendarPropertyProfileEvidenceClient, "query">,
+  inputPropertyId: string,
+): Promise<PmsOperatingCalendarPropertyProfileEvidenceResult> {
+  const propertyId = canonicalUuid(inputPropertyId);
+  const selected = await client.query<PropertyProfileRow>(
+    `SELECT property.id::text AS "propertyId",
+            property.profile_revision AS "profileRevision",
+            location.timezone AS "timeZone"
+     FROM hotel_catalog.properties property
+     LEFT JOIN hotel_catalog.property_locations location
+       ON location.property_id = property.id
+     WHERE property.id = $1::uuid
+     FOR SHARE OF property`,
+    [propertyId],
+  );
+  if (selected.rows.length > 1) {
+    throw new Error("Hotel Catalog property-profile evidence is not unique");
+  }
+  const row = selected.rows[0];
+  if (!row) throw new Error("Hotel Catalog property-profile evidence is unavailable");
+  if (canonicalUuid(row.propertyId) !== propertyId) {
+    throw new Error("Hotel Catalog property-profile evidence escaped its property scope");
+  }
+  const source = Object.freeze({
+    ownerDomain: "hotel_catalog" as const,
+    entityType: "property_profile" as const,
+    entityId: propertyId,
+    revision: `profile:${positiveRevision(row.profileRevision)}`,
+  });
+  return evidenceResult(source, row.timeZone);
+}
+
 function evidenceResult(
   source: Extract<
     PmsOperatingCalendarPropertyProfileEvidenceResult,
@@ -110,7 +122,10 @@ function evidenceResult(
   if (typeof timeZone !== "string") {
     throw new Error("Hotel Catalog property-profile timezone row is invalid");
   }
-  const parsedTimeZone = parsePmsCanonicalIanaTimeZone(timeZone, TIME_ZONE_REGISTRY);
+  const parsedTimeZone = parsePmsCanonicalIanaTimeZone(
+    timeZone,
+    HOTEL_CATALOG_OPERATING_CALENDAR_TIME_ZONE_REGISTRY,
+  );
   if (!parsedTimeZone) {
     return Object.freeze({ status: "timezone_invalid" as const, source });
   }
@@ -129,7 +144,7 @@ function isCanonicalIanaTimeZone(value: string): boolean {
   }
 }
 
-const TIME_ZONE_REGISTRY = Object.freeze({
+export const HOTEL_CATALOG_OPERATING_CALENDAR_TIME_ZONE_REGISTRY = Object.freeze({
   ownerDomain: "hotel_catalog" as const,
   registryVersion: HOTEL_CATALOG_OPERATING_CALENDAR_TIME_ZONE_REGISTRY_VERSION,
   isCanonicalIanaTimeZone,
