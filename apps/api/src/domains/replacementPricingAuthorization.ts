@@ -8,7 +8,7 @@ import type { PricingStorageScope } from "./replacementPricingStore.js";
  * authentication/route policy, never request JSON. This is identity authorization only. */
 export async function lockReplacementPricingAuthorization(
   client: PoolClient, context: RequestContext | null, scope: PricingStorageScope,
-  operation: "read" | "manage",
+  operation: "read" | "manage" | "preview",
 ): Promise<boolean> {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!context || ![scope.propertyId, scope.organizationId, scope.actorUserId, context.membership.membershipId].every((id) => uuid.test(id)) ||
@@ -16,11 +16,12 @@ export async function lockReplacementPricingAuthorization(
       context.selectedOrganization.organizationId.toLowerCase() !== scope.organizationId.toLowerCase() ||
       context.actor.status !== "active" || context.selectedOrganization.status !== "active" ||
       context.selectedOrganization.kind !== "hotel_group" || context.membership.status !== "active" ||
-      !["read", "manage"].includes(operation)) return false;
+      !["read", "manage", "preview"].includes(operation)) return false;
   const propertyId = scope.propertyId.toLowerCase();
-  const permission = operation === "read" ? "pms.rooms_rates.read" : "pms.rooms_rates.manage";
+  const required = operation === "preview" ? ["pms.rooms_rates.read", "pms.operations.read"] as const :
+    [operation === "read" ? "pms.rooms_rates.read" : "pms.rooms_rates.manage"] as const;
   const resource = { product: "pms", resourceType: "pms_property", resourceId: propertyId } as const;
-  if (!hasPermission(context, permission) ||
+  if (!required.every((permission) => hasPermission(context, permission)) ||
       !hasActiveLinkedResource(context, { ...resource, allowedRelationships: ["owner", "operator"] }) ||
       !hasActiveEntitlement(context, { product: "pms", key: "property-management", resource })) return false;
   await lockPmsInventoryMutationScope(client, propertyId);
@@ -58,7 +59,7 @@ export async function lockReplacementPricingAuthorization(
     for (const key of overrides.grant) permissions.add(key);
     for (const key of overrides.deny) permissions.delete(key);
   }
-  if (!permissions.has(permission)) return false;
+  if (!required.every((permission) => permissions.has(permission))) return false;
   // Lock even currently unrelated rows: an update could retarget one as a scoped suspension.
   const entitlements = (await client.query(`SELECT * FROM identity.product_entitlements
     WHERE organization_id=$1 FOR SHARE`, [scope.organizationId])).rows;

@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { buildApp } from "./app.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerChannexOfferPreviewRoutes } from "./routes/channexOfferPreview.js";
@@ -91,6 +92,14 @@ async function fixture(auth: RequestContext | null = context) {
   };
 }
 describe("channel offer preview HTTP boundary", () => {
+  it("registers only with a supplied preview runtime", async () => {
+    const disabled = buildApp({ logger: false }),
+      enabled = buildApp({ logger: false, channexOfferPreview: { read: vi.fn() } });
+    apps.push(disabled, enabled);
+    const url = `/api/pms/properties/${id}/channex/offer-preview`;
+    expect((await disabled.inject({ url })).statusCode).toBe(404);
+    expect((await enabled.inject({ url })).statusCode).toBe(401);
+  });
   it("returns only the exact configuration and explicit primary, with no readiness claim", async () => {
     const f = await fixture(),
       response = await f.inject();

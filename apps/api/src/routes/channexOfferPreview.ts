@@ -12,7 +12,7 @@ import { enforceRoutePolicy } from "./policy.js";
 export type ChannexOfferPreviewRoutesOptions = {
   /** Trusted server adapter: bounded acquisition/queries, shared decoder and source
    * freshness, both permissions and property authorization in the read transaction.
-   * No worker lease, provider calls or writes. Runtime wiring requires this adapter.
+   * No worker lease, provider calls or writes.
    */
   read(
     context: RequestContext,
@@ -25,8 +25,7 @@ const fields = ["roomTypeId", "offerId", "publicationRevision", "primaryOccupanc
 const positive = (v: string, max: number) =>
   /^[1-9][0-9]*$/.test(v) && Number.isSafeInteger(Number(v)) && Number(v) <= max;
 
-/** Independent adapter; deliberately not registered in the server until the
- * transactional reader is implemented and verified. */
+/** Protected preview adapter; enabled only with its trusted server reader. */
 export async function registerChannexOfferPreviewRoutes(
   app: FastifyInstance,
   options: ChannexOfferPreviewRoutesOptions,

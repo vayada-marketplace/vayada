@@ -1,3 +1,4 @@
+import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
@@ -1372,6 +1373,9 @@ const app = buildApp({
       : undefined,
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
+    : undefined,
+  channexOfferPreview: config.pmsOperationsSource === "target"
+    ? { read: (context, propertyId) => readChannexOfferPreview(propertySetupOwnerPool, context, propertyId) }
     : undefined,
   replacementPricing: config.pmsOperationsSource === "target"
     ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
