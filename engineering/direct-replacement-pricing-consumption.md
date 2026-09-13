@@ -219,9 +219,9 @@ until their owner exists; this is not calendar/inventory or full quote approval.
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
 owner rules and evidence before activation. Per-offer accepted payment methods
-are also absent from `ReplacementOfferTerms`; global Finance methods do not
-prove an individual rate permits a method. Extend those owner contracts rather
-than silently dropping the configured restrictions.
+now use explicit `payment.acceptedMethods` in `ReplacementOfferTerms`; historical
+absence supplies no permission. Global Finance methods alone do not prove an
+individual rate permits a method.
 
 An explicit zero/empty owner result is different from a missing adapter. Missing
 promotion, add-on, charge, FX or payment evidence cannot become a default zero,
@@ -420,3 +420,20 @@ never adds included charges twice, and rejects included allocations above the
 subtotal or invalid money. Authority and property-local day are rechecked after
 charge reads. This internal amount result is not a payment schedule, complete
 quote, inventory reservation, legal tax certification or checkout approval.
+
+
+Selected payment composition requires explicit `payment.acceptedMethods` on each
+selected offer's current Booking terms: nonempty, unique `card` and/or
+`pay_at_property`. Absence preserves historical terms decoding but supplies no
+method permission. The authorized terms writer stores the setting in the same
+immutable revision; changes require republishing as other terms changes do.
+The chosen method must also be currently executable in Finance. Only selected
+offers determine rate permission; ancestor/unselected terms do not grant it.
+
+`lockPublicPricingPaymentAmounts` composes full-payment terms only. Card collects
+the online-collectible portion now, leaving property-collected fees for later;
+pay-at-property defers the total. Deposits and mixed cancellation terms fail
+closed. Preserve selected terms/revisions, method, Finance evidence and a
+method-bound calculation identity. This remains an internal result, not an
+accepted quote or permission to charge a provider. Quote persistence, remaining
+owner evidence, inventory and atomic acceptance still precede route activation.
