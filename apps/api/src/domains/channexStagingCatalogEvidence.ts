@@ -18,6 +18,12 @@ const count = (v: unknown, min: number, max: number) =>
     ? v
     : rejectCatalog("invalid_catalog_capacity");
 
+const mealType = (value: unknown) => {
+  if (value === "none" || value === "room_only") return "room_only";
+  if (value === "breakfast") return "breakfast";
+  return rejectCatalog("unsupported_catalog_meal");
+};
+
 export type StagingCatalogRequest = {
   providerPropertyId: string;
   bookingId: string;
@@ -124,6 +130,8 @@ export async function readStagingCatalogEvidence(
     checkRate(parent, parentId as string);
     base = object(parent.attributes);
   } else if (rateId !== mappings[0]!.rate_plan_id) rejectCatalog("catalog_mapping_mismatch");
+  const meal = mealType(a.meal_type);
+  if (meal !== mealType(base.meal_type)) rejectCatalog("catalog_meal_mismatch");
   const options = list(base.options),
     primary = options[0];
   if (
@@ -137,9 +145,7 @@ export async function readStagingCatalogEvidence(
     a.currency !== base.currency ||
     a.currency !== booking.currency ||
     a.currency !== channelFacts.currency ||
-    !/^[A-Z]{3}$/.test(String(a.currency)) ||
-    !["none", "room_only"].includes(String(a.meal_type)) ||
-    !["none", "room_only"].includes(String(base.meal_type))
+    !/^[A-Z]{3}$/.test(String(a.currency))
   )
     rejectCatalog("unsupported_catalog_rate");
   const adults = count(r.occ_adults, 1, 20),
@@ -159,5 +165,6 @@ export async function readStagingCatalogEvidence(
     providerRoomCount: count(r.count_of_rooms, 1, 100),
     currency: a.currency as string,
     amount: primary.rate,
+    mealType: meal,
   };
 }
