@@ -361,3 +361,17 @@ Public authority and property-local day are rechecked after owner waits. The
 result is a subtotal before mandatory charges, with partial component sources;
 it must not be serialized as a complete quote or used to infer missing charge,
 FX, deposit, calendar/inventory or generalized-promotion execution.
+
+`composeReplacementSettlementAmounts` implements arithmetic on resolved,
+same-currency, disjoint charge amounts and an already eligible payment schedule.
+Included amounts are not added twice; excluded amounts increase the final total.
+Property-collected portions are reserved from online collection, including those
+already embedded in the subtotal. Included allocations cannot exceed subtotal.
+Full online payment collects the remaining online-collectible amount; pay at
+property defers the total. Deposits round half-up on the entire final total:
+360 at30%=108 now/252 later. A deposit exceeding the online-collectible portion
+is unavailable rather than clamped or redirected. This does not establish
+selected-stay tax/fee ownership or enable deposit execution in Finance. Zero-total
+booking acceptance remains unsupported. Charge basis evidence is preserved, not
+verified, by this pure helper; current-owner and per-rate method checks must
+precede its eventual use in complete quote composition.
