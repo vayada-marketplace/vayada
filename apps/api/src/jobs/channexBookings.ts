@@ -117,6 +117,7 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
   if(options.stagingImport){
     const response=record(await providerRequest(options,`/api/v1/booking_revisions/${encodeURIComponent(job.revision)}`,"GET"));
     const item=record(response.data),revision=parseRevision(item,job);
+    if(options.stagingImport.retainedRevision && (record(item.attributes).channel_id!==null || record(item.attributes).is_crs_revision!==false))throw new Failure("invalid_retained_revision_scope",false);
     if(options.stagingImport.revisionHash && stagingRevisionHash(item)!==options.stagingImport.revisionHash)throw new Failure("staging_catalog_revision_changed",false);
     if(revision.id!==options.stagingImport.revision||revision.channel!=="booking_com"||revision.status!=="confirmed")throw new Failure("invalid_staging_revision",false);
     return [item];
@@ -389,6 +390,7 @@ type StagingImportScope = {
   bindingGeneration: string;
   catalogHash?: string;
   revisionHash?: string;
+  retainedRevision?: boolean;
 };
 
 // Privileged one-shot operator boundary; never called by the API server.
@@ -402,6 +404,7 @@ export async function importChannexStagingReservation(
     repairAssignments?: boolean;
     catalogHash?: string;
     channelId?: string;
+    retainedRevision?: boolean;
   },
   request: typeof fetch = fetch,
 ) {
@@ -425,9 +428,9 @@ export async function importChannexStagingReservation(
     !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef) ||
     (input.catalogHash !== undefined &&
       (!/^[a-f0-9]{64}$/.test(input.catalogHash) ||
-        !uuid.test(input.channelId ?? "") ||
+        (input.retainedRevision ? input.channelId !== undefined : !uuid.test(input.channelId ?? "")) ||
         input.repairAssignments)) ||
-    (input.channelId !== undefined && !input.catalogHash)
+    ((input.channelId !== undefined || input.retainedRevision) && !input.catalogHash)
   ) {
     throw new Error("invalid_staging_import_scope");
   }
@@ -447,7 +450,8 @@ export async function importChannexStagingReservation(
           providerPropertyId: input.providerPropertyId,
           bookingId: input.channelBookingId,
           revisionId: input.revision,
-          channelId: input.channelId!,
+          channelId: input.channelId,
+          retainedRevision: input.retainedRevision,
           approvalRef: input.approvalRef,
           preImport: true,
         },

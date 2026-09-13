@@ -11,6 +11,7 @@ try {
       "approval-ref": { type: "string" },
       "catalog-hash": { type: "string" },
       "channel-id": { type: "string" },
+      "retained-revision": { type: "boolean", default: false },
       "repair-assignments": { type: "boolean", default: false },
     },
   });
@@ -22,6 +23,7 @@ try {
     repairAssignments: values["repair-assignments"],
     catalogHash: values["catalog-hash"],
     channelId: values["channel-id"],
+    retainedRevision: values["retained-revision"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");
   if (result.status !== "succeeded") process.exitCode = 1;

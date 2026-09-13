@@ -109,3 +109,29 @@ concurrent apply/import, missing capacity, closed/conflicting mappings, normal
 consumer rejection, exact OTA nightly evidence and replay. Deployed acceptance
 requires a reviewed image and coordinated shared-fixture lease; no provider
 objects, reservations, global processing or production behavior change here.
+
+## Retained OTA revision recovery (VAY-2013)
+
+The shared test hotel may be reclaimed after its channel is deleted. Channex
+[retains bookings after channel deletion](https://docs.channex.io/channel-api-examples/booking.com)
+and supports [catalog probes before connection](https://docs.channex.io/api-v.1-documentation/channel-api).
+The explicit `--retained-revision` mode uses those read-only probes plus the
+original revision's allocated room/rate. It creates no replacement channel.
+
+This exception is restricted to the exact property, provider booking/revision,
+OTA hotel/room/rate and provider room/rate in `retainedRevisionScope`; it requires
+`--pre-import`, no `--channel-id`, and a `VAY-2013:` approval reference. Require
+`channel_id: null`, `is_crs_revision: false`, an unambiguous standard OTA rate,
+a directly owned manual GBP room-only rate, and all existing runtime/binding
+guards. Its versioned receipt binds the recovery mode and hotel ID as well as
+the existing evidence. Apply refetches that evidence; the scoped import also
+checks the retained-revision flags on its final authoritative revision pull.
+
+For the approved target, preview `adoptChannexStagingCatalog` with the existing
+property/booking/revision arguments and `--pre-import --retained-revision`;
+apply adds `--apply-hash HASH`. After separately establishing verified room
+facts and owned capacity/calendar readiness, invoke `importChannexStagingReservation`
+with the same scope, `--catalog-hash HASH --retained-revision`. Do not pass a
+channel ID. The original failed job, protected bookings, provider stop-sell and
+global observe-only guards remain intact. This mode supplies catalog evidence
+only; it does not supply missing canonical room facts or authorize production use.

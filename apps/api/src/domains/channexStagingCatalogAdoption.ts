@@ -5,6 +5,8 @@ import { resolveStagingCatalogReference } from "./channexStagingCatalogReference
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import {
   catalogUuid,
+  retainedRevisionScope,
+  validateRetainedRevisionRequest,
   readStagingCatalogEvidence,
   rejectCatalog,
   type StagingCatalogRequest,
@@ -24,17 +26,17 @@ export async function adoptChannexStagingCatalog(
     management.capabilityModes.bookingSync !== "observe_only" ||
     !management.apiKey ||
     !config.targetDatabaseUrl ||
-    ![
-      propertyId,
-      input.providerPropertyId,
-      input.bookingId,
-      input.revisionId,
-      input.channelId,
-    ].every(catalogUuid) ||
+    ![propertyId, input.providerPropertyId, input.bookingId, input.revisionId].every(catalogUuid) ||
+    (input.retainedRevision
+      ? !input.preImport ||
+        input.channelId !== undefined ||
+        propertyId !== retainedRevisionScope.propertyId
+      : !catalogUuid(input.channelId)) ||
     !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef) ||
     (input.applyHash !== undefined && !/^[a-f0-9]{64}$/.test(input.applyHash))
   )
     rejectCatalog("invalid_staging_catalog_scope");
+  validateRetainedRevisionRequest(input);
   const pool = new pg.Pool({
     connectionString: config.targetDatabaseUrl,
     max: 1,
@@ -65,7 +67,11 @@ export async function adoptChannexStagingCatalog(
     await client.query("ROLLBACK");
     const facts = await readStagingCatalogEvidence(input, management.apiKey!, request);
     const evidence = {
-      version: input.preImport ? "channex-staging-bootstrap.v1" : "channex-staging-catalog.v1",
+      version: input.retainedRevision
+        ? "channex-staging-retained-bootstrap.v1"
+        : input.preImport
+          ? "channex-staging-bootstrap.v1"
+          : "channex-staging-catalog.v1",
       propertyId,
       connectionId: before.id,
       bindingGeneration: before.generation,
