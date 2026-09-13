@@ -1,5 +1,5 @@
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
-import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
+import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
 import { randomUUID } from "node:crypto";
@@ -218,6 +218,69 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       });
     return { ...f, correlation, response };
   }
+  async function transportReceipts(propertyId: string) {
+    return (
+      await pool.query(
+        `SELECT r.outcome,r.http_status,r.provider_request_id,r.identity_evidence,r.has_warnings,a.state
+       FROM pms.channex_offer_create_receipts r JOIN pms.channex_offer_create_attempts a ON a.id=r.attempt_id
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE t.property_id=$1`,
+        [propertyId],
+      )
+    ).rows;
+  }
+  const transportEnvelope = {
+    outcome: "transport_error",
+    http_status: null,
+    provider_request_id: null,
+    identity_evidence: {},
+    has_warnings: true,
+    state: "unresolved",
+  };
+  it("persists a fixed transport failure idempotently without gaining identity", async () => {
+    const f = await receiptFixture();
+    const save = await prepareChannexTransportFailurePersistence(pool, f.correlation);
+    const result = await save();
+    expect(await save()).toEqual(result);
+    expect(await transportReceipts(f.scope.propertyId)).toEqual([transportEnvelope]);
+    expect(await recordRetained(pool, f.input, f.selection, f.claim.attemptId)).toMatchObject({
+      kind: "unavailable",
+    });
+  });
+  it("does not retain a creation transport receipt for a failed room preflight", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const create = vi.fn(async () => new Response("{}"));
+    expect(
+      await prepared.dispatch({
+        getRoom: async () => {
+          throw new Error("private GET error");
+        },
+        create,
+      }),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(create).not.toHaveBeenCalled();
+    expect(await transportReceipts(f.scope.propertyId)).toEqual([]);
+  });
+  it("retains transport failure when creation exceeds its deadline", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    let signal: AbortSignal | undefined;
+    const create = vi.fn(async (_payload: unknown, current: AbortSignal): Promise<Response> => {
+      signal = current;
+      return new Promise(() => {});
+    });
+    const ports = { getRoom: async () => providerRoom(f), create };
+    expect(await prepared.dispatch(ports)).toMatchObject({
+      kind: "unavailable",
+      reason: "creation_reconciliation_required",
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(await transportReceipts(f.scope.propertyId)).toEqual([transportEnvelope]);
+    expect(await prepared.dispatch(ports)).toMatchObject({ reason: "dispatch_already_used" });
+    expect(create).toHaveBeenCalledOnce();
+  }, 30000);
   async function configurationFixture() {
     const f = await receiptFixture();
     await (
@@ -715,6 +778,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     expect(result).toEqual({ kind: "unavailable", reason: "lease_unavailable" });
     expect(create).not.toHaveBeenCalled();
+    expect(await transportReceipts(f.scope.propertyId)).toEqual([]);
   });
   it("holds an ambiguous create failure without allowing another dispatch", async () => {
     const f = await creationFixture();
@@ -733,6 +797,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       reason: "dispatch_already_used",
     });
     expect(create).toHaveBeenCalledOnce();
+    expect(await transportReceipts(f.scope.propertyId)).toEqual([transportEnvelope]);
     expect((await prepareChannexOfferDispatch(pool, f.input, f.selection)).kind).toBe(
       "unavailable",
     );

@@ -14,10 +14,26 @@ type Correlation = {
 /** Consume once, then retry only persistence with the same immutable observation.
  * The pool must bound connection acquisition. No current pricing authority is granted.
  */
-export async function prepareChannexReceiptPersistence(
+export function prepareChannexReceiptPersistence(
   pool: Pick<Pool, "connect">,
   correlation: Correlation,
   response: Response,
+) {
+  return prepareReceiptPersistence(pool, correlation, response);
+}
+
+/** Fixed ambiguous-transport evidence only; never persist exception text. */
+export function prepareChannexTransportFailurePersistence(
+  pool: Pick<Pool, "connect">,
+  correlation: Correlation,
+) {
+  return prepareReceiptPersistence(pool, correlation, null);
+}
+
+async function prepareReceiptPersistence(
+  pool: Pick<Pool, "connect">,
+  correlation: Correlation,
+  response: Response | null,
 ) {
   const scope = { ...correlation };
   for (const key of [
@@ -38,7 +54,16 @@ export async function prepareChannexReceiptPersistence(
     scope.workerId !== scope.workerId.trim()
   )
     throw new Error("Invalid Channex receipt worker");
-  const observation = await readChannexCreationResponse(response);
+  const observation =
+    response === null
+      ? {
+          outcome: "transport_error" as const,
+          httpStatus: null,
+          providerRequestId: null,
+          identityEvidence: {},
+          hasWarnings: true,
+        }
+      : await readChannexCreationResponse(response);
   const values = [
     scope.receiptId,
     scope.attemptId,

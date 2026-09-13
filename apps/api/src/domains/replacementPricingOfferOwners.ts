@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
+import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { channexCreationReceiptsResolved, readChannexCreationReceiptIdentity } from "./channexCreationReceiptGate.js";
 import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
@@ -258,7 +258,7 @@ export async function prepareChannexOfferDispatch(
       used = true;
       const before = await withSelectedChannexTarget(pool, lease, selected, work);
       if (before.kind !== "available") return before;
-      let response: Response;
+      let response: Response | null = null;
       try {
         await verifyChannexOfferRoom(
           room,
@@ -270,26 +270,31 @@ export async function prepareChannexOfferDispatch(
         );
         const current = await withSelectedChannexTarget(pool, lease, selected, work);
         if (current.kind !== "available") return current;
+      } catch {
+        return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
+      }
+      try {
         response = await boundedProviderCall((signal) =>
           ports.create(structuredClone(claim.request), signal),
         );
       } catch {
-        return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
+        // Once create was invoked, failure is ambiguous even without HTTP headers.
       }
-      const persist = await prepareChannexReceiptPersistence(
-        pool,
-        {
-          receiptId: randomUUID(),
-          attemptId: claim.attemptId,
-          jobAttemptId: claim.jobAttemptId,
-          workerId: claim.workerId,
-          propertyId: claimed.authority.lease.propertyId,
-          connectionId: claimed.authority.connectionId,
-        },
-        response,
-      );
+      const correlation = {
+        receiptId: randomUUID(),
+        attemptId: claim.attemptId,
+        jobAttemptId: claim.jobAttemptId,
+        workerId: claim.workerId,
+        propertyId: claimed.authority.lease.propertyId,
+        connectionId: claimed.authority.connectionId,
+      };
+      const persist = await (response === null
+        ? prepareChannexTransportFailurePersistence(pool, correlation)
+        : prepareChannexReceiptPersistence(pool, correlation, response));
       try {
         await persist();
+        if (response === null)
+          return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
         return { kind: "retained" as const, attemptId: claim.attemptId };
       } catch {
         return { kind: "receipt_pending" as const, persist };
