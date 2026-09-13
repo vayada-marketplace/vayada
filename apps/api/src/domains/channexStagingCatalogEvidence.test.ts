@@ -141,3 +141,115 @@ it("binds pre-import booking facts deterministically and rejects unsupported boo
       .revisionHash,
   ).not.toBe(first.revisionHash);
 });
+
+it("recovers only the authorized retained OTA allocation, using catalog probes without a channel", async () => {
+  const retainedInput = {
+    ...input,
+    channelId: undefined,
+    retainedRevision: true,
+    preImport: true,
+    approvalRef: "VAY-2013:test",
+  };
+  const { request } = provider(true);
+  await expect(
+    readStagingCatalogEvidence(retainedInput, "synthetic", request),
+  ).resolves.toMatchObject({
+    roomId,
+    rateId,
+    recovery: "retained-ota-revision.v1",
+    hotelId: "5868189",
+    currency: "GBP",
+    mealType: "room_only",
+  });
+  for (const change of [
+    { channelId: input.channelId },
+    { preImport: false },
+    { approvalRef: "VAY-1981:test" },
+    { bookingId: input.channelId },
+    { providerPropertyId: input.channelId },
+  ]) {
+    await expect(
+      readStagingCatalogEvidence(
+        { ...retainedInput, ...change },
+        "synthetic",
+        provider(true).request,
+      ),
+    ).rejects.toThrow();
+  }
+  const changes: ((data: Record<string, any>) => void)[] = [
+    (d) => {
+      d[`booking_revisions/${input.revisionId}`].attributes.channel_id = input.channelId;
+    },
+    (d) => {
+      delete d[`booking_revisions/${input.revisionId}`].attributes.channel_id;
+    },
+    (d) => {
+      d[`booking_revisions/${input.revisionId}`].attributes.is_crs_revision = true;
+    },
+    (d) => {
+      delete d[`booking_revisions/${input.revisionId}`].attributes.is_crs_revision;
+    },
+    (d) => {
+      d[`booking_revisions/${input.revisionId}`].attributes.ota_reservation_code = "5540217040";
+    },
+    (d) => {
+      d[`booking_revisions/${input.revisionId}`].attributes.rooms[0].rate_plan_id = input.channelId;
+    },
+    (d) => {
+      d[`booking_revisions/${input.revisionId}`].attributes.rooms[0].meta.rate_plan_code =
+        "16385047";
+    },
+    (d) => {
+      d["channels/mapping_details"].rooms.push(d["channels/mapping_details"].rooms[0]);
+    },
+    (d) => {
+      d["channels/mapping_details"].rooms[0].rates.push(
+        d["channels/mapping_details"].rooms[0].rates[0],
+      );
+    },
+    (d) => {
+      d["channels/mapping_details"].rooms[0].rates[0].parent_rate_id = "16385046";
+    },
+    (d) => {
+      d["channels/mapping_details"].rooms[0].rates[0].readonly = true;
+    },
+    (d) => {
+      d["channels/mapping_details"].rooms[0].rates[0].max_persons = 1;
+    },
+    (d) => {
+      Object.assign(d[`room_types/${roomId}`].attributes, { occ_adults: 3, default_occupancy: 3 });
+      d[`rate_plans/${rateId}`].attributes.options[0].occupancy = 3;
+      d[`booking_revisions/${input.revisionId}`].attributes.rooms[0].occupancy.adults = 3;
+    },
+    (d) => {
+      d[`room_types/${roomId}`].attributes.occ_children = 1;
+      d[`booking_revisions/${input.revisionId}`].attributes.rooms[0].occupancy.children = 1;
+    },
+    (d) => {
+      d["channels/connection_details"].attributes.currency = "EUR";
+    },
+    (d) => {
+      d[`rate_plans/${rateId}`].attributes.rate_mode = "derived";
+    },
+    (d) => {
+      d[`rate_plans/${rateId}`].relationships.channel = relation(input.channelId);
+    },
+    (d) => {
+      d[`rate_plans/${rateId}`].relationships.property = relation(input.channelId);
+    },
+    (d) => {
+      d[`room_types/${roomId}`].relationships.property = relation(input.channelId);
+    },
+    (d) => {
+      d[`rate_plans/${rateId}`].attributes.meal_type = "breakfast";
+    },
+  ];
+  for (const mutate of changes) {
+    const { data, request } = provider(true);
+    mutate(data);
+    await expect(readStagingCatalogEvidence(retainedInput, "synthetic", request)).rejects.toThrow();
+  }
+  await expect(
+    readStagingCatalogEvidence({ ...input, preImport: true }, "synthetic", provider(true).request),
+  ).rejects.toThrow();
+});

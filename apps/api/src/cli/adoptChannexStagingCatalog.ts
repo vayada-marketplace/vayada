@@ -12,6 +12,7 @@ try {
       "channel-id": { type: "string" },
       "approval-ref": { type: "string" },
       "pre-import": { type: "boolean", default: false },
+      "retained-revision": { type: "boolean", default: false },
       "apply-hash": { type: "string" },
     },
   });
@@ -19,7 +20,8 @@ try {
     providerPropertyId: values["provider-property-id"] ?? "",
     bookingId: values["booking-id"] ?? "",
     revisionId: values["revision-id"] ?? "",
-    channelId: values["channel-id"] ?? "",
+    channelId: values["channel-id"],
+    retainedRevision: values["retained-revision"],
     approvalRef: values["approval-ref"] ?? "",
     applyHash: values["apply-hash"],
     preImport: values["pre-import"],
