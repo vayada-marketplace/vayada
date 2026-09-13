@@ -40,6 +40,35 @@ still grants nothing: an exact, independently verified disposition is required.
 
 ## Scoped PMS authorization contract
 
+### Product-access preservation decision (September 14)
+
+Flamur approved preserving proven previous access per product: PMS only,
+approved Marketplace only, or both when each is independently established.
+This does not mean granting every product to every owner. An existing hotel,
+Marketplace profile, email match or social identity alone is not access evidence.
+Keep access restricted to the same proven owner and their own hotel resources;
+genuine suspensions, revocations and newer restrictions take precedence.
+
+Evaluate Marketplace using its own prior approval and target authorization
+requirements. Never use this PMS exception as Marketplace approval, and never
+copy an old approval over a newer target denial. Any Marketplace preservation
+must have its own product-specific evidence; absence or ambiguity stays denied.
+
+The retained eight-owner snapshot does not establish approved Marketplace
+access: four have pending Marketplace profiles and four have no profile in
+that snapshot. Therefore this decision does not automatically add Marketplace
+access for any of the eight. This is snapshot evidence, not a statement about
+their current production status. Current evidence must be checked before any
+execution; no production writes or cutover are authorized by this decision.
+
+Test the product matrix explicitly: PMS-only proof cannot authorize Marketplace;
+Marketplace-only proof cannot authorize PMS; both require both proofs. Profile
+presence or matching contact details cannot substitute for either proof, and a
+newer denial overrides stale approval. The scoped PMS mechanism below remains
+PMS-only; the common rule is preservation, not a shared all-products bypass.
+
+### PMS exception boundaries
+
 Keep the actual user and organization statuses in the request context. Never
 represent a pending actor or migration-suspended organization as globally active.
 Use a server-resolved, revocable disposition keyed by internal user, membership,
