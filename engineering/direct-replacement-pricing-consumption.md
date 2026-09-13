@@ -454,3 +454,16 @@ exchange rate or enable cross-currency quotes. Issue time comes from the databas
 after owner reads. The internal caller supplies a bounded lifetime (1–900 seconds),
 capped at the next property-local midnight; a local-day change during reads is
 unavailable. Stored price evidence is not inventory or checkout acceptance.
+
+
+Migration0205 stores immutable replacement pricing quote records separately from
+legacy checkout sessions, avoiding old amount serializers and conversion jobs.
+Issuance resolves current public authority before request replay. Request keys
+are property-scoped and bind the canonical selection and payment method; an
+identical retry returns the original quote without repricing or extending expiry.
+Changed input conflicts. Current organization scope is required for replay and
+readback. Quote amounts are historical records, not a fresh eligibility promise.
+The stored envelope is decoded and bound to the record's property/id on read;
+calculation details are retained server-side as archival JSON, not public output
+or independently validated input to settlement. No quote acceptance status is
+fabricated; atomic acceptance will reference this record after fresh checks.

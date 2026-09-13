@@ -1,3 +1,4 @@
+import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
 import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
@@ -1221,6 +1222,117 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     for (const lifetime of [0, -1, 901, 1.5, NaN])
       expect(await assembledQuote(f, lifetime)).toBeNull();
+  });
+
+  it("persists exact quote history and replays the original request after repricing", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const command = {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    };
+    const first = await store.issue(f.scope.propertyId, command);
+    expect(first.replayed).toBe(false);
+    expect((await store.read(f.scope.propertyId, first.quote.quoteId))?.quote).toEqual(first.quote);
+    await pool.query("UPDATE booking.addon_definitions SET price_amount=30 WHERE id=$1", [f.id]);
+    expect(await store.issue(f.scope.propertyId, command)).toEqual({ ...first, replayed: true });
+    const next = await store.issue(f.scope.propertyId, { ...command, requestId: randomUUID() });
+    expect(next.quote.evidence.totalMinor).toBe("22400");
+    expect(first.quote.evidence.totalMinor).toBe("20600");
+    expect(next.quote.quoteId).not.toBe(first.quote.quoteId);
+    await expect(
+      store.issue(f.scope.propertyId, { ...command, selection: { ...f.selection, promoCode: null } }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      store.issue(f.scope.propertyId, { ...command, paymentMethod: "card" }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    // Returned objects cannot mutate persisted history.
+    (
+      first as unknown as { quote: { evidence: { lines: { amountMinor: string }[] } } }
+    ).quote.evidence.lines[0]!.amountMinor = "1";
+    expect(
+      (await store.read(f.scope.propertyId, first.quote.quoteId))?.quote.evidence.lines[0]!
+        .amountMinor,
+    ).not.toBe("1");
+  });
+  it("serializes concurrent quote issuance and enforces append-only storage", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const command = {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    };
+    const issued = await Promise.all([
+      store.issue(f.scope.propertyId, command),
+      store.issue(f.scope.propertyId, command),
+    ]);
+    expect(new Set(issued.map((r) => r.quote.quoteId)).size).toBe(1);
+    expect(issued.map((r) => r.replayed).sort()).toEqual([false, true]);
+    for (const sql of [
+      "UPDATE booking.pricing_quotes SET request_id='changed' WHERE id=$1",
+      "DELETE FROM booking.pricing_quotes WHERE id=$1",
+    ])
+      await expect(pool.query(sql, [issued[0]!.quote.quoteId])).rejects.toMatchObject({
+        code: "55000",
+      });
+    await expect(pool.query("TRUNCATE booking.pricing_quotes CASCADE")).rejects.toMatchObject({
+      code: "55000",
+    });
+  });
+  it("reauthorizes replay/readback and isolates records by property", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      other = await componentsFixture(fixedPolicy(), propertyTerms);
+    const store = createCurrentPricingQuoteStore(pool, 300),
+      command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+    const first = await store.issue(f.scope.propertyId, command);
+    expect(await store.read(other.scope.propertyId, first.quote.quoteId)).toBeNull();
+    expect(await store.read(f.scope.propertyId, randomUUID())).toBeNull();
+    expect(await store.read(f.scope.propertyId, "bad-id")).toBeNull();
+    await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await store.read(f.scope.propertyId, first.quote.quoteId)).toBeNull();
+    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({ code: "denied" });
+  });
+  it("rejects unavailable or malformed issuance without leaving a stored quote", async () => {
+    const f = await componentsFixture(fixedPolicy()),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const command = {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    };
+    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({ code: "denied" });
+    for (const input of [
+      { ...command, requestId: " " },
+      { ...command, extra: true },
+      { ...command, selection: {} },
+      { ...command, paymentMethod: "cash" },
+    ])
+      await expect(store.issue(f.scope.propertyId, input)).rejects.toMatchObject({ code: "invalid" });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM booking.pricing_quotes WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+
+  it("returns expired historical quotes on retry without extending their lifetime", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    const store = createCurrentPricingQuoteStore(pool, 1);
+    const command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+    const first = await store.issue(f.scope.propertyId, command);
+    await pool.query("SELECT pg_sleep(1.1)");
+    const replay = await store.issue(f.scope.propertyId, command);
+    expect(replay.replayed).toBe(true);
+    expect(replay.quote).toEqual(first.quote);
+    expect(Date.parse(replay.quote.evidence.expiresAt)).toBeLessThan(Date.now());
+    expect((await store.read(f.scope.propertyId, first.quote.quoteId))?.quote).toEqual(first.quote);
   });
 
 });
