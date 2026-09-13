@@ -54,8 +54,37 @@ it("accepts pure parent inheritance but rejects derived pricing formulas", async
     parentId,
     amount: "80.00",
   });
+  rate.attributes.meal_type = "breakfast";
+  await expect(readStagingCatalogEvidence(input, "synthetic", request)).rejects.toThrow(
+    "catalog_meal_mismatch",
+  );
+  data[`rate_plans/${parentId}`].attributes.meal_type = "breakfast";
+  await expect(readStagingCatalogEvidence(input, "synthetic", request)).resolves.toMatchObject({
+    mealType: "breakfast",
+  });
   rate.attributes.options[0].derived_option = { rate: [["increase_by_percent", "10"]] };
   await expect(readStagingCatalogEvidence(input, "synthetic", request)).rejects.toThrow(
     "unsupported_derived_rate",
   );
+});
+
+it("retains breakfast evidence and normalizes room-only aliases without accepting other meals", async () => {
+  const { data, request } = provider();
+  const rate = data[`rate_plans/${rateId}`].attributes;
+  for (const [meal, expected] of [
+    ["none", "room_only"],
+    ["room_only", "room_only"],
+    ["breakfast", "breakfast"],
+  ]) {
+    rate.meal_type = meal;
+    await expect(readStagingCatalogEvidence(input, "synthetic", request)).resolves.toMatchObject({
+      mealType: expected,
+    });
+  }
+  for (const meal of ["half_board", "all_inclusive", "unknown", null]) {
+    rate.meal_type = meal;
+    await expect(readStagingCatalogEvidence(input, "synthetic", request)).rejects.toThrow(
+      "unsupported_catalog_meal",
+    );
+  }
 });

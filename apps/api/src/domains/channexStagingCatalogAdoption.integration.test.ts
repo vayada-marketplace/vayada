@@ -103,9 +103,10 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
     ).rows;
     return result;
   };
-  it("previews without writes and applies concurrently once, preserving staff edits and jobs", async () => {
-    const { request } = provider(),
+  it("previews breakfast without writes and applies concurrently once, preserving staff edits and jobs", async () => {
+    const { data, request } = provider(),
       before = await snapshot();
+    data[`rate_plans/${rateId}`].attributes.meal_type = "breakfast";
     const preview = await adoptChannexStagingCatalog(config(), input, request);
     expect(preview.outcome).toBe("preview");
     expect(await snapshot()).toEqual(before);
@@ -157,6 +158,12 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
     ).rejects.toThrow("staging_catalog_evidence_changed");
     expect(await snapshot()).toEqual(before);
     data[`room_types/${roomId}`].attributes.title = "Synthetic Double";
+    data[`rate_plans/${rateId}`].attributes.meal_type = "breakfast";
+    await expect(
+      adoptChannexStagingCatalog(config(), { ...input, applyHash: preview.hash }, request),
+    ).rejects.toThrow("staging_catalog_evidence_changed");
+    expect(await snapshot()).toEqual(before);
+    data[`rate_plans/${rateId}`].attributes.meal_type = "none";
     await db.query(
       "UPDATE platform.jobs SET status='dead_lettered' WHERE payload->>'propertyId'=$1",
       [propertyId],

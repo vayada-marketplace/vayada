@@ -51,3 +51,16 @@ conflicts, changed evidence/binding, wrong property/channel/rate, disabled globa
 guards, missing successful import, and preservation of staff/closure state on
 PostgreSQL 16 and 17. Live evidence must distinguish adoption from later capacity,
 calendar, assignment and no-show verification.
+
+## Breakfast-inclusive staging evidence (VAY-1981 follow-up)
+
+The existing sanctioned reservation has an unmapped special OTA rate and includes
+breakfast. Accept provider `breakfast` alongside `none`/`room_only`; normalize the
+latter two to `room_only`. Require a derived rate and its parent to have the same
+normalized meal type. Include that meal type in the evidence hash and audit so
+a preview cannot authorize a later meal change. Unknown meals remain rejected.
+This is catalog evidence only: do not infer a mapping from meal descriptions,
+change booked terms, create canonical prices, or bypass the exact historical
+revision and OTA mapping requirements. Previous preview hashes must be refreshed. Adoption replay of a pre-change
+receipt also rejects its old hash; existing reference resolution for assignment
+repair is unchanged. Do not delete or rewrite old receipts to force replay.
