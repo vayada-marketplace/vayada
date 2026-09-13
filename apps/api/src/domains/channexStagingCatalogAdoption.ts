@@ -6,6 +6,7 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import {
   catalogUuid,
   retainedRevisionScope,
+  validateRetainedRevisionRequest,
   readStagingCatalogEvidence,
   rejectCatalog,
   type StagingCatalogRequest,
@@ -35,6 +36,7 @@ export async function adoptChannexStagingCatalog(
     (input.applyHash !== undefined && !/^[a-f0-9]{64}$/.test(input.applyHash))
   )
     rejectCatalog("invalid_staging_catalog_scope");
+  validateRetainedRevisionRequest(input);
   const pool = new pg.Pool({
     connectionString: config.targetDatabaseUrl,
     max: 1,

@@ -38,6 +38,19 @@ it("rejects retained recovery outside its canonical property and explicit catalo
     await expect(adoptChannexStagingCatalog(config(), scope, request)).rejects.toThrow(
       "invalid_staging_catalog_scope",
     );
+  for (const change of [
+    { providerPropertyId: randomUUID() },
+    { bookingId: randomUUID() },
+    { revisionId: randomUUID() },
+    { approvalRef: "VAY-1981:test" },
+  ])
+    await expect(
+      adoptChannexStagingCatalog(
+        config(),
+        { ...retained, approvalRef: "VAY-2013:test", ...change },
+        request,
+      ),
+    ).rejects.toThrow("invalid_retained_revision_scope");
   const configured = config();
   await expect(
     adoptChannexStagingCatalog(

@@ -50,12 +50,27 @@ export const retainedRevisionScope = Object.freeze({
   otaRateCode: "16385048",
 });
 
+/** Validate operator scope before any database or authenticated provider reads. */
+export function validateRetainedRevisionRequest(input: StagingCatalogRequest) {
+  if (
+    input.retainedRevision &&
+    (!input.preImport ||
+      input.channelId !== undefined ||
+      input.providerPropertyId !== retainedRevisionScope.providerPropertyId ||
+      input.bookingId !== retainedRevisionScope.bookingId ||
+      input.revisionId !== retainedRevisionScope.revisionId ||
+      !input.approvalRef.startsWith("VAY-2013:"))
+  )
+    rejectCatalog("invalid_retained_revision_scope");
+}
+
 /** Read only: never repairs provider mappings or acknowledges a revision. */
 export async function readStagingCatalogEvidence(
   input: StagingCatalogRequest,
   apiKey: string,
   request: typeof fetch,
 ) {
+  validateRetainedRevisionRequest(input);
   const get = async (path: string, body?: unknown) => {
     const response = await request(`https://staging.channex.io/api/v1/${path}`, {
       headers: { "user-api-key": apiKey, ...(body ? { "content-type": "application/json" } : {}) },
@@ -88,12 +103,6 @@ export async function readStagingCatalogEvidence(
   if (input.retainedRevision) {
     const scope = retainedRevisionScope;
     if (
-      !input.preImport ||
-      input.channelId !== undefined ||
-      input.providerPropertyId !== scope.providerPropertyId ||
-      input.bookingId !== scope.bookingId ||
-      input.revisionId !== scope.revisionId ||
-      !input.approvalRef.startsWith("VAY-2013:") ||
       booking.channel_id !== null ||
       booking.is_crs_revision !== false ||
       String(booking.ota_reservation_code) !== scope.otaBookingCode ||
@@ -218,6 +227,8 @@ export async function readStagingCatalogEvidence(
     rejectCatalog("unsupported_catalog_rate");
   const adults = count(r.occ_adults, 1, 20),
     children = count(r.occ_children, 0, 20);
+  if (input.retainedRevision && adults + children !== 2)
+    rejectCatalog("catalog_occupancy_mismatch");
   if (count(r.default_occupancy, 1, 20) !== count(primary.occupancy, 1, 20))
     rejectCatalog("catalog_occupancy_mismatch");
   if (input.preImport) {

@@ -166,17 +166,22 @@ it("recovers only the authorized retained OTA allocation, using catalog probes w
     { preImport: false },
     { approvalRef: "VAY-1981:test" },
     { bookingId: input.channelId },
+    { revisionId: input.channelId },
     { providerPropertyId: input.channelId },
   ]) {
+    const { request } = provider(true);
     await expect(
-      readStagingCatalogEvidence(
-        { ...retainedInput, ...change },
-        "synthetic",
-        provider(true).request,
-      ),
-    ).rejects.toThrow();
+      readStagingCatalogEvidence({ ...retainedInput, ...change }, "synthetic", request),
+    ).rejects.toThrow("invalid_retained_revision_scope");
+    expect(request).not.toHaveBeenCalled();
   }
   const changes: ((data: Record<string, any>) => void)[] = [
+    (d) => {
+      d[`room_types/${roomId}`].attributes.occ_children = 1;
+    },
+    (d) => {
+      d[`room_types/${roomId}`].attributes.occ_adults = 1;
+    },
     (d) => {
       d[`booking_revisions/${input.revisionId}`].attributes.channel_id = input.channelId;
     },
