@@ -42,6 +42,7 @@ export async function persistChannexAssignments(
     rooms: readonly ChannexRoomStay[];
     repair?: boolean;
     stagingCatalogBindingGeneration?: string;
+    bootstrapHash?: string;
   },
 ) {
   const { propertyId, bookingId } = input;
@@ -102,7 +103,10 @@ export async function persistChannexAssignments(
           [propertyId, input.connectionId, room.externalRoomTypeId, room.externalRatePlanId],
         )
       ).rows;
-      if (mapped.length === 0 && input.repair && input.stagingCatalogBindingGeneration)
+      if (
+        (input.bootstrapHash || (mapped.length === 0 && input.repair)) &&
+        input.stagingCatalogBindingGeneration
+      )
         mapped = await resolveStagingCatalogReference(client, {
           ...input,
           ...room,

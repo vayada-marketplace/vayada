@@ -1,3 +1,5 @@
+import { adoptChannexStagingCatalog } from "../domains/channexStagingCatalogAdoption.js";
+import { stagingRevisionHash } from "../domains/channexStagingCatalogEvidence.js";
 import type { BookingChannel } from "@vayada/domain-booking";
 import { createHash } from "node:crypto";
 import pg from "pg";
@@ -85,11 +87,12 @@ async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Pro
           (($4::uuid IS NULL AND NOT job_metadata ? 'stagingImport') OR
            (id=$4::uuid AND payload->>'propertyId'=$5 AND payload->>'providerPropertyId'=$6
             AND resource_id=$7 AND payload->>'channelBookingId'=$7 AND payload->>'revision'=$8
-            AND job_metadata->'stagingImport'->>'bindingGeneration'=$9)) AND
+            AND job_metadata->'stagingImport'->>'bindingGeneration'=$9
+            AND job_metadata#>>'{stagingImport,catalogHash}' IS NOT DISTINCT FROM $10::text)) AND
           ((status='pending' AND run_after<=now() AND attempts_count<max_attempts) OR
            (status='running' AND locked_at<=now()-($3::bigint*interval '1 millisecond')))
          ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null],
+        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null],
       )
     ).rows[0];
     if (!row) return null;
@@ -114,6 +117,7 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
   if(options.stagingImport){
     const response=record(await providerRequest(options,`/api/v1/booking_revisions/${encodeURIComponent(job.revision)}`,"GET"));
     const item=record(response.data),revision=parseRevision(item,job);
+    if(options.stagingImport.revisionHash && stagingRevisionHash(item)!==options.stagingImport.revisionHash)throw new Failure("staging_catalog_revision_changed",false);
     if(revision.id!==options.stagingImport.revision||revision.channel!=="booking_com"||revision.status!=="confirmed")throw new Failure("invalid_staging_revision",false);
     return [item];
   }
@@ -194,7 +198,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,scope?:StagingImpo
       );
       if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
     }
-    if(!alreadyCanceled)await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms)});
+    if(!alreadyCanceled)await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms),...(scope?.catalogHash?{stagingCatalogBindingGeneration:scope.bindingGeneration,bootstrapHash:scope.catalogHash}:{})});
     await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:revision.retainedCharges,rooms:revision.rooms});
     if(revision.roomCount)await client.query(
       `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,
@@ -383,6 +387,8 @@ type StagingImportScope = {
   channelBookingId: string;
   revision: string;
   bindingGeneration: string;
+  catalogHash?: string;
+  revisionHash?: string;
 };
 
 // Privileged one-shot operator boundary; never called by the API server.
@@ -394,6 +400,8 @@ export async function importChannexStagingReservation(
     revision: string;
     approvalRef: string;
     repairAssignments?: boolean;
+    catalogHash?: string;
+    channelId?: string;
   },
   request: typeof fetch = fetch,
 ) {
@@ -414,7 +422,12 @@ export async function importChannexStagingReservation(
       input.channelBookingId,
       input.revision,
     ].every((value) => value && uuid.test(value)) ||
-    !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef)
+    !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef) ||
+    (input.catalogHash !== undefined &&
+      (!/^[a-f0-9]{64}$/.test(input.catalogHash) ||
+        !uuid.test(input.channelId ?? "") ||
+        input.repairAssignments)) ||
+    (input.channelId !== undefined && !input.catalogHash)
   ) {
     throw new Error("invalid_staging_import_scope");
   }
@@ -426,10 +439,43 @@ export async function importChannexStagingReservation(
   try {
     if (input.repairAssignments)
       return await repairStagingAssignments(pool, config, input, request);
+    let revisionHash: string | undefined;
+    if (input.catalogHash) {
+      const preview = await adoptChannexStagingCatalog(
+        config,
+        {
+          providerPropertyId: input.providerPropertyId,
+          bookingId: input.channelBookingId,
+          revisionId: input.revision,
+          channelId: input.channelId!,
+          approvalRef: input.approvalRef,
+          preImport: true,
+        },
+        request,
+      );
+      if (
+        preview.outcome !== "replayed" ||
+        preview.hash !== input.catalogHash ||
+        !preview.revisionHash
+      )
+        throw new Error("staging_bootstrap_receipt_required");
+      revisionHash = preview.revisionHash;
+    }
     const scope = await transaction(pool, async (client) => {
       const requested = { ...input, propertyId: management.stagingRestrictionsPropertyId! };
       const bindingGeneration = await stagingBinding(client, requested);
-      const key = `channex.staging-import:${requested.propertyId}:${input.channelBookingId}:${input.revision}:v1`;
+      const originalKey = `channex.staging-import:${requested.propertyId}:${input.channelBookingId}:${input.revision}:v1`;
+      const key = input.catalogHash ? `${originalKey}:catalog:${input.catalogHash}` : originalKey;
+      if (
+        input.catalogHash &&
+        (
+          await client.query(
+            `SELECT 1 FROM platform.jobs WHERE queue_name=$1 AND job_key=$2 AND status NOT IN ('dead_lettered','succeeded') FOR UPDATE`,
+            [QUEUE, originalKey],
+          )
+        ).rowCount
+      )
+        throw new Error("staging_original_import_in_progress");
       await client.query(
         `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,resource_product,
           resource_type,resource_id,correlation_id,payload,job_metadata)
@@ -447,7 +493,13 @@ export async function importChannexStagingReservation(
             pullRequired: true,
             rawPayload: { event: "booking" },
           },
-          { stagingImport: { bindingGeneration, approvalRef: input.approvalRef } },
+          {
+            stagingImport: {
+              bindingGeneration,
+              approvalRef: input.approvalRef,
+              ...(input.catalogHash ? { catalogHash: input.catalogHash } : {}),
+            },
+          },
         ],
       );
       const row = (
@@ -458,7 +510,7 @@ export async function importChannexStagingReservation(
         )
       ).rows[0]!;
       if (row.generation !== bindingGeneration) throw new Error("staging_binding_changed");
-      return { ...requested, jobId: row.id, bindingGeneration };
+      return { ...requested, jobId: row.id, bindingGeneration, revisionHash };
     });
     const counters = await runChannexBookingJobs(config.targetDatabaseUrl, {
       apiBaseUrl: management.apiBaseUrl!,

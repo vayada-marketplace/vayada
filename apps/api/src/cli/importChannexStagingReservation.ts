@@ -9,6 +9,8 @@ try {
       "booking-id": { type: "string" },
       "revision-id": { type: "string" },
       "approval-ref": { type: "string" },
+      "catalog-hash": { type: "string" },
+      "channel-id": { type: "string" },
       "repair-assignments": { type: "boolean", default: false },
     },
   });
@@ -18,6 +20,8 @@ try {
     revision: values["revision-id"] ?? "",
     approvalRef: values["approval-ref"] ?? "",
     repairAssignments: values["repair-assignments"],
+    catalogHash: values["catalog-hash"],
+    channelId: values["channel-id"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");
   if (result.status !== "succeeded") process.exitCode = 1;
