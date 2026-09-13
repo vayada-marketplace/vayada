@@ -1,5 +1,9 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import {
+  parseSavePropertySetupDraftRequest,
+  PROPERTY_SETUP_STEP_DEFINITIONS,
+} from "@vayada/domain-hotels";
 import { PMS_ROOM_FACTS_CONTRACT_VERSION } from "@vayada/domain-pms";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
@@ -100,7 +104,14 @@ async function render(track: "hotel_operations" | "both" = "hotel_operations") {
   let leave!: () => Promise<void>;
   const step = {
     stepId: "guest_experience",
-    currentBaseRevisions: { "booking.guest_experience": "guest-policy:absent" },
+    currentBaseRevisions: Object.fromEntries(
+      PROPERTY_SETUP_STEP_DEFINITIONS.find(
+        (definition) => definition.stepId === "guest_experience",
+      )!.baseRevisionKeys.map((key) => [
+        key,
+        key === "booking.guest_experience" ? "guest-policy:absent" : "source:1",
+      ]),
+    ),
     draft: null,
   };
   const props = {
@@ -199,6 +210,30 @@ describe("guest experience editor", () => {
         .props.disabled,
     ).toBe(true);
     await submit(h.renderer);
+    expect(mocks.save).not.toHaveBeenCalled();
+    h.renderer.unmount();
+  });
+  it("saves a first-entry draft with omitted canonical choices through the request validator", async () => {
+    mocks.load.mockResolvedValue({
+      revision: 0,
+      choices: {
+        defaultGuestLanguage: null,
+        childrenEnabled: null,
+        adultAgeThreshold: null,
+        phoneRequired: true,
+        arrivalTimeEnabled: false,
+        specialRequestsEnabled: true,
+      },
+    });
+    const h = await render();
+    await act(async () =>
+      h.renderer.root.findAllByType("select")[0].props.onChange({ target: { value: "en" } }),
+    );
+    await act(async () => h.leave());
+    const request = mocks.draft.mock.calls[0][1];
+    expect(parseSavePropertySetupDraftRequest(request).ok).toBe(true);
+    expect(request.payload["guest.default_language"]).toBe("en");
+    expect(request.payload["guest.children_enabled"]).toBeNull();
     expect(mocks.save).not.toHaveBeenCalled();
     h.renderer.unmount();
   });

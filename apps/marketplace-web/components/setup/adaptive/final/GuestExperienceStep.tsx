@@ -83,7 +83,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           Object.fromEntries(
             Object.entries(fields).map(([key, field]) => [
               field,
-              value.choices[key as keyof typeof fields],
+              value.choices[key as keyof typeof fields] ?? null,
             ]),
           ),
         );
