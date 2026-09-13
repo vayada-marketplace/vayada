@@ -1,3 +1,4 @@
+import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { isMinorAmount, pricingCurrencyScale, pricingDate } from "@vayada/domain-pms";
@@ -7,16 +8,6 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 const uuid = (v: unknown): v is string =>
   typeof v === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-function minor(value: string, scale: number): string | null {
-  if (!/^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value)) return null;
-  const [whole, fraction = ""] = value.split(".");
-  if (fraction.slice(scale).replace(/0/g, "")) return null;
-  const amount = (
-    BigInt(whole!) * 10n ** BigInt(scale) +
-    BigInt(fraction.slice(0, scale).padEnd(scale, "0") || "0")
-  ).toString();
-  return isMinorAmount(amount) ? amount : null;
-}
 
 /** Booking owner port, inside an already authorized READ COMMITTED property transaction.
  * bookingAmountMinor must be the owner's minimum-booking-value basis, never posted totals.
@@ -116,7 +107,7 @@ export async function lockReplacementPromoCode(
     (policy.arrival_until && request.checkIn > policy.arrival_until)
   )
     return null;
-  const minimum = policy.minimum === null ? "0" : minor(policy.minimum, scale);
+  const minimum = policy.minimum === null ? "0" : pricingDecimalMinor(policy.minimum, scale);
   if (minimum === null || BigInt(request.bookingAmountMinor) < BigInt(minimum)) return null;
   const eligibleSelectionIds = request.rooms
     .filter(
@@ -126,7 +117,10 @@ export async function lockReplacementPromoCode(
     )
     .map((r) => r.selectionId);
   if (!eligibleSelectionIds.length) return null;
-  const amount = minor(policy.discount, policy.discount_type === "percentage" ? 2 : scale);
+  const amount = pricingDecimalMinor(
+    policy.discount,
+    policy.discount_type === "percentage" ? 2 : scale,
+  );
   if (
     amount === null ||
     amount === "0" ||
