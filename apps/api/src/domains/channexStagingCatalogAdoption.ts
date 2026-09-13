@@ -172,9 +172,23 @@ export async function adoptChannexStagingCatalog(
        WHERE r.property_id=$1::uuid AND r.source_system='pms' AND r.source_room_type_id=$2 AND r.active
          AND r.room_attributes ? 'channexStagingAdoption' AND m.connection_id=$3::uuid
          AND m.external_room_type_id=$4 AND m.status='active'
+         AND r.name=$5 AND r.occupancy_limits=$6::jsonb
+         AND r.room_attributes->'channexStagingAdoption'->'providerRoomCount'=$7::jsonb
          AND NOT EXISTS(SELECT 1 FROM pms.room_type_closures c WHERE c.room_type_id=r.id)
        FOR SHARE OF r,m`,
-            [propertyId, sourceId, before.id, facts.roomId],
+            [
+              propertyId,
+              sourceId,
+              before.id,
+              facts.roomId,
+              facts.roomName,
+              JSON.stringify({
+                total: facts.adults + facts.children,
+                adults: facts.adults,
+                children: facts.children,
+              }),
+              JSON.stringify(facts.providerRoomCount),
+            ],
           )
         ).rows
       : [];

@@ -467,11 +467,12 @@ export async function importChannexStagingReservation(
       const originalKey = `channex.staging-import:${requested.propertyId}:${input.channelBookingId}:${input.revision}:v1`;
       const key = input.catalogHash ? `${originalKey}:catalog:${input.catalogHash}` : originalKey;
       if (
-        input.catalogHash &&
         (
           await client.query(
-            `SELECT 1 FROM platform.jobs WHERE queue_name=$1 AND job_key=$2 AND status NOT IN ('dead_lettered','succeeded') FOR UPDATE`,
-            [QUEUE, originalKey],
+            `SELECT 1 FROM platform.jobs WHERE queue_name=$1 AND job_key<>$3
+             AND (job_key=$2 OR starts_with(job_key,$2||':catalog:'))
+             AND status NOT IN ('dead_lettered','succeeded') FOR UPDATE`,
+            [QUEUE, originalKey, key],
           )
         ).rowCount
       )
