@@ -176,6 +176,19 @@ eligible extras; nonstack compares independent candidates with last-minute
 winning ties. Booking-validity and arrival windows remain independent and
 conjunctive. Do not derive promotional eligibility from the checkout date alone.
 
+`replacementDiscountComposition.ts` implements the pure `booking.discount-components.v1`
+arithmetic for already eligible, same-currency owner inputs. Last-minute applies
+to each room component, code applies once to eligible rooms plus eligible extras,
+and stacked code subtracts only those rooms' last-minute reductions from its basis.
+Nonstack chooses the greater total reduction, with last-minute winning ties.
+Percentages round the remaining price half-up in integer minor units, matching
+the agreed reference arithmetic; fixed amounts cap at their applicable basis.
+Meals and other charges are outside this input. Explicit null discounts and zero
+eligible extras are required; missing owner decisions fail rather than defaulting.
+This arithmetic does not establish date eligibility, switches, usage, targeting,
+current source revisions, complete quote money or acceptance. It is not yet wired
+to public pricing without those owners.
+
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
 owner rules and evidence before activation. Per-offer accepted payment methods
