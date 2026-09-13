@@ -57,7 +57,7 @@ export async function readStagingCatalogEvidence(
     revision.id !== input.revisionId ||
     booking.booking_id !== input.bookingId ||
     booking.property_id !== input.providerPropertyId ||
-    booking.ota_name !== "Booking.com" ||
+    !["Booking.com", "BookingCom"].includes(String(booking.ota_name)) ||
     !["new", "modified", "confirmed"].includes(String(booking.status)) ||
     stays.length !== 1
   )

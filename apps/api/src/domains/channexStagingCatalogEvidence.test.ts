@@ -5,6 +5,25 @@ import {
   stagingRevisionHash,
 } from "./channexStagingCatalogEvidence.js";
 import { input, roomId, rateId, relation, provider } from "./channexStagingCatalogTestFixture.js";
+it.each([false, true])(
+  "accepts exact Booking.com provider aliases with preImport=%s",
+  async (preImport) => {
+    const { data, request } = provider();
+    for (const name of ["Booking.com", "BookingCom"]) {
+      data[`booking_revisions/${input.revisionId}`].attributes.ota_name = name;
+      await expect(
+        readStagingCatalogEvidence({ ...input, preImport }, "synthetic", request),
+      ).resolves.toMatchObject({ roomId, rateId });
+    }
+    for (const name of ["Airbnb", "BookingCom Other", "", null]) {
+      data[`booking_revisions/${input.revisionId}`].attributes.ota_name = name;
+      await expect(
+        readStagingCatalogEvidence({ ...input, preImport }, "synthetic", request),
+      ).rejects.toThrow("invalid_catalog_revision");
+    }
+  },
+);
+
 it("rejects missing, mismatched, ambiguous and unsupported provider evidence", async () => {
   const changes = [
     (d: Record<string, any>) => {
