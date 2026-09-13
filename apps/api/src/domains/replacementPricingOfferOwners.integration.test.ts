@@ -15,11 +15,12 @@ import { createReplacementPricingStore } from "./replacementPricingStore.js";
 import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
 import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
+import { lockPublicPricingRoomStay, publicPricingOfferBindings } from "./publicPricingRoomStay.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture() {
+  async function fixture(configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
     const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
     const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
@@ -61,7 +62,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       finance = await lockFinanceReplacementPricingReadiness(client, { propertyId, currency: "EUR", pricingRevision: 1, terms });
     } finally { await client.query("ROLLBACK"); client.release(); }
     if (finance.kind !== "ready" || !roomSource || !termsSource || !financeSource) throw new Error("fixture requires owner evidence");
-    const snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
+    let snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
       rooms: [roomTypeId, secondRoomId].map((id) => ({
         version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
         children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
@@ -71,6 +72,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
         })),
       })) };
+    if (configure) snapshot = configure(snapshot);
     // Source evidence is proposal-independent; ownerReferences.finance is separate readiness evidence.
     const sources = { room: roomSource, terms: termsSource, finance: financeSource }, draftId = randomUUID();
     // Seed the draft boundary, then create evidence through the real authorized declaration writer.
@@ -261,8 +263,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
-  async function publicFixture(publish = true) {
-    const f = await fixture(),
+  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot) {
+    const f = await fixture(configure),
       propertyId = f.scope.propertyId;
     await pool.query(
       "UPDATE hotel_catalog.properties SET profile_status='complete',lifecycle_status='active' WHERE id=$1",
@@ -482,5 +484,256 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
     }
     expect(await f.readPublic()).toBeNull();
+  });
+  async function stayFixture(
+    configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
+  ) {
+    const f = await publicFixture(true, configure),
+      owner = await f.readPublic();
+    if (!owner) throw new Error("published owner required");
+    const bindings = publicPricingOfferBindings(owner);
+    const selection = {
+      version: "public-pricing-selection.v1",
+      checkIn: "2026-10-01",
+      checkOut: "2026-10-02",
+      currency: "EUR",
+      rooms: [
+        {
+          selectionId: "one",
+          publicOfferKey: bindings[0].publicOfferKey,
+          guests: { adults: 1, childAgesAtCheckIn: [] as number[] },
+        },
+      ],
+      addons: [],
+      promoCode: null,
+    };
+    const price = async (input: unknown = selection) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockPublicPricingRoomStay(client, f.scope.propertyId, input);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, bindings, selection, price };
+  }
+  const familyPrices = (snapshot: PricingStorageSnapshot): PricingStorageSnapshot => ({
+    ...snapshot,
+    rooms: snapshot.rooms.map((room, index) => ({
+      ...room,
+      capacity: { total: 3, adults: 3, children: 2 },
+      children: {
+        adultFromAge: 12,
+        bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "1500", countsTowardCapacity: true }],
+      },
+      offers: room.offers.map((offer) => ({
+        ...offer,
+        meal:
+          index === 0 && offer.id === "flex"
+            ? {
+                kind: "breakfast",
+                charge: { kind: "person", adultMinor: "1000", childBandAmountsMinor: ["500"] },
+              }
+            : offer.meal,
+        price:
+          offer.id === "other"
+            ? {
+                kind: "linked",
+                parentId: "flex",
+                adjustment: { kind: "percentage", basisPoints: -1000 },
+                dateOverrides: [],
+              }
+            : {
+                kind: "independent",
+                calendar: {
+                  base:
+                    index === 0
+                      ? { mode: "occupancy", amountsMinor: ["10000", "13000", "15500"] }
+                      : { mode: "per_person", unitMinor: "6000" },
+                  months: [],
+                  seasons: [],
+                  weekdays: [],
+                  dates: [],
+                },
+              },
+      })),
+    })),
+  });
+  it("calculates mixed physical rooms with actual child ages and separate nightly meal evidence", async () => {
+    const f = await stayFixture(familyPrices);
+    const first = f.bindings.find(
+      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "flex",
+    )!;
+    const second = f.bindings.find((b) => b.roomTypeId === f.snapshot.rooms[1].roomTypeId)!;
+    const input = {
+      ...f.selection,
+      checkOut: "2026-10-03",
+      rooms: [
+        {
+          selectionId: "family",
+          publicOfferKey: first.publicOfferKey,
+          guests: { adults: 1, childAgesAtCheckIn: [8] },
+        },
+        {
+          selectionId: "couple",
+          publicOfferKey: second.publicOfferKey,
+          guests: { adults: 2, childAgesAtCheckIn: [] },
+        },
+      ],
+    };
+    const result = await f.price(input);
+    expect(result).toMatchObject({
+      kind: "room_components",
+      roomMinor: "47000",
+      mealMinor: "3000",
+      roomAndMealMinor: "50000",
+    });
+    expect(
+      result?.rooms.map((r) => [r.selectionId, r.roomMinor, r.mealMinor, r.nights.length]),
+    ).toEqual([
+      ["family", "23000", "3000", 2],
+      ["couple", "24000", "0", 2],
+    ]);
+    expect(result?.stay.rooms[0].guests.childAgesAtCheckIn).toEqual([8]);
+    expect(result?.rooms[0].nights[0]).toMatchObject({
+      date: "2026-10-01",
+      roomMinor: "11500",
+      mealMinor: "1500",
+      totalMinor: "13000",
+    });
+  });
+  it("preserves linked ancestor policies and prices a child at the adult threshold", async () => {
+    const f = await stayFixture(familyPrices),
+      binding = f.bindings.find((b) => b.offerId === "other")!;
+    const result = await f.price({
+      ...f.selection,
+      rooms: [
+        {
+          selectionId: "one",
+          publicOfferKey: binding.publicOfferKey,
+          guests: { adults: 1, childAgesAtCheckIn: [8] },
+        },
+      ],
+    });
+    expect(result?.roomAndMealMinor).toBe("10350");
+    expect(Object.keys(result!.rooms[0].termsRevisions).sort()).toEqual(["flex", "other"]);
+    expect(result?.rooms[0].nights[0].sources).toEqual([
+      { offerId: "flex", kind: "base" },
+      { offerId: "other", kind: "linked" },
+    ]);
+    const flex = f.bindings.find(
+      (b) => b.roomTypeId === binding.roomTypeId && b.offerId === "flex",
+    )!;
+    expect(
+      (
+        await f.price({
+          ...f.selection,
+          rooms: [
+            {
+              selectionId: "one",
+              publicOfferKey: flex.publicOfferKey,
+              guests: { adults: 1, childAgesAtCheckIn: [12] },
+            },
+          ],
+        })
+      )?.roomAndMealMinor,
+    ).toBe("15000");
+  });
+  it("prices repeated room types separately and retains unpriced extras and promo intent", async () => {
+    const f = await stayFixture(familyPrices),
+      flex = f.bindings.find(
+        (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "flex",
+      )!;
+    const input = {
+      ...f.selection,
+      rooms: [1, 2].map((adults) => ({
+        selectionId: String(adults),
+        publicOfferKey: flex.publicOfferKey,
+        guests: { adults, childAgesAtCheckIn: [] },
+      })),
+      addons: [{ id: "transfer", quantity: 1, dates: null }],
+      promoCode: "CODE",
+    };
+    const result = await f.price(input);
+    expect(result?.roomAndMealMinor).toBe("26000");
+    expect(result?.stay.addons).toEqual(input.addons);
+    expect(result?.stay.promoCode).toBe("CODE");
+    expect(result).not.toHaveProperty("dueNowMinor");
+    expect(result).not.toHaveProperty("totalMinor");
+  });
+  it("rejects foreign and stale offer keys, unsupported currency and malformed allocations", async () => {
+    const f = await stayFixture(),
+      other = await stayFixture();
+    for (const input of [
+      { ...f.selection, currency: "USD" },
+      {
+        ...f.selection,
+        rooms: [{ ...f.selection.rooms[0], publicOfferKey: other.bindings[0].publicOfferKey }],
+      },
+      { ...f.selection, rooms: [{ ...f.selection.rooms[0], guests: { adults: 1, children: 1 } }] },
+      {
+        ...f.selection,
+        rooms: [{ ...f.selection.rooms[0], guests: { adults: 99, childAgesAtCheckIn: [] } }],
+      },
+      { ...f.selection, rooms: [f.selection.rooms[0], f.selection.rooms[0]] },
+    ])
+      expect(await f.price(input)).toBeNull();
+    await f.authority.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: f.choice.revision,
+      authority: "vayada",
+    });
+    expect(await f.price()).toBeNull();
+  });
+  it("rejects nightly stop-sell and aggregate overflow across otherwise valid rooms", async () => {
+    const closed = await stayFixture((s) => ({
+      ...s,
+      rooms: s.rooms.map((r) => ({
+        ...r,
+        offers: r.offers.map((o) => ({
+          ...o,
+          restrictions: {
+            kind: "own",
+            rules: {
+              minArrivalNights: 1,
+              maxStayNights: null,
+              closedToArrival: false,
+              closedToDeparture: false,
+              stopSell: true,
+            },
+            seasons: [],
+            dates: [],
+          },
+        })),
+      })),
+    }));
+    expect(await closed.price()).toBeNull();
+    const huge = await stayFixture((s) => ({
+      ...s,
+      rooms: s.rooms.map((r) => ({
+        ...r,
+        offers: r.offers.map((o) => ({
+          ...o,
+          price: {
+            kind: "independent",
+            calendar: {
+              base: { mode: "flat", amountMinor: "999999999999999999" },
+              months: [],
+              seasons: [],
+              weekdays: [],
+              dates: [],
+            },
+          },
+        })),
+      })),
+    }));
+    expect(
+      await huge.price({
+        ...huge.selection,
+        rooms: [1, 2].map((id) => ({ ...huge.selection.rooms[0], selectionId: String(id) })),
+      }),
+    ).toBeNull();
   });
 });

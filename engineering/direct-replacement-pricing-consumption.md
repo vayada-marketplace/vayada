@@ -116,6 +116,19 @@ quantity/dates but no selected-person identity. Extend the versioned input and
 request key before offering that feature; do not silently price every guest.
 Departure-date services remain possible when the add-on owner permits them.
 
+`publicPricingRoomStay.ts` binds the versioned guest allocation to server-derived
+`pricing-offer.v2` keys, hashes of the current PMS source identity, room and offer.
+These keys are replacement-selection identities, not legacy Distribution offer
+aliases. Discovery must derive them from the same validated publication; any
+source/publication/authority change requires refreshing the selection. The
+transaction adapter reuses the PMS calculator per physical room, preserving
+selected meal, linked ancestor terms and every night's exact component amounts.
+It returns `room_components` with evaluator version `booking.room-components.v1`,
+not a checkout quote or grand total. Aggregate room/meal amounts enforce the same
+18-digit minor-unit bound. Add-ons and promo intent remain in the bound stay for
+later owner composition; currency conversion and stay/calendar/inventory checks
+remain unavailable here. No public route is activated.
+
 ## Approved publication read
 
 Implement a Booking-facing composition adapter in `apps/api/src/domains` using
