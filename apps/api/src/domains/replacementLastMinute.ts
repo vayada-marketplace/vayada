@@ -126,6 +126,7 @@ export async function lockReplacementLastMinute(
     rooms,
     stacking: hotel.stackWithPromo,
     bookingLocalDate,
+    propertyTimeZone: row.timezone as string,
     daysBeforeArrival,
     sourceRevision,
   };
