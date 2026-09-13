@@ -375,3 +375,18 @@ selected-stay tax/fee ownership or enable deposit execution in Finance. Zero-tot
 booking acceptance remains unsupported. Charge basis evidence is preserved, not
 verified, by this pure helper; current-owner and per-rate method checks must
 precede its eventual use in complete quote composition.
+
+Fixed mandatory-charge policies use `booking.fixed-charges.v1`: explicit currency
+and complete list of active rules (empty explicitly means none). Each rule has
+stable id/name, integer minor-unit amount, unit (booking, room, night, room-night,
+person or person-night), inclusion and collection flags. Person rules require an
+explicit minimum age0..18; adults qualify, children use actual age at check-in.
+Other units require no age threshold. Nights exclude checkout; physical rooms
+are counted separately. Rates are hotel inputs, never jurisdiction defaults.
+Percentage/compound taxes, exemptions beyond age, seasonal/room targeting and
+maximum taxable nights require distinct contracts and are rejected by this schema.
+`calculateReplacementFixedCharges` returns calculated amounts, quantities, rule
+snapshots and stay/policy-bound basis identity. It does not prove current policy
+ownership. Included amounts remain annotations; the settlement combiner checks
+that they fit the final subtotal. Durable current policy ownership follows this
+calculation slice; publication inclusion confirmations are not converted silently.
