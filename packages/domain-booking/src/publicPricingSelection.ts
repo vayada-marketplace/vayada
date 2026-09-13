@@ -1,3 +1,4 @@
+import { validPricingAddonPeople } from "./pricingAddonSelection.js";
 import {
   pricingCurrencyScale,
   pricingDate,
@@ -9,8 +10,9 @@ import {
 import { parseReplacementStay, type ReplacementStay } from "./replacementPricingEvidence.js";
 
 export const PUBLIC_PRICING_SELECTION_VERSION = "public-pricing-selection.v1";
+export const PUBLIC_PRICING_SELECTION_V2 = "public-pricing-selection.v2";
 export type PublicPricingSelection = Readonly<{
-  version: typeof PUBLIC_PRICING_SELECTION_VERSION;
+  version: typeof PUBLIC_PRICING_SELECTION_VERSION | typeof PUBLIC_PRICING_SELECTION_V2;
   checkIn: string;
   checkOut: string;
   currency: string;
@@ -47,7 +49,8 @@ export function parsePublicPricingSelection(value: unknown): PublicPricingSelect
       "addons",
       "promoCode",
     ]) ||
-    value.version !== PUBLIC_PRICING_SELECTION_VERSION ||
+    (value.version !== PUBLIC_PRICING_SELECTION_VERSION &&
+      value.version !== PUBLIC_PRICING_SELECTION_V2) ||
     !pricingDate(value.checkIn) ||
     !pricingDate(value.checkOut) ||
     value.checkOut <= value.checkIn ||
@@ -85,7 +88,10 @@ export function parsePublicPricingSelection(value: unknown): PublicPricingSelect
   for (const addon of value.addons) {
     if (
       !pricingObject(addon) ||
-      !pricingKeys(addon, ["id", "quantity", "dates"]) ||
+      !validPricingAddonPeople(addon, value.rooms as PublicPricingSelection["rooms"]) ||
+      (value.version === PUBLIC_PRICING_SELECTION_V2
+        ? addon.version !== "addon-selection.v2"
+        : "version" in addon) ||
       !text(addon.id) ||
       addons.has(addon.id) ||
       !pricingInteger(addon.quantity, 1) ||

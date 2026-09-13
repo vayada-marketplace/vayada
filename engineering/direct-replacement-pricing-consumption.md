@@ -108,12 +108,11 @@ ceilings, not inventory or capacity permission. IDs/promo codes are at most200
 UTF-16 code units and public offer keys512. The eventual HTTP adapter must also
 bound raw body bytes before JSON decoding. Only the server supplies property
 scope and exact current public-offer mappings. Missing/ambiguous selected mappings
-fail. Selected-person extras are rejected until their versioned input exists.
+fail. V1 rejects selected-person extras; the v2 extension below supplies explicit references.
 No public route or stored evidence is activated by this parser.
 
-Selected-person add-ons are a known contract gap: `ReplacementStay.addons` has
-quantity/dates but no selected-person identity. Extend the versioned input and
-request key before offering that feature; do not silently price every guest.
+Selected-person add-ons use the v2 extension described below. Old v1 entries
+retain quantity/dates without inferred participants; never silently price every guest.
 Departure-date services remain possible when the add-on owner permits them.
 
 `publicPricingRoomStay.ts` binds the versioned guest allocation to server-derived
@@ -322,3 +321,18 @@ FX and partner payout allocation remain separate obligations. Python reference:
 `apps/pms-api/app/services/booking_service.py:_compute_addon_total` and its
 `test_addon_pricing.py` fixtures; its unknown-ID skipping and 1:1 FX fallback are
 not copied. Missing selected definitions or precision loss return unavailable.
+
+Selected-extra input now uses `public-pricing-selection.v2` with
+`addon-selection.v2` entries: id, quantity, dates and explicit people (null or
+room selection/kind/index references). References identify slots in the ordered
+adult/child allocation, not names. Child order is bound into request identity when a v2 extra is present;
+selected-person order is irrelevant. Empty-extra requests retain the existing
+order-insensitive room identity, regardless of public transport version. Existing v1 stays retain historical decoding
+and keys; v1 extras do not gain inferred participants. At most99 participants per
+extra; dates remain within arrival through departure pending owner eligibility.
+The concrete amount adapter requires v2 extras. Quantity means service units;
+per-guest models require quantity1 and explicitly selected participants. Saved
+unit tariffs apply equally to selected adults and children; different child
+prices require a new owner contract. Nightly services exclude checkout; one-time
+services allow at most one date, including checkout. Free-text lead-time rules
+cannot be treated as executable eligibility.

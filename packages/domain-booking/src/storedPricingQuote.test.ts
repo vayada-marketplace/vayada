@@ -192,3 +192,35 @@ it("requires complete evidence for both allocated rooms even when they share an 
   q.rooms[1].nights[0].mealMinor = "2000";
   expect(parseStoredPricingQuote(q)).toBeNull();
 });
+
+it("round-trips versioned selected participants and detects changed selection identity", () => {
+  const original = fixture() as StoredPricingQuote;
+  const stay: StoredPricingQuote["stay"] = {
+    ...original.stay,
+    addons: [
+      {
+        version: "addon-selection.v2",
+        id: "tour",
+        quantity: 1,
+        dates: ["2026-10-02"],
+        people: [{ selectionId: "one", kind: "child", index: 0 }],
+      },
+    ],
+  };
+  const quote = {
+    ...original,
+    stay,
+    evidence: { ...original.evidence, requestKey: replacementStayKey(stay) },
+  };
+  expect(parseStoredPricingQuote(JSON.parse(JSON.stringify(quote)))).toEqual(quote);
+  const changed = {
+    ...quote,
+    stay: {
+      ...quote.stay,
+      addons: [
+        { ...quote.stay.addons[0], people: [{ selectionId: "one", kind: "adult", index: 0 }] },
+      ],
+    },
+  };
+  expect(parseStoredPricingQuote(changed)).toBeNull();
+});

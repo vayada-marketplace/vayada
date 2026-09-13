@@ -12,6 +12,7 @@ import { parseStoredReplacementEvidence } from "./storedReplacementEvidence.js";
 import {
   parsePublicPricingSelection,
   PUBLIC_PRICING_SELECTION_VERSION,
+  PUBLIC_PRICING_SELECTION_V2,
 } from "./publicPricingSelection.js";
 import {
   parseReplacementStay,
@@ -70,7 +71,11 @@ export function parseStoredPricingQuote(value: unknown): StoredPricingQuote | nu
   // Reuse the public resource ceilings without treating internal identifiers as public authority.
   if (
     !parsePublicPricingSelection({
-      version: PUBLIC_PRICING_SELECTION_VERSION,
+      version: (rawStay.addons as unknown[]).some(
+        (a) => pricingObject(a) && a.version === "addon-selection.v2",
+      )
+        ? PUBLIC_PRICING_SELECTION_V2
+        : PUBLIC_PRICING_SELECTION_VERSION,
       checkIn: rawStay.checkIn,
       checkOut: rawStay.checkOut,
       currency: rawStay.currency,
