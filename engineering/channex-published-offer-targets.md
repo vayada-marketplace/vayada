@@ -520,3 +520,18 @@ This records a past metadata observation only. No version is sealed and no activ
 pointer changes. Later consumers must recheck current authority, receipt history
 and required capability/ARI/readback evidence; this field never grants readiness
 or proves that provider configuration remained unchanged afterward.
+
+
+### Creation transport failure receipts (VAY-2012)
+
+A thrown or timed-out injected creation call now uses the same correlated receipt
+transaction to retain a fixed `transport_error` observation: null status/request
+ID, empty identity evidence and a conservative warning flag. Exception strings
+and arbitrary metadata are never copied. Room preflight and pre-send authority
+failures do not create this receipt because creation was not invoked.
+
+Successful persistence still returns reconciliation required and leaves the
+attempt unresolved. Database failure exposes the same persistence-only retry
+closure. No path restores the consumed send opportunity or treats an abort as
+proof of no provider mutation. A provider that ignores abort may finish later;
+this receipt records ambiguity, not cancellation or safe retry.
