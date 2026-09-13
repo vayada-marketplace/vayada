@@ -437,3 +437,20 @@ closed. Preserve selected terms/revisions, method, Finance evidence and a
 method-bound calculation identity. This remains an internal result, not an
 accepted quote or permission to charge a provider. Quote persistence, remaining
 owner evidence, inventory and atomic acceptance still precede route activation.
+
+
+The current quote assembler creates `stored-pricing-quote.v1` exclusively from
+locked public payment amounts. Lines preserve gross room/meal/extra amounts,
+negative discount contributions and only additional charge contributions;
+included charges remain in the separate calculation details so totals do not
+count them twice. Repeated physical rooms retain nightly records while selected
+terms are deduplicated by room type/offer. Preserve charge rules/quantities,
+extra selections/economics, discount decisions and payment calculation identity
+alongside the validated quote for historical downstream use.
+
+Same-currency composition explicitly records a versioned no-conversion source
+bound to currency and the verified component sources. It does not fabricate an
+exchange rate or enable cross-currency quotes. Issue time comes from the database
+after owner reads. The internal caller supplies a bounded lifetime (1–900 seconds),
+capped at the next property-local midnight; a local-day change during reads is
+unavailable. Stored price evidence is not inventory or checkout acceptance.
