@@ -35,8 +35,18 @@ not authorize access. Callers must authorize the property, hold its inventory
 lock in the same transaction and check current owners separately. Channex job
 leases and channel connections must not become public guest authorization.
 No verified external-PMS pricing-authority adapter was found in these direct
-paths. Add an explicit owner-provided authority decision before enabling them;
-a channel connection or presence of local rates is not sufficient proof.
+paths. Booking's `pricing_authority_revisions` and `pricing_authority_heads`
+record an explicit staff choice: `vayada`, `external` or `unconfigured`.
+Missing state is unconfigured; no backfill infers authority from rates or channels.
+Migration0202 stores immutable actor/organization/request history with a scoped
+head. The owner command uses live pricing-manage authorization, expected-head
+comparison and idempotency under the property inventory lock. Reads take that
+same lock inside the caller's authorized transaction. Public access, active
+ownership and provider readiness still require independent checks; only an
+explicit Vayada choice can enter the forthcoming local-price adapter. Bind its
+revision into the PMS source key, so changing authority invalidates quotes.
+External choices stay unavailable until an external adapter is verified. UI and
+route wiring must not silently select Vayada for existing properties.
 
 ## Selection and identity
 
