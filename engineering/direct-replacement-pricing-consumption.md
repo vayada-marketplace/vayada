@@ -26,14 +26,14 @@ interface, not proof of a working replacement adapter.
 | Amendments | `apps/api/src/routes/pendingBookingEdits.ts`; date-change path in `bookingWebPublic.ts` | Reprice a proposal explicitly; accept against the current booking revision and preserve original accepted evidence. |
 | Staff preview | `apps/api/src/routes/pmsManualBookingPreviewCalculation.ts` | Replace the unavailable preset-price path with the same composition. Authorized manual overrides remain separate, explicit evidence. |
 
-The Channex task provides `apps/api/src/domains/replacementPricingSnapshot.ts`
-on verified integration `44da0edc63a071d043f6dc4d6418e2cd44997123`:
-`parsePricingStorageSnapshot` and `readCurrentPricingSnapshot`. Reuse this
-extraction when integrating the owner read; it is not yet in this pricing branch
-and its parent lacks the newer draft-policy work. Preserve that work during
-integration. The reader explicitly requires caller authorization, a same-transaction
-property lock and separate freshness checks. Its job lease and channel-connection
-authority must not become public guest authorization.
+`apps/api/src/domains/replacementPricingSnapshot.ts` now shares
+`parsePricingStorageSnapshot` and `readCurrentPricingSnapshot` with the pricing
+store. The extraction is copied from verified Channex integration
+`44da0edc63a071d043f6dc4d6418e2cd44997123`, preserving newer draft-policy work.
+It rejects dangling heads, incomplete room sets and malformed sources; it does
+not authorize access. Callers must authorize the property, hold its inventory
+lock in the same transaction and check current owners separately. Channex job
+leases and channel connections must not become public guest authorization.
 No verified external-PMS pricing-authority adapter was found in these direct
 paths. Add an explicit owner-provided authority decision before enabling them;
 a channel connection or presence of local rates is not sufficient proof.

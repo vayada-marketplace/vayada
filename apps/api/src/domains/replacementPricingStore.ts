@@ -1,16 +1,14 @@
 import type { BookingPricingDraft } from "./bookingPricingOfferTerms.js";
 import { createHash } from "node:crypto";
-import { isCompletePricingCurrencyConversion, parsePricingConfiguration, pricingCurrencyScale, pricingInteger, pricingKeys, pricingObject,
-  type PricingConfiguration } from "@vayada/domain-pms";
+import { isCompletePricingCurrencyConversion, pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms";
 import type { Pool, PoolClient } from "pg";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { lockReplacementPricingFxObservation } from "./replacementPricingFxStore.js";
 
 export type PricingStorageScope = Readonly<{ propertyId: string; organizationId: string; actorUserId: string }>;
-export type PricingStorageSources = Readonly<Record<string, string>>;
-export type PricingStorageSnapshot = Readonly<{ currency: string; rooms: readonly PricingConfiguration[];
-  ownerReferences: PricingStorageSources }>;
-export type StoredPricingRevision = PricingStorageSnapshot & Readonly<{ revision: number; sources: PricingStorageSources }>;
+export { PricingStorageError, type PricingStorageSources, type PricingStorageSnapshot, type StoredPricingRevision } from "./replacementPricingSnapshot.js";
+import { PricingStorageError, parsePricingStorageSnapshot as snapshot, readCurrentPricingSnapshot as current,
+  type PricingStorageSources, type PricingStorageSnapshot, type StoredPricingRevision } from "./replacementPricingSnapshot.js";
 export interface PricingStorageGuard {
   /** Recheck current access and lock current source revisions until transaction end.
    * Runs even for historical retries; must not require proposed owner references to remain current. */
@@ -26,23 +24,12 @@ export interface PricingStorageGuard {
   allowCurrencyChange(client: PoolClient, scope: PricingStorageScope, before: StoredPricingRevision,
     after: PricingStorageSnapshot): Promise<boolean>;
 }
-export class PricingStorageError extends Error {
-  constructor(readonly code: "invalid" | "denied" | "stale" | "idempotency_conflict" | "currency_conversion_required") { super(code); }
-}
 const uuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const fail = (code: PricingStorageError["code"]): never => { throw new PricingStorageError(code); };
 const text = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v === v.trim();
 const references = (v: unknown): v is PricingStorageSources => pricingObject(v) && Object.keys(v).length > 0 && Object.entries(v).every(([k, x]) => text(k) && text(x));
 const canonical = (v: unknown): string => JSON.stringify(v, (_k, value) => pricingObject(value)
   ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value);
-function snapshot(value: unknown, propertyId: string, revision: number): PricingStorageSnapshot {
-  if (!pricingObject(value) || !pricingKeys(value, ["currency", "rooms", "ownerReferences"]) ||
-      typeof value.currency !== "string" || pricingCurrencyScale(value.currency) === null || !references(value.ownerReferences) || !Array.isArray(value.rooms)) return fail("invalid");
-  const rooms = Array.from(value.rooms, parsePricingConfiguration);
-  if (rooms.some((r) => !r || r.propertyId !== propertyId || r.revision !== revision || r.currency !== value.currency) ||
-      new Set(rooms.map((r) => r!.roomTypeId)).size !== rooms.length) return fail("invalid");
-  return structuredClone({ currency: value.currency, rooms: rooms as PricingConfiguration[], ownerReferences: value.ownerReferences });
-}
 /** Infrastructure primitive only. Routes/preview/publication orchestration belong to VAY-1541. */
 export function createReplacementPricingStore(pool: Pool, guard: PricingStorageGuard) {
   async function transaction<T>(scope: PricingStorageScope, access: "read" | "manage", work: (client: PoolClient, sources: PricingStorageSources) => Promise<T>): Promise<T> {
@@ -57,13 +44,6 @@ export function createReplacementPricingStore(pool: Pool, guard: PricingStorageG
       const result = await work(client, sources);
       await client.query("COMMIT"); return result;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
-  }
-  async function current(client: PoolClient, propertyId: string): Promise<StoredPricingRevision | null> {
-    const row = (await client.query(`SELECT r.revision,r.currency,r.source_revisions,r.owner_references
-      FROM pms.pricing_v2_heads h JOIN pms.pricing_v2_revisions r USING(property_id,revision) WHERE h.property_id=$1`, [propertyId])).rows[0];
-    if (!row) return null;
-    const rooms = (await client.query("SELECT configuration FROM pms.pricing_v2_rooms WHERE property_id=$1 AND revision=$2 ORDER BY room_type_id", [propertyId, row.revision])).rows.map((r) => r.configuration);
-    return { ...snapshot({ currency: row.currency, ownerReferences: row.owner_references, rooms }, propertyId, row.revision), revision: row.revision, sources: row.source_revisions };
   }
   async function effects(client: PoolClient, scope: PricingStorageScope, revision: number, operation: string, requestId: string, publish: boolean) {
     const key = `pricing.v2:${scope.propertyId}:${operation}:${requestId}`;
