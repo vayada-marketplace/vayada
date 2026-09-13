@@ -499,3 +499,15 @@ missing/stale evidence and keep locks until its acceptance commit or rollback.
 This is an internal PMS prerequisite, not public authorization or a reservation:
 selected-night coverage, closures, linked inventory, capacity consumption and
 lifecycle receipts still belong to the replacement reservation writer.
+
+
+`reservePmsInventoryInTransaction` accepts the existing strict canonical PMS
+reserve command on an authorized caller's READ COMMITTED transaction. It replays
+an identical receipt before fresh inventory checks, otherwise verifies current
+calendar/profile/room capacity, operating status, materialization coverage and
+full-stay watermarks before consumption. Inventory, lifecycle receipt, audit,
+linked-inventory reconciliation and outbox changes share the caller transaction.
+Caller MUST roll back on any failure/exception and must authorize scope before
+replay. Opaque offer correlations require no legacy Distribution offer snapshot.
+This is an internal single-room-type command; mapping verified quote selections,
+whole-bundle idempotency, final time checks and booking acceptance follow.

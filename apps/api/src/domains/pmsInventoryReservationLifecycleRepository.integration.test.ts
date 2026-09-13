@@ -1,3 +1,4 @@
+import { reservePmsInventoryInTransaction } from "./pmsInventoryReservationLifecycleRepository.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import { withPmsHostDateCredit } from "./pmsHostDateAmendment.js";
@@ -72,6 +73,158 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
     await Promise.all(closeables.map((repository) => repository.close()));
     await admin.end();
   });
+
+  async function currentFixture() {
+    const f = await createFixture(admin, closeables, { capacity: 2, startingLimit: 2 });
+    await admin.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Berlin')",
+      [f.propertyId],
+    );
+    await admin.query(
+      `UPDATE pms.room_types SET occupancy_limits='{"total":2,"adults":2,"children":0}',
+      room_attributes='{"beds":[{"type":"queen","quantity":1}],"bedrooms":1,"bathrooms":1,"bathroomType":"private","size":{"value":20,"unit":"sqm"}}'
+      WHERE id=$1`,
+      [f.roomTypeId],
+    );
+    await admin.query(
+      `INSERT INTO pms.rooms(property_id,room_type_id,room_number,status,operational_label_status)
+      SELECT $1,$2,label,'available','verified' FROM unnest(ARRAY['101','102']) label`,
+      [f.propertyId, f.roomTypeId],
+    );
+    await materialize(f, "2026-08-04", "2026-08-05");
+    return f;
+  }
+
+  it("reserves without legacy offers, replays once, and rolls inventory and receipts back with the caller", async () => {
+    const f = await currentFixture();
+    const command = await reserveCommand(admin, f, randomUUID(), 1);
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await reservePmsInventoryInTransaction(client, command);
+      expect(result).toMatchObject({ ok: true, outcome: "reserved" });
+      expect(
+        (
+          await client.query("SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1", [
+            f.propertyId,
+          ])
+        ).rows,
+      ).toEqual([{ assigned_count: 1 }, { assigned_count: 1 }]);
+      expect(await reservePmsInventoryInTransaction(client, command)).toMatchObject({ ok: true });
+      expect(
+        (
+          await client.query(
+            "SELECT count(*)::int AS count FROM pms.inventory_reservation_receipts WHERE property_id=$1",
+            [f.propertyId],
+          )
+        ).rows[0],
+      ).toEqual({ count: 1 });
+      await client.query("ROLLBACK");
+      expect(await sideEffectCounts(admin, f.propertyId)).toMatchObject({
+        receipts: 0,
+        events: 0,
+        outbox: 0,
+        reserveAudits: 0,
+        reserveIdempotency: 0,
+      });
+      expect(await readDays(admin, f)).toEqual([
+        dayState("2026-08-04", 0, 2, 1, 0),
+        dayState("2026-08-05", 0, 2, 1, 0),
+      ]);
+      await client.query("BEGIN");
+      expect(await reservePmsInventoryInTransaction(client, command)).toMatchObject({ ok: true });
+      await client.query("COMMIT");
+      await client.query("BEGIN");
+      expect(await reservePmsInventoryInTransaction(client, command)).toMatchObject({ ok: true });
+      await client.query("COMMIT");
+      expect(await sideEffectCounts(admin, f.propertyId)).toMatchObject({
+        receipts: 1,
+        events: 1,
+        outbox: 1,
+        reserveAudits: 1,
+        reserveIdempotency: 1,
+      });
+      expect(await readDays(admin, f)).toEqual([
+        dayState("2026-08-04", 1, 1, 2, 1),
+        dayState("2026-08-05", 1, 1, 2, 1),
+      ]);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
+
+  it.each(["watermark", "capacity", "profile", "coverage", "inactive", "rate gate"])(
+    "rejects %s before reserving",
+    async (reason) => {
+      const f = await currentFixture();
+      const command = await reserveCommand(admin, f, randomUUID(), reason === "capacity" ? 3 : 1);
+      const input =
+        reason === "watermark"
+          ? {
+              ...command,
+              inventoryWatermarks: command.inventoryWatermarks.map((day) => ({
+                ...day,
+                inventoryRevision: 99,
+              })),
+            }
+          : reason === "coverage"
+            ? {
+                ...command,
+                checkIn: "2026-08-05",
+                checkOut: "2026-08-07",
+                inventoryWatermarks: command.inventoryWatermarks.map((day, index) => ({
+                  ...day,
+                  stayDate: index === 0 ? "2026-08-05" : "2026-08-06",
+                })),
+              }
+            : command;
+      if (reason === "profile")
+        await admin.query("UPDATE hotel_catalog.properties SET profile_revision=2 WHERE id=$1", [
+          f.propertyId,
+        ]);
+      if (reason === "rate gate")
+        await admin.query(
+          "UPDATE pms.inventory_days SET rate_gate_open=false,inventory_revision=inventory_revision+1,generated_pricing_source_fingerprint=repeat('b',64) WHERE property_id=$1",
+          [f.propertyId],
+        );
+      if (reason === "inactive")
+        await admin.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.roomTypeId]);
+      const before = await readDays(admin, f);
+      const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        expect(await reservePmsInventoryInTransaction(client, input)).toMatchObject({
+          ok: false,
+          error: {
+            code:
+              reason === "watermark"
+                ? "inventory_watermark_conflict"
+                : reason === "coverage"
+                  ? "materialization_not_current"
+                  : reason === "capacity" || reason === "rate gate"
+                    ? "inventory_unavailable"
+                    : "configuration_not_current",
+          },
+        });
+        await client.query("ROLLBACK");
+        expect(await sideEffectCounts(admin, f.propertyId)).toMatchObject({
+          receipts: 0,
+          events: 0,
+          outbox: 0,
+          reserveIdempotency: 0,
+        });
+        expect(await readDays(admin, f)).toEqual(before);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+        await pool.end();
+      }
+    },
+  );
 
   it.each([false, true])(
     "amends and cancels a handed-off direct PMS stay (linked=%s) without retaining historical capacity",
