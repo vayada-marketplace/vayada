@@ -1,18 +1,16 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { parseReplacementStay } from "@vayada/domain-booking";
-import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
+import {
+  calculateReplacementFixedCharges,
+  parseFixedChargePolicy,
+} from "./replacementFixedCharges.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
-/** Booking current policy owner inside caller-authorized READ COMMITTED transaction.
- * Fixed-rule coverage only. Does not approve public access, inventory or tax compliance. */
-export async function lockCurrentFixedCharges(client: PoolClient, value: unknown) {
-  const stay = parseReplacementStay(value);
-  if (
-    !stay ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stay.propertyId)
-  )
+/** Current fixed policy inside a caller-authorized READ COMMITTED transaction. */
+export async function lockCurrentFixedChargePolicy(client: PoolClient, propertyId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId))
     return null;
-  const propertyId = stay.propertyId.toLowerCase();
+  propertyId = propertyId.toLowerCase();
   await lockPmsInventoryMutationScope(client, propertyId);
   if (
     !(
@@ -29,6 +27,17 @@ export async function lockCurrentFixedCharges(client: PoolClient, value: unknown
       [propertyId],
     )
   ).rows[0];
+  if (!current) return null;
+  const policy = parseFixedChargePolicy(current.policy);
+  return policy ? { revision: current.revision as string, policy } : null;
+}
+
+/** Fixed-rule amounts only; caller provides authorization and retains locks. */
+export async function lockCurrentFixedCharges(client: PoolClient, value: unknown) {
+  const stay = parseReplacementStay(value);
+  if (!stay) return null;
+  const propertyId = stay.propertyId.toLowerCase();
+  const current = await lockCurrentFixedChargePolicy(client, propertyId);
   if (!current) return null;
   const calculated = calculateReplacementFixedCharges(stay, current.policy);
   if (!calculated) return null;

@@ -8,11 +8,11 @@ import { lockFinanceReplacementPricingSource } from "./financeReplacementPricing
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
-import { lockReplacementChargeDeclaration, type ReplacementChargeDeclaration } from "./replacementChargeDeclarations.js";
+import { lockReplacementChargeCoverage, type ReplacementChargeCoverage } from "./replacementChargeCoverage.js";
 import type { PricingStorageScope, PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 
 export type ReplacementPricingOfferOwners =
-  | { kind: "verified"; terms: readonly ReplacementOfferTerms[]; finance: Extract<FinanceReplacementPricingReadiness, { kind: "ready" }>; charges: ReplacementChargeDeclaration }
+  | { kind: "verified"; terms: readonly ReplacementOfferTerms[]; finance: Extract<FinanceReplacementPricingReadiness, { kind: "ready" }>; charges: ReplacementChargeCoverage }
   | { kind: "unavailable"; reason: "invalid" | "denied" | "room_unavailable" | "room_source_stale" | "terms_stale" | "terms_source_stale" | "finance_unavailable" | "finance_source_stale" | "charges_stale";
       financeReason?: Extract<FinanceReplacementPricingReadiness, { kind: "unavailable" }>["reason"] };
 
@@ -70,6 +70,6 @@ async function lockOwners(client: PoolClient, context: RequestContext | null,
   if (finance.kind !== "ready") return { kind: "unavailable", reason: "finance_unavailable", financeReason: finance.reason };
   if (!financeSource || currentSources.finance !== financeSource) return unavailable("finance_source_stale");
   if (intent === "draft" && snapshot.ownerReferences.charges === undefined) return { kind: "awaiting_charge_confirmation" };
-  const charges = await lockReplacementChargeDeclaration(client, scope.propertyId, snapshot.ownerReferences.charges ?? "", snapshot, currentSources);
+  const charges = await lockReplacementChargeCoverage(client, scope.propertyId, snapshot.ownerReferences.charges ?? "", snapshot, currentSources);
   return charges ? { kind: "verified", terms, finance, charges } : unavailable("charges_stale");
 }

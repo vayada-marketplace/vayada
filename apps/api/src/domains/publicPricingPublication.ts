@@ -9,7 +9,7 @@ import { lockFinanceReplacementPricingSource } from "./financeReplacementPricing
 import { lockPmsPricingRoomScope } from "./pmsPricingRoomScope.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { lockReplacementChargeDeclaration } from "./replacementChargeDeclarations.js";
+import { lockReplacementChargeCoverage } from "./replacementChargeCoverage.js";
 import { readCurrentPricingSnapshot } from "./replacementPricingSnapshot.js";
 
 /** Internal Booking composition boundary; never serialize this whole result publicly.
@@ -59,7 +59,7 @@ export async function lockPublicPricingPublication(client: PoolClient, slug: unk
     rooms: stored.rooms,
     ownerReferences: stored.ownerReferences,
   };
-  const charges = await lockReplacementChargeDeclaration(
+  const charges = await lockReplacementChargeCoverage(
     client,
     propertyId,
     stored.ownerReferences.charges!,
