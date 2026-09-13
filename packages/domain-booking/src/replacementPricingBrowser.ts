@@ -1,3 +1,4 @@
+import { validOptionalPricingPaymentMethods } from "./pricingPaymentMethods.js";
 import type { ReplacementOfferTerms } from "./replacementPricingEvidence.js";
 import { parseFlexibleCancellationTerms, pricingInteger, pricingKeys, pricingObject } from "@vayada/domain-pms/replacement-pricing";
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -11,8 +12,10 @@ export function parseBookingPricingOfferTerms(value: unknown): ReplacementOfferT
   const c = value.cancellation, p = value.payment;
   if (!(c.kind === "non_refundable" && pricingKeys(c, ["kind"])) &&
       !(c.kind === "flexible" && pricingKeys(c, ["kind", "terms"]) && parseFlexibleCancellationTerms(c.terms))) return null;
-  if (!(p.kind === "full" && pricingKeys(p, ["kind"])) &&
-      !(p.kind === "deposit" && pricingKeys(p, ["kind", "basisPoints", "balanceDaysBeforeArrival"]) &&
+  if (!validOptionalPricingPaymentMethods(p)) return null;
+  const methodKeys = Object.hasOwn(p, "acceptedMethods") ? ["acceptedMethods"] : [];
+  if (!(p.kind === "full" && pricingKeys(p, ["kind", ...methodKeys])) &&
+      !(p.kind === "deposit" && pricingKeys(p, ["kind", "basisPoints", "balanceDaysBeforeArrival", ...methodKeys]) &&
         pricingInteger(p.basisPoints, 1) && p.basisPoints <= 10000 && pricingInteger(p.balanceDaysBeforeArrival))) return null;
   return structuredClone({ ...value, roomTypeId: value.roomTypeId.toLowerCase(), revision: value.revision.toLowerCase() }) as ReplacementOfferTerms;
 }

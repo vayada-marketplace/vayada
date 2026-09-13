@@ -1,3 +1,4 @@
+import { validOptionalPricingPaymentMethods } from "./pricingPaymentMethods.js";
 import { validPricingAddonPeople, type PricingAddonSelection } from "./pricingAddonSelection.js";
 import { createHash } from "node:crypto";
 import { parseFlexibleCancellationTerms, type FlexibleCancellationTerms, isMinorAmount, isPositiveMinor, pricingCurrencyScale, pricingDate, pricingInteger,
@@ -24,7 +25,7 @@ export type ReplacementPromotionPolicy = Readonly<{
 export type ReplacementOfferTerms = Readonly<{
   roomTypeId: string; offerId: string; revision: string;
   cancellation: { kind: "non_refundable" } | { kind: "flexible"; terms: FlexibleCancellationTerms };
-  payment: { kind: "full" } | { kind: "deposit"; basisPoints: number; balanceDaysBeforeArrival: number };
+  payment: ({ kind: "full" } | { kind: "deposit"; basisPoints: number; balanceDaysBeforeArrival: number }) & { acceptedMethods?: readonly ("card" | "pay_at_property")[] };
 }>;
 export type ReplacementAddon = Readonly<{ id: string; amountMinor: string;
   unit: "booking" | "night" | "person" | "person_night"; childBandAmountsMinor: readonly string[] | null }>;
@@ -60,7 +61,7 @@ const nonempty = (v: unknown): v is string => typeof v === "string" && v.length 
 const compareKey = (a: unknown[], b: unknown[]): number => String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0;
 function validTerms(t: ReplacementOfferTerms): boolean {
   const c = t.cancellation, p = t.payment;
-  return nonempty(t.roomTypeId) && nonempty(t.offerId) && nonempty(t.revision) &&
+  return validOptionalPricingPaymentMethods(p) && nonempty(t.roomTypeId) && nonempty(t.offerId) && nonempty(t.revision) &&
     (c.kind === "non_refundable" || (c.kind === "flexible" && parseFlexibleCancellationTerms(c.terms) !== null)) &&
     (p.kind === "full" || (p.kind === "deposit" && pricingInteger(p.basisPoints, 1) && p.basisPoints <= 10000 && pricingInteger(p.balanceDaysBeforeArrival)));
 }

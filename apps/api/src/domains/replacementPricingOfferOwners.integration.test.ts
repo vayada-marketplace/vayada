@@ -1,3 +1,4 @@
+import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
 import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
 import type { FixedChargePolicy } from "./replacementFixedCharges.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
@@ -20,11 +21,12 @@ import { createReplacementPricingStorageGuard } from "./replacementPricingStorag
 import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingRoomStay, publicPricingOfferBindings } from "./publicPricingRoomStay.js";
+type TermsSetup = (terms: Omit<ReplacementOfferTerms, "revision">) => Omit<ReplacementOfferTerms, "revision">;
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture(configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot) {
+  async function fixture(configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, configureTerms?: TermsSetup, enableCard = false) {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
     const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
     const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
@@ -49,12 +51,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
     const booking = createBookingPricingOfferTermsStore(pool), secondRoomId = randomUUID();
     await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Second room')", [secondRoomId, propertyId]);
-    const termsInput = { roomTypeId, offerId: "flex", cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+    const termsInput: Omit<ReplacementOfferTerms, "revision"> = { roomTypeId, offerId: "flex", cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
     const terms: ReplacementOfferTerms[] = [];
     for (const [room, offerId] of [[roomTypeId, "flex"], [roomTypeId, "other"], [secondRoomId, "flex"]])
-      terms.push(await booking.save(context, scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...termsInput, roomTypeId: room, offerId } }));
+      terms.push(await booking.save(context, scope, { requestId: randomUUID(), expectedRevision: null, terms: configureTerms ? configureTerms({ ...termsInput, roomTypeId: room!, offerId: offerId! }) : { ...termsInput, roomTypeId: room, offerId } }));
     await pool.query(`INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
       VALUES($1,true,ARRAY['pay_at_property'],'EUR')`, [propertyId]);
+    if (enableCard) {
+      const accountId = randomUUID(), evidenceId = randomUUID();
+      await pool.query(`INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,onboarding_status,
+        charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
+        VALUES($1,$2,'property','stripe',$3,'active','completed',true,true,ARRAY['card_payments'],1,'{"detailsSubmitted":true,"cardPaymentsStatus":"active"}')`,
+        [accountId, propertyId, `acct_synthetic_${accountId}`]);
+      await pool.query("UPDATE finance.payment_settings SET provider_account_id=$2,accepted_methods=ARRAY['card','pay_at_property'] WHERE property_id=$1", [propertyId, accountId]);
+      await pool.query(`INSERT INTO finance.online_card_execution_evidence
+        (id,property_id,provider_account_id,contract_version,test_suite,provider_capability_revision,property_readiness_revision,
+         evidence_fingerprint_hash,executed_at,accepted_at,accepted_by_organization_id,accepted_by_user_id)
+        SELECT $1,s.property_id,s.provider_account_id,'finance-online-card-execution-evidence.v1','onb-25a',a.card_capability_revision,
+          s.online_card_readiness_revision,$2,now(),now(),$3,$4 FROM finance.payment_settings s
+        JOIN finance.payment_provider_accounts a ON a.id=s.provider_account_id WHERE s.property_id=$5`,
+        [evidenceId, evidenceId.replaceAll("-", "").repeat(2), organizationId, actorUserId, propertyId]);
+    }
     const client = await pool.connect();
     let finance, roomSource, termsSource, financeSource;
     try {
@@ -267,8 +284,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! })).toMatchObject({ reason: "charges_stale" });
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
-  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, policy?: FixedChargePolicy) {
-    const f = await fixture(configure),
+  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, policy?: FixedChargePolicy, configureTerms?: TermsSetup, enableCard = false) {
+    const f = await fixture(configure, configureTerms, enableCard),
       propertyId = f.scope.propertyId;
     await pool.query(
       "UPDATE hotel_catalog.properties SET profile_status='complete',lifecycle_status='active' WHERE id=$1",
@@ -498,8 +515,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   async function stayFixture(
     configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
     policy?: FixedChargePolicy,
+    configureTerms?: TermsSetup,
+    enableCard = false,
   ) {
-    const f = await publicFixture(true, configure, policy),
+    const f = await publicFixture(true, configure, policy, configureTerms, enableCard),
       owner = await f.readPublic();
     if (!owner) throw new Error("published owner required");
     const bindings = publicPricingOfferBindings(owner);
@@ -747,8 +766,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }),
     ).toBeNull();
   });
-  async function componentsFixture(policy?: FixedChargePolicy) {
-    const f = await stayFixture(familyPrices, policy),
+  async function componentsFixture(policy?: FixedChargePolicy, configureTerms?: TermsSetup, enableCard = false) {
+    const f = await stayFixture(familyPrices, policy, configureTerms, enableCard),
       id = randomUUID();
     await pool.query(
       `INSERT INTO booking.booking_settings(property_id,default_currency,last_minute_discount)
@@ -993,4 +1012,132 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       await writer.end();
     }
   });
+  const propertyTerms: TermsSetup = (t) => ({
+    ...t,
+    payment: { ...t.payment, acceptedMethods: ["pay_at_property"] },
+  });
+  async function paymentAmounts(
+    f: Awaited<ReturnType<typeof componentsFixture>>,
+    method: unknown = "pay_at_property",
+    input: unknown = f.selection,
+  ) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      return await lockPublicPricingPaymentAmounts(client, f.scope.propertyId, input, method);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  it("binds an explicit selected-rate method to current Finance and exact deferred amounts", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    const result = await paymentAmounts(f);
+    expect(result).toMatchObject({
+      kind: "pricing_payment_amounts",
+      method: "pay_at_property",
+      totalMinor: "20600",
+      dueNowMinor: "0",
+      dueLaterMinor: "20600",
+    });
+    expect(result?.selectedTerms).toHaveLength(2);
+    expect(result?.financeEvidenceId).toBe((await f.readPublic())?.finance.evidenceId);
+    expect(result?.paymentEvidenceId).toMatch(/^booking.payment-amounts.v1:/);
+    expect((await paymentAmounts(f))?.paymentEvidenceId).toBe(result?.paymentEvidenceId);
+    expect(await paymentAmounts(f, "card")).toBeNull();
+    for (const method of [null, {}, "cash", "", ["pay_at_property"]])
+      expect(await paymentAmounts(f, method)).toBeNull();
+    await pool.query(
+      "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await paymentAmounts(f)).toBeNull();
+  });
+  it("requires selected offer permission without inferring it from Finance or another offer", async () => {
+    const legacy = await componentsFixture(fixedPolicy());
+    expect(await paymentAmounts(legacy)).toBeNull();
+    const f = await componentsFixture(fixedPolicy(), (t) => ({
+      ...t,
+      payment: {
+        kind: "full",
+        acceptedMethods: t.offerId === "other" ? ["card"] : ["pay_at_property"],
+      },
+    }));
+    expect(await paymentAmounts(f)).not.toBeNull(); // Unselected 'other' does not veto flex.
+    const otherKey = f.bindings.find(
+      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
+    )!.publicOfferKey;
+    const mixed = {
+      ...f.selection,
+      rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
+    };
+    expect(await paymentAmounts(f, "pay_at_property", mixed)).toBeNull();
+    const cardOnly = await componentsFixture(fixedPolicy(), (t) => ({
+      ...t,
+      payment: { kind: "full", acceptedMethods: ["card"] },
+    }));
+    expect(await paymentAmounts(cardOnly, "card")).toBeNull(); // Finance does not execute card here.
+  });
+  it("invalidates payment amounts when allowed methods change in the terms owner", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      before = await paymentAmounts(f);
+    const term = before!.selectedTerms[0]!;
+    await createBookingPricingOfferTermsStore(pool).save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: term.revision,
+      terms: {
+        roomTypeId: term.roomTypeId,
+        offerId: term.offerId,
+        cancellation: term.cancellation,
+        payment: { kind: "full", acceptedMethods: ["card"] },
+      },
+    });
+    expect(await paymentAmounts(f)).toBeNull();
+    expect(before?.dueLaterMinor).toBe("20600");
+  });
+
+  it("collects only online-eligible amounts for card and binds the chosen method", async () => {
+    const f = await componentsFixture(
+      fixedPolicy(),
+      (t) => ({ ...t, payment: { kind: "full", acceptedMethods: ["card", "pay_at_property"] } }),
+      true,
+    );
+    const card = await paymentAmounts(f, "card"),
+      property = await paymentAmounts(f);
+    expect(card).toMatchObject({ totalMinor: "20600", dueNowMinor: "20000", dueLaterMinor: "600" });
+    expect(property).toMatchObject({ totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
+    expect(card?.paymentEvidenceId).not.toBe(property?.paymentEvidenceId);
+    await pool.query(
+      "UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await paymentAmounts(f, "card")).toBeNull();
+  });
+  it("rejects selected rates with incompatible cancellation terms", async () => {
+    const f = await componentsFixture(fixedPolicy(), (t) => ({
+      ...propertyTerms(t),
+      cancellation:
+        t.offerId === "other"
+          ? {
+              kind: "flexible",
+              terms: {
+                type: "free_until_days_before_arrival",
+                freeCancellationDeadlineDays: 7,
+                afterDeadlinePenalty: "full_booking_amount",
+                noShowPenalty: "full_booking_amount",
+              },
+            }
+          : t.cancellation,
+    }));
+    const otherKey = f.bindings.find(
+      (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "other",
+    )!.publicOfferKey;
+    expect(
+      await paymentAmounts(f, "pay_at_property", {
+        ...f.selection,
+        rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
+      }),
+    ).toBeNull();
+  });
+
 });
