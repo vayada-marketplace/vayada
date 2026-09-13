@@ -1,3 +1,4 @@
+import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
 import { parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
@@ -1333,6 +1334,142 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(replay.quote).toEqual(first.quote);
     expect(Date.parse(replay.quote.evidence.expiresAt)).toBeLessThan(Date.now());
     expect((await store.read(f.scope.propertyId, first.quote.quoteId))?.quote).toEqual(first.quote);
+  });
+
+  async function revalidate(f: Awaited<ReturnType<typeof componentsFixture>>, quoteId: string) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      return await lockCurrentQuoteRevalidation(client, f.scope.propertyId, quoteId);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  it("revalidates exact stored prices without issuing a new quote or extending expiry", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const original = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    });
+    const verified = await revalidate(f, original.quote.quoteId);
+    expect(verified).toMatchObject({
+      kind: "current_quote_price",
+      quote: original.quote,
+      sameDay: { eligible: true, reason: "not_same_day" },
+    });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM booking.pricing_quotes WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+    const other = await componentsFixture(fixedPolicy(), propertyTerms);
+    expect(await revalidate(other, original.quote.quoteId)).toBeNull();
+    expect(await revalidate(f, randomUUID())).toBeNull();
+    expect(await revalidate(f, "invalid")).toBeNull();
+    await pool.query("UPDATE booking.addon_definitions SET name='Changed description' WHERE id=$1", [
+      f.id,
+    ]);
+    expect(await revalidate(f, original.quote.quoteId)).toBeNull(); // Source changes count even at the same total.
+    expect((await store.read(f.scope.propertyId, original.quote.quoteId))?.quote).toEqual(
+      original.quote,
+    );
+  });
+  it("rejects changed charge policies, revoked public access and expired quotes", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 1);
+    const original = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    });
+    await pool.query("SELECT pg_sleep(1.1)");
+    expect(await revalidate(f, original.quote.quoteId)).toBeNull();
+    const liveStore = createCurrentPricingQuoteStore(pool, 300);
+    const live = await liveStore.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    });
+    const policy = (
+      await pool.query("SELECT revision FROM booking.fixed_charge_heads WHERE property_id=$1", [
+        f.scope.propertyId,
+      ])
+    ).rows[0];
+    await createFixedChargePolicyStore(pool).save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: policy.revision,
+      policy: { ...fixedPolicy(), charges: [] },
+    });
+    expect(await revalidate(f, live.quote.quoteId)).toBeNull();
+    await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await revalidate(f, live.quote.quoteId)).toBeNull();
+  });
+  it("checks current same-day policy and rejects a passed cutoff", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const dates = (
+      await pool.query("SELECT current_date::text AS arrival,(current_date+1)::text AS departure")
+    ).rows[0];
+    await pool.query(
+      "INSERT INTO booking.same_day_booking_policies(property_id,enabled,cutoff_local_time) VALUES($1,true,NULL)",
+      [f.scope.propertyId],
+    );
+    const original = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: { ...f.selection, checkIn: dates.arrival, checkOut: dates.departure },
+      paymentMethod: "pay_at_property",
+    });
+    expect(await revalidate(f, original.quote.quoteId)).toMatchObject({
+      sameDay: { eligible: true, reason: "before_cutoff" },
+    });
+    await pool.query(
+      "UPDATE booking.same_day_booking_policies SET enabled=false,revision=revision+1 WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await revalidate(f, original.quote.quoteId)).toBeNull();
+    await pool.query(
+      "UPDATE booking.same_day_booking_policies SET enabled=true,cutoff_local_time='00:00',revision=revision+1 WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await revalidate(f, original.quote.quoteId)).toBeNull();
+  });
+  it("retains current owner locks for the caller's subsequent acceptance work", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const original = await store.issue(f.scope.propertyId, {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    });
+    const client = await pool.connect(),
+      writer = new pg.Pool({ connectionString: url, options: "-c lock_timeout=100", max: 1 });
+    try {
+      await client.query("BEGIN");
+      expect(
+        await lockCurrentQuoteRevalidation(client, f.scope.propertyId, original.quote.quoteId),
+      ).not.toBeNull();
+      await expect(
+        writer.query("UPDATE booking.addon_definitions SET price_amount=99 WHERE id=$1", [f.id]),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        writer.query(
+          "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+          [f.scope.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await writer.end();
+    }
   });
 
 });
