@@ -1,3 +1,5 @@
+import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
+import { parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
 import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
 import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
 import type { FixedChargePolicy } from "./replacementFixedCharges.js";
@@ -1138,6 +1140,87 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         rooms: [f.selection.rooms[0], { ...f.selection.rooms[1], publicOfferKey: otherKey }],
       }),
     ).toBeNull();
+  });
+
+  async function assembledQuote(f: Awaited<ReturnType<typeof componentsFixture>>, lifetime = 300) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      return await lockCurrentPricingQuote(
+        client,
+        f.scope.propertyId,
+        f.selection,
+        "pay_at_property",
+        lifetime,
+      );
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  }
+  it("assembles a validated historical quote with exact lines, nightly records and seven sources", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      record = await assembledQuote(f);
+    expect(record).not.toBeNull();
+    const quote = record!.quote;
+    expect(parseStoredPricingQuote(JSON.parse(JSON.stringify(quote)))).toEqual(quote);
+    expect(quote.evidence).toMatchObject({
+      totalMinor: "20600",
+      dueNowMinor: "0",
+      dueLaterMinor: "20600",
+      fx: [],
+    });
+    expect(quote.rooms).toHaveLength(2);
+    expect(quote.evidence.terms).toHaveLength(1);
+    expect(Object.keys(quote.evidence.revisions).sort()).toEqual([
+      "addons",
+      "charges",
+      "finance",
+      "fx",
+      "pms",
+      "promotions",
+      "terms",
+    ]);
+    expect(quote.evidence.revisions.fx).toMatch(/^booking.no-conversion.v1:/);
+    expect(record?.calculation.charges.charges[0]).toMatchObject({ amountMinor: "600", quantity: 2 });
+    expect(record?.calculation.addons.lines[0].definition).toHaveProperty("id", f.id);
+    expect(
+      storedPricingQuoteStatus(
+        quote,
+        quote.stay,
+        quote.evidence.revisions,
+        { evaluatorVersion: quote.evaluatorVersion, paymentMethod: quote.paymentMethod },
+        new Date(quote.evidence.expiresAt),
+      ),
+    ).toBe("stale");
+    const duration = Date.parse(quote.evidence.expiresAt) - Date.parse(quote.evidence.issuedAt);
+    expect(duration).toBeGreaterThan(0);
+    expect(duration).toBeLessThanOrEqual(300000);
+    await pool.query("UPDATE booking.addon_definitions SET price_amount=30 WHERE id=$1", [f.id]);
+    const changed = await assembledQuote(f);
+    expect(changed?.quote.evidence.totalMinor).toBe("22400");
+    expect(quote.evidence.totalMinor).toBe("20600");
+    expect(
+      storedPricingQuoteStatus(
+        quote,
+        quote.stay,
+        changed!.quote.evidence.revisions,
+        { evaluatorVersion: quote.evaluatorVersion, paymentMethod: quote.paymentMethod },
+        new Date(quote.evidence.issuedAt),
+      ),
+    ).toBe("stale");
+  });
+  it("preserves included fee detail without an additive line and rejects invalid lifetimes", async () => {
+    const f = await componentsFixture(fixedPolicy(true), propertyTerms),
+      record = await assembledQuote(f);
+    expect(record?.quote.evidence.totalMinor).toBe("20000");
+    expect(record?.quote.evidence.lines.filter((line) => line.kind === "charge")).toEqual([]);
+    expect(record?.calculation.charges.charges[0]).toMatchObject({
+      included: true,
+      amountMinor: "600",
+    });
+    for (const lifetime of [0, -1, 901, 1.5, NaN])
+      expect(await assembledQuote(f, lifetime)).toBeNull();
   });
 
 });
