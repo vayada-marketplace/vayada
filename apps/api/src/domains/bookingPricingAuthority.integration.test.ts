@@ -7,6 +7,7 @@ import {
   lockBookingPricingAuthority,
 } from "./bookingPricingAuthority.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import { createRoomLastMinuteStore } from "./roomLastMinuteStore.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -444,5 +445,107 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       f.scope.propertyId,
     ]);
     expect(await f.readPublic()).toBeNull();
+  });
+  async function lastMinuteFixture() {
+    const f = await fixture(),
+      roomTypeId = randomUUID();
+    await pool.query(
+      "INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Last minute room')",
+      [roomTypeId, f.scope.propertyId],
+    );
+    const store = createRoomLastMinuteStore(pool),
+      command = {
+        requestId: randomUUID(),
+        roomTypeId,
+        expectedRevision: null,
+        policy: { enabled: true, tiers: [] },
+      };
+    return { ...f, roomTypeId, lastMinuteStore: store, lastMinuteCommand: command };
+  }
+  it("persists immutable room choices with compare-and-set and historical retry", async () => {
+    const f = await lastMinuteFixture(),
+      store = f.lastMinuteStore,
+      command = f.lastMinuteCommand;
+    const first = await store.save(f.context, f.scope, command);
+    const second = await store.save(f.context, f.scope, {
+      ...command,
+      requestId: randomUUID(),
+      expectedRevision: first.revision,
+      policy: { enabled: false, tiers: [] },
+    });
+    expect(await store.save(f.context, f.scope, command)).toEqual({ ...first, replayed: true });
+    expect(
+      (
+        await pool.query(
+          "SELECT revision FROM booking.room_last_minute_heads WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].revision,
+    ).toBe(second.revision);
+    await expect(
+      store.save(f.context, f.scope, { ...command, policy: { enabled: false, tiers: [] } }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      store.save(f.context, f.scope, { ...command, requestId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "stale" });
+    await expect(
+      pool.query("UPDATE booking.room_last_minute_revisions SET policy='{}' WHERE revision=$1", [
+        first.revision,
+      ]),
+    ).rejects.toMatchObject({ code: "55000" });
+    const receipt = (
+      await pool.query(
+        "SELECT organization_id,actor_user_id FROM booking.room_last_minute_revisions WHERE revision=$1",
+        [first.revision],
+      )
+    ).rows[0];
+    expect(receipt).toEqual({
+      organization_id: f.scope.organizationId,
+      actor_user_id: f.scope.actorUserId,
+    });
+  });
+  it("denies foreign rooms, missing or revoked staff authority, and malformed tiers", async () => {
+    const f = await lastMinuteFixture(),
+      other = await lastMinuteFixture(),
+      store = f.lastMinuteStore,
+      command = f.lastMinuteCommand;
+    await expect(store.save(null, f.scope, command)).rejects.toMatchObject({ code: "denied" });
+    await expect(
+      store.save(f.context, f.scope, { ...command, roomTypeId: other.roomTypeId }),
+    ).rejects.toMatchObject({ code: "denied" });
+    for (const policy of [
+      {
+        enabled: true,
+        tiers: [
+          { daysBeforeMin: 0, daysBeforeMax: 3, discountPercent: 10 },
+          { daysBeforeMin: 3, daysBeforeMax: null, discountPercent: 5 },
+        ],
+      },
+      { enabled: true, tiers: [{ daysBeforeMin: 0, daysBeforeMax: null, discountPercent: 0.001 }] },
+      { enabled: true, tiers: null },
+    ])
+      await expect(store.save(f.context, f.scope, { ...command, policy })).rejects.toMatchObject({
+        code: "invalid",
+      });
+    await store.save(f.context, f.scope, command);
+    await pool.query("UPDATE identity.organization_memberships SET status='inactive' WHERE id=$1", [
+      f.context.membership.membershipId,
+    ]);
+    await expect(store.save(f.context, f.scope, command)).rejects.toMatchObject({ code: "denied" });
+  });
+  it("serializes competing room override changes", async () => {
+    const f = await lastMinuteFixture();
+    const results = await Promise.allSettled([
+      f.lastMinuteStore.save(f.context, f.scope, f.lastMinuteCommand),
+      f.lastMinuteStore.save(f.context, f.scope, {
+        ...f.lastMinuteCommand,
+        requestId: randomUUID(),
+        policy: { enabled: false, tiers: [] },
+      }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "stale" },
+    });
   });
 });
