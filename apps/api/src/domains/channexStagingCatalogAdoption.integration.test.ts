@@ -591,32 +591,84 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
     );
     await expect(ingest(current.hash)).rejects.toThrow("staging_catalog_replay_conflict");
   });
-  it("reuses only the exact staging-owned room for another approved revision", async () => {
-    const { catalog, data, request } = await bootstrap(),
-      first = await catalog();
-    const adopted = await catalog(first.hash);
-    const next = { ...input, bookingId: randomUUID(), revisionId: randomUUID(), preImport: true };
-    data[`booking_revisions/${next.revisionId}`] = structuredClone(
-      data[`booking_revisions/${input.revisionId}`],
-    );
-    data[`booking_revisions/${next.revisionId}`].id = next.revisionId;
-    data[`booking_revisions/${next.revisionId}`].attributes.booking_id = next.bookingId;
-    const preview = await adoptChannexStagingCatalog(config(), next, request);
-    expect(
-      await adoptChannexStagingCatalog(config(), { ...next, applyHash: preview.hash }, request),
-    ).toMatchObject({ outcome: "adopted", roomTypeId: adopted.roomTypeId });
-    expect(
-      (await db.query("SELECT id FROM pms.room_types WHERE property_id=$1", [propertyId])).rows,
-    ).toHaveLength(1);
-    expect(
-      (
-        await db.query(
-          "SELECT id FROM pms.channex_staging_catalog_references WHERE property_id=$1",
-          [propertyId],
-        )
-      ).rows,
-    ).toHaveLength(2);
-  });
+  it.each(["exact", "name", "occupancy_limits", "room_attributes"])(
+    "reuses only compatible staging room facts: %s",
+    async (field) => {
+      const { catalog, data, request } = await bootstrap(),
+        first = await catalog();
+      const adopted = await catalog(first.hash);
+      const next = { ...input, bookingId: randomUUID(), revisionId: randomUUID(), preImport: true };
+      data[`booking_revisions/${next.revisionId}`] = structuredClone(
+        data[`booking_revisions/${input.revisionId}`],
+      );
+      data[`booking_revisions/${next.revisionId}`].id = next.revisionId;
+      data[`booking_revisions/${next.revisionId}`].attributes.booking_id = next.bookingId;
+      if (field !== "exact") {
+        const changes = {
+          name: "Changed",
+          occupancy_limits: { total: 3, adults: 3, children: 0 },
+          room_attributes: { channexStagingAdoption: { providerRoomCount: 2 } },
+        };
+        await db.query(`UPDATE pms.room_types SET ${field}=$2 WHERE id=$1`, [
+          adopted.roomTypeId,
+          changes[field as keyof typeof changes],
+        ]);
+        const before = await bootstrapSnapshot();
+        await expect(adoptChannexStagingCatalog(config(), next, request)).rejects.toThrow(
+          "staging_catalog_mapping_conflict",
+        );
+        expect(await bootstrapSnapshot()).toEqual(before);
+        return;
+      }
+      const preview = await adoptChannexStagingCatalog(config(), next, request);
+      expect(
+        await adoptChannexStagingCatalog(config(), { ...next, applyHash: preview.hash }, request),
+      ).toMatchObject({ outcome: "adopted", roomTypeId: adopted.roomTypeId });
+      expect(
+        (await db.query("SELECT id FROM pms.room_types WHERE property_id=$1", [propertyId])).rows,
+      ).toHaveLength(1);
+      expect(
+        (
+          await db.query(
+            "SELECT id FROM pms.channex_staging_catalog_references WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows,
+      ).toHaveLength(2);
+    },
+  );
+  it.each([false, true])(
+    "blocks the competing import key while catalog=%s is pending",
+    async (catalogFirst) => {
+      const { catalog, ingest, request } = await bootstrap(),
+        preview = await catalog();
+      await catalog(preview.hash);
+      const provider = request.getMockImplementation()!;
+      let reads = 0;
+      request.mockImplementation(async (url, init) => {
+        if (String(url).endsWith(input.revisionId) && ++reads === (catalogFirst ? 2 : 1))
+          return new Response(null, { status: 503 });
+        return provider(url, init);
+      });
+      expect(await ingest(catalogFirst ? preview.hash : undefined)).toMatchObject({
+        status: "pending",
+      });
+      request.mockImplementation(provider);
+      const before = (
+        await db.query("SELECT * FROM platform.jobs WHERE payload->>'propertyId'=$1", [propertyId])
+      ).rows;
+      await expect(ingest(catalogFirst ? undefined : preview.hash)).rejects.toThrow(
+        "staging_original_import_in_progress",
+      );
+      expect(
+        (
+          await db.query("SELECT * FROM platform.jobs WHERE payload->>'propertyId'=$1", [
+            propertyId,
+          ])
+        ).rows,
+      ).toEqual(before);
+    },
+  );
   it.each(["revision", "mapping"])(
     "rejects changed %s after receipt verification without partial writes",
     async (change) => {
