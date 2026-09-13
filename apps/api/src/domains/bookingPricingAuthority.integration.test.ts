@@ -1,3 +1,5 @@
+import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
+import { lockCurrentFixedCharges } from "./currentFixedCharges.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
@@ -719,5 +721,159 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       client.release();
       await writer.end();
     }
+  });
+  async function chargeFixture() {
+    const f = await fixture(),
+      store = createFixedChargePolicyStore(pool);
+    const policy = {
+      version: "booking.fixed-charges.v1",
+      currency: "EUR",
+      charges: [
+        {
+          id: "city",
+          name: "City fee",
+          unit: "person_night",
+          amountMinor: "300",
+          minimumAge: 18,
+          included: false,
+          collect: "property",
+        },
+      ],
+    };
+    const command = { requestId: randomUUID(), expectedRevision: null, policy };
+    const stay = {
+      propertyId: f.scope.propertyId,
+      checkIn: "2026-10-01",
+      checkOut: "2026-10-04",
+      currency: "EUR",
+      promoCode: null,
+      addons: [],
+      rooms: [
+        {
+          selectionId: "one",
+          roomTypeId: randomUUID(),
+          offerId: "flex",
+          guests: { adults: 2, childAgesAtCheckIn: [5] },
+        },
+      ],
+    };
+    const read = async (value: unknown = stay) => {
+      const c = await pool.connect();
+      try {
+        await c.query("BEGIN");
+        return await lockCurrentFixedCharges(c, value);
+      } finally {
+        await c.query("ROLLBACK");
+        c.release();
+      }
+    };
+    return { ...f, store, policy, command, stay, read };
+  }
+  it("saves complete charge policies with immutable history, current amounts and reauthorized retries", async () => {
+    const f = await chargeFixture();
+    expect(await f.read()).toBeNull();
+    const first = await f.store.save(f.context, f.scope, f.command),
+      priced = await f.read();
+    expect(priced).toMatchObject({ policyRevision: first.revision, additionalChargeMinor: "1800" });
+    const empty = await f.store.save(f.context, f.scope, {
+      ...f.command,
+      requestId: randomUUID(),
+      expectedRevision: first.revision,
+      policy: { ...f.policy, charges: [] },
+    });
+    expect(await f.read()).toMatchObject({
+      policyRevision: empty.revision,
+      charges: [],
+      additionalChargeMinor: "0",
+    });
+    expect((await f.read())?.sourceRevision).not.toBe(priced?.sourceRevision);
+    expect(await f.store.save(f.context, f.scope, f.command)).toMatchObject({
+      revision: first.revision,
+      replayed: true,
+    });
+    expect((await f.read())?.policyRevision).toBe(empty.revision);
+    expect(priced?.charges[0].amountMinor).toBe("1800");
+    await expect(
+      f.store.save(f.context, f.scope, { ...f.command, policy: { ...f.policy, charges: [] } }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      f.store.save(f.context, f.scope, { ...f.command, requestId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "stale" });
+    const history = (
+      await pool.query(
+        "SELECT actor_user_id,organization_id FROM booking.fixed_charge_revisions WHERE revision=$1",
+        [first.revision],
+      )
+    ).rows[0];
+    expect(history).toEqual({
+      actor_user_id: f.scope.actorUserId,
+      organization_id: f.scope.organizationId,
+    });
+    for (const sql of [
+      "UPDATE booking.fixed_charge_revisions SET policy='{}' WHERE revision=$1",
+      "DELETE FROM booking.fixed_charge_revisions WHERE revision=$1",
+    ])
+      await expect(pool.query(sql, [first.revision])).rejects.toMatchObject({ code: "55000" });
+    await expect(
+      pool.query("TRUNCATE booking.fixed_charge_revisions CASCADE"),
+    ).rejects.toMatchObject({ code: "55000" });
+    await pool.query("UPDATE identity.organization_memberships SET status='inactive' WHERE id=$1", [
+      f.context.membership!.membershipId,
+    ]);
+    await expect(f.store.save(f.context, f.scope, f.command)).rejects.toMatchObject({
+      code: "denied",
+    });
+  });
+  it("denies missing/foreign auth and unsupported policy values; current reads reject currency mismatch", async () => {
+    const f = await chargeFixture(),
+      other = await chargeFixture();
+    await expect(f.store.save(null, f.scope, f.command)).rejects.toMatchObject({ code: "denied" });
+    await expect(f.store.save(other.context, f.scope, f.command)).rejects.toMatchObject({
+      code: "denied",
+    });
+    await expect(
+      f.store.save(f.context, f.scope, {
+        ...f.command,
+        policy: { ...f.policy, charges: [{ ...f.policy.charges[0], unit: "percentage" }] },
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    await f.store.save(f.context, f.scope, f.command);
+    expect(await f.read({ ...f.stay, currency: "USD" })).toBeNull();
+    expect(await f.read({ ...f.stay, propertyId: other.scope.propertyId })).toBeNull();
+    const original = await f.read();
+    expect((await f.read({ ...f.stay, checkOut: "2026-10-05" }))?.basisEvidenceId).not.toBe(
+      original?.basisEvidenceId,
+    );
+  });
+  it("serializes competing charge writes and keeps the selected policy locked through consumption", async () => {
+    const f = await chargeFixture();
+    const results = await Promise.allSettled([
+      f.store.save(f.context, f.scope, f.command),
+      f.store.save(f.context, f.scope, { ...f.command, requestId: randomUUID() }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const current = await f.read(),
+      reader = await pool.connect();
+    try {
+      await reader.query("BEGIN");
+      expect(await lockCurrentFixedCharges(reader, f.stay)).not.toBeNull();
+      const writer = await pool.connect();
+      try {
+        await writer.query("BEGIN");
+        await writer.query("SET LOCAL lock_timeout='100ms'");
+        await expect(
+          writer.query("DELETE FROM booking.fixed_charge_heads WHERE property_id=$1", [
+            f.scope.propertyId,
+          ]),
+        ).rejects.toMatchObject({ code: "55P03" });
+      } finally {
+        await writer.query("ROLLBACK");
+        writer.release();
+      }
+    } finally {
+      await reader.query("ROLLBACK");
+      reader.release();
+    }
+    expect((await f.read())?.policyRevision).toBe(current?.policyRevision);
   });
 });

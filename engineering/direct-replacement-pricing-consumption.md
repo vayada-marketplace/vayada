@@ -390,3 +390,15 @@ snapshots and stay/policy-bound basis identity. It does not prove current policy
 ownership. Included amounts remain annotations; the settlement combiner checks
 that they fit the final subtotal. Durable current policy ownership follows this
 calculation slice; publication inclusion confirmations are not converted silently.
+
+Migration0204 stores Booking fixed-charge policy revisions and current heads.
+`createFixedChargePolicyStore` requires live pricing-manage authorization,
+expected revision and an idempotent request; immutable actor/organization history
+records every policy replacement. Retries reauthorize without resetting the head.
+`lockCurrentFixedCharges` reads the current explicit policy and calculates charges
+inside the caller-authorized property transaction. No head means unavailable;
+an empty saved policy explicitly returns zero fixed charges. Source and basis
+identity include current policy revision and exact selected stay. This does not
+claim coverage of unsupported tax types or replace public visibility/Finance
+checks. Connecting this fixed-rule owner to complete quotes requires explicit
+coverage and removal/replacement of the older all-included publication gate.
