@@ -1,3 +1,4 @@
+import { lockPublicPricingComponents } from "./publicPricingComponents.js";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
@@ -735,5 +736,120 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         rooms: [1, 2].map((id) => ({ ...huge.selection.rooms[0], selectionId: String(id) })),
       }),
     ).toBeNull();
+  });
+  async function componentsFixture() {
+    const f = await stayFixture(familyPrices),
+      id = randomUUID();
+    await pool.query(
+      `INSERT INTO booking.booking_settings(property_id,default_currency,last_minute_discount)
+          VALUES($1,'EUR','{"enabled":true,"stackWithPromo":true,"tiers":[{"daysBeforeMin":0,"daysBeforeMax":null,"discountPercent":20}]}')`,
+      [f.scope.propertyId],
+    );
+    await pool.query(
+      `INSERT INTO booking.addon_definitions(id,property_id,name,pricing_model,price_amount,currency,metadata)
+          VALUES($1,$2,'Transfer','per_stay',20,'EUR','{"maxQuantity":2}')`,
+      [id, f.scope.propertyId],
+    );
+    await pool.query(
+      `INSERT INTO booking.promo_definitions(property_id,code,discount_type,discount_value,max_uses,min_booking_value)
+          VALUES($1,'SAVE','percentage',10,100,200)`,
+      [f.scope.propertyId],
+    );
+    const dates = (
+      await pool.query(
+        "SELECT (current_date+10)::text AS arrival,(current_date+11)::text AS departure",
+      )
+    ).rows[0];
+    const selectedRoom = {
+      ...f.selection.rooms[0],
+      publicOfferKey: f.bindings.find(
+        (b) => b.roomTypeId === f.snapshot.rooms[0].roomTypeId && b.offerId === "flex",
+      )!.publicOfferKey,
+    };
+    const selection = {
+      ...f.selection,
+      version: "public-pricing-selection.v2",
+      checkIn: dates.arrival,
+      checkOut: dates.departure,
+      rooms: [selectedRoom, { ...selectedRoom, selectionId: "two" }],
+      addons: [{ version: "addon-selection.v2", id, quantity: 2, dates: null, people: null }],
+      promoCode: "SAVE",
+    };
+    const components = async (input: unknown = selection) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockPublicPricingComponents(client, f.scope.propertyId, input);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, id, selection, components };
+  }
+  it("composes repeated physical rooms, meals, saved extras and current stacked discounts", async () => {
+    const f = await componentsFixture(),
+      result = await f.components();
+    expect(result).toMatchObject({
+      kind: "pricing_components",
+      subtotalMinor: "20000",
+      room: { roomMinor: "20000", mealMinor: "2000" },
+      addons: { totalMinor: "4000" },
+      discounts: {
+        totalDiscountMinor: "6000",
+        codeMinor: "2000",
+        lastMinuteLines: [
+          { selectionId: "one", amountMinor: "2000" },
+          { selectionId: "two", amountMinor: "2000" },
+        ],
+      },
+    });
+    expect(result?.requestKey).toBe(result?.addons.requestKey);
+    expect(result?.componentSources.promotions).toMatch(/^booking.promotions.v2:/);
+    expect(result?.room.rooms).toHaveLength(2);
+    expect(result?.lastMinute.rooms).toHaveLength(1);
+    await pool.query(
+      "UPDATE booking.booking_settings SET last_minute_discount=jsonb_set(last_minute_discount,'{stackWithPromo}','false') WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    const nonstack = await f.components();
+    expect(nonstack?.subtotalMinor).toBe("22000");
+    expect(nonstack?.discounts.codeMinor).toBe("0");
+    expect(nonstack?.componentSources.promotions).not.toBe(result?.componentSources.promotions);
+  });
+  it("preserves the Python minimum basis and excludes meals from discount and minimum amounts", async () => {
+    const f = await componentsFixture();
+    await pool.query(
+      "UPDATE booking.promo_definitions SET min_booking_value=200.01 WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await f.components()).toBeNull();
+    await pool.query(
+      "UPDATE booking.promo_definitions SET min_booking_value=200,discount_type='fixed',discount_value=50 WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    const result = await f.components();
+    expect(result?.subtotalMinor).toBe("17000"); // 200 rooms +20 meals +40 extras -40 LM -50 one code
+    expect(result?.discounts.codeMinor).toBe("5000");
+    expect((await f.components({ ...f.selection, promoCode: null, addons: [] }))?.subtotalMinor).toBe(
+      "18000",
+    );
+    expect(await f.components({ ...f.selection, promoCode: "MISSING" })).toBeNull();
+  });
+  it("rejects unavailable current owners and preserves old component snapshots after owner changes", async () => {
+    const f = await componentsFixture(),
+      before = await f.components();
+    await pool.query("UPDATE booking.addon_definitions SET price_amount=30 WHERE id=$1", [f.id]);
+    const changed = await f.components();
+    expect(changed?.subtotalMinor).toBe("21800");
+    expect(changed?.componentSources.addons).not.toBe(before?.componentSources.addons);
+    expect(before?.subtotalMinor).toBe("20000");
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=false WHERE id=$1", [f.id]);
+    expect(await f.components()).toBeNull();
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=true WHERE id=$1", [f.id]);
+    await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await f.components()).toBeNull();
   });
 });

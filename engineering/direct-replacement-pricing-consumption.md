@@ -348,3 +348,16 @@ non-person services a saved guest limit applies to the whole allocated party.
 Nonempty free-text lead time is unavailable until an executable owner rule exists.
 Missing owners, v1 extras, mismatched models, FX needs and overflow fail closed.
 This subtotal does not authorize capacity, payouts or quote acceptance.
+
+`lockPublicPricingComponents` now connects the public current room/meal reader,
+selected-extra amounts, current LM policies and requested code eligibility in a
+single caller transaction. Room-type deduplication is only for policy lookup;
+physical room selections retain separate amounts. Promo minimum value preserves
+Python's room-after-LM plus extras basis (also in nonstack mode), excluding meals.
+Actual discount selection still uses the corrected independent nonstack comparison.
+Invalid requested codes fail; absent code is explicit intent. Sources bind current
+LM and code evidence; output retains owner snapshots and request identity.
+Public authority and property-local day are rechecked after owner waits. The
+result is a subtotal before mandatory charges, with partial component sources;
+it must not be serialized as a complete quote or used to infer missing charge,
+FX, deposit, calendar/inventory or generalized-promotion execution.
