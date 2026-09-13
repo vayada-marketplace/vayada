@@ -549,7 +549,7 @@ prerequisite. Existing connected-channel status remains unchanged.
 Use `GET /properties/:propertyId/channex/offer-preview` with exactly
 `roomTypeId`, `offerId`, `publicationRevision`, and `primaryOccupancy` query fields.
 Require canonical UUID property/room IDs, a nonempty trimmed offer ID up to 200
-characters, an integer revision from 1 through 2147483646, and an integer primary
+characters, an integer revision from 1 through 2147483647, and an integer primary
 count from 1 through 100. Reject duplicate, unknown, fractional and noncanonical numeric query values
 with 400. Accept primary only within the selected published room's adult capacity;
 the existing planner's 100-option bound and unsupported-child checks still apply.
