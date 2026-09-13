@@ -8,6 +8,8 @@ import {
 } from "./bookingPricingAuthority.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { createRoomLastMinuteStore } from "./roomLastMinuteStore.js";
+import { lockReplacementLastMinute } from "./replacementLastMinute.js";
+import { composeReplacementDiscounts } from "./replacementDiscountComposition.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -547,5 +549,175 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
     expect(results.find((r) => r.status === "rejected")).toMatchObject({
       reason: { code: "stale" },
     });
+  });
+  async function currentLastMinuteFixture() {
+    const f = await lastMinuteFixture(),
+      ids = [f.roomTypeId, randomUUID(), randomUUID()];
+    for (const id of ids.slice(1))
+      await pool.query(
+        "INSERT INTO pms.room_types(id,property_id,name) VALUES($1::uuid,$2,$1::text)",
+        [id, f.scope.propertyId],
+      );
+    const hotel = {
+      enabled: true,
+      stackWithPromo: true,
+      tiers: [
+        { daysBeforeMin: 0, daysBeforeMax: 3, discountPercent: 20 },
+        { daysBeforeMin: 4, daysBeforeMax: null, discountPercent: 10 },
+      ],
+    };
+    await pool.query(
+      "INSERT INTO booking.booking_settings(property_id,last_minute_discount) VALUES($1,$2)",
+      [f.scope.propertyId, hotel],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Pacific/Kiritimati')",
+      [f.scope.propertyId],
+    );
+    const today = (
+      await pool.query(
+        "SELECT (clock_timestamp() AT TIME ZONE 'Pacific/Kiritimati')::date::text AS date",
+      )
+    ).rows[0].date as string;
+    const input = (days = 3) => ({
+      propertyId: f.scope.propertyId,
+      roomTypeIds: ids,
+      checkIn: new Date(Date.parse(today) + days * 86400000).toISOString().slice(0, 10),
+    });
+    const read = async (days = 3) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockReplacementLastMinute(client, input(days));
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, ids, hotel, today, input, readLastMinute: read };
+  }
+  it("resolves inherited, opted-out and overridden rooms under the hotel master switch", async () => {
+    const f = await currentLastMinuteFixture();
+    await f.lastMinuteStore.save(f.context, f.scope, {
+      ...f.lastMinuteCommand,
+      roomTypeId: f.ids[1],
+      policy: { enabled: false, tiers: [] },
+    });
+    const saved = await f.lastMinuteStore.save(f.context, f.scope, {
+      ...f.lastMinuteCommand,
+      requestId: randomUUID(),
+      roomTypeId: f.ids[2],
+      policy: {
+        enabled: true,
+        tiers: [{ daysBeforeMin: 0, daysBeforeMax: null, discountPercent: 12.5 }],
+      },
+    });
+    const first = await f.readLastMinute();
+    expect(first?.rooms.map((r) => r.lastMinute?.basisPoints ?? null)).toEqual([2000, null, 1250]);
+    expect(first).toMatchObject({
+      bookingLocalDate: f.today,
+      daysBeforeArrival: 3,
+      stacking: true,
+    });
+    await f.lastMinuteStore.save(f.context, f.scope, {
+      ...f.lastMinuteCommand,
+      requestId: randomUUID(),
+      roomTypeId: f.ids[2],
+      expectedRevision: saved.revision,
+    });
+    const inherited = await f.readLastMinute();
+    expect(inherited?.rooms.map((r) => r.lastMinute?.basisPoints ?? null)).toEqual([
+      2000,
+      null,
+      2000,
+    ]);
+    expect(inherited?.sourceRevision).not.toBe(first?.sourceRevision);
+    await pool.query(
+      "UPDATE booking.booking_settings SET last_minute_discount=$2 WHERE property_id=$1",
+      [f.scope.propertyId, { enabled: false, stackWithPromo: false, tiers: [] }],
+    );
+    expect((await f.readLastMinute())?.rooms.every((r) => r.lastMinute === null)).toBe(true);
+  });
+  it("uses inclusive lead-day tiers and feeds the saved stacking choice into discount arithmetic", async () => {
+    const f = await currentLastMinuteFixture();
+    expect((await f.readLastMinute(0))?.rooms[0].lastMinute?.basisPoints).toBe(2000);
+    expect((await f.readLastMinute(4))?.rooms[0].lastMinute?.basisPoints).toBe(1000);
+    expect((await f.readLastMinute(200))?.rooms[0].lastMinute?.basisPoints).toBe(1000);
+    const price = async () => {
+      const policy = (await f.readLastMinute())!;
+      return composeReplacementDiscounts({
+        rooms: [
+          {
+            selectionId: "one",
+            roomMinor: "10000",
+            lastMinute: policy.rooms[0].lastMinute,
+            codeEligible: true,
+          },
+        ],
+        eligibleAddonMinor: "0",
+        code: { kind: "percentage", basisPoints: 1000 },
+        stacking: policy.stacking,
+      });
+    };
+    expect((await price())?.remainingRoomAndEligibleAddonMinor).toBe("7200");
+    await pool.query(
+      "UPDATE booking.booking_settings SET last_minute_discount=$2 WHERE property_id=$1",
+      [f.scope.propertyId, { ...f.hotel, stackWithPromo: false }],
+    );
+    expect((await price())?.remainingRoomAndEligibleAddonMinor).toBe("8000");
+  });
+  it("rejects missing, malformed and unsupported hotel policy evidence", async () => {
+    const f = await currentLastMinuteFixture();
+    for (const value of [
+      {},
+      { ...f.hotel, tiers: [f.hotel.tiers[0], f.hotel.tiers[0]] },
+      {
+        ...f.hotel,
+        promotions: [
+          {
+            type: "EARLY_BIRD",
+            active: true,
+            roomTypeIds: [],
+            discountPercent: 10,
+            threshold: 30,
+            freeNights: 0,
+            weekdays: [],
+            tiers: [],
+          },
+        ],
+      },
+    ]) {
+      await pool.query(
+        "UPDATE booking.booking_settings SET last_minute_discount=$2 WHERE property_id=$1",
+        [f.scope.propertyId, value],
+      );
+      expect(await f.readLastMinute()).toBeNull();
+    }
+    await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await f.readLastMinute()).toBeNull();
+  });
+  it("holds hotel and room override state through the consuming transaction", async () => {
+    const f = await currentLastMinuteFixture(),
+      client = await pool.connect(),
+      writer = new pg.Pool({ connectionString: url, max: 1, options: "-c lock_timeout=100ms" });
+    try {
+      await client.query("BEGIN");
+      expect(await lockReplacementLastMinute(client, f.input())).not.toBeNull();
+      await expect(
+        createRoomLastMinuteStore(writer).save(f.context, f.scope, f.lastMinuteCommand),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        writer.query(
+          "UPDATE booking.booking_settings SET last_minute_discount='{}' WHERE property_id=$1",
+          [f.scope.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await writer.end();
+    }
   });
 });
