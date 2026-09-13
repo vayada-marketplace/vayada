@@ -59,9 +59,16 @@ export async function lockReplacementPricingAuthorization(
     for (const key of overrides.deny) permissions.delete(key);
   }
   if (!permissions.has(permission)) return false;
+  return lockCurrentPmsPricingEntitlement(client, scope.organizationId, propertyId);
+}
+
+/** Caller holds the organization FOR UPDATE lock to serialize entitlement inserts. */
+export async function lockCurrentPmsPricingEntitlement(
+  client: PoolClient, organizationId: string, propertyId: string,
+): Promise<boolean> {
   // Lock even currently unrelated rows: an update could retarget one as a scoped suspension.
   const entitlements = (await client.query(`SELECT * FROM identity.product_entitlements
-    WHERE organization_id=$1 FOR SHARE`, [scope.organizationId])).rows;
+    WHERE organization_id=$1 FOR SHARE`, [organizationId])).rows;
   const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
   const applicable = entitlements.filter((e) => e.product === "pms" &&
     ["property-management", "pms-core", "account_access"].includes(e.entitlement_key) &&

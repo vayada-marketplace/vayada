@@ -6,6 +6,7 @@ import {
   createBookingPricingAuthorityStore,
   lockBookingPricingAuthority,
 } from "./bookingPricingAuthority.js";
+import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
@@ -247,5 +248,201 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       revision: null,
       organizationId: null,
     });
+  });
+  async function publicFixture() {
+    const f = await fixture(),
+      propertyId = f.scope.propertyId;
+    await pool.query(
+      "UPDATE hotel_catalog.properties SET lifecycle_status='active',profile_status='complete' WHERE id=$1",
+      [propertyId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1::uuid,$1::text,'canonical')",
+      [propertyId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO hotel_catalog.property_public_profile_read_model
+      (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
+      VALUES($1::uuid,$1::text,'Public authority test',$1::text,'en',ARRAY['en'],'complete')`,
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO distribution.public_hotel_bookability_profiles
+      (property_id,public_id,canonical_slug,canonical_url,booking_base_url,timezone,default_currency,
+       supported_currencies,profile_status,freshness_status,public_setup_completeness,capabilities)
+      VALUES($1::uuid,$1::text,$1::text,'https://example.test','https://example.test','Etc/UTC','EUR',
+       ARRAY['EUR'],'public','fresh','{"status":"ready"}','{"paymentMethods":["pay_at_property"]}')`,
+      [propertyId],
+    );
+    const readPublic = async (slug: unknown = propertyId) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockPublicPricingAuthority(client, slug);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    return { ...f, readPublic };
+  }
+  it("requires an explicit current local source and exact public canonical identity", async () => {
+    const f = await publicFixture();
+    expect(await f.readPublic()).toBeNull();
+    const first = await f.store.save(f.context, f.scope, f.command);
+    expect(await f.readPublic()).toEqual({
+      propertyId: f.scope.propertyId,
+      organizationId: f.scope.organizationId,
+      authorityRevision: first.revision,
+    });
+    for (const slug of [null, {}, "", " ", "x".repeat(201), randomUUID()])
+      expect(await f.readPublic(slug)).toBeNull();
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'marketplace_overlay')",
+      [f.scope.propertyId, "alias-" + f.scope.propertyId],
+    );
+    expect(await f.readPublic("alias-" + f.scope.propertyId)).toBeNull();
+    const second = await f.store.save(f.context, f.scope, {
+      ...f.command,
+      requestId: randomUUID(),
+      expectedRevision: first.revision,
+      authority: "external",
+    });
+    expect(await f.readPublic()).toBeNull();
+    await f.store.save(f.context, f.scope, {
+      ...f.command,
+      requestId: randomUUID(),
+      expectedRevision: second.revision,
+      authority: "unconfigured",
+    });
+    expect(await f.readPublic()).toBeNull();
+  });
+  it("rejects hidden, stale, expired, incomplete and malformed public profiles", async () => {
+    const f = await publicFixture();
+    await f.store.save(f.context, f.scope, f.command);
+    const client = await pool.connect();
+    try {
+      for (const change of [
+        "UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1",
+        "UPDATE hotel_catalog.properties SET profile_status='disabled' WHERE id=$1",
+        "UPDATE hotel_catalog.properties SET lifecycle_status='suspended' WHERE id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET profile_status='unpublished' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET freshness_status='stale' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET expires_at=clock_timestamp()-interval '1 second' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness='{}' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET capabilities='{\"paymentMethods\":{}}' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET capabilities='{\"paymentMethods\":[]}' WHERE property_id=$1",
+        "UPDATE distribution.public_hotel_bookability_profiles SET canonical_slug='old-slug' WHERE property_id=$1",
+        "UPDATE hotel_catalog.property_slugs SET status='retired' WHERE property_id=$1",
+      ]) {
+        await client.query("BEGIN");
+        try {
+          await client.query(change, [f.scope.propertyId]);
+          expect(await lockPublicPricingAuthority(client, f.scope.propertyId)).toBeNull();
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      }
+    } finally {
+      client.release();
+    }
+    expect(await f.readPublic()).not.toBeNull();
+  });
+  it("rejects lost ownership, inactive organizations and unavailable current entitlements", async () => {
+    const f = await publicFixture();
+    await f.store.save(f.context, f.scope, f.command);
+    const client = await pool.connect();
+    try {
+      for (const change of [
+        "DELETE FROM identity.organization_resource_links WHERE organization_id=$1 AND product='pms'",
+        "DELETE FROM identity.organization_resource_links WHERE organization_id=$1 AND product='hotel_catalog'",
+        "UPDATE identity.organizations SET status='suspended' WHERE id=$1",
+        "DELETE FROM identity.product_entitlements WHERE organization_id=$1",
+        "UPDATE identity.product_entitlements SET expires_at=clock_timestamp()-interval '1 second' WHERE organization_id=$1",
+        "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status) VALUES($1,'pms','account_access','suspended')",
+      ]) {
+        await client.query("BEGIN");
+        try {
+          await client.query(change, [f.scope.organizationId]);
+          expect(await lockPublicPricingAuthority(client, f.scope.propertyId)).toBeNull();
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      }
+    } finally {
+      client.release();
+    }
+  });
+  it("holds public visibility, ownership and entitlement decisions through the caller transaction", async () => {
+    const f = await publicFixture();
+    await f.store.save(f.context, f.scope, f.command);
+    const client = await pool.connect(),
+      writer = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      expect(await lockPublicPricingAuthority(client, f.scope.propertyId)).not.toBeNull();
+      await writer.query("SET lock_timeout='100ms'");
+      for (const [sql, id] of [
+        [
+          "UPDATE distribution.public_hotel_bookability_profiles SET profile_status='unpublished' WHERE property_id=$1",
+          f.scope.propertyId,
+        ],
+        [
+          "DELETE FROM identity.organization_resource_links WHERE organization_id=$1",
+          f.scope.organizationId,
+        ],
+        [
+          "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status) VALUES($1,'pms','account_access','suspended')",
+          f.scope.organizationId,
+        ],
+      ])
+        await expect(writer.query(sql!, [id])).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await client.query("ROLLBACK");
+      await writer.query("RESET lock_timeout");
+      client.release();
+      writer.release();
+    }
+  });
+  it("evaluates profile expiry against the current clock, not transaction start", async () => {
+    const f = await publicFixture();
+    await f.store.save(f.context, f.scope, f.command);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE distribution.public_hotel_bookability_profiles SET expires_at=now()+interval '50 milliseconds' WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+      await client.query("SELECT pg_sleep(0.06)");
+      expect(await lockPublicPricingAuthority(client, f.scope.propertyId)).toBeNull();
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+  it("uses the locale-less public slug namespace even when another catalog locale shares its text", async () => {
+    const f = await publicFixture(),
+      other = await fixture();
+    await f.store.save(f.context, f.scope, f.command);
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_slugs(property_id,slug,locale,purpose) VALUES($1,$2,'de','canonical')",
+      [other.scope.propertyId, f.scope.propertyId],
+    );
+    expect(await f.readPublic()).toMatchObject({ propertyId: f.scope.propertyId });
+    await expect(
+      pool.query(
+        "INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose) VALUES($1,$2,'canonical')",
+        [other.scope.propertyId, f.scope.propertyId],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+    await pool.query("UPDATE hotel_catalog.property_slugs SET locale='en' WHERE property_id=$1", [
+      f.scope.propertyId,
+    ]);
+    expect(await f.readPublic()).toBeNull();
   });
 });

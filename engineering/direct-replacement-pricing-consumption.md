@@ -48,6 +48,19 @@ revision into the PMS source key, so changing authority invalidates quotes.
 External choices stay unavailable until an external adapter is verified. UI and
 route wiring must not silently select Vayada for existing properties.
 
+`publicPricingAuthority.ts` now implements the internal public-access gate in a
+caller-owned READ COMMITTED transaction. It re-resolves canonical identity after
+the inventory lock, locks the choosing organization, public catalog/profile rows,
+current owner/operator links and entitlements, and checks expiry against the
+current clock. Only active, complete properties with fresh ready public profiles
+and explicit Vayada authority pass. It returns the authority revision for the
+subsequent source-identity adapter. It does not establish published-price freshness,
+stay/calendar/inventory eligibility or executable payment readiness. Routes remain
+unavailable until those checks and composition/acceptance are connected.
+The gate targets locale-less canonical slugs, matching Distribution publication
+reservation and the existing unique slug/locale index. Localized catalog slugs
+are not booking URL identities for this adapter.
+
 ## Selection and identity
 
 A public request identifies the hotel by its resolved route, dates, selected
