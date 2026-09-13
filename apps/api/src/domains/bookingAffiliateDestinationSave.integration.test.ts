@@ -1,3 +1,4 @@
+import { createPgBookingAffiliateDestinationRepository } from "./bookingAffiliateDestinationRepository.js";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
@@ -125,6 +126,33 @@ describe.skipIf(!databaseUrl)("affiliate destination save (PostgreSQL)", () => {
       "TRUNCATE booking.affiliate_destination_versions",
     ])
       await expect(pool.query(sql)).rejects.toMatchObject({ code: "55000" });
+  });
+  it("reads exact versions and history only within the authorized property and author organization", async () => {
+    const repository = createPgBookingAffiliateDestinationRepository(isolatedUrl);
+    try {
+      expect(await repository.list(id(3), id(4))).toEqual({ destinations: [] });
+      const saved = await repository.save(input());
+      if (!saved.ok) throw new Error("fixture failed");
+      expect(await repository.get(id(3), id(4), saved.destinationVersionId)).toMatchObject({
+        destinationVersionId: saved.destinationVersionId,
+        configuration: input().configuration,
+        trackingStatus: "not_validated",
+      });
+      expect((await repository.list(id(3), id(4))).destinations).toHaveLength(1);
+      for (const [property, organization] of [
+        [id(6), id(4)],
+        [id(3), id(5)],
+      ]) {
+        expect(
+          await repository.get(property!, organization!, saved.destinationVersionId),
+        ).toBeNull();
+        expect((await repository.list(property!, organization!)).destinations).toEqual([]);
+      }
+      await pool.query("UPDATE hotel_catalog.properties SET profile_status='disabled'");
+      expect(await repository.get(id(3), id(4), saved.destinationVersionId)).toBeNull();
+    } finally {
+      await repository.close();
+    }
   });
   it("serializes duplicate saves and rejects a changed payload under the same key", async () => {
     const results = await Promise.all([save(pool, input()), save(pool, input())]);
