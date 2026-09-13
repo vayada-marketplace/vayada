@@ -86,3 +86,21 @@ Creation returns 201, replay 200, malformed input 422, unavailable scope 404 and
 revision/key conflicts 409. Authentication/authorization failures remain 401/403.
 The server mounts this draft-only adapter; it exposes no publication command and
 does not make terms creator-visible. The Marketplace editing interface is next.
+
+## Approved commission association
+
+New draft revisions must resolve their exact Finance policy version in the offer's
+canonical property scope and find approval before persistence. The command calls
+the Finance-owned resolver inside the offer transaction; it does not copy a client
+percentage or select the newest policy. Missing, wrong-property and unapproved
+references return `policy_unavailable` (HTTP 409), without storing a draft or retry
+key. Database failures remain server errors. Existing authorized, completed retry
+keys still replay their original result, including historical unresolved drafts.
+
+The hotel draft read adds `draft.commission`, the Finance resolution for the stored
+reference, including rate, basis and eligibility when available. Historical missing
+or unapproved references remain explicitly unavailable; they are not backfilled.
+Changing the selected rate creates a new draft revision and preserves all previous
+references. Destination readiness, creator-visible published terms and accepted
+agreement creation remain separate publication work; this association alone does
+not certify a booking destination, publish terms or activate earning links.
