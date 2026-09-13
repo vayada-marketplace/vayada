@@ -189,6 +189,18 @@ This arithmetic does not establish date eligibility, switches, usage, targeting,
 current source revisions, complete quote money or acceptance. It is not yet wired
 to public pricing without those owners.
 
+`replacementPromoCode.ts` reads requested-code eligibility from current Booking
+settings and `promo_definitions`, preserving Python's independent inclusive
+booking/arrival windows, usage limits, minimum value and room targeting. Caller
+must already authorize the property and supply the owner-derived minimum-booking
+basis. It locks inventory, property, settings/location, selected room scopes and
+all property codes, then derives the property date from the current database clock.
+Saved decimal amounts use the Booking currency with exact minor conversion;
+nonrepresentable fractions fail. The source key binds currency, timezone, local
+date and all saved code state. Returned eligible selection IDs feed the discount
+basis. This is neither usage redemption nor the complete promotions source;
+last-minute/other promotions and final quote/acceptance composition remain required.
+
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
 owner rules and evidence before activation. Per-offer accepted payment methods
