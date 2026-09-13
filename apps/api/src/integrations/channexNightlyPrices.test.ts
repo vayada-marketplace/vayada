@@ -1,3 +1,4 @@
+import { verifyChannexNightRestrictions } from "./channexRestrictionReadback.js";
 import {
   planChannexOfferConfiguration,
   verifyChannexOfferConfiguration,
@@ -643,5 +644,147 @@ describe("Channex published adult room preflight", () => {
         throw new Error("room unavailable");
       }),
     ).rejects.toThrow("room unavailable");
+  });
+});
+
+describe("night restriction readback", () => {
+  const identity = {
+    externalPropertyId: "61000000-0000-4000-8000-000000000001",
+    externalRatePlanId: "61000000-0000-4000-8000-000000000002",
+  };
+  function response(config = fixture()) {
+    return {
+      data: {
+        [identity.externalRatePlanId]: {
+          [request.date]: { ...prepare(config)[0].restrictionCandidate },
+        },
+      },
+    };
+  }
+  it("reads exactly one scoped date and projects only verified rule values", async () => {
+    const body = response();
+    Object.assign(body.data[identity.externalRatePlanId][request.date], { secret: "not returned" });
+    const get = vi.fn(async (_method: "GET", _path: string) => body);
+    const observed = await verifyChannexNightRestrictions(fixture(), request, identity, get);
+    const query = new URL(get.mock.calls[0][1], "https://example.test").searchParams;
+    expect(get.mock.calls).toHaveLength(1);
+    expect(get.mock.calls[0][0]).toBe("GET");
+    expect(query.get("filter[property_id]")).toBe(identity.externalPropertyId);
+    expect(query.get("filter[date]")).toBe(request.date);
+    expect(query.get("filter[restrictions]")!.split(",")).toHaveLength(6);
+    expect(observed).toMatchObject({
+      kind: "observed",
+      ...identity,
+      date: request.date,
+      publicationRevision: 7,
+      restrictionOfferId: "flex",
+      restrictions: prepare()[0].restrictionCandidate,
+    });
+    expect(JSON.stringify(observed)).not.toContain("secret");
+  });
+  it("rejects every absent, null, mistyped or changed restriction", async () => {
+    for (const [key, value] of Object.entries(prepare()[0].restrictionCandidate)) {
+      for (const replacement of [
+        undefined,
+        null,
+        String(value),
+        typeof value === "boolean" ? !value : value + 1,
+      ]) {
+        const body = response();
+        Object.assign(body.data[identity.externalRatePlanId][request.date], { [key]: replacement });
+        await expect(
+          verifyChannexNightRestrictions(fixture(), request, identity, async () => body),
+        ).rejects.toThrow();
+      }
+    }
+  });
+  it("requires explicit neutral readback when rules are cleared", async () => {
+    const original = fixture(),
+      policy = original.offers[0].restrictions;
+    if (policy.kind !== "own") throw new Error("fixture");
+    const c: PricingConfiguration = {
+      ...original,
+      offers: [
+        {
+          ...original.offers[0],
+          restrictions: {
+            ...policy,
+            rules: {
+              minArrivalNights: 1,
+              maxStayNights: null,
+              closedToArrival: false,
+              closedToDeparture: false,
+              stopSell: false,
+            },
+          },
+        },
+      ],
+    };
+    await expect(
+      verifyChannexNightRestrictions(c, request, identity, async () => response(c)),
+    ).resolves.toMatchObject({
+      restrictions: {
+        min_stay_arrival: 1,
+        min_stay_through: 1,
+        max_stay: 0,
+        closed_to_arrival: false,
+        closed_to_departure: false,
+        stop_sell: false,
+      },
+    });
+    await expect(
+      verifyChannexNightRestrictions(c, request, identity, async () => response()),
+    ).rejects.toThrow();
+  });
+  it("rejects wrong rate/date, malformed responses and warnings", async () => {
+    for (const body of [
+      null,
+      {},
+      { data: [] },
+      { data: {} },
+      { data: { other: response().data[identity.externalRatePlanId] } },
+      {
+        data: {
+          [identity.externalRatePlanId]: { "2026-10-16": prepare()[0].restrictionCandidate },
+        },
+      },
+      { ...response(), errors: {} },
+      { ...response(), meta: { warnings: ["partial"] } },
+      { ...response(), meta: { warnings: null } },
+    ]) {
+      await expect(
+        verifyChannexNightRestrictions(fixture(), request, identity, async () => body),
+      ).rejects.toThrow();
+    }
+  });
+  it("validates inputs before IO and snapshots expectations before awaiting", async () => {
+    const get = vi.fn(async () => response());
+    await expect(verifyChannexNightRestrictions({}, request, identity, get)).rejects.toThrow();
+    await expect(
+      verifyChannexNightRestrictions(
+        fixture(),
+        request,
+        { ...identity, externalRatePlanId: "other" },
+        get,
+      ),
+    ).rejects.toThrow();
+    expect(get).not.toHaveBeenCalled();
+    const c = fixture(),
+      input = { ...request },
+      scope = { ...identity };
+    await expect(
+      verifyChannexNightRestrictions(c, input, scope, async () => {
+        scope.externalRatePlanId = "changed";
+        input.date = "2026-10-16";
+        const policy = c.offers[0].restrictions;
+        if (policy.kind === "own") Object.assign(policy.rules, { maxStayNights: 99 });
+        return response();
+      }),
+    ).resolves.toMatchObject({ ...identity, date: request.date, restrictions: { max_stay: 14 } });
+    await expect(
+      verifyChannexNightRestrictions(fixture(), request, identity, async () => {
+        throw new Error("transport");
+      }),
+    ).rejects.toThrow("transport");
   });
 });
