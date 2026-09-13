@@ -13,6 +13,21 @@ describe("property setup draft request safety", () => {
     expect(snapshotPropertySetupDraftRequest(value)).toEqual({ ok: true, value });
   });
 
+  it("allows UUID source revisions without hiding adjacent sensitive values", () => {
+    const source = "hotel_catalog.policy:6fbb5870-a269-4f5e-bb09-52f752169470:r1";
+    expect(snapshotPropertySetupDraftRequest({ source })).toEqual({ ok: true, value: { source } });
+    for (const secret of [
+      "DE89 3704 0044 0532 0130 00",
+      "DE89-3704-0044-0532-0130-00",
+      "sk_live_1234567890abcdefghij",
+    ]) {
+      expect(snapshotPropertySetupDraftRequest({ source: `${source} ${secret}` })).toMatchObject({
+        ok: false,
+        error: { code: "unsafe_payload" },
+      });
+    }
+  });
+
   it("returns the single serialized snapshot when a getter changes", () => {
     let reads = 0;
     const value = {

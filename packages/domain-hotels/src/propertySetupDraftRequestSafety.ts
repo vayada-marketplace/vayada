@@ -20,6 +20,9 @@ export type PropertySetupDraftSnapshotResult =
   | { ok: false; error: PropertySetupDraftRequestError };
 
 const DANGEROUS_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const IBAN_PATTERN = /\b[A-Z]{2}\d{2}(?:[\s-]?[A-Z0-9]){11,30}\b/i;
+const UUID_PATTERN =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 const SECRET_VALUE_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b/,
@@ -32,7 +35,6 @@ const SECRET_VALUE_PATTERNS = [
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
   /\bnpm_[A-Za-z0-9]{20,}\b/,
   /\bAIza[0-9A-Za-z_-]{35}\b/,
-  /\b[A-Z]{2}\d{2}(?:[\s-]?[A-Z0-9]){11,30}\b/i,
   /\bhttps?:\/\/[^\s/:@]+:[^\s/@]+@[^\s/]+/i,
   /\bhttps?:\/\/[^\s?]+\?[^\s]*(?:x-amz-signature|x-goog-signature|signature|sig|token)=/i,
 ] as const;
@@ -87,7 +89,11 @@ function inspectSnapshot(
 ): PropertySetupDraftRequestErrorCode | null {
   if (depth > PROPERTY_SETUP_DRAFT_MAX_DEPTH) return "payload_too_deep";
   if (typeof value === "string") {
-    return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(value)) ? "unsafe_payload" : null;
+    // UUID suffixes can resemble an IBAN; other secret checks still inspect the full value.
+    return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(value)) ||
+      IBAN_PATTERN.test(value.replace(UUID_PATTERN, " "))
+      ? "unsafe_payload"
+      : null;
   }
   if (value === null || typeof value !== "object") return null;
   if (Array.isArray(value)) {
