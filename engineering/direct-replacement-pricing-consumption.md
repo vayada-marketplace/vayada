@@ -155,6 +155,14 @@ meal evidence needed by confirmation, revenue, refunds and amendments. Do not
 silently replace historical v1 evidence or assume `version: pricing.v2` alone
 identifies every future calculation change.
 
+`stored-pricing-quote.v1` now wraps the bound stay and aggregate evidence with
+an explicit evaluator version, payment method and complete room/night records.
+The decoder validates exact minor strings, selected terms, meal plans, source
+references and nightly/aggregate conservation. It validates history at issuance;
+fresh status additionally checks current owners, request, method and evaluator.
+This is a server-storage format, not posted quote authority. Database writes,
+owner composition and executable payment validation remain integration work.
+
 Persist the exact accepted total, due-now and due-later amounts with the selected
 payment method and Finance evidence. The agreed example is360 at30% →108/252 on
 the final total. Deposit execution is currently unavailable in replacement
