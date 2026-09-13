@@ -1,4 +1,4 @@
-import { prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
+import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { preparePublishedChannexNightPrices } from "./channexPublishedNightPrices.js";
@@ -218,6 +218,135 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       });
     return { ...f, correlation, response };
   }
+  async function configurationFixture() {
+    const f = await receiptFixture();
+    await (
+      await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
+    )();
+    expect((await recordRetained(pool, f.input, f.selection, f.claim.attemptId)).kind).toBe(
+      "identified",
+    );
+    return f;
+  }
+  it("retains verified configuration idempotently while leaving the target pending", async () => {
+    const f = await configurationFixture();
+    await pool.query("UPDATE pms.channex_offer_target_intents SET result_evidence=$2 WHERE id=$1", [
+      f.claim.intentId,
+      { other: "preserved" },
+    ]);
+    const get = async () => f.response().json();
+    const result = await retainChannexOfferConfiguration(
+      pool,
+      f.input,
+      f.selection,
+      f.claim.attemptId,
+      get,
+    );
+    expect(result).toEqual({ kind: "configuration_retained", attemptId: f.claim.attemptId });
+    expect(
+      await retainChannexOfferConfiguration(pool, f.input, f.selection, f.claim.attemptId, get),
+    ).toEqual(result);
+    const row = (
+      await pool.query(
+        "SELECT status,result_evidence FROM pms.channex_offer_target_intents WHERE id=$1",
+        [f.claim.intentId],
+      )
+    ).rows[0];
+    expect(row.status).toBe("pending");
+    expect(row.result_evidence).toMatchObject({
+      other: "preserved",
+      configuration: { schemaVersion: 1, attemptId: f.claim.attemptId, intentId: f.claim.intentId },
+    });
+    expect(
+      (
+        await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
+          f.claim.targetId,
+        ])
+      ).rows[0].active_version,
+    ).toBeNull();
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_target_versions WHERE target_id=$1", [
+          f.claim.targetId,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+  });
+  it.each(["lease", "receipt", "mismatch"])(
+    "does not retain configuration after %s changes during GET",
+    async (variant) => {
+      const f = await configurationFixture();
+      const read = retainChannexOfferConfiguration(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        async () => {
+          if (variant === "lease")
+            await pool.query(
+              "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+              [f.input.jobId],
+            );
+          if (variant === "receipt")
+            await (
+              await prepareChannexReceiptPersistence(
+                pool,
+                { ...f.correlation, receiptId: randomUUID() },
+                new Response("{}", { status: 500 }),
+              )
+            )();
+          if (variant === "mismatch") return {};
+          return f.response().json();
+        },
+      );
+      if (variant === "mismatch") await expect(read).rejects.toThrow();
+      else expect(await read).toMatchObject({ kind: "unavailable" });
+      expect(
+        (
+          await pool.query(
+            "SELECT result_evidence FROM pms.channex_offer_target_intents WHERE id=$1",
+            [f.claim.intentId],
+          )
+        ).rows[0].result_evidence,
+      ).toEqual({});
+    },
+  );
+  it("rejects unresolved attempts before GET and preserves conflicting saved evidence", async () => {
+    const unresolved = await receiptFixture();
+    const get = vi.fn(async () => unresolved.response().json());
+    expect(
+      await retainChannexOfferConfiguration(
+        pool,
+        unresolved.input,
+        unresolved.selection,
+        unresolved.claim.attemptId,
+        get,
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(get).not.toHaveBeenCalled();
+    const f = await configurationFixture();
+    await pool.query("UPDATE pms.channex_offer_target_intents SET result_evidence=$2 WHERE id=$1", [
+      f.claim.intentId,
+      { configuration: { schemaVersion: 99 } },
+    ]);
+    expect(
+      await retainChannexOfferConfiguration(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        async () => f.response().json(),
+      ),
+    ).toMatchObject({ kind: "unavailable", reason: "configuration_evidence_conflict" });
+    expect(
+      (
+        await pool.query(
+          "SELECT result_evidence FROM pms.channex_offer_target_intents WHERE id=$1",
+          [f.claim.intentId],
+        )
+      ).rows[0].result_evidence,
+    ).toEqual({ configuration: { schemaVersion: 99 } });
+  });
   it("identifies from retained evidence and retries the same identity without changing receipts", async () => {
     const f = await receiptFixture();
     await (
@@ -671,7 +800,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ])
       ).rowCount,
     ).toBe(0);
-    expect(await f.serviceRead()).not.toHaveProperty("identification");
+    const publicRead = await f.serviceRead();
+    expect(publicRead).not.toHaveProperty("identification");
+    expect(publicRead).not.toHaveProperty("configurationIdentity");
     const changed = createdResponse(claim.request.body);
     expect(
       await recordCreation(pool, f.input, f.selection, {

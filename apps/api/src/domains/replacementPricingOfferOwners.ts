@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prepareChannexReceiptPersistence } from "./channexCreationReceiptStore.js";
-import { verifyChannexOfferRoom } from "../integrations/channexOfferConfiguration.js";
+import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { channexCreationReceiptsResolved, readChannexCreationReceiptIdentity } from "./channexCreationReceiptGate.js";
 import { planChannexOfferConfiguration, readChannexCreatedRateIdentity } from "../integrations/channexOfferConfiguration.js";
 import { performance } from "node:perf_hooks";
@@ -106,6 +106,7 @@ export async function readPublishedPricingForChannexJob(
     reservation: _reservation,
     createClaim: _createClaim,
     identification: _identification,
+    configurationIdentity: _configurationIdentity,
     ...evidence
   } = result;
   return evidence;
@@ -139,6 +140,7 @@ type TargetWork =
   | "reserve"
   | "claim"
   | { kind: "retained"; attemptId: string }
+  | { kind: "configuration"; attemptId: string; observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>> }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
 
@@ -184,6 +186,44 @@ export async function recordRetainedChannexOfferCreate(
   if (result.kind !== "available") return result;
   if (!result.identification) throw new Error("Creation identification missing");
   return { kind: "identified" as const, ...result.identification };
+}
+
+/** Retains a validated metadata observation only; never seals or activates a target. */
+export async function retainChannexOfferConfiguration(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const before = await withSelectedChannexTarget(pool, lease, selected, {
+    kind: "configuration",
+    attemptId,
+  });
+  if (before.kind !== "available") return before;
+  if (!before.configurationIdentity) throw new Error("Configuration identity missing");
+  const room = before.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const observation = await verifyChannexOfferConfiguration(
+    room,
+    selected.offerId,
+    selected.primaryOccupancy,
+    before.configurationIdentity,
+    (_method, path) => boundedProviderCall((signal) => get(path, signal)),
+  );
+  const after = await withSelectedChannexTarget(pool, lease, selected, {
+    kind: "configuration",
+    attemptId,
+    observation,
+  });
+  if (after.kind !== "available") return after;
+  return { kind: "configuration_retained" as const, attemptId };
 }
 
 /** Only a newly committed claim can create this one-shot closure. No runtime adapter is wired. */
@@ -377,6 +417,7 @@ async function withPublishedChannexPricing(
         }
       | undefined;
     let identification: { attemptId: string; externalRatePlanId: string } | undefined;
+    let configurationIdentity: ReturnType<typeof readChannexCreatedRateIdentity> | undefined;
     if (selection) {
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
@@ -541,7 +582,45 @@ async function withPublishedChannexPricing(
             )
           ).rows[0];
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
-          if ("kind" in work && work.kind === "dispatch") {
+          if ("kind" in work && work.kind === "configuration") {
+            if (
+              attempt.state !== "identified" ||
+              !(await channexCreationReceiptsResolved(client, target.id))
+            )
+              return unavailable("creation_reconciliation_required");
+            configurationIdentity = {
+              externalPropertyId: authority.externalPropertyId,
+              externalRoomTypeId: mapping.external_room_type_id as string,
+              externalRatePlanId: attempt.external_rate_plan_id as string,
+            };
+            if (work.observation) {
+              const observed = work.observation;
+              if (
+                observed.externalPropertyId !== configurationIdentity.externalPropertyId ||
+                observed.externalRoomTypeId !== configurationIdentity.externalRoomTypeId ||
+                observed.externalRatePlanId !== configurationIdentity.externalRatePlanId ||
+                JSON.stringify(observed.configuration) !== JSON.stringify(plan.configuration)
+              )
+                return unavailable("configuration_observation_mismatch");
+              const evidence = JSON.stringify({
+                schemaVersion: 1,
+                attemptId: attempt.id,
+                intentId: intent.id,
+                version: intent.version,
+                bindingGeneration: binding.binding_generation,
+                observation: observed,
+              });
+              const saved = await client.query(
+                `UPDATE pms.channex_offer_target_intents
+                 SET result_evidence=jsonb_set(result_evidence,'{configuration}',$2::jsonb)
+                 WHERE id=$1 AND status='pending' AND
+                   (NOT result_evidence ? 'configuration' OR result_evidence->'configuration'=$2::jsonb)
+                 RETURNING id`,
+                [intent.id, evidence],
+              );
+              if (!saved.rowCount) return unavailable("configuration_evidence_conflict");
+            }
+          } else if ("kind" in work && work.kind === "dispatch") {
             if (
               attempt.state !== "unresolved" ||
               attempt.job_attempt_id !== work.jobAttemptId ||
@@ -609,7 +688,10 @@ async function withPublishedChannexPricing(
                 "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
                 [attempt.id, identity.externalRatePlanId],
               );
-            identification = { attemptId: attempt.id, externalRatePlanId: identity.externalRatePlanId };
+            identification = {
+              attemptId: attempt.id,
+              externalRatePlanId: identity.externalRatePlanId,
+            };
           }
         }
       }
@@ -632,6 +714,7 @@ async function withPublishedChannexPricing(
       reservation,
       createClaim,
       identification,
+      configurationIdentity,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
