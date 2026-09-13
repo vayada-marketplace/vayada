@@ -201,6 +201,16 @@ date and all saved code state. Returned eligible selection IDs feed the discount
 basis. This is neither usage redemption nor the complete promotions source;
 last-minute/other promotions and final quote/acceptance composition remain required.
 
+Migration0203 adds Booking-owned immutable room last-minute revisions and scoped
+heads, because the replacement schema had no room override setting. Missing head
+means inherit, matching Python's absent room config; an explicit enabled/empty
+policy also restores inheritance. `roomLastMinuteStore.ts` requires live PMS
+pricing-manage authority, exact room scope, expected revision and an idempotent
+request. Actor/organization/history persist; retries reauthorize without resetting
+the current head. Tiers reject overlap and unrepresentable percentage precision.
+Hotel settings remain in Booking's existing settings owner; no room attributes or
+retired PMS rate rules are repurposed. The current reader follows separately.
+
 The existing replacement promotion input represents last-minute/code rules,
 not the full agreed early-bird/midweek/free-night feature set. Those need concrete
 owner rules and evidence before activation. Per-offer accepted payment methods
