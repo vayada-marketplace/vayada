@@ -471,7 +471,7 @@ export async function importChannexStagingReservation(
           await client.query(
             `SELECT 1 FROM platform.jobs WHERE queue_name=$1 AND job_key<>$3
              AND (job_key=$2 OR starts_with(job_key,$2||':catalog:'))
-             AND status NOT IN ('dead_lettered','succeeded') FOR UPDATE`,
+             AND status NOT IN ('dead_lettered','succeeded')`,
             [QUEUE, originalKey, key],
           )
         ).rowCount
