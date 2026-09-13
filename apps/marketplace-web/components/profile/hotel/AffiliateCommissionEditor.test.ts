@@ -33,12 +33,18 @@ describe("affiliate commission editor", () => {
     expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toContain(
       "two decimal places",
     );
+    await enter("12.50");
+    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
   });
   it("reuses the same save key after failure and preserves the decimal percentage", async () => {
     await mount();
     api.post.mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({ ok: true });
     await enter("12.50");
     await act(async () => button("Save draft rate").props.onClick());
+    await enter("12.50");
+    expect(renderer.root.findByProps({ role: "alert" }).children.join("")).toContain(
+      "Could not complete the save",
+    );
     await act(async () => button("Save draft rate").props.onClick());
     expect(api.post.mock.calls[0]).toEqual([
       path,

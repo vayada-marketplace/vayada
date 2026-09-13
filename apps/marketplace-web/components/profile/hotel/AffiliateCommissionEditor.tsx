@@ -12,6 +12,7 @@ export function AffiliateCommissionEditor({ propertyId }: { propertyId: string }
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [message, setMessage] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const attempt = useRef<{ rate: string; key: string } | null>(null);
@@ -52,7 +53,7 @@ export function AffiliateCommissionEditor({ propertyId }: { propertyId: string }
   async function save() {
     if (busy) return;
     if (!/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?$/.test(rate) || Number(rate) > 100) {
-      setError("Enter a percentage from 0 to 100, with up to two decimal places.");
+      setValidationError("Enter a percentage from 0 to 100, with up to two decimal places.");
       return;
     }
     const canonical = Number(rate).toFixed(2);
@@ -122,7 +123,10 @@ export function AffiliateCommissionEditor({ propertyId }: { propertyId: string }
             inputMode="decimal"
             value={rate}
             disabled={busy || loading}
-            onChange={(event) => setRate(event.target.value)}
+            onChange={(event) => {
+              setRate(event.target.value);
+              setValidationError("");
+            }}
             className="mt-1 block w-40 rounded-lg border border-gray-300 px-3 py-2"
             aria-describedby="commission-rate-help"
           />
@@ -150,6 +154,11 @@ export function AffiliateCommissionEditor({ propertyId }: { propertyId: string }
       {error && (
         <p role="alert" className="text-sm text-red-700">
           {error}
+        </p>
+      )}
+      {validationError && (
+        <p role="alert" className="text-sm text-red-700">
+          {validationError}
         </p>
       )}
       {message && (
