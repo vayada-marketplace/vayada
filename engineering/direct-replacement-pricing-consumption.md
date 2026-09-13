@@ -309,3 +309,16 @@ JPY/KWD, unchanged historical evidence and no double meal/promo charge.
 Current reset tests remain until the corresponding replacement slice has all
 owner and acceptance evidence. A successful editor publication or calculator
 unit test is not authorization to remove every `PRICING_UNAVAILABLE` guard.
+
+`replacementAddons.ts` reads current Booking add-on definitions under the
+caller-authorized transaction. It preserves exact same-currency unit prices,
+all four saved pricing models, visibility/status, quantity/guest limits,
+lead-time text and property/partner economics. Missing metadata limits use the
+existing writer/read-model defaults (quantity1, no guest limit). Owner rows and
+parent property remain locked; complete definition state binds source identity.
+An explicit empty selection returns owner evidence, not an inferred zero total.
+Selected-person/date eligibility, amount composition, executable lead-time rules,
+FX and partner payout allocation remain separate obligations. Python reference:
+`apps/pms-api/app/services/booking_service.py:_compute_addon_total` and its
+`test_addon_pricing.py` fixtures; its unknown-ID skipping and 1:1 FX fallback are
+not copied. Missing selected definitions or precision loss return unavailable.
