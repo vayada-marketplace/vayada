@@ -110,6 +110,14 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
       { occupancy: 3, rate: "155.00" },
     ]);
     for (const row of rows) {
+      expect(row.restrictionCandidate).toEqual({
+        min_stay_arrival: 3,
+        min_stay_through: 1,
+        max_stay: 14,
+        closed_to_arrival: true,
+        closed_to_departure: true,
+        stop_sell: true,
+      });
       expect(row.projection).toMatchObject({
         kind: "projected",
         propertyId: "property",
@@ -137,6 +145,7 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
   it("uses actual occupancy for meals and retains the linked restriction owner", () => {
     const rows = prepare(fixture(), { ...request, offerId: "nr" });
     expect(rows.map((r) => r.rate)).toEqual(["100.00", "137.00", "169.50"]);
+    expect(rows.every((row) => row.restrictionCandidate.min_stay_arrival === 3)).toBe(true);
     expect(rows[2].projection).toMatchObject({
       termsRevisions: { flex: "terms7", nr: "terms8" },
       night: {
@@ -150,6 +159,26 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
         ],
       },
     });
+  });
+  it("restores inherited rules after clearing a linked offer override", () => {
+    const c = fixture();
+    const parent = c.offers[0].restrictions;
+    if (parent.kind !== "own") throw new Error("fixture");
+    const child = {
+      ...c.offers[1],
+      restrictions: {
+        ...parent,
+        rules: { ...parent.rules, minArrivalNights: 2, maxStayNights: null },
+      },
+    };
+    const input = { ...request, offerId: "nr" };
+    const own = prepare({ ...c, offers: [c.offers[0], child] }, input);
+    const inherited = prepare(c, input);
+    expect(own[0].restrictionCandidate).toMatchObject({ min_stay_arrival: 2, max_stay: 0 });
+    expect(inherited[0].restrictionCandidate).toMatchObject({ min_stay_arrival: 3, max_stay: 14 });
+    expect(own.map((r) => r.rate)).toEqual(inherited.map((r) => r.rate));
+    expect(own[0].projection.night.restrictionOfferId).toBe("nr");
+    expect(inherited[0].projection.night.restrictionOfferId).toBe("flex");
   });
   it("evaluates per-person and included-guest tariffs rather than multiplying room totals", () => {
     expect(prepare(withBase({ mode: "per_person", unitMinor: "6000" })).map((r) => r.rate)).toEqual(
@@ -222,6 +251,14 @@ describe("Channex adult nightly price preparation with real PMS calculator", () 
     const before = structuredClone(config);
     const row = prepare(config)[0];
     expect(row.rate).toBe("120.00");
+    expect(row.restrictionCandidate).toEqual({
+      min_stay_arrival: 1,
+      min_stay_through: 1,
+      max_stay: 0,
+      closed_to_arrival: false,
+      closed_to_departure: false,
+      stop_sell: false,
+    });
     expect(row.projection.night).toMatchObject({
       sources: [{ offerId: "flex", kind: "date" }],
       restrictions: config.offers[0].restrictions.dates[0].rules,
