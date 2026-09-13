@@ -499,3 +499,24 @@ Exact pending retries return the same identity. Failed authority or conflicting
 evidence never removes independently committed receipts. The older raw-observation
 recorder remains an internal compatibility helper; retained evidence consumers
 use this entrypoint. Neither path seals configuration or activates delivery.
+
+
+### Pending configuration observations (VAY-2011)
+
+`retainChannexOfferConfiguration` checks a current identified attempt and all
+retained creation receipts before a bounded injected GET. It snapshots the lease
+and selection, releases database locks for IO, and reuses the exact configuration
+verifier. After GET it repeats proposal, binding, request, owner and receipt-history
+checks before saving anything. Unresolved attempts cannot use GET to gain identity.
+
+The pending intent's `result_evidence.configuration` holds a deterministic
+`schemaVersion: 1` projection: attempt ID, intent ID, reserved version, binding
+generation and the verifier's exact IDs/meal/configuration observation. Unrelated
+evidence keys survive; matching retries are accepted and different existing
+configuration evidence is held for reconciliation. Arbitrary provider metadata is
+not retained.
+
+This records a past metadata observation only. No version is sealed and no active
+pointer changes. Later consumers must recheck current authority, receipt history
+and required capability/ARI/readback evidence; this field never grants readiness
+or proves that provider configuration remained unchanged afterward.
