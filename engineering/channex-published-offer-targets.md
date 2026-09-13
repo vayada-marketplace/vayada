@@ -622,3 +622,88 @@ calls. Use meaningful PostgreSQL source-freshness and tenant-isolation coverage.
 UI tests and browser verification cover explicit selection, preview values,
 loading/error/unsupported states, property/selection races and clearing stale
 results. Report simulated preview evidence separately from provider validation.
+
+## Restriction equivalence and reset acceptance (VAY-1528)
+
+This contract defines the evidence still required before generic published-offer
+activation. It does not certify Channex fields or any connected OTA. VAY-1528
+owns the mapper and its verification; VAY-1545 consumes that result. The missing
+BookingCom channel in the VAY-2013 staging fixture is a separate provider blocker,
+not a reason to substitute different booking rules or introduce OTA rate variants.
+
+### Reuse the canonical result
+
+`projectReplacementRoomNight` already returns `night.restrictions` and
+`night.restrictionOfferId`; `prepareChannexAdultNightPrices` retains them inside
+each candidate projection. Reuse that effective result from the authorized
+published snapshot. Do not implement a second season resolver in the exporter.
+Exact dates override seasons, which override the restriction owner's base rules.
+Linked prices do not imply provider-side restriction inheritance: the calculator
+resolves the restriction owner independently and the exporter materializes it.
+
+| Canonical value     | Required booking meaning                                                            | Canonical unrestricted value |
+| ------------------- | ----------------------------------------------------------------------------------- | ---------------------------- |
+| `minArrivalNights`  | Compare total stay length with the arrival date's minimum only                      | `1`                          |
+| `maxStayNights`     | Compare total stay length with every occupied night's maximum; the tightest applies | `null`                       |
+| `closedToArrival`   | Reject arrivals on the specified date, not stays crossing that date                 | `false`                      |
+| `closedToDeparture` | Reject departures on the checkout date, which is not an occupied night              | `false`                      |
+| `stopSell`          | Reject a stay occupying any affected night of the selected offer                    | `false`                      |
+
+These are canonical values, not asserted wire reset values. The mapper must
+establish the exact provider setting and clearing representation for each field,
+including how an inherited/default provider value is overridden. Missing fields,
+HTTP acceptance, or similarly named provider fields do not establish equivalence.
+Do not translate `null` maximum to a large finite number or silently use an
+arrival-only maximum for the occupied-night rule.
+
+### Minimum verification matrix
+
+Use bounded synthetic fixtures with exact property/room/offer/date identities.
+Run canonical calculator expectations first, then the mapped provider state,
+and separately record observed channel enforcement where a channel is available.
+
+| Fixture                                                    | Required result                                                                                     |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Friday arrival minimum 3                                   | Friday–Sunday rejected; Friday–Monday accepted                                                      |
+| Sunday minimum 3; Saturday arrival minimum 1               | Saturday–Monday accepted, absent other restrictions                                                 |
+| Base maximum 14                                            | A 14-night stay accepted; a 15-night stay rejected                                                  |
+| Saturday maximum 14; Sunday maximum 2                      | Saturday–Tuesday rejected despite arrival maximum 14; Saturday–Monday accepted                      |
+| Sunday closed to arrival                                   | Sunday arrival rejected; Saturday–Monday accepted                                                   |
+| Monday closed to departure                                 | Saturday–Monday rejected even though Monday is outside its occupied nights                          |
+| Sunday stop-sell on offer A only                           | A's Saturday–Monday stay rejected; unrelated offer B unaffected                                     |
+| Parent minimum 3; child price −10% inheriting restrictions | Child two-night stay rejected; explicit child minimum 2 accepts; clearing override restores 3       |
+| Date override inside a seasonal interval                   | Date wins on that date; season resumes the next date; base resumes after the inclusive seasonal end |
+| Remove or shorten a rule after delivery                    | Previously affected dates receive their current fallback, including explicit unrestricted values    |
+
+For maximum stays, the varying Sunday example is mandatory: a constant maximum
+cannot distinguish arrival-only behavior from occupied-night behavior. Test CTD
+on the actual checkout date; inspecting only occupied-night payloads misses it.
+A conflicting rule vector must fail validation, not be repaired or weakened by
+the exporter. Existing price and availability evidence must remain unchanged by
+restriction-only updates.
+
+### Delivery and capability boundary
+
+A later implementation must cover the union of previously delivered affected
+dates and newly affected dates within the managed horizon. Re-read current
+published rules on retry; removal is a new complete desired vector, not omission
+of the old fields. Keep unresolved delivery ownership until ambiguous requests
+are reconciled so an older write cannot restore a cleared restriction. Newly
+opened dates require complete rules before readiness. The scheduling contract
+must also cover checkout dates for allowed arrivals near the horizon boundary;
+never assume CTD is covered merely because every priced night was sent.
+
+Record setting and clearing evidence separately, correlated to the external
+property, room, rate, connection/binding generation, current publication and
+restriction owner. Provider readback proves stored provider state only. Channel
+support must identify the actual connected channel and verified semantics; an OTA
+code or a generic Boolean supplied by a caller is not capability evidence.
+Unknown or non-equivalent semantics keep the affected channel/offer unavailable;
+they do not certify the whole connection or unrelated channels. Preserve the
+existing activation and current-authority checks in this document.
+
+The next implementation slice is the bounded field/reset mapper plus its
+canonical-equivalence fixtures after provider semantics are verified. Durable
+initial delivery/readback and activation consume that verified mapping afterward.
+No provider request, readiness transition, or runtime sender is enabled by this
+contract change.
