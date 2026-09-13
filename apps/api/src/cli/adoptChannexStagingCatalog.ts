@@ -11,6 +11,7 @@ try {
       "revision-id": { type: "string" },
       "channel-id": { type: "string" },
       "approval-ref": { type: "string" },
+      "pre-import": { type: "boolean", default: false },
       "apply-hash": { type: "string" },
     },
   });
@@ -21,6 +22,7 @@ try {
     channelId: values["channel-id"] ?? "",
     approvalRef: values["approval-ref"] ?? "",
     applyHash: values["apply-hash"],
+    preImport: values["pre-import"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");
 } catch (error) {

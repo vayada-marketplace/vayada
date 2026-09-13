@@ -64,3 +64,48 @@ change booked terms, create canonical prices, or bypass the exact historical
 revision and OTA mapping requirements. Previous preview hashes must be refreshed. Adoption replay of a pre-change
 receipt also rejects its old hash; existing reference resolution for assignment
 repair is unchanged. Do not delete or rewrite old receipts to force replay.
+
+## Pre-import bootstrap (VAY-2013)
+
+`adoptChannexStagingCatalog --pre-import` extends this staging compatibility
+boundary before a first import. Generic published-offer target ownership remains
+VAY-1972/VAY-1549; this reference is never a canonical pricing plan or production
+mapping. All existing runtime, claim, binding, provider and approval fences apply.
+The preview hash additionally binds a deterministic digest of the authoritative
+revision booking facts, including stay occupancy, OTA codes and booked nightly
+facts; mutable transport/ACK metadata is excluded. Only the
+digest is retained; guest data is not copied into catalog receipts.
+
+A bootstrap reference has no canonical booking yet (`guest_booking_id IS NULL`).
+It remains immutable after import. Apply rejects existing canonical bookings
+unless replaying its own receipt. It creates one room/mapping, or reuses an exact
+active staging-owned room/mapping without editing its facts. Explicit rate
+mappings, other identities, inactive/closed rooms and rebound connections reject.
+Apply/replay is serialized by the existing inventory and binding locks.
+
+After adoption, an authorized PMS member must complete room facts using the
+existing room-facts update command (verified bed/bathroom facts, never inferred
+from provider names), then use physical-unit reconciliation,
+operating-calendar preview/confirmation and inventory materialization to establish
+capacity for the stay. Do not copy provider room count into inventory or fabricate
+calendar SQL. Keep public room publication absent and provider stop-sell/zero
+availability intact. These are independently audited, replayable prerequisites;
+a failed import does not undo their previously committed setup.
+
+The scoped import takes `--catalog-hash` and `--channel-id`, revalidates the
+read-only preview against the existing receipt, and checks the pulled revision
+digest before persistence. Only this exact scope may resolve an unbound reference.
+Normal/global jobs cannot consume it. Its durable key adds `:catalog:<hash>` to
+the existing staging-import key, allowing one explicitly approved attempt after
+the original mapping failure without resetting that job. A nonterminal original
+job rejects; retries/replays reuse the same new key and preserve binding fences.
+Booking, assignment, occupancy, booking mapping, nightly evidence and handled
+revision/audit commit together. Provider ACK and job completion retain the existing
+durable retry boundary: an ACK failure may follow a committed import and retries
+must not duplicate it. Catalog receipts and prior failed jobs remain unchanged.
+
+Verify this sequence on PostgreSQL 16/17, including changed facts/generation,
+concurrent apply/import, missing capacity, closed/conflicting mappings, normal
+consumer rejection, exact OTA nightly evidence and replay. Deployed acceptance
+requires a reviewed image and coordinated shared-fixture lease; no provider
+objects, reservations, global processing or production behavior change here.

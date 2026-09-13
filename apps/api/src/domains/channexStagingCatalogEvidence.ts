@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 export class StagingCatalogError extends Error {}
 export const rejectCatalog = (code: string): never => {
   throw new StagingCatalogError(code);
@@ -31,6 +32,7 @@ export type StagingCatalogRequest = {
   channelId: string;
   approvalRef: string;
   applyHash?: string;
+  preImport?: boolean;
 };
 
 /** Read only: never repairs provider mappings or acknowledges a revision. */
@@ -152,7 +154,24 @@ export async function readStagingCatalogEvidence(
     children = count(r.occ_children, 0, 20);
   if (count(r.default_occupancy, 1, 20) !== count(primary.occupancy, 1, 20))
     rejectCatalog("catalog_occupancy_mismatch");
+  if (input.preImport) {
+    const occupancy = object(stay.occupancy),
+      fallback = object(booking.occupancy);
+    if (
+      count(occupancy.adults ?? fallback.adults, 1, 20) > adults ||
+      count(occupancy.children ?? fallback.children ?? 0, 0, 20) > children ||
+      count(list(a.options)[0]?.occupancy, 1, 20) !== r.default_occupancy
+    )
+      rejectCatalog("catalog_booked_occupancy_mismatch");
+  }
   return {
+    ...(input.preImport
+      ? {
+          revisionHash: stagingRevisionHash(revision),
+          defaultOccupancy: r.default_occupancy,
+          rateOccupancy: list(a.options)[0]?.occupancy,
+        }
+      : {}),
     roomId,
     rateId,
     parentId: parentId ?? null,
@@ -167,4 +186,50 @@ export async function readStagingCatalogEvidence(
     amount: primary.rate,
     mealType: meal,
   };
+}
+
+/** Stable digest only: no guest facts are retained in the catalog audit. */
+export function stagingRevisionHash(revision: unknown): string {
+  const value = object(revision),
+    attributes = object(value.attributes);
+  // Bind booking/operational/revenue facts, not mutable transport/ACK metadata.
+  const evidence = {
+    id: value.id,
+    ...Object.fromEntries(
+      [
+        "booking_id",
+        "property_id",
+        "ota_reservation_code",
+        "ota_name",
+        "status",
+        "revision",
+        "revision_number",
+        "arrival_date",
+        "departure_date",
+        "occupancy",
+        "currency",
+        "amount",
+        "services",
+      ].map((key) => [key, attributes[key]]),
+    ),
+    insertedAt: attributes.inserted_at ?? value.inserted_at,
+    rooms: list(attributes.rooms).map((room) => ({
+      ...Object.fromEntries(
+        ["room_type_id", "rate_plan_id", "checkin_date", "checkout_date", "occupancy", "days"].map(
+          (key) => [key, room[key]],
+        ),
+      ),
+      otaRoomCode: object(room.meta).room_type_code,
+      otaRateCode: object(room.meta).rate_plan_code,
+    })),
+  };
+  return createHash("sha256")
+    .update(
+      JSON.stringify(evidence, (_key, value) =>
+        value && typeof value === "object" && !Array.isArray(value)
+          ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+          : value,
+      ),
+    )
+    .digest("hex");
 }

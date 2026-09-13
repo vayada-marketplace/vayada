@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
-import { readStagingCatalogEvidence } from "./channexStagingCatalogEvidence.js";
+import {
+  readStagingCatalogEvidence,
+  stagingRevisionHash,
+} from "./channexStagingCatalogEvidence.js";
 import { input, roomId, rateId, relation, provider } from "./channexStagingCatalogTestFixture.js";
 it("rejects missing, mismatched, ambiguous and unsupported provider evidence", async () => {
   const changes = [
@@ -87,4 +90,35 @@ it("retains breakfast evidence and normalizes room-only aliases without acceptin
       "unsupported_catalog_meal",
     );
   }
+});
+
+it("binds pre-import booking facts deterministically and rejects unsupported booked occupancy", async () => {
+  const { data, request } = provider(),
+    revision = data[`booking_revisions/${input.revisionId}`];
+  const first = await readStagingCatalogEvidence(
+    { ...input, preImport: true },
+    "synthetic",
+    request,
+  );
+  expect(first.revisionHash).toBe(
+    stagingRevisionHash(Object.fromEntries(Object.entries(revision).reverse())),
+  );
+  revision.attributes.acknowledged_at = "2026-09-13T10:00:00Z";
+  expect(stagingRevisionHash(revision)).toBe(first.revisionHash);
+  revision.attributes.rooms[0].occupancy.adults = 3;
+  await expect(
+    readStagingCatalogEvidence({ ...input, preImport: true }, "synthetic", request),
+  ).rejects.toThrow("catalog_booked_occupancy_mismatch");
+  revision.attributes.rooms[0].occupancy.adults = 2;
+  revision.attributes.occupancy = { adults: 2, children: 1 };
+  delete revision.attributes.rooms[0].occupancy.children;
+  await expect(
+    readStagingCatalogEvidence({ ...input, preImport: true }, "synthetic", request),
+  ).rejects.toThrow("catalog_booked_occupancy_mismatch");
+  revision.attributes.occupancy.children = 0;
+  revision.attributes.rooms[0].days = { "2026-09-12": "100.00" };
+  expect(
+    (await readStagingCatalogEvidence({ ...input, preImport: true }, "synthetic", request))
+      .revisionHash,
+  ).not.toBe(first.revisionHash);
 });
