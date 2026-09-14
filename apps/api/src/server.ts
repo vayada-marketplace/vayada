@@ -102,6 +102,7 @@ import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryR
 import { createTargetPmsRoomInventoryReadPort } from "./domains/pmsRoomInventoryReadModel.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import { createPgPmsChannexManagementReadRepository } from "./domains/pmsChannexManagementReadModel.js";
+import { stagingAlertProperty } from "./domains/channexStagingAlertRecovery.js";
 import { createPgPmsChannexManagementCommandPort } from "./domains/pmsChannexManagementCommandStore.js";
 import { createPgPmsChannexIframeSessionPort } from "./domains/pmsChannexIframeSession.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
@@ -430,7 +431,10 @@ const pmsOperationsRepository =
     : undefined;
 
 const pmsChannexManagementRepository = pmsOperationsRepository
-  ? createPgPmsChannexManagementReadRepository({ connectionString: targetDatabaseUrl })
+  ? createPgPmsChannexManagementReadRepository({
+      connectionString: targetDatabaseUrl,
+      stagingAlertPropertyId: stagingAlertProperty(config),
+    })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
   ([capability, mode]) =>
@@ -444,9 +448,13 @@ const noShowReportingEnabled =
   (config.channexManagement.stagingNoShowEnabled ||
     (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.backgroundWorkersEnabled));
-const pmsChannexManagementCommandPort = channexCommandsMutating
-  ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
-  : undefined;
+const pmsChannexManagementCommandPort =
+  channexCommandsMutating || stagingAlertProperty(config)
+    ? createPgPmsChannexManagementCommandPort({
+        connectionString: targetDatabaseUrl,
+        stagingAlertPropertyId: stagingAlertProperty(config),
+      })
+    : undefined;
 const pmsChannexIframeSessionPort =
   config.channexManagement.capabilityModes.iframe === "mutating"
     ? createPgPmsChannexIframeSessionPort({

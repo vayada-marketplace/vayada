@@ -37,6 +37,7 @@ export type PmsChannexManagementCommandPort = {
     propertyId: string,
     input: PmsChannexManagementCommandInput,
   ): Promise<PmsChannexManagementCommandResult>;
+  recoverStagingAlert?: PmsChannexManagementCommandPort["recoverAlert"];
   recoverAlert?(
     context: RequestContext,
     propertyId: string,
