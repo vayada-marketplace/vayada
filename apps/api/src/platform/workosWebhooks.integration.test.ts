@@ -401,17 +401,24 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL WorkOS webhook store", () => {
         throw error;
       }
 
-      await grantIdentityAccessWithClient(admin as unknown as pg.PoolClient, {
-        userId: ownerUserId,
-        organization: {
-          organizationId,
-          kind: "hotel_group",
-          name: "VAY-1085 scope test",
-          slug: `vay-1085-${organizationId}`,
-          workosOrgId,
-        },
-        membership: { roleKey: "hotel_owner", propertyAccessMode: "all" },
-      });
+      try {
+        await admin.query("BEGIN");
+        await grantIdentityAccessWithClient(admin as unknown as pg.PoolClient, {
+          userId: ownerUserId,
+          organization: {
+            organizationId,
+            kind: "hotel_group",
+            name: "VAY-1085 scope test",
+            slug: `vay-1085-${organizationId}`,
+            workosOrgId,
+          },
+          membership: { roleKey: "hotel_owner", propertyAccessMode: "all" },
+        });
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
       await store.upsertWorkosMembership({
         workosMembershipId: ownerWorkosMembershipId,
         workosUserId: ownerWorkosUserId,

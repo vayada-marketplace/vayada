@@ -437,6 +437,13 @@ export async function grantIdentityAccessWithClient(
   client: pg.PoolClient,
   payload: GrantIdentityAccessCommand["payload"],
 ): Promise<string> {
+  // Caller owns the transaction; hold this subject lock through its commit.
+  const user = await client.query(
+    "SELECT id FROM identity.users WHERE id = $1 FOR KEY SHARE",
+    [payload.userId],
+  );
+  if (user.rows.length !== 1) throw new Error("Cannot grant access to a missing user");
+  await assertNotBootstrapProtectedUser(client, payload.userId);
   const organizationId = await upsertOrganization(client, payload.organization);
   if (payload.organization.websiteUrl !== undefined) {
     await client.query(

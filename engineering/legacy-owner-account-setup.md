@@ -144,7 +144,7 @@ replay. Its hashes must be revalidated by the consumer, never treated as approva
 
 The [prepared-owner signup guard](legacy-owner-signup-guard.md) denies receipt-marked
 existing-user reuse in lifecycle creation/webhook upserts, lifecycle email changes
-and active/pending status changes. New-UUID
+and active/pending status changes, plus the shared subject access-grant helper. New-UUID
 inserts still need the scoped index; other identity mutation paths remain
 unguarded. Do not enable preparation until the entire shared boundary is covered.
 
