@@ -141,6 +141,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           await client.query("ROLLBACK");
           return { outcome: "deferred", reason: "identity_not_found" };
         }
+        await assertStaffSubjectNotBootstrapProtected(client, identity.user_id);
         if (
           invitation.organization_kind !== "hotel_group" ||
           invitation.organization_status !== "active"
@@ -235,6 +236,24 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
     },
     close: () => pool.end(),
   };
+}
+
+// A receipt only denies access; it cannot authorize staff acceptance or release.
+async function assertStaffSubjectNotBootstrapProtected(client: pg.PoolClient, userId: string) {
+  let allowed = false;
+  try {
+    const result = await client.query<{ protected: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM platform.legacy_owner_bootstrap_receipts
+         WHERE $1::uuid = ANY(owner_user_ids)
+       ) AS protected`,
+      [userId],
+    );
+    allowed = result.rows.length === 1 && result.rows[0]?.protected === false;
+  } catch {
+    // Storage/read failures must not become an empty registry or expose DB details.
+  }
+  if (!allowed) throw new Error("Legacy owner account reconciliation required");
 }
 
 function normalizeEvent(

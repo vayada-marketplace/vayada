@@ -119,6 +119,17 @@ does not add a session guard or authorize later owner access.
 
 ## Transaction and deployment prerequisites
 
+Staff invitation acceptance now checks the resolved internal subject against
+receipt storage inside its existing transaction, after locking its provider
+mapping and user. Only an explicit absent receipt permits further acceptance
+checks and membership/property-assignment writes. Held subjects and unreadable
+storage throw a sanitized error and roll back; no new row locks are introduced.
+Expiry, revoked invitations, missing identities and exact no-write replay retain
+their earlier handling. Replay reports past acceptance, not current access or
+release from the hold. This guards acceptance, not invitation delivery, staff
+access editing or organization-only resource grants. Complete runtime receipt
+visibility remains a rollout prerequisite.
+
 The future bootstrap writer must insert previously absent users and their receipt
 in **one transaction**. Under READ COMMITTED, a later lookup cannot see that
 committed user without its receipt. If signup misses an uncommitted prepared user,
