@@ -48,23 +48,37 @@ export async function prepareChannexStagingDay(
   const catalogApprovalRef = input.noShow ? input.catalogApprovalRef! : input.approvalRef;
   requireState(/^[a-f0-9]{64}$/.test(input.catalogHash));
   requireState(input.applyHash === undefined || /^[a-f0-9]{64}$/.test(input.applyHash));
-  const catalog = await adoptChannexStagingCatalog(
-    config,
-    {
-      providerPropertyId: scope.providerPropertyId,
-      bookingId: scope.bookingId,
-      revisionId: scope.revisionId,
-      approvalRef: catalogApprovalRef,
-      retainedRevision: true,
-      preImport: true,
-    },
-    request,
-  );
-  requireState(
-    catalog.outcome === "replayed" &&
-      catalog.hash === input.catalogHash &&
-      catalog.roomTypeId === day.roomTypeId,
-  );
+  // New capacity uses the accepted immutable reference below; historical OTA
+  // catalog pricing can change independently of this room's current readiness.
+  if (input.noShow) {
+    requireState(
+      config.apiRuntime === "next" &&
+        !config.backgroundWorkersEnabled &&
+        config.channexManagement.apiBaseUrl === "https://staging.channex.io" &&
+        config.channexManagement.capabilityModes.bookingSync === "observe_only" &&
+        config.channexManagement.stagingRestrictionsPropertyId === scope.propertyId &&
+        !!config.channexManagement.apiKey &&
+        !!config.targetDatabaseUrl,
+    );
+  } else {
+    const catalog = await adoptChannexStagingCatalog(
+      config,
+      {
+        providerPropertyId: scope.providerPropertyId,
+        bookingId: scope.bookingId,
+        revisionId: scope.revisionId,
+        approvalRef: catalogApprovalRef,
+        retainedRevision: true,
+        preImport: true,
+      },
+      request,
+    );
+    requireState(
+      catalog.outcome === "replayed" &&
+        catalog.hash === input.catalogHash &&
+        catalog.roomTypeId === day.roomTypeId,
+    );
+  }
   const providerGuard: Record<string, unknown> = {};
   const query = new URLSearchParams({
     "filter[property_id]": scope.providerPropertyId,
@@ -218,7 +232,7 @@ export async function prepareChannexStagingDay(
       version: "pms-staging-date-exception.v1",
       ...scope,
       ...day,
-      catalogHash: catalog.hash,
+      catalogHash: input.catalogHash,
       providerGuard,
       binding,
       baseCalendar: calendar,
