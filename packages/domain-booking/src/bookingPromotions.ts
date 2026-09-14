@@ -1,5 +1,3 @@
-import { roundBookingPriceDecimalToMinorUnits } from "./bookingPriceCalculation.js";
-
 export const BOOKING_PROMOTION_NAMES = {
   LAST_MINUTE: "Last minute escape",
   EARLY_BIRD: "Early bird",
@@ -134,71 +132,8 @@ export function bestBookingPromotion(input: {
   roomTotal: number;
   roomCount: number;
 }): BookingPromotionDiscount | null {
-  const promotions = bookingPromotionsFromSettings(input.settings);
-  if (!promotions.some((p) => p.active)) return null;
-  const nights = input.nights.map((night) => {
-    const cents = roundBookingPriceDecimalToMinorUnits(String(night.grossRoomAmount));
-    if (cents === null) throw new TypeError("Invalid promotion nightly amount");
-    return { ...night, cents: BigInt(cents) * BigInt(input.roomCount) };
-  });
-  if (!nights.length) return null;
-  const leadDays = (Date.parse(nights[0]!.stayDate) - Date.parse(input.today)) / 86400000;
-  if (!Number.isInteger(leadDays) || leadDays < 0) return null;
-  const roomCents = roundBookingPriceDecimalToMinorUnits(String(input.roomTotal));
-  if (roomCents === null) throw new TypeError("Invalid promotion room total");
-  let best: BookingPromotionDiscount | null = null;
-  for (const promo of promotions) {
-    if (
-      !promo.active ||
-      (promo.roomTypeIds.length && !promo.roomTypeIds.includes(input.roomTypeId))
-    )
-      continue;
-    let discountPercent = promo.discountPercent;
-    if (promo.type === "LAST_MINUTE") {
-      if (promo.tiers.length) {
-        const tier = promo.tiers.find(
-          (t) =>
-            leadDays >= t.daysBeforeMin &&
-            (t.daysBeforeMax === null || leadDays <= t.daysBeforeMax),
-        );
-        if (!tier) continue;
-        discountPercent = tier.discountPercent;
-      } else if (leadDays > promo.threshold) continue;
-    }
-    if (promo.type === "EARLY_BIRD" && leadDays < promo.threshold) continue;
-    if (promo.type === "EXTENDED_STAY" && nights.length < promo.threshold) continue;
-    const eligible =
-      promo.type === "MIDWEEK"
-        ? nights.filter((n) =>
-            promo.weekdays.includes(new Date(n.stayDate + "T00:00:00Z").getUTCDay()),
-          )
-        : nights;
-    let cents: bigint;
-    if (promo.freeNights) {
-      cents = [...eligible]
-        .sort((a, b) => (a.cents < b.cents ? -1 : a.cents > b.cents ? 1 : 0))
-        .slice(0, promo.freeNights)
-        .reduce((sum, night) => sum + night.cents, 0n);
-    } else {
-      const basis =
-        promo.type === "MIDWEEK"
-          ? eligible.reduce((sum, night) => sum + night.cents, 0n)
-          : BigInt(roomCents);
-      const [mantissa, exponent = "0"] = String(discountPercent).split("e");
-      const [whole, fraction = ""] = mantissa!.split(".");
-      const numerator = BigInt(whole! + fraction);
-      const denominator = 100n * 10n ** BigInt(fraction.length - Number(exponent));
-      cents = (basis * numerator + denominator / 2n) / denominator;
-    }
-    if (cents > BigInt(roomCents)) cents = BigInt(roomCents);
-    const discountAmount = Number(cents) / 100;
-    if (discountAmount > (best?.discountAmount ?? 0))
-      best = {
-        type: promo.type,
-        name: BOOKING_PROMOTION_NAMES[promo.type],
-        discountPercent,
-        discountAmount,
-      };
-  }
-  return best;
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+  );
 }
