@@ -831,6 +831,9 @@ const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
 });
+const bookingGuestChoiceStore = createBookingGuestChoiceStore(propertySetupOwnerPool, (client) =>
+  createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+);
 const bookingGuestPolicyRepository = createPgBookingGuestPolicyRepository({
   connectionString: targetDatabaseUrl,
   pool: propertySetupOwnerPool,
@@ -1051,7 +1054,7 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
     booking: createPropertySetupBookingStateProvider({
       design: bookingDesignRepository,
       catalog: hotelCatalogStep1Repository,
-      guestPolicy: bookingGuestPolicyCurrentOwnerEvidence,
+      guestRules: { read: (scope) => bookingGuestChoiceStore.read(scope, "booking.settings.read") },
     }),
     pms: propertySetupPmsRuntime.provider,
     finance: createPropertySetupFinanceStateProvider({
@@ -1308,7 +1311,7 @@ const app = buildApp({
   bookingReservationsRepository,
   financePaymentSetup: financePaymentSetupRuntime.routes,
   bookingGuestChoices: {
-    store: createBookingGuestChoiceStore(propertySetupOwnerPool, client => createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client })),
+    store: bookingGuestChoiceStore,
     propertyAccessRepository: bookingPropertyAccessRepository,
   },
   bookingGuestPolicy: bookingGuestPolicyApplication

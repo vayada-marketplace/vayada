@@ -17,6 +17,10 @@ describe("Booking guest-policy scope authorization", () => {
     );
     const port = createPgBookingGuestPolicyScopeAuthorizationPort({ pool: { query } as never });
     await expect(port.authorizeGuestPolicyScope(input())).resolves.toBe(true);
+    await expect(
+      port.authorizeGuestPolicyScope({ ...input(), permission: "booking.settings.read" }),
+    ).resolves.toBe(true);
+    expect(query.mock.calls[1]![0].values[3]).toBe("booking.settings.read");
     const request = query.mock.calls[0]![0];
     expect(request.query_timeout).toBe(5_000);
     expect(request.text).toContain("permission_grant.permission_key = $4");
@@ -51,7 +55,7 @@ describe("Booking guest-policy scope authorization", () => {
     const query = vi.fn(async () => ({ rows: [{ authorized: true }], rowCount: 1 }));
     const port = createPgBookingGuestPolicyScopeAuthorizationPort({ pool: { query } as never });
     const rejected = [
-      { ...input(), permission: "booking.settings.read" },
+      { ...input(), permission: "booking.reservations.read" },
       { ...input(), entitlement: { ...input().entitlement, key: "other-key" } },
       { ...input(), resource: { ...input().resource, resourceType: "other_type" } },
       { ...input(), resource: { ...input().resource, allowedRelationships: [] } },

@@ -620,3 +620,21 @@ retry key, and renders actionable conflict/permission errors. The editor must ke
 that key for an unchanged uncertain command and must not promote guest-rule saving
 to setup readiness. Browser transport validation does not replace backend scope
 authorization or current owner checks.
+
+
+Guest-experience setup completion now means confirmed guest rules exist. Its
+base-revision manifest contains only `booking.guest_experience`, using
+`guest-choices:<revision UUID>` or `guest-choices:absent`. The Booking setup
+provider calls the authorized new store with actor/property/organization scope
+and compares two reads before reporting a stable state. Missing rules are
+not-started; malformed/denied/unavailable/changing owner evidence fails closed.
+No retired rate or Catalog policy source can complete this step. Setup route reads
+exclude retired guest-experience drafts at the repository boundary; their values
+are neither resumed nor accepted under the new one-key manifest. The repository
+also filters their historical resume/completion markers. Other drafts remain available.
+Setup owner reads require booking.settings.read; guest-rule API access and saves
+retain booking.settings.manage. Both use the same scoped authorization checks.
+
+This is setup configuration state, not public publication readiness. Cancellation,
+payment, operating-calendar, public visibility and booking acceptance gates remain
+separate; no catalog projection receipt or publication readiness is fabricated.
