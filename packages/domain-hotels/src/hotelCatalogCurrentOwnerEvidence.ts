@@ -74,7 +74,7 @@ export function createHotelCatalogCurrentOwnerEvidence<Key extends HotelCatalogC
   revision: number,
 ): HotelCatalogCurrentOwnerEvidence<Key> | null {
   const parsedScope = parseHotelCatalogCurrentOwnerEvidenceScope(scope);
-  if (!parsedScope || !boundedRevision(revision)) return null;
+  if (!parsedScope || !boundedRevision(revision, ownerKey)) return null;
   const sourceIdentity = `${ownerKey}:${parsedScope.propertyId}` as const;
   return Object.freeze({
     ...parsedScope,
@@ -135,7 +135,7 @@ function parseResult<Key extends HotelCatalogCurrentOwnerKey>(
     value.evidence.organizationId !== parsedScope.organizationId ||
     value.evidence.propertyId !== parsedScope.propertyId ||
     value.evidence.ownerKey !== ownerKey ||
-    !boundedRevision(value.evidence.revision)
+    !boundedRevision(value.evidence.revision, ownerKey)
   )
     return null;
   const evidence = createHotelCatalogCurrentOwnerEvidence(
@@ -184,11 +184,11 @@ function uuid(value: unknown): value is string {
   );
 }
 
-function boundedRevision(value: unknown): value is number {
+function boundedRevision(value: unknown, ownerKey: HotelCatalogCurrentOwnerKey): value is number {
   return (
     typeof value === "number" &&
     Number.isSafeInteger(value) &&
-    value >= 1 &&
+    value >= (ownerKey === "hotel_catalog.policy" ? 0 : 1) &&
     value <= HOTEL_CATALOG_CURRENT_OWNER_REVISION_MAX
   );
 }
