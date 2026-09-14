@@ -1,3 +1,4 @@
+import { verifyChannexAriTaskFinish } from "../integrations/channexAriTaskReadback.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
@@ -170,7 +171,7 @@ export async function claimPublishedChannexInitialAri(
 type TargetWork =
   | "reserve"
   | "claim"
-  | { kind: "ari_observe"; attemptId: string; ariAttemptId: string }
+  | { kind: "ari_observe"; attemptId: string; ariAttemptId: string; taskRead?: true }
   | { kind: "ari_claim"; attemptId: string; date: string }
   | { kind: "ari_dispatch"; attemptId: string; date: string; ariAttemptId: string; jobAttemptId: string; workerId: string }
   | { kind: "retained"; attemptId: string }
@@ -355,6 +356,59 @@ export async function readCurrentChannexStagedRestrictions(
     ariAttemptId,
     ...before.reservation,
     observation,
+  };
+}
+/** Task IDs come only from the retained original receipt; never a completion permit. */
+export async function readCurrentChannexAriTaskFinishes(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  ariAttemptId: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (![attemptId, ariAttemptId].every((id) => typeof id === "string" && uuid.test(id)))
+    return { kind: "unavailable" as const, reason: "invalid_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const work = { kind: "ari_observe" as const, attemptId, ariAttemptId, taskRead: true as const };
+  const before = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (before.kind !== "available") return before;
+  const original = before.stagedAri,
+    identity = before.configurationIdentity;
+  if (!original?.taskIds || !identity) throw new Error("Original ARI tasks missing");
+  const observations = await boundedProviderCall(async (signal) => {
+    const result = [];
+    for (const taskId of original.taskIds!) {
+      signal.throwIfAborted();
+      result.push(
+        await verifyChannexAriTaskFinish(
+          { taskId, externalPropertyId: identity.externalPropertyId, request: original.request },
+          (_method, path) => {
+            signal.throwIfAborted();
+            return get(path, signal);
+          },
+        ),
+      );
+    }
+    return result;
+  });
+  const after = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (after.kind !== "available") return after;
+  if (
+    !isDeepStrictEqual(before.stagedAri, after.stagedAri) ||
+    !isDeepStrictEqual(before.reservation, after.reservation) ||
+    !isDeepStrictEqual(before.configurationIdentity, after.configurationIdentity) ||
+    !isDeepStrictEqual(before.publication, after.publication)
+  )
+    return { kind: "unavailable" as const, reason: "ari_task_observation_stale" };
+  return {
+    kind: "ari_tasks_observed" as const,
+    creationAttemptId: attemptId,
+    ariAttemptId,
+    ...before.reservation,
+    observations,
   };
 }
 /** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
@@ -642,7 +696,7 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
-    let stagedAri: { attemptId: string; request: unknown; history: unknown } | undefined;
+    let stagedAri: { attemptId: string; request: unknown; history: unknown; taskIds?: string[] } | undefined;
     let ariRequest: { method: "POST"; path: "/api/v1/restrictions"; body: unknown } | undefined;
     let ariClaim:
       | {
@@ -881,6 +935,30 @@ async function withPublishedChannexPricing(
                 )
               ).rows;
               stagedAri = { attemptId: stored.id, request: stored.request_body, history };
+              if (work.taskRead) {
+                const receipts = (
+                  await client.query(
+                    "SELECT outcome,http_status,has_warnings,task_ids FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY id",
+                    [stored.id],
+                  )
+                ).rows;
+                const receipt = receipts[0];
+                const tasks: unknown = receipt?.task_ids;
+                const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+                if (
+                  receipts.length !== 1 ||
+                  receipt.outcome !== "complete_json" ||
+                  receipt.http_status !== 200 ||
+                  receipt.has_warnings !== false ||
+                  !Array.isArray(tasks) ||
+                  tasks.length === 0 ||
+                  tasks.length > 100 ||
+                  tasks.some((id) => typeof id !== "string" || !uuid.test(id)) ||
+                  new Set(tasks).size !== tasks.length
+                )
+                  return unavailable("ari_receipt_history_unavailable");
+                stagedAri.taskIds = tasks;
+              }
             }
             if (work.kind === "ari_claim" || work.kind === "ari_dispatch") {
               const location = (
