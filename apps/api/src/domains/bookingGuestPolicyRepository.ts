@@ -481,7 +481,7 @@ async function setTimeouts(client: RepositoryClient): Promise<void> {
   await client.query("SET LOCAL statement_timeout = '5s'");
 }
 
-async function lockProperty(client: RepositoryClient, propertyId: string): Promise<void> {
+async function lockProperty(client: BookingGuestPolicyReadClient, propertyId: string): Promise<void> {
   await client.query(
     `SELECT pg_advisory_xact_lock(hashtext('booking.guest_policy'), hashtext($1::uuid::text))`,
     [propertyId],
@@ -713,6 +713,23 @@ export async function readCurrentBookingGuestPolicyRevision(
     [propertyId, organizationId ?? null],
   );
   return result.rows[0] ? projectRevision(result.rows[0]) : null;
+}
+
+/** Confirmed guest choices only; legacy rate disclosures are not replacement pricing evidence.
+ * Caller owns the transaction and acquires public/inventory authority before this owner lock. */
+export async function lockCurrentBookingGuestChoices(
+  client: BookingGuestPolicyReadClient,
+  propertyId: string,
+  organizationId: string,
+) {
+  await lockProperty(client, propertyId);
+  const current = await readCurrentBookingGuestPolicyRevision(client, propertyId, organizationId);
+  if (!current) return null;
+  return {
+    propertyId: current.propertyId,
+    sourceRevision: `guest-policy:${current.revisionId}:${current.confirmation.confirmationId}`,
+    choices: structuredClone(current.bundle.choices),
+  };
 }
 
 async function readRevision(

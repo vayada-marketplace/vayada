@@ -564,3 +564,20 @@ No default policy or fabricated disclosure is supplied by this parser. Full gues
 and policy evidence must accompany accepted booking history. Finance snapshots,
 exact booking/add-on persistence, lifecycle/revenue handoff, final time checks and
 atomic accepted-command replay remain required before route activation.
+
+`lockCurrentQuoteGuestDisclosure` connects that input to the current confirmed
+Booking guest choices. It locks public/inventory authority, then the existing
+`booking.guest_policy` owner, then revalidates the stored quote after that wait.
+It carries the current revision and confirmation identities. Only choices are
+reused from the validated guest-policy record: its old rates, pricing currency,
+timezone and pricing fingerprints are never used as replacement disclosures.
+The versioned disclosure contains the complete replacement quote, guest choices
+and current property timezone. Return its exact serialized JSON and SHA-256 hash
+together so presentation and acknowledgment refer to the same evidence.
+
+This is consumption of already-confirmed guest choices, not a replacement guest
+policy editor. An absent or invalid confirmed policy fails closed. Provisioning
+and editing policies without retired pricing dependencies remains necessary for
+new properties. Caller retains the transaction locks and must still perform final
+time checks after later waits, store the exact accepted disclosure with the booking,
+and honor accepted-command replay before fresh validation. No public route is enabled.
