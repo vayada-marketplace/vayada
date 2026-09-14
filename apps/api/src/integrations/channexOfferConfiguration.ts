@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { parsePricingConfiguration } from "@vayada/domain-pms";
+import { parsePricingConfiguration, pricingObject } from "@vayada/domain-pms";
 import { ChannexMealSyncError, verifyChannexMealReadback } from "./channexMealSync.js";
 
 /** Closed configuration fragment, not an HTTP request or a capability/send permit.
@@ -60,6 +60,7 @@ export async function verifyChannexOfferConfiguration(
     { ...scope, mealType: expected.meal_type },
     async (method, path) => {
       const response = structuredClone(await request(method, path));
+      requireCleanMetadata(response);
       const data = record(record(response).data);
       const attributes = record(data.attributes);
       const parentRelationship = record(data.relationships).parent_rate_plan;
@@ -77,19 +78,8 @@ export async function verifyChannexOfferConfiguration(
             `/api/v1/rate_plans/options?filter[property_id]=${encodeURIComponent(scope.externalPropertyId)}`,
           ),
         );
-        const meta = optionsResponse.meta;
-        if (
-          Object.hasOwn(optionsResponse, "errors") ||
-          Object.hasOwn(optionsResponse, "warnings") ||
-          (meta !== undefined &&
-            (meta === null ||
-              typeof meta !== "object" ||
-              Array.isArray(meta) ||
-              (record(meta).warnings !== undefined &&
-                !isDeepStrictEqual(record(meta).warnings, [])))) ||
-          !Array.isArray(optionsResponse.data)
-        )
-          mismatch();
+        requireCleanMetadata(optionsResponse);
+        if (!Array.isArray(optionsResponse.data)) mismatch();
         const matches = (optionsResponse.data as unknown[]).filter(
           (raw) => record(raw).id === scope.externalRatePlanId,
         );
@@ -175,6 +165,7 @@ export async function verifyChannexOfferRoom(
   const response = structuredClone(
     await request("GET", `/api/v1/room_types/${encodeURIComponent(expected.externalRoomTypeId)}`),
   );
+  requireCleanMetadata(response);
   const data = record(record(response).data);
   const attributes = record(data.attributes);
   const propertyRelationship = record(data.relationships).property;
@@ -238,4 +229,16 @@ function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function requireCleanMetadata(response: unknown) {
+  if (
+    !pricingObject(response) ||
+    Object.hasOwn(response, "errors") ||
+    Object.hasOwn(response, "warnings") ||
+    (response.meta !== undefined &&
+      (!pricingObject(response.meta) ||
+        (response.meta.warnings !== undefined && !isDeepStrictEqual(response.meta.warnings, []))))
+  )
+    throw new ChannexMealSyncError("Channex metadata response ambiguous");
 }

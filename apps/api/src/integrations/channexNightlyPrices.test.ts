@@ -413,6 +413,19 @@ describe("closed offer configuration readback", () => {
     const request = vi.fn(async () => response);
     return { room, response, request, planned };
   }
+  it.each([
+    { errors: {} },
+    { warnings: [] },
+    { meta: null },
+    { meta: { warnings: ["partial"] } },
+    { meta: { warnings: null } },
+  ])("rejects ambiguous metadata even with matching data %j", async (patch) => {
+    const { room, response, request } = setup();
+    Object.assign(response, patch);
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).rejects.toThrow("Channex metadata response ambiguous");
+  });
   it("verifies one GET and accepts reordered options without claiming amounts", async () => {
     const { room, response, request, planned } = setup();
     response.data.attributes.options.reverse();
@@ -665,6 +678,19 @@ describe("Channex published adult room preflight", () => {
     const request = vi.fn(async () => response);
     return { room, response, request };
   }
+  it.each([
+    { errors: {} },
+    { warnings: [] },
+    { meta: null },
+    { meta: { warnings: ["partial"] } },
+    { meta: { warnings: null } },
+  ])("rejects ambiguous metadata even with matching data %j", async (patch) => {
+    const { room, response, request } = setup();
+    Object.assign(response, patch);
+    await expect(verifyChannexOfferRoom(room, identity, request)).rejects.toThrow(
+      "Channex metadata response ambiguous",
+    );
+  });
   it("verifies exact identity/capacity with one GET without choosing a rate primary", async () => {
     const { room, response, request } = setup();
     const expected = { ...identity, adults: 3, children: 0, infants: 0, roomKind: "room" };
