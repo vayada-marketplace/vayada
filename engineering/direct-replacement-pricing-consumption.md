@@ -581,3 +581,17 @@ and editing policies without retired pricing dependencies remains necessary for
 new properties. Caller retains the transaction locks and must still perform final
 time checks after later waits, store the exact accepted disclosure with the booking,
 and honor accepted-command replay before fresh validation. No public route is enabled.
+
+Replacement guest-rule configuration is a separate Booking owner:
+`booking.guest_choice_revisions` plus `guest_choice_heads`. Save a complete validated
+choice set with explicit confirmation, authenticated actor/scope, request identity
+and expected revision. Reauthorize under the `booking.guest_policy` owner lock
+before replay or mutation. A matching retry returns its original revision even
+after later edits; changed content conflicts. The immutable revision records the
+confirming actor/time and command hash. No rates, prices, default policy or legacy
+bundle is required or copied. Current reads are scoped by property and organization.
+
+This owner foundation does not yet replace the setup routes/readiness projections
+or switch the disclosure reader. That wiring must select this owner explicitly,
+without a silent legacy fallback, and publish changes to affected consumers before
+activation. The old policy repository remains for existing unrelated consumers.
