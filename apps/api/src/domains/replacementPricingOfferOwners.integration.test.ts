@@ -325,6 +325,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ])
     ).rows[0];
     const rate = ((await f.response().json()) as { data: { id: string } }).data.id;
+    // A currently sellable offer still stages a closed provider rate.
+    expect(f.snapshot.rooms[0].offers[0].restrictions).toMatchObject({
+      kind: "own",
+      rules: { stopSell: false },
+    });
     expect(row).toMatchObject({
       creation_attempt_id: f.claim.attemptId,
       job_attempt_id: result.jobAttemptId,
@@ -345,7 +350,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
             max_stay: 0,
             closed_to_arrival: false,
             closed_to_departure: false,
-            stop_sell: false,
+            stop_sell: true,
           },
         ],
       },

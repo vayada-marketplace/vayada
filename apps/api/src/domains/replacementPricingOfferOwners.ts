@@ -751,6 +751,9 @@ async function withPublishedChannexPricing(
                     date: prepared.candidates[0].projection.night.date,
                     rates: prepared.candidates.map(({ occupancy, rate }) => ({ occupancy, rate })),
                     ...prepared.candidates[0].restrictionCandidate,
+                    // Pending rates must remain closed regardless of the desired sell state.
+                    // Opening sales is a separate activation operation, never initial ARI.
+                    stop_sell: true,
                   },
                 ],
               };
