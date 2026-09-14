@@ -68,3 +68,15 @@ or change property settings. The post-preflight authority recheck still applies.
 A mode read is only a necessary capability observation: it does not prove the
 setting cannot change afterward or that the subsequent upload executed. Exact
 original receipt/task and independent current-value verification remain required.
+
+### All-occupancy current price observations
+
+Read each verified manual option ID for the immutable staged request's date,
+requiring its exact decimal total and stop-sell true. Require every configured
+occupancy exactly once, unique option IDs and primary ID matching the base rate.
+Reject warning/error envelopes for metadata as well as price reads. Recheck
+configuration and option IDs after reading all prices; no partial result.
+This is a sequence of current observations, not an atomic provider snapshot,
+original-upload execution, full restriction verification or activation proof.
+The owning service must load immutable scope and recheck publication, ownership
+and complete attempt/receipt history under bounded IO before returning evidence.
