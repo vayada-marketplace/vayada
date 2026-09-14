@@ -818,3 +818,25 @@ lease loss. Receipt insertion must fence the target row so an older transaction
 cannot reconcile from a stale receipt snapshot. Repeat persistence uses the same
 receipt ID and exact evidence; it never reissues HTTP. Storage and bounded
 capture precede a runtime dispatcher and authoritative reconciliation service.
+
+
+### Closed initial ARI staging (VAY-1545)
+
+Every new initial ARI request explicitly sends `stop_sell: true`, including when
+the current published offer is sellable. Rates and the other five restriction
+values still come from the unmodified calculator projection. The staging closure
+belongs to provisioning; it does not overwrite the hotel's desired restriction.
+A caller cannot opt out of closure. This prevents the initial rate payload from
+opening a pending rate ahead of availability, semantics and activation checks.
+
+The initial desired-rule readback helper cannot certify this staging payload:
+it compares the hotel's desired stop-sell, which may be false. A future stage
+readback must compare the exact persisted closed request; desired-state readback
+and opening sales belong to the later activation operation. No stage receipt or
+readback alone authorizes that transition.
+
+Earlier retained attempts may contain `stop_sell: false`. Their requests are
+immutable and are not rewritten or released by this change. Any future dispatcher
+must reject a recovered or open initial payload; only a newly claimed one-use
+operation with explicit closure can be eligible for its remaining guards. No
+runtime sender, provider write, receipt reconciliation or activation is enabled.
