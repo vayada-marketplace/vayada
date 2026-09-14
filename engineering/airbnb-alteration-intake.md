@@ -264,6 +264,24 @@ filters cannot silently drop conflicting evidence. Provider revision freshness,
 binding ownership, Finance payment/folio handling and gross-price interpretation
 remain the coordinator's responsibility; this reader does not activate the workflow.
 
+### Operation without provider clarification
+
+VAY-1551 proceeds with a limited scope without waiting for a support reply.
+Declines and readback of already-sent decisions do not require monetary inference.
+Before a new accept POST, the coordinator checks the existing Finance guard while
+holding the booking lock: any nightly revenue evidence, payment or folio blocks
+acceptance. It removes only the unsent queued intent, allowing staff to decline,
+and returns an explicit message that no approval was sent. It never clears an
+intent whose send has started. The authoritative revision applier retains its
+Finance guard for records created later. No financial records are changed by this
+fallback, and identical totals do not establish identical nightly economics.
+
+Bookings without financial records continue through the existing availability,
+provider decision and revision validation path. This does not verify provider
+price semantics or activate runtime flags; supported sandbox end-to-end evidence
+and reviewed cutover are still required before activation. A Channex reply is one
+possible source of financial mapping evidence, not a prerequisite for this scope.
+
 ### Provider economics evidence required before worker wiring
 
 The [Airbnb channel settings reference](https://docs.channex.io/channel-api-examples/airbnb#airbnb-connection-settings-reference)

@@ -1556,6 +1556,7 @@ export function createTargetBookingWebCheckoutAdapter(
       const code = error instanceof Error ? error.message : "";
       if (code !== "alteration_decision_in_progress") {
         const message = code === "alteration_rooms_unavailable" ? "The requested rooms are no longer available."
+          : code === "alteration_finance_reconciliation_required" ? "This booking has financial records that Vayada cannot update automatically. No approval was sent. You can still decline the request."
           : code === "alteration_decision_conflict" ? "A different decision has already been recorded."
           : code === "alteration_linked_inventory_unsupported" ? "This change involves linked rooms and needs to be handled in Airbnb."
           : "The Airbnb decision could not be confirmed. Refresh the request before trying again.";
