@@ -248,6 +248,16 @@ function readFixture(options: ReadFixtureOptions = {}) {
   const calls: Array<{ text: string; values?: readonly unknown[] }> = [];
   const query = vi.fn(async (text: string, values?: readonly unknown[]) => {
     calls.push({ text, values });
+    if (text.includes("FROM pms.room_types room")) {
+      const rows = factsValues.map((room) => ({
+        propertyId: room.propertyId,
+        roomTypeId: room.roomTypeId,
+        state: room.lifecycle === "active" ? "operating" : "inactive",
+        closureCommandId: null,
+        cutoffDate: null,
+      }));
+      return { rows, rowCount: rows.length };
+    }
     if (text.includes("ORDER BY calendar_revision DESC")) {
       return {
         rows: root ? [{ calendarRevision: root.calendarRevision }] : [],

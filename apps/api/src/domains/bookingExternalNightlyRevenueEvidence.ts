@@ -119,7 +119,9 @@ export async function appendExternalNightlyRevenueEvidence(
     if (
       removedRoomLines.some(
         (line) =>
-          line.occupiedRoomNights > 0 ||
+          command.sourceKind !== "ota" ||
+          !((line.economicEvent === "occupancy_adjustment" && line.occupiedRoomNights === -1) ||
+            (line.economicEvent === "correction" && line.occupiedRoomNights === 0)) ||
           !targets.rows.some(
             (target) =>
               target.id === line.correctsEvidenceId &&

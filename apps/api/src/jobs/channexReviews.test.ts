@@ -100,6 +100,32 @@ describe.skipIf(!databaseUrl)("Channex review worker (PostgreSQL)", () => {
     expect(review.rows[0]).toMatchObject({ count: 1, body: "Edited" });
   });
 
+  it("reads object replies without exposing private guest-review fields", async () => {
+    await insertJob("review-1", "2026-07-30T10:00:00Z", "Great", {
+      reply: { reply: "Thanks", guest_review: { private_review: "Private feedback" } },
+    });
+    await insertJob("review-2", "2026-07-30T10:00:00Z", "Great", {
+      reply: { guest_review: { private_review: "Private feedback" } },
+    });
+    await runChannexReviewJobs(databaseUrl!, "test-worker");
+    const result = await client.query(
+      "SELECT reply_body FROM pms.channel_reviews ORDER BY provider_review_id",
+    );
+    expect(result.rows).toEqual([{ reply_body: "Thanks" }, { reply_body: null }]);
+  });
+
+  it("does not erase a confirmed reply when newer or duplicate payloads omit it", async () => {
+    await insertJob("review-1", "2026-07-30T10:00:00Z", "Great", { reply: "Thanks" });
+    await runChannexReviewJobs(databaseUrl!, "test-worker");
+    for (const revision of ["2026-07-30T10:00:00Z", "2026-07-30T11:00:00Z"]) {
+      await insertJob("review-1", revision, "Edited");
+      await runChannexReviewJobs(databaseUrl!, "test-worker");
+      expect(
+        (await client.query("SELECT reply_body FROM pms.channel_reviews")).rows[0].reply_body,
+      ).toBe("Thanks");
+    }
+  });
+
   it("dead-letters an unmapped review without violating terminal constraints", async () => {
     await insertJob("review-2", "2026-07-30T10:00:00.000Z", "Unknown", {}, "unmapped", 1);
     expect(await runChannexReviewJobs(databaseUrl!, "test-worker")).toEqual({
