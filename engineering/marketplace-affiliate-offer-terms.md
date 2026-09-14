@@ -123,7 +123,9 @@ hotel-only and separate from the existing descriptive collaboration offer fields
 
 Each new draft revision resolves its exact Booking destination version against the
 canonical property, authoring organization and enabled property through the Booking
-read boundary inside the offer transaction. Missing, malformed or out-of-scope
+read boundary inside the offer transaction. New saves hold a shared property-row
+lock until commit so concurrent disablement cannot pass the enabled-property check.
+Missing, malformed or out-of-scope
 references return `destination_unavailable` (HTTP 409), without a draft or retry key.
 Storage failures propagate as server errors. Authorized completed retries still
 return their original result. GET adds `draft.destination`: the exact saved

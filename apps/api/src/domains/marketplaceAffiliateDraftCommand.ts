@@ -132,6 +132,14 @@ export async function saveMarketplaceAffiliateDraft(
       await client.query("ROLLBACK");
       return { ok: false, code: "policy_unavailable" };
     }
+    const property = await client.query(
+      "SELECT id FROM hotel_catalog.properties WHERE id=$1 AND profile_status <> 'disabled' FOR SHARE",
+      [propertyId],
+    );
+    if (!property.rowCount) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "destination_unavailable" };
+    }
     const destinations = await readBookingAffiliateDestinations(
       client,
       propertyId,

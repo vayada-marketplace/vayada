@@ -19,7 +19,7 @@ const policies = await readFile(
   "utf8",
 );
 const destinations = await readFile(
-  new URL("0179_booking_affiliate_destinations.sql", migrations),
+  new URL("0191_booking_affiliate_destinations.sql", migrations),
   "utf8",
 );
 const terms = {
@@ -266,7 +266,7 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
     const repository = createPgMarketplaceAffiliateDraftRepository(isolatedConnectionString);
     try {
       const first = await repository.save(input());
-      await destination(id(31), id(3), id(4));
+      for (let n = 31; n <= 52; n++) await destination(id(n), id(3), id(4));
       await expect(repository.read(id(4), id(3), id(2))).resolves.toMatchObject({
         draft: {
           destination: {
@@ -297,11 +297,46 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
       await expect(repository.read(id(4), id(3), id(2))).resolves.toMatchObject({
         draft: { destination: null },
       });
+      await expect(repository.save(input())).resolves.toEqual({ ...first, replayed: true });
       await expect(
         repository.save({ ...input(), expectedRevision: 2, idempotencyKey: "disabled" }),
       ).resolves.toMatchObject({ code: "destination_unavailable" });
     } finally {
       await repository.close();
+    }
+  });
+
+  it("waits for concurrent property disablement and rejects without draft or retry writes", async () => {
+    const updater = await pool.connect();
+    let saving: ReturnType<typeof saveMarketplaceAffiliateDraft> | undefined;
+    try {
+      await updater.query("BEGIN");
+      await updater.query(
+        "UPDATE hotel_catalog.properties SET profile_status='disabled' WHERE id=$1",
+        [id(3)],
+      );
+      saving = saveMarketplaceAffiliateDraft(pool, input());
+      let waiting = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        await updater.query("SELECT pg_stat_clear_snapshot()");
+        const result = await updater.query(`SELECT 1 FROM pg_stat_activity
+          WHERE datname=current_database() AND wait_event_type='Lock'
+          AND query LIKE 'SELECT id FROM hotel_catalog.properties%FOR SHARE'`);
+        if (result.rowCount) {
+          waiting = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      await updater.query("COMMIT");
+      await expect(saving).resolves.toEqual({ ok: false, code: "destination_unavailable" });
+      for (const table of ["marketplace.affiliate_offer_terms_drafts", "platform.idempotency_keys"])
+        expect((await pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count).toBe("0");
+    } finally {
+      await updater.query("ROLLBACK");
+      updater.release();
+      await saving;
     }
   });
 
