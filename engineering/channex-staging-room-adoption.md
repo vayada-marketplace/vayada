@@ -194,3 +194,24 @@ property/room closure receipt exists, the date is on or after its cutoff,
 assigned and blocked counts. Keep all other rows in the strict manifest check,
 including pre-cutoff history or rows without complete closure proof. This read
 filter never changes inventory, coverage, recurrence or provider state.
+
+## Separate no-show test day (VAY-1535)
+
+`prepareChannexStagingDay --no-show` prepares only September 20, 2026 for the
+same existing synthetic Double room at capacity one. It requires an explicit
+`VAY-1535:` approval and a separate `--catalog-approval-ref VAY-2013:...` for
+read-only verification of the retained catalog receipt. No arbitrary date, room,
+capacity or runtime is accepted. The September 14 command, hash and receipt
+remain unchanged. September 20 has its own immutable audit key and approval hash;
+the current calendar must still be revision 9 with the accepted September 20–21
+recurrence. This is bounded operational readiness, not full-horizon coverage.
+
+Apply reuses the same catalog, binding, provider stop-sell/non-positive
+availability, facts, unit, publication, calendar, hash and inventory locks.
+Assignments on other dates do not prevent this new day, while any overlapping
+assignment or unexplained pre-existing inventory rejects. After import, replay
+may observe one exactly mapped Channex Booking.com assignment for September
+20–21; it preserves occupancy and rejects inconsistent mapping/counts. It does
+not authorize importing or reporting any booking. No provider writes, calendar
+changes, coverage advancement or publication occur. Verification must prove the
+occupied September 14 row/receipt and all other inventory remain unchanged.

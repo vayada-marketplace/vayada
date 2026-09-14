@@ -8,12 +8,16 @@ try {
       "catalog-hash": { type: "string" },
       "approval-ref": { type: "string" },
       "apply-hash": { type: "string" },
+      "no-show": { type: "boolean" },
+      "catalog-approval-ref": { type: "string" },
     },
   });
   const result = await prepareChannexStagingDay(loadConfig(), {
     catalogHash: values["catalog-hash"] ?? "",
     approvalRef: values["approval-ref"] ?? "",
     applyHash: values["apply-hash"],
+    noShow: values["no-show"],
+    catalogApprovalRef: values["catalog-approval-ref"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");
 } catch {

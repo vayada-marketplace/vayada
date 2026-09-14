@@ -6,7 +6,7 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareChannexStagingDay, stagingDay } from "./pmsChannexStagingDay.js";
+import { prepareChannexStagingDay, stagingDay, noShowStagingDay } from "./pmsChannexStagingDay.js";
 import { retainedRevisionScope as scope } from "./channexStagingCatalogEvidence.js";
 import { config, databaseUrl } from "./channexStagingCatalogTestFixture.js";
 import { seedChannexAssignmentInventory } from "../jobs/channexAssignmentTestFixture.js";
@@ -40,12 +40,25 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
   const request = vi.fn<typeof fetch>(async (url) =>
     Response.json({
       data: String(url).includes("/availability?")
-        ? { [scope.roomId]: { [stagingDay.stayDate]: -1 } }
-        : { [scope.rateId]: { [stagingDay.stayDate]: { stop_sell: true } } },
+        ? { [scope.roomId]: { [stagingDay.stayDate]: -1, [noShowStagingDay.stayDate]: 0 } }
+        : {
+            [scope.rateId]: {
+              [stagingDay.stayDate]: { stop_sell: true },
+              [noShowStagingDay.stayDate]: { stop_sell: true },
+            },
+          },
     }),
   );
   const run = (applyHash?: string) =>
     prepareChannexStagingDay(config(), { ...input, applyHash }, request);
+  const noShowInput = {
+    ...input,
+    noShow: true,
+    approvalRef: "VAY-1535:no-show-test",
+    catalogApprovalRef: input.approvalRef,
+  };
+  const runNoShow = (applyHash?: string) =>
+    prepareChannexStagingDay(config(), { ...noShowInput, applyHash }, request);
   beforeEach(async () => {
     request.mockClear();
     await db.query(
@@ -280,14 +293,18 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
     await expect(run()).rejects.toThrow();
     expect(await snapshot()).toEqual(before);
   });
-  it("preserves exact imported occupancy on replay and rejects an unrelated revision", async () => {
-    const preview = await run();
-    await run(preview.hash);
+  const importOccupancy = async (date: string, checkout: string) => {
     const booking = (
       await db.query(
         `INSERT INTO booking.guest_bookings(property_id,public_reference,source_system,source_booking_id,lifecycle_status,payment_status,check_in,check_out,adults,children,room_count,currency,total_amount,balance_amount,booking_channel)
-      VALUES($1,$2,'pms',$3,'confirmed','unpaid','2026-09-14','2026-09-15',2,0,1,'GBP',700,700,'booking_com') RETURNING id`,
-        [scope.propertyId, randomUUID(), `channex:${scope.propertyId}:${scope.bookingId}`],
+      VALUES($1,$2,'pms',$3,'confirmed','unpaid',$4::date,$5::date,2,0,1,'GBP',700,700,'booking_com') RETURNING id`,
+        [
+          scope.propertyId,
+          randomUUID(),
+          `channex:${scope.propertyId}:${scope.bookingId}`,
+          date,
+          checkout,
+        ],
       )
     ).rows[0].id;
     const binding = (
@@ -318,8 +335,8 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
           {
             externalRoomTypeId: scope.roomId,
             externalRatePlanId: scope.rateId,
-            checkIn: "2026-09-14",
-            checkOut: "2026-09-15",
+            checkIn: date,
+            checkOut: checkout,
             adults: 2,
             children: 0,
           },
@@ -332,6 +349,11 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
     } finally {
       client.release();
     }
+  };
+  it("preserves exact imported occupancy on replay and rejects an unrelated revision", async () => {
+    const preview = await run();
+    await run(preview.hash);
+    await importOccupancy("2026-09-14", "2026-09-15");
     const occupied = await snapshot();
     expect((await run(preview.hash)).outcome).toBe("replayed");
     expect(await snapshot()).toEqual(occupied);
@@ -343,6 +365,29 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
         )
       ).rows,
     ).toEqual([{ assigned_count: 1, available_count: 0 }]);
+    const noShowPreview = await runNoShow();
+    expect(await snapshot()).toEqual(occupied);
+    const results = await Promise.all([
+      runNoShow(noShowPreview.hash),
+      runNoShow(noShowPreview.hash),
+    ]);
+    expect(results.map((x) => x.outcome).sort()).toEqual(["applied", "replayed"]);
+    const both = await snapshot();
+    for (const key of Object.keys(occupied)) {
+      const rows = both[key] as any[];
+      expect(
+        rows.filter((x) =>
+          key === "pms.inventory_days"
+            ? x.row.stay_date !== noShowStagingDay.stayDate ||
+              x.row.room_type_id !== stagingDay.roomTypeId
+            : key === "platform.product_audit_events"
+              ? !String(x.row.audit_key).includes(noShowStagingDay.stayDate)
+              : true,
+        ),
+      ).toEqual(occupied[key]);
+    }
+    expect((await runNoShow(noShowPreview.hash)).outcome).toBe("replayed");
+    expect(await snapshot()).toEqual(both);
     await db.query(
       "UPDATE pms.channel_booking_mappings SET external_revision_id='other' WHERE property_id=$1",
       [scope.propertyId],
@@ -424,5 +469,63 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
         "DROP TRIGGER fail_staging_day_test ON platform.product_audit_events;DROP FUNCTION pms.fail_staging_day_test()",
       );
     }
+  });
+  it("keeps no-show approval and hashes distinct and rolls back rejected applies", async () => {
+    const before = await snapshot();
+    const old = await run();
+    const next = await runNoShow();
+    expect(next.stayDate).toBe("2026-09-20");
+    expect(next.hash).not.toBe(old.hash);
+    await expect(runNoShow(old.hash)).rejects.toThrow();
+    await expect(
+      prepareChannexStagingDay(
+        config(),
+        { ...input, noShow: true, catalogApprovalRef: input.approvalRef },
+        request,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      prepareChannexStagingDay(
+        config(),
+        { ...noShowInput, catalogApprovalRef: "VAY-1535:wrong" },
+        request,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      prepareChannexStagingDay(
+        config(),
+        { ...noShowInput, catalogApprovalRef: undefined },
+        request,
+      ),
+    ).rejects.toThrow();
+    expect(await snapshot()).toEqual(before);
+    await db.query(
+      `CREATE FUNCTION public.reject_noshow_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='pms.staging_date_exception.applied' THEN RAISE EXCEPTION 'test'; END IF; RETURN NEW; END $$`,
+    );
+    await db.query(
+      `CREATE TRIGGER reject_noshow_audit BEFORE INSERT ON platform.product_audit_events FOR EACH ROW EXECUTE FUNCTION public.reject_noshow_audit()`,
+    );
+    try {
+      await expect(runNoShow(next.hash)).rejects.toThrow();
+      expect(await snapshot()).toEqual(before);
+    } finally {
+      await db.query(
+        "DROP TRIGGER reject_noshow_audit ON platform.product_audit_events; DROP FUNCTION public.reject_noshow_audit()",
+      );
+    }
+  });
+  it("replays occupied no-show capacity without resetting it and rejects broken booking mapping", async () => {
+    const preview = await runNoShow();
+    await runNoShow(preview.hash);
+    await importOccupancy("2026-09-20", "2026-09-21");
+    const occupied = await snapshot();
+    expect((await runNoShow(preview.hash)).outcome).toBe("replayed");
+    expect(await snapshot()).toEqual(occupied);
+    await db.query(
+      "UPDATE pms.channel_booking_mappings SET external_booking_id='wrong' WHERE property_id=$1",
+      [scope.propertyId],
+    );
+    await expect(runNoShow(preview.hash)).rejects.toThrow();
+    expect(await snapshot()).toEqual(occupied);
   });
 });
