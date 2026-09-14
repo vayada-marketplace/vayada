@@ -20,7 +20,7 @@ generation from the queued job; reject a changed binding. Do not match on guest,
 dates, public reference or a local ID that happens to resemble a provider ID.
 
 Preserve the original booking snapshot on replay. Duplicate requests cannot
-overwrite a proposal or reopen a locally/provider resolved request. A changed
+overwrite a proposal or reopen a request resolved locally or by the provider. A changed
 proposal under the same provider event ID is an evidence conflict for review.
 Never copy an arbitrary webhook body directly to the intake: the future worker
 must pull the live-feed event from Channex and validate its property and identity.
@@ -102,6 +102,14 @@ port, provider-owned rows dispatch to the durable coordinator before direct-book
 logic. The port is absent in server runtime until reconciliation/cutover is ready.
 Property plus booking plus request identity are resolved from storage; browser
 provider identifiers are never accepted. Existing `enforceRoutePolicy` applies.
+
+Booking consumes a required, read-only `ExternalChangePresentationPort` supplied
+at server composition. The connectivity adapter owns provider-marker
+classification and the staff-safe projection; Booking treats provider metadata as
+opaque. Classification remains available with decision writes disabled and treats
+malformed provider markers as externally managed, preventing direct accept/decline
+from bypassing the provider workflow. Registering this read-only adapter does not
+enable decisions or workers.
 
 Responses add a sanitized `providerRequest` projection. Provider acknowledgement
 is `awaiting_confirmation`, not an applied booking change. Unknown sends offer
@@ -229,6 +237,112 @@ economics producer must establish revenue semantics and correction/source freshn
 before passing lines to the atomic Booking/Finance writer. This pure reader has no
 runtime registration and does not relax the temporary application guard.
 
+The Booking OTA correction planner compares scoped current room-night ledger
+aggregates and their latest evidence IDs with verified desired **gross** economics.
+It uses decimal integer arithmetic for price deltas, reverses removed nights, adds
+new nights, restores previously removed nights of the same room type and omits
+unchanged economics. Corrections retain current-tip lineage and cannot backdate
+recognition before the prior evidence or service night. Missing-to-known economics
+can be corrected, including explicit zero. Room-type replacements, known-to-missing
+prices and quality-only changes with unchanged known money remain unsupported by
+this slice. The caller must establish tenant/source scope, booking locks, complete
+ledger coverage, currency, accounting date and provider source freshness before
+planning; raw provider prices are not automatically verified gross economics.
+Plans are bounded to 1,000 lines and commit through the existing atomic Finance
+economics writer. This pure planner does not yet load ledger state or change the
+runtime guard.
+
+The Booking OTA ledger reader locks the confirmed Airbnb booking by property,
+booking ID, exact external source reference and currency. It requires a caller-owned
+transaction and returns at most 1,000 current room-night aggregates with their
+latest evidence IDs and recognition dates. It includes removed historical nights
+for correction lineage and rejects mixed/non-OTA or unsupported economic events,
+invalid aggregate occupancy/money, and incomplete current-stay coverage. Every
+current room position must have one occupied entry for every stay date; active
+entries outside the current stay/count also reject. Currency, source and property
+filters cannot silently drop conflicting evidence. Provider revision freshness,
+binding ownership, Finance payment/folio handling and gross-price interpretation
+remain the coordinator's responsibility; this reader does not activate the workflow.
+
+### Operation without provider clarification
+
+VAY-1551 proceeds with a limited scope without waiting for a support reply.
+Declines and readback of already-sent decisions do not require monetary inference.
+Before a new accept POST, the coordinator checks the existing Finance guard while
+holding the booking lock: any nightly revenue evidence, payment or folio blocks
+acceptance. It removes only the unsent queued intent, allowing staff to decline,
+and returns an explicit message that no approval was sent. It never clears an
+intent whose send has started. The authoritative revision applier retains its
+Finance guard for records created later. No financial records are changed by this
+fallback, and identical totals do not establish identical nightly economics.
+
+Bookings without financial records continue through the existing availability,
+provider decision and revision validation path. On 2026-09-14, Flamur explicitly
+waived the real Airbnb end-to-end test for this scope because no Airbnb account
+is available. Record that test as skipped, not passed; it no longer blocks review
+of this limited implementation. Local integration tests use simulated provider
+responses and do not establish real Airbnb behavior. No test-account provisioning
+or further support follow-up is required for this scope.
+
+This waiver does not activate runtime flags or automatic financial updates.
+Any future live activation needs a separate reviewed cutover decision that
+explicitly accounts for the unverified provider behavior. A Channex reply is one
+possible source of financial mapping evidence, not a prerequisite for this scope.
+
+### Provider economics evidence required before worker wiring
+
+The [Airbnb channel settings reference](https://docs.channex.io/channel-api-examples/airbnb#airbnb-connection-settings-reference)
+explicitly documents `booking_amount_settings` (`Payout Amount` or `Total Paid
+Amount`) and `cohost_payout_calculations` (deduct co-host commission when true).
+The management adapter retains the provider channel ID and these two settings
+on each normalized Airbnb channel in `connectedChannels`. Missing or malformed
+values remain null; absence never means payout mode or a disabled deduction.
+No raw provider settings or tokens are copied. The provider's `channel` field
+is preferred over the older `application` shape. Existing metadata without
+the new settings remains readable and must be treated as unknown by consumers.
+
+This narrows the earlier blocker: inspect the connection's configured amount
+mode before seeking provider clarification. A stored settings snapshot alone
+does not establish its freshness for a particular booking revision or prove
+the gross/tax semantics of `rooms[].days`; financial application stays guarded.
+
+Rechecked the [official Bookings Collection](https://docs.channex.io/api-v.1-documentation/bookings-collection)
+on 2026-09-10. The generic field definitions describe `amount` as total booking
+amount, `rooms[].days` as a daily price breakdown, and `ota_commission` as the OTA
+commission amount. They do not explicitly establish the gross-revenue treatment
+of Airbnb daily prices, fees or tax allocations required by our Finance contract.
+
+The published Airbnb **New Booking** example has three nightly prices of 83.20,
+room/booking amounts of 249.60, a separate commission amount of 10.00 and empty
+services/taxes arrays. Its notes separately describe a listing base price of
+300.00, cancellation payout of 249.60 and cancellation host fee of 50.40. These
+values are inconsistent with a simple assumption that daily prices necessarily
+equal listing gross. This is ambiguous example evidence, not proof that the API
+always returns net payouts. Do not parse the free-text notes into financial facts
+or infer that empty services/taxes arrays prove gross-price semantics.
+
+Before removing the Finance guard or connecting the price reader directly to the
+correction planner, establish a configuration-aware mapping and a sanctioned modified
+Airbnb revision pair that establish:
+
+- Whether daily prices are before or after Airbnb host commission, and whether
+  this varies by fee model or revision lifecycle.
+- Which structured fields distinguish accommodation, cleaning/service fees,
+  inclusive/exclusive taxes and retained cancellation amounts; how nightly gross
+  is recoverable without inventing an allocation.
+- The scope of `ota_commission` (including non-room charges), whether its revision
+  value replaces the previous total, and how it relates to the configured Finance
+  commission rule snapshots without recording the expense twice.
+- Expected reconciliation of daily prices, room totals, booking totals and
+  commission for a price/date alteration, including reductions and explicit zero.
+
+Capture the settings, supporting documentation and sanitized before/after payload
+evidence in this contract; seek provider confirmation for any unresolved semantics.
+The existing reader, ledger loader and
+planner remain reusable components; their synthetic tests do not establish this
+provider mapping. Worker Finance integration still requires this verified mapping,
+alongside the other documented activation gates.
+
 Application supports room count/type changes for pre-arrival channel assignments.
 Match slots by provider room position. Retain physical rooms and rate plans only
 for an active slot whose room type is unchanged and whose new stay has no physical
@@ -243,3 +357,7 @@ Linked inventory,
 missing materialization and in-house stays require review and block application.
 Those limitations remain activation gates, alongside finance-source freshness
 validation, periodic scans and sanctioned provider end-to-end evidence.
+
+### Additional activation prerequisite after main integration
+
+Keep alteration application disabled until its assignment updates also reconcile the generic Channex worker's `assignment_payload.channexStay` and `channexRevision` metadata and released slots. Otherwise a later generic modified or canceled revision can fail with `operational_assignment_conflict`. Cover alteration followed by generic modification and cancellation before activation. This prerequisite is separate from the waived live Airbnb account test.

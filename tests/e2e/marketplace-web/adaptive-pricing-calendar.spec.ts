@@ -1,3 +1,16 @@
+import {
+  roomList,
+  pricingPlan,
+  pricingSnapshot,
+  recurringPricing,
+  propertyProfile,
+  canonicalTimeZone,
+  currentCalendar,
+} from "../support/adaptiveSetupOwnerReads";
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import type {
@@ -10,10 +23,8 @@ import {
   PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
   PMS_OPERATING_CALENDAR_IMPACT_CONTRACT_VERSION,
   PMS_PRICING_CONTRACT_VERSION,
-  PMS_RECURRING_PRICING_CONTRACT_VERSION,
   PMS_ROOM_FACTS_CONTRACT_VERSION,
   createPmsOperatingCalendarSourceRevision,
-  parsePmsCanonicalIanaTimeZone,
 } from "@vayada/domain-pms";
 
 import { watchPageHealth } from "../support/pageHealth";
@@ -24,7 +35,6 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
 const propertyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const roomTypeId = "33333333-3333-4333-8333-333333333333";
-const planId = "44444444-4444-4444-8444-444444444444";
 const acceptedAt = new Date().toISOString();
 const confirmationIssuedAt = new Date(Date.now() - 60_000).toISOString();
 const confirmationExpiresAt = new Date(
@@ -209,7 +219,7 @@ async function mockPricingCalendarApis(page: Page) {
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname;
     if (
-      /^\/api\/hotel-setup\/(?:status|tracks|handoffs)(?:\/|$)/.test(pathname) ||
+      /^\/api\/hotel-setup\/(?:tracks|handoffs)(?:\/|$)/.test(pathname) ||
       /^\/api\/(?:booking|finance|distribution)\//.test(pathname)
     ) {
       forbiddenCalls.push(`${request.method()} ${pathname}`);
@@ -442,84 +452,6 @@ async function mockPricingCalendarApis(page: Page) {
   };
 }
 
-function roomList() {
-  return {
-    contractVersion: PMS_ROOM_FACTS_CONTRACT_VERSION,
-    propertyId,
-    items: [
-      {
-        contractVersion: PMS_ROOM_FACTS_CONTRACT_VERSION,
-        propertyId,
-        roomTypeId,
-        roomFactsRevision: 3,
-        lifecycle: "active",
-        facts: {
-          name: "Garden Suite",
-          description: "A quiet garden-facing suite.",
-          category: "suite",
-          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 1 },
-          beds: [{ type: "king", quantity: 1 }],
-          bedrooms: 1,
-          bathrooms: 1,
-          bathroomType: "private",
-          size: { value: 30, unit: "sqm" },
-        },
-        createdAt: acceptedAt,
-        updatedAt: acceptedAt,
-      },
-    ],
-  };
-}
-
-function pricingPlan(flexibleRatePlanRevision: number, amountDecimal: string) {
-  return {
-    contractVersion: PMS_PRICING_CONTRACT_VERSION,
-    propertyId,
-    roomTypeId,
-    flexibleRatePlanId: planId,
-    flexibleRatePlanRevision,
-    sourceRoomFactsRevision: 3,
-    baseAmount: { amountDecimal, currency: "EUR" },
-    cancellationTerms: {
-      type: "free_until_days_before_arrival",
-      freeCancellationDeadlineDays: 7,
-      afterDeadlinePenalty: "full_booking_amount",
-      noShowPenalty: "full_booking_amount",
-    },
-    createdAt: acceptedAt,
-    updatedAt: acceptedAt,
-  };
-}
-
-function pricingSnapshot(flexibleRatePlanRevision: number, amountDecimal: string) {
-  return {
-    contractVersion: PMS_PRICING_CONTRACT_VERSION,
-    propertyId,
-    pricingCurrency: {
-      contractVersion: PMS_PRICING_CONTRACT_VERSION,
-      propertyId,
-      currency: "EUR",
-      pricingCurrencyRevision: 2,
-      createdAt: acceptedAt,
-      updatedAt: acceptedAt,
-    },
-    flexibleRatePlans: [pricingPlan(flexibleRatePlanRevision, amountDecimal)],
-    capturedAt: acceptedAt,
-  };
-}
-
-function recurringPricing() {
-  return {
-    contractVersion: PMS_RECURRING_PRICING_CONTRACT_VERSION,
-    propertyId,
-    pricingCurrencyRevision: 2,
-    optionalPricingAggregateRevision: 0,
-    currency: "EUR",
-    sources: [],
-    capturedAt: acceptedAt,
-  };
-}
-
 function confirmationEvidence(fingerprint: string, revision: number) {
   return {
     organizationId,
@@ -527,69 +459,6 @@ function confirmationEvidence(fingerprint: string, revision: number) {
     pricingSourceFingerprint: fingerprint,
     confirmationRevision: revision,
     confirmedAt: acceptedAt,
-  };
-}
-
-function propertyProfile() {
-  return {
-    propertyId,
-    profileRevision: 7,
-    profile: {
-      displayName: "Hotel Lindenhof",
-      propertyType: "hotel",
-      location: {
-        streetAddress: "Lindenstrasse 4",
-        postalCode: "10115",
-        city: "Berlin",
-        countryCode: "DE",
-        timezone: "Europe/Berlin",
-        latitude: 52.52,
-        longitude: 13.405,
-        localityPublic: true,
-        geoPublic: false,
-        mapDisplayMode: "approximate",
-      },
-      contacts: [],
-    },
-  };
-}
-
-function canonicalTimeZone() {
-  return parsePmsCanonicalIanaTimeZone("Europe/Berlin", {
-    ownerDomain: "hotel_catalog",
-    registryVersion: "e2e.v1",
-    isCanonicalIanaTimeZone: (value) => value === "Europe/Berlin",
-  })!;
-}
-
-function currentCalendar() {
-  return {
-    contractVersion: PMS_OPERATING_CALENDAR_CONTRACT_VERSION,
-    propertyId,
-    calendarRevision: 2,
-    source: createPmsOperatingCalendarSourceRevision(propertyId, 2),
-    sourceInputs: {
-      propertyProfile: {
-        ownerDomain: "hotel_catalog",
-        entityType: "property_profile",
-        entityId: propertyId,
-        revision: "profile:7",
-      },
-      propertyTimeZone: canonicalTimeZone(),
-      roomBindings: [
-        {
-          roomTypeId,
-          sourceRoomFactsRevision: 3,
-          sourceRoomUnitsRevision: 5,
-          physicalCapacityCount: 4,
-          startingSellableLimitCount: 3,
-        },
-      ],
-    },
-    schedule: { mode: "year_round", periods: [] },
-    defaultMinimumStayNights: 2,
-    createdAt: acceptedAt,
-    updatedAt: acceptedAt,
   };
 }
 
@@ -693,6 +562,16 @@ function acceptedCalendarConfiguration(body: Record<string, unknown>) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(

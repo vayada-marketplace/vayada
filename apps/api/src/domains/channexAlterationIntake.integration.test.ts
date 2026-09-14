@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -856,6 +857,7 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
     const config = ports(),
       command = input(requestId);
     const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
       connectionString: url!,
       pool,
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -879,6 +881,164 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
         providerRequest: { state: "awaiting_confirmation", allowedActions: [] },
       });
       expect(config.provider.resolve).toHaveBeenCalledOnce();
+    } finally {
+      await adapter.close?.();
+    }
+  });
+  async function withFinancialEvidence(kind: string, run: () => Promise<void>) {
+    if (kind === "revenue") {
+      await pool.query(
+        "INSERT INTO booking.nightly_revenue_room_scopes(property_id,room_type_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [property, room],
+      );
+      await pool.query(
+        `INSERT INTO booking.nightly_revenue_evidence(property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,command_key)
+        VALUES($1,$2,$3,'2026-10-01','2026-10-01','EUR',300,1,'room_night','confirmed','ota','exact',1,$4)`,
+        [property, booking, room, randomUUID()],
+      );
+    } else if (kind === "payment") {
+      await pool.query(
+        "INSERT INTO finance.payments(property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,'deposit','paid',10,'EUR')",
+        [property, booking],
+      );
+    } else {
+      await pool.query("INSERT INTO finance.folios(property_id,guest_booking_id) VALUES($1,$2)", [
+        property,
+        booking,
+      ]);
+    }
+    try {
+      await run();
+    } finally {
+      const cleanup = await pool.connect();
+      try {
+        await cleanup.query("BEGIN");
+        await cleanup.query("SET LOCAL session_replication_role=replica");
+        for (const table of [
+          "finance.folios",
+          "finance.payments",
+          "booking.nightly_revenue_evidence",
+        ])
+          await cleanup.query(`DELETE FROM ${table} WHERE property_id=$1 AND guest_booking_id=$2`, [
+            property,
+            booking,
+          ]);
+        await cleanup.query(
+          "DELETE FROM booking.nightly_revenue_room_scopes WHERE property_id=$1 AND room_type_id=$2",
+          [property, room],
+        );
+        await cleanup.query("COMMIT");
+      } catch (error) {
+        await cleanup.query("ROLLBACK");
+        throw error;
+      } finally {
+        cleanup.release();
+      }
+    }
+  }
+  it.each(["revenue", "payment", "folio"])(
+    "blocks acceptance before sending with %s evidence and still permits decline",
+    async (kind) => {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      await withFinancialEvidence(kind, async () => {
+        const config = ports();
+        const before = (
+          await pool.query(
+            "SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1",
+            [booking],
+          )
+        ).rows;
+        await expect(decideChannexAlteration(config, input(requestId))).rejects.toThrow(
+          "alteration_finance_reconciliation_required",
+        );
+        expect(config.provider.resolve).not.toHaveBeenCalled();
+        expect(config.assertAvailability).not.toHaveBeenCalled();
+        expect(await journal(requestId)).toBeNull();
+        expect((await readbackRow(requestId)).status).toBe("pending");
+        const provider = {
+          ...config.provider,
+          resolve: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+        };
+        expect(
+          await decideChannexAlteration({ ...config, provider }, input(requestId, "decline")),
+        ).toMatchObject({ providerState: "declined" });
+        expect(provider.resolve).toHaveBeenCalledOnce();
+        expect(
+          (
+            await pool.query(
+              "SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1",
+              [booking],
+            )
+          ).rows,
+        ).toEqual(before);
+      });
+    },
+  );
+  it("checks new financial evidence again when retrying an unsent intent", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    config.assertAvailability.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("unavailable");
+    expect(await journal(requestId)).toMatchObject({ sendStartedAt: null });
+    await withFinancialEvidence("folio", async () => {
+      await expect(decideChannexAlteration(config, command)).rejects.toThrow(
+        "alteration_finance_reconciliation_required",
+      );
+      expect(config.provider.resolve).not.toHaveBeenCalled();
+      expect(await journal(requestId)).toBeNull();
+    });
+  });
+  it("retains uncertain send intent and uses readback even when financial evidence appears", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports(),
+      command = input(requestId);
+    config.provider.resolve.mockRejectedValueOnce(new Error("uncertain"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("uncertain");
+    const sent = await journal(requestId);
+    await withFinancialEvidence("folio", async () => {
+      expect(await decideChannexAlteration(config, command)).toMatchObject({
+        sendStartedAt: sent.sendStartedAt,
+        deliveryState: "unknown",
+      });
+      expect(config.provider.resolve).toHaveBeenCalledOnce();
+      expect(await journal(requestId)).toMatchObject({ sendStartedAt: sent.sendStartedAt });
+      await expect(decideChannexAlteration(config, input(requestId, "decline"))).rejects.toThrow(
+        "alteration_decision_conflict",
+      );
+    });
+  });
+  it("returns a clear staff error and keeps both decisions available after financial rejection", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      externalChanges: externalBookingChanges,
+      connectionString: url!,
+      pool,
+      inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      airbnbAlterations: { decide: (value) => decideChannexAlteration(config, value) },
+    });
+    try {
+      await withFinancialEvidence("folio", async () => {
+        await expect(
+          adapter.acceptChangeRequest(property, booking, requestId, {
+            actorUserId: randomUUID(),
+            requestId: "finance-preflight",
+            correlationId: "finance-preflight",
+            idempotencyKey: "finance-preflight",
+            fingerprint: "unused",
+            occurredAt: new Date(),
+          }),
+        ).rejects.toMatchObject({
+          statusCode: 409,
+          message:
+            "This booking has financial records that Vayada cannot update automatically. No approval was sent. You can still decline the request.",
+        });
+        expect(config.provider.resolve).not.toHaveBeenCalled();
+        expect(await adapter.findLatestChangeRequest(property, booking)).toMatchObject({
+          providerRequest: { state: "pending", allowedActions: ["accept", "decline"] },
+        });
+      });
     } finally {
       await adapter.close?.();
     }

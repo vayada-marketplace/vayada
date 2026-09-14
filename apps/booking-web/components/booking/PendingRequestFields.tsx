@@ -153,6 +153,61 @@ export default function PendingRequestFields({
           />
         </label>
       </div>
+      {input.roomSelection && (
+        <fieldset className="space-y-4">
+          <legend className="font-semibold">{t("allocateGuests")}</legend>
+          {input.roomSelection.lines.map((line, lineIndex) => {
+            const roomName = (selected?.combination?.roomLines ?? details.booking.roomLines)?.find(
+              (candidate) =>
+                candidate.roomTypeId === line.roomTypeId &&
+                candidate.publicOfferKey === line.publicOfferKey,
+            )?.roomName;
+            return line.guests.map((guest, guestIndex) => (
+              <fieldset
+                key={`${line.roomTypeId}:${line.publicOfferKey}:${guestIndex}`}
+                className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2"
+              >
+                <legend className="px-1">
+                  {roomName ? `${roomName} · ` : ""}
+                  {t("roomNumber", { number: guestIndex + 1 })}
+                </legend>
+                {(["adults", "children"] as const).map((kind) => (
+                  <label key={kind}>
+                    {t(kind === "adults" ? "allocationAdults" : "allocationChildren")}
+                    <input
+                      className={field}
+                      type="number"
+                      min={kind === "adults" ? 1 : 0}
+                      max={100}
+                      required
+                      value={guest[kind]}
+                      onChange={(e) =>
+                        change({
+                          roomSelection: {
+                            ...input.roomSelection!,
+                            lines: input.roomSelection!.lines.map((current, index) =>
+                              index !== lineIndex
+                                ? current
+                                : {
+                                    ...current,
+                                    guests: current.guests.map((allocation, position) =>
+                                      position !== guestIndex
+                                        ? allocation
+                                        : { ...allocation, [kind]: Number(e.target.value) },
+                                    ),
+                                  },
+                            ),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </fieldset>
+            ));
+          })}
+        </fieldset>
+      )}
       {!partyMatches && (
         <p role="alert" className="text-sm text-red-700">
           {t("partyChanged")}

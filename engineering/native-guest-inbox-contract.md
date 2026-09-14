@@ -490,21 +490,44 @@ assistance_unavailable`; staff can still write and send a manual reply.
 
 ### Provider-specific actions
 
-Thread detail may expose `booking_com_no_reply_needed` only when the provider
-conversation supports it. The idempotent command is:
+Thread detail exposes `channex_close` for connected Channex OTA conversations and
+`booking_com_no_reply_needed` only for Booking.com. Both require reply permission,
+linked-property access, the sending switch and effective mutating messaging mode.
 
 ```http
 POST /threads/:threadId/provider-actions/no-reply-needed
+POST /threads/:threadId/provider-actions/close
 Idempotency-Key: <opaque client key>
+
+{"expectedVersion":4}
 ```
 
-It returns `202` after atomically recording audit/outbox evidence for a durable
-`pms.inbox.provider-action.deliver` job. Execution revalidates the provider
-capability and uses a stable provider idempotency reference; ambiguous outcomes
-are held for review rather than retried blindly. It does not implicitly change
-the Vayada `attentionState`; staff may separately mark the thread done.
-Once an action job has been accepted for a thread, detail suppresses the action
-and the command rejects a second key so a reload cannot enqueue a duplicate.
+These commands return `202` only after recording the existing durable
+`pms.inbox.provider-action.deliver` job, audit and outbox. Detail returns separate
+`providerActions` with action, state (`pending|retrying|confirmed|held|failed`),
+normalized reason and the accepted `threadVersion`. Capability suppression is
+never evidence of success. The UI polls pending actions and retains terminal
+outcomes across refreshes. Neither action sends a guest message, changes the
+reservation, deletes history, marks read, nor changes local triage.
+
+Execution rechecks scope, connection and conversation version. A stale command or
+queued action is rejected/held and requires refresh and explicit reapplication.
+An explicit safe recovery reuses the same job and retains its attempt history;
+automatic rate-limit retries use the existing bounded backoff (five attempts).
+A durable dispatch marker makes worker-crash recovery hold uncertain requests.
+Timeouts, server errors and malformed closure confirmations are ambiguous and
+cannot be blindly retried. Staff must check Channex for uncertain outcomes.
+
+[Channex Messages Collection](https://docs.channex.io/api-v.1-documentation/messages-collection)
+documents empty-body POSTs to `/message_threads/:id/close` and
+`/message_threads/:id/no_reply_needed`. Closure confirmation requires matching
+thread identity and `is_closed:true`; no-reply confirmation requires successful
+HTTP acceptance. No native idempotency, conditional version guard or remote
+reopen is documented. Provider requests therefore cannot atomically fence a new
+remote arrival; confirmation describes the accepted action at its recorded
+boundary, never that all later guest messages were handled. Subsequent local
+thread changes are visibly distinguished and are not overwritten by completion.
+Local Done, Reopen and Undo affect only Vayada, including after remote closure.
 
 ### Start a direct email thread
 
