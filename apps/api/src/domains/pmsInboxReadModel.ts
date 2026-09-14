@@ -132,6 +132,8 @@ const THREAD_COLUMNS = `thread.id::text, thread.version::text, thread.attention_
                   AND connection.connection_status IN ('connected', 'degraded')
                   AND connection.messaging_app_installed) AS "otaConnectionReady",
         COALESCE((thread.source = 'channex' AND thread.delivery_channel = 'ota'
+          AND lower(BTRIM(thread.provider_channel)) IN
+            ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
           AND BTRIM(thread.source_thread_id) <> ''), FALSE) AS "providerActionAvailable",
         COALESCE((SELECT jsonb_agg(result) FROM (
           SELECT DISTINCT ON (job.payload->>'action') job.payload->>'action' AS action,
@@ -378,7 +380,9 @@ export function createPgPmsInboxReadPort(config: {
           thread: toSummary(threadRow, emailRoutes.get(threadRow.id)),
           providerActions: threadRow.providerActions ?? [],
           availableProviderActions:
-            config.providerMutationEnabled && threadRow.providerActionAvailable && threadRow.otaConnectionReady
+            config.providerMutationEnabled &&
+            threadRow.providerActionAvailable &&
+            threadRow.otaConnectionReady
               ? (
                   [
                     "channex_close",

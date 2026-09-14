@@ -39,7 +39,13 @@ export async function runPmsInboxProviderActions(
     const claimed = await client.query<Job>(
       `
       UPDATE platform.jobs job SET status = 'running', locked_at = now(), locked_by = $2,
-        attempts_count = attempts_count + 1, updated_at = now()
+        attempts_count = attempts_count + 1,
+        max_attempts = CASE
+          WHEN job.status = 'running' AND job.attempts_count >= job.max_attempts
+            THEN job.max_attempts + 1
+          ELSE job.max_attempts
+        END,
+        updated_at = now()
       FROM (SELECT id FROM platform.jobs WHERE job_type = $1
         AND ((status = 'pending' AND run_after <= now() AND attempts_count < max_attempts)
           OR (status = 'running' AND locked_at < now() - interval '2 minutes'))
@@ -71,6 +77,8 @@ export async function runPmsInboxProviderActions(
       `
       SELECT thread.version::text, (thread.source = 'channex' AND thread.delivery_channel = 'ota'
         AND thread.source_thread_id = $3 AND BTRIM(thread.source_thread_id) <> ''
+        AND lower(BTRIM(thread.provider_channel)) IN
+          ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
         AND ($4 = 'channex_close' OR ($4 = 'booking_com_no_reply_needed'
           AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
         AND EXISTS (SELECT 1 FROM pms.channel_connections connection WHERE connection.property_id = thread.property_id

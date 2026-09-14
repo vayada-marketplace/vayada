@@ -13565,7 +13565,8 @@ describe("vayada-api", () => {
       await expect(post(key)).resolves.toMatchObject({ statusCode, body: { code } });
 
     await expect(post("closure", { expectedVersion: 4 }, true)).resolves.toMatchObject({
-      statusCode: 202, body: { action: "channex_close" },
+      statusCode: 202,
+      body: { action: "channex_close" },
     });
     const beforeInvalid = calls.length;
     await expect(post()).resolves.toMatchObject({
@@ -13647,9 +13648,13 @@ describe("vayada-api", () => {
         payload: "{",
       });
       expect(response.statusCode, candidate.name).toBe(candidate.status);
-      const closure = await app.inject({ method: "POST",
+      const closure = await app.inject({
+        method: "POST",
         url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
-        headers: { ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }), "idempotency-key": "closure" },
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "idempotency-key": "closure",
+        },
         payload: { expectedVersion: 4 },
       });
       expect(closure.statusCode, candidate.name).toBe(candidate.status);

@@ -199,13 +199,15 @@ export function createChannexThreadAction(config: {
       return {
         ok: false,
         failure:
-          response.status === 429
-            ? "transient_provider_failure"
-            : response.status >= 500
-              ? "ambiguous_provider_outcome"
-              : [401, 403].includes(response.status)
-                ? "provider_configuration_unavailable"
-                : "provider_rejected",
+          response.status === 408
+            ? "ambiguous_provider_outcome"
+            : response.status === 429
+              ? "transient_provider_failure"
+              : response.status >= 500
+                ? "ambiguous_provider_outcome"
+                : [401, 403].includes(response.status)
+                  ? "provider_configuration_unavailable"
+                  : "provider_rejected",
       };
     if (input.action === "channex_close") {
       const body = (await response.json().catch(() => null)) as {

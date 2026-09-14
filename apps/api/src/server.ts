@@ -1570,9 +1570,12 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
-  marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
-  marketplaceAffiliatePolicyRepository: createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
-  marketplaceAffiliateDestinationRepository: createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateDraftRepository:
+    createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePolicyRepository:
+    createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
+  marketplaceAffiliateDestinationRepository:
+    createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },

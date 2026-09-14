@@ -68,8 +68,30 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
           throw new Error("duplicate dispatch");
         });
         expect(requests).toBe(1);
-      const read = createPgPmsInboxReadPort({ connectionString: URL!, pool, providerMutationEnabled: true, attachmentMediaAccessEnabled: false, emailReplyRoutes: { async resolveReplyRoutes() { return []; } } });
-      expect(await read.getThread({ propertyId: PROPERTY, threadId: THREAD, canReadGuestContact: false, messageLimit: 20 })).toMatchObject({ ok: true, value: { providerActions: [{ action: providerAction, state: "confirmed", threadVersion: 4 }] } });
+        const read = createPgPmsInboxReadPort({
+          connectionString: URL!,
+          pool,
+          providerMutationEnabled: true,
+          attachmentMediaAccessEnabled: false,
+          emailReplyRoutes: {
+            async resolveReplyRoutes() {
+              return [];
+            },
+          },
+        });
+        expect(
+          await read.getThread({
+            propertyId: PROPERTY,
+            threadId: THREAD,
+            canReadGuestContact: false,
+            messageLimit: 20,
+          }),
+        ).toMatchObject({
+          ok: true,
+          value: {
+            providerActions: [{ action: providerAction, state: "confirmed", threadVersion: 4 }],
+          },
+        });
         expect(
           (
             await admin.query(
@@ -92,7 +114,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     },
   );
 
-  it.each(["stale", "revoked", "disconnected", "uncertain", "exhausted"])(
+  it.each(["stale", "revoked", "disconnected", "unsupported", "uncertain", "exhausted"])(
     "persists truthful %s outcome and never blindly repeats",
     async (scenario) => {
       await command.noReplyNeeded(action("failure"));
@@ -109,6 +131,11 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
         await admin.query(
           `UPDATE pms.channel_connections SET messaging_app_installed = false WHERE property_id = $1`,
           [PROPERTY],
+        );
+      if (scenario === "unsupported")
+        await admin.query(
+          `UPDATE pms.message_threads SET provider_channel = 'other' WHERE id = $1`,
+          [THREAD],
         );
       if (scenario === "exhausted")
         await admin.query(`UPDATE platform.jobs SET max_attempts = 1 WHERE property_id = $1`, [
@@ -140,6 +167,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
               stale: "conversation_changed",
               revoked: "access_unavailable",
               disconnected: "provider_configuration_unavailable",
+              unsupported: "provider_configuration_unavailable",
               uncertain: "ambiguous_provider_outcome",
               exhausted: "retry_exhausted",
             } as Record<string, string>
@@ -216,6 +244,56 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     }
   });
 
+  it("holds an exhausted crashed dispatch without blocking the next action", async () => {
+    const crashed = await command.noReplyNeeded(action("crashed-final-attempt"));
+    const queued = await command.noReplyNeeded({
+      ...action("queued-after-crash"),
+      action: "channex_close",
+    });
+    if (!crashed.ok || !queued.ok) throw new Error("Expected provider-action jobs");
+    await admin.query(
+      `UPDATE platform.jobs SET status = 'running', attempts_count = max_attempts,
+       locked_at = now() - interval '3 minutes', locked_by = 'crashed',
+       job_metadata = job_metadata || '{"dispatched":true}'::jsonb WHERE id = $1`,
+      [crashed.value.jobId],
+    );
+    const pool = new pg.Pool({ connectionString: URL });
+    let calls = 0;
+    try {
+      await runPmsInboxProviderActions(pool, async () => {
+        calls++;
+        return { ok: true, providerReference: SOURCE_CONVERSATION };
+      });
+      await runPmsInboxProviderActions(pool, async () => {
+        calls++;
+        return { ok: true, providerReference: SOURCE_CONVERSATION };
+      });
+      expect(calls).toBe(1);
+      expect(
+        (
+          await admin.query(
+            `SELECT status, attempts_count::int AS attempts, max_attempts::int AS maximum,
+             job_metadata->>'outcome' AS outcome, job_metadata->>'reason' AS reason
+             FROM platform.jobs WHERE id = $1`,
+            [crashed.value.jobId],
+          )
+        ).rows[0],
+      ).toEqual({
+        status: "failed",
+        attempts: 6,
+        maximum: 6,
+        outcome: "held",
+        reason: "ambiguous_provider_outcome",
+      });
+      expect(
+        (await admin.query(`SELECT status FROM platform.jobs WHERE id = $1`, [queued.value.jobId]))
+          .rows[0],
+      ).toEqual({ status: "succeeded" });
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("rejects both actions when mutations are disabled or the thread is direct email", async () => {
     const disabled = createPgPmsInboxProviderActionPort({ connectionString: URL! });
     try {
@@ -234,7 +312,8 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
   });
 
   it("serializes distinct keys into a single logical action", async () => {
-    const blocker = new pg.Client({ connectionString: URL }); await blocker.connect();
+    const blocker = new pg.Client({ connectionString: URL });
+    await blocker.connect();
     try {
       await blocker.query("BEGIN");
       await blocker.query("SELECT id FROM pms.message_threads WHERE id = $1 FOR UPDATE", [THREAD]);
@@ -243,7 +322,13 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       // Both commands are waiting before their duplicate checks can run.
       let waiters = 0;
       for (let poll = 0; poll < 100 && waiters < 2; poll++) {
-        waiters = Number((await admin.query(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%SELECT thread.version%'`)).rows[0].count);
+        waiters = Number(
+          (
+            await admin.query(
+              `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%SELECT thread.version%'`,
+            )
+          ).rows[0].count,
+        );
         if (waiters < 2) await new Promise((resolve) => setTimeout(resolve, 10));
       }
       await blocker.query("COMMIT");
@@ -251,7 +336,9 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       expect(waiters).toBe(2);
       expect(results.filter((result) => result.ok)).toHaveLength(1);
       expect((await state()).counts.jobs).toBe(1);
-    } finally { await blocker.end(); }
+    } finally {
+      await blocker.end();
+    }
   });
 
   it("atomically enqueues one stable provider action without changing Inbox triage", async () => {
@@ -372,6 +459,33 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       jobs: 0,
     });
   });
+
+  it.each(["other", null])(
+    "rejects unsupported provider channel %s for both actions",
+    async (providerChannel) => {
+      await admin.query(
+        `UPDATE pms.message_threads SET provider_channel = $2 WHERE id = $1::uuid`,
+        [THREAD, providerChannel],
+      );
+      for (const providerAction of ["booking_com_no_reply_needed", "channex_close"] as const)
+        await expect(
+          command.noReplyNeeded({
+            ...action(`unsupported-${providerChannel ?? "null"}-${providerAction}`),
+            action: providerAction,
+          }),
+        ).resolves.toMatchObject({
+          ok: false,
+          error: { code: "provider_action_unavailable" },
+        });
+      expect((await state()).counts).toEqual({
+        idempotency: 1,
+        events: 0,
+        audits: 0,
+        outbox: 0,
+        jobs: 0,
+      });
+    },
+  );
 
   it("returns missing and fingerprint conflicts without a second side effect", async () => {
     await expect(

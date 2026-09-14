@@ -1198,7 +1198,7 @@ export default function InboxWorkspace() {
         if (selectedThreadIdRef.current === threadId) await loadDetail(true);
         else setReloadList((value) => value + 1);
       },
-      t("inbox.errorBookingComUpdate"),
+      t(action === "close" ? "inbox.errorChannexUpdate" : "inbox.errorBookingComUpdate"),
       threadId,
     );
   }

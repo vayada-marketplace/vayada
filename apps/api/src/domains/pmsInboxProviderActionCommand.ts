@@ -442,9 +442,11 @@ async function lockThread(
 ): Promise<ThreadRow | null> {
   const query = await client.query<ThreadRow>(
     `SELECT thread.version::text, thread.source_thread_id AS "sourceThreadId",
-            (thread.source = 'channex'
-             AND thread.delivery_channel = 'ota'
-             AND ($3 = 'channex_close' OR lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom'))
+              (thread.source = 'channex'
+               AND thread.delivery_channel = 'ota'
+               AND lower(BTRIM(thread.provider_channel)) IN
+                 ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
+               AND ($3 = 'channex_close' OR lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom'))
              AND BTRIM(thread.source_thread_id) <> ''
 ) AS "providerCapable"
      FROM pms.message_threads thread
@@ -455,13 +457,15 @@ async function lockThread(
   const thread = query.rows[0];
   if (!thread) return null;
   // A separate statement sees jobs committed while waiting for the thread lock.
-  const duplicate = await client.query(`SELECT 1 FROM platform.jobs
+  const duplicate = await client.query(
+    `SELECT 1 FROM platform.jobs
     WHERE property_id = $1 AND resource_product = 'pms' AND resource_type = 'message_thread'
       AND resource_id = $2 AND job_type = $3 AND source_domain_event_id IS NOT NULL
       AND payload->>'action' = $4 AND (status IN ('pending', 'running')
         OR job_metadata->>'reason' = 'ambiguous_provider_outcome'
         OR (status <> 'failed' AND COALESCE(payload->>'expectedVersion', $5) = $5))`,
-    [input.propertyId, input.threadId, JOB_TYPE, action(input), thread.version]);
+    [input.propertyId, input.threadId, JOB_TYPE, action(input), thread.version],
+  );
   return { ...thread, providerCapable: thread.providerCapable && duplicate.rows.length === 0 };
 }
 

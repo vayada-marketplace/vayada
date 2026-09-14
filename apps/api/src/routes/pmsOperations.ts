@@ -2363,7 +2363,8 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
           thread: redactInboxGuestContact(result.value.thread, canReadGuestContact),
-          availableProviderActions: options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
+          availableProviderActions:
+            options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
           providerActions: result.value.providerActions ?? [],
           timeline: result.value.timeline.map((item) => item.item),
           previousCursor: result.value.previousCursor,

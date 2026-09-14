@@ -161,6 +161,7 @@ describe("Channex provider actions", () => {
     },
   );
   it.each([
+    [408, "ambiguous_provider_outcome"],
     [429, "transient_provider_failure"],
     [500, "ambiguous_provider_outcome"],
     [403, "provider_configuration_unavailable"],

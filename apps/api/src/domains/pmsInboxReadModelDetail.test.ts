@@ -141,7 +141,11 @@ function recordingPool(options: { threadRows?: QueryResultRow[] } = {}) {
   return { pool, calls };
 }
 
-function createRead(pool: PmsInboxReadPool, attachmentMediaAccessEnabled = true, providerMutationEnabled = true) {
+function createRead(
+  pool: PmsInboxReadPool,
+  attachmentMediaAccessEnabled = true,
+  providerMutationEnabled = true,
+) {
   return createPgPmsInboxReadPort({
     providerMutationEnabled,
     connectionString: "",
@@ -156,11 +160,36 @@ function createRead(pool: PmsInboxReadPool, attachmentMediaAccessEnabled = true,
 }
 
 describe("PostgreSQL PMS Inbox thread detail read model", () => {
+  it.each(["other", null])("hides provider actions for unsupported channel %s", async (channel) => {
+    const { pool, calls } = recordingPool({
+      threadRows: [{ ...thread, providerChannel: channel, providerActionAvailable: false }],
+    });
+    const result = await createRead(pool).getThread({
+      propertyId: PROPERTY,
+      threadId: THREAD,
+      canReadGuestContact: false,
+      messageLimit: 2,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { availableProviderActions: [] },
+    });
+    expect(calls[0]![0]).toContain("'bookingcom', 'airbnb', 'expedia'");
+  });
+
   it("hides disabled provider mutations while preserving recorded outcomes", async () => {
     const outcome = { action: "channex_close", state: "confirmed", reason: null, threadVersion: 4 };
     const { pool } = recordingPool({ threadRows: [{ ...thread, providerActions: [outcome] }] });
-    const result = await createRead(pool, true, false).getThread({ propertyId: PROPERTY, threadId: THREAD, canReadGuestContact: false, messageLimit: 2 });
-    expect(result).toMatchObject({ ok: true, value: { availableProviderActions: [], providerActions: [outcome] } });
+    const result = await createRead(pool, true, false).getThread({
+      propertyId: PROPERTY,
+      threadId: THREAD,
+      canReadGuestContact: false,
+      messageLimit: 2,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { availableProviderActions: [], providerActions: [outcome] },
+    });
   });
 
   it("returns a property-scoped chronological page with safe attachments and cursor", async () => {
@@ -275,7 +304,7 @@ describe("PostgreSQL PMS Inbox thread detail read model", () => {
     const { pool, calls } = recordingPool({ threadRows: [] });
     const emailCalls: unknown[] = [];
     const read = createPgPmsInboxReadPort({
-    providerMutationEnabled: true,
+      providerMutationEnabled: true,
       connectionString: "",
       attachmentMediaAccessEnabled: true,
       pool,

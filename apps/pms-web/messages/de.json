@@ -1095,6 +1095,7 @@
   "inbox.errorAssistManualFallback": "{error} Sie können manuell weiterschreiben.",
   "inbox.errorAttachmentPrepare": "Der Anhang konnte nicht vorbereitet werden.",
   "inbox.errorBookingComUpdate": "Booking.com konnte nicht aktualisiert werden.",
+  "inbox.errorChannexUpdate": "Channex konnte nicht aktualisiert werden.",
   "inbox.errorConversationChanged": "Die Konversation wurde geändert. Prüfen Sie die neuesten Nachrichten und versuchen Sie es erneut.",
   "inbox.errorConversationChangedDraftPreserved": "Die Konversation wurde geändert. Ihr Entwurf bleibt erhalten; prüfen Sie ihn und senden Sie ihn erneut.",
   "inbox.errorFutureTime": "Wählen Sie einen gültigen zukünftigen Zeitpunkt in {timezone}.",
