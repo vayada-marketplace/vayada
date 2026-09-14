@@ -1,3 +1,4 @@
+import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
 import { randomUUID } from "node:crypto";
@@ -112,6 +113,7 @@ export async function readPublishedPricingForChannexJob(
     identification: _identification,
     configurationIdentity: _configurationIdentity,
     ariClaim: _ariClaim,
+    ariRequest: _ariRequest,
     ...evidence
   } = result;
   return evidence;
@@ -168,6 +170,7 @@ type TargetWork =
   | "reserve"
   | "claim"
   | { kind: "ari_claim"; attemptId: string; date: string }
+  | { kind: "ari_dispatch"; attemptId: string; date: string; ariAttemptId: string; jobAttemptId: string; workerId: string }
   | { kind: "retained"; attemptId: string }
   | { kind: "configuration"; attemptId: string; observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>> }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
@@ -310,6 +313,96 @@ export async function readCurrentChannexNightRestrictions(
     attemptId,
     ...before.reservation,
     observation,
+  };
+}
+
+/** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
+export async function prepareChannexInitialAriDispatch(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  date: string,
+) {
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const claimed = await withSelectedChannexTarget(pool, lease, selected, {
+    kind: "ari_claim",
+    attemptId,
+    date,
+  });
+  if (claimed.kind !== "available") return claimed;
+  const claim = claimed.ariClaim,
+    request = claimed.ariRequest,
+    identity = claimed.configurationIdentity;
+  if (!claim || !request || !identity) throw new Error("Initial ARI claim missing");
+  const room = claimed.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const work = {
+    kind: "ari_dispatch" as const,
+    attemptId,
+    date,
+    ariAttemptId: claim.attemptId,
+    jobAttemptId: claim.jobAttemptId,
+    workerId: claim.workerId,
+  };
+  let used = false;
+  return {
+    kind: "prepared" as const,
+    async dispatch(ports: {
+      get(path: string, signal: AbortSignal): Promise<unknown>;
+      post(payload: NonNullable<typeof request>, signal: AbortSignal): Promise<Response>;
+    }) {
+      if (used) return { kind: "unavailable" as const, reason: "dispatch_already_used" };
+      used = true;
+      const before = await withSelectedChannexTarget(pool, lease, selected, work);
+      if (before.kind !== "available") return before;
+      try {
+        const get = (_method: "GET", path: string) =>
+          boundedProviderCall((signal) => ports.get(path, signal));
+        await verifyChannexOfferRoom(room, identity, get);
+        await verifyChannexOfferConfiguration(
+          room,
+          selected.offerId,
+          selected.primaryOccupancy,
+          identity,
+          get,
+        );
+      } catch {
+        return { kind: "unavailable" as const, reason: "ari_preflight_unavailable" };
+      }
+      const after = await withSelectedChannexTarget(pool, lease, selected, work);
+      if (after.kind !== "available") return after;
+      let response: Response | null = null;
+      try {
+        response = await boundedProviderCall((signal) =>
+          ports.post(structuredClone(request), signal),
+        );
+      } catch {
+        /* A timed-out or thrown POST remains an unresolved provider mutation. */
+      }
+      const correlation = {
+        receiptId: randomUUID(),
+        attemptId: claim.attemptId,
+        jobAttemptId: claim.jobAttemptId,
+        workerId: claim.workerId,
+        propertyId: claimed.authority.lease.propertyId,
+        connectionId: claimed.authority.connectionId,
+      };
+      const persist = await (response === null
+        ? prepareChannexAriTransportFailurePersistence(pool, correlation)
+        : prepareChannexAriReceiptPersistence(pool, correlation, response));
+      try {
+        await persist();
+        return { kind: "retained" as const, attemptId: claim.attemptId };
+      } catch {
+        return { kind: "receipt_pending" as const, persist };
+      }
+    },
   };
 }
 
@@ -508,6 +601,7 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
+    let ariRequest: { method: "POST"; path: "/api/v1/restrictions"; body: unknown } | undefined;
     let ariClaim:
       | {
           attemptId: string;
@@ -686,7 +780,7 @@ async function withPublishedChannexPricing(
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
           if (
             "kind" in work &&
-            (work.kind === "configuration" || work.kind === "ari_claim")
+            (work.kind === "configuration" || work.kind === "ari_claim" || work.kind === "ari_dispatch")
           ) {
             if (
               attempt.state !== "identified" ||
@@ -698,7 +792,7 @@ async function withPublishedChannexPricing(
               externalRoomTypeId: mapping.external_room_type_id as string,
               externalRatePlanId: attempt.external_rate_plan_id as string,
             };
-            if (work.kind === "ari_claim") {
+            if (work.kind === "ari_claim" || work.kind === "ari_dispatch") {
               const location = (
                 await client.query(
                   "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT",
@@ -768,31 +862,59 @@ async function withPublishedChannexPricing(
                   },
                 ],
               };
-              const created = (
-                await client.query(
-                  `INSERT INTO pms.channex_offer_ari_attempts
-                           (creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
-                           SELECT $1,a.id,a.worker_id,$2,$3::jsonb FROM platform.job_attempts a
-                           WHERE a.job_id=$4 AND a.attempt_number=$5 AND a.worker_id=$6
-                           ON CONFLICT (external_property_id,external_rate_plan_id) WHERE state='unresolved'
-                           DO NOTHING RETURNING id,job_attempt_id,worker_id`,
+              if (work.kind === "ari_dispatch") {
+                const permitted = await client.query(
+                  `SELECT a.id FROM pms.channex_offer_ari_attempts a
+                   JOIN platform.job_attempts j ON j.id=a.job_attempt_id
+                   WHERE a.id=$1 AND a.creation_attempt_id=$2 AND a.job_attempt_id=$3
+                     AND a.worker_id=$4 AND j.job_id=$5 AND j.attempt_number=$6
+                     AND a.state='unresolved' AND a.service_date=$7 AND a.request_body=$8::jsonb
+                     AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)
+                     AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_attempts other
+                       WHERE other.external_property_id=a.external_property_id
+                         AND other.external_rate_plan_id=a.external_rate_plan_id AND other.id<>a.id)
+                   FOR UPDATE OF a NOWAIT`,
                   [
+                    work.ariAttemptId,
                     attempt.id,
-                    work.date,
-                    JSON.stringify(request),
+                    work.jobAttemptId,
+                    work.workerId,
                     lease.jobId,
                     lease.attemptNumber,
-                    lease.workerId,
+                    work.date,
+                    JSON.stringify(request),
                   ],
-                )
-              ).rows[0];
-              if (!created) return unavailable("ari_reconciliation_required");
-              ariClaim = {
-                ...reservation,
-                attemptId: created.id,
-                jobAttemptId: created.job_attempt_id,
-                workerId: created.worker_id,
-              };
+                );
+                if (!permitted.rowCount || work.workerId !== lease.workerId)
+                  return unavailable("ari_dispatch_unavailable");
+              } else {
+                const created = (
+                  await client.query(
+                    `INSERT INTO pms.channex_offer_ari_attempts
+                             (creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+                             SELECT $1,a.id,a.worker_id,$2,$3::jsonb FROM platform.job_attempts a
+                             WHERE a.job_id=$4 AND a.attempt_number=$5 AND a.worker_id=$6
+                             ON CONFLICT (external_property_id,external_rate_plan_id) WHERE state='unresolved'
+                             DO NOTHING RETURNING id,job_attempt_id,worker_id`,
+                    [
+                      attempt.id,
+                      work.date,
+                      JSON.stringify(request),
+                      lease.jobId,
+                      lease.attemptNumber,
+                      lease.workerId,
+                    ],
+                  )
+                ).rows[0];
+                if (!created) return unavailable("ari_reconciliation_required");
+                ariClaim = {
+                  ...reservation,
+                  attemptId: created.id,
+                  jobAttemptId: created.job_attempt_id,
+                  workerId: created.worker_id,
+                };
+              }
+              ariRequest = { method: "POST", path: "/api/v1/restrictions", body: request };
             }
 
             if (work.kind === "configuration" && work.observation) {
@@ -918,6 +1040,7 @@ async function withPublishedChannexPricing(
       identification,
       configurationIdentity,
       ariClaim,
+      ariRequest,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")

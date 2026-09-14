@@ -859,3 +859,26 @@ send permission: future dispatch must repeat admission using current timezone,
 clock and applicable scheduling policy immediately before IO, alongside closed
 payload, receipt, ownership and capability checks. Old claims receive no resend
 opportunity or new date authority from this change.
+
+### Closed initial ARI dispatch boundary (VAY-1545)
+
+`prepareChannexInitialAriDispatch` creates a one-use sender only after a fresh
+claim commits. Before and after bounded live room/rate metadata reads it repeats
+the current authority, configuration evidence, hotel-local date admission and
+exact immutable payload checks. The reads verify manual adult occupancy options,
+room capacity, meal type and closed configuration. They do not certify downstream
+OTA restriction or child-pricing semantics. The uploaded payload keeps
+`stop_sell: true`; this service has no runtime adapter or activation path.
+
+An existing receipt or any other ARI attempt for the provider property/rate blocks
+sending. This deliberately also blocks subsequent dates after a raw storage-level
+reconciliation: authoritative completion and history handling must exist before
+that restriction can be relaxed. Recovery cannot recreate a sender for an old
+claim. A preflight failure consumes the closure and leaves ownership unresolved.
+
+The POST is attempted once with a bounded deadline. A response, including a late
+response after lease loss, is sanitized and retained; a thrown or timed-out POST
+retains fixed transport-failure evidence. A storage failure returns only a receipt
+persistence retry, never another POST. Neither a task acknowledgement nor a saved
+receipt releases ownership or opens sales. Current verification uses injected
+provider ports and isolated PostgreSQL, with no real Channex mutations.
