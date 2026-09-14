@@ -497,13 +497,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       });
     } catch (error) {
       const mapped = mapWorkOSAuthError(error);
-      const canSelectRequestedPlatformOrganization =
-        parsed.surface === "platform-admin" &&
+      const canSelectRequestedOrganization =
         parsed.organizationId &&
         mapped.state === "organization_selection_required" &&
         mapped.pendingAuthenticationToken &&
         mapped.organizations?.some(({ id }) => id === parsed.organizationId);
-      if (canSelectRequestedPlatformOrganization) {
+      if (canSelectRequestedOrganization) {
         try {
           session = await options.authKitClient.authenticateWithOrganizationSelection({
             organizationId: parsed.organizationId!,
@@ -535,6 +534,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
     }
 
+    if (parsed.organizationId && session.organizationId !== parsed.organizationId) {
+      return reply
+        .code(403)
+        .send({ state: "auth_failed", message: "Selected workspace could not be authenticated." });
+    }
+
     let resolution: IdentityResolution;
     try {
       resolution = await resolveOrCreateIdentity(
@@ -542,7 +547,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         request,
         options,
         surfacePolicy,
-        organizationAccessOptionsFromRequest(request, surfacePolicy),
+        organizationAccessOptionsFromRequest(request, surfacePolicy, {
+          explicitOrganizationSelection: Boolean(parsed.organizationId),
+        }),
       );
     } catch (error) {
       if (error instanceof OrganizationSelectionRequiredError) {
@@ -561,6 +568,15 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       });
       request.log.warn({ err: error }, "Password login identity resolution failed");
       return reply.code(403).send(toAuthError(error));
+    }
+
+    if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
+      return reply
+        .code(403)
+        .send({
+          state: "auth_failed",
+          message: "Selected workspace is not available on this surface.",
+        });
     }
 
     await options.productAuditSink.record({
@@ -2207,9 +2223,7 @@ function parsePasswordLoginBody(body: unknown):
   try {
     const surface = parseSurface(typeof input.surface === "string" ? input.surface : undefined);
     const organizationId =
-      surface === "platform-admin" && typeof input.organizationId === "string"
-        ? input.organizationId.trim()
-        : "";
+      typeof input.organizationId === "string" ? input.organizationId.trim() : "";
     return {
       ok: true,
       email,
