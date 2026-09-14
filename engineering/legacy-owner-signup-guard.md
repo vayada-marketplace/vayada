@@ -2,7 +2,7 @@
 
 VAY-2017 deny-only application slice, following
 [account setup](legacy-owner-account-setup.md) and
-[identity architecture](workos-identity-architecture.md). Wires the two caller
+[identity architecture](workos-identity-architecture.md). Wires the caller
 paths below; no grants, account preparation, deployment or production authorization.
 
 ## Reuse the receipt, do not add another registry
@@ -53,6 +53,22 @@ installed scoped unique index. A uniqueness error must roll back, never trigger
 email-based recovery or a replacement-ID retry. This guard does not stop provider
 side effects that an upstream signup flow already dispatched.
 
+## Direct lifecycle email and status changes
+
+`updateIdentityUserEmail` and `updateIdentityUserStatus` first lock the exact user
+with SELECT FOR UPDATE in their transaction. If absent, preserve accepted no-op
+without later updates: a prepared user inserted after the lookup must not become
+an unguarded update target. For a present user, check its receipt before any email
+change or status update to active/pending. Same-value requests are not exceptions.
+Both local email caches commit together; failure of either update rolls back both.
+
+Explicit suspended/deleted status updates remain available without a receipt
+read, including during receipt-store outages. Existing suspend, delete and revoke
+commands remain unchanged. These exceptions only retain their existing restrictive
+behavior; no receipt removal or access release is introduced. Lifecycle profile
+updates are not covered by this slice and cannot be cited as immutable identity
+evidence without a fresh check.
+
 ## Transaction and deployment prerequisites
 
 The future bootstrap writer must insert previously absent users and their receipt
@@ -79,8 +95,8 @@ once prepared rows exist, rolling back to unguarded app code is unsafe.
 ## Preparation remains blocked after the first callers
 
 Receipt lookup alone does not police every identity mutation. Before enabling
-preparation, separately cover lifecycle status/email updates, access/resource-link
-grants, webhook membership reconciliation, session reconciliation and other
+preparation, separately cover access/resource-link grants, webhook membership
+reconciliation, session reconciliation and other
 identity writers. Inventory their direct SQL and transaction boundaries. Do not
 block legitimate suspension/deletion by blindly placing a blanket guard ahead of
 all lifecycle commands; restrictive actions need their own reviewed behavior.
