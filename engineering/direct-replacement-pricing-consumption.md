@@ -727,3 +727,17 @@ private calculation JSON, promotion configuration, Finance/charge evidence IDs a
 internal offer identifiers. Missing public authority/owner evidence is generically
 unavailable; conflicts require a new request. This replaces the retired target
 quote path without adding a parallel calculator or changing historical bookings.
+
+
+Browser consumption first requires a shared, browser-safe public quote DTO and
+strict response validation against the request's dates, currency, payment method
+and physical selection IDs. Totals stay decimal-string minor units; validate
+line contributions and due-now/due-later arithmetic with BigInt. Never recreate
+flat nightly rates, deposit percentages or currency conversion in the client.
+The browser client sends only the versioned selection/payment request and scopes
+retry keys to slug plus complete request. It retains a key after uncertain transport
+failure, expires it at the server's expiry (including expired historical replies),
+and supports cancellation. Expired responses cannot become displayable prices.
+This client prerequisite does not activate the current count-only checkout UI:
+room selection must supply actual child ages and current replacement offer keys
+first. Legacy request payloads cannot be silently converted into those facts.

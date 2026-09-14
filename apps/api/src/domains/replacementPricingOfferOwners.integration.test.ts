@@ -1,3 +1,4 @@
+import { parsePublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { createReplacementBookingQuoteIssuer } from "../routes/replacementBookingQuote.js";
 import Fastify from "fastify";
 import { createTargetBookingWebCheckoutAdapter, registerBookingWebPublicRoutes } from "../routes/bookingWebPublic.js";
@@ -1389,7 +1390,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     try {
       const path = `/hotels/${f.scope.propertyId}/bookings/quote`;
-      const payload = { version: "public-booking-quote-request.v1", selection: f.selection, paymentMethod: "pay_at_property" };
+      const payload = { version: "public-booking-quote-request.v1", selection: f.selection, paymentMethod: "pay_at_property" } as const;
       const failed = createReplacementBookingQuoteIssuer({ async issue() { throw new Error("private database details"); } });
       await expect(failed(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 503, message: "Quote temporarily unavailable." });
       const headers = { "Idempotency-Key": randomUUID() };
@@ -1398,6 +1399,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(first.statusCode).toBe(200);
       expect(first.headers["cache-control"]).toBe("no-store");
       const body = first.json();
+      expect(parsePublicBookingQuote(body, payload)).toEqual(body);
       expect(body).toMatchObject({ version: "public-booking-quote.v1", replayed: false, currency: "EUR", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
       expect(body.rooms).toHaveLength(f.selection.rooms.length);
       expect(Object.keys(body).sort()).toEqual(["version", "quoteId", "replayed", "checkIn", "checkOut", "currency", "paymentMethod", "issuedAt", "expiresAt", "totalMinor", "dueNowMinor", "dueLaterMinor", "lines", "rooms"].sort());
