@@ -53,6 +53,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
   });
   const repositories: PmsInventoryMaterializationRepository[] = [];
+  const alterationBookings: string[] = [];
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
@@ -61,6 +62,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
 
   afterAll(async () => {
     await Promise.all(repositories.map((repository) => repository.close()));
+    await admin.query("DELETE FROM booking.booking_change_requests WHERE guest_booking_id = ANY($1::uuid[])", [alterationBookings]);
     await admin.end();
   });
 
@@ -72,6 +74,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     const connectionId = randomUUID(),
       externalRoom = randomUUID(),
       bookingId = randomUUID();
+    alterationBookings.push(bookingId);
     await admin.query(
       `INSERT INTO pms.rooms(property_id,room_type_id,room_number)
       VALUES($1,$2,'A'),($1,$2,'B'),($1,$3,'C'),($1,$3,'D')`,
@@ -139,7 +142,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         );
-        await assertChannexAlterationAvailability(admin, input);
+        let availabilityError: unknown;
+        try { await assertChannexAlterationAvailability(admin, input); }
+        catch (error) { availabilityError = error; }
         expect(
           (
             await admin.query(
@@ -148,6 +153,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
             )
           ).rows,
         ).toEqual(beforeCheck.rows);
+        if (availabilityError) throw availabilityError;
       } finally {
         await admin.query("ROLLBACK");
       }
@@ -457,6 +463,178 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await admin.query("ROLLBACK");
     }
+    await admin.query("BEGIN");
+    try {
+      const change = await prepareRevision("2026-08-07");
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null,"priceDifference":null}'::jsonb WHERE id=$1`,
+        [change.requestId],
+      );
+      for (const amount of [undefined, null, "", "-1.00", "NaN", "10000000000000.00", "25.001"]) {
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, {
+            ...change.revision,
+            attributes: { ...change.revision.attributes, amount },
+          }),
+        ).rejects.toThrow();
+      }
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, {
+          ...change.revision,
+          attributes: { ...change.revision.attributes, currency: "USD" },
+        }),
+      ).rejects.toThrow("alteration_revision_proposal_mismatch");
+      expect(
+        (
+          await admin.query(
+            "SELECT check_out::text,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual({ check_out: "2026-08-06", total_amount: "0.00" });
+      await admin.query(
+        "UPDATE booking.booking_change_requests SET requested_changes=requested_changes - 'newTotal' WHERE id=$1",
+        [change.requestId],
+      );
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).rejects.toThrow();
+      await admin.query(
+        `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null}'::jsonb WHERE id=$1`,
+        [change.requestId],
+      );
+      // An explicit provider zero is valid; a missing amount above is not zero.
+      change.revision.attributes.amount = "0.00";
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).resolves.toBe(true);
+      expect(
+        (
+          await admin.query(
+            "SELECT status,requested_changes->'newTotal' AS quote,requested_changes->'priceDifference' AS difference FROM booking.booking_change_requests WHERE id=$1",
+            [change.requestId],
+          )
+        ).rows[0],
+      ).toEqual({ status: "accepted", quote: null, difference: null });
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    for (const evidence of ["revenue", "payment", "folio"]) {
+      await admin.query("BEGIN");
+      try {
+        await admin.query(
+          "UPDATE booking.guest_bookings SET total_amount=25,balance_amount=15 WHERE id=$1",
+          [bookingId],
+        );
+        const change = await prepareRevision("2026-08-07");
+        if (evidence === "revenue") {
+          await admin.query(
+            "INSERT INTO booking.nightly_revenue_room_scopes(property_id,room_type_id) VALUES($1,$2)",
+            [propertyId, roomTypeId],
+          );
+          await admin.query(
+            `INSERT INTO booking.nightly_revenue_evidence(property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,command_key)
+            VALUES($1,$2,$3,'2026-08-04','2026-08-04','EUR',25,1,'room_night','confirmed','ota','exact',1,$4)`,
+            [propertyId, bookingId, roomTypeId, randomUUID()],
+          );
+        } else if (evidence === "payment") {
+          await admin.query(
+            "INSERT INTO finance.payments(property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,'deposit','paid',10,'EUR')",
+            [propertyId, bookingId],
+          );
+        } else {
+          await admin.query(
+            "INSERT INTO finance.folios(property_id,guest_booking_id) VALUES($1,$2)",
+            [propertyId, bookingId],
+          );
+        }
+        async function financialSnapshot() {
+          return (
+            await admin.query(
+              `SELECT
+            (SELECT jsonb_agg(to_jsonb(row)) FROM booking.nightly_revenue_evidence row WHERE guest_booking_id=$1) AS revenue,
+            (SELECT jsonb_agg(to_jsonb(row)) FROM finance.payments row WHERE guest_booking_id=$1) AS payments,
+            (SELECT jsonb_agg(to_jsonb(row)) FROM finance.folios row WHERE guest_booking_id=$1) AS folios`,
+              [bookingId],
+            )
+          ).rows;
+        }
+        const beforeFinance = await financialSnapshot();
+        const beforeInventory = (
+          await admin.query(
+            "SELECT to_jsonb(day) FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+            [propertyId],
+          )
+        ).rows;
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, change.revision),
+        ).rejects.toThrow("alteration_finance_reconciliation_required");
+        expect(
+          (
+            await admin.query(
+              "SELECT check_out::text,total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+              [bookingId],
+            )
+          ).rows[0],
+        ).toEqual({ check_out: "2026-08-06", total_amount: "25.00", balance_amount: "15.00" });
+        expect(
+          (
+            await admin.query("SELECT status FROM booking.booking_change_requests WHERE id=$1", [
+              change.requestId,
+            ])
+          ).rows[0].status,
+        ).toBe("pending");
+        expect(
+          (
+            await admin.query(
+              "SELECT to_jsonb(day) FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual(beforeInventory);
+        expect(await financialSnapshot()).toEqual(beforeFinance);
+        // Even an unchanged total cannot attest to unchanged nightly/tax evidence.
+        change.revision.attributes.departure_date = "2026-08-06";
+        await admin.query(
+          `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"requestedCheckOut":"2026-08-06"}'::jsonb WHERE id=$1`,
+          [change.requestId],
+        );
+        await expect(
+          applyChannexAlterationRevision(admin, change.scope, change.revision),
+        ).rejects.toThrow("alteration_finance_reconciliation_required");
+        expect(
+          (
+            await admin.query(
+              "SELECT adults,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+              [bookingId],
+            )
+          ).rows[0],
+        ).toEqual({ adults: 1, balance_amount: "15.00" });
+        expect(await financialSnapshot()).toEqual(beforeFinance);
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+    }
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        "UPDATE booking.guest_bookings SET total_amount=25,balance_amount=15 WHERE id=$1",
+        [bookingId],
+      );
+      const change = await prepareRevision("2026-08-06");
+      await expect(
+        applyChannexAlterationRevision(admin, change.scope, change.revision),
+      ).resolves.toBe(true);
+      expect(
+        (
+          await admin.query("SELECT balance_amount::text FROM booking.guest_bookings WHERE id=$1", [
+            bookingId,
+          ])
+        ).rows[0].balance_amount,
+      ).toBe("15.00");
+    } finally {
+      await admin.query("ROLLBACK");
+    }
     // Application assertions run before rollback, against actual materialized inventory.
     await admin.query("BEGIN");
     try {
@@ -573,10 +751,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       VALUES($1,$2,$3,$4,'channex',0,'active'),($1,$2,$3,$4,'channex',1,'active')`,
       [propertyId, connectionId, bookingId, applied.providerBookingId],
     );
+    const syntheticRatePlanId = randomUUID();
     const providerRevision = {
       ...applied.revision,
       attributes: {
         ...applied.revision.attributes,
+        rooms: applied.revision.attributes.rooms.map((room) => ({ ...room, rate_plan_id: syntheticRatePlanId })),
         ota_name: "Airbnb",
         inserted_at: new Date().toISOString(),
       },
@@ -637,8 +817,32 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].code,
     ).toBe("alteration_revision_proposal_mismatch");
-    providerRevision.attributes.amount = "25.00";
+    providerRevision.attributes.amount = "37.50";
+    await admin.query(
+      `UPDATE booking.booking_change_requests SET requested_changes=requested_changes || '{"newTotal":null,"priceDifference":null}'::jsonb WHERE id=$1`,
+      [applied.requestId],
+    );
     await admin.query(`UPDATE platform.jobs SET run_after=now() WHERE id=$1`, [jobId]);
+    const financePayment = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [financePayment, propertyId, bookingId],
+    );
+    try {
+      expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
+      expect(acknowledgements).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' AS code FROM platform.jobs WHERE id=$1",
+            [jobId],
+          )
+        ).rows[0].code,
+      ).toBe("alteration_finance_reconciliation_required");
+    } finally {
+      await admin.query("DELETE FROM finance.payments WHERE id=$1", [financePayment]);
+    }
+    await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
     const trigger = `alteration_fail_${bookingId.replaceAll("-", "")}`;
     await admin.query(
       `CREATE FUNCTION pms.${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.property_id='${propertyId}'::uuid THEN RAISE EXCEPTION 'synthetic mapping failure'; END IF; RETURN NEW; END$$; CREATE TRIGGER ${trigger} BEFORE INSERT ON pms.channel_booking_mappings FOR EACH ROW EXECUTE FUNCTION pms.${trigger}()`,
@@ -695,6 +899,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(
       (
         await admin.query(
+          "SELECT total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50" });
+    expect(
+      (
+        await admin.query(
+          "SELECT requested_changes->'newTotal' AS quote,requested_changes->'priceDifference' AS difference FROM booking.booking_change_requests WHERE id=$1",
+          [applied.requestId],
+        )
+      ).rows[0],
+    ).toEqual({ quote: null, difference: null });
+    expect(
+      (
+        await admin.query(
           `SELECT to_jsonb(day) AS data FROM pms.inventory_days day WHERE property_id=$1 ORDER BY room_type_id,stay_date`,
           [propertyId],
         )
@@ -716,6 +936,97 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
+  });
+
+  it("rejects captured active-room evidence after closure without writing inventory", async () => {
+    const fixture = await createFixture(admin, repositories, [2]);
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,1,1,2,'2026-08-04',now(),$5)`,
+      [fixture.propertyId, fixture.roomTypeId, randomUUID(), "a".repeat(64), fixture.actorUserId],
+    );
+    expect(
+      await fixture.repository.materializeInventory(
+        materializationCommand(fixture, "closed", 1, "2026-08-04", "2026-08-06"),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "configuration_not_current" } });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.inventory_days WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ count: 0 }]);
+  });
+
+  it("adds a new room to stored coverage and still rejects missing old-room rows", async () => {
+    const newRoom = randomUUID();
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "before-add", 1, "2026-08-04", "2026-08-06"),
+    );
+    await admin.query(
+      "UPDATE pms.inventory_days SET assigned_count=1, available_count=1, booking_source_revision=1, inventory_revision=2 WHERE property_id=$1 AND stay_date='2026-08-05'",
+      [fixture.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'New room')",
+      [newRoom, fixture.propertyId],
+    );
+    additionalRoomTypes.push(newRoom);
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+    for (const [from, through] of [
+      ["2026-08-04", "2026-08-05"],
+      ["2026-08-05", "2026-08-06"],
+    ]) {
+      await expect(
+        fixture.repository.materializeInventory(
+          materializationCommand(fixture, `partial-add-${from}`, 2, from!, through!),
+        ),
+      ).resolves.toMatchObject({ ok: false, error: { code: "inventory_invariant_violation" } });
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT calendar_revision FROM pms.inventory_materialization_coverage WHERE property_id=$1",
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ calendar_revision: 1 }]);
+    const command = materializationCommand(fixture, "add-room", 2, "2026-08-04", "2026-08-06");
+    const result = await fixture.repository.materializeInventory(command);
+    expect(result).toMatchObject({ ok: true, outcome: "rematerialized" });
+    await expect(fixture.repository.materializeInventory(command)).resolves.toEqual(result);
+    const rows = await admin.query(
+      "SELECT room_type_id,stay_date::text,assigned_count,available_count FROM pms.inventory_days WHERE property_id=$1",
+      [fixture.propertyId],
+    );
+    expect(rows.rows).toHaveLength(6);
+    expect(
+      rows.rows.find((r) => r.room_type_id === fixture.roomTypeId && r.stay_date === "2026-08-05"),
+    ).toMatchObject({ assigned_count: 1, available_count: 1 });
+    await expect(
+      admin.query(
+        "DELETE FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-05'",
+        [fixture.propertyId, fixture.roomTypeId],
+      ),
+    ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
   });
 
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {
@@ -1374,6 +1685,7 @@ async function activateCalendarRevision(
     actorUserId: fixture.actorUserId,
     revision,
     startingLimit: binding.startingSellableLimitCount,
+    roomTypeIds: configuration.sourceInputs.roomBindings.map((b) => b.roomTypeId),
   });
   fixture.calendarState.currentRevision = revision;
 }
@@ -1434,6 +1746,7 @@ async function seedCalendarRevision(
     revision: number;
     startingLimit: number;
     additionalRoomTypes?: readonly string[];
+    roomTypeIds?: readonly string[];
   },
 ): Promise<void> {
   const idempotencyId = randomUUID();
@@ -1500,10 +1813,10 @@ async function seedCalendarRevision(
         outboxId,
         input.actorUserId,
         ACCEPTED_AT.toISOString(),
-        1 + (input.additionalRoomTypes?.length ?? 0),
+        input.roomTypeIds?.length ?? (1 + (input.additionalRoomTypes?.length ?? 0)),
       ],
     );
-    for (const roomTypeId of [input.roomTypeId, ...(input.additionalRoomTypes ?? [])]) {
+    for (const roomTypeId of input.roomTypeIds ?? [input.roomTypeId, ...(input.additionalRoomTypes ?? [])]) {
       await admin.query(
         `INSERT INTO pms.operating_calendar_room_bindings (
          property_id, calendar_revision, room_type_id,
