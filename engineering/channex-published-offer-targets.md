@@ -955,3 +955,20 @@ or OTA delivery proof. Do not release ownership or activate from this adapter.
 The public task API's lifecycle/retry guarantees and occupancy price readback
 still require verification before definitive reconciliation. Never substitute a
 browser session token for the scoped API key. Keep the runtime sender disabled.
+
+### Receipt-bound task observation (VAY-1545)
+
+The domain task reader accepts creation/ARI attempt IDs only. Reuse the current
+immutable-attempt, configuration and full-history reader. Require exactly one
+retained complete-JSON HTTP 200 receipt with no warnings and a nonempty distinct
+UUID task list (at most 100). Missing receipts, transport errors, malformed bodies,
+warning/partial responses or multiple receipts remain a hold; this slice does not
+choose a preferred receipt or consolidate duplicate observations.
+
+Fetch every original task under one aggregate 15-second deadline, checking abort
+before each GET. Compare each result to the immutable request; if any task fails,
+return no partial observation set. Repeat authority and full-history reads after
+IO and reject changes. All task IDs come from the retained receipt, never the
+caller. Return correlated task observations only, without persistence, ownership
+release, retry permission or activation. Even all matching finish markers do not
+establish provider lifecycle/replay guarantees or complete price/OTA delivery.

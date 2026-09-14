@@ -1,3 +1,4 @@
+import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { prepareChannexInitialAriDispatch, claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexStagedRestrictions, readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
@@ -904,6 +905,155 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect(await f.read()).toMatchObject({ kind: "unavailable", reason: "ari_attempt_unavailable" });
     expect(f.get).not.toHaveBeenCalled();
+  });
+  async function taskReadFixture() {
+    const f = await stagedReadFixture();
+    const read = (get: (path: string, signal: AbortSignal) => Promise<unknown>) =>
+      readCurrentChannexAriTaskFinishes(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        f.ariCorrelation.attemptId,
+        get,
+      );
+    const task = (id = f.taskId) => ({
+      data: {
+        type: "task",
+        id,
+        attributes: {
+          id,
+          task: "Property.UpdateRestrictions",
+          payload: { values: [f.stored] },
+          success: true,
+          errors: [],
+          received_at: "2026-09-14T00:00:00.000001",
+          executed_at: "2026-09-14T00:00:00.000002",
+          finished_at: "2026-09-14T00:00:00.000003",
+        },
+      },
+    });
+    const retain = (response = f.ariResponse()) =>
+      prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, response).then((save) => save());
+    return { ...f, readTasks: read, task, retain };
+  }
+  it("reads only original receipt tasks and leaves ARI ownership unresolved", async () => {
+    const f = await taskReadFixture();
+    await f.retain();
+    const get = vi.fn(async () => f.task());
+    expect(await f.readTasks(get)).toMatchObject({
+      kind: "ari_tasks_observed",
+      ariAttemptId: f.ariCorrelation.attemptId,
+      observations: [{ taskId: f.taskId }],
+    });
+    expect(get.mock.calls[0]).toMatchObject([`/api/v1/tasks/${f.taskId}`, expect.any(AbortSignal)]);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+          f.ariCorrelation.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
+  it.each(["missing", "transport", "warnings", "http", "multiple"])(
+    "holds %s original task receipts before IO",
+    async (mode) => {
+      const f = await taskReadFixture();
+      if (mode === "transport")
+        await (
+          await prepareChannexAriTransportFailurePersistence(pool, f.ariCorrelation)
+        )();
+      if (mode === "warnings")
+        await f.retain(
+          new Response(
+            JSON.stringify({
+              data: [{ type: "task", id: f.taskId }],
+              meta: { warnings: ["partial"] },
+            }),
+          ),
+        );
+      if (mode === "http")
+        await f.retain(
+          new Response(
+            JSON.stringify({ data: [{ type: "task", id: f.taskId }], meta: { warnings: [] } }),
+            { status: 500 },
+          ),
+        );
+      if (mode === "multiple") {
+        await f.retain();
+        await (
+          await prepareChannexAriReceiptPersistence(
+            pool,
+            { ...f.ariCorrelation, receiptId: randomUUID() },
+            f.ariResponse(),
+          )
+        )();
+      }
+      const get = vi.fn();
+      expect(await f.readTasks(get)).toMatchObject({
+        kind: "unavailable",
+        reason: "ari_receipt_history_unavailable",
+      });
+      expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it("does not return partial task finishes when a later task fails", async () => {
+    const f = await taskReadFixture(),
+      other = randomUUID();
+    await f.retain(
+      new Response(
+        JSON.stringify({
+          data: [f.taskId, other].map((id) => ({ type: "task", id })),
+          meta: { warnings: [] },
+        }),
+      ),
+    );
+    const get = vi.fn(async (path: string) => (path.endsWith(f.taskId) ? f.task() : {}));
+    await expect(f.readTasks(get)).rejects.toThrow("ari_task_observation_unavailable");
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+  it("rejects lease loss during original task GET", async () => {
+    const f = await taskReadFixture();
+    await f.retain();
+    expect(
+      await f.readTasks(async () => {
+        await pool.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+        return f.task();
+      }),
+    ).toMatchObject({ kind: "unavailable", reason: "lease_unavailable" });
+  });
+  it("rejects a new receipt during original task GET", async () => {
+    const f = await taskReadFixture();
+    await f.retain();
+    expect(
+      await f.readTasks(async () => {
+        await (
+          await prepareChannexAriTransportFailurePersistence(pool, {
+            ...f.ariCorrelation,
+            receiptId: randomUUID(),
+          })
+        )();
+        return f.task();
+      }),
+    ).toMatchObject({ kind: "unavailable", reason: "ari_receipt_history_unavailable" });
+  });
+  it("bounds all original task reads and does not start later GETs after timeout", async () => {
+    const f = await taskReadFixture(),
+      other = randomUUID();
+    await f.retain(
+      new Response(
+        JSON.stringify({
+          data: [f.taskId, other].map((id) => ({ type: "task", id })),
+          meta: { warnings: [] },
+        }),
+      ),
+    );
+    const get = vi.fn(async () => new Promise<unknown>(() => {}));
+    await expect(f.readTasks(get)).rejects.toThrow();
+    expect(get).toHaveBeenCalledOnce();
   });
   it("retains late ARI receipts idempotently without releasing ownership", async () => {
     const f = await ariReceiptFixture(),
