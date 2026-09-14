@@ -612,3 +612,11 @@ ready, provide a hotel editor, or create bookings. Those remain separate work.
 
 Database authorization uses the same transaction connection for reads and writes;
 it must not acquire another pooled connection while holding the guest-owner lock.
+
+
+The marketplace guest-rule client uses the authenticated target API, validates
+saved choice/revision responses, sends explicit confirmation and a caller-retained
+retry key, and renders actionable conflict/permission errors. The editor must keep
+that key for an unchanged uncertain command and must not promote guest-rule saving
+to setup readiness. Browser transport validation does not replace backend scope
+authorization or current owner checks.
