@@ -45,3 +45,30 @@ current owners or provider state. Schema-correct readers, fresh eligibility,
 approvals, transition ledger/consumer, replay, revocation, compensation and
 PG16/17 concurrency/atomicity tests are separate next slices. Clean-claim
 adoption remains unchanged and continues rejecting every historical claim.
+
+## Target-only snapshot reader
+
+`readLegacyHistoricalBindingTargetSnapshot` now owns a dedicated pool client,
+REPEATABLE READ READ ONLY transaction and rollback/release. It takes ACCESS SHARE
+table locks before requiring whole-table SELECT and disabled RLS on properties,
+claims and connections. This prevents partial privileges or policy-filtered rows
+from masquerading as exhaustive evidence and holds relation definitions stable.
+Locks do not fence GRANT/REVOKE. Binding fingerprints compare the visible column
+list with unfiltered `pg_attribute` names before explicitly SELECTing every
+column; privilege loss cannot silently turn a full-row hash into a partial hash.
+
+It reads `profile_status`, `claim_state` and `claim_source` directly and returns
+all Channex claims matching property OR external ID, and all Channex connections
+matching property OR live external ID OR retained legacy external ID. Other
+providers are outside this Channex-only set. No LIMIT, status filter or matching
+row selection hides competing history. Empty sets remain empty; missing property
+fails. Full physical-row fingerprints reuse the existing lossless normalization;
+only typed identifiers/statuses and hashes leave the reader, never raw metadata.
+Malformed retained identifiers and unsupported/lossy JSON values fail closed.
+
+Output rows/arrays are frozen. The snapshot does not establish property
+eligibility, ownership, source provenance or approval. Source observations must
+be independently verified; combining them does not make two reads atomic. A
+future executor needs its own locked combined verification, not cached output.
+Synthetic tests use parent-migrated disposable PG16/17 databases; no production
+read, provider call, claim transition or clean-adoption boundary change is added.
