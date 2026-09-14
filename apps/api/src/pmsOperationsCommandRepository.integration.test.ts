@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -10,9 +11,9 @@ import { createPgPmsRoomFactsReadModel } from "./domains/pmsRoomFactsReadModel.j
 import type { PmsRoomOrderCommand, PmsRoomTypeCreateCommand } from "./routes/pmsOperations.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
-const actorUserId = "95959595-9595-4595-8595-959595959501";
-const organizationId = "95959595-9595-4595-8595-959595959502";
-const propertyId = "95959595-9595-4595-8595-959595959503";
+let actorUserId = randomUUID();
+let organizationId = randomUUID();
+let propertyId = randomUUID();
 
 describe.skipIf(!TEST_DATABASE_URL)("first-run PMS room setup concurrency", () => {
   const control = new pg.Client({
@@ -39,20 +40,25 @@ describe.skipIf(!TEST_DATABASE_URL)("first-run PMS room setup concurrency", () =
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
     await control.connect();
-    await cleanup();
+  });
+
+  beforeEach(async () => {
+    actorUserId = randomUUID();
+    organizationId = randomUUID();
+    propertyId = randomUUID();
     await control.query(
       `INSERT INTO identity.users (id, email, name, status)
-       VALUES ($1::uuid, 'pms-room-race@example.test', 'PMS Room Race', 'active')`,
+       VALUES ($1::uuid, $1::text || '@example.test', 'PMS Room Race', 'active')`,
       [actorUserId],
     );
     await control.query(
       `INSERT INTO identity.organizations (id, kind, name, slug, status)
-       VALUES ($1::uuid, 'hotel_group', 'PMS Room Race', 'pms-room-race', 'active')`,
+       VALUES ($1::uuid, 'hotel_group', 'PMS Room Race', $1::text, 'active')`,
       [organizationId],
     );
     await control.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
-       VALUES ($1::uuid, 'pms-room-race', 'PMS Room Race')`,
+       VALUES ($1::uuid, $1::text, 'PMS Room Race')`,
       [propertyId],
     );
     await control.query(
@@ -78,16 +84,11 @@ describe.skipIf(!TEST_DATABASE_URL)("first-run PMS room setup concurrency", () =
     );
   });
 
-  beforeEach(async () => {
-    await cleanupPmsData();
-  });
-
   afterAll(async () => {
     await repository.close?.();
     await reconcileRepository.close();
     await labelRepository.close();
     await lifecycleReadRepository.close?.();
-    await cleanup();
     await control.end();
   });
 
@@ -456,73 +457,8 @@ describe.skipIf(!TEST_DATABASE_URL)("first-run PMS room setup concurrency", () =
     throw new Error("Concurrent room setup commands did not reach the advisory lock");
   }
 
-  async function cleanup(): Promise<void> {
-    await control.query("BEGIN");
-    try {
-      await control.query("DELETE FROM platform.outbox_events WHERE property_id = $1::uuid", [
-        propertyId,
-      ]);
-      await control.query("DELETE FROM platform.domain_events WHERE property_id = $1::uuid", [
-        propertyId,
-      ]);
-      await control.query(
-        "DELETE FROM platform.product_audit_events WHERE organization_id = $1::uuid",
-        [organizationId],
-      );
-      await control.query(
-        `DELETE FROM platform.idempotency_keys
-         WHERE organization_id = $1::uuid
-            OR property_id = $2::uuid`,
-        [organizationId, propertyId],
-      );
-      await control.query("DELETE FROM pms.room_types WHERE property_id = $1::uuid", [propertyId]);
-      await control.query(
-        "DELETE FROM identity.product_entitlements WHERE organization_id = $1::uuid",
-        [organizationId],
-      );
-      await control.query(
-        "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
-        [organizationId],
-      );
-      await control.query(
-        "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",
-        [organizationId],
-      );
-      await control.query("DELETE FROM hotel_catalog.properties WHERE id = $1::uuid", [propertyId]);
-      await control.query("DELETE FROM identity.organizations WHERE id = $1::uuid", [
-        organizationId,
-      ]);
-      await control.query("DELETE FROM identity.users WHERE id = $1::uuid", [actorUserId]);
-      await control.query("COMMIT");
-    } catch (error) {
-      await control.query("ROLLBACK");
-      throw error;
-    }
-  }
-
-  async function cleanupPmsData(): Promise<void> {
-    await control.query("BEGIN");
-    try {
-      await control.query("DELETE FROM platform.outbox_events WHERE property_id = $1::uuid", [
-        propertyId,
-      ]);
-      await control.query("DELETE FROM platform.domain_events WHERE property_id = $1::uuid", [
-        propertyId,
-      ]);
-      await control.query(
-        "DELETE FROM platform.product_audit_events WHERE property_id = $1::uuid",
-        [propertyId],
-      );
-      await control.query("DELETE FROM platform.idempotency_keys WHERE property_id = $1::uuid", [
-        propertyId,
-      ]);
-      await control.query("DELETE FROM pms.room_types WHERE property_id = $1::uuid", [propertyId]);
-      await control.query("COMMIT");
-    } catch (error) {
-      await control.query("ROLLBACK");
-      throw error;
-    }
-  }
+  // Each test owns fresh identities and property; retain append-only audit history
+  // until the disposable test database is destroyed.
 });
 
 function roomCommand(

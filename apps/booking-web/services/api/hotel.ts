@@ -14,7 +14,7 @@ export const hotelService = {
     return toLegacyHotel(await bookingWebPublicApi.getHotel(slug, { locale }));
   },
 
-  async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
+  async recordAffiliateClick(slug: string, referralCode: string, clickId: string): Promise<void> {
     try {
       await fetch(
         `${bookingWebPublic.baseURL}/api/booking-web/hotels/${encodeURIComponent(slug)}/attribution/clicks`,
@@ -22,6 +22,7 @@ export const hotelService = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            clickId,
             referralCode,
             sessionId: getBookingWebSessionId(slug),
             landingUrl: typeof window === "undefined" ? undefined : window.location.href,

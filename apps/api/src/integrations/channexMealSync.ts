@@ -1,7 +1,9 @@
+import type { PricingMeal } from "@vayada/domain-pms";
+
 export type ChannexMeal = {
   externalRatePlanId: string;
   externalRoomTypeId: string;
-  mealType: "room_only" | "breakfast";
+  mealType: PricingMeal["kind"];
 };
 
 export class ChannexMealSyncError extends Error {}
@@ -13,6 +15,7 @@ export async function reconcileChannexMeals(
   request: (method: "GET" | "PUT", path: string, body?: unknown) => Promise<unknown>,
 ): Promise<void> {
   if (!meals.length) return;
+  for (const meal of meals) validateMeal(propertyId, meal);
   const mapped = new Map<string, string>();
   for (let page = 1; ; page++) {
     const response = record(
@@ -40,22 +43,7 @@ export async function reconcileChannexMeals(
   }
   for (const meal of meals) {
     const path = `/api/v1/rate_plans/${encodeURIComponent(meal.externalRatePlanId)}`;
-    const read = async () => {
-      const data = record(record(await request("GET", path)).data);
-      const attributes = record(data.attributes);
-      const relationships = record(data.relationships);
-      const relatedId = (name: string) => record(record(relationships[name]).data).id;
-      if (
-        data.id !== meal.externalRatePlanId ||
-        (attributes.property_id ?? relatedId("property")) !== propertyId ||
-        (attributes.room_type_id ?? relatedId("room_type")) !== meal.externalRoomTypeId
-      ) {
-        throw new ChannexMealSyncError(
-          "Channex meal reconciliation property/room/rate identity mismatch",
-        );
-      }
-      return attributes.meal_type;
-    };
+    const read = () => readChannexMeal(propertyId, meal, request);
     const current = await read();
     if (current === meal.mealType) continue;
     const channel = mapped.get(meal.externalRatePlanId);
@@ -73,4 +61,66 @@ export async function reconcileChannexMeals(
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+/** Provider metadata proof only: no publication authority, amount or OTA-display claim. */
+export async function verifyChannexMealReadback(
+  propertyId: string,
+  meal: ChannexMeal,
+  request: (method: "GET", path: string) => Promise<unknown>,
+): Promise<ChannexMeal & { externalPropertyId: string }> {
+  validateMeal(propertyId, meal);
+  // Snapshot caller inputs before awaiting provider IO.
+  const expected = {
+    externalRatePlanId: meal.externalRatePlanId,
+    externalRoomTypeId: meal.externalRoomTypeId,
+    mealType: meal.mealType,
+  };
+  if ((await readChannexMeal(propertyId, expected, request)) !== expected.mealType)
+    throw new ChannexMealSyncError("Channex meal readback did not match the configured inclusion");
+  return { ...expected, externalPropertyId: propertyId };
+}
+
+function validateMeal(propertyId: string, meal: ChannexMeal): void {
+  if (
+    ![propertyId, meal?.externalRatePlanId, meal?.externalRoomTypeId].every(
+      (id) => typeof id === "string" && id.trim().length > 0,
+    ) ||
+    !["room_only", "breakfast", "half_board", "full_board", "all_inclusive"].includes(
+      meal?.mealType,
+    )
+  )
+    throw new ChannexMealSyncError("Invalid Channex meal identity or inclusion");
+}
+
+async function readChannexMeal(
+  propertyId: string,
+  meal: ChannexMeal,
+  request: (method: "GET", path: string) => Promise<unknown>,
+): Promise<unknown> {
+  const data = record(
+    record(
+      await request("GET", `/api/v1/rate_plans/${encodeURIComponent(meal.externalRatePlanId)}`),
+    ).data,
+  );
+  const attributes = record(data.attributes);
+  const relationships = record(data.relationships);
+  const matches = (attribute: string, relationship: string, expected: string) => {
+    const direct = attributes[attribute];
+    const related = record(record(relationships[relationship]).data).id;
+    return (
+      (direct === expected || related === expected) &&
+      (direct === undefined || direct === expected) &&
+      (related === undefined || related === expected)
+    );
+  };
+  if (
+    data.id !== meal.externalRatePlanId ||
+    !matches("property_id", "property", propertyId) ||
+    !matches("room_type_id", "room_type", meal.externalRoomTypeId)
+  )
+    throw new ChannexMealSyncError(
+      "Channex meal reconciliation property/room/rate identity mismatch",
+    );
+  return attributes.meal_type;
 }

@@ -17,6 +17,7 @@ describe("PMS Channex management contract", () => {
       "sync_bookings",
       "update_markups",
       "install_messaging",
+      "update_inventory_rules",
     ]);
     expect(CHANNEX_MANAGEMENT_OPERATION_TYPES).not.toContain("promote_webhook");
   });

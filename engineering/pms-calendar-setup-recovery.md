@@ -29,3 +29,11 @@ before fact decoding prevents malformed legacy retired rows from blocking those
 flows. Direct ID and durable draft-binding lookups retain retired records. Active
 room facts still undergo the complete contract validation, and no inventory or
 room lifecycle is changed by this read.
+
+When recovery adds an active room to an already materialized calendar, the
+materializer uses the immutable calendar revision recorded by stored coverage
+to identify the new binding. An entirely empty new room can be initialized;
+partial room coverage and gaps in existing rooms still fail closed. The first
+materialization with added bindings must include the full stored horizon before
+coverage advances to the new revision. Existing reservation and manual inventory
+owners are preserved. This is a prerequisite for VAY-910 mixed-room validation.
