@@ -8,7 +8,7 @@ function fixture() {
   const propertyId = randomUUID(),
     bookingId = randomUUID(),
     roomTypeId = randomUUID(),
-    externalId = randomUUID();
+    externalId: string = randomUUID();
   const input = {
     propertyId,
     bookingId,
