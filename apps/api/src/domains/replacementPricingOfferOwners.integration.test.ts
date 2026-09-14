@@ -1,3 +1,4 @@
+import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { parsePublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { createReplacementBookingQuoteIssuer } from "../routes/replacementBookingQuote.js";
 import Fastify from "fastify";
@@ -17,7 +18,7 @@ import { redeemCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
-import { parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
+import { parsePublicPricingSelection, parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
 import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
 import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
 import type { FixedChargePolicy } from "./replacementFixedCharges.js";
@@ -485,14 +486,59 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       const request = { ...scope, sourceManifestHash: hash, sourceManifest: { contractVersion: "onboarding-source-manifest.v1" as const, propertyId: scope.propertyId, sources: evidence.sources } };
       const snapshot = await pms.getSnapshot(request);
       if (snapshot.outcome !== "snapshot") throw new Error("PMS snapshot required");
+      const profile = structuredClone(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile);
+      profile.hotel.propertyId = scope.propertyId;
+      profile.hotel.slug = scope.propertyId;
       const built = buildBookingPublicContent({
-        sourceManifestHash: hash, readinessHash: hash, profile: structuredClone(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile),
+        sourceManifestHash: hash, readinessHash: hash, profile,
         rooms: snapshot.content.rooms, calendar: snapshot.content.calendar,
         finance: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"], onlinePayment: true, payAtProperty: true, readyPaymentMethods: ["card", "pay_at_property"] },
       });
       expect(built).not.toBeNull();
       expect(parseBookingPublicContent(built?.publicContent)).toEqual(built?.publicContent);
       expect(built?.publicContent.rooms.flatMap(room => room.rates)).toEqual(current!.rooms.flatMap(room => room.offers));
+      const catalog = createPublicPricingOfferCatalog(single);
+      expect(await catalog.read(scope.propertyId)).toBeNull(); // Approved pricing alone is not published content.
+      let revisionNumber = 0;
+      const publishContent = async (content: unknown) => {
+        const revision = randomUUID();
+        await pool.query(`INSERT INTO distribution.public_booking_content_revisions
+          (id,property_id,revision_number,readiness_contract_version,source_manifest,source_manifest_hash,readiness_hash,readiness_product,readiness_status,public_content,built_by_user_id)
+          VALUES($1,$2,$3,'onboarding-product-readiness.v1',$4,$5,$5,'booking','ready',$6,$7)`,
+          [revision, scope.propertyId, ++revisionNumber, request.sourceManifest, hash, content, scope.actorUserId]);
+        await pool.query(`INSERT INTO distribution.active_public_booking_revision(property_id,content_revision_id,activated_by_user_id)
+          VALUES($1,$2,$3) ON CONFLICT(property_id) DO UPDATE SET content_revision_id=EXCLUDED.content_revision_id`,
+          [scope.propertyId, revision, scope.actorUserId]);
+      };
+      await publishContent(built!.publicContent);
+      const offers = await catalog.read(scope.propertyId);
+      expect(offers?.version).toBe("public-pricing-offers.v1");
+      expect(offers?.rooms.flatMap(room => room.offers.map(offer => offer.publicOfferKey))).toEqual(current!.rooms.flatMap(room => room.offers.map(offer => offer.ratePlanId)));
+      expect(offers?.rooms.every(room => room.name === "Suite" && room.images.length === 1)).toBe(true);
+      expect(JSON.stringify(offers)).not.toMatch(/baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/);
+      expect(await catalog.read(randomUUID())).toBeNull();
+      const app = Fastify({ logger: false });
+      await app.register(registerBookingWebPublicRoutes, { profileRepository: { async findProfileBySlug() { return null; } },
+        checkoutAdapter: createTargetBookingWebCheckoutAdapter({ connectionString: url!, pool: single, inventoryReservationPort: createTargetPmsInventoryReservationPort() }) });
+      try {
+        const response = await app.inject({ method: "GET", url: `/hotels/${scope.propertyId}/pricing-offers` });
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.json()).toEqual(offers);
+        expect((await app.inject({ method: "GET", url: `/hotels/${randomUUID()}/pricing-offers` })).statusCode).toBe(404);
+      } finally { await app.close(); }
+      for (const change of [
+        (content: NonNullable<typeof built>["publicContent"]) => { content.profile.hotel.propertyId = randomUUID(); },
+        (content: NonNullable<typeof built>["publicContent"]) => { (content.rooms as unknown[]).pop(); },
+        (content: NonNullable<typeof built>["publicContent"]) => { (content.rooms[0]!.rates as unknown[])[0] = { ratePlanId: "old", currency: "EUR", baseNightlyAmount: "100.00", refundable: true, paymentTiming: "pay_at_property" }; },
+      ]) {
+        const invalid = structuredClone(built!.publicContent); change(invalid);
+        await publishContent(invalid);
+        expect(await catalog.read(scope.propertyId)).toBeNull();
+      }
+      await publishContent(built!.publicContent);
+      await f.authority.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.choice.revision, authority: "vayada" });
+      expect(await catalog.read(scope.propertyId)).toBeNull(); // Previously published keys cannot survive a new authority revision.
       await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [scope.propertyId]);
       expect(await pms.getSnapshot(request)).toEqual({ outcome: "unavailable", owner: "pms" });
     } finally { await single.end(); }
@@ -1390,7 +1436,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     try {
       const path = `/hotels/${f.scope.propertyId}/bookings/quote`;
-      const payload = { version: "public-booking-quote-request.v1", selection: f.selection, paymentMethod: "pay_at_property" } as const;
+      const payload = { version: "public-booking-quote-request.v1", selection: parsePublicPricingSelection(f.selection)!, paymentMethod: "pay_at_property" } as const;
       const failed = createReplacementBookingQuoteIssuer({ async issue() { throw new Error("private database details"); } });
       await expect(failed(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 503, message: "Quote temporarily unavailable." });
       const headers = { "Idempotency-Key": randomUUID() };

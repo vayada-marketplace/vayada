@@ -741,3 +741,16 @@ and supports cancellation. Expired responses cannot become displayable prices.
 This client prerequisite does not activate the current count-only checkout UI:
 room selection must supply actual child ages and current replacement offer keys
 first. Legacy request payloads cannot be silently converted into those facts.
+
+
+GET /api/booking-web/hotels/:slug/pricing-offers exposes the current published
+replacement offer catalogue for explicit guest selection. It requires current
+public authority and the approved pricing owner in one READ COMMITTED transaction,
+then reads the active Distribution content and requires exact room/offer equality
+with the current mapper. Only published names/descriptions/occupancy/images and
+public offer keys/currency/meal plans are returned. Closing/inactive rooms, missing
+publication, old flat prices, changed pricing/terms/Finance or mismatched property
+fail closed; public access is checked again after reads. The catalogue has no
+amounts or availability promise. The existing date-specific /offers contract is
+not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
+their own date, age, availability and current-evidence checks.
