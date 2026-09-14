@@ -13,6 +13,89 @@ const scopeSchema = z.object({
 type Scope = z.infer<typeof scopeSchema>;
 const queue = "pms.channex.webhooks",
   type = "channex.scan-alterations";
+
+/** Default-off runtime integration must supply its explicit rollout property allowlist. */
+export async function scheduleChannexAlterationScans(options: {
+  pool: pg.Pool;
+  propertyIds: readonly string[];
+  ownsMutation: () => boolean;
+  signal?: AbortSignal;
+  limit?: number;
+}): Promise<number> {
+  const properties = z.array(z.uuid()).max(100).parse(options.propertyIds);
+  const limit = z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .parse(options.limit ?? 25);
+  const active = () => !options.signal?.aborted && options.ownsMutation();
+  if (!properties.length || !active()) return 0;
+  const client = await options.pool.connect();
+  try {
+    await client.query("BEGIN");
+    const bindings = await client.query<Scope>(
+      `SELECT connection.id AS "connectionId",connection.property_id AS "propertyId",
+         connection.binding_generation AS "bindingGeneration",connection.external_property_id AS "providerPropertyId"
+       FROM pms.channel_connections connection JOIN pms.channel_binding_claims claim
+         ON claim.property_id=connection.property_id AND claim.provider='channex'
+         AND claim.external_property_id=connection.external_property_id AND claim.claim_state='active'
+       WHERE connection.provider='channex' AND connection.connection_status='connected'
+         AND connection.property_id=ANY($1::uuid[]) AND NOT EXISTS (
+           SELECT 1 FROM platform.jobs job WHERE job.queue_name=$2 AND job.job_type=$3
+             AND job.resource_product='pms' AND job.property_id=connection.property_id
+             AND ((job.resource_type='channel_connection' AND job.resource_id=connection.id::text)
+               OR (job.resource_type='channel_property' AND job.resource_id=connection.property_id::text))
+             AND job.payload->>'connectionId'=connection.id::text
+             AND job.payload->>'bindingGeneration'=connection.binding_generation::text
+             AND (job.status IN ('pending','running') OR
+               (job.job_metadata->>'trigger'='periodic' AND job.created_at>now()-interval '15 minutes'))
+         ) ORDER BY connection.property_id,connection.id LIMIT $4
+       FOR UPDATE OF connection SKIP LOCKED FOR SHARE OF claim SKIP LOCKED`,
+      [properties, queue, type, limit],
+    );
+    let scheduled = 0;
+    for (const scope of bindings.rows) {
+      if (!active()) return 0;
+      // Fresh statement snapshot after the binding lock: another scheduler may have just committed.
+      const result = await client.query(
+        `INSERT INTO platform.jobs(job_key,queue_name,job_type,tenant_scope,property_id,
+           resource_product,resource_type,resource_id,payload,job_metadata)
+         SELECT $2 || ':' || $4 || ':' || $6 || ':periodic:' || floor(extract(epoch FROM now())/900)::text,
+           $1,$2,'property',$3,'pms','channel_connection',$4,$5::jsonb,'{"page":1,"trigger":"periodic"}'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM platform.jobs job WHERE job.queue_name=$1 AND job.job_type=$2
+             AND job.resource_product='pms' AND job.property_id=$3
+             AND ((job.resource_type='channel_connection' AND job.resource_id=$4)
+               OR (job.resource_type='channel_property' AND job.resource_id=$3::text))
+             AND job.payload->>'connectionId'=$4 AND job.payload->>'bindingGeneration'=$6
+             AND (job.status IN ('pending','running') OR
+               (job.job_metadata->>'trigger'='periodic' AND job.created_at>now()-interval '15 minutes'))
+         ) ON CONFLICT(queue_name,job_key) DO NOTHING`,
+        [
+          queue,
+          type,
+          scope.propertyId,
+          scope.connectionId,
+          JSON.stringify(scope),
+          scope.bindingGeneration,
+        ],
+      );
+      scheduled += result.rowCount ?? 0;
+    }
+    if (!active()) return 0;
+    await client.query("COMMIT");
+    return scheduled;
+  } finally {
+    try {
+      await client.query("ROLLBACK");
+      client.release();
+    } catch {
+      client.release(true);
+    }
+  }
+}
+
 async function assertBinding(client: pg.PoolClient, scope: Scope) {
   const result = await client.query(
     `SELECT connection.id FROM pms.channel_connections connection

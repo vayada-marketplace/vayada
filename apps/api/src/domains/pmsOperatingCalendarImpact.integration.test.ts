@@ -1,3 +1,5 @@
+import { loadConfig } from "../config.js";
+import { createPgPmsRoomClosureRepository } from "./pmsRoomClosureCommandRepository.js";
 import {
   parsePreviewPmsOperatingCalendarImpactCommand,
   parseUpsertPmsOperatingCalendarCommand,
@@ -256,6 +258,117 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
       ),
     ).resolves.toEqual({ ok: false, error: { code: "materialization_not_current" } });
   });
+
+  it.each([
+    "valid",
+    "missing-receipt",
+    "wrong-owner",
+    "before-cutoff",
+    "open-row",
+    "assigned-row",
+    "blocked-row",
+  ])(
+    "handles retained terminal inventory only with complete closure proof (%s)",
+    async (variant) => {
+      await configureAndSeedInventory();
+      const closure = createPgPmsRoomClosureRepository({
+        connectionString,
+        channex: loadConfig({}).channexManagement,
+        now: () => new Date(acceptedAt),
+      });
+      try {
+        expect(
+          await closure.closeRoom({
+            organizationId,
+            propertyId,
+            roomTypeId: roomTypeB,
+            actorUserId,
+            expectedRoomFactsRevision: 4,
+            expectedRoomUnitsRevision: 8,
+            expectedCalendarRevision: 1,
+            expectedActivePublicationRevisionId: null,
+            idempotencyKey: "terminal-manifest",
+            requestId: "terminal-manifest",
+          }),
+        ).toMatchObject({ ok: true, calendarRevision: 2, closedInventoryDays: 3 });
+      } finally {
+        await closure.dispose();
+      }
+      // Complete the test room's inactive disposition; historical inventory remains.
+      await admin.query("UPDATE pms.room_types SET active=false WHERE property_id=$1 AND id=$2", [
+        propertyId,
+        roomTypeB,
+      ]);
+      if (variant !== "valid") {
+        await admin.query("BEGIN;SET LOCAL session_replication_role=replica");
+        try {
+          if (variant === "missing-receipt")
+            await admin.query("DELETE FROM pms.room_type_closures WHERE property_id=$1", [
+              propertyId,
+            ]);
+          if (variant === "open-row")
+            await admin.query(
+              "UPDATE pms.inventory_days SET status='open',available_count=2 WHERE property_id=$1 AND room_type_id=$2",
+              [propertyId, roomTypeB],
+            );
+          if (variant === "wrong-owner")
+            await admin.query(
+              "UPDATE pms.inventory_days SET closure_source_revision=0 WHERE property_id=$1 AND room_type_id=$2",
+              [propertyId, roomTypeB],
+            );
+          if (variant === "before-cutoff")
+            await admin.query(
+              "UPDATE pms.room_type_closures SET cutoff_date='2026-08-05' WHERE property_id=$1",
+              [propertyId],
+            );
+          if (variant === "assigned-row")
+            await admin.query(
+              "UPDATE pms.inventory_days SET assigned_count=1 WHERE property_id=$1 AND room_type_id=$2",
+              [propertyId, roomTypeB],
+            );
+          if (variant === "blocked-row")
+            await admin.query(
+              "UPDATE pms.inventory_days SET blocked_count=1 WHERE property_id=$1 AND room_type_id=$2",
+              [propertyId, roomTypeB],
+            );
+          await admin.query("COMMIT");
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      }
+      const rows = () =>
+        admin.query(
+          "SELECT to_jsonb(i) row FROM pms.inventory_days i WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+          [propertyId],
+        );
+      const before = await rows();
+      const command = previewCommand("after-closure", {
+        expectedCalendarRevision: 2,
+        roomTypeLimits: [{ ...roomLimits()[0]!, startingSellableLimitCount: 1 }],
+      });
+      if (variant === "valid") {
+        const preview = await requiredPreview(command);
+        expect(preview.sourceRevisions.inventory.dayCount).toBe(3);
+        expect(preview.impact.summary.acceptedBookingCount).toBe(0);
+        const applied = await calendar.upsertOperatingCalendar(
+          finalCommand("after-closure", preview.confirmation, {
+            expectedCalendarRevision: 2,
+            roomTypeLimits: [{ ...roomLimits()[0]!, startingSellableLimitCount: 1 }],
+          }),
+        );
+        expect(applied.ok, JSON.stringify(applied)).toBe(true);
+        expect(applied).toMatchObject({
+          ok: true,
+          response: { configuration: { calendarRevision: 3 } },
+        });
+      } else
+        await expect(impact.previewOperatingCalendarImpact(command)).rejects.toThrow(
+          "Inventory coverage manifest is not exact",
+        );
+      expect((await rows()).rows).toEqual(before.rows);
+    },
+  );
 
   it("waits for a booking/override writer and rejects the now-stale confirmation", async () => {
     await configureAndSeedInventory();
@@ -820,6 +933,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS operating-calendar impact co
         "DELETE FROM pms.inventory_reservation_receipts WHERE property_id = $1::uuid",
         "DELETE FROM pms.inventory_coverage_validation_queue WHERE property_id = $1::uuid",
         "DELETE FROM pms.inventory_materialization_coverage WHERE property_id = $1::uuid",
+        "DELETE FROM pms.room_type_closures WHERE property_id = $1::uuid",
         "DELETE FROM pms.inventory_days WHERE property_id = $1::uuid",
         "DELETE FROM pms.operating_calendar_recurring_periods WHERE property_id = $1::uuid",
         "DELETE FROM pms.operating_calendar_room_bindings WHERE property_id = $1::uuid",

@@ -29,6 +29,18 @@ describe("parsePublicBookabilityProfileProjection", () => {
     expect(parsePublicBookabilityProfileProjection(profile)).toBeNull();
   });
 
+  it("preserves midnight as the explicit end-of-arrival-day deadline", () => {
+    const profile = storedProfile();
+    profile.hotel = {
+      ...(profile.hotel as Record<string, unknown>),
+      policies: { checkInFrom: "14:00", checkInUntil: "00:00" },
+    };
+    expect(parsePublicBookabilityProfileProjection(profile)?.hotel.policies).toEqual({
+      checkInFrom: "14:00",
+      checkInUntil: "00:00",
+    });
+  });
+
   it.each([
     ["unknown root field", (profile: any) => (profile.privateValue = "secret")],
     ["wrong source", (profile: any) => (profile.dataSources[0] = "private")],

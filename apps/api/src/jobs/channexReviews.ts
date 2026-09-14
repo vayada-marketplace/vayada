@@ -65,7 +65,7 @@ export async function runChannexReviewJobs(
              ON CONFLICT (property_id, provider, provider_review_id) DO UPDATE SET
                channel = EXCLUDED.channel, guest_display_name = EXCLUDED.guest_display_name,
                rating = EXCLUDED.rating, body = EXCLUDED.body,
-               reply_body = EXCLUDED.reply_body,
+               reply_body = COALESCE(EXCLUDED.reply_body, pms.channel_reviews.reply_body),
                reviewed_at = EXCLUDED.reviewed_at,
                provider_updated_at = EXCLUDED.provider_updated_at,
                provider_snapshot = EXCLUDED.provider_snapshot, updated_at = now()
@@ -137,7 +137,7 @@ function parseReview(payload: Record<string, unknown>) {
       text(review.reviewer_name) ?? text(review.guest_name) ?? text(review.guest_display_name),
     rating: number(review.overall_score) ?? number(review.rating),
     body: text(review.content) ?? text(review.body) ?? "",
-    replyBody: text(review.reply),
+    replyBody: text(review.reply) ?? text(record(review.reply).reply),
     reviewedAt: text(review.received_at) ?? text(review.created_at) ?? text(envelope.created_at),
     updatedAt: text(payload.reviewRevision) ?? text(raw.timestamp) ?? text(review.updated_at),
     snapshot: {

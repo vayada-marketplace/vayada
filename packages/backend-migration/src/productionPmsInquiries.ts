@@ -45,11 +45,9 @@ export function normalizePmsInquiries(context: PmsBuildContext, records: PmsTarg
         (typeof sourceBody === "string" && sourceBody.trim().toLowerCase() === "inquiry"));
     const inquiryValue = raw["inquiry"];
     const explicitInquiry =
-      [
-        raw["provider_inquiry_id"],
-        raw["inquiry_id"],
-        optionalObject(raw["meta"])["live_feed_event_id"],
-      ].some((value) => value != null && value !== "") ||
+      [raw["provider_inquiry_id"], raw["inquiry_id"]].some(
+        (value) => value != null && value !== "",
+      ) ||
       (inquiryValue != null &&
         (typeof inquiryValue !== "object" ||
           Array.isArray(inquiryValue) ||
