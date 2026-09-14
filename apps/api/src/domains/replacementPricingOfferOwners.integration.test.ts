@@ -1,3 +1,4 @@
+import { readCurrentChannexStagedPrices } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { prepareChannexInitialAriDispatch, claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
@@ -785,6 +786,112 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
     return { ...f, ariCorrelation: correlation, taskId, ariResponse: response };
   }
+  async function stagedPriceFixture() {
+    const f = await ariReceiptFixture();
+    const stored = (
+      await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+        f.ariCorrelation.attemptId,
+      ])
+    ).rows[0].request_body.values[0];
+    const metadata = (await f.response().json()) as {
+      data: { attributes: { options: { id: string; is_primary: boolean; occupancy: number }[] } };
+    };
+    const options = metadata.data.attributes.options;
+    options.forEach((o: { id: string; is_primary: boolean }) => {
+      o.id = o.is_primary ? stored.rate_plan_id : randomUUID();
+    });
+    const get = vi.fn(async (path: string) => {
+      if (path.includes("/rate_plans/")) return structuredClone(metadata);
+      const id = new URL(path, "https://staging.channex.io").searchParams.get(
+        "filter[rate_plan_id]",
+      );
+      const option = options.find((o: { id: string }) => o.id === id);
+      if (!option) throw new Error("Unexpected option ID");
+      const amount = stored.rates.find(
+        (r: { occupancy: number }) => r.occupancy === option.occupancy,
+      ).rate;
+      return { data: { [id!]: { [stored.date]: { rate: amount, stop_sell: true } } } };
+    });
+    const read = (port: (path: string, signal: AbortSignal) => Promise<unknown> = get) =>
+      readCurrentChannexStagedPrices(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        f.ariCorrelation.attemptId,
+        port,
+      );
+    return { ...f, get, read, stored, metadata };
+  }
+  it("reads all staged guest totals under immutable ownership without releasing the attempt", async () => {
+    const f = await stagedPriceFixture();
+    const result = await f.read();
+    expect(result).toMatchObject({
+      kind: "staged_prices_observed",
+      ariAttemptId: f.ariCorrelation.attemptId,
+      observation: {
+        prices: [
+          { occupancy: 1, rate: "100.00" },
+          { occupancy: 2, rate: "100.00" },
+        ],
+      },
+    });
+    expect(f.get).toHaveBeenCalledTimes(4);
+    expect(
+      (
+        await pool.query("SELECT state FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+          f.ariCorrelation.attemptId,
+        ])
+      ).rows[0].state,
+    ).toBe("unresolved");
+  });
+  it.each(["before", "during"])("rejects authority loss %s guest price reads", async (when) => {
+    const f = await stagedPriceFixture();
+    const expire = () =>
+      pool.query(
+        "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+        [f.input.jobId],
+      );
+    if (when === "before") await expire();
+    const result = await f.read(async (path) => {
+      await expire();
+      return f.get(path);
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "lease_unavailable" });
+    if (when === "before") expect(f.get).not.toHaveBeenCalled();
+  });
+  it("rejects receipt history changes during guest price reads", async () => {
+    const f = await stagedPriceFixture();
+    let added = false;
+    const result = await f.read(async (path) => {
+      if (!added) {
+        added = true;
+        await (
+          await prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, f.ariResponse())
+        )();
+      }
+      return f.get(path);
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "staged_price_observation_stale" });
+  });
+  it("requires retained configuration before guest price GETs", async () => {
+    const f = await stagedPriceFixture();
+    await pool.query(
+      "UPDATE pms.channex_offer_target_intents SET result_evidence=result_evidence-'configuration' WHERE id=$1",
+      [f.claim.intentId],
+    );
+    expect(await f.read()).toMatchObject({
+      kind: "unavailable",
+      reason: "configuration_evidence_unavailable",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it("bounds the whole guest price read and stops further GETs after timeout", async () => {
+    const f = await stagedPriceFixture();
+    const get = vi.fn(async () => new Promise<unknown>(() => {}));
+    await expect(f.read(get)).rejects.toThrow();
+    expect(get).toHaveBeenCalledOnce();
+  });
   async function stagedReadFixture() {
     const f = await ariReceiptFixture();
     const stored = (
