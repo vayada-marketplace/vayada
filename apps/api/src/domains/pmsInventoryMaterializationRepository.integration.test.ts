@@ -2,6 +2,7 @@ import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsComma
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createHash, randomUUID } from "node:crypto";
 import { runChannexBookingJobs } from "../jobs/channexBookings.js";
+import { persistChannexAssignments } from "./channexBookingAssignments.js";
 import { applyChannexAlterationRevision } from "./channexAlterationRevision.js";
 
 import {
@@ -49,21 +50,38 @@ type Fixture = Readonly<{
 }>;
 
 describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization repository", () => {
-  const admin = new pg.Client({
+  const adminPool = new pg.Pool({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
   });
+  let admin: pg.PoolClient;
   const repositories: PmsInventoryMaterializationRepository[] = [];
   const alterationBookings: string[] = [];
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
-    await admin.connect();
+    admin = await adminPool.connect();
   });
 
   afterAll(async () => {
     await Promise.all(repositories.map((repository) => repository.close()));
-    await admin.query("DELETE FROM booking.booking_change_requests WHERE guest_booking_id = ANY($1::uuid[])", [alterationBookings]);
-    await admin.end();
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    for (const table of ["product_audit_events", "dead_letter_events", "job_attempts"]) {
+      await admin.query(
+        `DELETE FROM platform.${table} WHERE job_id IN (SELECT id FROM platform.jobs WHERE payload->>'propertyId' IN (SELECT property_id::text FROM booking.guest_bookings WHERE id=ANY($1::uuid[])))`,
+        [alterationBookings],
+      );
+    }
+    await admin.query(
+      "DELETE FROM platform.jobs WHERE payload->>'propertyId' IN (SELECT property_id::text FROM booking.guest_bookings WHERE id=ANY($1::uuid[]))",
+      [alterationBookings],
+    );
+    await admin.query(
+      "DELETE FROM booking.booking_change_requests WHERE guest_booking_id = ANY($1::uuid[])",
+      [alterationBookings],
+    );
+    await admin.query("COMMIT");
+    admin.release();
+    await adminPool.end();
   });
 
   it("checks Airbnb alterations against real materialization and canonical assignments", async () => {
@@ -143,8 +161,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [propertyId],
         );
         let availabilityError: unknown;
-        try { await assertChannexAlterationAvailability(admin, input); }
-        catch (error) { availabilityError = error; }
+        try {
+          await assertChannexAlterationAvailability(admin, input);
+        } catch (error) {
+          availabilityError = error;
+        }
         expect(
           (
             await admin.query(
@@ -756,7 +777,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ...applied.revision,
       attributes: {
         ...applied.revision.attributes,
-        rooms: applied.revision.attributes.rooms.map((room) => ({ ...room, rate_plan_id: syntheticRatePlanId })),
+        rooms: applied.revision.attributes.rooms.map((room) => ({
+          ...room,
+          rate_plan_id: syntheticRatePlanId,
+        })),
         ota_name: "Airbnb",
         inserted_at: new Date().toISOString(),
       },
@@ -773,7 +797,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
               propertyId,
               providerPropertyId: applied.scope.providerPropertyId,
               channelBookingId: applied.providerBookingId,
-              revision: applied.revisionId,
+              revision: providerRevision.id,
               revisionSource: "webhook_hint",
               pullRequired: true,
               rawPayload: { event: "booking" },
@@ -928,6 +952,156 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].count,
     ).toBe(3);
+    // Exercise an actual alteration followed by ordinary assignment writes in one rollback scope.
+    await admin.query("BEGIN");
+    try {
+      const rateId = randomUUID();
+      await admin.query(
+        "INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,currency) VALUES($1,$2,$3,'compat','Compatibility','EUR')",
+        [rateId, propertyId, roomTypeId],
+      );
+      await admin.query(
+        "INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,external_room_type_id,external_rate_plan_id) VALUES($1,$2,$3,$4,$5,$6)",
+        [propertyId, connectionId, roomTypeId, rateId, externalRoom, syntheticRatePlanId],
+      );
+      await admin.query(
+        'UPDATE pms.operational_booking_assignments SET room_id=NULL,assigned_at=NULL,assignment_status=\'pending\',rate_plan_id=$2,assignment_payload=assignment_payload||\'{"version":"provider-before","channexRevision":"provider-before"}\'::jsonb WHERE guest_booking_id=$1',
+        [bookingId, rateId],
+      );
+      const reducedRequest = randomUUID();
+      await admin.query(
+        `INSERT INTO booking.booking_change_requests(id,guest_booking_id,request_type,requested_by,requested_changes)
+        SELECT $1::uuid,guest_booking_id,request_type,requested_by,jsonb_set(requested_changes,'{channex,eventId}',to_jsonb($1::uuid::text)) || jsonb_build_object(
+          'oldCheckOut','2026-08-05','oldTotal','37.50','newTotal','37.50','oldAdults',2,'oldChildren',0,
+          'rooms',jsonb_build_array(requested_changes->'rooms'->0))
+        FROM booking.booking_change_requests WHERE id=$2`,
+        [reducedRequest, applied.requestId],
+      );
+      const reducedRevision = {
+        ...providerRevision,
+        id: randomUUID(),
+        attributes: {
+          ...providerRevision.attributes,
+          rooms: [providerRevision.attributes.rooms[0]!],
+        },
+      };
+      await expect(
+        applyChannexAlterationRevision(admin, applied.scope, {
+          ...reducedRevision,
+          attributes: {
+            ...reducedRevision.attributes,
+            rooms: [{ ...reducedRevision.attributes.rooms[0]!, checkout_date: "2026-08-06" }],
+          },
+        }),
+      ).rejects.toThrow("alteration_revision_proposal_mismatch");
+      await admin.query("SAVEPOINT prior_staff_edit");
+      await admin.query(
+        'UPDATE pms.operational_booking_assignments SET assignment_payload=assignment_payload||\'{"version":"staff-edited"}\'::jsonb WHERE guest_booking_id=$1',
+        [bookingId],
+      );
+      await expect(
+        applyChannexAlterationRevision(admin, applied.scope, reducedRevision),
+      ).resolves.toBe(true);
+      const staffSlot = (
+        await admin.query(
+          "SELECT assignment_payload AS payload FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 AND position=1",
+          [bookingId],
+        )
+      ).rows[0];
+      expect(staffSlot.payload.channexRevision).toBe("provider-before");
+      expect(staffSlot.payload.version).not.toBe(staffSlot.payload.channexRevision);
+      await admin.query("ROLLBACK TO SAVEPOINT prior_staff_edit");
+      await expect(
+        applyChannexAlterationRevision(admin, applied.scope, reducedRevision),
+      ).resolves.toBe(true);
+      const readSlots = async () =>
+        (
+          await admin.query(
+            "SELECT id,position,assignment_status AS status,room_id,assigned_at,assignment_payload AS payload FROM pms.operational_booking_assignments WHERE guest_booking_id=$1 ORDER BY position",
+            [bookingId],
+          )
+        ).rows;
+      await admin.query(
+        "UPDATE pms.operational_booking_assignments SET room_id=(SELECT id FROM pms.rooms WHERE property_id=$2 AND room_number='B'),assigned_at=now() WHERE guest_booking_id=$1 AND position=2",
+        [bookingId, propertyId],
+      );
+      const reduced = await readSlots();
+      expect(reduced[0].payload.channexRevision).toBe(reduced[0].payload.version);
+      expect(reduced[0].payload.channexStay).toMatchObject({
+        externalRoomTypeId: externalRoom,
+        externalRatePlanId: syntheticRatePlanId,
+        checkOut: "2026-08-05",
+        adults: 1,
+      });
+      expect(reduced[1].status).toBe("released");
+      const roomStay = {
+        externalRoomTypeId: externalRoom,
+        externalRatePlanId: syntheticRatePlanId,
+        checkIn: "2026-08-04",
+        checkOut: "2026-08-05",
+        adults: 1,
+        children: 0,
+      };
+      const generic = (rooms = [roomStay], canceled = false) =>
+        persistChannexAssignments(admin, {
+          propertyId,
+          connectionId,
+          bookingId,
+          providerBookingId: applied.providerBookingId,
+          revisionId: randomUUID(),
+          channel: "airbnb",
+          canceled,
+          rooms,
+        });
+      await expect(generic()).resolves.toBe(false);
+      expect(await readSlots()).toEqual(reduced);
+      await admin.query("SAVEPOINT staff_edit");
+      await admin.query(
+        'UPDATE pms.operational_booking_assignments SET assignment_payload=assignment_payload||\'{"version":"staff-edited"}\'::jsonb WHERE id=$1',
+        [reduced[0].id],
+      );
+      await expect(generic([{ ...roomStay, adults: 2 }])).rejects.toThrow(
+        "operational_assignment_conflict",
+      );
+      await admin.query("ROLLBACK TO SAVEPOINT staff_edit");
+      await expect(generic([{ ...roomStay, adults: 2 }])).resolves.toBe(true);
+      expect((await readSlots())[1]).toEqual(reduced[1]);
+      await expect(generic([{ ...roomStay, adults: 2 }])).resolves.toBe(false);
+      await admin.query("SAVEPOINT reuse_slot");
+      await admin.query("UPDATE booking.guest_bookings SET room_count=2 WHERE id=$1", [bookingId]);
+      await expect(generic([roomStay, roomStay])).resolves.toBe(true);
+      const reused = await readSlots();
+      expect(reused[1]).toMatchObject({
+        id: reduced[1].id,
+        status: "pending",
+        room_id: null,
+        assigned_at: null,
+      });
+      expect(reused[1].payload.channexAlterationReleased).toBeUndefined();
+      await admin.query("ROLLBACK TO SAVEPOINT reuse_slot");
+      // A manually released slot must still block ordinary writes.
+      await admin.query("SAVEPOINT untrusted_release");
+      await admin.query(
+        "UPDATE pms.operational_booking_assignments SET assignment_payload=assignment_payload-'channexAlterationReleased' WHERE id=$1",
+        [reduced[1].id],
+      );
+      await expect(generic([], true)).rejects.toThrow("operational_assignment_conflict");
+      await admin.query("ROLLBACK TO SAVEPOINT untrusted_release");
+      await expect(generic([], true)).resolves.toBe(true);
+      const canceled = await readSlots();
+      expect(canceled[0].status).toBe("canceled");
+      expect(canceled[1]).toEqual(reduced[1]);
+      expect(
+        (
+          await admin.query(
+            "SELECT assigned_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date='2026-08-04'",
+            [propertyId, roomTypeId],
+          )
+        ).rows[0].assigned_count,
+      ).toBe(0);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
     await book(randomUUID(), "2026-08-06", "2026-08-07");
     await expect(check()).rejects.toThrow("alteration_rooms_unavailable");
     input.changes.requestedCheckOut = "2026-08-06";
@@ -936,6 +1110,94 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
+    // Full worker sequence also covers the downstream Booking revenue reader and ACK journal.
+    await admin.query(
+      "UPDATE pms.room_types SET room_facts_revision=room_facts_revision-1 WHERE id=$1",
+      [roomTypeId],
+    );
+    await admin.query(
+      "UPDATE booking.guest_bookings SET source_system='pms',source_booking_id=$2 WHERE id=$1",
+      [bookingId, `channex:${propertyId}:${applied.providerBookingId}`],
+    );
+    const workerRate = randomUUID(),
+      workerRequest = randomUUID();
+    await admin.query(
+      "INSERT INTO pms.rate_plans(id,property_id,room_type_id,code,name,currency) VALUES($1,$2,$3,'worker-compat','Worker compatibility','EUR')",
+      [workerRate, propertyId, roomTypeId],
+    );
+    await admin.query(
+      "INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,external_room_type_id,external_rate_plan_id) VALUES($1,$2,$3,$4,$5,$6)",
+      [propertyId, connectionId, roomTypeId, workerRate, externalRoom, syntheticRatePlanId],
+    );
+    await admin.query(
+      `INSERT INTO booking.booking_change_requests(id,guest_booking_id,request_type,requested_by,requested_changes)
+      SELECT $1::uuid,guest_booking_id,request_type,requested_by,jsonb_set(requested_changes,'{channex,eventId}',to_jsonb($1::uuid::text)) || jsonb_build_object(
+        'oldCheckOut','2026-08-05','oldTotal','37.50','newTotal','37.50','oldAdults',2,'oldChildren',0,
+        'rooms',jsonb_build_array(requested_changes->'rooms'->0))
+      FROM booking.booking_change_requests WHERE id=$2`,
+      [workerRequest, applied.requestId],
+    );
+    providerRevision.attributes.rooms = [providerRevision.attributes.rooms[0]!];
+    Object.assign(providerRevision.attributes.rooms[0]!, { days: { "2026-08-04": "37.50" } });
+    let followup = 0;
+    const nextWorkerRevision = async () => {
+      providerRevision.id = randomUUID();
+      providerRevision.attributes.inserted_at = new Date(
+        Date.now() + ++followup * 1000,
+      ).toISOString();
+      const nextJob = await queueRevision();
+      const result = await runRevision();
+      expect(
+        result,
+        JSON.stringify(
+          (await admin.query("SELECT job_metadata FROM platform.jobs WHERE id=$1", [nextJob])).rows,
+        ),
+      ).toMatchObject({ succeeded: 1 });
+    };
+    await nextWorkerRevision();
+    const releasedHistory = (
+      await admin.query(
+        "SELECT to_jsonb(a) AS data FROM pms.operational_booking_assignments a WHERE guest_booking_id=$1 AND position=2",
+        [bookingId],
+      )
+    ).rows;
+    expect(releasedHistory[0].data.assignment_status).toBe("released");
+    await nextWorkerRevision();
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+    Object.assign(providerRevision.attributes, { status: "cancelled", amount: "0.00" });
+    await nextWorkerRevision();
+    await queueRevision();
+    expect(await runRevision()).toMatchObject({ succeeded: 1 });
+    expect(
+      (
+        await admin.query("SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1", [
+          bookingId,
+        ])
+      ).rows[0].lifecycle_status,
+    ).toBe("canceled");
+    expect(
+      (
+        await admin.query(
+          "SELECT to_jsonb(a) AS data FROM pms.operational_booking_assignments a WHERE guest_booking_id=$1 AND position=2",
+          [bookingId],
+        )
+      ).rows,
+    ).toEqual(releasedHistory);
+    expect(
+      (
+        await admin.query(
+          "SELECT sum(occupied_room_nights)::int AS nights FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].nights,
+    ).toBe(0);
   });
 
   it("rejects captured active-room evidence after closure without writing inventory", async () => {
@@ -1508,7 +1770,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
 });
 
 async function createFixture(
-  admin: pg.Client,
+  admin: Pick<pg.PoolClient, "query">,
   repositories: PmsInventoryMaterializationRepository[],
   startingLimits: readonly number[],
   additionalRoomTypes: readonly string[] = [],
@@ -1671,7 +1933,7 @@ async function createFixture(
 }
 
 async function activateCalendarRevision(
-  admin: pg.Client,
+  admin: Pick<pg.PoolClient, "query">,
   fixture: Fixture,
   revision: number,
 ): Promise<void> {
@@ -1737,7 +1999,7 @@ function configurationSnapshot(input: {
 }
 
 async function seedCalendarRevision(
-  admin: pg.Client,
+  admin: Pick<pg.PoolClient, "query">,
   input: {
     organizationId: string;
     propertyId: string;
@@ -1813,10 +2075,13 @@ async function seedCalendarRevision(
         outboxId,
         input.actorUserId,
         ACCEPTED_AT.toISOString(),
-        input.roomTypeIds?.length ?? (1 + (input.additionalRoomTypes?.length ?? 0)),
+        input.roomTypeIds?.length ?? 1 + (input.additionalRoomTypes?.length ?? 0),
       ],
     );
-    for (const roomTypeId of input.roomTypeIds ?? [input.roomTypeId, ...(input.additionalRoomTypes ?? [])]) {
+    for (const roomTypeId of input.roomTypeIds ?? [
+      input.roomTypeId,
+      ...(input.additionalRoomTypes ?? []),
+    ]) {
       await admin.query(
         `INSERT INTO pms.operating_calendar_room_bindings (
          property_id, calendar_revision, room_type_id,
@@ -1858,7 +2123,10 @@ function materializationCommand(
   };
 }
 
-async function consumeAndOverrideFirstDay(admin: pg.Client, fixture: Fixture): Promise<void> {
+async function consumeAndOverrideFirstDay(
+  admin: Pick<pg.PoolClient, "query">,
+  fixture: Fixture,
+): Promise<void> {
   await admin.query(
     `UPDATE pms.inventory_days
      SET assigned_count = 2, available_count = 0,
@@ -1877,7 +2145,7 @@ async function consumeAndOverrideFirstDay(admin: pg.Client, fixture: Fixture): P
   );
 }
 
-async function readFirstDay(admin: pg.Client, fixture: Fixture) {
+async function readFirstDay(admin: Pick<pg.PoolClient, "query">, fixture: Fixture) {
   const result = await admin.query<{
     calendarRevision: number;
     inventoryRevision: number;
@@ -1911,7 +2179,7 @@ async function readFirstDay(admin: pg.Client, fixture: Fixture) {
   return result.rows[0];
 }
 
-async function sideEffectCounts(admin: pg.Client, propertyId: string) {
+async function sideEffectCounts(admin: Pick<pg.PoolClient, "query">, propertyId: string) {
   const result = await admin.query<{
     audits: number;
     idempotency: number;
@@ -1937,7 +2205,10 @@ async function sideEffectCounts(admin: pg.Client, propertyId: string) {
   return result.rows[0];
 }
 
-async function inventoryDayCount(admin: pg.Client, propertyId: string): Promise<number> {
+async function inventoryDayCount(
+  admin: Pick<pg.PoolClient, "query">,
+  propertyId: string,
+): Promise<number> {
   const result = await admin.query<{ count: number }>(
     `SELECT count(*)::integer AS count
      FROM pms.inventory_days WHERE property_id = $1::uuid`,
@@ -1946,7 +2217,7 @@ async function inventoryDayCount(admin: pg.Client, propertyId: string): Promise<
   return result.rows[0]?.count ?? -1;
 }
 
-async function backendProcessId(client: pg.Client): Promise<number> {
+async function backendProcessId(client: Pick<pg.PoolClient, "query">): Promise<number> {
   const result = await client.query<{ processId: number }>(
     `SELECT pg_backend_pid()::integer AS "processId"`,
   );
@@ -1955,7 +2226,10 @@ async function backendProcessId(client: pg.Client): Promise<number> {
   return processId;
 }
 
-async function waitForLockWaiter(admin: pg.Client, blockingProcessId: number): Promise<void> {
+async function waitForLockWaiter(
+  admin: Pick<pg.PoolClient, "query">,
+  blockingProcessId: number,
+): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const result = await admin.query<{ waitingCount: number }>(
       `SELECT count(*)::integer AS "waitingCount"

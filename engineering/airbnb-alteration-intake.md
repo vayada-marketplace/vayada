@@ -358,6 +358,12 @@ missing materialization and in-house stays require review and block application.
 Those limitations remain activation gates, alongside finance-source freshness
 validation, periodic scans and sanctioned provider end-to-end evidence.
 
-### Additional activation prerequisite after main integration
+### Assignment compatibility after main integration
 
-Keep alteration application disabled until its assignment updates also reconcile the generic Channex worker's `assignment_payload.channexStay` and `channexRevision` metadata and released slots. Otherwise a later generic modified or canceled revision can fail with `operational_assignment_conflict`. Cover alteration followed by generic modification and cancellation before activation. This prerequisite is separate from the waived live Airbnb account test.
+The VAY-1551 follow-up refreshes provider stay metadata and preserves staff-edit guards. Both generic assignment persistence and the nightly-revenue reader exclude slots explicitly released by an alteration from their active-room view. PostgreSQL coverage runs an alteration, an ordinary modified revision, cancellation and replay through the real worker with simulated provider responses. Runtime activation and the other Finance/provider-evidence prerequisites remain separate; the live Airbnb test waiver still applies.
+
+### Assignment compatibility contract (VAY-1551 follow-up)
+
+An authoritative alteration must refresh each active slot's provider stay (room/rate identifiers, dates and occupancy) without marking staff-modified slots as untouched. Preserve the reservation version used by staff commands; advance the generic worker's comparison token only for untouched or newly reset provider slots. Missing rate identifiers cannot establish complete provider metadata. Per-room dates must agree with the supported whole-booking stay.
+
+The generic worker excludes only channel slots explicitly released by an alteration from active-room comparison and cancellation. Preserve those history rows on shrink/cancel, and clear their release marker and physical allocation when legitimately reused. Other released/canceled/manual slots and staff changes retain existing conflict guards. Validate alteration → ordinary modification → cancellation, release/reuse, replay, and staff-edit conflicts with PostgreSQL. Runtime and Finance activation stay disabled.
