@@ -1,3 +1,4 @@
+import type { PublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import type { FastifyRequest } from "fastify";
 import { parsePublicPricingSelection } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
@@ -70,7 +71,7 @@ export function createReplacementBookingQuoteIssuer(
             payment: structuredClone(terms.payment),
           };
         }),
-      };
+      } satisfies PublicBookingQuote;
     } catch (error) {
       if (!(error instanceof PricingStorageError))
         throw Object.assign(new Error("Quote temporarily unavailable.", { cause: error }), {

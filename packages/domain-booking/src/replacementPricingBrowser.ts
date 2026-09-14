@@ -19,3 +19,5 @@ export function parseBookingPricingOfferTerms(value: unknown): ReplacementOfferT
         pricingInteger(p.basisPoints, 1) && p.basisPoints <= 10000 && pricingInteger(p.balanceDaysBeforeArrival))) return null;
   return structuredClone({ ...value, roomTypeId: value.roomTypeId.toLowerCase(), revision: value.revision.toLowerCase() }) as ReplacementOfferTerms;
 }
+
+export { parsePublicBookingQuote, type PublicBookingQuote, type PublicBookingQuoteRequest } from "./publicBookingQuote.js";
