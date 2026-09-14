@@ -49,10 +49,28 @@ export async function readLegacyOwnershipTargetRow(
   return readTargetRow(client, table, id);
 }
 
+/** Binding-only boundary; does not broaden clean-adoption or ownership readers. */
+export async function readLegacyHistoricalBindingTargetRow(
+  client: AdoptionQueryClient,
+  table: "hotel_catalog.properties" | "pms.channel_binding_claims" | "pms.channel_connections",
+  id: string,
+): Promise<{ id: string; rowStateSha256: string }> {
+  if (
+    table !== "hotel_catalog.properties" &&
+    table !== "pms.channel_binding_claims" &&
+    table !== "pms.channel_connections"
+  )
+    rejectAdoption("UNSUPPORTED_TARGET_TABLE");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
+    rejectAdoption("TARGET_ROW_MISMATCH");
+  return readTargetRow(client, table, id, true);
+}
+
 async function readTargetRow(
   client: AdoptionQueryClient,
   table: string,
   id: string,
+  requireCompleteColumns = false,
 ): Promise<{ id: string; rowStateSha256: string }> {
   const [schema, relation] = table.split(".") as [string, string];
   const columns = await client.query<Column>(
@@ -64,6 +82,19 @@ async function readTargetRow(
   );
   if (columns.rows.length === 0)
     rejectAdoption("TARGET_SCHEMA_MISMATCH", `Target table ${table} is missing`);
+  if (requireCompleteColumns) {
+    const physical = await client.query<{ columnName: string }>(
+      `SELECT attname AS "columnName" FROM pg_attribute
+       WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped
+         AND attgenerated = '' ORDER BY attnum`,
+      [table],
+    );
+    if (
+      physical.rows.length !== columns.rows.length ||
+      physical.rows.some((row, index) => row.columnName !== columns.rows[index]?.columnName)
+    )
+      rejectAdoption("TARGET_COLUMN_VISIBILITY_INCOMPLETE");
+  }
   const expressions = columns.rows.map((column) => columnExpression(column)).join(", ");
   const result = await client.query<Record<string, unknown>>(
     `SELECT ${expressions} FROM ${quote(schema)}.${quote(relation)} WHERE id = $1::uuid`,
