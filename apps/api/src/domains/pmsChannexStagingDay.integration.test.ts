@@ -24,6 +24,19 @@ const input = { catalogHash: "a".repeat(64), approvalRef: "VAY-2013:synthetic-da
 describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
   const db = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   const ids = [scope.propertyId, stagingDay.roomTypeId];
+  const fixtureTransaction = async (body: (client: pg.PoolClient) => Promise<void>) => {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN; SET LOCAL session_replication_role=replica");
+      await body(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
   const request = vi.fn<typeof fetch>(async (url) =>
     Response.json({
       data: String(url).includes("/availability?")
@@ -47,57 +60,57 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
     ).rows[0].id;
     await seedChannexAssignmentInventory(db, scope.propertyId, other);
     // Synthetic immutable base calendar is seeded locally; live commands never rewrite it.
-    await db.query("BEGIN; SET LOCAL session_replication_role=replica");
-    await db.query(
-      "UPDATE pms.operating_calendar_revisions SET calendar_revision=8,schedule_mode='recurring',recurring_period_count=1 WHERE property_id=$1",
-      [scope.propertyId],
-    );
-    await db.query(
-      "UPDATE pms.operating_calendar_room_bindings SET calendar_revision=8 WHERE property_id=$1",
-      [scope.propertyId],
-    );
-    await db.query(
-      "INSERT INTO pms.operating_calendar_recurring_periods(property_id,calendar_revision,period_index,start_month,start_day,end_month,end_day) VALUES($1,8,0,9,20,9,21)",
-      [scope.propertyId],
-    );
-    await db.query("COMMIT");
+    await fixtureTransaction(async (client) => {
+      await client.query(
+        "UPDATE pms.operating_calendar_revisions SET calendar_revision=8,schedule_mode='recurring',recurring_period_count=1 WHERE property_id=$1",
+        [scope.propertyId],
+      );
+      await client.query(
+        "UPDATE pms.operating_calendar_room_bindings SET calendar_revision=8 WHERE property_id=$1",
+        [scope.propertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.operating_calendar_recurring_periods(property_id,calendar_revision,period_index,start_month,start_day,end_month,end_day) VALUES($1,8,0,9,20,9,21)",
+        [scope.propertyId],
+      );
+    });
     await db.query(
       `INSERT INTO pms.room_types(id,property_id,name,occupancy_limits,room_attributes,room_facts_revision,room_units_revision)
       VALUES($2,$1,'Approved double','{"total":2,"adults":2,"children":0}',
       '{"beds":[{"type":"double","quantity":1}],"bathroomType":"private","bedrooms":null,"bathrooms":null,"size":null}',2,2)`,
       ids,
     );
-    await db.query("BEGIN; SET LOCAL session_replication_role=replica");
-    await db.query(
-      `UPDATE pms.inventory_days SET calendar_revision=8,generated_source_revision=8,
-      status=CASE WHEN stay_date BETWEEN '2026-09-20' AND '2026-09-21' THEN 'open' ELSE 'closed' END,
-      available_count=CASE WHEN stay_date BETWEEN '2026-09-20' AND '2026-09-21' THEN 100 ELSE 0 END WHERE property_id=$1`,
-      [scope.propertyId],
-    );
-    await db.query(
-      `INSERT INTO pms.operating_calendar_revisions
-      (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at)
-      SELECT organization_id,property_id,9,contract_version,property_profile_revision,property_time_zone,schedule_mode,1,2,default_minimum_stay_nights,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),created_by_user_id,now(),now() FROM pms.operating_calendar_revisions WHERE property_id=$1 AND calendar_revision=8`,
-      [scope.propertyId],
-    );
-    await db.query(
-      "INSERT INTO pms.operating_calendar_recurring_periods(property_id,calendar_revision,period_index,start_month,start_day,end_month,end_day) SELECT property_id,9,period_index,start_month,start_day,end_month,end_day FROM pms.operating_calendar_recurring_periods WHERE property_id=$1 AND calendar_revision=8",
-      [scope.propertyId],
-    );
-    await db.query(
-      "INSERT INTO pms.operating_calendar_room_bindings(property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) SELECT property_id,9,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count FROM pms.operating_calendar_room_bindings WHERE property_id=$1 AND calendar_revision=8",
-      [scope.propertyId],
-    );
-    await db.query(
-      "INSERT INTO pms.operating_calendar_room_bindings(property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) VALUES($1,9,$2,2,2,1,1)",
-      ids,
-    );
-    await db.query(
-      `INSERT INTO pms.inventory_materialization_coverage(property_id,organization_id,calendar_revision,materialized_revision,coverage_from,coverage_through,room_type_count,expected_day_count,materialized_day_count,last_changed_materialization_idempotency_key_id,last_changed_materialization_domain_event_id,last_changed_materialization_outbox_event_id,updated_at)
-      SELECT property_id,organization_id,8,8,'2026-09-01','2026-09-30',1,30,30,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now() FROM pms.operating_calendar_revisions WHERE property_id=$1 AND calendar_revision=8`,
-      [scope.propertyId],
-    );
-    await db.query("COMMIT");
+    await fixtureTransaction(async (client) => {
+      await client.query(
+        `UPDATE pms.inventory_days SET calendar_revision=8,generated_source_revision=8,
+        status=CASE WHEN stay_date BETWEEN '2026-09-20' AND '2026-09-21' THEN 'open' ELSE 'closed' END,
+        available_count=CASE WHEN stay_date BETWEEN '2026-09-20' AND '2026-09-21' THEN 100 ELSE 0 END WHERE property_id=$1`,
+        [scope.propertyId],
+      );
+      await client.query(
+        `INSERT INTO pms.operating_calendar_revisions
+        (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at)
+        SELECT organization_id,property_id,9,contract_version,property_profile_revision,property_time_zone,schedule_mode,1,2,default_minimum_stay_nights,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),created_by_user_id,now(),now() FROM pms.operating_calendar_revisions WHERE property_id=$1 AND calendar_revision=8`,
+        [scope.propertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.operating_calendar_recurring_periods(property_id,calendar_revision,period_index,start_month,start_day,end_month,end_day) SELECT property_id,9,period_index,start_month,start_day,end_month,end_day FROM pms.operating_calendar_recurring_periods WHERE property_id=$1 AND calendar_revision=8",
+        [scope.propertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.operating_calendar_room_bindings(property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) SELECT property_id,9,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count FROM pms.operating_calendar_room_bindings WHERE property_id=$1 AND calendar_revision=8",
+        [scope.propertyId],
+      );
+      await client.query(
+        "INSERT INTO pms.operating_calendar_room_bindings(property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) VALUES($1,9,$2,2,2,1,1)",
+        ids,
+      );
+      await client.query(
+        `INSERT INTO pms.inventory_materialization_coverage(property_id,organization_id,calendar_revision,materialized_revision,coverage_from,coverage_through,room_type_count,expected_day_count,materialized_day_count,last_changed_materialization_idempotency_key_id,last_changed_materialization_domain_event_id,last_changed_materialization_outbox_event_id,updated_at)
+        SELECT property_id,organization_id,8,8,'2026-09-01','2026-09-30',1,30,30,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now() FROM pms.operating_calendar_revisions WHERE property_id=$1 AND calendar_revision=8`,
+        [scope.propertyId],
+      );
+    });
     await db.query(
       "INSERT INTO pms.rooms(property_id,room_type_id,room_number) VALUES($1,$2,'synthetic')",
       ids,
@@ -142,18 +155,19 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
     );
   });
   afterEach(async () => {
-    await db.query("BEGIN; SET LOCAL session_replication_role=replica");
-    const tables = (
-      await db.query(
-        `SELECT c.table_schema,c.table_name FROM information_schema.columns c JOIN information_schema.tables t USING (table_schema,table_name) WHERE c.column_name='property_id' AND t.table_type='BASE TABLE' AND c.table_schema IN ('pms','platform','booking','distribution')`,
-      )
-    ).rows;
-    for (const t of tables)
-      await db.query(`DELETE FROM "${t.table_schema}"."${t.table_name}" WHERE property_id=$1`, [
-        scope.propertyId,
-      ]);
-    await db.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [scope.propertyId]);
-    await db.query("COMMIT");
+    await fixtureTransaction(async (client) => {
+      const tables = (
+        await client.query(
+          `SELECT c.table_schema,c.table_name FROM information_schema.columns c JOIN information_schema.tables t USING (table_schema,table_name) WHERE c.column_name='property_id' AND t.table_type='BASE TABLE' AND c.table_schema IN ('pms','platform','booking','distribution')`,
+        )
+      ).rows;
+      for (const t of tables)
+        await client.query(
+          `DELETE FROM "${t.table_schema}"."${t.table_name}" WHERE property_id=$1`,
+          [scope.propertyId],
+        );
+      await client.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [scope.propertyId]);
+    });
   });
   afterAll(() => db.end());
   const snapshot = async () => {
@@ -231,12 +245,12 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
           [scope.propertyId],
         );
       if (change === "calendar") {
-        await db.query("BEGIN;SET LOCAL session_replication_role=replica");
-        await db.query(
-          "UPDATE pms.operating_calendar_revisions SET calendar_revision=10 WHERE property_id=$1 AND calendar_revision=9",
-          [scope.propertyId],
-        );
-        await db.query("COMMIT");
+        await fixtureTransaction(async (client) => {
+          await client.query(
+            "UPDATE pms.operating_calendar_revisions SET calendar_revision=10 WHERE property_id=$1 AND calendar_revision=9",
+            [scope.propertyId],
+          );
+        });
       }
       if (change === "block")
         await db.query(
@@ -373,8 +387,8 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
           currentDays,
         }),
       ).toMatchObject({ ok: false, error: { code: "current_day_coverage_gap" } });
-      await client.query("ROLLBACK");
     } finally {
+      await client.query("ROLLBACK").catch(() => {});
       client.release();
     }
     expect(
