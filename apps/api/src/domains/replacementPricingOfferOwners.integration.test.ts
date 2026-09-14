@@ -1,3 +1,7 @@
+import { createReplacementBookingQuoteIssuer } from "../routes/replacementBookingQuote.js";
+import Fastify from "fastify";
+import { createTargetBookingWebCheckoutAdapter, registerBookingWebPublicRoutes } from "../routes/bookingWebPublic.js";
+import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createReplacementPricingPublicationReader } from "./replacementPricingPublicationReader.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
 import { pricingEvidence } from "../bookingGuestPolicyTestFixtures.js";
@@ -1375,6 +1379,48 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       (await store.read(f.scope.propertyId, first.quote.quoteId))?.quote.evidence.lines[0]!
         .amountMinor,
     ).not.toBe("1");
+  });
+  it("issues public HTTP quotes from current stored pricing without exposing private evidence", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    const app = Fastify({ logger: false });
+    await app.register(registerBookingWebPublicRoutes, {
+      profileRepository: { async findProfileBySlug() { return null; } },
+      checkoutAdapter: createTargetBookingWebCheckoutAdapter({ connectionString: url!, pool, inventoryReservationPort: createTargetPmsInventoryReservationPort() }),
+    });
+    try {
+      const path = `/hotels/${f.scope.propertyId}/bookings/quote`;
+      const payload = { version: "public-booking-quote-request.v1", selection: f.selection, paymentMethod: "pay_at_property" };
+      const failed = createReplacementBookingQuoteIssuer({ async issue() { throw new Error("private database details"); } });
+      await expect(failed(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 503, message: "Quote temporarily unavailable." });
+      const headers = { "Idempotency-Key": randomUUID() };
+      const post = (body: unknown = payload, key = headers) => app.inject({ method: "POST", url: path, headers: key, payload: body as Record<string, unknown> });
+      const first = await post();
+      expect(first.statusCode).toBe(200);
+      expect(first.headers["cache-control"]).toBe("no-store");
+      const body = first.json();
+      expect(body).toMatchObject({ version: "public-booking-quote.v1", replayed: false, currency: "EUR", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
+      expect(body.rooms).toHaveLength(f.selection.rooms.length);
+      expect(Object.keys(body).sort()).toEqual(["version", "quoteId", "replayed", "checkIn", "checkOut", "currency", "paymentMethod", "issuedAt", "expiresAt", "totalMinor", "dueNowMinor", "dueLaterMinor", "lines", "rooms"].sort());
+      expect(body.rooms.every((room: Record<string, unknown>) => Object.keys(room).sort().join(",") === "cancellation,mealPlan,payment,selectionId")).toBe(true);
+      const stored = await createCurrentPricingQuoteStore(pool, 300).read(f.scope.propertyId, body.quoteId);
+      expect(stored?.quote.evidence.totalMinor).toBe(body.totalMinor);
+      expect((await post()).json()).toEqual({ ...body, replayed: true });
+      expect((await post({ ...payload, selection: { ...f.selection, promoCode: null } })).statusCode).toBe(409);
+      for (const invalid of [{}, { ...payload, propertyId: randomUUID() }, { ...payload, totalMinor: "1" }, { ...payload, paymentMethod: "cash" }, { ...payload, selection: { ...f.selection, rooms: [] } }]) expect((await post(invalid)).statusCode).toBe(400);
+      for (const key of [undefined, "", "a,b", "x".repeat(201)]) {
+        const response = await app.inject({ method: "POST", url: path, headers: key === undefined ? {} : { "Idempotency-Key": key }, payload });
+        expect(response.statusCode).toBe(400);
+        expect(response.headers["cache-control"]).toBe("no-store");
+      }
+      expect((await app.inject({ method: "POST", url: path, headers: { "Idempotency-Key": ["one", "two"] }, payload })).statusCode).toBe(400);
+      expect((await app.inject({ method: "POST", url: path, headers: { ...headers, "content-type": "application/json" }, payload: " ".repeat(65537) })).statusCode).toBe(413);
+      expect((await app.inject({ method: "POST", url: path, headers: { ...headers, "content-type": "application/json" }, payload: "{" })).statusCode).toBe(400);
+      expect((await app.inject({ method: "POST", url: `/hotels/${randomUUID()}/bookings/quote`, headers, payload })).statusCode).toBe(404);
+      await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+      expect((await post(payload, { "Idempotency-Key": randomUUID() })).statusCode).toBe(404);
+      await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [f.scope.propertyId]);
+      expect((await post()).statusCode).toBe(404); // Historical retry still needs public authority.
+    } finally { await app.close(); }
   });
   it("serializes concurrent quote issuance and enforces append-only storage", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),

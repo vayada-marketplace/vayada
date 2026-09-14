@@ -708,3 +708,22 @@ flexible/recurring pricing and charge-confirmation sources. Room facts/media,
 calendar profile bindings and independent Finance publication gates remain.
 This connects publication evidence only; stay quoting and atomic guest booking
 acceptance remain separate and are not enabled by a quote-required offer.
+
+
+The existing public POST /api/booking-web/hotels/:slug/bookings/quote now accepts
+{version: "public-booking-quote-request.v1", selection, paymentMethod}, where
+selection uses the existing versioned age-aware public pricing selection. A single
+nonempty printable Idempotency-Key (maximum 200 characters) is required; callers
+should generate a fresh random key per changed selection. Raw JSON is limited to
+64 KiB before decoding. No client property/owner/amount/source evidence is accepted.
+The target adapter delegates to the current immutable quote store, with a five-minute
+server lifetime capped at property-local midnight. Identical retries return the
+original quote and expiry, including expired historical results; changed input
+conflicts. An issued price is not an inventory hold or booking acceptance.
+The public-booking-quote.v1 response exposes quote reference, dates, currency,
+payment method, issue/expiry time, decimal-string minor-unit totals and price lines,
+and selected room meal/cancellation/payment terms. It excludes owner fingerprints,
+private calculation JSON, promotion configuration, Finance/charge evidence IDs and
+internal offer identifiers. Missing public authority/owner evidence is generically
+unavailable; conflicts require a new request. This replaces the retired target
+quote path without adding a parallel calculator or changing historical bookings.

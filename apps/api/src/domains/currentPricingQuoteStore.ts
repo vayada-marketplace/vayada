@@ -56,7 +56,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         .digest("hex");
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const scope = await lockPublicPricingAuthority(client, slug);
         if (!scope) return fail("denied");
         const prior = (
@@ -113,7 +113,7 @@ export function createCurrentPricingQuoteStore(pool: Pool, lifetimeSeconds: numb
         return null;
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const scope = await lockPublicPricingAuthority(client, slug);
         if (!scope) return null;
         const row = (

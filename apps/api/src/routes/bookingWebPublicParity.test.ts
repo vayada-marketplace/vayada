@@ -808,6 +808,7 @@ describe("Booking Web public bootstrap parity", () => {
       app.inject({
         method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/quote",
+        headers: { "Idempotency-Key": "guest-quote-1" },
         payload: { guestEmail: "guest@example.com", checkIn: "2026-09-12", checkOut: "2026-09-15" },
       }),
       app.inject({
