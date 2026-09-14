@@ -27,6 +27,26 @@ describe("Booking public content", () => {
     expect(Object.isFrozen(result)).toBe(true);
   });
 
+  it("round-trips quoted offers without fabricating amounts or payment timing", () => {
+    const offer = { ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`, currency: "EUR",
+      pricing: { kind: "quote_required", publicationRevision: 7, termsRevision: "11111111-1111-4111-8111-111111111111" }, mealPlan: "breakfast" };
+    const result = build({ rooms: [{ ...rooms()[0], rates: [offer] }] });
+    expect(result?.publicContent.rooms[0]?.rates).toEqual([offer]);
+    expect(parseBookingPublicContent(result?.publicContent)).toEqual(result?.publicContent);
+    expect(result?.publicContent.rooms[0]?.rates[0]).not.toHaveProperty("baseNightlyAmount");
+    expect(result?.publicContent.rooms[0]?.rates[0]).not.toHaveProperty("paymentTiming");
+    for (const invalid of [
+      { ratePlanId: offer.ratePlanId, currency: "EUR", baseNightlyAmount: "100.00", refundable: true, paymentTiming: "pay_at_property" },
+      { ...offer, baseNightlyAmount: "100.00" }, { ...offer, paymentTiming: "pay_at_property" },
+      { ...offer, currency: "USD" }, { ...offer, mealPlan: "unknown" },
+      { ...offer, ratePlanId: "legacy-plan" }, { ...offer, pricing: { ...offer.pricing, publicationRevision: 0 } },
+      { ...offer, pricing: { ...offer.pricing, termsRevision: "stale" } },
+      { ...offer, pricing: { ...offer.pricing, internalCost: "12" } },
+    ]) expect(build({ rooms: [{ ...rooms()[0], rates: [invalid] }] })).toBeNull();
+    expect(build({ rooms: [{ ...rooms()[0], rates: [offer, offer] }] })).toBeNull();
+    expect(build({ rooms: [{ ...rooms()[0], rates: [offer] }], finance: { ...finance(), readyPaymentMethods: [] } })).toBeNull();
+  });
+
   it("omits rates whose payment method is not ready", () => {
     const publicProfile = profile();
     publicProfile.hotel.capabilities.onlinePayment = false;

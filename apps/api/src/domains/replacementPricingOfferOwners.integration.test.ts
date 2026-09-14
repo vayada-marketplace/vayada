@@ -1,3 +1,4 @@
+import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
@@ -413,6 +414,16 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     expect(result?.publication.rooms).toHaveLength(2);
     expect(result?.terms).toHaveLength(3);
+    const mapped = mapReplacementPublicOffers(result!);
+    expect(mapped).toHaveLength(2);
+    const offers = mapped!.flatMap(room => room.offers);
+    expect(offers).toHaveLength(3);
+    expect(new Set(offers.map(offer => offer.ratePlanId)).size).toBe(3);
+    expect(offers.map(offer => offer.ratePlanId)).toEqual(publicPricingOfferBindings(result!).map(binding => binding.publicOfferKey));
+    expect(offers.every(offer => offer.pricing.kind === "quote_required" && offer.pricing.publicationRevision === 1)).toBe(true);
+    expect(offers.every(offer => !Object.hasOwn(offer, "baseNightlyAmount") && !Object.hasOwn(offer, "paymentTiming"))).toBe(true);
+    expect(mapReplacementPublicOffers({ ...result!, terms: [] })).toBeNull();
+    expect(mapReplacementPublicOffers({ ...result!, terms: [...result!.terms, result!.terms[0]!] })).toBeNull();
     expect(result?.pmsSourceRevision).toMatch(/^booking\.pms\.publication\.v2:[a-f0-9]{64}$/);
     await pool.query(
       "UPDATE pms.pricing_v2_drafts SET draft_revision=draft_revision+1 WHERE property_id=$1",
