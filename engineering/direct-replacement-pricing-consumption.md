@@ -525,3 +525,18 @@ even if the caller catches the error. Caller still owns final commit/rollback an
 must roll back on later authority/acceptance failures. Held inventory does not
 mean booking acceptance; final expiry/cutoff and accepted-command replay remain
 with the forthcoming acceptance writer.
+
+
+`redeemCurrentQuotePromo` binds an existing guest booking's explicit
+`booking_metadata.pricingQuoteId`, stay, physical room count, currency and exact
+total to the scoped immutable quote. Applied receipts replay before fresh source
+checks, without consuming another use; the same quote cannot redeem for another
+booking. Fresh revalidation now exposes its freshly calculated components for
+this command; archival calculation JSON remains non-authoritative. Only positive
+actually applied code discounts consume usage. A losing nonstack code consumes
+nothing. Current usage limits serialize under the property/promo locks. Existing
+promo applications retain exact amount, source and quote linkage for reversal.
+The existing numeric(15,2) column must represent the amount exactly; unsupported
+precision/range fails rather than rounding. Caller owns atomic rollback with the
+booking and inventory. This step does not create or confirm a booking; final
+clock checks follow owner waits, and accepted-command replay precedes all steps.

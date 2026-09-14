@@ -121,6 +121,7 @@ export async function lockCurrentQuoteRevalidation(
   return {
     kind: "current_quote_price" as const,
     quote,
+    calculation: current.calculation,
     scope,
     checkedAt: now.toISOString(),
     sameDay: {

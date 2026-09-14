@@ -1,3 +1,4 @@
+import { redeemCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
@@ -1472,6 +1473,131 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
       await writer.end();
     }
+  });
+
+  async function redemptionFixture(nonstack = false, maximum = 100) {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    if (nonstack)
+      await pool.query(
+        "UPDATE booking.booking_settings SET last_minute_discount=jsonb_set(last_minute_discount,'{stackWithPromo}','false') WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+    await pool.query("UPDATE booking.promo_definitions SET max_uses=$2 WHERE property_id=$1", [
+      f.scope.propertyId,
+      maximum,
+    ]);
+    const store = createCurrentPricingQuoteStore(pool, 300);
+    const quote = (
+      await store.issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection: f.selection,
+        paymentMethod: "pay_at_property",
+      })
+    ).quote;
+    const booking = async (q = quote) => {
+      const id = randomUUID();
+      await pool.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,lifecycle_status,check_in,check_out,room_count,currency,total_amount,booking_metadata)
+        VALUES($1::uuid,$2,($1::uuid)::text,'draft',$3,$4,$5,$6,$7::numeric/100,$8)`,
+        [
+          id,
+          f.scope.propertyId,
+          q.stay.checkIn,
+          q.stay.checkOut,
+          q.stay.rooms.length,
+          q.stay.currency,
+          q.evidence.totalMinor,
+          { pricingQuoteId: q.quoteId },
+        ],
+      );
+      return id;
+    };
+    const id = await booking();
+    const apply = async (bookingId = id, quoteId = quote.quoteId, commit = true) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await redeemCurrentQuotePromo(
+          client,
+          f.scope.propertyId,
+          quoteId,
+          bookingId,
+        );
+        await client.query(commit ? "COMMIT" : "ROLLBACK");
+        return result;
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      } finally {
+        client.release();
+      }
+    };
+    const uses = async () =>
+      (
+        await pool.query(
+          "SELECT current_uses FROM booking.promo_definitions WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].current_uses;
+    return { f, quote, id, booking, apply, uses, store };
+  }
+  it("redeems the exact applied code amount once and rolls redemption back with the caller", async () => {
+    const r = await redemptionFixture();
+    expect(await r.apply(r.id, r.quote.quoteId, false)).toMatchObject({
+      kind: "applied",
+      discountMinor: "2000",
+      replayed: false,
+    });
+    expect(await r.uses()).toBe(0);
+    const first = await r.apply();
+    expect(first).toMatchObject({ kind: "applied", discountMinor: "2000", replayed: false });
+    expect(await r.apply()).toEqual({ ...first, replayed: true });
+    expect(await r.uses()).toBe(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT discount_amount::text AS amount FROM booking.promo_applications WHERE guest_booking_id=$1",
+          [r.id],
+        )
+      ).rows,
+    ).toEqual([{ amount: "20.00" }]);
+  });
+  it("rejects another booking using a redeemed quote and rejects mismatched booking evidence", async () => {
+    const r = await redemptionFixture();
+    await r.apply();
+    await expect(r.apply(await r.booking())).rejects.toThrow("Quote promotion is unavailable");
+    await pool.query("UPDATE booking.guest_bookings SET total_amount=1 WHERE id=$1", [r.id]);
+    await expect(r.apply()).rejects.toThrow("Quote promotion is unavailable");
+    expect(await r.uses()).toBe(1);
+  });
+  it("does not consume a code when the nonstacking last-minute discount wins", async () => {
+    const r = await redemptionFixture(true);
+    expect(await r.apply()).toEqual({ kind: "not_applied" });
+    expect(await r.uses()).toBe(0);
+  });
+  it("rejects changed promotion evidence before consumption", async () => {
+    const r = await redemptionFixture();
+    await pool.query(
+      "UPDATE booking.promo_definitions SET discount_value=11 WHERE property_id=$1",
+      [r.f.scope.propertyId],
+    );
+    await expect(r.apply()).rejects.toThrow("Quote promotion is unavailable");
+    expect(await r.uses()).toBe(0);
+  });
+  it("lets only one concurrent quote consume the final promotion use", async () => {
+    const r = await redemptionFixture(false, 1);
+    const other = (
+      await r.store.issue(r.f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection: r.f.selection,
+        paymentMethod: "pay_at_property",
+      })
+    ).quote;
+    const otherBooking = await r.booking(other);
+    const results = await Promise.allSettled([r.apply(), r.apply(otherBooking, other.quoteId)]);
+    expect(results.filter((v) => v.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((v) => v.status === "rejected")).toHaveLength(1);
+    expect(await r.uses()).toBe(1);
   });
 
 });
