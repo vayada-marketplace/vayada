@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
-import { reserveCurrentQuoteInventory } from "./currentQuoteInventory.js";
+import {
+  reserveCurrentQuoteInventory,
+  reserveRevalidatedQuoteInventory,
+} from "./currentQuoteInventory.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
@@ -12,7 +15,12 @@ vi.mock("./pmsInventoryReservationLifecycleRepository.js", () => ({
   reservePmsQuoteInventory: vi.fn(),
 }));
 const quoteId = "a1000000-0000-4000-8000-000000000001";
-const scope = { propertyId: "property", organizationId: "organization", authorityRevision: "authority:1" };
+const scope = {
+  propertyId: "property",
+  organizationId: "organization",
+  authorityRevision: "authority:1",
+};
+// Owner/decoder mocks intentionally expose only inventory-relevant quote fields.
 const quote = {
   quoteId,
   stay: {
@@ -84,4 +92,70 @@ it("rejects a stale fresh quote but allows PMS to replay existing held inventory
     replayed: true,
   });
   expect(lockCurrentQuoteRevalidation).toHaveBeenCalledTimes(1);
+});
+
+it("reserves from same-transaction pre-mutation evidence without repricing after own effects", async () => {
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
+    typeof reserveRevalidatedQuoteInventory
+  >[2];
+  vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(null);
+  expect(await reserveRevalidatedQuoteInventory(client, "hotel", current)).toEqual({
+    quote,
+    ...held,
+  });
+  expect(lockCurrentQuoteRevalidation).not.toHaveBeenCalled();
+  expect(reservePmsQuoteInventory).toHaveBeenCalledOnce();
+  expect(lockPublicPricingAuthority).toHaveBeenCalledTimes(3);
+});
+it("rejects changed stored quote or property/organization/authority evidence before mutation", async () => {
+  for (const changedScope of [
+    { ...scope, propertyId: "foreign" },
+    { ...scope, organizationId: "foreign" },
+    { ...scope, authorityRevision: "authority:2" },
+  ]) {
+    await expect(
+      reserveRevalidatedQuoteInventory(client, "hotel", {
+        kind: "current_quote_price",
+        scope: changedScope,
+        quote,
+      } as unknown as Parameters<typeof reserveRevalidatedQuoteInventory>[2]),
+    ).rejects.toThrow("unavailable");
+  }
+  await expect(
+    reserveRevalidatedQuoteInventory(client, "hotel", {
+      kind: "current_quote_price",
+      scope,
+      quote: { ...quote, stay: { ...quote.stay, checkOut: "2026-10-04" } },
+    } as unknown as Parameters<typeof reserveRevalidatedQuoteInventory>[2]),
+  ).rejects.toThrow("unavailable");
+  expect(reservePmsQuoteInventory).not.toHaveBeenCalled();
+});
+it("retains PMS replay and propagates replay/capacity failures without another calculator", async () => {
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
+    typeof reserveRevalidatedQuoteInventory
+  >[2];
+  vi.mocked(reservePmsQuoteInventory).mockResolvedValueOnce({ ...held, replayed: true });
+  expect(await reserveRevalidatedQuoteInventory(client, "hotel", current)).toMatchObject({
+    replayed: true,
+  });
+  vi.mocked(reservePmsQuoteInventory).mockRejectedValueOnce(
+    new Error("PMS replay/capacity unavailable"),
+  );
+  await expect(reserveRevalidatedQuoteInventory(client, "hotel", current)).rejects.toThrow(
+    "PMS replay/capacity",
+  );
+  expect(lockCurrentQuoteRevalidation).not.toHaveBeenCalled();
+});
+it("fails after PMS waits when public scope is revoked or changed", async () => {
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
+    typeof reserveRevalidatedQuoteInventory
+  >[2];
+  vi.mocked(lockPublicPricingAuthority)
+    .mockResolvedValueOnce(scope)
+    .mockResolvedValueOnce(scope)
+    .mockResolvedValueOnce(null);
+  await expect(reserveRevalidatedQuoteInventory(client, "hotel", current)).rejects.toThrow(
+    "unavailable",
+  );
+  expect(reservePmsQuoteInventory).toHaveBeenCalledOnce();
 });
