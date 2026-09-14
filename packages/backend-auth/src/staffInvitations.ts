@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { assertSubjectNotBootstrapProtected } from "./legacyOwnerHold.js";
 
 import {
   hasValidStaffPermissionHierarchy,
@@ -36,6 +37,7 @@ type StaffRosterRow = {
   last_active_at: Date | null;
 };
 type StaffAccessTargetRow = {
+  user_id: string;
   role_key: string;
   permission_overrides: unknown;
   property_access_mode: string;
@@ -219,6 +221,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
         }
+        if (normalized.membershipStatus === "active")
+          await assertSubjectNotBootstrapProtected(client, previous.user_id);
         await client.query(
           `UPDATE identity.organization_memberships
            SET status = $3, updated_at = now()
@@ -553,7 +557,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             : { outcome: "rejected" as const, reason: "idempotency_conflict" as const };
         }
         const target = await client.query<StaffAccessTargetRow>(
-          `SELECT membership.role_key, membership.permission_overrides,
+          `SELECT membership.user_id::text, membership.role_key, membership.permission_overrides,
                   membership.property_access_mode,
                   ARRAY(SELECT assignment.property_id::text
                         FROM identity.membership_property_assignments assignment
@@ -571,6 +575,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
         }
+        await assertSubjectNotBootstrapProtected(client, previous.user_id);
         const linkedProperties = await client.query<{ property_id: string }>(
           `SELECT property.id::text AS property_id
            FROM identity.organization_resource_links link
