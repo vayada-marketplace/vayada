@@ -1,3 +1,4 @@
+import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import { bookingQuoteAcceptanceRequirements, parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
@@ -356,6 +357,49 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
     return { ...f, authority, choice, readPublic, publishPrices };
   }
+  it("reads owner evidence before public projection, without granting public access", async () => {
+    const f = await publicFixture(false);
+    const readOwner = async (scope: { propertyId: string; organizationId: string } = f.scope) => {
+      const client = await pool.connect();
+      try { await client.query("BEGIN"); return await lockCurrentPricingPublication(client, scope); }
+      finally { await client.query("ROLLBACK"); client.release(); }
+    };
+    expect(await readOwner()).toBeNull(); // A draft cannot satisfy publication.
+    await f.publishPrices();
+    const before = await f.readPublic();
+    expect((await readOwner())?.pmsSourceRevision).toBe(before?.pmsSourceRevision);
+    await pool.query("DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id=$1", [f.scope.propertyId]);
+    await pool.query("UPDATE hotel_catalog.properties SET profile_status='incomplete' WHERE id=$1", [f.scope.propertyId]);
+    expect(await f.readPublic()).toBeNull();
+    expect(await readOwner()).toMatchObject({ publication: { revision: 1, currency: "EUR" }, terms: before!.terms, charges: before!.charges });
+    expect(await readOwner({ ...f.scope, organizationId: randomUUID() })).toBeNull();
+    expect(await readOwner({ ...f.scope, propertyId: "malformed" })).toBeNull();
+    for (const sql of [
+      "UPDATE identity.organizations SET status='suspended' WHERE id=$1",
+      "DELETE FROM identity.organization_resource_links WHERE organization_id=$1 AND product='pms'",
+      "UPDATE identity.product_entitlements SET expires_at=now()-interval '1 second' WHERE organization_id=$1",
+    ]) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN"); await client.query(sql, [f.scope.organizationId]);
+        expect(await lockCurrentPricingPublication(client, f.scope)).toBeNull();
+      } finally { await client.query("ROLLBACK"); client.release(); }
+    }
+    const external = await f.authority.save(f.context, f.scope, {
+      requestId: randomUUID(), expectedRevision: f.choice.revision, authority: "external",
+    });
+    expect(await readOwner()).toBeNull();
+    await f.authority.save(f.context, f.scope, {
+      requestId: randomUUID(), expectedRevision: external.revision, authority: "vayada",
+    });
+    expect(await readOwner()).not.toBeNull();
+    await pool.query("UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1", [f.scope.organizationId]);
+    expect(await readOwner()).toBeNull();
+    await pool.query("UPDATE identity.product_entitlements SET status='active' WHERE organization_id=$1", [f.scope.organizationId]);
+    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+    expect(await readOwner()).toBeNull();
+  });
+
   it("reads only the complete current publication with real owner evidence, never a draft", async () => {
     const f = await publicFixture(false);
     expect(await f.readPublic()).toBeNull();
