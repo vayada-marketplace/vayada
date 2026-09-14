@@ -1,0 +1,126 @@
+# Missing legacy owner account setup
+
+VAY-2017 prerequisite design, following the [diagnostic planner](legacy-owner-bootstrap-planner.md),
+[identity architecture](workos-identity-architecture.md) and
+[ownership restoration](legacy-pms-ownership-restoration.md). Proposed technical
+contract; not an approved write manifest, implemented executor or cutover GO.
+
+## Why a separate path
+
+The authorized September 14 source/target readback confirmed eight historical
+owner/hotel associations and no live Next users under those IDs or snapshot
+emails. Different-ID/different-email accounts remain possible. Earlier WorkOS
+reads are separate observations, not fresh provider evidence for an apply.
+
+The broad `workosBackfill` cannot seed missing internal users. The identity
+migration writer uses timestamp-based upserts, not exact expected-absence
+guards. Neither is an approved eight-owner repair command.
+
+Account preparation does not establish current ownership or grant hotel access.
+Keep the existing authenticated-owner requirement for ownership restoration.
+Creating a provider identity is not proof that its eventual operator owns the
+historical hotel, even if they verify the historical email address.
+
+## Smallest first write boundary
+
+The first future writer prepares **internal identity rows only**. For an
+independently approved subset of the fixed eight-owner cohort, insert only
+`identity.users` with the exact legacy UUID, reviewed contact fields, and an
+explicit `status = 'pending'`. Do not rely on the schema's `active` default or
+generate a replacement UUID. Missing names may remain null; do not invent them.
+
+Create no organization, membership, resource link, entitlement, hotel or provider
+identity in this step. Record required organization/membership dependencies as
+unresolved prerequisites using the existing canonical IDs; do not satisfy them
+with fabricated or globally activated rows. Preserve both protected QA hotels.
+
+The whole approved subset commits atomically with its restricted receipt/audit.
+A conflicted owner is excluded only by a newly reviewed subset, never silently
+dropped by the executor. Existing users are not updated, even when pending.
+An exact prior success is replayed from its receipt, not inferred from row shape.
+
+## Evidence and approval before any write
+
+- Bind command version/ID, environment and independently verified database
+  identity, exact owner IDs, intended row values, source run/ledger/row hashes,
+  fresh current ownership/restriction evidence, expected target absence and
+  expiry to one canonical payload hash. Contact evidence belongs in protected
+  storage; public reports contain neither emails nor reversible payloads.
+- Use distinct immutable migration/security authority records under VAY-1320's
+  sole-human dual-authority policy, with controlled signer/executor separation.
+  The ownership-restoration approval does not authorize this new operation.
+  General chat permission and a passed readback are not signed write evidence.
+- Recheck exact-ID, normalized-email and external-identity conflicts under the
+  write transaction. Unknown normalization, ambiguous matches, missing current
+  source evidence, newer restrictions, revoked/expired approval or target drift
+  block. Snapshot freshness must not be relabeled as current ownership.
+- Serialize duplicate command IDs and overlapping owner/email keys. Application
+  advisory locks alone cannot exclude ordinary signup writers. The storage
+  design must prove a database-enforced collision boundary shared with signup,
+  or a separately authorized write fence. Until that exists, the writer remains
+  non-executable; do not assume an email uniqueness constraint is present.
+- Verify authority before replay lookup. Same command with different bytes
+  rejects. Successful exact replay returns only its immutable receipt and grants
+  nothing; revoked or stale evidence cannot authorize another write.
+
+This design does not add a registry migration. The next storage PR must specify
+receipt uniqueness, append-only privileges, audit atomicity and approval locking
+before a consumer can use it. No invented principal or synthetic signature may
+authorize a real operation.
+
+## Provider preparation is a later, separate operation
+
+Only after an approved internal-row receipt and a fresh source/target/provider
+assessment may a reviewed provider adapter create an absent WorkOS identity
+with `external_id` equal to that same internal UUID. No email-only linking,
+legacy password import, automatic email verification or existing-user update.
+Do not change ordinary signup or session reconciliation to force this mapping.
+
+Before dispatch, commit a durable intent bound to the exact command, owner,
+contact evidence and provider environment. A provider request must not run while
+a database transaction is held open. On success, record the exact provider ID
+and link it only after fresh identity checks and conditional local persistence.
+
+| Observed outcome                             | Required recovery                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Proven no request was dispatched             | Fresh approval/checks before dispatch.                                                                       |
+| Provider succeeded, local persistence failed | Recover the exact provider ID from durable evidence and verified external-ID lookup; never recreate blindly. |
+| Timeout or unknown dispatch/result           | Retain unresolved intent; no automatic create retry based on a temporary 404.                                |
+| Existing identity or email collision         | Stop for independent reconciliation; neither overwrite nor link by email.                                    |
+
+The implementation must demonstrate provider-supported uniqueness/idempotency
+and visibility semantics before allowing automatic recovery. Until then,
+uncertain outcomes stay blocked. Do not assume a distributed transaction exists.
+Prove creation causes no automatic notifications before any no-contact rehearsal.
+Invitations, verification/reset mail and other user contact need separate scope.
+
+## Cancellation and access remain separate
+
+Cancellation blocks further dispatch and appends a receipt; it does not delete
+the user or provider identity. A later cleanup would require exact before-state,
+no-newer-use/dependency checks and separate authorization. Preserve evidence of
+partial completion, and never erase a conflict to make a rerun pass.
+
+Pending identity preparation must remain denied by existing product gates.
+Do not globally activate a user, organization or membership for a smoke test.
+Finish the scoped PMS session/organization/authorization/resource chain and
+independently verify the current owner before enabling access to existing hotels.
+Marketplace approval, Channex activation and legacy shutdown remain unchanged.
+
+## Required tests and next implementation
+
+First specify the shared collision guard and receipt storage, then build the
+internal-only writer with synthetic PostgreSQL16/17 fixtures. Cover explicit
+pending status, exact UUID preservation, extra IDs, email collisions, concurrent
+ordinary signup, duplicate commands, payload drift, revoked/expired approval,
+audit failure, rollback and preserved protected fixtures. Assert zero provider
+calls and no organization/membership/resource/entitlement changes.
+
+Provider intent/adapter/recovery tests come afterward: dispatch failure, timeout,
+duplicate dispatch, provider-success/local-failure, external-ID mismatch, email
+collision, newer local restrictions and no user notifications. Test product
+denials after preparation; login or health alone is not an access test.
+
+No existing read approval authorizes either writer. Real isolated rehearsals and
+production execution require their own exact write/recovery approval. This
+document and its review do not complete VAY-2017.
