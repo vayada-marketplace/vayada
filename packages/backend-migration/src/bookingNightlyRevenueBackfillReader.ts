@@ -27,7 +27,11 @@ type ExactNight = NonNullable<
 export async function readUncapturedNightlyRevenueCandidates(
   client: QueryClient,
   options: { afterGuestBookingId?: string; limit?: number } = {},
-) {
+): Promise<{
+  transactionId: string | null;
+  candidates: NightlyRevenueBackfillCandidate[];
+  nextGuestBookingId: string | null;
+}> {
   const limit = options.limit ?? 500;
   if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Invalid page limit");
   const bookings = await client.query<BookingRow & { transactionId: string }>(
