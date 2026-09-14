@@ -540,3 +540,27 @@ The existing numeric(15,2) column must represent the amount exactly; unsupported
 precision/range fails rather than rounding. Caller owns atomic rollback with the
 booking and inventory. This step does not create or confirm a booking; final
 clock checks follow owner waits, and accepted-command replay precedes all steps.
+
+
+Replacement booking input is `booking-quote-acceptance.v1`: a request ID, exact
+quote ID, explicit acceptance of quote and guest-policy evidence hashes, and
+bounded booker name/email/phone/country/arrival/special-request fields. Posted
+money, occupancy and owner scope are rejected. Require first/last name and valid
+email rather than the legacy creator's fallback guest name. Normalize surrounding
+whitespace and email case for deterministic command identity; request ID is the
+idempotency key, not part of the payload fingerprint. Never treat the fingerprint
+as an authentication or secret token.
+
+`bookingQuoteAcceptanceRequirements`/`parseBookingQuoteAcceptanceInput` are pure
+boundaries, not current-policy readers. Caller-supplied policy evidence includes
+property, source revision, exact disclosure hash and validated Booking choices.
+The current owner must produce and lock replacement disclosures before acceptance;
+old bundles that depend on retired pricing settings/rate plans are insufficient.
+Changed policy/quote evidence requires renewed acknowledgment. Respect required
+phone, optional arrival/special-request controls and child eligibility/age bounds.
+Country is an optional two-letter shape here, not country eligibility verification;
+arrival is an optional time value, not a promise of late-arrival permission.
+No default policy or fabricated disclosure is supplied by this parser. Full guest
+and policy evidence must accompany accepted booking history. Finance snapshots,
+exact booking/add-on persistence, lifecycle/revenue handoff, final time checks and
+atomic accepted-command replay remain required before route activation.
