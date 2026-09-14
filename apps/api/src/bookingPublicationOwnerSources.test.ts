@@ -1,6 +1,5 @@
 import {
   createBookingDesignReadinessProvider,
-  createBookingPricingSourceFingerprint,
   isBookingLaunchOwnerEvidenceValid,
 } from "@vayada/domain-booking";
 import { createHotelMediaResolutionPort } from "@vayada/domain-hotels";
@@ -185,10 +184,12 @@ describe("production Booking publication owner sources", () => {
         ],
       },
     ];
-    const fingerprint = createBookingPricingSourceFingerprint(scope, {
-      ...pricing,
-      roomPublication,
-    });
+    const rate = { ratePlanId: `pricing-offer.v2:${"a".repeat(64)}`, currency: "EUR", pricing: { kind: "quote_required", publicationRevision: 1, termsRevision: propertyId }, mealPlan: "room_only" };
+    const offers = { scope, sourceRevision: `booking.pms.publication.v2:${"b".repeat(64)}`, rooms: [{ roomTypeId, offers: [rate] }] };
+    const getCurrentPricingOffers = vi.fn().mockResolvedValue(offers);
+    let inventoryReady = true;
+    let inventoryRevision = "calendar:3";
+    let inventoryRooms = [roomTypeId];
     let calendarStatus: "current" | "stale" = "current";
     const source = createPmsBookingPublicationSource({
       rooms: {
@@ -196,16 +197,7 @@ describe("production Booking publication owner sources", () => {
           return roomPublication;
         },
       },
-      pricing: {
-        async getPricingSourceSnapshot() {
-          return pricing.pricing;
-        },
-      },
-      recurringPricing: {
-        async getRecurringPricingBookingEvidence() {
-          return pricing.recurringPricing;
-        },
-      },
+      pricing: { getCurrentPricingOffers },
       operatingCalendar: {
         async getCurrentOperatingCalendarConfiguration() {
           return {
@@ -229,12 +221,12 @@ describe("production Booking publication owner sources", () => {
       inventory: {
         async getInventoryLaunchReadiness({ requiredCoverage }) {
           return {
-            ready: true,
+            ready: inventoryReady,
             blockers: [],
             requiredCoverage,
             snapshot: {
               configuration: {
-                source: pmsSource("pms_operating_calendar.v1", propertyId, "calendar:3"),
+                source: pmsSource("pms_operating_calendar.v1", propertyId, inventoryRevision),
               },
               coverage: {
                 ...requiredCoverage,
@@ -243,25 +235,10 @@ describe("production Booking publication owner sources", () => {
                 expectedDayCount: 366,
                 materializedDayCount: 366,
                 gaps: [],
-                roomTypeIds: [roomTypeId],
+                roomTypeIds: inventoryRooms,
               },
             },
           } as any;
-        },
-      },
-      mandatoryChargeConfirmation: {
-        bookingPricingConfirmationEvidencePort: "pms_mandatory_charges",
-        async getMandatoryChargeConfirmation() {
-          return {
-            outcome: "available",
-            evidence: {
-              organizationId,
-              propertyId,
-              pricingSourceFingerprint: fingerprint,
-              confirmationRevision: 6,
-              confirmedAt: now,
-            },
-          };
         },
       },
       now: () => new Date(now),
@@ -273,10 +250,38 @@ describe("production Booking publication owner sources", () => {
       outcome: "snapshot",
       content: {
         availabilityReady: true,
-        rooms: [{ images: [{ url: "https://cdn.test/suite.webp", alt: "Suite" }] }],
+        rooms: [{ images: [{ url: "https://cdn.test/suite.webp", alt: "Suite" }], rates: [rate] }],
         calendar: { expectedDayCount: 366, materializedDayCount: 366, gapCount: 0 },
       },
     });
+    expect(isBookingLaunchOwnerEvidenceValid(evidence, scope, "pms")).toBe(true);
+    expect(evidence.sources.some(source => source.entityType === "pms_pricing_publication.v2")).toBe(true);
+    const unavailable = () => expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({ outcome: "unavailable", owner: "pms" });
+    getCurrentPricingOffers.mockResolvedValue(null);
+    await unavailable();
+    getCurrentPricingOffers.mockResolvedValue({ ...offers, sourceRevision: "changed" });
+    await unavailable(); // Previous manifest cannot bind a newer publication.
+    getCurrentPricingOffers.mockResolvedValue(offers).mockResolvedValueOnce(offers).mockResolvedValueOnce(null);
+    await unavailable(); // Revocation while other ports are being read.
+    getCurrentPricingOffers.mockResolvedValueOnce(offers).mockResolvedValueOnce({ ...offers, sourceRevision: "changed" });
+    await unavailable();
+    getCurrentPricingOffers.mockResolvedValue({ ...offers, scope: { ...scope, organizationId: propertyId } });
+    await unavailable();
+    getCurrentPricingOffers.mockResolvedValue({ ...offers, rooms: [] });
+    await unavailable();
+    getCurrentPricingOffers.mockResolvedValue(offers);
+    inventoryReady = false;
+    await unavailable();
+    inventoryReady = true;
+    inventoryRevision = "calendar:4";
+    await unavailable();
+    inventoryRevision = "calendar:3";
+    inventoryRooms = [];
+    await unavailable();
+    inventoryRooms = [roomTypeId];
+    roomPublication.blockers.push({ code: "room_media_missing", affectedEntity: { entityType: "property", entityId: propertyId } });
+    await unavailable();
+    roomPublication.blockers = [];
     calendarStatus = "stale";
     const staleEvidence = await source.getBookingLaunchEvidence(scope);
     expect(staleEvidence).toMatchObject({

@@ -1,3 +1,8 @@
+import { createReplacementPricingPublicationReader } from "./replacementPricingPublicationReader.js";
+import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
+import { pricingEvidence } from "../bookingGuestPolicyTestFixtures.js";
+import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
+import { buildBookingPublicContent, parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
@@ -431,6 +436,61 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     expect((await f.readPublic())?.pmsSourceRevision).toBe(result?.pmsSourceRevision);
     expect(await f.readPublic(randomUUID())).toBeNull();
+  });
+  it("publishes current database offers through PMS and final Distribution content", async () => {
+    const f = await publicFixture(), scope = f.scope;
+    const single = new pg.Pool({ connectionString: url, max: 1 });
+    try {
+      const pricing = createReplacementPricingPublicationReader(single);
+      const current = await pricing.getCurrentPricingOffers(scope);
+      expect(await pricing.getCurrentPricingOffers({ ...scope, organizationId: randomUUID() })).toBeNull();
+      expect(await pricing.getCurrentPricingOffers({ ...scope, propertyId: "invalid" })).toBeNull();
+      expect(current?.rooms).toHaveLength(2);
+      const roomTypeIds = current!.rooms.map(room => room.roomTypeId);
+      const source = { ownerDomain: "pms" as const, entityType: "pms_operating_calendar.v1", entityId: scope.propertyId, revision: "calendar:1" };
+      const roomTemplate = pricingEvidence().roomPublication.rooms[0]!;
+      const pms = createPmsBookingPublicationSource({
+        pricing,
+        rooms: { async getRoomPublicationSnapshot() {
+          return { ...pricingEvidence().roomPublication, propertyId: scope.propertyId, rooms: roomTypeIds.map(roomTypeId => ({
+            ...roomTemplate, propertyId: scope.propertyId, roomTypeId,
+            facts: { ...roomTemplate.facts, beds: [{ type: "king" as (typeof roomTemplate.facts.beds)[number]["type"], quantity: 1 }] },
+            media: [{ mediaObjectId: randomUUID(), altText: "Suite", sortOrder: 0, publicVariants: [{ variantName: "original_safe" as const, publicUrl: "https://cdn.example.test/suite.webp" }] }],
+          })) };
+        } },
+        operatingCalendar: {
+          async getCurrentOperatingCalendarConfiguration() { return { sourceStatus: "current", configuration: {
+            propertyId: scope.propertyId, source, updatedAt: "2026-06-06T11:00:00.000Z",
+            sourceInputs: { propertyTimeZone: "Etc/UTC", propertyProfile: { ownerDomain: "hotel_catalog", entityType: "property_profile", entityId: scope.propertyId, revision: "profile:1" } },
+          } } as any; },
+          async getOperatingCalendarConfigurationBySource() { return null; },
+        },
+        inventory: { async getInventoryLaunchReadiness({ requiredCoverage }) { return {
+          ready: true, blockers: [], requiredCoverage, snapshot: { configuration: { source }, coverage: {
+            coverageFrom: requiredCoverage.from, coverageThrough: requiredCoverage.through,
+            expectedDayCount: 732, materializedDayCount: 732, gaps: [], roomTypeIds,
+          } },
+        } as any; } },
+        now: () => new Date("2026-06-06T11:00:00.000Z"),
+      });
+      const evidence = await pms.getBookingLaunchEvidence(scope);
+      if (evidence.outcome !== "evidence") throw new Error("PMS evidence required");
+      expect(evidence.entities.flatMap(entity => entity.blockers)).toEqual([]);
+      const hash = `sha256:${"a".repeat(64)}` as const;
+      const request = { ...scope, sourceManifestHash: hash, sourceManifest: { contractVersion: "onboarding-source-manifest.v1" as const, propertyId: scope.propertyId, sources: evidence.sources } };
+      const snapshot = await pms.getSnapshot(request);
+      if (snapshot.outcome !== "snapshot") throw new Error("PMS snapshot required");
+      const built = buildBookingPublicContent({
+        sourceManifestHash: hash, readinessHash: hash, profile: structuredClone(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile),
+        rooms: snapshot.content.rooms, calendar: snapshot.content.calendar,
+        finance: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"], onlinePayment: true, payAtProperty: true, readyPaymentMethods: ["card", "pay_at_property"] },
+      });
+      expect(built).not.toBeNull();
+      expect(parseBookingPublicContent(built?.publicContent)).toEqual(built?.publicContent);
+      expect(built?.publicContent.rooms.flatMap(room => room.rates)).toEqual(current!.rooms.flatMap(room => room.offers));
+      await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [scope.propertyId]);
+      expect(await pms.getSnapshot(request)).toEqual({ outcome: "unavailable", owner: "pms" });
+    } finally { await single.end(); }
   });
   it("changes the source identity after a new authority choice and refuses external or hidden properties", async () => {
     const f = await publicFixture(),
