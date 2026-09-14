@@ -130,6 +130,16 @@ release from the hold. This guards acceptance, not invitation delivery, staff
 access editing or organization-only resource grants. Complete runtime receipt
 visibility remains a rollout prerequisite.
 
+Staff status editing now checks the locked target subject for every `active`
+request, including active-to-active. Staff access editing checks the subject of
+the locked membership before changing roles, permissions or assignments; even
+apparently restrictive mixed edits are held. Dedicated suspension/removal and
+exact no-write replay retain their existing behavior. Idempotency reservations
+roll back with denial. No row-lock order changes: the membership lock pins its
+non-null subject FK. This relies on preparation inserting only absent users and
+their receipts atomically; it does not make later receipt insertion onto an
+existing user safe. Acceptance and edits reuse one private package guard.
+
 The future bootstrap writer must insert previously absent users and their receipt
 in **one transaction**. Under READ COMMITTED, a later lookup cannot see that
 committed user without its receipt. If signup misses an uncommitted prepared user,
