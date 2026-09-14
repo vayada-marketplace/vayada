@@ -2,6 +2,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readLegacyOwnershipTargetRow } from "./channexAdoptionTargetRows.js";
 import { readLegacyOwnershipDrift } from "./legacyOwnershipEvidenceReader.js";
+import { readLegacyOwnershipTargetEvidence } from "./legacyOwnershipRelationships.js";
 import {
   LEGACY_OWNERSHIP_ROW_TABLES,
   type LegacyOwnershipFingerprint,
@@ -11,6 +12,7 @@ const url = process.env["VAY2017_EVIDENCE_TEST_DATABASE_URL"];
 describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
   let client: pg.Client;
   const fingerprints: LegacyOwnershipFingerprint[] = [];
+  const legacyHotelId = "00000000-0000-4000-8000-000000000099";
   beforeAll(async () => {
     const parsed = new URL(url!);
     if (
@@ -38,6 +40,40 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
         table,
         ...(await readLegacyOwnershipTargetRow(client, table, id)),
       });
+    }
+    const id = (kind: LegacyOwnershipFingerprint["kind"]) =>
+      fingerprints.find((row) => row.kind === kind)!.id;
+    await client.query(`ALTER TABLE identity.organizations ADD COLUMN kind text;
+      ALTER TABLE identity.organization_memberships ADD COLUMN user_id uuid, ADD COLUMN organization_id uuid,
+        ADD COLUMN role_key text, ADD COLUMN access_origin text;
+      ALTER TABLE identity.organization_resource_links ADD COLUMN organization_id uuid, ADD COLUMN product text,
+        ADD COLUMN resource_type text, ADD COLUMN resource_id text, ADD COLUMN relationship text;
+      ALTER TABLE hotel_catalog.property_source_links ADD COLUMN property_id uuid, ADD COLUMN source_id text,
+        ADD COLUMN source_system text, ADD COLUMN source_table text, ADD COLUMN relationship text`);
+    await client.query("UPDATE identity.organizations SET kind = 'hotel_group'");
+    await client.query(
+      "UPDATE identity.organization_memberships SET user_id = $1, organization_id = $2, role_key = 'hotel_owner', access_origin = 'agency'",
+      [id("user"), id("organization")],
+    );
+    await client.query(
+      "UPDATE hotel_catalog.property_source_links SET property_id = $1, source_id = $2, source_system = 'pms', source_table = 'hotels', relationship = 'operational_input'",
+      [id("property"), legacyHotelId],
+    );
+    for (const [kind, product, type, resource] of [
+      ["legacyLink", "pms", "pms_hotel", legacyHotelId],
+      ["canonicalLink", "hotel_catalog", "property", id("property")],
+      ["pmsLink", "pms", "pms_property", id("property")],
+    ] as const) {
+      await client.query(
+        "UPDATE identity.organization_resource_links SET organization_id = $1, product = $2, resource_type = $3, resource_id = $4, relationship = 'operator' WHERE id = $5",
+        [id("organization"), product, type, resource, id(kind)],
+      );
+    }
+    for (const row of fingerprints) {
+      Object.assign(
+        row,
+        await readLegacyOwnershipTargetRow(client, LEGACY_OWNERSHIP_ROW_TABLES[row.kind], row.id),
+      );
     }
   });
   afterAll(async () => {
@@ -74,6 +110,102 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
       await client.query("DELETE FROM identity.organization_memberships");
       await expect(readLegacyOwnershipDrift(client, fingerprints)).rejects.toMatchObject({
         code: "TARGET_ROW_MISMATCH",
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it("matches the exact pending owner target chain without granting access", async () => {
+    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY");
+    try {
+      expect(await readLegacyOwnershipTargetEvidence(client, fingerprints, legacyHotelId)).toEqual({
+        outcome: "target_matches",
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each([
+    [
+      "wrong owner",
+      "UPDATE identity.organization_memberships SET user_id = '00000000-0000-4000-8000-000000000098'",
+      "membership_conflict",
+    ],
+    [
+      "wrong organization kind",
+      "UPDATE identity.organizations SET kind = 'platform'",
+      "membership_conflict",
+    ],
+    [
+      "wrong legacy mapping",
+      "UPDATE hotel_catalog.property_source_links SET source_id = 'other'",
+      "source_link_conflict",
+    ],
+    [
+      "wrong resource owner",
+      "UPDATE identity.organization_resource_links SET organization_id = '00000000-0000-4000-8000-000000000098'",
+      "ownership_link_conflict",
+    ],
+    [
+      "wrong relationship",
+      "UPDATE identity.organization_resource_links SET relationship = 'front_desk'",
+      "ownership_link_conflict",
+    ],
+    ["newer restriction", "UPDATE identity.users SET status = 'suspended'", "target_drift"],
+    [
+      "archived competing owner",
+      `INSERT INTO identity.organization_resource_links SELECT '00000000-0000-4000-8000-000000000098', 'archived', updated_at, revision, metadata,
+      '00000000-0000-4000-8000-000000000097', product, resource_type, resource_id, relationship FROM identity.organization_resource_links LIMIT 1`,
+      "ownership_link_conflict",
+    ],
+    [
+      "second membership",
+      `INSERT INTO identity.organization_memberships SELECT '00000000-0000-4000-8000-000000000098', 'inactive', updated_at, revision, metadata,
+      '00000000-0000-4000-8000-000000000097', organization_id, role_key, access_origin FROM identity.organization_memberships`,
+      "membership_conflict",
+    ],
+  ])("rejects %s", async (_name, sql, reason) => {
+    await client.query("BEGIN");
+    try {
+      await client.query(sql!);
+      expect(await readLegacyOwnershipTargetEvidence(client, fingerprints, legacyHotelId)).toEqual({
+        outcome: "blocked",
+        reason,
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each(["pms_hotel", "property", "pms_property"])(
+    "rejects archived competing %s ownership",
+    async (resourceType) => {
+      await client.query("BEGIN");
+      try {
+        await client.query(
+          `INSERT INTO identity.organization_resource_links
+        SELECT '00000000-0000-4000-8000-000000000098', 'archived', updated_at, revision, metadata,
+        '00000000-0000-4000-8000-000000000097', product, resource_type, resource_id, relationship
+        FROM identity.organization_resource_links WHERE resource_type = $1`,
+          [resourceType],
+        );
+        expect(
+          await readLegacyOwnershipTargetEvidence(client, fingerprints, legacyHotelId),
+        ).toEqual({ outcome: "blocked", reason: "ownership_link_conflict" });
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    },
+  );
+  it("rejects an additional historical PMS mapping for the same canonical hotel", async () => {
+    await client.query("BEGIN");
+    try {
+      await client.query(`INSERT INTO hotel_catalog.property_source_links
+        SELECT '00000000-0000-4000-8000-000000000098', 'superseded', updated_at, revision, metadata,
+        property_id, '00000000-0000-4000-8000-000000000097', source_system, source_table, relationship
+        FROM hotel_catalog.property_source_links`);
+      expect(await readLegacyOwnershipTargetEvidence(client, fingerprints, legacyHotelId)).toEqual({
+        outcome: "blocked",
+        reason: "source_link_conflict",
       });
     } finally {
       await client.query("ROLLBACK");
