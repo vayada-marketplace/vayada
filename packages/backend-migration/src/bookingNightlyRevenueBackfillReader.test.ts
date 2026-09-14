@@ -12,7 +12,7 @@ const ids = [1, 2, 3, 4].map(
 );
 
 describe("nightly revenue backfill reader", () => {
-  it("pages uncaptured bookings and uses only retained booking and assignment evidence", async () => {
+  it("pages uncaptured or backfill-owned bookings using only retained evidence", async () => {
     const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
     const client = {
       async query(sql: string, values: readonly unknown[]) {
@@ -44,6 +44,7 @@ describe("nightly revenue backfill reader", () => {
     expect(calls[0]!.values).toEqual([CURSOR, 4]);
     expect(calls[0]!.sql).toContain('txid_current()::text AS "transactionId"');
     expect(calls[0]!.sql).toContain("$1::uuid IS NULL OR booking.id>$1::uuid");
+    expect(calls[0]!.sql).toContain("evidence.command_key NOT LIKE 'backfill:v1:%'");
     expect(calls.map(({ sql }) => sql).join(" ")).not.toMatch(/rate_plan|pricing|external|fetch/i);
 
     const plan = planNightlyRevenueBackfill(page.candidates, {
