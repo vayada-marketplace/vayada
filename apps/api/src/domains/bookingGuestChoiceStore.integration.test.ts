@@ -1,3 +1,4 @@
+import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./bookingGuestPolicyScopeAuthorization.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -30,7 +31,7 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
       [scope.propertyId],
     );
     let allowed = true;
-    const store = createBookingGuestChoiceStore(pool, {
+    const store = createBookingGuestChoiceStore(pool, () => ({
       async authorizeGuestPolicyScope(input) {
         expect(input).toMatchObject({
           ...scope,
@@ -44,7 +45,7 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
         });
         return allowed;
       },
-    });
+    }));
     const command = {
       requestId: "rules-1",
       expectedRevision: null as string | null,
@@ -72,6 +73,7 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
   }
   it("creates without rates, edits with revision checks and replays the original confirmed revision", async () => {
     const f = await fixture();
+    expect(await f.store.read(f.scope)).toBeNull();
     const first = await f.store.save(f.scope, f.command);
     expect(first.replayed).toBe(false);
     const edit = {
@@ -82,6 +84,10 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
     };
     const second = await f.store.save(f.scope, edit);
     expect(second.revision).not.toBe(first.revision);
+    expect(await f.store.read(f.scope)).toEqual({
+      revision: second.revision,
+      choices: edit.choices,
+    });
     expect(await f.store.save(f.scope, f.command)).toEqual({ ...first, replayed: true });
     expect(
       await f.store.save(f.scope, {
@@ -118,6 +124,7 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
       client.release();
     }
     f.deny();
+    await expect(f.store.read(f.scope)).rejects.toThrow("guest_choices_denied");
     await expect(f.store.save(f.scope, f.command)).rejects.toThrow("guest_choices_denied");
     const rows = await pool.query(
       "SELECT actor_user_id,confirmed_at FROM booking.guest_choice_revisions WHERE property_id=$1",
@@ -157,5 +164,41 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
       [f.scope.propertyId],
     );
     expect(rows.rows).toHaveLength(1);
+  });
+  it("uses real authorization on the transaction connection with a one-connection pool", async () => {
+    const f = await fixture(),
+      role = `guest_rules_${randomUUID()}`;
+    await pool.query(
+      "INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active',$3,'agency')",
+      [f.scope.organizationId, f.scope.actorUserId, role],
+    );
+    await pool.query(
+      "INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key) VALUES('hotel_group',$1,'booking.settings.manage')",
+      [role],
+    );
+    await pool.query(
+      "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'booking','booking_hotel',$2,'owner','active')",
+      [f.scope.organizationId, f.scope.propertyId],
+    );
+    await pool.query(
+      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id) VALUES($1,'booking','booking-engine','active','booking','booking_hotel',$2)",
+      [f.scope.organizationId, f.scope.propertyId],
+    );
+    const single = new pg.Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 1000 });
+    try {
+      const store = createBookingGuestChoiceStore(single, (client) =>
+        createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+      );
+      const saved = await store.save(f.scope, f.command);
+      expect((await store.read(f.scope))?.revision).toBe(saved.revision);
+      await pool.query(
+        "UPDATE identity.organization_memberships SET status='suspended' WHERE organization_id=$1",
+        [f.scope.organizationId],
+      );
+      await expect(store.read(f.scope)).rejects.toThrow("guest_choices_denied");
+      await expect(store.save(f.scope, f.command)).rejects.toThrow("guest_choices_denied");
+    } finally {
+      await single.end();
+    }
   });
 });

@@ -5,7 +5,7 @@ import {
   type BookingGuestPolicyScopeAuthorizationPort,
 } from "@vayada/domain-booking";
 import { pricingKeys, pricingObject } from "@vayada/domain-pms";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { BookingGuestPolicyReadClient } from "./bookingGuestPolicyRepository.js";
 
 type Scope = { propertyId: string; organizationId: string; actorUserId: string };
@@ -47,9 +47,49 @@ export async function lockCurrentGuestChoiceRevision(
 /** Internal owner; route adapters supply authenticated scope, never body-supplied IDs. */
 export function createBookingGuestChoiceStore(
   pool: Pool,
-  authorization: BookingGuestPolicyScopeAuthorizationPort,
+  authorization: (client: PoolClient) => BookingGuestPolicyScopeAuthorizationPort,
 ) {
   return {
+    async read(scope: Scope) {
+      if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid))
+        throw new Error("invalid_guest_choices");
+      const target = {
+        propertyId: scope.propertyId.toLowerCase(),
+        organizationId: scope.organizationId.toLowerCase(),
+        actorUserId: scope.actorUserId.toLowerCase(),
+      };
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await lock(client, target.propertyId);
+        const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
+        if (
+          !(await authorization(client).authorizeGuestPolicyScope({
+            ...target,
+            ...BOOKING_GUEST_POLICY_AUTHORIZATION,
+            checkedAt: now.toISOString(),
+          }))
+        )
+          throw new Error("guest_choices_denied");
+        const current = await lockCurrentGuestChoiceRevision(
+          client,
+          target.propertyId,
+          target.organizationId,
+        );
+        await client.query("COMMIT");
+        return current
+          ? {
+              revision: current.sourceRevision.slice("guest-choices:".length),
+              choices: current.choices,
+            }
+          : null;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async save(scope: Scope, input: unknown) {
       if (
         ![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid) ||
@@ -94,7 +134,7 @@ export function createBookingGuestChoiceStore(
         await lock(client, target.propertyId);
         const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
         if (
-          !(await authorization.authorizeGuestPolicyScope({
+          !(await authorization(client).authorizeGuestPolicyScope({
             ...target,
             ...BOOKING_GUEST_POLICY_AUTHORIZATION,
             checkedAt: now.toISOString(),

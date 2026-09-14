@@ -1,3 +1,5 @@
+import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
+import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import { bookingQuoteAcceptanceRequirements, parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { redeemCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
@@ -1658,7 +1660,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         specialRequests: " Quiet room please. ",
       },
     };
-    return { quote, policy, input, ack };
+    return { quote, policy, input, ack, scope: f.scope };
   }
   it("binds guest acknowledgment to the exact quote and policy, with deterministic normalized identity", async () => {
     const f = await acceptanceFixture();
@@ -1755,6 +1757,27 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ),
       ).toBeNull();
     }
+  });
+
+  it("reads saved replacement guest rules into a real current quote disclosure without legacy fallback", async () => {
+    const f = await acceptanceFixture();
+    const read = async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        return await lockCurrentQuoteGuestDisclosure(client, f.scope.propertyId, f.quote.quoteId);
+      } finally { await client.query("ROLLBACK"); client.release(); }
+    };
+    expect(await read()).toBeNull();
+    const store = createBookingGuestChoiceStore(pool, () => ({ async authorizeGuestPolicyScope(scope) {
+      expect(scope).toMatchObject(f.scope); return true;
+    } }));
+    const saved = await store.save(f.scope, { requestId: randomUUID(), expectedRevision: null, confirmed: true, choices: f.policy.choices });
+    const disclosure = await read();
+    expect(disclosure!.policy.sourceRevision).toBe(`guest-choices:${saved.revision}`);
+    expect(disclosure!.disclosure.choices).toEqual(f.policy.choices);
+    expect(disclosure!.quote).toEqual(f.quote);
+    expect(parseBookingQuoteAcceptanceInput({ ...f.input, acceptance: { accepted: true, quoteEvidenceId: disclosure!.quoteEvidenceId, guestPolicyEvidenceId: disclosure!.guestPolicyEvidenceId } }, disclosure!.quote, disclosure!.policy)).not.toBeNull();
   });
 
 });
