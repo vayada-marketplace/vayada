@@ -1,3 +1,8 @@
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page } from "@playwright/test";
 import type { PropertySetupRouteReadModel, PropertySetupStepDraft } from "@vayada/domain-hotels";
 
@@ -76,16 +81,92 @@ test.describe("adaptive room authoring", () => {
     await assertHealthy();
   });
 
-  test("retains first-visit values and exits only after a refreshed exact manifest", async ({
+  for (const lostResponse of [false, true]) {
+    test(`refreshes imported rooms while preserving local input (mock APIs, lost response: ${lostResponse})`, async ({
+      page,
+      baseURL,
+    }, testInfo) => {
+      await primeBrowserState(page);
+      await mockAuthSession(page);
+      await mockRoute(page, () => routeWithRoomsDraft(emptyRoomsDraft()));
+      const owner = await mockRoomOwnerApis(page);
+      let saved = false;
+      const prepared = {
+        contractVersion: "prepared-hotel-import.v1",
+        property: {},
+        rooms: [
+          {
+            id: "garden",
+            name: "Imported Suite",
+            description: "",
+            maxGuests: 2,
+            maxAdults: 2,
+            maxChildren: 0,
+            bedType: "queen",
+            bedQuantity: 1,
+            bathroomType: "private",
+            sizeSquareMetres: null,
+          },
+        ],
+      };
+      await page.route(
+        /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+        async (route) => {
+          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+          const item = { itemId: "room:garden", status: "applied", resourceId: roomTypeIds[0] };
+          if (route.request().method() === "POST") {
+            owner.insertImportedRoom();
+            saved = true;
+            if (lostResponse) return route.abort("failed");
+            return route.fulfill({ headers: corsHeaders(route), json: { items: [item] } });
+          }
+          return route.fulfill({
+            headers: corsHeaders(route),
+            json: {
+              import: {
+                sourceId: "synthetic-source",
+                propertyId,
+                data: prepared,
+                results: saved ? { "room:garden": item } : {},
+              },
+              profile: { propertyId, profileRevision: 1, profile: { displayName: "Test Hotel" } },
+              canImportRooms: true,
+              canImportProperty: false,
+              existingRooms: saved ? [{ id: roomTypeIds[0], name: "Imported Suite" }] : [],
+            },
+          });
+        },
+      );
+      await page.goto(setupUrl(baseURL));
+      await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
+      await page.getByLabel("Room type name").fill("Unfinished local room");
+      const panel = page.getByRole("region", { name: "Prepared hotel data" });
+      await panel.getByRole("button", { name: "Review prepared hotel data" }).click();
+      await panel.getByRole("checkbox", { name: "Imported Suite", exact: true }).check();
+      await panel.getByRole("button", { name: "Save selected items" }).click();
+      if (lostResponse) {
+        await expect(panel.getByRole("alert")).toContainText("Import could not finish");
+        await panel.getByRole("button", { name: "Refresh", exact: true }).click();
+      }
+      await expect(
+        page.getByRole("heading", { name: "Imported Suite", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByLabel("Room type name")).toHaveValue("Unfinished local room");
+      expect(owner.createdDraftIds).toHaveLength(0);
+      expect(owner.draftWrites).toBe(0);
+      await page.screenshot({ path: testInfo.outputPath("import-refresh.png"), fullPage: true });
+    });
+  }
+
+  test("retains first-visit values and exits with the exact current manifest", async ({
     page,
     baseURL,
   }, testInfo) => {
     await primeBrowserState(page);
     await mockAuthSession(page);
-    let manifestAvailable = false;
-    const routeState = await mockRoute(page, () =>
-      routeWithRoomsDraft(manifestAvailable ? emptyRoomsDraft() : null),
-    );
+    const initialRoute = routeWithRoomsDraft(null);
+    const routeState = await mockRoute(page, () => initialRoute);
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
     const owner = await mockRoomOwnerApis(page);
 
     await page.goto(setupUrl(baseURL));
@@ -95,30 +176,34 @@ test.describe("adaptive room authoring", () => {
     await name.fill("Locally retained room");
     await expect(
       page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add or arrange photos" })).toBeDisabled();
+    await expect(
+      page.getByText("Complete the required room details before uploading."),
+    ).toBeVisible();
 
     expect(owner.draftWrites).toBe(0);
     expect(owner.createdDraftIds).toEqual([]);
     expect(owner.mediaTargets).toEqual([]);
 
-    manifestAvailable = true;
-    await page.getByRole("button", { name: "Refresh setup data" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toHaveCount(0);
-    await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
     const assertHealthy = watchPageHealth(page, testInfo);
     await expect(name).toHaveValue("Locally retained room");
     await assertHealthy();
     await page.getByRole("button", { name: "Exit setup", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/marketplace$/, { timeout: 60_000 });
+    await expect(page).toHaveURL(destination);
     expect(owner.draftWrites).toBe(1);
     expect(owner.lastDraftPayload?.["room.name"]).toEqual(
       expect.objectContaining({ [owner.lastDraftRoomId!]: "Locally retained room" }),
     );
-    expect(routeState.reads).toBe(2);
+    expect(routeState.reads).toBe(1);
+    expect(owner.lastDraftRequest).toMatchObject({
+      expectedBaseRevisions: initialRoute.steps.find((step) => step.stepId === "rooms")!
+        .currentBaseRevisions,
+      expectedDraftRevision: 0,
+      expectedTrackRevision: 3,
+      expectedSessionRevision: 7,
+    });
   });
 
   test("keeps the mobile dialogs keyboard-contained and returns focus without overflow", async ({
@@ -179,6 +264,16 @@ async function uploadPhoto(page: Page, filename: string) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(
@@ -260,6 +355,7 @@ async function mockRoomOwnerApis(page: Page) {
   let draftWrites = 0;
   let draftRevision = 4;
   let sessionRevision = 7;
+  let lastDraftRequest: Record<string, unknown> | null = null;
   let lastDraftPayload: Record<string, unknown> | null = null;
   let lastDraftRoomId: string | null = null;
 
@@ -291,6 +387,7 @@ async function mockRoomOwnerApis(page: Page) {
     draftWrites += 1;
     draftRevision += 1;
     sessionRevision += 1;
+    lastDraftRequest = body;
     lastDraftPayload = body.payload;
     lastDraftRoomId =
       Object.keys((body.payload["room.name"] as Record<string, unknown>) ?? {})[0] ?? null;
@@ -642,11 +739,32 @@ async function mockRoomOwnerApis(page: Page) {
   });
 
   return {
+    insertImportedRoom() {
+      rooms.set(roomTypeIds[0]!, {
+        ...ownerRoomShape(),
+        roomTypeId: roomTypeIds[0]!,
+        draftRoomId: "import:synthetic-source:garden",
+        facts: {
+          name: "Imported Suite",
+          description: "",
+          category: null,
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "queen", quantity: 1 }],
+          bedrooms: null,
+          bathrooms: null,
+          bathroomType: "private",
+          size: null,
+        },
+      });
+    },
     events,
     createdDraftIds,
     mediaTargets,
     get draftWrites() {
       return draftWrites;
+    },
+    get lastDraftRequest() {
+      return lastDraftRequest;
     },
     get lastDraftPayload() {
       return lastDraftPayload;
