@@ -331,6 +331,47 @@ retention deadline. Rerun the dry run with the same ID after apply and require u
 checksums/counts. Booking success still does not authorize legacy shutdown:
 VAY-1356 through VAY-1363 and the rollback window remain mandatory gates.
 
+## Booking Nightly Revenue Backfill
+
+VAY-1181 reconstructs Booking-owned nightly room revenue from retained target
+evidence. It never calls Booking.com or another provider, and it excludes any
+booking with producer-owned base room-night evidence. Exact nightly evidence is
+preferred; missing amounts stay explicit. Equal allocation from a retained
+booking total is disabled unless the operator opts in.
+
+Start with a dry run (the default):
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<24 lowercase hex characters> \
+  --recognized-on <YYYY-MM-DD> \
+  --dry-run
+```
+
+Review every exception and the planned reconciliation by property, stay date,
+currency, source, and evidence quality. Add
+`--allow-inferred-equal-allocation` only after approving that policy. Apply the
+same reviewed run with its exact guard:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<same 24 lowercase hex characters> \
+  --recognized-on <same YYYY-MM-DD> \
+  --apply \
+  --confirm nightly-revenue-backfill:vay1181-<same 24 lowercase hex characters>
+```
+
+Each page is verified before its independent transaction commits. After an
+interruption, rerun with the same immutable run ID and arguments: committed
+pages replay, while uncaptured or backfill-owned corrected bookings append the
+next revision. Never mint a new run ID merely to resume. `--recognized-on` is
+the correction recognition date; base room-night rows retain their stay date.
+The JSON report includes every page checkpoint, exception, planned totals, and
+applied ledger totals. Any exception sets exit code 2 after printing the report;
+an execution or verification failure sets exit code 1 and rolls back that page.
+
 ## Production PMS Migration
 
 VAY-1356 consumes PMS rooms and rate configuration, exact 366-day inventory,
