@@ -1,3 +1,4 @@
+import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { createReplacementBookingQuoteIssuer, requirePublicQuoteKey } from "./replacementBookingQuote.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
@@ -233,6 +234,7 @@ export type BookingWebCheckoutAdapter = {
     clientAddressHash: string,
     context: BookingWebCheckoutCommandContext,
   ): Promise<void>;
+  getPricingOffers?(slug: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -507,6 +509,13 @@ export async function registerBookingWebPublicRoutes(
     reply.header("Cache-Control", "no-store");
     reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-profile-read");
     return response;
+  });
+
+  app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug/pricing-offers", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    reply.header("X-Robots-Tag", "noindex");
+    if (!checkoutAdapter.getPricingOffers) throw createHttpError(404, "Pricing offers unavailable.");
+    return checkoutAdapter.getPricingOffers(request.params.slug);
   });
 
   app.get<{ Params: BookingWebHotelParams; Querystring: PublicHotelQuoteQuery }>(
@@ -1350,6 +1359,7 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
+  const pricingOffers = createPublicPricingOfferCatalog(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(pool, 300));
 
   const editCleanupTimer = setInterval(() => {
@@ -1783,6 +1793,13 @@ export function createTargetBookingWebCheckoutAdapter(
         });
         return body;
       });
+    },
+    async getPricingOffers(slug) {
+      let offers;
+      try { offers = await pricingOffers.read(slug); }
+      catch (error) { throw Object.assign(new Error("Pricing offers temporarily unavailable.", { cause: error }), { statusCode: 503 }); }
+      if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
+      return offers;
     },
     async quoteBooking(slug, request, context) {
       return issueReplacementQuote(slug, request, context?.idempotencyKey);
