@@ -225,6 +225,7 @@ jobs:
           src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
+          src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
