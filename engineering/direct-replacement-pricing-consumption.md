@@ -668,3 +668,17 @@ are fabricated from saved guest rules.
 The prior single-pricing-currency publication constraint remains explicit: Finance
 must advertise only its default currency, matching PMS rates. Merely enabling more
 payment currencies does not establish quote conversion support.
+
+
+Publication orchestration must read approved pricing before a public profile exists.
+`lockCurrentPricingPublication` separates the shared current-owner validation from
+`lockPublicPricingPublication`'s public-access gate. It accepts trusted organization/
+property scope inside the caller's READ COMMITTED transaction, checks explicit
+Vayada authority, active organization/property, PMS/Catalog links and current PMS
+entitlement, then validates the complete stored pricing revision, room sources,
+offer terms, Finance and mandatory-charge coverage. Entitlements are rechecked
+after owner waits. It neither needs a public profile nor grants guest access.
+The public wrapper still requires public authority before and after these reads.
+Both return the same pricing source fingerprint; no duplicate calculator or
+legacy-price fallback is introduced. PMS publication content mapping and separate
+room/media/calendar/inventory readiness remain required downstream.
