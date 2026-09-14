@@ -130,8 +130,7 @@ export default function ReplacementQuoteTerms({
       ))}
       <p>Selected payment method: {methodNames[quote.paymentMethod]}.</p>
       <p className="text-sm text-gray-600">
-        This price preview does not reserve a room or take payment. These are rate terms only; our
-        guest policies still need to be provided before a booking can be submitted.
+        This price preview does not reserve a room or take payment. These are rate terms only. Please also review our guest rules before booking.
       </p>
       {(unavailable || missingLabels) && (
         <p role="status">
