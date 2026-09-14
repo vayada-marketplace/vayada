@@ -41,6 +41,7 @@ describe("nightly revenue backfill page transaction", () => {
       limit: 25,
     });
     expect(dependencies.apply).not.toHaveBeenCalled();
+    expect(dependencies.verify).not.toHaveBeenCalled();
   });
 
   it("applies and commits one page using the reader transaction token", async () => {
@@ -60,6 +61,7 @@ describe("nightly revenue backfill page transaction", () => {
       { pageId: `${RUN}:${FINGERPRINT}`, recognizedOn: "2026-09-17", lines: [line] },
       "reader-transaction",
     );
+    expect(dependencies.verify).toHaveBeenCalledWith(client, [line]);
   });
 
   it("rolls back failures and treats an empty page as a completed dry checkpoint", async () => {
@@ -74,6 +76,20 @@ describe("nightly revenue backfill page transaction", () => {
     ).rejects.toThrow("write failed");
     expect(failedClient.sql.at(-1)).toBe("ROLLBACK");
     expect(failedClient.releasedWith).toEqual([false]);
+
+    const verificationClient = new TransactionFixture();
+    const verificationFailed = fixture();
+    verificationFailed.verify = vi.fn(async () => {
+      throw new Error("verification failed");
+    });
+    await expect(
+      runNightlyRevenueBackfillPage(
+        new PoolFixture(verificationClient) as never,
+        { ...input, mode: "apply" },
+        verificationFailed,
+      ),
+    ).rejects.toThrow("verification failed");
+    expect(verificationClient.sql.at(-1)).toBe("ROLLBACK");
 
     const poisonedClient = new TransactionFixture(true);
     const poisonedPool = new PoolFixture(poisonedClient);
@@ -186,6 +202,12 @@ function fixture(): NightlyRevenueBackfillPageServices {
       bookingCount: 1,
       insertedCount: 1,
       sourceRevisions: { [CURSOR]: 1 },
+    })),
+    verify: vi.fn(async () => ({
+      lineCount: 1,
+      storedRows: 1,
+      revisionCount: 1,
+      reconciliation: [],
     })),
   };
 }
