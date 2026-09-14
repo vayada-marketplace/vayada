@@ -100,14 +100,7 @@ export const PROPERTY_SETUP_STEP_DEFINITIONS = [
     stepId: "guest_experience",
     track: "hotel_operations",
     permission: "booking.settings.manage",
-    baseRevisionKeys: [
-      "booking.guest_experience",
-      "pms.pricing_settings",
-      "pms.rate_plans",
-      "pms.room_types",
-      "hotel_catalog.location",
-      "hotel_catalog.policy",
-    ],
+    baseRevisionKeys: ["booking.guest_experience"],
     fields: [
       "guest.default_language",
       "guest.children_enabled",

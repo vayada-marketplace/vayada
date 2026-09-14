@@ -50,7 +50,10 @@ export function createBookingGuestChoiceStore(
   authorization: (client: PoolClient) => BookingGuestPolicyScopeAuthorizationPort,
 ) {
   return {
-    async read(scope: Scope) {
+    async read(
+      scope: Scope,
+      permission: "booking.settings.read" | "booking.settings.manage" = "booking.settings.manage",
+    ) {
       if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid))
         throw new Error("invalid_guest_choices");
       const target = {
@@ -67,6 +70,7 @@ export function createBookingGuestChoiceStore(
           !(await authorization(client).authorizeGuestPolicyScope({
             ...target,
             ...BOOKING_GUEST_POLICY_AUTHORIZATION,
+            permission,
             checkedAt: now.toISOString(),
           }))
         )

@@ -1,3 +1,4 @@
+import { createPropertySetupBookingStateProvider } from "../platform/propertySetupBookingState.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./bookingGuestPolicyScopeAuthorization.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
@@ -189,12 +190,56 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
       const store = createBookingGuestChoiceStore(single, (client) =>
         createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
       );
+      const provider = createPropertySetupBookingStateProvider({
+        design: {
+          getCurrentDesign: async () => {
+            throw new Error("unexpected design read");
+          },
+        },
+        catalog: {
+          getState: async () => {
+            throw new Error("unexpected catalog read");
+          },
+        },
+        guestRules: { read: (scope) => store.read(scope, "booking.settings.read") },
+      });
+      await pool.query(
+        "INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key) VALUES('hotel_group',$1,'booking.settings.read')",
+        [role],
+      );
+      const request = {
+        ...f.scope,
+        selectedTracks: ["hotel_operations"] as const,
+        expectedTrackRevision: 1,
+        stepIds: ["guest_experience"] as const,
+      };
+      await expect(provider.getOwnerState(request)).resolves.toMatchObject({
+        outcome: "found",
+        facts: [{ state: "not_started", sourceRevision: "guest-choices:absent" }],
+      });
       const saved = await store.save(f.scope, f.command);
+      await expect(provider.getOwnerState(request)).resolves.toMatchObject({
+        outcome: "found",
+        facts: [{ state: "complete", sourceRevision: `guest-choices:${saved.revision}` }],
+      });
       expect((await store.read(f.scope))?.revision).toBe(saved.revision);
+      await pool.query(
+        "DELETE FROM identity.role_permission_grants WHERE role_key=$1 AND permission_key='booking.settings.manage'",
+        [role],
+      );
+      await expect(provider.getOwnerState(request)).resolves.toMatchObject({
+        outcome: "found",
+        facts: [{ state: "complete" }],
+      });
+      await expect(store.save(f.scope, f.command)).rejects.toThrow("guest_choices_denied");
+      await expect(store.read(f.scope)).rejects.toThrow("guest_choices_denied");
       await pool.query(
         "UPDATE identity.organization_memberships SET status='suspended' WHERE organization_id=$1",
         [f.scope.organizationId],
       );
+      await expect(provider.getOwnerState(request)).resolves.toEqual({
+        outcome: "provider_failure",
+      });
       await expect(store.read(f.scope)).rejects.toThrow("guest_choices_denied");
       await expect(store.save(f.scope, f.command)).rejects.toThrow("guest_choices_denied");
     } finally {
