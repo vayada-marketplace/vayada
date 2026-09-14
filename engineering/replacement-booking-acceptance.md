@@ -217,3 +217,13 @@ Capture/replay tests currently mock SQL boundaries. Before activation, exercise
 real subscription-update versus capture lock ordering and transaction retries,
 in addition to the inventory/promo/receipt races above. Unit ordering assertions
 are not evidence that competing owner transactions cannot deadlock.
+
+## Combined final deadline gate
+
+`finishPricingAcceptance(client, slug, current, finance)` combines the existing
+quote/time/authority gate with the captured Finance deadline. Both evidence inputs
+must originate on this retained transaction before mutations. It compares the
+exact property/organization/authority revision, then uses the final gate's database
+time after all waits to require capture <= time < validUntil (null is unbounded).
+The writer must stage every blocking write first and roll back on rejection.
+No additional database work follows inside this helper; it returns time only.
