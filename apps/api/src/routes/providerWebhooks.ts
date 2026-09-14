@@ -93,6 +93,7 @@ export type ProviderWebhookRoutesOptions = {
   modes?: ProviderWebhookModeConfig;
   channexBookingPromotionEnabled?: boolean;
   channexAlterationPromotionEnabled?: boolean;
+  channexReviewMode?: ProviderWebhookMode;
   store: ProviderWebhookStore;
   pmsInboxDeliveryReceipts?: Pick<PmsInboxDeliveryReceiptPort, "recordTrustedProviderReceipt">;
   stripeTimestampToleranceSeconds?: number;
@@ -579,6 +580,8 @@ function channexModeFor(
   classification: ChannexClassification,
 ): ProviderWebhookMode {
   const mode = modeFor(options, "channex");
+  if (classification.family === "review" || classification.family === "updated_review")
+    return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
     ((classification.family === "alteration" && !options.channexAlterationPromotionEnabled) ||
@@ -831,11 +834,14 @@ type ChannexClassification = {
 
 function classifyChannexPayload(payload: Record<string, unknown>): ChannexClassification {
   const nestedPayload = optionalRecord(payload, "payload") ?? {};
-  const eventType =
+  const providerEventType =
     optionalString(payload, "event") ??
     optionalString(payload, "event_type") ??
     optionalString(payload, "type") ??
     "unknown";
+  // Keep the persisted/UI event name compatible with existing alert incidents.
+  const eventType =
+    providerEventType === "disconnect_channel" ? "disconnected_channel" : providerEventType;
   const envelope: ChannexEventEnvelope = {
     eventType,
     family: channexEventFamily(eventType),
