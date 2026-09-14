@@ -1,3 +1,4 @@
+import { readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
@@ -291,6 +292,193 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     return f;
   }
+  async function restrictionFixture() {
+    const f = await configurationFixture();
+    const rateId = ((await f.response().json()) as { data: { id: string } }).data.id;
+    const date = "2030-06-14";
+    const restrictions = {
+      min_stay_arrival: 1,
+      min_stay_through: 1,
+      max_stay: 0,
+      closed_to_arrival: false,
+      closed_to_departure: false,
+      stop_sell: false,
+    };
+    const response = { data: { [rateId]: { [date]: restrictions } } };
+    return { ...f, rateId, date, restrictions, restrictionResponse: response };
+  }
+  it("observes restrictions for the identified pending target without granting activation", async () => {
+    const f = await restrictionFixture();
+    const selected = { ...f.selection },
+      lease = { ...f.input };
+    const get = vi.fn(async (path: string, signal: AbortSignal) => {
+      const query = new URL(path, "https://example.test").searchParams;
+      expect(query.get("filter[property_id]")).toBe(f.scope.propertyId);
+      expect(query.get("filter[date]")).toBe(f.date);
+      expect(signal.aborted).toBe(false);
+      selected.roomTypeId = randomUUID();
+      lease.jobId = randomUUID();
+      return f.restrictionResponse;
+    });
+    expect(
+      await readCurrentChannexNightRestrictions(
+        pool,
+        lease,
+        selected,
+        f.claim.attemptId,
+        f.date,
+        get,
+      ),
+    ).toEqual({
+      kind: "restrictions_observed",
+      attemptId: f.claim.attemptId,
+      targetId: f.claim.targetId,
+      intentId: f.claim.intentId,
+      version: f.claim.version,
+      observation: {
+        kind: "observed",
+        externalPropertyId: f.scope.propertyId,
+        externalRatePlanId: f.rateId,
+        propertyId: f.scope.propertyId,
+        roomTypeId: f.selection.roomTypeId,
+        offerId: "flex",
+        publicationRevision: 1,
+        restrictionOfferId: "flex",
+        date: f.date,
+        restrictions: f.restrictions,
+      },
+    });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        await pool.query(
+          `SELECT t.active_version,i.status,i.result_evidence FROM pms.channex_offer_targets t
+       JOIN pms.channex_offer_target_intents i ON i.target_id=t.id WHERE i.id=$1`,
+          [f.claim.intentId],
+        )
+      ).rows,
+    ).toEqual([{ active_version: null, status: "pending", result_evidence: {} }]);
+  });
+  it.each(["lease", "receipt", "binding", "mapping", "intent", "terms", "publication"])(
+    "rejects restriction observations when %s changes during GET",
+    async (variant) => {
+      const f = await restrictionFixture();
+      const result = await readCurrentChannexNightRestrictions(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        f.date,
+        async () => {
+          if (variant === "lease")
+            await pool.query(
+              "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+              [f.input.jobId],
+            );
+          if (variant === "receipt")
+            await (
+              await prepareChannexReceiptPersistence(
+                pool,
+                { ...f.correlation, receiptId: randomUUID() },
+                new Response("{}", { status: 500 }),
+              )
+            )();
+          if (variant === "binding")
+            await pool.query(
+              "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+              [f.scope.propertyId],
+            );
+          if (variant === "mapping")
+            await pool.query(
+              "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1",
+              [f.scope.propertyId, randomUUID()],
+            );
+          if (variant === "intent")
+            await pool.query(
+              "UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1",
+              [f.claim.intentId],
+            );
+          if (variant === "terms")
+            await f.booking.save(f.context, f.scope, {
+              requestId: randomUUID(),
+              expectedRevision: f.terms[0].revision,
+              terms: f.termsInput,
+            });
+          if (variant === "publication")
+            await pool.query("UPDATE pms.pricing_v2_heads SET revision=0 WHERE property_id=$1", [
+              f.scope.propertyId,
+            ]);
+          return f.restrictionResponse;
+        },
+      );
+      expect(result).toMatchObject({ kind: "unavailable" });
+    },
+  );
+  it("denies unresolved or invalid restriction selections before provider IO", async () => {
+    const f = await receiptFixture();
+    const get = vi.fn();
+    expect(
+      await readCurrentChannexNightRestrictions(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        "2030-06-14",
+        get,
+      ),
+    ).toMatchObject({ kind: "unavailable", reason: "creation_reconciliation_required" });
+    expect(
+      await readCurrentChannexNightRestrictions(
+        pool,
+        f.input,
+        f.selection,
+        "invalid",
+        "2030-06-14",
+        get,
+      ),
+    ).toMatchObject({ kind: "unavailable", reason: "invalid_creation_attempt" });
+    const ready = await restrictionFixture();
+    await expect(
+      readCurrentChannexNightRestrictions(
+        pool,
+        ready.input,
+        ready.selection,
+        ready.claim.attemptId,
+        "2030-02-30",
+        get,
+      ),
+    ).rejects.toThrow();
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("propagates failed or mismatched restriction readback without retaining evidence", async () => {
+    const f = await restrictionFixture();
+    for (const get of [
+      async () => {
+        throw new Error("transport failed");
+      },
+      async () => ({}),
+    ]) {
+      await expect(
+        readCurrentChannexNightRestrictions(
+          pool,
+          f.input,
+          f.selection,
+          f.claim.attemptId,
+          f.date,
+          get,
+        ),
+      ).rejects.toThrow();
+    }
+    expect(
+      (
+        await pool.query(
+          "SELECT result_evidence FROM pms.channex_offer_target_intents WHERE id=$1",
+          [f.claim.intentId],
+        )
+      ).rows[0].result_evidence,
+    ).toEqual({});
+  });
+
   it("retains verified configuration idempotently while leaving the target pending", async () => {
     const f = await configurationFixture();
     await pool.query("UPDATE pms.channex_offer_target_intents SET result_evidence=$2 WHERE id=$1", [
