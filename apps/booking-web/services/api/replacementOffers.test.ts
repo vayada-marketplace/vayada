@@ -85,3 +85,11 @@ it("formats accounting units without float rounding or ICU zero-decimal shortcut
   expect(displayQuoteMoney("1", "KWD")).toBe("KWD 0.001");
   expect(displayQuoteMoney("10800", "IDR")).toBe("IDR 108.00");
 });
+
+it("sends the entered promo with the exact selection and clears it explicitly", () => {
+  const request = (code: string) =>
+    roomQuoteRequest(rooms, choices(), "2026-10-01", "2026-10-03", "card", code);
+  expect(request(" SAVE10 ")?.selection.promoCode).toBe("SAVE10");
+  expect(request(" ")?.selection.promoCode).toBeNull();
+  expect(request("x".repeat(201))).toBeNull();
+});

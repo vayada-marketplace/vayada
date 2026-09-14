@@ -55,7 +55,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
         })),
         rooms: selection.rooms.map((room: any) => ({
           selectionId: room.selectionId,
-          mealPlan: "room_only",
+          mealPlan: room.publicOfferKey === firstKey ? "breakfast" : "room_only",
           cancellation: { kind: "non_refundable" },
           payment: { kind: "full", acceptedMethods: ["pay_at_property"] },
         })),
@@ -74,6 +74,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await second.getByLabel("Room and meal option").selectOption(secondKey);
   await second.getByLabel(/Adults/).fill("1");
   await page.getByLabel("Payment preference").selectOption("pay_at_property");
+  await page.getByLabel("Promo code (optional)").fill("SAVE10");
   await expect(page.getByRole("button", { name: "Get price", exact: true })).toBeDisabled();
   expect(requests).toBe(0);
   await expect(
@@ -82,15 +83,24 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await first.getByLabel("Child 1: age at check-in").selectOption("0");
   await page.getByRole("button", { name: "Get price", exact: true }).click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
+  const acknowledgement = page.getByLabel(
+    "I have read the room and rate terms for this price preview.",
+  );
+  await expect(page.getByRole("region", { name: "Room 1 terms" }).getByText("Meals: Breakfast", { exact: true })).toBeVisible();
+  await acknowledgement.check();
+  await expect(acknowledgement).toBeChecked();
+  await expect(page.getByRole("heading", { name: "Your room and rate terms" })).toBeVisible();
   expect(submitted.selection.rooms.map((room: any) => [room.publicOfferKey, room.guests])).toEqual([
     [firstKey, { adults: 2, childAgesAtCheckIn: [0] }],
     [secondKey, { adults: 1, childAgesAtCheckIn: [] }],
   ]);
+  expect(submitted.selection.promoCode).toBe("SAVE10");
   expect(new Set(submitted.selection.rooms.map((room: any) => room.selectionId)).size).toBe(2);
   await first.getByLabel("Child 1: age at check-in").selectOption("7");
   await expect(page.getByRole("region", { name: "Your stay price" })).toHaveCount(0);
   await page.getByRole("button", { name: "Get price", exact: true }).click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
+  await expect(acknowledgement).not.toBeChecked();
   await expect(page.getByText(/This price has expired/)).toBeVisible({ timeout: 6000 });
   await expect(page.getByRole("region", { name: "Your stay price" })).toHaveCount(0);
   await page.getByRole("button", { name: "Get price", exact: true }).click();

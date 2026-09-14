@@ -765,3 +765,28 @@ The new /book entry replaces the retired guest-details step with room selection
 and a price preview; it offers no reservation submission until atomic acceptance
 and complete guest/policy disclosure are connected. Optional extras/promo controls
 and the remaining old checkout screens are separate unfinished work.
+
+## Parallel implementation after the room quote form
+
+The quote form now sends an optional entered promo code in the existing selection;
+changes invalidate its price and retry identity. The server remains responsible
+for eligibility and the resulting discount. Per-room rate disclosure uses only
+validated quote meal/cancellation/payment terms and published room labels. Its
+local acknowledgement is bound to that exact preview and resets on changes or
+expiry; it is not the server's guest-policy acceptance evidence.
+
+GET /api/booking-web/hotels/:slug/pricing-addons returns current public selection
+metadata through the approved pricing/public authority owner and Booking add-on
+validation in one READ COMMITTED transaction. It respects the existing Booking
+show_addons_step switch without manufacturing publication readiness. Private
+partner economics and prices are excluded; nonempty lead-time rules remain
+unsupported and are omitted. All configured extras are validated in bounded
+batches without confusing the 99-selected-extras quote ceiling with catalogue
+size. Public responses are no-store/noindex with generic unavailable errors.
+The explicit participant/date extra-selection UI remains a separate step.
+
+The final acceptance-time gate and concrete remaining persistence/Finance order
+are defined in `replacement-booking-acceptance.md`. A successful time check or
+local rate acknowledgement is not a completed booking. Full current guest-policy
+disclosure, age-policy alignment, immutable acceptance persistence and orchestration
+remain required before any replacement reservation submission can be enabled.
