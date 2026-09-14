@@ -180,3 +180,18 @@ exact evidence retention, immutable history and transaction rollback. They do no
 establish a domain-valid PMS reservation or completed checkout. Full domain
 snapshot decoding, replay repository, owner capture and the acceptance writer
 remain required. No runtime write or public acceptance route is added by0210.
+
+## Historical acceptance reading
+
+`decodePricingAcceptanceHistory` verifies persisted quote, exact disclosure bytes,
+normalized consent command, Finance snapshot values and PMS receipt bundle shapes.
+It uses historical guest rules; current time, prices and policies do not invalidate
+accepted history. Fixed plans retain the owner's configured nominal percentages,
+which may be nonzero; the plan determines their application downstream.
+`replayPricingAcceptance` additionally checks current public authority and scoped
+quote/booking/complete-receipt links before normalizing a retry against that history.
+The receipt result must identify `booking` / `guest_booking` and the accepted booking
+with success status200. No receipt means only “no recorded command”; the future
+writer must reserve the command/quote keys and repeat the read after any wait.
+These readers neither reserve inventory nor create a booking or validate current
+PMS occupancy. The immutable bundle retains opaque PMS receipt IDs for its owner.
