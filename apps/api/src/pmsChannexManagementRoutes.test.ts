@@ -246,6 +246,55 @@ describe("PMS Channex management command routes", () => {
     expect(blocked.recoverAlert).not.toHaveBeenCalled();
   });
 
+  it("keeps PMS authorization and approval checks on the scoped observe-only path", async () => {
+    for (const access of [
+      { authenticated: false },
+      { permission: false },
+      { permissions: ["pms.operations.read"] },
+      { entitlement: "missing" },
+      { entitlement: "suspended" },
+      { linked: false },
+    ] as Access[]) {
+      const h = await testApp(
+        access,
+        { ...mutating, bookingSync: "observe_only" },
+        undefined,
+        true,
+      );
+      const response = await h.app.inject({
+        method: "POST",
+        url: `/properties/${propertyId}/channex/alerts/${operationId}/recover`,
+        headers: { authorization: "Bearer valid" },
+        payload: { round: 0 },
+      });
+      expect([401, 403]).toContain(response.statusCode);
+      expect(h.recoverStagingAlert).not.toHaveBeenCalled();
+      await h.app.close();
+    }
+    const h = await testApp({}, { ...mutating, bookingSync: "observe_only" }, undefined, true);
+    app = h.app;
+    const click = (scope = propertyId, round = 0) =>
+      app!.inject({
+        method: "POST",
+        url: `/properties/${scope}/channex/alerts/${operationId}/recover`,
+        headers: { authorization: "Bearer valid" },
+        payload: { round, approvalRef: "forged", revision: "forged" },
+      });
+    expect((await click(operationId)).statusCode).toBe(403);
+    expect((await click(propertyId, 3)).statusCode).toBe(400);
+    expect((await click()).statusCode).toBe(409);
+    h.recoverStagingAlert.mockResolvedValue({ ok: true });
+    expect((await click()).statusCode).toBe(202);
+    expect(h.recoverStagingAlert).toHaveBeenLastCalledWith(
+      expect.anything(),
+      propertyId,
+      operationId,
+      0,
+    );
+    expect(h.recoverAlert).not.toHaveBeenCalled();
+    expect(h.enqueue).not.toHaveBeenCalled();
+  });
+
   it("queues an authorized command and preserves actor context", async () => {
     const harness = await testApp();
     app = harness.app;
@@ -454,9 +503,13 @@ async function testApp(
   access: Access = {},
   capabilityModes: ChannexManagementCapabilityModes = mutating,
   reportScope?: string,
+  stagingRecovery = false,
 ) {
   const app = Fastify({ logger: false });
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
+  const recoverStagingAlert = vi
+    .fn()
+    .mockResolvedValue({ ok: false, code: "staging_alert_approval_invalid" });
   const enqueue = vi.fn<PmsChannexManagementCommandPort["enqueue"]>();
   const reportSubmit = vi.fn().mockResolvedValue({
     eligible: true,
@@ -482,7 +535,7 @@ async function testApp(
       getAlerts: async () => [
         {
           id: operationId,
-          eventType: "sync_error",
+          eventType: stagingRecovery ? "non_acked_booking" : "sync_error",
           impact: {
             bookingId: null,
             revisionId: null,
@@ -505,7 +558,7 @@ async function testApp(
       ],
     },
     capabilityModes,
-    commandPort: { enqueue, recoverAlert },
+    commandPort: { enqueue, recoverAlert, ...(stagingRecovery ? { recoverStagingAlert } : {}) },
     noShowReports: {
       get: vi.fn().mockResolvedValue({ eligible: true, retryable: true }),
       submit: reportSubmit,
@@ -513,7 +566,7 @@ async function testApp(
     noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
     noShowReportingPropertyId: reportScope,
   });
-  return { app, enqueue, putDatePrice, recoverAlert, reportSubmit };
+  return { app, enqueue, putDatePrice, recoverAlert, recoverStagingAlert, reportSubmit };
 }
 
 function context(access: Access): RequestContext {

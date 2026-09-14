@@ -1,3 +1,7 @@
+import {
+  assertStagingAlertApproval,
+  type StagingAlertApproval,
+} from "./channexStagingAlertRecovery.js";
 import { replaceStayRestrictions } from "./pmsStayRestrictions.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import { buildChannexManagementJobKey } from "@vayada/domain-pms-channex";
@@ -31,6 +35,7 @@ export function createPgPmsChannexManagementCommandPort(config: {
   connectionString: string;
   pool?: Pool;
   now?: () => Date;
+  stagingAlertPropertyId?: string;
 }): PmsChannexManagementCommandPort {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -39,6 +44,19 @@ export function createPgPmsChannexManagementCommandPort(config: {
     enqueue: (context, propertyId, input) => enqueue(pool, now(), context, propertyId, input),
     recoverAlert: (context, propertyId, alertId, round) =>
       recoverAlert(pool, now(), context, propertyId, alertId, round),
+    ...(config.stagingAlertPropertyId
+      ? {
+          recoverStagingAlert: (
+            context: RequestContext,
+            propertyId: string,
+            alertId: string,
+            round: number,
+          ) =>
+            propertyId === config.stagingAlertPropertyId
+              ? recoverAlert(pool, now(), context, propertyId, alertId, round, true)
+              : Promise.resolve({ ok: false, code: "channex_capability_not_mutating" }),
+        }
+      : {}),
     async close() {
       await pool.end();
     },
@@ -296,6 +314,7 @@ async function recoverAlert(
   propertyId: string,
   alertId: string,
   round: number,
+  staging = false,
 ): Promise<{ ok: boolean; code?: string }> {
   const client = await pool.connect();
   try {
@@ -320,6 +339,48 @@ async function recoverAlert(
       await client.query("ROLLBACK");
       return { ok: false, code: "alert_not_actionable" };
     }
+    let stagingJob: { id: string } | undefined;
+    if (staging) {
+      const row = (
+        await client.query<{
+          id: string;
+          approval: StagingAlertApproval;
+          payload: {
+            propertyId: string;
+            providerPropertyId: string;
+            channelBookingId: string;
+            revision: string;
+            bindingGeneration: string;
+          };
+        }>(
+          `SELECT id::text,job_metadata->'stagingAlertRecovery' approval,payload FROM platform.jobs
+         WHERE queue_name='pms.channex.webhooks' AND job_type='channex.ingest-booking'
+           AND job_key=$1 AND status IN ('pending','running') FOR UPDATE`,
+          [`alert:${alertId}:round:${round}`],
+        )
+      ).rows[0];
+      if (
+        !row?.approval ||
+        row.approval.alertId !== alertId ||
+        row.approval.round !== round ||
+        row.payload.propertyId !== propertyId
+      ) {
+        await client.query("ROLLBACK");
+        return { ok: false, code: "channex_capability_not_mutating" };
+      }
+      try {
+        await assertStagingAlertApproval(
+          client,
+          row.payload,
+          row.approval,
+          round < alert.round ? row.id : undefined,
+        );
+      } catch {
+        await client.query("ROLLBACK");
+        return { ok: false, code: "staging_alert_approval_invalid" };
+      }
+      stagingJob = row;
+    }
     if (round < alert.round || alert.busy) {
       await client.query("COMMIT");
       return { ok: true };
@@ -330,7 +391,13 @@ async function recoverAlert(
     }
     const jobs: string[] = [];
     const key = `alert:${alertId}:round:${round}`;
-    if (
+    if (stagingJob) {
+      await client.query(
+        "UPDATE platform.jobs SET run_after=now(),updated_at=now() WHERE id=$1::uuid",
+        [stagingJob.id],
+      );
+      jobs.push(stagingJob.id);
+    } else if (
       ["booking_unmapped_room", "booking_unmapped_rate", "non_acked_booking"].includes(
         alert.eventType,
       )
