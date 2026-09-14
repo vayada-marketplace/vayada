@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 
 const token = "c".repeat(43);
 const input = {
@@ -33,6 +33,87 @@ const booking = {
   hostResponseDeadlineAt: new Date(Date.now() + 86400000).toISOString(),
   pendingExpiresAt: new Date(Date.now() + 86400000).toISOString(),
 };
+
+test("reallocates held mixed rooms and saves without public availability", async ({
+  page,
+}, testInfo) => {
+  await mockBookingApis(page);
+  const lines = ["alpine-suite", "garden-room"].map((roomTypeId) => ({
+    roomTypeId,
+    publicOfferKey: `${roomTypeId}:flexible`,
+    guests: [{ adults: 2, children: 0 }],
+  }));
+  const mixedInput = {
+    ...input,
+    adults: 4,
+    numberOfRooms: 2,
+    roomSelection: { contractVersion: "booking-room-selection.v1", lines },
+  };
+  const roomLines = lines.map((line, index) => ({
+    ...line,
+    roomName: index ? "Garden Room" : "Alpine Suite",
+    roomCount: 1,
+    rateSummary: {},
+    policy: {},
+    totals: { grandTotal: "100.00" },
+  }));
+  const mixedBooking = {
+    ...booking,
+    ...mixedInput,
+    roomName: "1 × Alpine Suite + 1 × Garden Room",
+    roomLines,
+    totalAmount: 200,
+  };
+  let saved = false;
+  await page.route("**/api/booking-web/hotels/*/offers**", (route) =>
+    route.fulfill({ json: { ...publicOffers, quote: { ...publicOffers.quote, offers: [] } } }),
+  );
+  await page.route("**/bookings/*/edit/*", (route) => {
+    const action = new URL(route.request().url()).pathname.split("/").at(-1);
+    const body = route.request().postDataJSON();
+    expect(body.confirmationToken).toBe(token);
+    if (action === "details")
+      return route.fulfill({ json: { booking: mixedBooking, revision: 3, input: mixedInput } });
+    if (action === "quote" || action === "prepare") {
+      expect(body).toMatchObject({
+        adults: 3,
+        numberOfRooms: 2,
+        roomSelection: {
+          ...mixedInput.roomSelection,
+          lines: [lines[0], { ...lines[1], guests: [{ adults: 1, children: 0 }] }],
+        },
+      });
+      return route.fulfill({
+        json:
+          action === "quote"
+            ? { quoteId: "mixed-edit", totalAmount: 200, currency: "EUR" }
+            : { attemptId: "mixed-attempt", clientSecret: null },
+      });
+    }
+    expect(action).toBe("save");
+    expect(body).toMatchObject({ revision: 3, attemptId: "mixed-attempt" });
+    saved = true;
+    return route.fulfill({ json: { booking: mixedBooking, confirmationToken: token } });
+  });
+  await page.route("**/bookings/confirmation", (route) => route.fulfill({ json: mixedBooking }));
+  await page.goto(`/en/booking/VAY-959/edit-request?token=${token}`);
+  await page.getByLabel("Adults", { exact: true }).first().fill("3");
+  await expect(page.getByRole("button", { name: "Review updated price" })).toBeDisabled();
+  await page
+    .getByRole("group", { name: "Garden Room · Room 1", exact: true })
+    .getByLabel("Adults", { exact: true })
+    .fill("1");
+  await expect(page.getByRole("button", { name: "Review updated price" })).toBeEnabled();
+  await page.getByRole("button", { name: "Review updated price" }).click();
+  await expect(page.getByRole("region", { name: "Updated total" })).toContainText("EUR 200.00");
+  await page.screenshot({
+    path: testInfo.outputPath("held-allocation-editor.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Save request", exact: true }).click();
+  await expect.poll(() => saved).toBe(true);
+  await expect(page).toHaveURL(new RegExp(`/booking/VAY-959\\?token=${token}$`));
+});
 
 test("prefills and saves every pending-request field without creating a booking", async ({
   page,
@@ -166,9 +247,16 @@ for (const state of [
   { status: "confirmed", canEditRequest: true, visible: false },
   { status: "cancelled", canEditRequest: true, visible: false },
   { status: "pending", canEditRequest: true, visible: false, confirmationToken: "" },
-  { status: "pending", canEditRequest: true, visible: false, hostResponseDeadline: "2020-01-01T00:00:00Z" },
+  {
+    status: "pending",
+    canEditRequest: true,
+    visible: false,
+    hostResponseDeadline: "2020-01-01T00:00:00Z",
+  },
 ]) {
-  test(`My Booking edit entry: ${state.status}, eligible=${state.canEditRequest}, ${JSON.stringify(state)}`, async ({ page }) => {
+  test(`My Booking edit entry: ${state.status}, eligible=${state.canEditRequest}, ${JSON.stringify(state)}`, async ({
+    page,
+  }) => {
     await mockBookingApis(page);
     await page.route("**/api/booking-web/hotels/*/bookings/lookup", (route) =>
       route.fulfill({ json: { ...booking, confirmationToken: token, ...state } }),
@@ -178,7 +266,7 @@ for (const state of [
     );
     await page.goto("/en/my-booking?reference=VAY-959&email=ada%40example.test");
     await expect(page.getByText("Booking Found", { exact: true })).toBeVisible();
-    const edit = page.getByRole("link", { name: "Edit Request", exact: true });
+    const edit = page.getByRole("link", { name: /^Edit request$/i });
     if (state.visible) {
       await expect(edit).toBeVisible();
       await edit.click();
