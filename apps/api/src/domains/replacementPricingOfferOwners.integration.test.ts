@@ -637,6 +637,22 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     },
   );
   it.each(["room_types", "rate_plans"])(
+    "never sends after warning-bearing %s metadata",
+    async (endpoint) => {
+      const f = await initialDispatchFixture();
+      const get = async (path: string) => {
+        const response = await f.get(path);
+        return path.includes(endpoint)
+          ? { ...(response as object), meta: { warnings: ["partial"] } }
+          : response;
+      };
+      expect(await f.prepared.dispatch({ get, post: f.post })).toMatchObject({
+        reason: "ari_preflight_unavailable",
+      });
+      expect(f.post).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["room_types", "rate_plans"])(
     "blocks initial ARI with incompatible live %s metadata",
     async (endpoint) => {
       const f = await initialDispatchFixture();
