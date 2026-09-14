@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { randomUUID } from "node:crypto";
 import { recordTargetCheckoutCommand } from "./bookingWebPublic.js";
 import { describe, expect, it } from "vitest";
@@ -327,7 +328,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         `INSERT INTO booking.edit_authorization_releases(provider_payment_intent_id,provider_account_ref,property_id) VALUES($1,'acct_vay959',$2)`,
         [recovery.paymentIntentId, propertyId],
       );
-      await releaseAbandonedBookingEdits(pool, {
+      await releaseAbandonedBookingEdits(pool, { externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: {
@@ -396,7 +397,7 @@ describe.skipIf(!process.env["TEST_DATABASE_URL"])(
         ],
       );
       const before = await snapshot();
-      await releaseAbandonedBookingEdits(pool, {
+      await releaseAbandonedBookingEdits(pool, { externalChanges: externalBookingChanges,
         connectionString: url!,
         inventoryReservationPort: createTargetPmsInventoryReservationPort(),
         stripePaymentProvider: {
