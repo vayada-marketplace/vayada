@@ -37,3 +37,26 @@ SQL allowlist enforcement, cryptographic approval, organization/membership
 dependency planning, provisioning, user contact or apply command. Those remain
 separate reviewed slices with exact scope, conflict/recovery tests and approval.
 The current broad WorkOS backfill must not be run as an eight-owner repair.
+
+## Scoped target reader
+
+`readLegacyOwnerBootstrapTargets` is the first adapter. It accepts exactly eight
+independently authorized, source-bound ID/email pairs, copies them before I/O,
+and requires a read-only session/transaction. One parameterized SELECT matches
+only those IDs or normalized emails in target users, plus associated WorkOS
+identity conflicts. Results contain only owner IDs and target classifications;
+database errors are replaced with a fixed code to avoid parameter disclosure.
+This adapter accepts only ASCII email addresses and uses PostgreSQL `C` collation
+for database-side case folding so JavaScript and PostgreSQL cannot disagree;
+any internationalized address fails closed for a separately reviewed path.
+
+Deleted/suspended/unknown target statuses block, as do different-ID email
+candidates, mismatched emails on an exact ID, duplicate linked WorkOS identities,
+and WorkOS email mappings belonging to another user. Missing or duplicate result
+rows fail the read. An exact pending user is not activated or granted access.
+
+Caller must independently verify the DB environment and full table visibility
+(including RLS), supply scoped source values, and manage connection/transaction
+lifetime. This helper does not prove source ownership or provider state and does
+not set planner completeness. No production runner is wired; provider reads,
+source verification and organization/membership dependency checks remain pending.
