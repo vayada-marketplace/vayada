@@ -54,6 +54,44 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Catalog current-owner evidence p
     ).resolves.toEqual({ outcome: "missing", reason: "property_scope" });
   });
 
+  it("advances a never-configured policy from revision zero on its first save", async () => {
+    // Restore the fixture to a newly-created property with no policy history.
+    await admin.query(
+      "DELETE FROM hotel_catalog.property_policy_summaries WHERE property_id = $1::uuid",
+      [propertyId],
+    );
+    await admin.query(
+      "DELETE FROM hotel_catalog.property_owner_revisions WHERE property_id = $1::uuid AND owner_key = 'hotel_catalog.policy'",
+      [propertyId],
+    );
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toMatchObject({
+      outcome: "available",
+      evidence: { revision: 0 },
+    });
+    await expect(
+      ports.policy.getCurrentPolicyOwnerEvidence({
+        organizationId: otherOrganizationId,
+        propertyId,
+      }),
+    ).resolves.toEqual({ outcome: "missing", reason: "property_scope" });
+    await admin.query(
+      "INSERT INTO hotel_catalog.property_policy_summaries (property_id, check_in_time) VALUES ($1::uuid, '16:00')",
+      [propertyId],
+    );
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toMatchObject({
+      outcome: "available",
+      evidence: { revision: 1 },
+    });
+    await admin.query(
+      "DELETE FROM hotel_catalog.property_policy_summaries WHERE property_id = $1::uuid",
+      [propertyId],
+    );
+    await expect(ports.policy.getCurrentPolicyOwnerEvidence(scope)).resolves.toEqual({
+      outcome: "missing",
+      reason: "owner_state",
+    });
+  });
+
   it("distinguishes a missing policy row without hiding the available location owner", async () => {
     await admin.query(
       "DELETE FROM hotel_catalog.property_policy_summaries WHERE property_id = $1::uuid",

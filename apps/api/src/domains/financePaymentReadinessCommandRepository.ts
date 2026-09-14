@@ -18,7 +18,7 @@ import {
   type ReplaceFinancePaymentMethodsError,
   type ReplaceFinancePaymentMethodsResult,
 } from "@vayada/domain-finance";
-import { PMS_PRICING_CONTRACT_VERSION } from "@vayada/domain-pms";
+import { PMS_PRICING_CONTRACT_VERSION, type PmsPricingReadPort } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
@@ -98,6 +98,7 @@ export function createPgFinancePaymentReadinessCommandRepository(config: {
   max?: number;
   pool?: FinancePaymentReadinessCommandPool;
   now?: () => Date;
+  pricingReadPort?: Pick<PmsPricingReadPort, "getPropertyPricingCurrency">;
 }): FinancePaymentReadinessCommandRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Finance payment readiness repository connectionString must not be empty");
@@ -120,7 +121,8 @@ export function createPgFinancePaymentReadinessCommandRepository(config: {
 
       try {
         await client.query("BEGIN");
-        if (!(await lockAuthorizedScope(client, command, acceptedAt))) {
+        if (config.pricingReadPort) await client.query("SET LOCAL lock_timeout = '5s'");
+        if (!(await lockAuthorizedScope(client, command, acceptedAt, !!config.pricingReadPort))) {
           await rollbackQuietly(client);
           return failure({ code: "setup_scope_unavailable" });
         }
@@ -143,7 +145,28 @@ export function createPgFinancePaymentReadinessCommandRepository(config: {
           return concurrent ?? failure({ code: "command_in_progress" });
         }
 
-        const worked = await applyCommand(client, command, input.currentPricing, acceptedAt);
+        let currentPricing = input.currentPricing;
+        if (config.pricingReadPort) {
+          // Shared property locks remain compatible with PMS currency/charge commands.
+          // The lock and Finance commit must belong to this same transaction.
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-pricing-currency:', $1::uuid::text), 0))",
+            [command.propertyId],
+          );
+          const current = await config.pricingReadPort.getPropertyPricingCurrency(
+            command.propertyId,
+          );
+          if (current && current.propertyId !== command.propertyId)
+            throw new Error("Finance currency evidence belongs to another property");
+          currentPricing = current
+            ? {
+                contractVersion: current.contractVersion,
+                currency: current.currency,
+                pricingCurrencyRevision: current.pricingCurrencyRevision,
+              }
+            : null;
+        }
+        const worked = await applyCommand(client, command, currentPricing, acceptedAt);
         const changed = "event" in worked;
         const result = parseReplaceFinancePaymentMethodsResult(
           "result" in worked ? worked.result : worked,
@@ -305,6 +328,7 @@ async function lockAuthorizedScope(
   client: FinancePaymentReadinessCommandClient,
   command: ReplaceFinancePaymentMethodsCommand,
   at: Date,
+  currencyLocked: boolean,
 ): Promise<boolean> {
   const scope = await client.query(
     `SELECT property.id
@@ -331,7 +355,7 @@ async function lockAuthorizedScope(
       AND permission_grant.role_key = membership.role_key
       AND permission_grant.permission_key = $4
      WHERE property.id = $2::uuid
-     FOR UPDATE OF property
+     FOR ${currencyLocked ? "SHARE" : "UPDATE"} OF property
      FOR SHARE OF organization, resource, actor, membership
      FOR KEY SHARE OF permission_grant`,
     [command.organizationId, command.propertyId, command.audit.actor.userId, MANAGE_PERMISSION],

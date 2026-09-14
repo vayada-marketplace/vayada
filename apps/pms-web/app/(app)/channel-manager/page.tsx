@@ -11,6 +11,7 @@ import {
 import { OperationalAlerts } from "@/components/channel-manager/OperationalAlerts";
 import { useTranslation } from "@/lib/i18n";
 import { channexService } from "@/services/channex";
+import { InventoryRules } from "@/components/channel-manager/InventoryRules";
 import {
   terminalChannexStatuses,
   useChannexManager,
@@ -226,6 +227,12 @@ export default function ChannelManagerPage() {
               )}
             </section>
 
+            <InventoryRules
+              key={snapshot.propertyId}
+              snapshot={snapshot}
+              disabled={busy || !connected || !modeAllowsChanges(snapshot.capabilityModes.ariSync)}
+              refresh={() => loadSnapshot({ background: true })}
+            />
             <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6">
               <h2 className="font-semibold text-gray-950">{t("channels.markups")}</h2>
               <p className="mt-1 text-sm text-gray-500">{t("channels.markupsDescription")}</p>

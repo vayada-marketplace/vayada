@@ -71,6 +71,14 @@ describe("Airbnb alteration availability", () => {
     await assertChannexAlterationAvailability(f.client, f.input);
     expect(f.queries.every(({ sql }) => !/^\s*(UPDATE|INSERT|DELETE)/i.test(sql))).toBe(true);
   });
+  it("preserves provider room ID casing for mapping lookup", async () => {
+    const f = fixture();
+    const externalId = f.input.changes.rooms[0]!.roomTypeId.toUpperCase();
+    f.input.changes.rooms[0]!.roomTypeId = externalId;
+    f.rows.mappings[0]!.externalId = externalId;
+    await expect(assertChannexAlterationAvailability(f.client, f.input)).resolves.toBeUndefined();
+    expect(f.queries.find(({ sql }) => sql.includes("FROM pms.channel_room_type_mappings"))?.values).toContainEqual([externalId]);
+  });
   it("does not credit the original room on an added sold-out night", async () => {
     const f = fixture();
     f.input.changes.requestedCheckOut = "2026-10-04";

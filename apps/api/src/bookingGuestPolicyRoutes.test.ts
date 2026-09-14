@@ -63,6 +63,22 @@ describe("protected Booking guest-policy routes", () => {
     expect(application.upsertGuestPolicy).not.toHaveBeenCalled();
   });
 
+  it("accepts midnight as the explicit end-of-arrival-day check-in deadline", async () => {
+    const application = routeApplication(
+      revisionFixture(),
+      compositionFixture(),
+      firstVisitReadiness(),
+      [],
+    );
+    app = await routeApp(application);
+    const midnightChoices = { ...choices, checkInUntil: "00:00" };
+
+    expect((await post(app, "/preview", { choices: midnightChoices })).statusCode).toBe(200);
+    expect(application.previewGuestPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ choices: midnightChoices }),
+    );
+  });
+
   it("mounts the protected production route only with its application", async () => {
     const disabled = buildApp({ logger: false });
     const path = `/api/booking/properties/${propertyId}/booking-guest-policy`;

@@ -2,9 +2,45 @@ import { coversAlertScope } from "./channexManagementPlans.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
-import { channexRequests, createChannexManagementProvider } from "./channexManagement.js";
+import {
+  ChannexAriMappingMissingError,
+  channexRequests,
+  createChannexManagementProvider,
+} from "./channexManagement.js";
 
 describe("Channex management provider", () => {
+  it.each([
+    [new ChannexAriMappingMissingError(), "mapping_missing"],
+    [new Error("Missing property binding"), "invalid_state"],
+  ])("classifies planning failures inside the property lock", async (error, code) => {
+    let locked = false;
+    const fetcher = vi.fn<typeof fetch>();
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "test",
+      fetch: fetcher,
+      plans: {
+        plan: async () => {
+          throw new Error("Unlocked plan must not run");
+        },
+        withPropertyLock: async (_job, work) => {
+          locked = true;
+          try {
+            return await work(async () => {
+              expect(locked).toBe(true);
+              throw error;
+            });
+          } finally {
+            locked = false;
+          }
+        },
+      },
+    });
+    expect(await provider.execute(job("sync_ari"))).toMatchObject({ ok: false, code });
+    expect(locked).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("executes a prepared action with provider authentication", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(204));
     const onProgress = vi.fn();
@@ -197,6 +233,64 @@ describe("Channex management provider", () => {
       ],
     });
   });
+
+  it.each([
+    [
+      { booking_amount_settings: "Payout Amount", cohost_payout_calculations: true },
+      "Payout Amount",
+      true,
+    ],
+    [
+      { booking_amount_settings: "Total Paid Amount", cohost_payout_calculations: false },
+      "Total Paid Amount",
+      false,
+    ],
+    [{}, null, null],
+    [{ booking_amount_settings: "unknown", cohost_payout_calculations: "false" }, null, null],
+    [null, null, null],
+  ])(
+    "retains only explicit Airbnb financial settings (%j)",
+    async (settings, bookingAmountMode, deductCoHostPayout) => {
+      const id = "82000000-0000-4000-8000-000000000001";
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "secret",
+        plans: {
+          plan: async () => ({ requests: [channexRequests.listChannels("external-property")] }),
+        },
+        fetch: vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(
+            response(200, {
+              data: [
+                {
+                  id,
+                  attributes: {
+                    channel: "Airbnb",
+                    application: "obsolete",
+                    title: "Airbnb",
+                    is_active: true,
+                    settings: settings && { ...settings, access_token: "PRIVATE PROVIDER TOKEN" },
+                  },
+                },
+              ],
+            }),
+          ),
+      });
+      const result = await provider.execute(job("provision"));
+      expect(result).toMatchObject({
+        ok: true,
+        channels: [
+          {
+            key: "airbnb",
+            application: "Airbnb",
+            airbnbAmountSettings: { channelId: id, bookingAmountMode, deductCoHostPayout },
+          },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain("PRIVATE PROVIDER TOKEN");
+    },
+  );
 
   it("reconciles provider state and checkpoints it before skipping duplicate creates", async () => {
     const checkpoint = vi.fn();

@@ -136,7 +136,13 @@ export type InboxThreadListResponse = {
 export type InboxThreadDetailResponse = {
   contractVersion: typeof INBOX_CONTRACT_VERSION;
   thread: InboxThread;
-  availableProviderActions: Array<"booking_com_no_reply_needed">;
+  availableProviderActions: Array<"booking_com_no_reply_needed" | "channex_close">;
+  providerActions?: Array<{
+    action: "booking_com_no_reply_needed" | "channex_close";
+    state: "pending" | "retrying" | "confirmed" | "held" | "failed";
+    reason: string | null;
+    threadVersion: number | null;
+  }>;
   timeline: InboxTimelineItem[];
   previousCursor: string | null;
 };
@@ -375,16 +381,18 @@ export const messagingService = {
     >("reply", endpoint(propertyId, `threads/${encodeURIComponent(threadId)}/messages`), input);
   },
 
-  providerNoReplyNeeded(propertyId: string, threadId: string) {
+  providerNoReplyNeeded(
+    propertyId: string,
+    threadId: string,
+    expectedVersion: number,
+    action: "no-reply-needed" | "close" = "no-reply-needed",
+  ) {
     return postCommand<
       ContractResponse<{ propertyId: string; threadId: string; acceptedAt: string }>
     >(
-      "provider-no-reply-needed",
-      endpoint(
-        propertyId,
-        `threads/${encodeURIComponent(threadId)}/provider-actions/no-reply-needed`,
-      ),
-      {},
+      `provider-${action}`,
+      endpoint(propertyId, `threads/${encodeURIComponent(threadId)}/provider-actions/${action}`),
+      { expectedVersion },
     );
   },
 

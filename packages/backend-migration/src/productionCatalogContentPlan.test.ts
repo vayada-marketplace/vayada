@@ -80,6 +80,22 @@ describe("planProductionCatalogContent", () => {
     });
   });
 
+  it("preserves a legacy midnight check-in deadline as end of arrival day", () => {
+    const changed = structuredClone(rows);
+    Object.assign(changed[0]!.data, {
+      check_in_from: "14:00",
+      check_in_until: "00:00",
+    });
+    const ownership = planCatalogOwnership(changed);
+    const plan = planProductionCatalogContent(
+      changed,
+      ownership,
+      planProductionCatalogCore(changed, ownership),
+    );
+    expect(plan.blockers).toEqual([]);
+    expect(plan.policies[0]).toMatchObject({ checkInTime: "14:00", checkInUntil: "00:00" });
+  });
+
   it.each([
     { check_in_from: "18:00", check_in_until: "12:00" },
     { check_in_time: "", check_in_until: "23:00" },
