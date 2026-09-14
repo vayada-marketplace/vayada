@@ -492,10 +492,12 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
     const run = () =>
       runPmsChannexManagementWorkerOnce({ store, provider, workerId: "vay846-proof" });
     const current = async () => (await listChannexAlerts(db, P)).find((a) => a.id === alert.id)!;
-    // Only advance this incident's retry clock; never manufacture completion or verification.
+    // Advance only this incident's retry clock and run booking before ARI so that
+    // the intermediate unresolved assertion does not depend on tied queue timestamps.
+    // Completion and verification are always written by the real workers.
     const due = () =>
       db.query(
-        "UPDATE platform.jobs SET run_after=now(),priority=100000 WHERE payload->>'recoveryAlertId'=$1 AND status='pending'",
+        "UPDATE platform.jobs SET run_after=now(),priority=CASE WHEN payload->>'operationType'='sync_bookings' THEN 100001 ELSE 100000 END WHERE payload->>'recoveryAlertId'=$1 AND status='pending'",
         [alert.id],
       );
     try {
