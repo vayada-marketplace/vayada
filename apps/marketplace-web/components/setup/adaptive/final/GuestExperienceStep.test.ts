@@ -1,35 +1,19 @@
 import { createElement } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { PMS_ROOM_FACTS_CONTRACT_VERSION } from "@vayada/domain-pms";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
-const mocks = vi.hoisted(() => ({
-  load: vi.fn(),
-  preview: vi.fn(),
-  save: vi.fn(),
-  draft: vi.fn(),
-  reset: vi.fn(),
-  rooms: vi.fn(),
+const mocks = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
+vi.mock("@/services/api/bookingGuestRulesClient", () => ({
+  bookingGuestRulesClient: mocks,
+  guestRulesErrorMessage: (error: Error) => error.message,
 }));
-vi.mock("@/services/api/bookingGuestPolicyClient", () => ({
-  bookingGuestPolicyClient: { load: mocks.load, preview: mocks.preview, save: mocks.save },
-}));
-vi.mock("@/services/api/adaptiveSetupDraftClient", () => ({
-  adaptiveSetupDraftClient: { save: mocks.draft },
-}));
-vi.mock("@/services/api/propertySetupDraftResetClient", () => ({
-  propertySetupDraftResetApi: { reset: mocks.reset },
-  PropertySetupDraftResetError: class extends Error {},
-}));
-vi.mock("@/services/api/targetClient", () => ({ targetApiClient: { get: mocks.rooms } }));
 import { GuestExperienceStep } from "./GuestExperienceStep";
 const propertyId = "22222222-2222-4222-8222-222222222222",
-  organizationId = "11111111-1111-4111-8111-111111111111",
-  roomTypeId = "33333333-3333-4333-8333-333333333333";
+  organizationId = "11111111-1111-4111-8111-111111111111";
 const choices = {
   defaultGuestLanguage: "en",
   childrenEnabled: false,
-  adultAgeThreshold: null,
+  adultAgeThreshold: 16,
   phoneRequired: true,
   arrivalTimeEnabled: false,
   specialRequestsEnabled: true,
@@ -37,64 +21,10 @@ const choices = {
   checkOutTime: "11:00",
   checkInUntil: "23:00",
 };
-const bundle = {
-  propertyId,
-  organizationId,
-  choices,
-  sourceFingerprint: `sha256:${"1".repeat(64)}`,
-  bundleHash: `sha256:${"2".repeat(64)}`,
-  pricingCurrency: "EUR",
-  propertyTimeZone: "Europe/Berlin",
-  rates: [
-    {
-      roomTypeId,
-      roomFactsRevision: 1,
-      flexible: {
-        freeCancellationDeadlineDays: 2,
-        cutoff: { localTime: "18:00", timeZone: "Europe/Berlin" },
-      },
-      nonRefundable: null,
-      additionalGuest: null,
-    },
-  ],
-};
 beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.load.mockResolvedValue({ revision: 0, choices });
-  mocks.preview.mockResolvedValue({ outcome: "ready", bundle });
-  mocks.save.mockResolvedValue({ revision: 1, choices });
-  mocks.draft.mockResolvedValue({
-    sessionId: "session",
-    trackRevision: 1,
-    sessionRevision: 2,
-    draftRevision: 1,
-  });
-  mocks.reset.mockResolvedValue({ sessionRevision: 3 });
-  mocks.rooms.mockResolvedValue({
-    propertyId,
-    items: [
-      {
-        contractVersion: PMS_ROOM_FACTS_CONTRACT_VERSION,
-        propertyId,
-        roomTypeId,
-        roomFactsRevision: 1,
-        lifecycle: "active",
-        createdAt: "2026-09-11T00:00:00.000Z",
-        updatedAt: "2026-09-11T00:00:00.000Z",
-        facts: {
-          name: "Garden Suite",
-          description: "",
-          category: null,
-          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 2 },
-          beds: [{ type: "king", quantity: 1 }],
-          bedrooms: null,
-          bathrooms: 1,
-          bathroomType: "private",
-          size: null,
-        },
-      },
-    ],
-  });
+  vi.resetAllMocks();
+  mocks.load.mockResolvedValue({ revision: propertyId, choices });
+  mocks.save.mockResolvedValue({ revision: organizationId, choices });
 });
 async function render(track: "hotel_operations" | "both" = "hotel_operations") {
   let leave!: () => Promise<void>;
@@ -130,161 +60,72 @@ async function render(track: "hotel_operations" | "both" = "hotel_operations") {
   });
   return { renderer, props, leave: () => leave() };
 }
-function review(renderer: ReactTestRenderer) {
-  return renderer.root.findAllByType("button").find((button) => button.props.type === "button")!;
-}
 function confirm(renderer: ReactTestRenderer) {
   return renderer.root
     .findAllByType("input")
-    .filter((input) => input.props.type === "checkbox")
+    .filter((i) => i.props.type === "checkbox")
     .at(-1)!;
 }
 async function submit(renderer: ReactTestRenderer) {
   await act(async () => renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }));
 }
-describe("guest experience editor", () => {
-  it("requires explicit first-entry choices independent of interface language", async () => {
-    mocks.load.mockResolvedValue({
-      revision: 0,
-      choices: {
-        ...choices,
-        defaultGuestLanguage: null,
-        childrenEnabled: null,
-        checkInTime: null,
-        checkOutTime: null,
-      },
-    });
+describe("replacement guest rules editor", () => {
+  it("requires first-entry choices and explicit confirmation", async () => {
+    mocks.load.mockResolvedValue(null);
     const h = await render();
     expect(
       h.renderer.root
         .findAllByType("select")
         .slice(0, 2)
-        .map((input) => input.props.value),
+        .map((i) => i.props.value),
     ).toEqual(["", ""]);
-    await act(async () => review(h.renderer).props.onClick());
-    expect(mocks.preview).not.toHaveBeenCalled();
-    h.renderer.unmount();
-  });
-  it.each(["hotel_operations", "both"] as const)(
-    "reviews named room terms and saves for %s",
-    async (track) => {
-      const h = await render(track);
-      await act(async () => review(h.renderer).props.onClick());
-      expect(JSON.stringify(h.renderer.toJSON())).toContain("Garden Suite");
-      await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
-      await submit(h.renderer);
-      expect(mocks.save).toHaveBeenCalledWith(
-        { organizationId, propertyId },
-        expect.objectContaining({
-          expectedRevision: 0,
-          confirmPolicyBundle: true,
-          choices: expect.objectContaining({ checkInUntil: "23:00" }),
-        }),
-        bundle,
-      );
-      expect(mocks.reset).toHaveBeenCalledOnce();
-      expect(h.props.saveAndContinue).toHaveBeenCalledOnce();
-      h.renderer.unmount();
-    },
-  );
-  it("clears confirmation and preview after an answer changes", async () => {
-    const h = await render();
-    await act(async () => review(h.renderer).props.onClick());
-    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
-    await act(async () =>
-      h.renderer.root.findAllByType("select")[0].props.onChange({ target: { value: "de" } }),
-    );
-    expect(
-      h.renderer.root.findAllByType("button").find((button) => button.props.type === "submit")!
-        .props.disabled,
-    ).toBe(true);
     await submit(h.renderer);
     expect(mocks.save).not.toHaveBeenCalled();
     h.renderer.unmount();
   });
-  it("keeps missing pricing blocked and saves partial answers on exit", async () => {
-    mocks.preview.mockResolvedValue({
-      outcome: "blocked",
-      blockers: [{ code: "pricing_source_missing" }],
-    });
+  it("saves confirmed rules without rates and without advancing readiness", async () => {
     const h = await render();
-    await act(async () => review(h.renderer).props.onClick());
-    expect(JSON.stringify(h.renderer.toJSON())).toContain("Policy review is not ready");
-    await act(async () => h.leave());
-    expect(mocks.draft).toHaveBeenCalled();
-    expect(mocks.save).not.toHaveBeenCalled();
-    h.renderer.unmount();
-  });
-  it("rejects a stale canonical revision without overwriting it", async () => {
-    mocks.load.mockResolvedValue({ revision: 2, choices });
-    const h = await render();
-    await act(async () => review(h.renderer).props.onClick());
     await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
     await submit(h.renderer);
-    expect(h.props.reportRevisionConflict).toHaveBeenCalled();
-    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalledWith(propertyId, propertyId, choices, expect.any(String));
+    expect(JSON.stringify(h.renderer.toJSON())).toContain("Guest rules saved.");
+    expect(h.props.saveAndContinue).not.toHaveBeenCalled();
+    await expect(h.leave()).resolves.toBeUndefined();
     h.renderer.unmount();
   });
-  it("preserves a custom adult threshold through disabling children and draft exit", async () => {
-    mocks.load.mockResolvedValue({
-      revision: 0,
-      choices: { ...choices, childrenEnabled: true, adultAgeThreshold: 16 },
-    });
+  it("clears confirmation on edits, preserves age bounds and blocks unsaved navigation", async () => {
     const h = await render();
-    await act(async () =>
-      h.renderer.root.findAllByType("select")[1].props.onChange({ target: { value: "false" } }),
-    );
-    await act(async () => h.leave());
-    expect(mocks.draft).toHaveBeenLastCalledWith(
-      propertyId,
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          "guest.adult_age_threshold": 16,
-          "guest.children_enabled": false,
-        }),
-      }),
-    );
+    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
     await act(async () =>
       h.renderer.root.findAllByType("select")[1].props.onChange({ target: { value: "true" } }),
     );
+    expect(confirm(h.renderer).props.checked).toBe(false);
     expect(
-      h.renderer.root.findAllByType("input").find((input) => input.props.type === "number")!.props
-        .value,
+      h.renderer.root.findAllByType("input").find((i) => i.props.type === "number")!.props.value,
     ).toBe(16);
+    await expect(h.leave()).rejects.toThrow("Save your guest rules");
+    await submit(h.renderer);
+    expect(mocks.save).not.toHaveBeenCalled();
     h.renderer.unmount();
   });
-  it("discloses nightly per-person charges and non-refundable payment prerequisites", async () => {
-    mocks.preview.mockResolvedValue({
-      outcome: "ready",
-      bundle: {
-        ...bundle,
-        rates: [
-          {
-            ...bundle.rates[0],
-            nonRefundable: {},
-            additionalGuest: {
-              includedGuestsPerRoom: 2,
-              amountDecimal: "30",
-              currency: "EUR",
-              countedGuestTypes: ["adult", "child"],
-            },
-          },
-        ],
-      },
-    });
+  it("keeps the retry identity and edits after an uncertain save", async () => {
+    mocks.save.mockRejectedValueOnce(new Error("Network unavailable"));
     const h = await render();
-    await act(async () => review(h.renderer).props.onClick());
-    const copy = JSON.stringify(h.renderer.toJSON());
-    expect(copy).toContain("per night");
-    expect(copy).toContain("Each additional");
-    expect(copy).toContain("ready online card payment method");
+    await act(async () =>
+      h.renderer.root.findAllByType("select")[0].props.onChange({ target: { value: "de" } }),
+    );
+    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
+    await submit(h.renderer);
+    await expect(h.leave()).rejects.toThrow();
+    const first = mocks.save.mock.calls[0];
+    await submit(h.renderer);
+    expect(mocks.save.mock.calls[1]).toEqual(first);
     h.renderer.unmount();
   });
-  it("does not render an editable form when access is denied", async () => {
+  it("does not expose the editor after a failed authorized load", async () => {
     mocks.load.mockRejectedValue(new Error("Forbidden"));
     const h = await render();
     expect(h.renderer.root.findAllByType("form")).toHaveLength(0);
-    expect(JSON.stringify(h.renderer.toJSON())).toContain("Forbidden");
     h.renderer.unmount();
   });
 });
