@@ -34,3 +34,26 @@ Validation must reach the actual provider request with saved-source integration
 tests, including discounted overrides, year/weekend boundaries, local dates,
 rounding, removal, and invalid pricing. Next/staging evidence must distinguish
 request acceptance, provider readback, and downstream OTA delivery; no bookings.
+
+### Observed manual-option metadata and incomplete task payload (2026-09-14)
+
+The closed VAY-1545 sandbox probe stored independent EUR100/130/155 guest totals.
+Non-primary manual options expose `derived_option: {rate: []}` and
+`inherit_rate: false`; accept that exact empty shape, never a non-empty formula.
+The detailed rate response may omit the absent parent. Require explicit null
+from the property-scoped rate-options endpoint, matching rate, property, room,
+currency and sell mode, rather than assuming an omitted parent means none.
+
+The successful finished upload task omitted submitted `min_stay_through`.
+A subsequent scoped property read reported `settings.min_stay_type: arrival`.
+This is evidence of a compatibility gap, not proof that arbitrary omitted task
+fields were applied. Keep exact original task-payload matching and block full
+reconciliation until property restriction capability and all requested fields
+are verified. Current/default restriction equality is not upload execution proof.
+No provider setting change or runtime activation is part of this correction.
+
+References: [rate options](https://docs.channex.io/api-v.1-documentation/rate-plans-collection#rate-plan-options),
+[ARI fields](https://docs.channex.io/api-v.1-documentation/ari#fields), VAY-1545.
+Local sanitized probe: `evidence/vay1545-multioccupancy/RESULT.md` in the shared
+testing directory. This metadata correction alone does not complete the deployed
+calculator-to-Channex flow or downstream OTA acceptance.

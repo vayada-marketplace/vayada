@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { parsePricingConfiguration } from "@vayada/domain-pms";
 import { ChannexMealSyncError, verifyChannexMealReadback } from "./channexMealSync.js";
 
@@ -61,11 +62,49 @@ export async function verifyChannexOfferConfiguration(
       const response = structuredClone(await request(method, path));
       const data = record(record(response).data);
       const attributes = record(data.attributes);
-      const parent = record(record(data.relationships).parent_rate_plan).data;
+      const parentRelationship = record(data.relationships).parent_rate_plan;
+      const parent = record(parentRelationship).data;
       const options = attributes.options;
       const mismatch = () => {
         throw new ChannexMealSyncError("Channex offer configuration readback mismatch");
       };
+      let parentAbsenceVerified = attributes.parent_rate_plan_id === null || parent === null;
+      if (attributes.parent_rate_plan_id === undefined && parentRelationship === undefined) {
+        // Channex's detail response omits an absent parent; options exposes explicit null.
+        const optionsResponse = record(
+          await request(
+            "GET",
+            `/api/v1/rate_plans/options?filter[property_id]=${encodeURIComponent(scope.externalPropertyId)}`,
+          ),
+        );
+        const meta = optionsResponse.meta;
+        if (
+          Object.hasOwn(optionsResponse, "errors") ||
+          Object.hasOwn(optionsResponse, "warnings") ||
+          (meta !== undefined &&
+            (meta === null ||
+              typeof meta !== "object" ||
+              Array.isArray(meta) ||
+              (record(meta).warnings !== undefined &&
+                !isDeepStrictEqual(record(meta).warnings, [])))) ||
+          !Array.isArray(optionsResponse.data)
+        )
+          mismatch();
+        const matches = (optionsResponse.data as unknown[]).filter(
+          (raw) => record(raw).id === scope.externalRatePlanId,
+        );
+        const match = record(matches[0]),
+          details = record(match.attributes);
+        parentAbsenceVerified =
+          matches.length === 1 &&
+          match.type === "rate_plan" &&
+          details.id === scope.externalRatePlanId &&
+          details.property_id === scope.externalPropertyId &&
+          details.room_type_id === scope.externalRoomTypeId &&
+          details.parent_rate_plan_id === null &&
+          details.currency === expected.currency &&
+          details.sell_mode === expected.sell_mode;
+      }
       if (
         attributes.sell_mode !== expected.sell_mode ||
         attributes.rate_mode !== expected.rate_mode ||
@@ -73,9 +112,9 @@ export async function verifyChannexOfferConfiguration(
         attributes.inherit_rate !== false ||
         attributes.inherit_stop_sell !== false ||
         attributes.auto_rate_settings !== null ||
-        (attributes.parent_rate_plan_id !== null && parent !== null) ||
+        !parentAbsenceVerified ||
         (attributes.parent_rate_plan_id !== undefined && attributes.parent_rate_plan_id !== null) ||
-        (parent !== undefined && parent !== null) ||
+        (parentRelationship !== undefined && parent !== null) ||
         (attributes.id !== undefined && attributes.id !== scope.externalRatePlanId) ||
         !Array.isArray(attributes.stop_sell) ||
         attributes.stop_sell.length !== 7 ||
@@ -85,6 +124,8 @@ export async function verifyChannexOfferConfiguration(
       )
         mismatch();
       // Compare by occupancy: provider ordering and unrelated option metadata may differ.
+      // Manual non-primary options can expose an empty derivation container.
+      // Accept only that observed shape with explicit independent pricing.
       const remaining = new Map(
         expected.options.map((option) => [option.occupancy, option.is_primary]),
       );
@@ -94,7 +135,13 @@ export async function verifyChannexOfferConfiguration(
         if (
           !remaining.has(occupancy) ||
           option.is_primary !== remaining.get(occupancy) ||
-          option.derived_option !== null
+          (option.inherit_rate !== undefined && option.inherit_rate !== false) ||
+          (option.derived_option !== null &&
+            !(
+              option.is_primary === false &&
+              option.inherit_rate === false &&
+              isDeepStrictEqual(option.derived_option, { rate: [] })
+            ))
         )
           mismatch();
         remaining.delete(occupancy);
