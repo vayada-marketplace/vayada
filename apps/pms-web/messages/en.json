@@ -1095,6 +1095,7 @@
   "inbox.errorAssistManualFallback": "{error} You can keep writing manually.",
   "inbox.errorAttachmentPrepare": "The attachment could not be prepared.",
   "inbox.errorBookingComUpdate": "Booking.com could not be updated.",
+  "inbox.errorChannexUpdate": "Channex could not be updated.",
   "inbox.errorConversationChanged": "The conversation changed. Review the latest messages and try again.",
   "inbox.errorConversationChangedDraftPreserved": "The conversation changed. Your draft is preserved; review it and send again.",
   "inbox.errorFutureTime": "Choose a valid future time in {timezone}.",
@@ -2131,5 +2132,15 @@
   "reviews.guest.reason.identity_mismatch": "The review does not match this property.",
   "reviews.guest.reason.unsupported_channel": "Only Airbnb guest reviews are supported.",
   "reviews.guest.reason.invalid_input": "Enter ratings from 1 to 5 and a public review without control characters. Text fields allow up to 10,000 characters.",
-  "reviews.guest.reason.permission_required": "You need permission to manage this property."
+  "reviews.guest.reason.permission_required": "You need permission to manage this property.",
+  "inbox.providerClose": "Close in Channex",
+  "inbox.providerClosure": "Channex closure",
+  "inbox.providerNoReply": "Booking.com no reply needed",
+  "inbox.providerConfirmed": "Confirmed by provider",
+  "inbox.providerPending": "Pending provider confirmation",
+  "inbox.providerRetrying": "Retrying provider request",
+  "inbox.providerUncertain": "Outcome uncertain. Check Channex before taking further action.",
+  "inbox.providerFailed": "Not completed. Refresh, resolve the issue, then retry from the actions menu.",
+  "inbox.providerChanged": "Conversation changed since this action.",
+  "inbox.providerLocalOnly": "Local Done and Reopen only affect your Inbox."
 }

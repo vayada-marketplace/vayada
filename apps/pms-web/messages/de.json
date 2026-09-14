@@ -1095,6 +1095,7 @@
   "inbox.errorAssistManualFallback": "{error} Sie können manuell weiterschreiben.",
   "inbox.errorAttachmentPrepare": "Der Anhang konnte nicht vorbereitet werden.",
   "inbox.errorBookingComUpdate": "Booking.com konnte nicht aktualisiert werden.",
+  "inbox.errorChannexUpdate": "Channex konnte nicht aktualisiert werden.",
   "inbox.errorConversationChanged": "Die Konversation wurde geändert. Prüfen Sie die neuesten Nachrichten und versuchen Sie es erneut.",
   "inbox.errorConversationChangedDraftPreserved": "Die Konversation wurde geändert. Ihr Entwurf bleibt erhalten; prüfen Sie ihn und senden Sie ihn erneut.",
   "inbox.errorFutureTime": "Wählen Sie einen gültigen zukünftigen Zeitpunkt in {timezone}.",
@@ -2145,5 +2146,15 @@
   "reviews.guest.reason.identity_mismatch": "Die Bewertung gehört nicht zu dieser Unterkunft.",
   "reviews.guest.reason.unsupported_channel": "Nur Airbnb-Gästebewertungen werden unterstützt.",
   "reviews.guest.reason.invalid_input": "Geben Sie Bewertungen von 1 bis 5 und einen öffentlichen Text ohne Steuerzeichen ein. Textfelder erlauben bis zu 10.000 Zeichen.",
-  "reviews.guest.reason.permission_required": "Sie benötigen die Berechtigung zur Verwaltung dieser Unterkunft."
+  "reviews.guest.reason.permission_required": "Sie benötigen die Berechtigung zur Verwaltung dieser Unterkunft.",
+  "inbox.providerClose": "In Channex schließen",
+  "inbox.providerClosure": "Channex-Abschluss",
+  "inbox.providerNoReply": "Booking.com: Keine Antwort nötig",
+  "inbox.providerConfirmed": "Vom Anbieter bestätigt",
+  "inbox.providerPending": "Bestätigung des Anbieters ausstehend",
+  "inbox.providerRetrying": "Anbieteranfrage wird erneut versucht",
+  "inbox.providerUncertain": "Ergebnis unklar. Vor weiteren Aktionen in Channex prüfen.",
+  "inbox.providerFailed": "Nicht abgeschlossen. Aktualisieren, das Problem beheben und im Aktionsmenü erneut versuchen.",
+  "inbox.providerChanged": "Die Unterhaltung hat sich seit dieser Aktion geändert.",
+  "inbox.providerLocalOnly": "Erledigt und Wieder öffnen gelten nur für deinen Posteingang."
 }
