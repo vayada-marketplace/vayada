@@ -9,7 +9,10 @@ import { readLegacyOwnershipDrift } from "./legacyOwnershipEvidenceReader.js";
  * Exact target relationships + drift, not proof of current identity or access.
  * Requires an authenticated expected manifest and caller-owned transaction/locks.
  * Includes inactive competing owners: historical conflicts require explicit review.
- * Source provenance, status eligibility, WorkOS identity and approvals remain
+ * Disallowed link/membership states fail even with matching fingerprints.
+ * Pending membership and suspended links still require a separate proven
+ * migration disposition; matching evidence never excuses genuine restrictions.
+ * Source provenance, full eligibility, WorkOS identity and approvals remain
  * separate gates. This function neither starts transactions nor performs writes.
  */
 export async function readLegacyOwnershipTargetEvidence(
@@ -31,9 +34,10 @@ export async function readLegacyOwnershipTargetEvidence(
     sourceSystem: string;
     sourceTable: string;
     relationship: string;
+    status: string;
   }>(
     `SELECT id::text, property_id::text AS "propertyId", source_id AS "sourceId",
-      source_system AS "sourceSystem", source_table AS "sourceTable", relationship
+      source_system AS "sourceSystem", source_table AS "sourceTable", relationship, status
     FROM hotel_catalog.property_source_links
     WHERE id = $1::uuid OR (source_system = 'pms' AND source_table = 'hotels'
       AND (source_id = $2 OR property_id = $3::uuid)) ORDER BY id`,
@@ -51,6 +55,8 @@ export async function readLegacyOwnershipTargetEvidence(
     sourceRow.relationship !== "operational_input"
   )
     return { outcome: "blocked", reason: "source_link_conflict" };
+  if (sourceRow.status !== "active")
+    return { outcome: "blocked", reason: "source_link_restricted" };
 
   const memberships = await client.query<{
     id: string;
@@ -59,9 +65,10 @@ export async function readLegacyOwnershipTargetEvidence(
     roleKey: string;
     accessOrigin: string;
     organizationKind: string;
+    status: string;
   }>(
     `SELECT m.id::text, m.user_id::text AS "userId", m.organization_id::text AS "organizationId",
-      m.role_key AS "roleKey", m.access_origin AS "accessOrigin", o.kind AS "organizationKind"
+      m.role_key AS "roleKey", m.access_origin AS "accessOrigin", o.kind AS "organizationKind", m.status
     FROM identity.organization_memberships m
     LEFT JOIN identity.organizations o ON o.id = m.organization_id
     WHERE m.id = $1::uuid OR (m.organization_id = $2::uuid AND m.role_key = 'hotel_owner')
@@ -80,6 +87,8 @@ export async function readLegacyOwnershipTargetEvidence(
     membership.organizationKind !== "hotel_group"
   )
     return { outcome: "blocked", reason: "membership_conflict" };
+  if (membership.status !== "active" && membership.status !== "pending")
+    return { outcome: "blocked", reason: "membership_restricted" };
 
   const links = await client.query<{
     id: string;
@@ -88,9 +97,10 @@ export async function readLegacyOwnershipTargetEvidence(
     resourceType: string;
     resourceId: string;
     relationship: string;
+    status: string;
   }>(
     `SELECT id::text, organization_id::text AS "organizationId", product,
-      resource_type AS "resourceType", resource_id AS "resourceId", relationship
+      resource_type AS "resourceType", resource_id AS "resourceId", relationship, status
     FROM identity.organization_resource_links
     WHERE id = ANY($1::uuid[]) OR (relationship IN ('owner', 'operator') AND (
       (product = 'pms' AND resource_type = 'pms_hotel' AND resource_id = $2) OR
@@ -128,6 +138,8 @@ export async function readLegacyOwnershipTargetEvidence(
     })
   )
     return { outcome: "blocked", reason: "ownership_link_conflict" };
+  if (links.rows.some((row) => row.status !== "active" && row.status !== "suspended"))
+    return { outcome: "blocked", reason: "ownership_link_restricted" };
 
   const drift = await readLegacyOwnershipDrift(client, expected);
   return drift.outcome === "unchanged" ? { outcome: "target_matches" } : drift;
