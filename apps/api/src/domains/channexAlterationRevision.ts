@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import {
   reconcilePmsOccupiedInventory,
   type PmsOccupiedInventoryClient,
@@ -196,6 +197,8 @@ export async function applyChannexAlterationRevision(
         assignment.roomTypeId === matches[0]!.roomTypeId,
     };
   });
+  if (await hasBookingFinancialEvidence(client, scope))
+    throw new Error("alteration_finance_reconciliation_required");
   await assertChannexAlterationAvailability(client, {
     propertyId: scope.propertyId,
     bookingId: scope.bookingId,
@@ -289,7 +292,7 @@ export async function applyChannexAlterationRevision(
   }
   await client.query(
     `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=$7::numeric,
-    balance_amount=CASE WHEN payment_status='unpaid' THEN $7::numeric ELSE balance_amount END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
+    balance_amount=CASE WHEN payment_status='unpaid' AND total_amount<>$7::numeric THEN $7::numeric ELSE balance_amount END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
     [
       scope.bookingId,
       scope.propertyId,

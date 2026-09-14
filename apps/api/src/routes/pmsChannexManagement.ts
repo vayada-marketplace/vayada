@@ -1,3 +1,4 @@
+import { parseInventoryRules } from "@vayada/domain-pms-channex";
 import { stayRestrictionReplacement } from "../domains/pmsStayRestrictions.js";
 import {
   NoShowReportingConflict,
@@ -21,6 +22,7 @@ export type PmsChannexManagementRoutesOptions = {
   repository: PmsChannexManagementReadRepository;
   noShowReports?: NoShowReportingStore;
   noShowReportingEnabled?: boolean;
+  noShowReportingPropertyId?: string;
   capabilityModes: ChannexManagementCapabilityModes;
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
@@ -88,6 +90,9 @@ export async function registerPmsChannexManagementRoutes(
     );
   });
 
+  const reportingEnabled = (propertyId: string) =>
+    options.noShowReportingEnabled &&
+    (!options.noShowReportingPropertyId || options.noShowReportingPropertyId === propertyId);
   const reportPath = "/properties/:propertyId/reservations/:bookingId/no-show-report";
   type ReportParams = { propertyId: string; bookingId: string };
   app.get<{ Params: ReportParams }>(reportPath, async (request, reply) => {
@@ -97,7 +102,7 @@ export async function registerPmsChannexManagementRoutes(
       return reply.code(503).send({ message: "Reporting is unavailable." });
     const result = await options.noShowReports.get(propertyId, bookingId);
     if (!result) return reply.code(404).send({ message: "Reservation not found." });
-    return options.noShowReportingEnabled
+    return reportingEnabled(propertyId)
       ? result
       : {
           ...result,
@@ -109,7 +114,7 @@ export async function registerPmsChannexManagementRoutes(
   app.post<{ Params: ReportParams; Body: unknown }>(reportPath, async (request, reply) => {
     const { propertyId, bookingId } = request.params;
     const context = enforcePmsChannexPolicy(request, propertyId, "pms.operations.manage");
-    if (!options.noShowReportingEnabled || !options.noShowReports)
+    if (!reportingEnabled(propertyId) || !options.noShowReports)
       return reply
         .code(409)
         .send({ message: "Booking.com reporting is disabled in this environment." });
@@ -188,8 +193,12 @@ export async function registerPmsChannexManagementRoutes(
       const ari = ["rate_error", "sync_error", "sync_warning", "disconnected_channel"].includes(
         alert.eventType,
       );
+      const scoped =
+        booking && !ari && options.capabilityModes.bookingSync === "observe_only"
+          ? options.commandPort?.recoverStagingAlert
+          : undefined;
       if (
-        (booking && options.capabilityModes.bookingSync !== "mutating") ||
+        (booking && options.capabilityModes.bookingSync !== "mutating" && !scoped) ||
         (ari && options.capabilityModes.ariSync !== "mutating")
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
@@ -199,14 +208,9 @@ export async function registerPmsChannexManagementRoutes(
         Number(request.body.round) >= 3
       )
         return reply.code(400).send({ code: "invalid_recovery_round" });
-      if (!options.commandPort?.recoverAlert)
-        return reply.code(503).send({ code: "recovery_unavailable" });
-      const result = await options.commandPort.recoverAlert(
-        context,
-        propertyId,
-        alertId,
-        Number(request.body.round),
-      );
+      const recover = scoped ?? options.commandPort?.recoverAlert;
+      if (!recover) return reply.code(503).send({ code: "recovery_unavailable" });
+      const result = await recover(context, propertyId, alertId, Number(request.body.round));
       return reply.code(result.ok ? 202 : 409).send(result);
     },
   );
@@ -265,6 +269,34 @@ export async function registerPmsChannexManagementRoutes(
         await options.commandPort.enqueue(context, request.params.propertyId, {
           ...input,
           operationType: "update_markups",
+        }),
+      );
+    },
+  );
+
+  app.put<{ Params: { propertyId: string }; Body: unknown }>(
+    "/properties/:propertyId/channex/inventory-rules",
+    async (request, reply) => {
+      const context = enforcePmsChannexPolicy(
+        request,
+        request.params.propertyId,
+        "pms.operations.manage",
+      );
+      const body = request.body as Record<string, unknown> | null;
+      const inventoryRules = parseInventoryRules(body);
+      if (!body || !inventoryRules || !isCommandIdentity(body.commandId, body.idempotencyKey))
+        return reply.code(400).send({ code: "invalid_inventory_rules" });
+      if (options.capabilityModes.ariSync !== "mutating")
+        return reply.code(409).send({ code: "channex_capability_not_mutating" });
+      if (!options.commandPort)
+        return reply.code(503).send({ code: "channex_commands_unavailable" });
+      return sendCommandResult(
+        reply,
+        await options.commandPort.enqueue(context, request.params.propertyId, {
+          commandId: body.commandId as string,
+          idempotencyKey: body.idempotencyKey as string,
+          operationType: "update_inventory_rules",
+          inventoryRules,
         }),
       );
     },
@@ -340,6 +372,7 @@ function parseCommand(body: unknown) {
   if (
     typeof value.operationType !== "string" ||
     value.operationType === "update_markups" ||
+    value.operationType === "update_inventory_rules" ||
     !CHANNEX_MANAGEMENT_OPERATION_TYPES.includes(
       value.operationType as ChannexManagementOperationType,
     )
@@ -396,6 +429,7 @@ function isMutating(modes: ChannexManagementCapabilityModes, type: ChannexManage
     sync_bookings: "bookingSync",
     update_markups: "markups",
     install_messaging: "messaging",
+    update_inventory_rules: "ariSync",
   }[type] as keyof ChannexManagementCapabilityModes;
   return modes[capability] === "mutating";
 }
