@@ -94,6 +94,29 @@ level permission grants run only after this helper succeeds. Dedicated access
 revocation remains unchanged. This guard is not a replacement for normal caller
 authorization, and does not guard organization-only resource grants.
 
+## Membership reconciliation
+
+`upsertWorkosMembership` now owns one transaction. It serializes the provider
+identity, locks the resolved user FOR KEY SHARE, verifies and locks the exact
+external mapping FOR SHARE, and retains the ordinary unlocked organization lookup
+inside the transaction. Adding an organization SHARE lock before membership writes
+would invert staff management's membership/organization lock order. This slice
+does not strengthen ordinary organization-kind/provider-mapping drift semantics;
+the lookup is not immutable organization evidence or owner eligibility proof.
+Missing/drifted identity mappings reject before writes. Active **and pending**
+inputs require an absent receipt before the existing membership upsert: pending
+input still carries roles and provider linkage and is not a restrictive bypass.
+
+The route sends membership.updated inactive/suspended statuses through this same
+method. For these inputs, all users take an exact-existing status-only UPDATE
+matching organization, user and provider membership ID. Never insert, relink or
+change role/permission/provider metadata under a restrictive event. Existing
+inactive/suspended state and its timestamp remain unchanged on retry; missing or
+mismatched bindings visibly reject. This deliberate ordinary-event change keeps
+real restrictions available even when receipt storage is unreadable. Dedicated
+membership-deleted and directory deactivation handlers remain unchanged. This
+does not add a session guard or authorize later owner access.
+
 ## Transaction and deployment prerequisites
 
 The future bootstrap writer must insert previously absent users and their receipt
@@ -120,8 +143,8 @@ once prepared rows exist, rolling back to unguarded app code is unsafe.
 ## Preparation remains blocked after the first callers
 
 Receipt lookup alone does not police every identity mutation. Before enabling
-preparation, separately cover organization-only resource-link grants, webhook membership
-reconciliation, session reconciliation and other
+preparation, separately cover organization-only resource-link grants,
+session reconciliation and other
 identity writers. Inventory their direct SQL and transaction boundaries. Do not
 block legitimate suspension/deletion by blindly placing a blanket guard ahead of
 all lifecycle commands; restrictive actions need their own reviewed behavior.

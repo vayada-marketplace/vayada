@@ -330,6 +330,39 @@ describe("WorkOS webhook routes", () => {
     await app.close();
   });
 
+  it.each(["inactive", "suspended"] as const)(
+    "routes membership.updated %s through the restrictive upsert boundary",
+    async (status) => {
+      const store = createMemoryStore();
+      const received: WorkosMembershipPayload[] = [];
+      store.upsertWorkosMembership = async (input) => {
+        received.push(input);
+        return { userId: "user_internal", organizationId: "org_internal" };
+      };
+      const app = buildApp({
+        workosWebhooks: {
+          secret: "whsec_test",
+          processInline: true,
+          store,
+          verifier: verifierFor(
+            event("evt_restrict", "organization_membership.updated", {
+              ...membershipData(),
+              status,
+            }),
+          ),
+        },
+      });
+      try {
+        const response = await postWebhook(app, "evt_restrict");
+        expect(response.json()).toMatchObject({ status: "accepted" });
+        expect(received).toHaveLength(1);
+        expect(received[0]).toMatchObject({ workosMembershipId: "om_platform", status });
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   it("deactivates memberships from WorkOS removal events", async () => {
     const store = createMemoryStore();
     store.users.set("user_workos_platform", {

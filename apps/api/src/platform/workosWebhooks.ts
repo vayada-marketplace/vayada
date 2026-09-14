@@ -612,12 +612,65 @@ async function upsertWorkosMembership(
   pool: pg.Pool,
   input: WorkosMembershipPayload,
 ): Promise<{ userId: string; organizationId: string }> {
-  const userId = await findUserIdByWorkosUserId(pool, input.workosUserId);
-  const organization = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
-  if (!userId || !organization) {
-    throw new Error("WorkOS membership references an unknown user or organization");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await lockWorkosProviderIdentity(client, input.workosUserId);
+    const userId = await findUserIdByWorkosUserId(client, input.workosUserId);
+    const user = await client.query(
+      "SELECT id FROM identity.users WHERE id = $1 FOR KEY SHARE",
+      [userId],
+    );
+    if (!userId || user.rows.length !== 1) {
+      throw new Error("WorkOS membership references an unknown user or organization");
+    }
+    // Lock user before mapping/org to stay compatible with identity writers.
+    const mapping = await client.query(
+      `SELECT user_id FROM identity.external_identities
+       WHERE provider = 'workos' AND provider_user_id = $1 AND user_id = $2
+       FOR SHARE`,
+      [input.workosUserId, userId],
+    );
+    const organizations = await client.query<WorkosOrganizationRow>(
+      "SELECT id, kind FROM identity.organizations WHERE workos_org_id = $1",
+      [input.workosOrgId],
+    );
+    const organization = organizations.rows[0];
+    if (mapping.rows.length !== 1 || !organization) {
+      throw new Error("WorkOS membership references an unknown user or organization");
+    }
+    if (input.status === "inactive" || input.status === "suspended") {
+      const restricted = await client.query(
+        `UPDATE identity.organization_memberships
+         SET status = CASE WHEN status IN ('inactive', 'suspended') THEN status ELSE $4 END,
+             updated_at = CASE WHEN status IN ('inactive', 'suspended') THEN updated_at ELSE now() END
+         WHERE organization_id = $1 AND user_id = $2 AND workos_membership_id = $3`,
+        [organization.id, userId, input.workosMembershipId, input.status],
+      );
+      if (restricted.rowCount !== 1) {
+        throw new Error("WorkOS membership restriction requires an exact existing binding");
+      }
+    } else {
+      await assertNotBootstrapProtectedUser(client, userId);
+      await upsertWorkosMembershipWithClient(client, input, userId, organization);
+    }
+    await client.query("COMMIT");
+    return { userId, organizationId: organization.id };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-  const existingMembership = await pool.query<{ role_key: string }>(
+}
+
+async function upsertWorkosMembershipWithClient(
+  client: pg.PoolClient,
+  input: WorkosMembershipPayload,
+  userId: string,
+  organization: WorkosOrganizationRow,
+): Promise<void> {
+  const existingMembership = await client.query<{ role_key: string }>(
     `SELECT role_key
      FROM identity.organization_memberships
      WHERE organization_id = $1 AND user_id = $2
@@ -627,7 +680,7 @@ async function upsertWorkosMembership(
   const pendingInvitation =
     organization.kind === "hotel_group"
       ? (
-          await pool.query<{ permission_overrides: unknown; role_key: string }>(
+          await client.query<{ permission_overrides: unknown; role_key: string }>(
             `SELECT invitation.role_key, invitation.permission_overrides
              FROM identity.staff_invitations invitation
              JOIN identity.users users ON users.id = $2
@@ -653,7 +706,7 @@ async function upsertWorkosMembership(
   });
   const holdPending = Boolean(pendingInvitation) && input.status === "active";
 
-  await pool.query(
+  await client.query(
     `INSERT INTO identity.organization_memberships
        (
          organization_id,
@@ -752,5 +805,4 @@ async function upsertWorkosMembership(
       organization.kind === "hotel_group",
     ],
   );
-  return { userId, organizationId: organization.id };
 }
