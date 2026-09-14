@@ -22,3 +22,8 @@ export function parseBookingPricingOfferTerms(value: unknown): ReplacementOfferT
 
 export { parsePublicBookingQuote, type PublicBookingQuote, type PublicBookingQuoteRequest } from "./publicBookingQuote.js";
 export { pricingCurrencyScale } from "@vayada/domain-pms/replacement-pricing";
+
+export {
+  parsePublicQuoteGuestDisclosure,
+  type PublicQuoteGuestDisclosure,
+} from "./publicQuoteGuestDisclosure.js";

@@ -131,12 +131,19 @@ acceptance migration/decoder and replay repository, owner-preserving reservation
 promo composition, same-transaction Finance/add-on capture and replacement
 booking/lifecycle/revenue projections, then the complete orchestrator.
 
-There is also an unresolved age contract: the browser retains all actual ages
-0–17 and room pricing uses its own `children.adultFromAge`; acceptance currently
-rejects any child age at or above Booking guest `adultAgeThreshold`. A lower
-property threshold therefore permits a quote that cannot be accepted. Decide and
-implement classification versus eligibility semantics consistently before route
-activation. Never drop ages or silently convert selections to satisfy the parser.
+Guest age semantics: retain every actual age 0–17 exactly in the immutable quote.
+Booking guest `adultAgeThreshold` classifies those ages; it is not a maximum age
+permitted in the actual-age list. This follows Booking admin's existing “Adults
+{adultAge}+; children ages 0–{childMaxAge}” setting and the guest selector's labels.
+The inspected Python settings/checkout do not provide actual-age threshold
+enforcement; this decision does not claim Python parity for a rule it lacks.
+When `childrenEnabled` is true, do not reject ages at/above the threshold. When
+false, reject ages below the configured threshold; a missing disabled threshold
+conservatively rejects any recorded minor. For threshold12, ages12 and17 remain
+retained and eligible, while age11 is disallowed when children are disabled.
+PMS `children.adultFromAge` remains the separate price-classification owner. Do
+not rewrite ages, guest counts, accepted quote identity or price to satisfy this
+eligibility check. These rules do not activate booking submission.
 
 Focused final-gate tests verify ordering, cutoff crossed during an authority wait,
 exact expiry, future/invalid time, changed policy/timezone/scope, and unchanged

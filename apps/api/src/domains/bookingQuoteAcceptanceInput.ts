@@ -117,11 +117,12 @@ export function parseBookingQuoteAcceptanceInput(
     )
   )
     return null;
+  // Actual ages remain immutable pricing facts; the guest threshold classifies them.
   for (const room of requirements.quote.stay.rooms) {
     if (
-      (!policy.childrenEnabled && room.guests.childAgesAtCheckIn.length > 0) ||
+      !policy.childrenEnabled &&
       room.guests.childAgesAtCheckIn.some(
-        (age) => policy.adultAgeThreshold === null || age >= policy.adultAgeThreshold,
+        (age) => policy.adultAgeThreshold === null || age < policy.adultAgeThreshold,
       )
     )
       return null;
