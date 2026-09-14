@@ -882,3 +882,25 @@ retains fixed transport-failure evidence. A storage failure returns only a recei
 persistence retry, never another POST. Neither a task acknowledgement nor a saved
 receipt releases ownership or opens sales. Current verification uses injected
 provider ports and isolated PostgreSQL, with no real Channex mutations.
+
+### Exact staged restriction observation (VAY-1545)
+
+The staged restriction reader compares the six explicit restriction fields from
+one immutable initial request with the provider values for its exact rate/date.
+It never recalculates desired hotel rules: a desired open rate is deliberately
+staged closed. Require exactly one values item, valid provider UUIDs and calendar
+date, explicit valid minima/maximum/booleans and `stop_sell: true` before GET.
+Reject missing fields, mismatches and error/warning envelopes. Snapshot scope and
+expected fields before IO. This helper returns a restriction observation only;
+it does not validate rates, current authority, receipt history or task completion.
+The future domain caller must load the immutable attempt itself, supply bounded
+authenticated IO and repeat authority/history checks before retaining evidence.
+
+As checked on 2026-09-14, the public [ARI API](https://docs.channex.io/api-v.1-documentation/ari)
+documents the restriction GET and a task acknowledgement from POST. The
+[property tasks UI](https://docs.channex.io/application-documentation/property-tasks)
+describes processing logs, but the documentation index/search did not establish a
+supported terminal-task API or the complete multi-occupancy price GET shape.
+Do not invent either interface. These remain explicit verification gaps, not
+proof that Channex lacks them. An exact restriction observation cannot release
+an unresolved attempt, establish complete price delivery or activate sales.
