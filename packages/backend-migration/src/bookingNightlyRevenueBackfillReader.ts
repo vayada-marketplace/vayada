@@ -27,17 +27,17 @@ type ExactNight = NonNullable<
 export async function readUncapturedNightlyRevenueCandidates(
   client: QueryClient,
   options: { afterGuestBookingId?: string; limit?: number } = {},
-): Promise<{ candidates: NightlyRevenueBackfillCandidate[]; nextGuestBookingId: string | null }> {
+) {
   const limit = options.limit ?? 500;
   if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Invalid page limit");
-  const bookings = await client.query<BookingRow>(
+  const bookings = await client.query<BookingRow & { transactionId: string }>(
     `SELECT booking.property_id::text AS "propertyId",booking.id::text AS "guestBookingId",
        booking.check_in::text AS "checkIn",booking.check_out::text AS "checkOut",
        booking.room_count AS "roomCount",booking.currency::text,booking.lifecycle_status AS "lifecycleStatus",
        booking.source_system AS "sourceSystem",booking.booking_channel AS "bookingChannel",
        booking.booking_metadata AS "bookingMetadata",
        quote.currency::text AS "quoteCurrency",quote.selected_offer_snapshot AS "quoteSnapshot",
-       assignment.rows AS assignments
+       assignment.rows AS assignments,txid_current()::text AS "transactionId"
      FROM booking.guest_bookings booking
      LEFT JOIN booking.quote_sessions quote ON quote.id=booking.quote_session_id
        AND quote.property_id=booking.property_id
@@ -58,6 +58,7 @@ export async function readUncapturedNightlyRevenueCandidates(
     [options.afterGuestBookingId ?? null, limit],
   );
   return {
+    transactionId: bookings.rows[0]?.transactionId ?? null,
     candidates: bookings.rows.map((booking) => candidate(booking)),
     nextGuestBookingId: bookings.rows.at(-1)?.guestBookingId ?? null,
   };

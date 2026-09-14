@@ -26,6 +26,7 @@ describe("nightly revenue backfill reader", () => {
     });
 
     expect(page.nextGuestBookingId).toBe(ids[3]);
+    expect(page.transactionId).toBe("reader-transaction");
     expect(page.candidates.map(({ sourceKind }) => sourceKind)).toEqual([
       "direct",
       "ota",
@@ -41,6 +42,7 @@ describe("nightly revenue backfill reader", () => {
     expect(page.candidates[1]!.retainedEvidence).toEqual({ currency: null });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.values).toEqual([CURSOR, 4]);
+    expect(calls[0]!.sql).toContain('txid_current()::text AS "transactionId"');
     expect(calls[0]!.sql).toContain("$1::uuid IS NULL OR booking.id>$1::uuid");
     expect(calls.map(({ sql }) => sql).join(" ")).not.toMatch(/rate_plan|pricing|external|fetch/i);
 
@@ -77,6 +79,7 @@ describe("nightly revenue backfill reader", () => {
     expect(await readUncapturedNightlyRevenueCandidates(client as never)).toEqual({
       candidates: [],
       nextGuestBookingId: null,
+      transactionId: null,
     });
     expect(calls).toBe(1);
   });
@@ -94,6 +97,7 @@ function bookings() {
     quoteCurrency: null,
     quoteSnapshot: {},
     assignments: [],
+    transactionId: "reader-transaction",
   };
   return [
     {
