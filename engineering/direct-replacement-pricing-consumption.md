@@ -649,3 +649,22 @@ not turn setup completion into public bookability.
 Guest-rule navigation requests explicitly recheck the leave guard on controller
 retries so edits made after a failed refresh cannot be discarded by the shell's
 Retry button. Existing draft-writing steps retain their current retry behavior.
+
+
+Public publication's Booking owner now reads confirmed guest choices independently
+of the retired guest-policy bundle. Its source identity is guest_choice_revision /
+guest-choices:<UUID>, scoped to property and organization; missing/malformed evidence
+blocks the guest group and a changed head invalidates an older snapshot manifest.
+The internal reader holds the guest-owner lock while reading confirmation evidence.
+Booking no longer supplies currencies or pricing source bindings through guest rules.
+The publication builder takes supported currencies from the independently validated
+Finance snapshot. PMS room/rate currencies must still match Finance in final content
+validation. PMS pricing, cancellation/offer terms, mandatory charges, calendar,
+Finance payment readiness, Catalog visibility, and owner-manifest agreement retain
+their separate gates. This change alone cannot make the replacement pricing stack
+public: the remaining PMS publication adapter still consumes retired pricing inputs
+and must be replaced before publication can succeed. No activation or receipts
+are fabricated from saved guest rules.
+The prior single-pricing-currency publication constraint remains explicit: Finance
+must advertise only its default currency, matching PMS rates. Merely enabling more
+payment currencies does not establish quote conversion support.

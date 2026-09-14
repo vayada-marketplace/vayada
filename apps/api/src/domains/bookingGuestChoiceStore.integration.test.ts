@@ -1,3 +1,4 @@
+import { createBookingGuestChoicePublicationReader } from "./bookingGuestChoicePublication.js";
 import { createPropertySetupBookingStateProvider } from "../platform/propertySetupBookingState.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./bookingGuestPolicyScopeAuthorization.js";
 import { randomUUID } from "node:crypto";
@@ -75,6 +76,8 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
   it("creates without rates, edits with revision checks and replays the original confirmed revision", async () => {
     const f = await fixture();
     expect(await f.store.read(f.scope)).toBeNull();
+    const publication = createBookingGuestChoicePublicationReader(pool);
+    expect(await publication.getCurrentGuestRules(f.scope)).toBeNull();
     const first = await f.store.save(f.scope, f.command);
     expect(first.replayed).toBe(false);
     const edit = {
@@ -85,6 +88,20 @@ describe.skipIf(!url)("confirmed guest rules without pricing", () => {
     };
     const second = await f.store.save(f.scope, edit);
     expect(second.revision).not.toBe(first.revision);
+    const published = await publication.getCurrentGuestRules(f.scope);
+    expect(published).toMatchObject({
+      propertyId: f.scope.propertyId,
+      organizationId: f.scope.organizationId,
+      sourceRevision: `guest-choices:${second.revision}`,
+      choices: edit.choices,
+    });
+    expect(new Date(published!.confirmedAt).toISOString()).toBe(published!.confirmedAt);
+    expect(
+      await publication.getCurrentGuestRules({ ...f.scope, organizationId: randomUUID() }),
+    ).toBeNull();
+    await expect(
+      publication.getCurrentGuestRules({ ...f.scope, propertyId: "invalid" }),
+    ).rejects.toThrow();
     expect(await f.store.read(f.scope)).toEqual({
       revision: second.revision,
       choices: edit.choices,
