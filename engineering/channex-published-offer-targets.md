@@ -723,3 +723,54 @@ not persisted, a provider write acknowledgement, an OTA semantics certificate,
 a future send permit or an activation decision. A sender must still establish
 its own current authority and complete initial ARI requirements. No runtime
 sender is connected by this entrypoint.
+
+
+### Durable initial rate/restriction attempts (VAY-1545)
+
+Before any initial rate/restriction POST, commit one attempt for one property-local
+calendar date, containing the complete occupancy-rate array and explicit daily
+restrictions. A date's occupancies travel together; neither an accepted subset nor
+HTTP 200 alone proves completion. The request body is immutable and bounded to
+64 KiB. Its exact semantic validation remains the materializer's responsibility.
+The operation references an identified creation attempt, its pending intent and
+version, binding generation, exact provider property/room/rate IDs, and the
+original job-attempt/worker correlation. The creation attempt already links the
+immutable publication/source proposal; do not copy or reinterpret pricing rules.
+
+A unique unresolved attempt for the external property/rate pair serializes all
+its dates and generations, including a connection replacement that references
+the same provider IDs. This deliberately favors correctness over throughput for
+initial uploads. Another rate remains independent. Losing a lease, expiring a
+job, changing the intent or losing the response never releases this exclusion.
+No automatic resend or timeout reset is allowed. Original dispatch evidence must
+be retained independently of current lease state before reconciliation.
+
+The database permits only an unresolved-to-reconciled transition with retained,
+nonempty reconciliation evidence; identities, request, timestamps and terminal
+rows remain immutable. That storage transition is not a public API or readiness
+proof. The later service must establish definitive completion of the original
+request (including potential late completion), complete response/warning/partial
+item accounting, exact price/restriction readback and current ownership before
+releasing exclusion. Readback by itself cannot prove an old request will not
+finish later. Unknown outcomes remain unresolved for explicit recovery.
+
+Storage insertion requires the identified creation, exact pending intent,
+current binding and same-property job-attempt correlation. The service must also
+check its live lease, complete creation receipt history, publication/owner
+freshness, capability and exact materialized payload under the existing target
+lock. Storage alone authorizes no HTTP, retry, sealing or activation. A fresh
+claim must return a one-use dispatch closure; a retried claim never restores it.
+Do not enable a caller until its receipt and reconciliation paths are complete.
+
+This lane covers rate-plan prices and restrictions. Room availability has a
+separate room-scoped owner shared by every rate plan; a rate-plan exclusion must
+not pretend to serialize it. Complete initial ARI additionally needs current
+room availability evidence, bounded horizon/date coverage, all occupancy and
+restriction observations, and activation CAS. Sales remain unavailable until
+all existing configuration, semantics and activation gates pass.
+
+Storage tests must prove immutable request/correlation, same-property scope,
+identified pending creation, binding matching, one unresolved rate across dates,
+concurrent claim exclusion, other-rate independence, and no implicit release
+following intent failure. A real sender and its late-response tests follow this
+storage dependency; this contract does not authorize provider writes.
