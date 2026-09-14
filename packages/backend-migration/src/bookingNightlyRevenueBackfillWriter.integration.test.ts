@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { verifyAppliedNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillVerification.js";
 import { applyNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillWriter.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 const DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -60,6 +61,11 @@ describe.skipIf(!DATABASE_URL)("nightly revenue backfill writer (PostgreSQL)", (
         count: 2,
         revision: 2,
         corrections: 1,
+      });
+      expect(await verifyAppliedNightlyRevenueBackfillPage(client, plan("0.0000"))).toMatchObject({
+        lineCount: 1,
+        storedRows: 2,
+        revisionCount: 2,
       });
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);

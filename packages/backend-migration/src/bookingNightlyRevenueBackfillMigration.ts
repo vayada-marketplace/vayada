@@ -2,6 +2,7 @@ import type pg from "pg";
 
 import { planNightlyRevenueBackfill } from "./bookingNightlyRevenueBackfill.js";
 import { readUncapturedNightlyRevenueCandidates } from "./bookingNightlyRevenueBackfillReader.js";
+import { verifyAppliedNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillVerification.js";
 import { applyNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillWriter.js";
 
 type QueryPool = Pick<pg.Pool, "connect">;
@@ -18,11 +19,13 @@ export type NightlyRevenueBackfillPageServices = {
   read: typeof readUncapturedNightlyRevenueCandidates;
   plan: typeof planNightlyRevenueBackfill;
   apply: typeof applyNightlyRevenueBackfillPage;
+  verify: typeof verifyAppliedNightlyRevenueBackfillPage;
 };
 const services: NightlyRevenueBackfillPageServices = {
   read: readUncapturedNightlyRevenueCandidates,
   plan: planNightlyRevenueBackfill,
   apply: applyNightlyRevenueBackfillPage,
+  verify: verifyAppliedNightlyRevenueBackfillPage,
 };
 
 /** Acquires and releases one client; one bounded transaction is the safe checkpoint. */
@@ -63,8 +66,17 @@ export async function runNightlyRevenueBackfillPage(
       { pageId, recognizedOn: input.recognizedOn, lines: plan.lines },
       page.transactionId,
     );
+    const verification = await dependencies.verify(client, plan.lines);
     await finish("COMMIT");
-    return report(input, page.nextGuestBookingId, page.candidates.length, pageId, plan, write);
+    return report(
+      input,
+      page.nextGuestBookingId,
+      page.candidates.length,
+      pageId,
+      plan,
+      write,
+      verification,
+    );
   } catch (error) {
     if (state === "open") {
       try {
@@ -86,6 +98,7 @@ function report(
   pageId: string,
   plan: ReturnType<typeof planNightlyRevenueBackfill>,
   write: Awaited<ReturnType<typeof applyNightlyRevenueBackfillPage>> | null,
+  verification: Awaited<ReturnType<typeof verifyAppliedNightlyRevenueBackfillPage>> | null = null,
 ) {
   return {
     runId: input.runId,
@@ -99,6 +112,7 @@ function report(
     exceptions: plan.exceptions,
     reconciliation: plan.reconciliation,
     write,
+    verification,
   };
 }
 

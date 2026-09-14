@@ -107,6 +107,7 @@ export {
   type NightlyRevenueBackfillMode,
   type NightlyRevenueBackfillPageInput,
 } from "./bookingNightlyRevenueBackfillMigration.js";
+export { verifyAppliedNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillVerification.js";
 
 export {
   runProductionPmsMigration,
