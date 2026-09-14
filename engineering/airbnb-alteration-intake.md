@@ -20,7 +20,7 @@ generation from the queued job; reject a changed binding. Do not match on guest,
 dates, public reference or a local ID that happens to resemble a provider ID.
 
 Preserve the original booking snapshot on replay. Duplicate requests cannot
-overwrite a proposal or reopen a locally/provider resolved request. A changed
+overwrite a proposal or reopen a request resolved locally or by the provider. A changed
 proposal under the same provider event ID is an evidence conflict for review.
 Never copy an arbitrary webhook body directly to the intake: the future worker
 must pull the live-feed event from Channex and validate its property and identity.
@@ -357,3 +357,7 @@ Linked inventory,
 missing materialization and in-house stays require review and block application.
 Those limitations remain activation gates, alongside finance-source freshness
 validation, periodic scans and sanctioned provider end-to-end evidence.
+
+### Additional activation prerequisite after main integration
+
+Keep alteration application disabled until its assignment updates also reconcile the generic Channex worker's `assignment_payload.channexStay` and `channexRevision` metadata and released slots. Otherwise a later generic modified or canceled revision can fail with `operational_assignment_conflict`. Cover alteration followed by generic modification and cancellation before activation. This prerequisite is separate from the waived live Airbnb account test.

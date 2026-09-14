@@ -98,6 +98,8 @@ const PRICING_SOURCES_SELECT = `WITH pricing_currency AS (
       WHERE room.property_id = plan.property_id
         AND room.id = plan.room_type_id
         AND room.active
+        AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+          WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
     )
 )
 SELECT
@@ -129,24 +131,17 @@ export function createPgPmsPricingReadModel(config: {
     },
 
     async getFlexibleRatePlan(propertyId, roomTypeId) {
-      const scope = roomTypeScope(propertyId, roomTypeId);
-      const result = await pool.query<PmsFlexibleRatePlanRow>(
-        `${PLAN_SELECT}
-         WHERE plan.property_id = $1::uuid
-           AND plan.room_type_id = $2::uuid
-           AND plan.pricing_contract_version = $3`,
-        [scope.propertyId, scope.roomTypeId, PMS_PRICING_CONTRACT_VERSION],
+      throw Object.assign(
+        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
       );
-      if (result.rows.length > 1) throw new Error("PMS flexible pricing plan is not unique");
-      if (!result.rows[0]) return null;
-      const snapshot = pmsFlexibleRatePlanSnapshotFromRow(result.rows[0]);
-      assertPlanScope(snapshot, scope);
-      return snapshot;
     },
 
     async listFlexibleRatePlans(propertyId) {
-      const normalizedPropertyId = readUuid(propertyId);
-      return queryPlans(pool, normalizedPropertyId);
+      throw Object.assign(
+        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+      );
     },
 
     async getPricingSourceSnapshot(propertyId) {
@@ -252,41 +247,6 @@ export async function queryCurrency(
     throw new Error("PMS pricing currency read escaped its property scope");
   }
   return snapshot;
-}
-
-async function queryPlans(
-  queryable: Queryable,
-  propertyId: string,
-): Promise<readonly FlexibleRatePlanSnapshot[]> {
-  const result = await queryable.query<PmsFlexibleRatePlanRow>(
-    `${PLAN_SELECT}
-     WHERE plan.property_id = $1::uuid
-       AND plan.pricing_contract_version = $2
-     ORDER BY plan.room_type_id ASC`,
-    [propertyId, PMS_PRICING_CONTRACT_VERSION],
-  );
-  return Object.freeze(
-    result.rows.map((row) => {
-      const snapshot = pmsFlexibleRatePlanSnapshotFromRow(row);
-      if (snapshot.propertyId !== propertyId) {
-        throw new Error("PMS flexible pricing plan list escaped its property scope");
-      }
-      return snapshot;
-    }),
-  );
-}
-
-function roomTypeScope(propertyId: string, roomTypeId: string) {
-  return Object.freeze({ propertyId: readUuid(propertyId), roomTypeId: readUuid(roomTypeId) });
-}
-
-function assertPlanScope(
-  snapshot: FlexibleRatePlanSnapshot,
-  scope: { propertyId: string; roomTypeId: string },
-): void {
-  if (snapshot.propertyId !== scope.propertyId || snapshot.roomTypeId !== scope.roomTypeId) {
-    throw new Error("PMS flexible pricing plan read escaped its requested scope");
-  }
 }
 
 function readUuid(value: string): string {

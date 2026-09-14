@@ -104,6 +104,56 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open settings concurrency
     await blocker.end();
   });
 
+  it("ignores a closing room's absent binding and unverified labels while preserving operating-room checks", async () => {
+    const closingRoom = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.room_types (id,property_id,name,active)
+      VALUES ($1,$2,'Closing',true)`,
+      [closingRoom, propertyId],
+    );
+    await admin.query(
+      `INSERT INTO pms.rooms (id,property_id,room_type_id,operational_label_status)
+      VALUES ($1,$2,$3,'unverified')`,
+      [randomUUID(), propertyId, closingRoom],
+    );
+    await expect(firstRepository.update(command(true, "before-closure"))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "physical_room_labels_unverified" },
+    });
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+      VALUES ($1,$2,$3,$4,1,1,1,2,'2026-09-09',now(),$5)`,
+      [propertyId, closingRoom, randomUUID(), "a".repeat(64), actorUserId],
+    );
+    await expect(firstRepository.update(command(true, "after-closure"))).resolves.toMatchObject({
+      ok: true,
+      setting: { enabled: true },
+    });
+    await admin.query(
+      `UPDATE pms.rooms SET operational_label_status='unverified'
+      WHERE property_id=$1 AND room_type_id<>$2`,
+      [propertyId, closingRoom],
+    );
+    await expect(firstRepository.findContext(propertyId)).resolves.toMatchObject({
+      setupError: { code: "physical_room_labels_unverified" },
+    });
+    await admin.query(
+      `INSERT INTO pms.room_type_closures
+      (property_id,room_type_id,command_id,request_fingerprint,expected_room_facts_revision,
+       expected_room_units_revision,previous_calendar_revision,closed_calendar_revision,
+       cutoff_date,accepted_at,actor_user_id)
+      SELECT property_id,room_type_id,$2,$3,1,1,1,2,'2026-09-09',now(),$4
+      FROM pms.operating_calendar_room_bindings WHERE property_id=$1 AND calendar_revision=1`,
+      [propertyId, randomUUID(), "b".repeat(64), actorUserId],
+    );
+    await expect(firstRepository.findContext(propertyId)).resolves.toMatchObject({
+      setupError: { code: "operating_calendar_room_bindings_stale" },
+    });
+  });
+
   it("rereads after the property lock and rejects a stale virtual-default save", async () => {
     await blocker.query("BEGIN");
     await blocker.query("SELECT id FROM hotel_catalog.properties WHERE id = $1::uuid FOR UPDATE", [

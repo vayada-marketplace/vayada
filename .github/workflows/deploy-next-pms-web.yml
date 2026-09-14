@@ -67,6 +67,7 @@ jobs:
             NEXT_PUBLIC_BOOKING_ADMIN_URL=${{ env.NEXT_BOOKING_ADMIN_URL }}
             NEXT_PUBLIC_MARKETPLACE_URL=${{ env.NEXT_MARKETPLACE_URL }}
             NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
+            NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
             NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-latest

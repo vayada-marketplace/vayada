@@ -188,6 +188,11 @@ export function createPgPropertySetupPmsOwnerRepository(config: {
              ON scope.authorized
             AND room_type.property_id = $2::uuid
             AND room_type.active
+            AND NOT EXISTS (
+              SELECT 1 FROM pms.room_type_closures closure
+              WHERE closure.property_id = room_type.property_id
+                AND closure.room_type_id = room_type.id
+            )
       LEFT JOIN pms.rooms room
              ON room.property_id = room_type.property_id
             AND room.room_type_id = room_type.id

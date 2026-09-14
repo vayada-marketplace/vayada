@@ -4,7 +4,6 @@ import type { QueryResultRow } from "pg";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildRoomTypeInventoryHorizon,
   createTargetPmsOperationsCommandRepository,
   type PmsOperationsCommandPool,
 } from "./domains/pmsOperationsCommandRepository.js";
@@ -291,208 +290,6 @@ describe("PMS operations command repository", () => {
     ).toHaveLength(1);
   });
 
-  it("persists a previewable default cancellation policy when room creation omits it", async () => {
-    const target = targetPrivateNotesPool();
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-    const command = roomTypeCreateCommand();
-    delete command.flexibleCancellationPolicy;
-    const result = await repository.createRoomType(command);
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("room creation failed");
-    const policy = result.roomType.ratePlans[0]!.cancellationPolicySnapshot!;
-    expect(
-      hostPolicyImpact(
-        policy,
-        { rateType: "flexible" },
-        "2026-09-21",
-        "2026-09-22",
-        "Europe/Berlin",
-      ),
-    ).toMatchObject({
-      type: "flexible",
-      previousDeadline: "2026-09-14",
-      newDeadline: "2026-09-15",
-      afterDeadlinePenalty: "full_booking_amount",
-      noShowPenalty: "full_booking_amount",
-    });
-    const inserts = target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_plans"));
-    expect(
-      inserts.some((call) =>
-        call.values?.some(
-          (value) =>
-            typeof value === "string" && value.includes('"freeCancellationDeadlineDays":7'),
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("creates PMS room types with replay-safe inventory and distribution side effects", async () => {
-    const target = targetPrivateNotesPool();
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-    const command = roomTypeCreateCommand();
-
-    const created = await repository.createRoomType(command);
-    const replayed = await repository.createRoomType(command);
-    const conflicting = await repository.createRoomType(
-      roomTypeCreateCommand({
-        name: "Junior Suite",
-        idempotencyKey: command.idempotencyKey,
-      }),
-    );
-
-    expect(created.ok).toBe(true);
-    expect(replayed.ok).toBe(true);
-    if (!created.ok || !replayed.ok) throw new Error("room type create unexpectedly failed");
-    expect(created.roomType).toMatchObject({
-      name: "Deluxe Double",
-      category: "double",
-      baseRate: { amountDecimal: "149.00", currency: "EUR" },
-      roomCount: 2,
-    });
-    expect(created.roomType.ratePlans[0]).toMatchObject({
-      ratePlanId: "f6855200-0000-0000-0000-000000000001",
-      code: "FLEX",
-    });
-    expect(created.roomType.ratePlans[1]).toMatchObject({
-      ratePlanId: "f6855200-0000-0000-0000-000000000002",
-      code: "NRF",
-      rateType: "non_refundable",
-      baseRate: { amountDecimal: "129.00", currency: "EUR" },
-    });
-    expect(replayed).toEqual({ ...created, replayed: true });
-    expect(conflicting).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "idempotency_conflict",
-    });
-    expect(created.commandMeta.sideEffects).toEqual([
-      "ari_changed",
-      "distribution_refresh",
-      "audit_event",
-    ]);
-    expect(target.roomTypes).toHaveLength(1);
-    expect(target.generatedRooms.map((room) => room.roomNumber)).toEqual([null, null]);
-    expect(target.auditEvents.map((event) => event.action)).toEqual(["pms.room_type.created"]);
-    const keyHash = sha256(command.idempotencyKey);
-    const domainEventCalls = target.calls.filter((call) =>
-      call.text.includes("platform.domain_events"),
-    );
-    const outboxCalls = target.calls.filter((call) => call.text.includes("platform.outbox_events"));
-    const auditCall = target.calls.find((call) =>
-      call.text.includes("INSERT INTO platform.product_audit_events"),
-    );
-    expect(domainEventCalls[0]?.values?.[0]).toBe(
-      `pms.inventory.changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(outboxCalls[0]?.values?.[1]).toBe(
-      `pms.ari_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(outboxCalls[1]?.values?.[1]).toBe(
-      `distribution.inventory_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(auditCall?.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
-    expect(auditCall?.values?.[2]).toBe(command.propertyId);
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.room_types")),
-    ).toHaveLength(1);
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_plans")),
-    ).toHaveLength(2);
-    expect(target.calls.filter((call) => call.text.includes("INSERT INTO pms.rooms"))).toHaveLength(
-      1,
-    );
-    expect(
-      target.calls.find((call) => call.text.includes("INSERT INTO pms.rooms"))?.text,
-    ).toContain("'setupGenerated', TRUE");
-    const roomOrderLockIndex = target.calls.findIndex((call) =>
-      call.text.includes("pms.room-order:"),
-    );
-    expect(roomOrderLockIndex).toBeGreaterThan(-1);
-    expect(roomOrderLockIndex).toBeLessThan(
-      target.calls.findIndex((call) => call.text.includes("INSERT INTO pms.rooms")),
-    );
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_rules")),
-    ).toHaveLength(1);
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.inventory_days")),
-    ).toHaveLength(1);
-    expect(domainEventCalls).toHaveLength(1);
-    expect(outboxCalls).toHaveLength(2);
-  });
-
-  it("duplicates only declared room configuration and exactly replays durable side effects", async () => {
-    const target = targetPrivateNotesPool();
-    const readRepository: PmsOperationsReadRepository = {
-      ...unusedReadRepository,
-      async findRoomTypeById(propertyId, roomTypeId) {
-        const record = target.roomTypes.find(
-          (item) => item.propertyId === propertyId && item.roomType.roomTypeId === roomTypeId,
-        );
-        return record ? structuredClone(record.roomType) : null;
-      },
-    };
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository,
-      now: target.now,
-    });
-    const created = await repository.createRoomType(roomTypeCreateCommand({ roomCount: 2 }));
-    if (!created.ok) throw new Error("room type create unexpectedly failed");
-    const command = {
-      propertyId: defaultPropertyId,
-      roomTypeId: created.roomType.roomTypeId,
-      commandId: "cmd-room-type-duplicate",
-      idempotencyKey: "client-room-type-duplicate",
-      expectedVersion: created.roomType.version,
-      audit: roomTypeCreateCommand().audit,
-    };
-
-    const duplicated = await repository.duplicateRoomType(command);
-    const replay = await repository.duplicateRoomType(command);
-
-    expect(duplicated).toMatchObject({
-      ok: true,
-      roomType: {
-        version: "room-type-facts-v1",
-        name: "Deluxe Double Copy",
-        roomCount: 0,
-      },
-      commandMeta: {
-        sideEffects: ["ari_changed", "distribution_refresh", "audit_event"],
-      },
-    });
-    expect(replay).toEqual({ ...duplicated, replayed: true });
-    expect(target.roomTypes).toHaveLength(2);
-    expect(
-      target.calls.find(
-        ({ text }) =>
-          text.includes("INSERT INTO pms.rate_rules") && text.includes("SELECT rule.property_id"),
-      )?.text,
-    ).toContain("rule.enabled, rule.stop_sell");
-    expect(
-      target.calls.filter(
-        ({ text }) =>
-          text.includes("INSERT INTO pms.room_types") &&
-          text.includes("SELECT\n       source.property_id"),
-      ),
-    ).toHaveLength(1);
-    expect(
-      target.auditEvents.filter(({ action }) => action === "pms.room_type.duplicated"),
-    ).toHaveLength(1);
-  });
-
   it("reports every retirement dependency category and retires safely with exact replay", async () => {
     const blockedTarget = targetPrivateNotesPool({
       retirementCounts: { reservations: 2, physicalUnits: 3, inventory: 4, publication: 5 },
@@ -503,7 +300,7 @@ describe("PMS operations command repository", () => {
       readRepository: unusedReadRepository,
       now: blockedTarget.now,
     });
-    const blockedCreated = await blockedRepository.createRoomType(roomTypeCreateCommand());
+    const blockedCreated = blockedTarget.seedRoomType();
     if (!blockedCreated.ok) throw new Error("room type create unexpectedly failed");
     const blockedImpact = await blockedRepository.inspectRoomTypeRetirement(
       defaultPropertyId,
@@ -525,7 +322,7 @@ describe("PMS operations command repository", () => {
       readRepository: unusedReadRepository,
       now: target.now,
     });
-    const created = await repository.createRoomType(roomTypeCreateCommand());
+    const created = target.seedRoomType();
     if (!created.ok) throw new Error("room type create unexpectedly failed");
     const command = {
       propertyId: defaultPropertyId,
@@ -549,98 +346,7 @@ describe("PMS operations command repository", () => {
     ).toHaveLength(1);
     expect(
       target.calls.filter(({ text }) => text.includes("'pms.inventory.ari_changed'")),
-    ).toHaveLength(2);
-  });
-
-  it("serializes first-run room setup and rejects a second initial room type", async () => {
-    const target = targetPrivateNotesPool();
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-
-    const created = await repository.createRoomType(
-      roomTypeCreateCommand({ initialSetupOnly: true }),
-    );
-    const competing = await repository.createRoomType(
-      roomTypeCreateCommand({
-        initialSetupOnly: true,
-        commandId: "cmd-room-type-create-competing",
-        idempotencyKey: "client-room-type-create-competing",
-        name: "Competing Suite",
-      }),
-    );
-
-    expect(created.ok).toBe(true);
-    expect(competing).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "room_type_conflict",
-    });
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.room_types")),
     ).toHaveLength(1);
-    expect(
-      target.calls.some(
-        (call) =>
-          call.text.includes("pg_advisory_xact_lock") &&
-          call.text.includes("pms-initial-room-setup:"),
-      ),
-    ).toBe(true);
-    const lockCallIndex = target.calls.findIndex((call) =>
-      call.text.includes("pg_advisory_xact_lock"),
-    );
-    const existenceCallIndex = target.calls.findIndex(
-      (call) =>
-        call.text.includes("SELECT EXISTS") && call.text.includes("FROM pms.room_types room_type"),
-    );
-    expect(lockCallIndex).toBeGreaterThanOrEqual(0);
-    expect(existenceCallIndex).toBeGreaterThan(lockCallIndex);
-  });
-
-  it("materializes only the bounded explicit operating and season horizon", () => {
-    const horizon = buildRoomTypeInventoryHorizon(
-      roomTypeCreateCommand({
-        roomCount: 3,
-        operatingPeriods: [{ from: "08-01", to: "08-31" }],
-        seasons: [
-          {
-            name: "Summer",
-            tier: "high",
-            from: "08-10",
-            to: "08-20",
-            rate: { amountDecimal: "210.00", currency: "EUR" },
-            minStayNights: 2,
-            maxStayNights: 7,
-          },
-        ],
-      }),
-      "2026-08-14T17:00:00.000Z",
-    );
-
-    expect(horizon).toHaveLength(366);
-    expect(horizon[0]).toEqual({
-      stayDate: "2026-08-14",
-      status: "open",
-      totalCount: 3,
-      availableCount: 3,
-      seasonIndex: 0,
-      rateAmountDecimal: "210.00",
-      minStayNights: 2,
-      maxStayNights: 7,
-    });
-    expect(horizon.find((day) => day.stayDate === "2026-08-21")).toMatchObject({
-      status: "closed",
-      availableCount: 0,
-      rateAmountDecimal: null,
-    });
-    expect(horizon.find((day) => day.stayDate === "2026-09-01")).toMatchObject({
-      status: "closed",
-      availableCount: 0,
-    });
-    expect(horizon.at(-1)?.stayDate).toBe("2027-08-14");
   });
 
   it("updates PMS room-type location with replay-safe idempotency", async () => {
@@ -660,7 +366,7 @@ describe("PMS operations command repository", () => {
       readRepository,
       now: target.now,
     });
-    const created = await repository.createRoomType(roomTypeCreateCommand());
+    const created = target.seedRoomType();
     if (!created.ok) throw new Error("room type create unexpectedly failed");
     target.roomTypes[0]!.roomType.ratePlans.unshift({
       ratePlanId: "f6855200-0000-0000-0000-999999999999",
@@ -728,10 +434,7 @@ describe("PMS operations command repository", () => {
       "audit_event",
     ]);
     expect(target.roomTypes[0]!.roomType.attributes).toMatchObject(updated.roomType.attributes);
-    expect(target.auditEvents.map((event) => event.action)).toEqual([
-      "pms.room_type.created",
-      "pms.room_type.updated",
-    ]);
+    expect(target.auditEvents.map((event) => event.action)).toEqual(["pms.room_type.updated"]);
     const updateAuditCall = target.calls.find((call) =>
       call.text.includes("'pms.room_type.updated'"),
     );
@@ -748,33 +451,10 @@ describe("PMS operations command repository", () => {
     ).toContain("pricing_contract_version IS NULL");
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO platform.domain_events")),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO platform.outbox_events")),
-    ).toHaveLength(4);
-  });
-
-  it("leaves generated PMS rooms unlabeled until canonical verification", async () => {
-    const target = targetPrivateNotesPool();
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-
-    const result = await repository.createRoomType(
-      roomTypeCreateCommand({
-        commandId: "cmd-room-type-create-collision",
-        idempotencyKey: "client-room-type-create-collision",
-      }),
-    );
-
-    expect(result).toMatchObject({ ok: true });
-    expect(target.generatedRooms.map((room) => room.roomNumber)).toEqual([null, null]);
-    expect(
-      target.calls.find((call) => call.text.includes("INSERT INTO pms.rooms"))?.text,
-    ).toContain("'unverified'");
+    ).toHaveLength(2);
   });
 
   it("rejects checkout charge assignment IDs outside the reservation before insert", async () => {
@@ -865,6 +545,7 @@ function targetPrivateNotesPool(
   now(): Date;
   pool: PmsOperationsCommandPool;
   roomTypes: RoomTypeRecord[];
+  seedRoomType(): { ok: true; roomType: PmsRoomType };
   stripPrivateNoteReplayEditMetadata(): void;
 } {
   const calls: QueryCall[] = [];
@@ -1438,6 +1119,44 @@ function targetPrivateNotesPool(
         return client;
       },
       async end() {},
+    },
+    seedRoomType() {
+      const command = roomTypeCreateCommand();
+      const roomType: PmsRoomType = {
+        roomTypeId: "f6855100-0000-0000-0000-000000000001",
+        version: "room-type-facts-v1",
+        name: command.name,
+        description: command.description,
+        category: command.category,
+        occupancyLimits: command.occupancyLimits,
+        attributes: command.attributes,
+        amenities: command.amenities,
+        media: command.media,
+        baseRate: command.baseRate,
+        active: true,
+        sortOrder: 10,
+        roomCount: 0,
+        ratePlans: [
+          {
+            ratePlanId: "f6855200-0000-0000-0000-000000000001",
+            code: "FLEX",
+            name: "Flexible",
+            rateType: "flexible",
+            mealPlan: null,
+            baseRate: command.baseRate,
+            active: true,
+          },
+        ],
+        rateRulesSummary: {
+          minStayNights: null,
+          maxStayNights: null,
+          closedToArrival: false,
+          closedToDeparture: false,
+          activeRuleCount: 0,
+        },
+      };
+      roomTypes.set(roomType.roomTypeId, { propertyId: defaultPropertyId, roomType });
+      return { ok: true, roomType };
     },
     get roomTypes() {
       return [...roomTypes.values()];
