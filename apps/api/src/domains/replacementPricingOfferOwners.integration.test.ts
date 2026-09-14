@@ -1,3 +1,4 @@
+import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
@@ -496,6 +497,163 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       { occupancy: 1, rate: "139.50" },
       { occupancy: 2, rate: "139.50" },
     ]);
+  });
+  async function ariReceiptFixture() {
+    const f = await initialAriFixture(),
+      claimed = await f.claimAri();
+    if (claimed.kind !== "ari_claimed") throw new Error("claim required");
+    const correlation = {
+      ...f.correlation,
+      receiptId: randomUUID(),
+      attemptId: claimed.attemptId,
+      jobAttemptId: claimed.jobAttemptId,
+      workerId: claimed.workerId,
+    };
+    const taskId = randomUUID();
+    const response = () =>
+      new Response(
+        JSON.stringify({
+          data: [{ type: "task", id: taskId }],
+          meta: { warnings: [] },
+          secret: "not retained",
+        }),
+        { headers: { "x-request-id": "r".repeat(512) } },
+      );
+    return { ...f, ariCorrelation: correlation, taskId, ariResponse: response };
+  }
+  it("retains late ARI receipts idempotently without releasing ownership", async () => {
+    const f = await ariReceiptFixture(),
+      response = f.ariResponse();
+    const scope = { ...f.ariCorrelation };
+    const persist = await prepareChannexAriReceiptPersistence(pool, scope, response);
+    scope.attemptId = randomUUID();
+    expect(response.bodyUsed).toBe(true);
+    await pool.query(
+      "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+      [f.input.jobId],
+    );
+    await persist();
+    await persist();
+    const rows = (
+      await pool.query(
+        "SELECT outcome,http_status,task_ids,has_warnings FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1",
+        [f.ariCorrelation.attemptId],
+      )
+    ).rows;
+    expect(rows).toEqual([
+      { outcome: "complete_json", http_status: 200, task_ids: [f.taskId], has_warnings: false },
+    ]);
+    expect(
+      (
+        await pool.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_offer_ari_attempts WHERE id=$1",
+          [f.ariCorrelation.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ state: "unresolved", reconciliation_evidence: {} }]);
+    await expect(
+      (
+        await prepareChannexAriReceiptPersistence(
+          pool,
+          f.ariCorrelation,
+          new Response("{}", { status: 500 }),
+        )
+      )(),
+    ).rejects.toThrow("conflict");
+    for (const sql of [
+      "DELETE FROM pms.channex_offer_ari_receipts WHERE id=$1",
+      "UPDATE pms.channex_offer_ari_receipts SET has_warnings=true WHERE id=$1",
+    ])
+      await expect(pool.query(sql, [f.ariCorrelation.receiptId])).rejects.toMatchObject({
+        code: "23514",
+      });
+  });
+  it("records fixed ARI transport ambiguity and warning observations without exception text", async () => {
+    const f = await ariReceiptFixture();
+    await (
+      await prepareChannexAriTransportFailurePersistence(pool, f.ariCorrelation)
+    )();
+    await (
+      await prepareChannexAriReceiptPersistence(
+        pool,
+        { ...f.ariCorrelation, receiptId: randomUUID() },
+        new Response(
+          JSON.stringify({
+            data: [{ type: "task", id: f.taskId }],
+            meta: { warnings: ["secret error"] },
+          }),
+        ),
+      )
+    )();
+    const rows = (
+      await pool.query(
+        "SELECT outcome,http_status,provider_request_id,task_ids,has_warnings FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY captured_at",
+        [f.ariCorrelation.attemptId],
+      )
+    ).rows;
+    expect(rows).toEqual([
+      {
+        outcome: "transport_error",
+        http_status: null,
+        provider_request_id: null,
+        task_ids: [],
+        has_warnings: true,
+      },
+      {
+        outcome: "complete_json",
+        http_status: 200,
+        provider_request_id: null,
+        task_ids: [f.taskId],
+        has_warnings: true,
+      },
+    ]);
+  });
+  it("rejects foreign ARI receipt correlation", async () => {
+    const f = await ariReceiptFixture();
+    for (const field of ["propertyId", "connectionId", "attemptId", "jobAttemptId", "workerId"])
+      await expect(
+        (
+          await prepareChannexAriReceiptPersistence(
+            pool,
+            { ...f.ariCorrelation, [field]: randomUUID() },
+            f.ariResponse(),
+          )
+        )(),
+      ).rejects.toThrow("correlation unavailable");
+    expect(
+      (
+        await pool.query("SELECT 1 FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1", [
+          f.ariCorrelation.attemptId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+  });
+  it("retries only ARI persistence after target contention and fences older snapshots", async () => {
+    const f = await ariReceiptFixture(),
+      persist = await prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, f.ariResponse());
+    const blocker = await pool.connect(),
+      stale = await pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE", [
+        f.claim.targetId,
+      ]);
+      await expect(persist()).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("ROLLBACK");
+      await stale.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await stale.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1", [f.claim.targetId]);
+      await persist();
+      await expect(
+        stale.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE", [
+          f.claim.targetId,
+        ]),
+      ).rejects.toMatchObject({ code: "40001" });
+    } finally {
+      await blocker.query("ROLLBACK");
+      await stale.query("ROLLBACK");
+      blocker.release();
+      stale.release();
+    }
   });
   async function restrictionFixture() {
     const f = await configurationFixture();
