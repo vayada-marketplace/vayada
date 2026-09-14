@@ -423,6 +423,111 @@ describe("closed offer configuration readback", () => {
     });
     expect(request.mock.calls).toEqual([["GET", "/api/v1/rate_plans/rate"]]);
   });
+  function parentOptionResponse() {
+    return {
+      data: [
+        {
+          id: "rate",
+          type: "rate_plan",
+          attributes: {
+            id: "rate",
+            property_id: "property",
+            room_type_id: "room",
+            parent_rate_plan_id: null,
+            currency: "EUR",
+            sell_mode: "per_person",
+          },
+        },
+      ],
+    };
+  }
+  it("requires scoped explicit parent absence when the detail omits its parent", async () => {
+    const { room, response } = setup();
+    delete (response.data.attributes as Record<string, unknown>).parent_rate_plan_id;
+    const get = vi.fn(async (_method: "GET", path: string) =>
+      path.includes("options?") ? parentOptionResponse() : response,
+    );
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, get),
+    ).resolves.toMatchObject(identity);
+    expect(get.mock.calls).toEqual([
+      ["GET", "/api/v1/rate_plans/rate"],
+      ["GET", "/api/v1/rate_plans/options?filter[property_id]=property"],
+    ]);
+  });
+  it.each([
+    { parent_rate_plan_id: "other" },
+    { parent_rate_plan_id: undefined },
+    { property_id: "other" },
+    { room_type_id: "other" },
+    { id: "other" },
+    { currency: "USD" },
+    { sell_mode: "per_room" },
+  ])("rejects missing or conflicting option identity %j", async (patch) => {
+    const { room, response } = setup();
+    delete (response.data.attributes as Record<string, unknown>).parent_rate_plan_id;
+    const options = parentOptionResponse();
+    Object.assign(options.data[0].attributes, patch);
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, async (_method, path) =>
+        path.includes("options?") ? options : response,
+      ),
+    ).rejects.toThrow();
+  });
+  it.each([
+    {},
+    { data: [] },
+    { data: [parentOptionResponse().data[0], parentOptionResponse().data[0]] },
+    { ...parentOptionResponse(), errors: {} },
+    { ...parentOptionResponse(), warnings: [] },
+    { ...parentOptionResponse(), meta: { warnings: ["partial"] } },
+    { ...parentOptionResponse(), meta: null },
+  ])("rejects ambiguous parent evidence %j", async (options) => {
+    const { room, response } = setup();
+    delete (response.data.attributes as Record<string, unknown>).parent_rate_plan_id;
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, async (_method, path) =>
+        path.includes("options?") ? options : response,
+      ),
+    ).rejects.toThrow();
+  });
+  it("accepts the observed independent manual options with empty rate derivation", async () => {
+    const { room, response, request } = setup();
+    for (const option of response.data.attributes.options) {
+      Object.assign(option, {
+        inherit_rate: false,
+        derived_option: option.is_primary ? null : { rate: [] },
+      });
+    }
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).resolves.toMatchObject(identity);
+  });
+  it.each([
+    { inherit_rate: true, derived_option: null },
+    { inherit_rate: true, derived_option: { rate: [] } },
+    { inherit_rate: undefined, derived_option: { rate: [] } },
+    { inherit_rate: "false", derived_option: { rate: [] } },
+    { inherit_rate: false, derived_option: { rate: [["increase_by_percent", "10"]] } },
+    { inherit_rate: false, derived_option: { rate: [], extra: [] } },
+    { inherit_rate: false, derived_option: { rate: null } },
+  ])("rejects inherited or unverified option pricing %j", async (patch) => {
+    const { room, response, request } = setup();
+    Object.assign(response.data.attributes.options.find((option) => !option.is_primary)!, patch);
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).rejects.toThrow();
+  });
+  it("does not assume an empty derivation is valid for the primary option", async () => {
+    const { room, response, request } = setup();
+    Object.assign(response.data.attributes.options.find((option) => option.is_primary)!, {
+      inherit_rate: false,
+      derived_option: { rate: [] },
+    });
+    await expect(
+      verifyChannexOfferConfiguration(room, "flex", 2, identity, request),
+    ).rejects.toThrow();
+  });
   it.each([
     ["sell_mode", "per_room"],
     ["rate_mode", "derived"],
@@ -478,6 +583,8 @@ describe("closed offer configuration readback", () => {
   it("rejects conflicting relationships and wrong rate IDs", async () => {
     for (const patch of [
       { id: "other" },
+      { relationships: { parent_rate_plan: {} } },
+      { relationships: { parent_rate_plan: null } },
       { relationships: { property: { data: { id: "other" } } } },
       { relationships: { parent_rate_plan: { data: { id: "parent" } } } },
     ]) {

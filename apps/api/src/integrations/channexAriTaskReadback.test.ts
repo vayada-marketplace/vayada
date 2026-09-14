@@ -126,6 +126,40 @@ describe("original ARI task finish observation", () => {
       "ari_task_observation_unavailable",
     );
   });
+  it("holds the live multioccupancy task when a submitted stay rule is omitted", async () => {
+    const sent = {
+      values: [
+        {
+          property_id: externalPropertyId,
+          rate_plan_id: "dbe5d426-8403-4573-9254-c13f96e9c180",
+          date: "2026-10-15",
+          rates: [
+            { occupancy: 1, rate: "100.00" },
+            { occupancy: 2, rate: "130.00" },
+            { occupancy: 3, rate: "155.00" },
+          ],
+          min_stay_arrival: 1,
+          min_stay_through: 1,
+          max_stay: 0,
+          closed_to_arrival: false,
+          closed_to_departure: false,
+          stop_sell: true,
+        },
+      ],
+    };
+    const body = response();
+    const observed = structuredClone(sent);
+    delete (observed.values[0] as Record<string, unknown>).min_stay_through;
+    Object.assign(body.data.attributes, { payload: observed });
+    // Success/timestamps and correct prices do not prove the omitted field executed.
+    await expect(
+      verify({ taskId, externalPropertyId, request: sent }, async () => body),
+    ).rejects.toThrow("ari_task_observation_unavailable");
+    Object.assign(body.data.attributes, { payload: sent });
+    await expect(
+      verify({ taskId, externalPropertyId, request: sent }, async () => body),
+    ).resolves.toMatchObject({ kind: "task_finish_observed" });
+  });
   it("snapshots the original request before IO", async () => {
     const input = expected();
     const result = await verify(input, async () => {
