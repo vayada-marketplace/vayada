@@ -1,3 +1,7 @@
+import {
+  bookingQuoteAcceptanceRequirements,
+  parseBookingQuoteAcceptanceInput,
+} from "./bookingQuoteAcceptanceInput.js";
 import { createHash } from "node:crypto";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
@@ -185,3 +189,50 @@ it("rejects scope mismatches and requires renewed acknowledgment for changed cho
   });
   expect(await lockCurrentQuoteGuestDisclosure(client, "hotel", "quote-1")).toBeNull();
 });
+
+it.each([
+  { enabled: true, threshold: 12, ages: [11, 12, 17], allowed: true },
+  { enabled: false, threshold: 12, ages: [12, 17], allowed: true },
+  { enabled: false, threshold: 12, ages: [11, 12, 17], allowed: false },
+  { enabled: false, threshold: null, ages: [17], allowed: false },
+  { enabled: false, threshold: null, ages: [], allowed: true },
+])(
+  "classifies actual ages without rewriting immutable quote evidence: %j",
+  ({ enabled, threshold, ages, allowed }) => {
+    const quote = fixture();
+    quote.stay.rooms[0].guests.childAgesAtCheckIn = ages;
+    quote.evidence.requestKey = replacementStayKey(quote.stay);
+    const original = structuredClone(quote);
+    const policy = {
+      propertyId: quote.stay.propertyId,
+      sourceRevision: "guest-policy:age-rule",
+      disclosureHash: "sha256:" + "a".repeat(64),
+      choices: { ...choices, childrenEnabled: enabled, adultAgeThreshold: threshold },
+    };
+    const requirements = bookingQuoteAcceptanceRequirements(quote, policy)!;
+    expect(requirements).not.toBeNull();
+    const input = {
+      version: "booking-quote-acceptance.v1",
+      requestId: "request",
+      quoteId: quote.quoteId,
+      acceptance: {
+        accepted: true,
+        quoteEvidenceId: requirements.quoteEvidenceId,
+        guestPolicyEvidenceId: requirements.guestPolicyEvidenceId,
+      },
+      guest: {
+        firstName: "Test",
+        lastName: "Guest",
+        email: "test@example.com",
+        phone: "+1234567",
+        countryCode: null,
+        arrivalTime: null,
+        specialRequests: null,
+      },
+    };
+    const result = parseBookingQuoteAcceptanceInput(input, quote, policy);
+    expect(result !== null).toBe(allowed);
+    expect(quote).toEqual(original);
+    expect(requirements.quote.stay.rooms[0].guests.childAgesAtCheckIn).toEqual(ages);
+  },
+);

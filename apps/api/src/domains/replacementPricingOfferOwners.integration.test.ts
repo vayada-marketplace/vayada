@@ -1955,7 +1955,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(parseBookingQuoteAcceptanceInput(f.input, f.quote, f.policy)).not.toBeNull();
     for (const choices of [
       { ...f.policy.choices, childrenEnabled: false },
-      { ...f.policy.choices, adultAgeThreshold: 8 },
+      { ...f.policy.choices, childrenEnabled: false, adultAgeThreshold: 9 },
     ]) {
       const policy = { ...f.policy, choices };
       expect(
