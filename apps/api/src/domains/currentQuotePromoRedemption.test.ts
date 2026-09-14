@@ -33,6 +33,8 @@ const query = vi.fn(async (sql: string, args: unknown[]) => {
     {
       id: "application",
       guest_booking_id: bookingId,
+      promo_definition_id: args[0],
+      promo_code: args[3],
       application_status: "applied",
       currency: args[5],
       discount_amount: args[4],
@@ -169,4 +171,24 @@ it("fails if the atomic owner update returns no consumption", async () => {
   await expect(redeemLockedCurrentQuotePromo(client, "hotel", current, bookingId)).rejects.toThrow(
     "unavailable",
   );
+});
+
+it("rejects a same-amount locked replay from another code or source revision", async () => {
+  await redeemLockedCurrentQuotePromo(client, "hotel", current, bookingId);
+  const original = structuredClone(prior[0]);
+  for (const patch of [
+    { promo_definition_id: "10000000-0000-4000-8000-000000000009" },
+    { promo_code: "OTHER" },
+    { metadata: { ...(original.metadata as object), promoSourceRevision: "promo:other" } },
+  ]) {
+    prior[0] = { ...original, ...patch };
+    await expect(
+      redeemLockedCurrentQuotePromo(client, "hotel", current, bookingId),
+    ).rejects.toThrow("unavailable");
+  }
+  prior[0] = original;
+  expect(await redeemLockedCurrentQuotePromo(client, "hotel", current, bookingId)).toMatchObject({
+    replayed: true,
+  });
+  expect(writes).toBe(1);
 });

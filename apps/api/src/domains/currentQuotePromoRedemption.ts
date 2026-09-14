@@ -86,7 +86,7 @@ async function redeemQuotePromo(
     return fail();
   const prior = (
     await client.query(
-      `SELECT id,guest_booking_id,application_status,currency,discount_amount::text,metadata
+      `SELECT id,guest_booking_id,promo_definition_id,promo_code,application_status,currency,discount_amount::text,metadata
     FROM booking.promo_applications WHERE property_id=$1 AND
       (guest_booking_id=$2 OR metadata->>'pricingQuoteId'=$3) FOR UPDATE`,
       [scope.propertyId, guestBookingId, quote.quoteId],
@@ -105,6 +105,9 @@ async function redeemQuotePromo(
       pricingDecimalMinor(p.discount_amount, scale) !== p.metadata?.discountMinor ||
       (locked &&
         (!locked.calculation.code ||
+          p.promo_definition_id !== locked.calculation.code.id ||
+          p.promo_code !== locked.calculation.code.code ||
+          p.metadata?.promoSourceRevision !== locked.calculation.code.sourceRevision ||
           p.metadata?.discountMinor !== locked.calculation.discounts.codeMinor))
     )
       return fail();
