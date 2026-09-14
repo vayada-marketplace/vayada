@@ -333,6 +333,7 @@ export interface RegisterResponse {
 }
 
 export interface LoginRequest {
+  organizationId?: string;
   email: string;
   password: string;
 }

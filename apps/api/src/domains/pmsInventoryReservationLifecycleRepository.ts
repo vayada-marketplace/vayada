@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -379,6 +380,18 @@ async function executeReserve(
             acceptedAt,
           );
         }
+        const eligibility = (
+          await readPmsRoomOperatingEligibility(client, command.propertyId)
+        ).find((room) => room.roomTypeId === command.roomTypeId);
+        if (eligibility?.state !== "operating")
+          return finalizeReserve(
+            client,
+            command,
+            idempotency,
+            keyHash,
+            reserveFailure("configuration_not_current"),
+            acceptedAt,
+          );
         const binding = exact.sourceInputs.roomBindings.find(
           ({ roomTypeId }) => roomTypeId === command.roomTypeId,
         );
