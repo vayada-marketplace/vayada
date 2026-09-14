@@ -11,6 +11,9 @@ const uuid = z.uuid();
 const money = z.string().regex(/^\d{1,13}(?:\.\d{1,2})?$/);
 const room = z.object({
   room_type_id: uuid,
+  rate_plan_id: z.string().min(1).optional(),
+  checkin_date: z.iso.date().optional(),
+  checkout_date: z.iso.date().optional(),
   occupancy: z.object({
     adults: z.number().int().min(1),
     children: z.number().int().min(0).default(0),
@@ -112,6 +115,8 @@ export async function applyChannexAlterationRevision(
     revision.rooms.length !== proposedRooms.length ||
     revision.rooms.some(
       (item, index) =>
+        (item.checkin_date !== undefined && item.checkin_date !== revision.arrival_date) ||
+        (item.checkout_date !== undefined && item.checkout_date !== revision.departure_date) ||
         item.room_type_id !== proposedRooms[index]!.roomTypeId ||
         item.occupancy.adults !== proposedRooms[index]!.adults ||
         item.occupancy.children !== proposedRooms[index]!.children,
@@ -153,9 +158,12 @@ export async function applyChannexAlterationRevision(
     roomId: string | null;
     status: string;
     version: string | null;
+    untouched: boolean;
   }>(
     `SELECT assignment.id,assignment.position,assignment.room_type_id AS "roomTypeId",assignment.room_id AS "roomId",
        assignment.assignment_status AS status,assignment.assignment_payload->>'version' AS version,assignment.source,
+       (assignment.source='channel' AND assignment.assignment_status='pending' AND assignment.room_id IS NULL
+         AND assignment.assignment_payload->>'version'=assignment.assignment_payload->>'channexRevision') AS untouched,
        assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb AS "releasedByAlteration"
      FROM pms.operational_booking_assignments assignment
      WHERE assignment.property_id=$1 AND assignment.guest_booking_id=$2
@@ -246,9 +254,21 @@ export async function applyChannexAlterationRevision(
     );
   }
   for (const [index, item] of desired.entries()) {
+    const providerRoom = revision.rooms[index]!;
     const payload = JSON.stringify({
       channexRevisionId: revision.id,
       version,
+      channexStay: providerRoom.rate_plan_id
+        ? {
+            externalRoomTypeId: providerRoom.room_type_id,
+            externalRatePlanId: providerRoom.rate_plan_id,
+            checkIn: revision.arrival_date,
+            checkOut: revision.departure_date,
+            adults: providerRoom.occupancy.adults,
+            children: providerRoom.occupancy.children,
+          }
+        : null,
+      ...(!item.retain || item.assignment?.untouched ? { channexRevision: version } : {}),
     });
     if (item.assignment) {
       await client.query(
