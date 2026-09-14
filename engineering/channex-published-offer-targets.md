@@ -904,3 +904,22 @@ supported terminal-task API or the complete multi-occupancy price GET shape.
 Do not invent either interface. These remain explicit verification gaps, not
 proof that Channex lacks them. An exact restriction observation cannot release
 an unresolved attempt, establish complete price delivery or activate sales.
+
+### Current immutable-attempt restriction reader (VAY-1545)
+
+The domain reader accepts creation/ARI attempt IDs, never caller-supplied provider
+identity, date or restrictions. Under existing published-owner/lease/target locks,
+load the unresolved ARI attempt belonging to the current identified creation and
+require the exact retained configuration. Before IO, match the request body’s
+property/rate/date against its immutable identity columns and service date; storage
+validity alone does not establish request scope. Read its immutable request and snapshot
+all ARI attempt IDs/states and receipt IDs for the provider property/rate. Use the
+bounded authenticated restriction GET adapter, then repeat current authority,
+publication, target/configuration and complete history checks. Reject any change
+across IO. A current worker may observe an older worker's upload; it cannot send
+it again. Past-date observation is allowed because readback grants no write.
+
+Return a correlated restriction observation without retaining completion evidence,
+reconciling ownership or activating the target. Transport ambiguity and task
+acknowledgements remain unresolved regardless of matching restrictions. Price and
+original-task completion verification are separate requirements.

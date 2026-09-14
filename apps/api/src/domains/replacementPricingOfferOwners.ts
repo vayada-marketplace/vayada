@@ -3,7 +3,7 @@ import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { verifyChannexNightRestrictions } from "../integrations/channexRestrictionReadback.js";
+import { verifyChannexStagedNightRestrictions, verifyChannexNightRestrictions } from "../integrations/channexRestrictionReadback.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { channexCreationReceiptsResolved, readChannexCreationReceiptIdentity } from "./channexCreationReceiptGate.js";
@@ -114,6 +114,7 @@ export async function readPublishedPricingForChannexJob(
     configurationIdentity: _configurationIdentity,
     ariClaim: _ariClaim,
     ariRequest: _ariRequest,
+    stagedAri: _stagedAri,
     ...evidence
   } = result;
   return evidence;
@@ -169,6 +170,7 @@ export async function claimPublishedChannexInitialAri(
 type TargetWork =
   | "reserve"
   | "claim"
+  | { kind: "ari_observe"; attemptId: string; ariAttemptId: string }
   | { kind: "ari_claim"; attemptId: string; date: string }
   | { kind: "ari_dispatch"; attemptId: string; date: string; ariAttemptId: string; jobAttemptId: string; workerId: string }
   | { kind: "retained"; attemptId: string }
@@ -316,6 +318,45 @@ export async function readCurrentChannexNightRestrictions(
   };
 }
 
+/** Observe the immutable upload under current ownership; never release or resend it. */
+export async function readCurrentChannexStagedRestrictions(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  ariAttemptId: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (![attemptId, ariAttemptId].every((id) => typeof id === "string" && uuid.test(id)))
+    return { kind: "unavailable" as const, reason: "invalid_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const work = { kind: "ari_observe" as const, attemptId, ariAttemptId };
+  const before = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (before.kind !== "available") return before;
+  if (!before.stagedAri) throw new Error("Staged ARI missing");
+  const observation = await verifyChannexStagedNightRestrictions(
+    before.stagedAri.request,
+    (_method, path) => boundedProviderCall((signal) => get(path, signal)),
+  );
+  const after = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (after.kind !== "available") return after;
+  if (
+    !isDeepStrictEqual(before.stagedAri, after.stagedAri) ||
+    !isDeepStrictEqual(before.reservation, after.reservation) ||
+    !isDeepStrictEqual(before.configurationIdentity, after.configurationIdentity) ||
+    !isDeepStrictEqual(before.publication, after.publication)
+  )
+    return { kind: "unavailable" as const, reason: "staged_restriction_observation_stale" };
+  return {
+    kind: "staged_restrictions_observed" as const,
+    creationAttemptId: attemptId,
+    ariAttemptId,
+    ...before.reservation,
+    observation,
+  };
+}
 /** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
 export async function prepareChannexInitialAriDispatch(
   pool: Pool,
@@ -601,6 +642,7 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
+    let stagedAri: { attemptId: string; request: unknown; history: unknown } | undefined;
     let ariRequest: { method: "POST"; path: "/api/v1/restrictions"; body: unknown } | undefined;
     let ariClaim:
       | {
@@ -780,7 +822,7 @@ async function withPublishedChannexPricing(
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
           if (
             "kind" in work &&
-            (work.kind === "configuration" || work.kind === "ari_claim" || work.kind === "ari_dispatch")
+            (work.kind === "configuration" || work.kind === "ari_claim" || work.kind === "ari_dispatch" || work.kind === "ari_observe")
           ) {
             if (
               attempt.state !== "identified" ||
@@ -792,6 +834,54 @@ async function withPublishedChannexPricing(
               externalRoomTypeId: mapping.external_room_type_id as string,
               externalRatePlanId: attempt.external_rate_plan_id as string,
             };
+            if (work.kind === "ari_observe") {
+              const evidence = JSON.stringify({
+                schemaVersion: 1,
+                attemptId: attempt.id,
+                intentId: intent.id,
+                version: intent.version,
+                bindingGeneration: binding.binding_generation,
+                observation: {
+                  ...configurationIdentity,
+                  mealType: plan.configuration.meal_type,
+                  configuration: plan.configuration,
+                },
+              });
+              if (
+                !(
+                  await client.query(
+                    "SELECT 1 FROM pms.channex_offer_target_intents WHERE id=$1 AND result_evidence->'configuration'=$2::jsonb",
+                    [intent.id, evidence],
+                  )
+                ).rowCount
+              )
+                return unavailable("configuration_evidence_unavailable");
+              const stored = (
+                await client.query(
+                  `SELECT id,request_body FROM pms.channex_offer_ari_attempts
+                 WHERE id=$1 AND creation_attempt_id=$2 AND state='unresolved'
+                   AND request_body#>>'{values,0,property_id}'=external_property_id
+                   AND request_body#>>'{values,0,rate_plan_id}'=external_rate_plan_id
+                   AND request_body#>>'{values,0,date}'=to_char(service_date,'YYYY-MM-DD')
+                 FOR SHARE NOWAIT`,
+                  [work.ariAttemptId, attempt.id],
+                )
+              ).rows[0];
+              if (!stored) return unavailable("ari_attempt_unavailable");
+              const history = (
+                await client.query(
+                  `SELECT a.id,a.state,COALESCE((SELECT jsonb_agg(r.id ORDER BY r.id)
+                   FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id),'[]'::jsonb) AS receipts
+                 FROM pms.channex_offer_ari_attempts a
+                 WHERE a.external_property_id=$1 AND a.external_rate_plan_id=$2 ORDER BY a.id`,
+                  [
+                    configurationIdentity.externalPropertyId,
+                    configurationIdentity.externalRatePlanId,
+                  ],
+                )
+              ).rows;
+              stagedAri = { attemptId: stored.id, request: stored.request_body, history };
+            }
             if (work.kind === "ari_claim" || work.kind === "ari_dispatch") {
               const location = (
                 await client.query(
@@ -1041,6 +1131,7 @@ async function withPublishedChannexPricing(
       configurationIdentity,
       ariClaim,
       ariRequest,
+      stagedAri,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
