@@ -3,10 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   parseBookingGuestPolicyChoices,
   type BookingGuestPolicyChoices,
-  type BookingGuestPolicyComposition,
 } from "@vayada/domain-booking";
-import { parseRoomTypeFactsSnapshot } from "@vayada/domain-pms";
-import { targetApiClient } from "@/services/api/targetClient";
 import type { PropertySetupDraftPayload } from "@vayada/domain-hotels";
 import type { AdaptiveSetupStepComponentProps } from "../AdaptiveSetupStepFormDispatcher";
 import {
@@ -16,13 +13,11 @@ import {
   adaptivePrimaryButtonClass,
   adaptiveSecondaryButtonClass,
 } from "../AdaptiveStepPrimitives";
-import { adaptiveStepErrorMessage } from "../adaptiveSetupStepState";
 import {
-  bookingGuestPolicyClient,
-  type GuestPolicySetup,
-} from "@/services/api/bookingGuestPolicyClient";
-import { useFinalStepDraft } from "./useFinalStepDraft";
-
+  bookingGuestRulesClient,
+  guestRulesErrorMessage,
+  type GuestRules,
+} from "@/services/api/bookingGuestRulesClient";
 const fields = {
   defaultGuestLanguage: "guest.default_language",
   childrenEnabled: "guest.children_enabled",
@@ -45,163 +40,149 @@ const languages = {
 };
 
 export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
-  const draft = useFinalStepDraft(props, "guest_experience");
-  const canonical = useRef<GuestPolicySetup | null>(null);
-  const saved = useRef(false);
-  const [hasSaved, setHasSaved] = useState(false);
+  type Data = PropertySetupDraftPayload<"guest_experience">;
+  const canonical = useRef<GuestRules | null>(null);
+  const values = useRef<Data>({});
+  const dirty = useRef(false),
+    busy = useRef(false),
+    generation = useRef(0);
+  const retryCommand = useRef<{ fingerprint: string; key: string } | null>(null);
+  const [data, setData] = useState<Data>({});
+  const [loading, setLoading] = useState(true),
+    [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null),
+    [loaded, setLoaded] = useState(false);
+  const [confirmed, setConfirmed] = useState(false),
+    [saved, setSaved] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [bounds, setBounds] = useState<
     Pick<BookingGuestPolicyChoices, "checkInUntil" | "checkOutFrom">
   >({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<BookingGuestPolicyComposition | null>(null);
-  const [roomNames, setRoomNames] = useState<Record<string, string>>({});
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-  const { initialize } = draft;
-  const { organizationId, propertyId } = props.route.scope;
+  const { propertyId, organizationId } = props.route.scope;
+  const { registerBeforeLeave } = props;
+  useEffect(
+    () =>
+      registerBeforeLeave(async () => {
+        if (busy.current) throw new Error("Wait for guest rules to finish saving.");
+        if (dirty.current) throw new Error("Save your guest rules before leaving this step.");
+      }),
+    [registerBeforeLeave],
+  );
   useEffect(() => {
     const controller = new AbortController();
+    const current = ++generation.current;
+    setSaving(false);
     setLoading(true);
-    setLoadError(null);
-    setPreview(null);
-    void bookingGuestPolicyClient
-      .load({ organizationId, propertyId }, { signal: controller.signal, cache: "no-store" })
+    setLoaded(false);
+    setError(null);
+    setConfirmed(false);
+    setSaved(false);
+    dirty.current = false;
+    busy.current = false;
+    retryCommand.current = null;
+    void bookingGuestRulesClient
+      .load(propertyId, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
         canonical.current = value;
-        setBounds({
-          checkInUntil: value.choices.checkInUntil,
-          checkOutFrom: value.choices.checkOutFrom,
-        });
-        saved.current = false;
-        setHasSaved(false);
-        initialize(
-          Object.fromEntries(
-            Object.entries(fields).map(([key, field]) => [
-              field,
-              value.choices[key as keyof typeof fields],
-            ]),
-          ),
+        const choices = value?.choices ?? {
+          defaultGuestLanguage: null,
+          childrenEnabled: null,
+          adultAgeThreshold: null,
+          phoneRequired: true,
+          arrivalTimeEnabled: false,
+          specialRequestsEnabled: true,
+          checkInTime: null,
+          checkOutTime: null,
+        };
+        const initial = Object.fromEntries(
+          Object.entries(fields).map(([key, field]) => [
+            field,
+            choices[key as keyof typeof fields],
+          ]),
         );
+        values.current = initial;
+        setData(initial);
+        setBounds(
+          value
+            ? { checkInUntil: value.choices.checkInUntil, checkOutFrom: value.choices.checkOutFrom }
+            : {},
+        );
+        setLoaded(true);
       })
-      .catch((error) => {
-        if (!controller.signal.aborted) setLoadError(adaptiveStepErrorMessage(error));
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(guestRulesErrorMessage(cause));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
-  }, [organizationId, propertyId, initialize, draft.reload, retry]);
-
-  function choices() {
+    return () => {
+      controller.abort();
+      generation.current = current + 1;
+    };
+  }, [propertyId, organizationId, retry]);
+  function update(field: keyof Data, value: Data[keyof Data]) {
+    if (busy.current) return;
+    values.current = { ...values.current, [field]: value };
+    setData(values.current);
+    dirty.current = true;
+    setConfirmed(false);
+    setSaved(false);
+    setError(null);
+  }
+  async function submit() {
+    if (busy.current || !loaded) return;
     const base = canonical.current?.choices;
-    return parseBookingGuestPolicyChoices({
+    const choices = parseBookingGuestPolicyChoices({
       ...Object.fromEntries(
-        Object.entries(fields).map(([key, field]) => [key, draft.values.current[field]]),
+        Object.entries(fields).map(([key, field]) => [key, values.current[field]]),
       ),
-      ...(base && Object.hasOwn(base, "checkInUntil") ? { checkInUntil: base.checkInUntil } : {}),
-      ...(base && Object.hasOwn(base, "checkOutFrom") ? { checkOutFrom: base.checkOutFrom } : {}),
+      ...(base?.checkInUntil ? { checkInUntil: base.checkInUntil } : {}),
+      ...(base?.checkOutFrom ? { checkOutFrom: base.checkOutFrom } : {}),
     });
-  }
-  function update(
-    field: keyof PropertySetupDraftPayload<"guest_experience">,
-    value: PropertySetupDraftPayload<"guest_experience">[typeof field],
-  ) {
-    draft.change(field, value);
-    saved.current = false;
-    setHasSaved(false);
-    if (field !== "policy.cancellation_bundle_confirmation") {
-      draft.change("policy.cancellation_bundle_confirmation", false);
-      setPreview(null);
-    }
-  }
-  async function review() {
-    const value = choices();
-    if (!value) {
-      setPreviewError(
-        "Choose a guest language, child policy, valid adult age and check-in/check-out times first.",
+    if (!choices || !confirmed) {
+      setError(
+        "Choose a language, child policy and valid arrival times, then confirm your guest rules.",
       );
       return;
     }
-    setPreviewBusy(true);
-    setPreviewError(null);
-    setPreview(null);
-    draft.change("policy.cancellation_bundle_confirmation", false);
+    const expectedRevision = canonical.current?.revision ?? null;
+    const fingerprint = JSON.stringify({ propertyId, organizationId, expectedRevision, choices });
+    if (retryCommand.current?.fingerprint !== fingerprint)
+      retryCommand.current = { fingerprint, key: crypto.randomUUID() };
+    const current = generation.current;
+    busy.current = true;
+    setSaving(true);
+    setError(null);
     try {
-      const [policy, raw] = await Promise.all([
-        bookingGuestPolicyClient.preview({ organizationId, propertyId }, value, {
-          cache: "no-store",
-        }),
-        targetApiClient.get<{ propertyId: string; items: unknown[] }>(
-          `/api/pms/setup/properties/${encodeURIComponent(propertyId)}/room-types`,
-          { cache: "no-store" },
-        ),
-      ]);
-      if (raw?.propertyId !== propertyId || !Array.isArray(raw.items))
-        throw new Error("Room details are unavailable. Refresh and review again.");
-      const rooms = raw.items.map(parseRoomTypeFactsSnapshot);
-      if (rooms.some((room) => !room || room.propertyId !== propertyId))
-        throw new Error("Room details are invalid. Refresh and review again.");
-      if (
-        policy.outcome === "ready" &&
-        policy.bundle.rates.some(
-          (rate) =>
-            !rooms.some(
-              (room) =>
-                room?.roomTypeId === rate.roomTypeId &&
-                room.roomFactsRevision === rate.roomFactsRevision,
-            ),
-        )
-      )
-        throw new Error("Room details changed. Review the cancellation policy again.");
-      setRoomNames(Object.fromEntries(rooms.map((room) => [room!.roomTypeId, room!.facts.name])));
-      setPreview(policy);
-    } catch (error) {
-      setPreviewError(adaptiveStepErrorMessage(error));
+      const result = await bookingGuestRulesClient.save(
+        propertyId,
+        expectedRevision,
+        choices,
+        retryCommand.current.key,
+      );
+      if (current !== generation.current) return;
+      canonical.current = result;
+      dirty.current = false;
+      retryCommand.current = null;
+      setSaved(true);
+    } catch (cause) {
+      if (current === generation.current) setError(guestRulesErrorMessage(cause));
     } finally {
-      setPreviewBusy(false);
+      if (current === generation.current) {
+        busy.current = false;
+        setSaving(false);
+      }
     }
   }
-  async function submit() {
-    await draft.commit(async () => {
-      if (saved.current) return;
-      const value = choices();
-      if (
-        !value ||
-        preview?.outcome !== "ready" ||
-        !draft.values.current["policy.cancellation_bundle_confirmation"]
-      )
-        throw new Error("Review and confirm the current cancellation policy before saving.");
-      const expectedRevision = canonical.current?.revision ?? 0;
-      const source = draft.revision.current.baseRevisions?.["booking.guest_experience"];
-      if (
-        source !== (expectedRevision ? `guest-policy:${expectedRevision}` : "guest-policy:absent")
-      ) {
-        props.reportRevisionConflict();
-        throw new Error(
-          "This guest-policy draft is based on older settings. Refresh before saving.",
-        );
-      }
-      canonical.current = await bookingGuestPolicyClient.save(
-        { organizationId, propertyId },
-        {
-          expectedRevision,
-          expectedSourceFingerprint: preview.bundle.sourceFingerprint,
-          choices: value,
-          confirmPolicyBundle: true,
-        },
-        preview.bundle,
-      );
-      saved.current = true;
-      setHasSaved(true);
-    });
-  }
   if (loading) return <AdaptiveStepSkeleton columns />;
-  if (loadError)
-    return <AdaptiveSaveError message={loadError} onRetry={() => setRetry((value) => value + 1)} />;
-  const data = draft.data;
+  if (!loaded)
+    return (
+      <AdaptiveSaveError
+        message={error ?? "Guest rules are unavailable."}
+        onRetry={() => setRetry((v) => v + 1)}
+      />
+    );
   return (
     <form
       className="mx-auto max-w-5xl"
@@ -210,8 +191,13 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
         void submit();
       }}
     >
-      {draft.error && <AdaptiveSaveError message={draft.error} />}
-      <fieldset disabled={draft.saving || previewBusy} className="grid gap-6 lg:grid-cols-2">
+      {error && <AdaptiveSaveError message={error} />}
+      {saved && (
+        <p role="status" className="mb-5 rounded-xl bg-green-50 p-4 text-sm text-green-800">
+          Guest rules saved.
+        </p>
+      )}
+      <fieldset disabled={saving} className="grid gap-6 lg:grid-cols-2">
         <AdaptiveStepCard>
           <h2 className="text-lg font-semibold">Guest experience</h2>
           <p className="mt-2 text-sm text-gray-600">
@@ -295,7 +281,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           </div>
         </AdaptiveStepCard>
         <AdaptiveStepCard>
-          <h2 className="text-lg font-semibold">Arrival and cancellation</h2>
+          <h2 className="text-lg font-semibold">Arrival times</h2>
           {(
             [
               ["policy.check_in_time", "Check-in from"],
@@ -351,91 +337,39 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
             </p>
           )}
           <p className="mt-5 text-sm text-gray-600">
-            Cancellation terms come from your room rates. Review them before confirming.
+            Cancellation and payment terms are configured with your rates.
           </p>
-          <button
-            type="button"
-            className={`${adaptiveSecondaryButtonClass} mt-4`}
-            onClick={() => void review()}
-          >
-            {previewBusy ? "Loading policy…" : "Review cancellation policy"}
-          </button>
-          {previewError && (
-            <p role="alert" className="mt-3 text-sm text-red-700">
-              {previewError}
-            </p>
-          )}
-          {preview?.outcome === "blocked" && (
-            <div role="status" className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
-              <p className="font-semibold">Policy review is not ready</p>
-              <p className="mt-2">
-                Complete the required pricing, room and property settings, then review again. Your
-                answers can be saved as a draft.
-              </p>
-              <ul className="mt-2 list-disc pl-5">
-                {preview.blockers.map((blocker, index) => (
-                  <li key={index}>{blocker.code.replaceAll("_", " ")}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {preview?.outcome === "ready" && (
-            <div className="mt-5 space-y-4 text-sm">
-              <p>
-                Policy currency: {preview.bundle.pricingCurrency}. Times use{" "}
-                {preview.bundle.propertyTimeZone}.
-              </p>
-              {preview.bundle.rates.map((rate) => (
-                <div key={rate.roomTypeId} className="rounded-lg border border-gray-200 p-4">
-                  <h3 className="font-semibold">{roomNames[rate.roomTypeId]}</h3>
-                  <p className="mt-2">
-                    Free cancellation until {rate.flexible.freeCancellationDeadlineDays} days before
-                    arrival at {rate.flexible.cutoff.localTime}. Later cancellation or a no-show
-                    costs the full booking amount.
-                  </p>
-                  {rate.nonRefundable && (
-                    <p className="mt-2">
-                      Non-refundable rate: full prepayment, no refunds, and the full booking amount
-                      for a no-show. Offering this rate requires a ready online card payment method.
-                    </p>
-                  )}
-                  {rate.additionalGuest && (
-                    <p className="mt-2">
-                      Includes {rate.additionalGuest.includedGuestsPerRoom} guests per room. Each
-                      additional {rate.additionalGuest.countedGuestTypes.join(" or ")} guest costs{" "}
-                      {rate.additionalGuest.amountDecimal} {rate.additionalGuest.currency} per
-                      night.
-                    </p>
-                  )}
-                </div>
-              ))}
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={data["policy.cancellation_bundle_confirmation"] === true}
-                  onChange={(event) =>
-                    update("policy.cancellation_bundle_confirmation", event.target.checked)
-                  }
-                />
-                I have reviewed and confirm these cancellation terms.
-              </label>
-            </div>
-          )}
+          <label className="mt-5 flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            I confirm these guest rules and arrival times.
+          </label>
         </AdaptiveStepCard>
       </fieldset>
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          className={adaptiveSecondaryButtonClass}
+          disabled={saving}
+          onClick={() => {
+            if (
+              !dirty.current ||
+              window.confirm("Discard your unsaved changes and reload saved guest rules?")
+            )
+              setRetry((v) => v + 1);
+          }}
+        >
+          Reload saved rules
+        </button>
         <button
           type="submit"
           className={adaptivePrimaryButtonClass}
-          disabled={
-            draft.saving ||
-            previewBusy ||
-            (!hasSaved &&
-              (preview?.outcome !== "ready" ||
-                data["policy.cancellation_bundle_confirmation"] !== true))
-          }
+          disabled={saving || !confirmed}
         >
-          {draft.saving ? "Saving…" : "Save and continue"}
+          {saving ? "Saving…" : "Save guest rules"}
         </button>
       </div>
     </form>
