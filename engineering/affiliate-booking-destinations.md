@@ -75,3 +75,13 @@ and profile entitlement protect every endpoint; errors and successes are no-stor
 The shared app error handler retains 503 for database connection/capacity failures;
 ordinary server exceptions remain 500. Neither becomes a missing destination.
 No edit/delete, verification, network-fetch, activation or publication route exists.
+
+## Hotel setup form
+
+The hotel profile Offers tab accepts an explicit booking-page name and HTTPS URL,
+using the shared Booking validator and authenticated destination API. It lists
+saved versions as tracking-not-validated and never follows or activates their URLs.
+Retries preserve the same key for the same normalized input during the editor
+session. Successful saves clear the form and reload stored history; a failed history
+reload does not offer a duplicate save. The component is keyed to the canonical
+property so requests and retry state do not carry across property selections.
