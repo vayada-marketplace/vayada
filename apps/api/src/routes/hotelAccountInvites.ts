@@ -473,11 +473,15 @@ function parsePayload(value: unknown): HotelAccountInvitePayload | null {
   const keys = Object.keys(value);
   const hasRedemption = Object.prototype.hasOwnProperty.call(value, INVITE_REDEMPTION_PAYLOAD_KEY);
   if (
-    keys.length !== INVITE_PAYLOAD_KEYS.length + (hasRedemption ? 1 : 0) ||
+    keys.length !==
+      INVITE_PAYLOAD_KEYS.length +
+        (hasRedemption ? 1 : 0) +
+        (Object.hasOwn(value, "preparedData") ? 1 : 0) ||
     !keys.every(
       (key) =>
         INVITE_PAYLOAD_KEYS.includes(key as (typeof INVITE_PAYLOAD_KEYS)[number]) ||
-        key === INVITE_REDEMPTION_PAYLOAD_KEY,
+        key === INVITE_REDEMPTION_PAYLOAD_KEY ||
+        key === "preparedData",
     )
   ) {
     return null;
@@ -503,6 +507,7 @@ function parsePayload(value: unknown): HotelAccountInvitePayload | null {
     organization: value.organization,
     property: value.property,
     selectedTracks: value.selectedTracks,
+    ...(Object.hasOwn(value, "preparedData") ? { preparedData: value.preparedData } : {}),
   });
   if (typeof parsed === "string") return null;
   return {
