@@ -1295,7 +1295,7 @@ function parsePropertyProfileUpdate(
   return sendInvalidProfile(reply, errors);
 }
 
-function parseCanonicalPropertyProfile(
+export function parseCanonicalPropertyProfile(
   input: Record<string, unknown>,
   errors: Record<string, string[]>,
 ): PropertyProfile | null {

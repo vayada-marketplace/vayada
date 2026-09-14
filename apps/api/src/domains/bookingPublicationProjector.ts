@@ -14,6 +14,7 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import type { BookingPublicationAttemptStatusPort } from "./bookingPublicationAttemptStatusRepository.js";
 import {
   BookingPublicationActiveRevisionConflictError,
+  BookingPublicationRoomClosureConflictError,
   BookingPublicationLeaseLostError,
   BookingPublicationPropertyUnavailableError,
   type DistributionBookingPublicationInput,
@@ -220,7 +221,10 @@ export function createBookingPublicationProjector(config: {
         if (error instanceof BookingPublicationLeaseLostError) {
           return { processed: 1, succeeded: 0, failed: 1, exhausted: 0 };
         }
-        if (error instanceof BookingPublicationActiveRevisionConflictError) {
+        if (
+          error instanceof BookingPublicationActiveRevisionConflictError ||
+          error instanceof BookingPublicationRoomClosureConflictError
+        ) {
           return await terminalFailure(
             pool,
             config.projection,

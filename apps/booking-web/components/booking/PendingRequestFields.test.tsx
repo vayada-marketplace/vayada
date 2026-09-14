@@ -75,9 +75,7 @@ it("prefills held mixed rooms even when public search cannot offer them", async 
   expect(document.querySelector("select")!.selectedOptions[0].textContent).toBe(
     details.booking.roomName,
   );
-  const count = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="number"]')).at(
-    -1,
-  )!;
+  const count = document.querySelector<HTMLInputElement>("input[readonly]")!;
   expect(count.value).toBe("3");
   expect(count.readOnly).toBe(true);
 });
@@ -115,6 +113,33 @@ it("blocks price review after a party change until allocations match", async () 
   await render({ ...input, adults: 7 }, [mixed, single]);
   expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
   expect(document.querySelector('[role="alert"]')!.textContent).toBe(en.roomSelection.partyChanged);
+});
+
+it("reallocates held rooms without public stock and preserves every room and rate", async () => {
+  const changedParty = { ...input, adults: 5 };
+  const change = await render(changedParty, [], vi.fn());
+  const allocationFields = document.querySelectorAll<HTMLInputElement>(
+    'fieldset fieldset input[type="number"]',
+  );
+  expect(allocationFields).toHaveLength(6);
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      allocationFields[4],
+      "1",
+    );
+    allocationFields[4].dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const updated = { ...changedParty, ...change.mock.lastCall![0] };
+  expect(updated.roomSelection).toEqual({
+    ...selection,
+    lines: [selection.lines[0], { ...selection.lines[1], guests: [{ adults: 1, children: 0 }] }],
+  });
+  expect(selection.lines[1].guests[0].adults).toBe(2);
+  await render(updated, [], change);
+  expect(document.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  expect(document.querySelector<HTMLInputElement>("input[readonly]")!.value).toBe("3");
 });
 
 it("can restore a held original selection after choosing an alternative", async () => {
