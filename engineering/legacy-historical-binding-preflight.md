@@ -94,3 +94,29 @@ Only frozen identifiers, hashes and boolean source state are returned. Source
 proof neither verifies hotel-owner identity nor consults mutable canonical state.
 Source/target readers still take separate snapshots; a locked combined verifier,
 fresh owner eligibility and distinct signed transition authority remain unwired.
+
+## Evidence-only assessment composition
+
+`readLegacyHistoricalBindingEvidenceSnapshot` assembles one original-pair
+assessment from the actual source and target readers and the existing evaluator.
+Its expected input contains the source-proof request, binding expectation and
+property fingerprint. The caller must independently authenticate that entire
+expected input and configure the correct source/target pools; this composer
+implements no authentication, signature, trusted flag, approval or environment
+attestation. Do not expose it as a request-controlled authorization endpoint.
+
+It clones expectations before awaiting, rejects inconsistent source/run/pair
+or property identities and protected keys before reads, and compares the full
+property fingerprint in addition to claim/connection fingerprints. Returned
+reader observations are retained exactly, without filtering competing rows.
+The result is frozen and always `executable: false`, including a matching
+assessment. Inactive-source and protected-fixture denials remain unchanged.
+Reader failures propagate; they cannot become an absent-row fallback or match.
+
+This is diagnostic assembly before a distinct signed transition verifier, not
+a current-owner check or atomic source/target snapshot. Both readers still own
+separate read-only transactions. Fresh canonical ownership/eligibility, signed
+transition authorities, revocation and combined locked revalidation remain
+required. No clean-adoption consumer, provider, writer or runtime route is wired.
+Composition tests mock reader modules and use the real evaluator; they do not
+add PostgreSQL or production evidence beyond the separate reader suites.
