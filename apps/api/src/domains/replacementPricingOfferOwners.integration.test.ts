@@ -1220,6 +1220,40 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await expect(f.readTasks(get)).rejects.toThrow();
     expect(get).toHaveBeenCalledOnce();
   });
+  it("retains distinct warning classifications and rejects same-receipt diagnostic changes", async () => {
+    const f = await taskReadFixture();
+    const response = (meta: unknown) =>
+      new Response(JSON.stringify({ data: [{ type: "task", id: f.taskId }], meta }));
+    const persist = await prepareChannexAriReceiptPersistence(
+      pool,
+      f.ariCorrelation,
+      response({ warnings: ["private message"] }),
+    );
+    await persist();
+    await persist();
+    expect(
+      (
+        await pool.query(
+          "SELECT warning_reason,has_warnings FROM pms.channex_offer_ari_receipts WHERE id=$1",
+          [f.ariCorrelation.receiptId],
+        )
+      ).rows,
+    ).toEqual([{ warning_reason: "provider_warnings", has_warnings: true }]);
+    await expect(
+      (await prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, response({})))(),
+    ).rejects.toThrow("conflict");
+    const get = vi.fn(async () => f.task());
+    expect(await f.readTasks(get)).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_receipt_history_unavailable",
+    });
+    expect(get).not.toHaveBeenCalled();
+    await expect(
+      pool.query("UPDATE pms.channex_offer_ari_receipts SET warning_reason=NULL WHERE id=$1", [
+        f.ariCorrelation.receiptId,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
   it("retains late ARI receipts idempotently without releasing ownership", async () => {
     const f = await ariReceiptFixture(),
       response = f.ariResponse();
@@ -1235,12 +1269,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await persist();
     const rows = (
       await pool.query(
-        "SELECT outcome,http_status,task_ids,has_warnings FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1",
+        "SELECT outcome,http_status,task_ids,has_warnings,warning_reason FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1",
         [f.ariCorrelation.attemptId],
       )
     ).rows;
     expect(rows).toEqual([
-      { outcome: "complete_json", http_status: 200, task_ids: [f.taskId], has_warnings: false },
+      { outcome: "complete_json", http_status: 200, task_ids: [f.taskId], has_warnings: false, warning_reason: null },
     ]);
     expect(
       (
@@ -1286,7 +1320,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     )();
     const rows = (
       await pool.query(
-        "SELECT outcome,http_status,provider_request_id,task_ids,has_warnings FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY captured_at",
+        "SELECT outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY captured_at",
         [f.ariCorrelation.attemptId],
       )
     ).rows;
@@ -1297,6 +1331,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         provider_request_id: null,
         task_ids: [],
         has_warnings: true,
+        warning_reason: null,
       },
       {
         outcome: "complete_json",
@@ -1304,6 +1339,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         provider_request_id: null,
         task_ids: [f.taskId],
         has_warnings: true,
+        warning_reason: "provider_warnings",
       },
     ]);
   });

@@ -62,6 +62,7 @@ async function prepareReceiptPersistence(
           providerRequestId: null,
           taskIds: [],
           hasWarnings: true,
+          warningReason: null,
         }
       : await readChannexAriResponse(response);
   const values = [
@@ -74,6 +75,7 @@ async function prepareReceiptPersistence(
     observation.providerRequestId,
     observation.taskIds,
     observation.hasWarnings,
+    observation.warningReason,
   ];
   return async function persist() {
     const client = await pool.connect();
@@ -94,8 +96,8 @@ async function prepareReceiptPersistence(
       if (!target.rows.length) throw new Error("Channex receipt correlation unavailable");
       await client.query(
         `INSERT INTO pms.channex_offer_ari_receipts
-         (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,provider_request_id,task_ids,has_warnings)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9) ON CONFLICT(id) DO NOTHING`,
+         (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9,$10) ON CONFLICT(id) DO NOTHING`,
         values,
       );
       const receipt = await client.query(
@@ -103,7 +105,8 @@ async function prepareReceiptPersistence(
          WHERE id=$1 AND attempt_id=$2 AND job_attempt_id=$3 AND worker_id=$4
            AND outcome=$5 AND http_status IS NOT DISTINCT FROM $6::integer
            AND provider_request_id IS NOT DISTINCT FROM $7::text
-           AND task_ids=$8::uuid[] AND has_warnings=$9`,
+           AND task_ids=$8::uuid[] AND has_warnings=$9
+           AND warning_reason IS NOT DISTINCT FROM $10::text`,
         values,
       );
       if (!receipt.rows.length) throw new Error("Channex receipt conflict");

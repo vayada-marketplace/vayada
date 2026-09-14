@@ -20,6 +20,7 @@ describe("Channex ARI response evidence", () => {
       providerRequestId: "request:1",
       taskIds: [task],
       hasWarnings: false,
+      warningReason: null,
     });
     expect(read(valid, 500)).toMatchObject({ httpStatus: 500, taskIds: [task] });
     expect(
@@ -29,6 +30,35 @@ describe("Channex ARI response evidence", () => {
         providerRequestId: "secret with spaces",
       }).providerRequestId,
     ).toBeNull();
+  });
+  it.each([
+    [null, "invalid_tasks"],
+    [{ ...valid, data: [], errors: "secret" }, "invalid_tasks"],
+    [{ ...valid, errors: "secret", warnings: [] }, "root_errors"],
+    [{ ...valid, warnings: "secret", meta: null }, "root_warnings"],
+    [{ ...valid, meta: null }, "invalid_meta"],
+    [{ ...valid, meta: {} }, "invalid_warnings"],
+    [{ ...valid, meta: { warnings: "secret" } }, "invalid_warnings"],
+    [
+      { ...valid, meta: { warnings: [{ warning: "secret", token: "secret" }] } },
+      "provider_warnings",
+    ],
+  ])("classifies the first blocker without retaining provider content", (body, reason) => {
+    const result = read(body);
+    expect(result).toMatchObject({ hasWarnings: true, warningReason: reason });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+  it("keeps non-JSON body failures separate from warning classification", async () => {
+    expect(sanitizeChannexAriResponse({ httpStatus: 200, body: "{" })).toMatchObject({
+      outcome: "invalid_json",
+      hasWarnings: true,
+      warningReason: null,
+    });
+    expect(await readChannexAriResponse(new Response(Uint8Array.of(255)))).toMatchObject({
+      outcome: "body_interrupted",
+      hasWarnings: true,
+      warningReason: null,
+    });
   });
   it.each([
     {},

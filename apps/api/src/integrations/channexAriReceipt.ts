@@ -1,5 +1,13 @@
 import { readChannexResponse } from "./channexResponseBody.js";
 
+export type ChannexAriWarningReason =
+  | "invalid_tasks"
+  | "root_errors"
+  | "root_warnings"
+  | "invalid_meta"
+  | "invalid_warnings"
+  | "provider_warnings";
+
 /** Allowlisted response observation, never delivery completion or permission to retry.
  * https://docs.channex.io/api-v.1-documentation/ari
  */
@@ -16,6 +24,7 @@ export function sanitizeChannexAriResponse(input: {
     providerRequestId: typeof id === "string" && /^[A-Za-z0-9._:-]{1,512}$/.test(id) ? id : null,
     taskIds: [] as string[],
     hasWarnings: true,
+    warningReason: null as ChannexAriWarningReason | null,
   };
   if (Buffer.byteLength(input.body, "utf8") > 65536)
     return { ...base, outcome: "body_limit" as const };
@@ -43,18 +52,20 @@ export function sanitizeChannexAriResponse(input: {
       : [];
   // Preserve no partial task list and fail closed on duplicate identities.
   const validTasks = tasks.length > 0 && new Set(tasks).size === tasks.length;
+  // First blocker only; never copy provider warning text or echoed values.
+  let warningReason: ChannexAriWarningReason | null = null;
+  if (!validTasks || !object(parsed)) warningReason = "invalid_tasks";
+  else if (Object.hasOwn(parsed, "errors")) warningReason = "root_errors";
+  else if (Object.hasOwn(parsed, "warnings")) warningReason = "root_warnings";
+  else if (!object(parsed.meta)) warningReason = "invalid_meta";
+  else if (!Array.isArray(parsed.meta.warnings)) warningReason = "invalid_warnings";
+  else if (parsed.meta.warnings.length !== 0) warningReason = "provider_warnings";
   return {
     ...base,
     outcome: "complete_json" as const,
     taskIds: validTasks ? tasks : [],
-    hasWarnings:
-      !validTasks ||
-      !object(parsed) ||
-      Object.hasOwn(parsed, "errors") ||
-      Object.hasOwn(parsed, "warnings") ||
-      !object(parsed.meta) ||
-      !Array.isArray(parsed.meta.warnings) ||
-      parsed.meta.warnings.length !== 0,
+    hasWarnings: warningReason !== null,
+    warningReason,
   };
 }
 
