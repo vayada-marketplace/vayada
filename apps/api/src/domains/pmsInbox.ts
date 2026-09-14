@@ -178,7 +178,8 @@ export type PmsInboxReadPort = {
     PmsInboxPortResult<{
       propertyId: string;
       thread: PmsInboxThreadSummary;
-      availableProviderActions: readonly "booking_com_no_reply_needed"[];
+      availableProviderActions: readonly PmsInboxProviderAction[];
+      providerActions?: readonly PmsInboxProviderActionOutcome[];
       timeline: readonly { propertyId: string; threadId: string; item: PmsInboxTimelineItem }[];
       previousCursor: string | null;
     }>
@@ -508,6 +509,7 @@ export type PmsInboxAssistancePort = {
 
 export type PmsInboxProviderActionError = {
   code:
+    | "thread_version_conflict"
     | "validation_failed"
     | "thread_not_found"
     | "provider_action_unavailable"
@@ -515,10 +517,20 @@ export type PmsInboxProviderActionError = {
   message: string;
 };
 
+export type PmsInboxProviderAction = "booking_com_no_reply_needed" | "channex_close";
+export type PmsInboxProviderActionOutcome = {
+  action: PmsInboxProviderAction;
+  state: "pending" | "retrying" | "confirmed" | "held" | "failed";
+  reason: string | null;
+  threadVersion: number | null;
+};
+
 export type PmsInboxProviderActionPort = {
   noReplyNeeded(input: {
     propertyId: string;
     threadId: string;
+    expectedVersion: number;
+    action?: PmsInboxProviderAction;
     organizationId: string;
     actorUserId: string;
     actorMembershipId: string;
@@ -530,7 +542,7 @@ export type PmsInboxProviderActionPort = {
         value: {
           propertyId: string;
           threadId: string;
-          action: "booking_com_no_reply_needed";
+          action: PmsInboxProviderAction;
           jobId: string;
           acceptedAt: string;
           attentionStateChanged: false;
