@@ -3,6 +3,8 @@ import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.j
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  PMS_INVENTORY_RESERVATION_BUNDLE_VERSION,
+  parsePmsInventoryReservationBundle,
   PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
   PMS_INVENTORY_RESERVATION_LIFECYCLE_IDEMPOTENCY,
   createPmsOperatingCalendarSourceRevision,
@@ -276,6 +278,154 @@ export function createPgPmsInventoryReservationLifecycleRepository(
       if (ownsPool) await pool.end();
     },
   };
+}
+
+/** Internal selection supplied by the authorized immutable quote owner. */
+export async function reservePmsQuoteInventory(
+  client: PmsInventoryReservationLifecycleRepositoryClient,
+  input: {
+    organizationId: string;
+    propertyId: string;
+    quoteId: string;
+    checkIn: string;
+    checkOut: string;
+    rooms: readonly { roomTypeId: string }[];
+  },
+  requireFreshQuote: () => Promise<void>,
+) {
+  const unavailable = (): never => {
+    throw new Error("Quote inventory is unavailable");
+  };
+  const { organizationId, propertyId, quoteId, checkIn, checkOut } = input;
+  if (
+    ![organizationId, propertyId, quoteId].every((id) => normalizeUuid(id) === id) ||
+    !stayDates(checkIn, checkOut) ||
+    input.rooms.length < 1 ||
+    input.rooms.length > 99
+  )
+    return unavailable();
+  const counts = new Map<string, number>();
+  for (const room of input.rooms) {
+    if (normalizeUuid(room.roomTypeId) !== room.roomTypeId) return unavailable();
+    counts.set(room.roomTypeId, (counts.get(room.roomTypeId) ?? 0) + 1);
+  }
+  const lines = [...counts].sort(([a], [b]) => a.localeCompare(b));
+  const operation = "pms.pricing_quote_inventory.reserve_bundle";
+  const keyHash = hash(quoteId),
+    fingerprint = hash(
+      stableJson({ organizationId, propertyId, quoteId, checkIn, checkOut, lines }),
+    );
+  await lockPmsInventoryMutationScope(client, propertyId);
+  const prior = await findIdempotency(client, operation, propertyId, keyHash);
+  if (prior) {
+    const bundle = parsePmsInventoryReservationBundle(prior.idempotencyMetadata);
+    if (
+      prior.status !== "completed" ||
+      prior.requestFingerprintHash !== fingerprint ||
+      !bundle ||
+      bundle.receipts.length !== lines.length
+    )
+      return unavailable();
+    for (const [index, receipt] of bundle.receipts.entries()) {
+      const status = await readReservationStatus(
+        client,
+        {
+          organizationId,
+          propertyId,
+          receipt,
+        },
+        true,
+      );
+      const [roomTypeId, roomCount] = lines[index]!;
+      if (
+        !status ||
+        status.state !== "reserved" ||
+        status.roomTypeId !== roomTypeId ||
+        status.roomCount !== roomCount ||
+        status.checkIn !== checkIn ||
+        status.checkOut !== checkOut ||
+        status.offerCorrelation.quoteSessionId !== quoteId
+      )
+        return unavailable();
+    }
+    return { bundle, replayed: true };
+  }
+  await requireFreshQuote();
+  const calendar = await lockPmsCurrentOperatingCalendar(client, propertyId);
+  if (!calendar || calendar.sourceStatus !== "current") return unavailable();
+  const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]!.now;
+  const audit: RoomFactsCommandAudit = {
+    actor: { kind: "system", service: "booking.pricing-quotes" },
+    requestId: quoteId,
+    correlationId: quoteId,
+    requestedAt: now.toISOString(),
+  };
+  await client.query("SAVEPOINT pms_pricing_quote_bundle");
+  try {
+    const claim = await reserveIdempotency(
+      client,
+      operation,
+      propertyId,
+      keyHash,
+      fingerprint,
+      audit,
+      now,
+    );
+    if (!claim) return unavailable();
+    const receipts: PmsInventoryReservationStatus["receipt"][] = [];
+    for (const [roomTypeId, roomCount] of lines) {
+      const days = await lockInventoryDays(client, propertyId, roomTypeId, checkIn, checkOut);
+      const result = await reservePmsInventoryInTransaction(client, {
+        contractVersion: PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
+        organizationId,
+        propertyId,
+        roomTypeId,
+        checkIn,
+        checkOut,
+        roomCount,
+        offerCorrelation: {
+          quoteSessionId: quoteId,
+          publicOfferKey: `pricing-quote:${quoteId}:${roomTypeId}`,
+        },
+        configurationSource: calendar.configuration.source,
+        expectedMaterializedRevision: calendar.configuration.calendarRevision,
+        inventoryWatermarks: days.map((day) => ({
+          propertyId,
+          roomTypeId,
+          stayDate: day.stayDate,
+          calendarRevision: day.calendarRevision,
+          inventoryRevision: day.inventoryRevision,
+          sourceRevisions: {
+            generated: day.generatedSourceRevision,
+            channel: day.channelSourceRevision,
+            manual: day.manualSourceRevision,
+            block: day.blockSourceRevision,
+            booking: day.bookingSourceRevision,
+          },
+        })),
+        idempotencyKey: `pricing-quote:${quoteId}:${roomTypeId}`,
+        audit,
+      });
+      if (!result.ok || result.status.state !== "reserved") return unavailable();
+      receipts.push(result.status.receipt);
+    }
+    const bundle = {
+      contractVersion: PMS_INVENTORY_RESERVATION_BUNDLE_VERSION,
+      owner: "pms" as const,
+      receipts,
+    };
+    await client.query(
+      `UPDATE platform.idempotency_keys SET status='completed',response_status_code=200,
+      response_body_hash=$2,idempotency_metadata=$3,last_seen_at=$4,completed_at=$4 WHERE id=$1`,
+      [claim.id, hash(stableJson(bundle)), bundle, now],
+    );
+    await client.query("RELEASE SAVEPOINT pms_pricing_quote_bundle");
+    return { bundle, replayed: false };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT pms_pricing_quote_bundle");
+    await client.query("RELEASE SAVEPOINT pms_pricing_quote_bundle");
+    throw error;
+  }
 }
 
 /**

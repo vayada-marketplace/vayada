@@ -1,4 +1,4 @@
-import { reservePmsInventoryInTransaction } from "./pmsInventoryReservationLifecycleRepository.js";
+import { reservePmsQuoteInventory, reservePmsInventoryInTransaction } from "./pmsInventoryReservationLifecycleRepository.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import { withPmsHostDateCredit } from "./pmsHostDateAmendment.js";
@@ -94,6 +94,105 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
     await materialize(f, "2026-08-04", "2026-08-05");
     return f;
   }
+
+  it("groups physical rooms and replays the complete quote bundle before freshness checks", async () => {
+    const f = await currentFixture(),
+      quoteId = randomUUID();
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL }),
+      client = await pool.connect();
+    const fresh = vi.fn(async () => {});
+    const input = {
+      ...f,
+      quoteId,
+      checkIn: "2026-08-04",
+      checkOut: "2026-08-06",
+      rooms: [{ roomTypeId: f.roomTypeId }, { roomTypeId: f.roomTypeId }],
+    };
+    try {
+      await client.query("BEGIN");
+      const held = await reservePmsQuoteInventory(client, input, fresh);
+      expect(held.replayed).toBe(false);
+      expect(held.bundle.receipts).toHaveLength(1);
+      await client.query("COMMIT");
+      await client.query("BEGIN");
+      expect(await reservePmsQuoteInventory(client, input, fresh)).toEqual({
+        ...held,
+        replayed: true,
+      });
+      await client.query("COMMIT");
+      expect(fresh).toHaveBeenCalledTimes(1);
+      expect(await readDays(admin, f)).toEqual([
+        dayState("2026-08-04", 2, 0, 2, 1),
+        dayState("2026-08-05", 2, 0, 2, 1),
+      ]);
+      await client.query("BEGIN");
+      await expect(
+        reservePmsQuoteInventory(client, { ...input, rooms: input.rooms.slice(0, 1) }, fresh),
+      ).rejects.toThrow("Quote inventory is unavailable");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
+
+  it("rolls back the first room's receipt and inventory when a later bundle line fails", async () => {
+    const f = await currentFixture(),
+      quoteId = randomUUID();
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL }),
+      client = await pool.connect();
+    const spy = vi.spyOn(client, "query");
+    try {
+      await client.query("BEGIN");
+      await expect(
+        reservePmsQuoteInventory(
+          client,
+          {
+            ...f,
+            quoteId,
+            checkIn: "2026-08-04",
+            checkOut: "2026-08-06",
+            rooms: [
+              { roomTypeId: f.roomTypeId },
+              { roomTypeId: "ffffffff-ffff-4fff-8fff-ffffffffffff" },
+            ],
+          },
+          async () => {},
+        ),
+      ).rejects.toThrow("Quote inventory is unavailable");
+      expect(
+        spy.mock.calls.some(
+          ([sql]) =>
+            typeof sql === "string" &&
+            sql.includes("INSERT INTO pms.inventory_reservation_receipts"),
+        ),
+      ).toBe(true);
+      await client.query("COMMIT");
+      expect(await sideEffectCounts(admin, f.propertyId)).toMatchObject({
+        receipts: 0,
+        events: 0,
+        outbox: 0,
+        reserveIdempotency: 0,
+      });
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform.idempotency_keys WHERE property_id=$1 AND operation='pms.pricing_quote_inventory.reserve_bundle'",
+            [f.propertyId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(await readDays(admin, f)).toEqual([
+        dayState("2026-08-04", 0, 2, 1, 0),
+        dayState("2026-08-05", 0, 2, 1, 0),
+      ]);
+    } finally {
+      spy.mockRestore();
+      await client.query("ROLLBACK");
+      client.release();
+      await pool.end();
+    }
+  });
 
   it("reserves without legacy offers, replays once, and rolls inventory and receipts back with the caller", async () => {
     const f = await currentFixture();

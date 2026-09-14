@@ -511,3 +511,17 @@ Caller MUST roll back on any failure/exception and must authorize scope before
 replay. Opaque offer correlations require no legacy Distribution offer snapshot.
 This is an internal single-room-type command; mapping verified quote selections,
 whole-bundle idempotency, final time checks and booking acceptance follow.
+
+
+`reserveCurrentQuoteInventory` resolves the current public property/organization
+and exact immutable quote, then delegates to the PMS quote bundle owner. Physical
+rooms are counted once each and grouped by room type, independent of selected
+rate options. The quote ID identifies the complete inventory request. Scoped,
+still-reserved receipts replay before fresh price/expiry checks; terminal receipts
+and changed counts/dates/scope cannot be treated as a new hold. Fresh consumption
+requires quote revalidation and current PMS evidence. A savepoint rolls back all
+bundle lines, lifecycle/outbox changes and the bundle claim on any line failure,
+even if the caller catches the error. Caller still owns final commit/rollback and
+must roll back on later authority/acceptance failures. Held inventory does not
+mean booking acceptance; final expiry/cutoff and accepted-command replay remain
+with the forthcoming acceptance writer.
