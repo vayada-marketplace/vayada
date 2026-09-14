@@ -694,3 +694,17 @@ from different rooms. Distribution validates/sanitizes this variant and still
 checks Finance currency and payment readiness. Older flat rate records remain
 decodable; they are not produced by the replacement mapper. This is an offer
 content prerequisite, not the completed PMS source or a public quote endpoint.
+
+
+PMS publication reads current replacement pricing through a transaction-owning
+internal adapter, using trusted orchestrator scope. The adapter releases owner
+locks before independent room/media/calendar reads, then the source reads pricing
+again and requires the same revision fingerprint. Missing, revoked or changed
+evidence cannot publish. Room identities must exactly match the approved pricing
+rooms; inventory must cover those rooms under the current operating-calendar
+revision. Pricing/terms/Finance/charge coverage is validated by the shared owner
+reader. The PMS manifest records its replacement fingerprint in place of retired
+flexible/recurring pricing and charge-confirmation sources. Room facts/media,
+calendar profile bindings and independent Finance publication gates remain.
+This connects publication evidence only; stay quoting and atomic guest booking
+acceptance remain separate and are not enabled by a quote-required offer.

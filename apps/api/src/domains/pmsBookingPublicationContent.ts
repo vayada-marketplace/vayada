@@ -1,58 +1,39 @@
-import type { BookingPublicRate } from "@vayada/domain-distribution/booking-publication";
+import type { BookingPublicQuotedOffer } from "@vayada/domain-distribution/booking-publication";
 import type { BookingPublicationSnapshotContent } from "@vayada/domain-distribution/booking-publication-owner-snapshots";
 import {
-  parsePmsPricingSourceSnapshot,
-  parsePmsRecurringPricingBookingEvidence,
   type PmsInventoryLaunchReadinessReadPort,
   type RoomPublicationRoomSnapshot,
 } from "@vayada/domain-pms";
 
 export function buildPmsBookingPublicationContent(input: {
   rooms: readonly RoomPublicationRoomSnapshot[];
-  pricing: NonNullable<ReturnType<typeof parsePmsPricingSourceSnapshot>>;
-  recurring: NonNullable<ReturnType<typeof parsePmsRecurringPricingBookingEvidence>>;
+  offers: readonly { roomTypeId: string; offers: readonly BookingPublicQuotedOffer[] }[];
   inventory: NonNullable<
     Awaited<ReturnType<PmsInventoryLaunchReadinessReadPort["getInventoryLaunchReadiness"]>>
   >["snapshot"];
   currentLocalDate: string;
   observedAt: string;
 }): BookingPublicationSnapshotContent["pms"] | null {
-  const plans = new Map(input.pricing.flexibleRatePlans.map((plan) => [plan.roomTypeId, plan]));
-  const nonRefundable = input.recurring.sources.find(
-    (source) => source.sourceKind === "non_refundable" && source.lifecycle === "active",
-  );
+  const roomIds = input.rooms.map((room) => room.roomTypeId).sort();
+  const sameRooms = (ids: readonly string[]) =>
+    JSON.stringify([...ids].sort()) === JSON.stringify(roomIds);
+  if (
+    !roomIds.length ||
+    new Set(roomIds).size !== roomIds.length ||
+    !sameRooms(input.offers.map((room) => room.roomTypeId)) ||
+    !sameRooms(input.inventory.coverage.roomTypeIds)
+  )
+    return null;
+  const offers = new Map(input.offers.map((room) => [room.roomTypeId, room.offers]));
   const rooms = input.rooms.map((room) => {
-    const plan = plans.get(room.roomTypeId);
-    if (!plan) return null;
+    const rates = offers.get(room.roomTypeId);
+    if (!rates?.length) return null;
     const images = room.media.flatMap((assignment) => {
       const image = assignment.publicVariants.find(
         ({ variantName }) => variantName === "original_safe",
       );
       return image ? [{ url: image.publicUrl, alt: assignment.altText }] : [];
     });
-    const rates: BookingPublicRate[] = [
-      {
-        ratePlanId: plan.flexibleRatePlanId,
-        currency: plan.baseAmount.currency,
-        baseNightlyAmount: plan.baseAmount.amountDecimal,
-        refundable: true,
-        cancellation:
-          plan.cancellationTerms.flexibleCancellationType === "partial_refund"
-            ? "Partial refund according to notice period"
-            : `Free cancellation until ${plan.cancellationTerms.freeCancellationDeadlineDays} days before arrival`,
-        paymentTiming: "pay_at_property",
-      },
-    ];
-    if (nonRefundable?.sourceKind === "non_refundable") {
-      rates.push({
-        ratePlanId: nonRefundable.sourceId,
-        currency: plan.baseAmount.currency,
-        baseNightlyAmount: discount(plan.baseAmount.amountDecimal, nonRefundable.discountPercent),
-        refundable: false,
-        cancellation: "Non-refundable",
-        paymentTiming: "prepay_full",
-      });
-    }
     return {
       roomTypeId: room.roomTypeId,
       name: room.facts.name,
@@ -91,8 +72,3 @@ export function buildPmsBookingPublicationContent(input: {
     freshness: { status: "fresh", lastUpdatedAt: observedAt },
   };
 }
-
-const discount = (amount: string, percent: number) => {
-  const cents = Math.round(Number(amount) * 100);
-  return (Math.round((cents * (100 - percent)) / 100) / 100).toFixed(2);
-};

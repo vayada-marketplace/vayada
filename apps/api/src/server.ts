@@ -1,3 +1,4 @@
+import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
@@ -1035,11 +1036,9 @@ const bookingPublicationRuntime = (() => {
     design: bookingDesignReadinessProvider,
     guestRules: createBookingGuestChoicePublicationReader(propertySetupOwnerPool),
     rooms: pmsRoomPublicationRuntime.readModel,
-    pricing: pmsPricingReadModel,
-    recurringPricing: propertySetupPmsRuntime.recurringPricing,
+    pricing: createReplacementPricingPublicationReader(propertySetupOwnerPool),
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
-    mandatoryChargeConfirmation: bookingMandatoryChargeConfirmationEvidence,
     finance: financePaymentReadinessReadModel,
   });
 })();
