@@ -58,6 +58,24 @@ const capacity = required(
 );
 
 describe("PMS room publication read model", () => {
+  it("excludes a closing room without altering the private facts source", async () => {
+    const target = readTarget({ operating: false });
+    const model = createModel(target);
+    const result = await model.getRoomPublicationSnapshot({ organizationId, propertyId });
+    expect(result.rooms).toEqual([]);
+    expect(activeFacts.lifecycle).toBe("active");
+    expect(target.sourceReads).toBe(0);
+    await model.close();
+  });
+
+  it("rejects a closure committed while the publication snapshot is being built", async () => {
+    const model = createModel(readTarget({ operating: [true, false] }));
+    await expect(model.getRoomPublicationSnapshot({ organizationId, propertyId })).rejects.toThrow(
+      "sources changed while the snapshot was being built",
+    );
+    await model.close();
+  });
+
   it("reauthorizes exact caller scope and builds a public-safe ready snapshot", async () => {
     const target = readTarget();
     const factsCalls: string[] = [];
@@ -415,6 +433,7 @@ function createModel(
 function readTarget(
   options: {
     authorized?: boolean[];
+    operating?: boolean | boolean[];
     sourceRow?: Partial<{
       propertyId: string;
       roomTypeId: string;
@@ -426,6 +445,9 @@ function readTarget(
     }>;
   } = {},
 ) {
+  const eligibility = Array.isArray(options.operating)
+    ? [...options.operating]
+    : [options.operating ?? true];
   const authorized = [...(options.authorized ?? [true, true, true])];
   const scopeChecks: string[][] = [];
   const scopeSql: string[] = [];
@@ -446,6 +468,19 @@ function readTarget(
       text: string,
       values?: readonly unknown[],
     ) {
+      if (text.includes("LEFT JOIN pms.room_type_closures"))
+        return rows([
+          {
+            propertyId,
+            roomTypeId,
+            state:
+              (eligibility.length > 1 ? eligibility.shift() : eligibility[0]) === false
+                ? "closing"
+                : "operating",
+            closureCommandId: null,
+            cutoffDate: null,
+          } as unknown as T,
+        ]);
       if (text.includes("pms_room_publication_scope")) {
         scopeChecks.push([String(values?.[0]), String(values?.[1])]);
         scopeSql.push(text);

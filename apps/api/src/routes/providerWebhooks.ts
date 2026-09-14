@@ -67,6 +67,7 @@ export type ProviderWebhookPromotionInput = {
 
 export type ProviderWebhookPromotionResult = {
   status:
+    | "observed"
     | "promoted"
     | "already_promoted"
     | "already_normalized"
@@ -91,6 +92,8 @@ export type ProviderWebhookRoutesOptions = {
   secrets: ProviderWebhookSecrets;
   modes?: ProviderWebhookModeConfig;
   channexBookingPromotionEnabled?: boolean;
+  channexAlterationPromotionEnabled?: boolean;
+  channexReviewMode?: ProviderWebhookMode;
   store: ProviderWebhookStore;
   pmsInboxDeliveryReceipts?: Pick<PmsInboxDeliveryReceiptPort, "recordTrustedProviderReceipt">;
   stripeTimestampToleranceSeconds?: number;
@@ -218,11 +221,17 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
       reply,
       request,
       rawPayload:
-        classification.family === "message" &&
-        (classification.propertyOwnerResolved === false ||
-          !channexMessageIdentityComplete(classification))
-          ? channexUnresolvedMessageTombstone(classification)
-          : payload.value,
+        classification.family === "alteration"
+          ? {
+              event: "alteration_request",
+              property_id: classification.providerPropertyId,
+              content_retained: false,
+            }
+          : classification.family === "message" &&
+              (classification.propertyOwnerResolved === false ||
+                !channexMessageIdentityComplete(classification))
+            ? channexUnresolvedMessageTombstone(classification)
+            : payload.value,
       payloadHash: channexPayloadHash(payload.value, classification),
       store: options.store,
       normalizedPreview: previewChannexEvent(payload.value, classification),
@@ -571,10 +580,13 @@ function channexModeFor(
   classification: ChannexClassification,
 ): ProviderWebhookMode {
   const mode = modeFor(options, "channex");
+  if (classification.family === "review" || classification.family === "updated_review")
+    return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
-    ((classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
-      (["booking", "message"].includes(classification.family) &&
+    ((classification.family === "alteration" && !options.channexAlterationPromotionEnabled) ||
+      (classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
+      (["booking", "message", "alteration"].includes(classification.family) &&
         classification.propertyOwnerResolved === false) ||
       (classification.family === "message" && !channexMessageIdentityComplete(classification)))
     ? "observe_only"
@@ -631,7 +643,8 @@ async function resolveChannexPropertyIdentity(
   store: ProviderWebhookStore,
   classification: ChannexClassification,
 ): Promise<ChannexClassification> {
-  if (!["booking", "message", "alert"].includes(classification.family)) return classification;
+  if (!["booking", "message", "alert", "alteration"].includes(classification.family))
+    return classification;
   const providerPropertyId = classification.propertyId;
   if (classification.propertyIdentityConsistent === false) {
     return {
@@ -640,20 +653,35 @@ async function resolveChannexPropertyIdentity(
       propertyOwnerResolved: false,
     };
   }
-  const propertyId = store.resolveChannexPropertyId
-    ? await store.resolveChannexPropertyId(providerPropertyId)
-    : providerPropertyId;
+  let propertyId: string | null;
+  try {
+    propertyId = store.resolveChannexPropertyId
+      ? await store.resolveChannexPropertyId(providerPropertyId)
+      : classification.family === "alteration"
+        ? null
+        : providerPropertyId;
+  } catch (error) {
+    if (
+      classification.family !== "alteration" ||
+      !(error instanceof Error) ||
+      error.message !== "Ambiguous Channex property ownership"
+    )
+      throw error;
+    propertyId = null;
+  }
   return {
     ...classification,
     propertyId: propertyId ?? providerPropertyId,
     providerPropertyId,
     propertyOwnerResolved: propertyId !== null,
     receiptKey:
-      classification.family === "booking"
-        ? bookingReceiptKey(propertyId ?? providerPropertyId, classification)
-        : classification.family === "message"
-          ? messageReceiptKey(propertyId ?? providerPropertyId, classification)
-          : classification.receiptKey,
+      classification.family === "alteration"
+        ? `webhook:channex:alteration_request:${providerPropertyId}:${propertyId ?? "unresolved"}:${sha256(classification.receiptKey)}:scan-v1`
+        : classification.family === "booking"
+          ? bookingReceiptKey(propertyId ?? providerPropertyId, classification)
+          : classification.family === "message"
+            ? messageReceiptKey(propertyId ?? providerPropertyId, classification)
+            : classification.receiptKey,
   };
 }
 
@@ -779,6 +807,7 @@ type ChannexEventFamily =
   | "review"
   | "updated_review"
   | "alert"
+  | "alteration"
   | "unsupported";
 
 type ChannexEventEnvelope = {
@@ -805,11 +834,14 @@ type ChannexClassification = {
 
 function classifyChannexPayload(payload: Record<string, unknown>): ChannexClassification {
   const nestedPayload = optionalRecord(payload, "payload") ?? {};
-  const eventType =
+  const providerEventType =
     optionalString(payload, "event") ??
     optionalString(payload, "event_type") ??
     optionalString(payload, "type") ??
     "unknown";
+  // Keep the persisted/UI event name compatible with existing alert incidents.
+  const eventType =
+    providerEventType === "disconnect_channel" ? "disconnected_channel" : providerEventType;
   const envelope: ChannexEventEnvelope = {
     eventType,
     family: channexEventFamily(eventType),
@@ -958,6 +990,7 @@ function channexMessageThreadId(payload: Record<string, unknown>): string {
 }
 
 function channexEventFamily(eventType: string): ChannexEventFamily {
+  if (eventType === "alteration_request") return "alteration";
   if (CHANNEX_ALERT_EVENTS.has(eventType)) return "alert";
   if (eventType === "message") return "message";
   if (
@@ -1212,6 +1245,24 @@ function previewChannexEvent(
   classification: ChannexClassification,
   revisionSource: "webhook_hint" | "revision_feed" = "webhook_hint",
 ): ProviderWebhookNormalizedPreview {
+  if (classification.family === "alteration") {
+    const key = sha256(classification.receiptKey);
+    return {
+      domainEventKey: `channex.alteration.scan:${key}:v1`,
+      domainEventType: "channex.alteration.scan",
+      resourceProduct: "pms",
+      resourceType: "channel_property",
+      resourceId: classification.propertyId,
+      jobKey: `channex.scan-alterations:${key}:v1`,
+      queueName: "pms.channex.webhooks",
+      jobType: "channex.scan-alterations",
+      payload: {
+        propertyId: classification.propertyId,
+        providerPropertyId: classification.providerPropertyId,
+        propertyOwnerResolved: classification.propertyOwnerResolved === true,
+      },
+    };
+  }
   if (classification.family === "alert") {
     const preview = fallbackPreview(
       "channex",

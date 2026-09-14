@@ -1,3 +1,5 @@
+import type { Page } from "@playwright/test";
+import { corsHeaders, fulfillCorsPreflight } from "../marketplace-web/utils/cors";
 import type {
   AdaptiveHotelSetupStatus,
   ProductEntryDecision,
@@ -297,4 +299,11 @@ function trackStatus(
     components,
     allowedActions: selected ? ["manage_service"] : ["add"],
   };
+}
+
+export async function mockHotelSetupPrerequisites(page: Page, status: AdaptiveHotelSetupStatus) {
+  await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({ status: 200, headers: corsHeaders(route), json: status });
+  });
 }

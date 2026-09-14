@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createPgHotelCatalogStep1Repository } from "./hotelCatalogStep1Repository.js";
+import {
+  createPgHotelCatalogStep1Repository,
+  readLockedHotelCatalogStep1State,
+} from "./hotelCatalogStep1Repository.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const userId = "57575757-5757-4757-8757-575757575701";
@@ -36,6 +39,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Hotel Catalog Step 1 command", (
     await repository.close();
     await cleanup();
     await admin.end();
+  });
+
+  it("reads Catalog inside the caller's transaction without committing it", async () => {
+    await admin.query("BEGIN");
+    try {
+      const before = await admin.query("SELECT txid_current()::text AS id");
+      const state = await readLockedHotelCatalogStep1State(admin, {
+        organizationId,
+        propertyId,
+        actorUserId: userId,
+      });
+      expect(state?.readModel.propertyId).toBe(propertyId);
+      const after = await admin.query("SELECT txid_current()::text AS id");
+      expect(after.rows[0].id).toBe(before.rows[0].id);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
   });
 
   it("atomically saves locale, summary, reviewed-empty amenities, slug, setup fallback, audit, and outbox", async () => {
@@ -396,6 +416,72 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Hotel Catalog Step 1 command", (
     });
   }
 
+  it.each([
+    "applied",
+    "normalized summary",
+    "changed payload",
+    "changed manifest",
+    "other resume step",
+  ])("retires only the applied presentation draft: %s", async (scenario) => {
+    const command = saveCommand(`draft-${scenario}`);
+    const source = scenario === "changed manifest" ? "profile:0" : "profile:1";
+    await admin.query(
+      `INSERT INTO hotel_catalog.property_setup_step_drafts
+          (session_id, step_id, payload, base_revisions, retention_expires_at, created_at, updated_at)
+         VALUES ($1::uuid, 'present_hotel', $2::jsonb, $3::jsonb,
+                 $4::timestamptz + interval '30 days', $4::timestamptz, $4::timestamptz)`,
+      [
+        sessionId,
+        JSON.stringify({
+          "profile.default_locale": command.request.locale,
+          "profile.short_description":
+            scenario === "changed payload"
+              ? `${summary} More input.`
+              : scenario === "normalized summary"
+                ? `  ${summary}  `
+                : summary,
+          "profile.hero_image": null,
+          "profile.gallery_images": [],
+          "profile.amenities": [],
+        }),
+        JSON.stringify({
+          "hotel_catalog.profile": source,
+          "hotel_catalog.media": source,
+          "hotel_catalog.amenities": source,
+        }),
+        now.toISOString(),
+      ],
+    );
+    if (scenario === "other resume step") {
+      await admin.query(
+        "UPDATE hotel_catalog.property_setup_sessions SET resume_step_id = 'rooms' WHERE id = $1::uuid",
+        [sessionId],
+      );
+    }
+    await expect(prepareAndSave(command)).resolves.toMatchObject({ ok: true });
+    const state = await admin.query(
+      `SELECT resume_step_id, revision,
+           (SELECT count(*)::integer FROM hotel_catalog.property_setup_step_drafts WHERE session_id = session.id) AS drafts
+         FROM hotel_catalog.property_setup_sessions session WHERE id = $1::uuid`,
+      [sessionId],
+    );
+    const consumed = ["applied", "normalized summary", "other resume step"].includes(scenario);
+    expect(state.rows[0]).toEqual({
+      resume_step_id:
+        scenario === "other resume step" ? "rooms" : consumed ? null : "present_hotel",
+      revision: 2,
+      drafts: consumed ? 0 : 1,
+    });
+    // Exact retries must not advance either canonical or session revisions.
+    await expect(prepareAndSave(command)).resolves.toMatchObject({ ok: true });
+    await expect(readRevision()).resolves.toBe(2);
+    const replaySession = await admin.query(
+      "SELECT revision FROM hotel_catalog.property_setup_sessions WHERE id = $1::uuid",
+      [sessionId],
+    );
+    expect(replaySession.rows[0].revision).toBe(2);
+  });
+
   async function seedFixture(): Promise<void> {
     await admin.query(
       `INSERT INTO identity.users (id, email, name, status)
@@ -428,10 +514,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Hotel Catalog Step 1 command", (
     await admin.query(
       `INSERT INTO hotel_catalog.property_setup_sessions (
          id, organization_id, property_id, selected_tracks, track_revision,
-         resume_step_id, retention_expires_at
+         resume_step_id, retention_expires_at, created_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, ARRAY['hotel_operations'], 1,
-         'present_hotel', $4::timestamptz + interval '30 days'
+         'present_hotel', $4::timestamptz + interval '30 days', $4::timestamptz, $4::timestamptz
        )`,
       [sessionId, organizationId, propertyId, now.toISOString()],
     );
