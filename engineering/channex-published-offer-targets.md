@@ -707,3 +707,19 @@ canonical-equivalence fixtures after provider semantics are verified. Durable
 initial delivery/readback and activation consume that verified mapping afterward.
 No provider request, readiness transition, or runtime sender is enabled by this
 contract change.
+
+### Current pending-target restriction observation (VAY-1528)
+
+`readCurrentChannexNightRestrictions` composes the nightly readback with the
+existing current-publication and identified-creation boundary. It obtains the
+room configuration, terms revisions and provider IDs from that boundary, calls
+one bounded GET, then repeats the lease, publication, owner, binding, mapping,
+pending-intent and complete creation-receipt checks. The reservation, provider
+identity and publication must still match before the observation is returned.
+Caller-owned selection and lease objects are copied before asynchronous work.
+
+The returned observation carries its attempt, target, intent and version. It is
+not persisted, a provider write acknowledgement, an OTA semantics certificate,
+a future send permit or an activation decision. A sender must still establish
+its own current authority and complete initial ARI requirements. No runtime
+sender is connected by this entrypoint.

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { verifyChannexNightRestrictions } from "../integrations/channexRestrictionReadback.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
 import { channexCreationReceiptsResolved, readChannexCreationReceiptIdentity } from "./channexCreationReceiptGate.js";
@@ -224,6 +226,64 @@ export async function retainChannexOfferConfiguration(
   });
   if (after.kind !== "available") return after;
   return { kind: "configuration_retained" as const, attemptId };
+}
+
+/** Current pending-target observation only, never a send or activation permit. */
+export async function readCurrentChannexNightRestrictions(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  date: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const work = { kind: "configuration" as const, attemptId };
+  const before = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (before.kind !== "available") return before;
+  if (!before.configurationIdentity || !before.reservation)
+    throw new Error("Configuration identity missing");
+  const room = before.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const observation = await verifyChannexNightRestrictions(
+    room,
+    {
+      propertyId: before.authority.lease.propertyId,
+      roomTypeId: selected.roomTypeId,
+      offerId: selected.offerId,
+      date,
+      expectedRevision: before.publication.revision,
+      expectedTermsRevisions: Object.fromEntries(
+        before.owners.terms
+          .filter((terms) => terms.roomTypeId === selected.roomTypeId)
+          .map((terms) => [terms.offerId, terms.revision]),
+      ),
+    },
+    {
+      externalPropertyId: before.configurationIdentity.externalPropertyId,
+      externalRatePlanId: before.configurationIdentity.externalRatePlanId,
+    },
+    (_method, path) => boundedProviderCall((signal) => get(path, signal)),
+  );
+  const after = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (after.kind !== "available") return after;
+  if (
+    !isDeepStrictEqual(before.reservation, after.reservation) ||
+    !isDeepStrictEqual(before.configurationIdentity, after.configurationIdentity) ||
+    !isDeepStrictEqual(before.publication, after.publication)
+  )
+    return { kind: "unavailable" as const, reason: "restriction_observation_stale" };
+  return {
+    kind: "restrictions_observed" as const,
+    attemptId,
+    ...before.reservation,
+    observation,
+  };
 }
 
 /** Only a newly committed claim can create this one-shot closure. No runtime adapter is wired. */
