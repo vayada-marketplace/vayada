@@ -14,7 +14,7 @@ import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import { bookingQuoteAcceptanceRequirements, parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
-import { redeemCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
+import { redeemCurrentQuotePromo, redeemLockedCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
@@ -1773,6 +1773,26 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         )
       ).rows,
     ).toEqual([{ amount: "20.00" }]);
+  });
+  it("composes locked promo consumption and same-command replay without invalidating its own usage, then rolls back", async () => {
+    const r = await redemptionFixture(false, 1);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      const current = await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, r.quote.quoteId);
+      expect(current).not.toBeNull();
+      const first = await redeemLockedCurrentQuotePromo(client, r.f.scope.propertyId, current!, r.id);
+      expect(first).toMatchObject({ kind: "applied", discountMinor: "2000", replayed: false });
+      expect((await client.query("SELECT current_uses FROM booking.promo_definitions WHERE property_id=$1", [r.f.scope.propertyId])).rows[0].current_uses).toBe(1);
+      // A full re-read now rejects the command's own consumed final use.
+      expect(await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, r.quote.quoteId)).toBeNull();
+      expect(await redeemLockedCurrentQuotePromo(client, r.f.scope.propertyId, current!, r.id)).toEqual({ ...first, replayed: true });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(await r.uses()).toBe(0);
+    expect((await pool.query("SELECT id FROM booking.promo_applications WHERE guest_booking_id=$1", [r.id])).rows).toEqual([]);
   });
   it("rejects another booking using a redeemed quote and rejects mismatched booking evidence", async () => {
     const r = await redemptionFixture();

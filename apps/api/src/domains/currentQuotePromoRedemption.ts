@@ -1,9 +1,36 @@
+import { isDeepStrictEqual } from "node:util";
+import type { StoredPricingQuote } from "@vayada/domain-booking";
 import type { PoolClient } from "pg";
 import { isPositiveMinor, pricingCurrencyScale } from "@vayada/domain-pms";
 import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { pricingDecimalMinor } from "./pricingDecimalMinor.js";
+
+type CurrentQuote = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
+const fail = (): never => {
+  throw new Error("Quote promotion is unavailable");
+};
+const uuid = (v: unknown) =>
+  typeof v === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+
+/** Consume the successful pre-mutation revalidation from this same retained
+ * READ COMMITTED transaction. Never call with posted, historical or unlocked evidence.
+ * Preserves booking links and replay; no reprice after own inventory/promo changes.
+ * Caller must run its final-time gate after all writes and roll back on failure. */
+export async function redeemLockedCurrentQuotePromo(
+  client: PoolClient,
+  slug: unknown,
+  current: CurrentQuote,
+  guestBookingId: unknown,
+) {
+  if (!uuid(guestBookingId) || current.scope.propertyId !== current.quote.stay.propertyId)
+    return fail();
+  const scope = await lockPublicPricingAuthority(client, slug);
+  if (!scope || !isDeepStrictEqual(scope, current.scope)) return fail();
+  return redeemQuotePromo(client, slug, current.quote, scope, guestBookingId, current);
+}
 
 /** Internal acceptance step. Caller owns READ COMMITTED and must roll back the
  * booking, inventory and redemption together on any later failure. No payment execution. */
@@ -13,12 +40,6 @@ export async function redeemCurrentQuotePromo(
   quoteId: unknown,
   guestBookingId: unknown,
 ) {
-  const fail = (): never => {
-    throw new Error("Quote promotion is unavailable");
-  };
-  const uuid = (v: unknown) =>
-    typeof v === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
   if (!uuid(quoteId) || !uuid(guestBookingId)) return fail();
   const scope = await lockPublicPricingAuthority(client, slug);
   if (!scope) return fail();
@@ -32,8 +53,18 @@ export async function redeemCurrentQuotePromo(
     ? decodeCurrentPricingQuoteRecord(row.payload, scope.propertyId, row.id)
     : null;
   if (!stored) return fail();
-  const { quote } = stored,
-    scale = pricingCurrencyScale(quote.stay.currency);
+  return redeemQuotePromo(client, slug, stored.quote, scope, guestBookingId);
+}
+
+async function redeemQuotePromo(
+  client: PoolClient,
+  slug: unknown,
+  quote: StoredPricingQuote,
+  scope: CurrentQuote["scope"],
+  guestBookingId: unknown,
+  locked?: CurrentQuote,
+) {
+  const scale = pricingCurrencyScale(quote.stay.currency);
   const booking = (
     await client.query(
       `SELECT id,check_in::text,check_out::text,currency,room_count,total_amount::text,booking_metadata,lifecycle_status
@@ -44,7 +75,7 @@ export async function redeemCurrentQuotePromo(
   if (
     !booking ||
     scale === null ||
-    booking.booking_metadata.pricingQuoteId !== quote.quoteId ||
+    booking.booking_metadata?.pricingQuoteId !== quote.quoteId ||
     booking.check_in !== quote.stay.checkIn ||
     booking.check_out !== quote.stay.checkOut ||
     booking.currency !== quote.stay.currency ||
@@ -67,25 +98,31 @@ export async function redeemCurrentQuotePromo(
       prior.length !== 1 ||
       p.guest_booking_id !== booking.id ||
       p.application_status !== "applied" ||
-      !isPositiveMinor(p.metadata.discountMinor) ||
-      p.metadata.version !== "booking.quote-promo.v1" ||
-      p.metadata.pricingQuoteId !== quote.quoteId ||
+      !isPositiveMinor(p.metadata?.discountMinor) ||
+      p.metadata?.version !== "booking.quote-promo.v1" ||
+      p.metadata?.pricingQuoteId !== quote.quoteId ||
       p.currency !== quote.stay.currency ||
-      pricingDecimalMinor(p.discount_amount, scale) !== p.metadata.discountMinor
+      pricingDecimalMinor(p.discount_amount, scale) !== p.metadata?.discountMinor ||
+      (locked &&
+        (!locked.calculation.code ||
+          p.metadata?.discountMinor !== locked.calculation.discounts.codeMinor))
     )
       return fail();
-    if (!(await lockPublicPricingAuthority(client, slug))) return fail();
+    if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
     return {
       kind: "applied" as const,
       applicationId: p.id as string,
-      discountMinor: p.metadata.discountMinor as string,
+      discountMinor: p.metadata?.discountMinor as string,
       replayed: true,
     };
   }
-  const current = await lockCurrentQuoteRevalidation(client, slug, quote.quoteId);
-  if (!current) return fail();
+  const current = locked ?? (await lockCurrentQuoteRevalidation(client, slug, quote.quoteId));
+  if (!current || !isDeepStrictEqual(current.scope, scope)) return fail();
+  if (locked && !isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope))
+    return fail();
   const { code, discounts } = current.calculation;
   if (!code || discounts.codeMinor === "0") return { kind: "not_applied" as const };
+  if (!isPositiveMinor(discounts.codeMinor)) return fail();
   // The existing application column is numeric(15,2). Never silently round a
   // higher-precision currency or overflow it; the acceptance transaction must fail.
   const amount = BigInt(discounts.codeMinor),
