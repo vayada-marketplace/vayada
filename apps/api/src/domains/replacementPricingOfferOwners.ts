@@ -1,3 +1,4 @@
+import { verifyChannexStagedNightPrices } from "../integrations/channexStagedPriceReadback.js";
 import { verifyChannexMinimumStayCapability } from "../integrations/channexMinimumStayCapability.js";
 import { verifyChannexAriTaskFinish } from "../integrations/channexAriTaskReadback.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
@@ -353,6 +354,55 @@ export async function readCurrentChannexStagedRestrictions(
     return { kind: "unavailable" as const, reason: "staged_restriction_observation_stale" };
   return {
     kind: "staged_restrictions_observed" as const,
+    creationAttemptId: attemptId,
+    ariAttemptId,
+    ...before.reservation,
+    observation,
+  };
+}
+/** Observe the immutable upload under current ownership; never release or resend it. */
+export async function readCurrentChannexStagedPrices(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  ariAttemptId: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (![attemptId, ariAttemptId].every((id) => typeof id === "string" && uuid.test(id)))
+    return { kind: "unavailable" as const, reason: "invalid_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const work = { kind: "ari_observe" as const, attemptId, ariAttemptId };
+  const before = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (before.kind !== "available") return before;
+  if (!before.stagedAri || !before.configurationIdentity) throw new Error("Staged ARI missing");
+  const room = before.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const observation = await boundedProviderCall((signal) =>
+    verifyChannexStagedNightPrices(
+      room,
+      selected.offerId,
+      selected.primaryOccupancy,
+      before.configurationIdentity!,
+      before.stagedAri!.request,
+      (_method, path) => {
+        signal.throwIfAborted();
+        return get(path, signal);
+      },
+    ),
+  );
+  const after = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (after.kind !== "available") return after;
+  if (
+    !isDeepStrictEqual(before.stagedAri, after.stagedAri) ||
+    !isDeepStrictEqual(before.reservation, after.reservation) ||
+    !isDeepStrictEqual(before.configurationIdentity, after.configurationIdentity) ||
+    !isDeepStrictEqual(before.publication, after.publication)
+  )
+    return { kind: "unavailable" as const, reason: "staged_price_observation_stale" };
+  return {
+    kind: "staged_prices_observed" as const,
     creationAttemptId: attemptId,
     ariAttemptId,
     ...before.reservation,
