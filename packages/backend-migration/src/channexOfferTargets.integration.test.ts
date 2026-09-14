@@ -455,6 +455,188 @@ describe.skipIf(!url)("Channex offer target storage", () => {
       );
     return { ...f, t, i, a, job, jobAttempt, worker, receipt };
   }
+  async function ariFixture(identified = true) {
+    const f = await correlatedFixture(),
+      rate = randomUUID();
+    if (identified)
+      await pool.query(
+        "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+        [f.a.id, rate],
+      );
+    const insert = (
+      client = pool,
+      date = "2030-06-14",
+      job = f.jobAttempt,
+      worker: string = f.worker,
+      body: unknown = { values: [{ date }] },
+    ) =>
+      client.query(
+        `INSERT INTO pms.channex_offer_ari_attempts
+         (creation_attempt_id,job_attempt_id,worker_id,service_date,request_body,external_rate_plan_id)
+         VALUES($1,$2,$3,$4,$5,'caller-forged-rate') RETURNING *`,
+        [f.a.id, job, worker, date, JSON.stringify(body)],
+      );
+    return { ...f, rate, insert };
+  }
+  it("binds initial ARI storage to identified creation and retains immutable history", async () => {
+    const f = await ariFixture(),
+      a = (await f.insert()).rows[0];
+    expect(a).toMatchObject({
+      creation_attempt_id: f.a.id,
+      target_id: f.t,
+      intent_id: f.i.id,
+      version: f.i.version,
+      binding_generation: f.generation,
+      external_property_id: f.property,
+      external_room_type_id: f.room,
+      external_rate_plan_id: f.rate,
+      job_attempt_id: f.jobAttempt,
+      worker_id: f.worker,
+      state: "unresolved",
+      reconciliation_evidence: {},
+      request_body: { values: [{ date: "2030-06-14" }] },
+    });
+    for (const assignment of [
+      "request_body='{}'",
+      "job_attempt_id=gen_random_uuid()",
+      "worker_id='other'",
+      "service_date='2030-06-15'",
+      "external_rate_plan_id='other'",
+      "creation_attempt_id=gen_random_uuid()",
+      "binding_generation=gen_random_uuid()",
+      "created_at='2000-01-01'",
+    ]) {
+      await expect(
+        pool.query(`UPDATE pms.channex_offer_ari_attempts SET ${assignment} WHERE id=$1`, [a.id]),
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+    await expect(
+      pool.query("DELETE FROM pms.channex_offer_ari_attempts WHERE id=$1", [a.id]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("UPDATE pms.channex_offer_ari_attempts SET state='reconciled' WHERE id=$1", [
+        a.id,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+    // Storage transition only. A future service must validate real completion evidence.
+    await pool.query(
+      "UPDATE pms.channex_offer_ari_attempts SET state='reconciled',reconciliation_evidence=$2 WHERE id=$1",
+      [a.id, { fixture: "reconciled" }],
+    );
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_offer_ari_attempts SET reconciliation_evidence=$2 WHERE id=$1",
+        [a.id, { fixture: "changed" }],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    expect((await f.insert(pool, "2030-06-15")).rows[0].state).toBe("unresolved");
+    expect(
+      (await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [f.t]))
+        .rows[0].active_version,
+    ).toBeNull();
+  });
+  it("rejects unresolved creation, foreign jobs, stale bindings and failed intents", async () => {
+    const unresolved = await ariFixture(false);
+    await expect(unresolved.insert()).rejects.toMatchObject({ code: "23514" });
+    const f = await ariFixture(),
+      other = await ariFixture();
+    await expect(
+      f.insert(pool, "2030-06-14", other.jobAttempt, other.worker),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(f.insert(pool, "2030-06-14", f.jobAttempt, "wrong-worker")).rejects.toMatchObject({
+      code: "23514",
+    });
+    await pool.query(
+      "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+      [f.connection],
+    );
+    await expect(f.insert()).rejects.toMatchObject({ code: "23514" });
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      other.i.id,
+    ]);
+    await expect(other.insert()).rejects.toMatchObject({ code: "23514" });
+  });
+  it("bounds ARI requests and rejects non-object, empty and oversized bodies", async () => {
+    const f = await ariFixture();
+    for (const body of [null, [], {}, { oversized: "x".repeat(65536) }])
+      await expect(
+        f.insert(pool, "2030-06-14", f.jobAttempt, f.worker, body),
+      ).rejects.toMatchObject({ code: "23514" });
+    await expect(f.insert(pool, "infinity")).rejects.toMatchObject({ code: "23514" });
+  });
+  it("serializes dates and retains exclusion when an intent fails", async () => {
+    const f = await ariFixture();
+    await f.insert();
+    await expect(f.insert(pool, "2030-06-15")).rejects.toMatchObject({ code: "23505" });
+    // Another rate under the same property remains independent.
+    const t = await f.target(),
+      i = await f.intent(t),
+      a = await f.createAttempt(t, i);
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [a.id, randomUUID()],
+    );
+    await pool.query(
+      `INSERT INTO pms.channex_offer_ari_attempts(creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+      VALUES($1,$2,$3,'2030-06-14','{"values":[1]}')`,
+      [a.id, f.jobAttempt, f.worker],
+    );
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      f.i.id,
+    ]);
+    const replacement = await f.intent(f.t),
+      next = await f.createAttempt(f.t, replacement);
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [next.id, f.rate],
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_offer_ari_attempts(creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+      VALUES($1,$2,$3,'2030-06-15','{"values":[1]}')`,
+        [next.id, f.jobAttempt, f.worker],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+  it("keeps unresolved provider-rate exclusion across binding replacement", async () => {
+    const f = await ariFixture();
+    await f.insert();
+    await pool.query("UPDATE pms.channex_offer_target_intents SET status='failed' WHERE id=$1", [
+      f.i.id,
+    ]);
+    const generation = randomUUID(),
+      next = await f.intent(f.t);
+    await pool.query("UPDATE pms.channel_connections SET binding_generation=$2 WHERE id=$1", [
+      f.connection,
+      generation,
+    ]);
+    const creation = (
+      await pool.query(
+        `INSERT INTO pms.channex_offer_create_attempts
+       (target_id,intent_id,version,binding_generation,external_property_id,external_room_type_id,request_body)
+       VALUES($1,$2,$3,$4,$5,$6,'{"rate_plan":{}}') RETURNING id`,
+        [f.t, next.id, next.version, generation, f.property, f.room],
+      )
+    ).rows[0].id;
+    await pool.query(
+      "UPDATE pms.channex_offer_create_attempts SET state='identified',external_rate_plan_id=$2 WHERE id=$1",
+      [creation, f.rate],
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_offer_ari_attempts(creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+       VALUES($1,$2,$3,'2030-06-15','{"values":[1]}')`,
+        [creation, f.jobAttempt, f.worker],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+  it("allows only one concurrent initial ARI claim", async () => {
+    const f = await ariFixture();
+    const results = await Promise.allSettled([f.insert(), f.insert(pool, "2030-06-15")]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((r) => r.status === "rejected");
+    expect(rejected).toMatchObject({ status: "rejected", reason: { code: "23505" } });
+  });
   it("retains late correlated observations without identifying or activating", async () => {
     const f = await correlatedFixture();
     await pool.query(
