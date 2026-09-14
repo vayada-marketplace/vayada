@@ -34,10 +34,15 @@ export async function readAdoptionTargetRow(
 /** Separate ownership boundary; the clean-adoption allowlist remains unchanged. */
 export async function readLegacyOwnershipTargetRow(
   client: AdoptionQueryClient,
-  table: (typeof LEGACY_OWNERSHIP_ROW_TABLES)[keyof typeof LEGACY_OWNERSHIP_ROW_TABLES],
+  table:
+    | (typeof LEGACY_OWNERSHIP_ROW_TABLES)[keyof typeof LEGACY_OWNERSHIP_ROW_TABLES]
+    | "identity.external_identities",
   id: string,
 ): Promise<{ id: string; rowStateSha256: string }> {
-  if (!(Object.values(LEGACY_OWNERSHIP_ROW_TABLES) as readonly string[]).includes(table))
+  if (
+    table !== "identity.external_identities" &&
+    !(Object.values(LEGACY_OWNERSHIP_ROW_TABLES) as readonly string[]).includes(table)
+  )
     rejectAdoption("UNSUPPORTED_TARGET_TABLE");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
     rejectAdoption("TARGET_ROW_MISMATCH");
