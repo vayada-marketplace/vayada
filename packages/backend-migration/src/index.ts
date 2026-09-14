@@ -102,6 +102,11 @@ export type {
   ProductionBookingPlan,
   ProductionBookingTargetState,
 } from "./productionBookingTypes.js";
+export {
+  runNightlyRevenueBackfillPage,
+  type NightlyRevenueBackfillMode,
+  type NightlyRevenueBackfillPageInput,
+} from "./bookingNightlyRevenueBackfillMigration.js";
 
 export {
   runProductionPmsMigration,
