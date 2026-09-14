@@ -840,3 +840,22 @@ immutable and are not rewritten or released by this change. Any future dispatche
 must reject a recovered or open initial payload; only a newly claimed one-use
 operation with explicit closure can be eligible for its remaining guards. No
 runtime sender, provider write, receipt reconciliation or activation is enabled.
+
+
+### Property-local initial ARI dates (VAY-1545)
+
+New initial claims require a current locked property-location timezone and use
+the database clock to establish the hotel's calendar date. Missing or invalid
+timezone and malformed dates fail closed; there is no server-timezone fallback.
+The admitted interval includes local today through today plus548 calendar days,
+reusing the existing full-ARI default exported by the scheduler. Calendar-day
+arithmetic is independent of daylight-saving day length. This bounds initial
+provisioning; it does not change scheduler configuration overrides or assert
+that inventory is open for those dates.
+
+This admission runs before storing upload ownership under the current-authority
+transaction. The location row remains locked until commit. It is not a durable
+send permission: future dispatch must repeat admission using current timezone,
+clock and applicable scheduling policy immediately before IO, alongside closed
+payload, receipt, ownership and capability checks. Old claims receive no resend
+opportunity or new date authority from this change.

@@ -294,8 +294,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     return f;
   }
+  const initialAriDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  const nextAriDate = new Date(Date.now() + 4 * 86400000).toISOString().slice(0, 10);
   async function initialAriFixture(baseMinor = "10000") {
     const f = await configurationFixture(baseMinor);
+    await pool.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+      [f.scope.propertyId],
+    );
     expect(
       await retainChannexOfferConfiguration(
         pool,
@@ -305,7 +311,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         async () => f.response().json(),
       ),
     ).toMatchObject({ kind: "configuration_retained" });
-    const claim = (date = "2030-06-14") =>
+    const claim = (date = initialAriDate) =>
       claimPublishedChannexInitialAri(pool, f.input, f.selection, f.claim.attemptId, date);
     return { ...f, claimAri: claim };
   }
@@ -340,7 +346,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           {
             property_id: f.scope.propertyId,
             rate_plan_id: rate,
-            date: "2030-06-14",
+            date: initialAriDate,
             rates: [
               { occupancy: 1, rate: "100.00" },
               { occupancy: 2, rate: "100.00" },
@@ -355,7 +361,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         ],
       },
     });
-    for (const date of ["2030-06-14", "2030-06-15"])
+    for (const date of [initialAriDate, nextAriDate])
       expect(await f.claimAri(date)).toMatchObject({
         kind: "unavailable",
         reason: "ari_reconciliation_required",
@@ -422,7 +428,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
           expectedRevision: f.terms[0].revision,
           terms: f.termsInput,
         });
-      expect(await f.claimAri(variant === "date" ? "2030-02-30" : "2030-06-14")).toMatchObject({
+      expect(await f.claimAri(variant === "date" ? "2030-02-30" : initialAriDate)).toMatchObject({
         kind: "unavailable",
       });
       expect(
@@ -444,7 +450,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         f.input,
         f.selection,
         f.claim.attemptId,
-        "2030-06-14",
+        initialAriDate,
       ),
     ).toMatchObject({ kind: "unavailable" });
     expect(
@@ -453,7 +459,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         other.input,
         other.selection,
         f.claim.attemptId,
-        "2030-06-14",
+        initialAriDate,
       ),
     ).toMatchObject({ kind: "unavailable" });
   });
@@ -475,7 +481,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         f.input,
         f.selection,
         f.claim.attemptId,
-        "2030-06-14",
+        initialAriDate,
       ),
     ).toMatchObject({ kind: "unavailable" });
     expect(reached).toBe(true);
@@ -660,6 +666,35 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       stale.release();
     }
   });
+  it.each(["missing", "invalid", "past", "beyond"])(
+    "rejects initial ARI %s date admission before storing ownership",
+    async (variant) => {
+      const f = await initialAriFixture();
+      if (variant === "missing")
+        await pool.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [
+          f.scope.propertyId,
+        ]);
+      if (variant === "invalid")
+        await pool.query(
+          "UPDATE hotel_catalog.property_locations SET timezone='invalid/zone' WHERE property_id=$1",
+          [f.scope.propertyId],
+        );
+      const date =
+        variant === "past" ? "2000-01-01" : variant === "beyond" ? "9999-01-01" : initialAriDate;
+      expect(await f.claimAri(date)).toEqual({
+        kind: "unavailable",
+        reason: "ari_date_unavailable",
+      });
+      expect(
+        (
+          await pool.query(
+            "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE target_id=$1",
+            [f.claim.targetId],
+          )
+        ).rows[0].count,
+      ).toBe(0);
+    },
+  );
   async function restrictionFixture() {
     const f = await configurationFixture();
     const rateId = ((await f.response().json()) as { data: { id: string } }).data.id;
