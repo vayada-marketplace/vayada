@@ -521,7 +521,17 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     if (prepared.kind !== "prepared") throw new Error("dispatch required");
     const get = vi.fn(async (path: string) =>
-      path.includes("room_types") ? providerRoom(f) : f.response().json(),
+      path.includes("properties/")
+        ? {
+            data: {
+              type: "property",
+              id: f.scope.propertyId,
+              attributes: { settings: { min_stay_type: "both" } },
+            },
+          }
+        : path.includes("room_types")
+          ? providerRoom(f)
+          : f.response().json(),
     );
     const taskId = randomUUID();
     const post = vi.fn(
@@ -541,7 +551,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     });
     const result = await first;
     expect(result.kind).toBe("retained");
-    expect(f.get).toHaveBeenCalledTimes(2);
+    expect(f.get).toHaveBeenCalledTimes(3);
     expect(f.post).toHaveBeenCalledOnce();
     expect(f.post.mock.calls[0]![0]).toMatchObject({
       method: "POST",
@@ -591,6 +601,38 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       });
       expect(f.post).not.toHaveBeenCalled();
       if (when === "before") expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["arrival", "through", "unknown", undefined])(
+    "does not POST or retain a provider receipt for unsupported minimum-stay mode %s",
+    async (mode) => {
+      const f = await initialDispatchFixture();
+      const get = vi.fn(async (path: string) => {
+        if (path.includes("properties/"))
+          return {
+            data: {
+              type: "property",
+              id: f.scope.propertyId,
+              attributes: { settings: { min_stay_type: mode } },
+            },
+          };
+        return f.get(path);
+      });
+      expect(await f.prepared.dispatch({ get, post: f.post })).toEqual({
+        kind: "unavailable",
+        reason: "ari_restriction_capability_unavailable",
+      });
+      expect(get).toHaveBeenCalledOnce();
+      expect(f.post).not.toHaveBeenCalled();
+      expect(
+        (
+          await pool.query(
+            `SELECT r.id FROM pms.channex_offer_ari_receipts r JOIN pms.channex_offer_ari_attempts a ON a.id=r.attempt_id WHERE a.creation_attempt_id=$1`,
+            [f.claim.attemptId],
+          )
+        ).rows,
+      ).toHaveLength(0);
+      expect(await f.prepared.dispatch(f)).toMatchObject({ reason: "dispatch_already_used" });
     },
   );
   it.each(["room_types", "rate_plans"])(

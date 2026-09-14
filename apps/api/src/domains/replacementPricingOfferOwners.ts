@@ -1,3 +1,4 @@
+import { verifyChannexMinimumStayCapability } from "../integrations/channexMinimumStayCapability.js";
 import { verifyChannexAriTaskFinish } from "../integrations/channexAriTaskReadback.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
@@ -456,9 +457,14 @@ export async function prepareChannexInitialAriDispatch(
       used = true;
       const before = await withSelectedChannexTarget(pool, lease, selected, work);
       if (before.kind !== "available") return before;
+      const get = (_method: "GET", path: string) =>
+        boundedProviderCall((signal) => ports.get(path, signal));
       try {
-        const get = (_method: "GET", path: string) =>
-          boundedProviderCall((signal) => ports.get(path, signal));
+        await verifyChannexMinimumStayCapability(identity.externalPropertyId, get);
+      } catch {
+        return { kind: "unavailable" as const, reason: "ari_restriction_capability_unavailable" };
+      }
+      try {
         await verifyChannexOfferRoom(room, identity, get);
         await verifyChannexOfferConfiguration(
           room,
