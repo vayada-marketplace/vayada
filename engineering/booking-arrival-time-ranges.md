@@ -11,8 +11,10 @@ immutable revision, audit and outbox. Catalog remains a public projection.
 Optional `checkInUntil` and `checkOutFrom` bound the respective same-day windows.
 Absent bounds mean from-only check-in and by-only check-out, as before. No
 missing bound is defaulted or inferred. Supplied bounds must be HH:MM and strictly
-ordered within their own window; overnight windows are not represented by this
-contract. Never compare arrival and departure times against each other.
+ordered within their own window. `checkInUntil: "00:00"` is the one ordering
+exception: it explicitly means the end of the arrival day, preserving legacy
+windows such as `14:00–00:00`. Other overnight windows are not represented by
+this contract. Never compare arrival and departure times against each other.
 The property's canonical IANA timezone applies; no UTC fallback is allowed.
 
 Optional keys are omitted, not inserted into historical bundles. Existing

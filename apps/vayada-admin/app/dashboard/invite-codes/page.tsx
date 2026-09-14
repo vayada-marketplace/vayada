@@ -16,6 +16,12 @@ import {
   type InviteCode,
 } from "@/services/api/inviteCodes";
 
+import {
+  PreparedHotelEditor,
+  emptyPreparedData,
+} from "@vayada/product-onboarding/PreparedHotelEditor";
+import { parsePreparedHotelImport } from "@vayada/domain-hotels";
+
 type InviteView = "list" | "create";
 type SetupRoute = "marketplace" | "operations" | "combined";
 
@@ -60,6 +66,8 @@ export default function InviteCodesPage() {
   const [organizationName, setOrganizationName] = useState("");
   const [propertyName, setPropertyName] = useState("");
   const [setupRoute, setSetupRoute] = useState<SetupRoute>("marketplace");
+  const [prepareData, setPrepareData] = useState(false);
+  const [preparedData, setPreparedData] = useState(emptyPreparedData);
   const [saving, setSaving] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createdInvite, setCreatedInvite] = useState<InviteCode | null>(null);
@@ -104,7 +112,18 @@ export default function InviteCodesPage() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedRoute = SETUP_ROUTE_OPTIONS.find((option) => option.id === setupRoute)!;
+    if (
+      prepareData &&
+      (!parsePreparedHotelImport(preparedData) ||
+        (preparedData.rooms.length > 0 && setupRoute === "marketplace"))
+    ) {
+      setCreateError(
+        "Check the prepared details. Each room needs a name and Hotel Operations access.",
+      );
+      return;
+    }
     const request: HotelAccountInviteCreateRequest = {
+      ...(prepareData ? { preparedData } : {}),
       identity: { email: inviteeEmail.trim() },
       organization: { displayName: organizationName.trim() },
       property: { displayName: propertyName.trim() },
@@ -129,6 +148,8 @@ export default function InviteCodesPage() {
     setOrganizationName("");
     setPropertyName("");
     setSetupRoute("marketplace");
+    setPrepareData(false);
+    setPreparedData(emptyPreparedData());
     setCreateError("");
     setCreatedInvite(null);
     setView("list");
@@ -270,6 +291,42 @@ export default function InviteCodesPage() {
               </div>
             </fieldset>
 
+            <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <label className="flex items-center gap-2 font-semibold">
+                <input
+                  type="checkbox"
+                  checked={prepareData}
+                  onChange={(event) => {
+                    setPrepareData(event.target.checked);
+                    if (event.target.checked && !preparedData.property.displayName)
+                      setPreparedData({
+                        ...preparedData,
+                        property: { ...preparedData.property, displayName: propertyName.trim() },
+                      });
+                  }}
+                />
+                Prepare hotel details and rooms
+              </label>
+              {prepareData && (
+                <div className="mt-4">
+                  <PreparedHotelEditor
+                    value={preparedData}
+                    onChange={setPreparedData}
+                    allowRooms={setupRoute !== "marketplace"}
+                  />
+                </div>
+              )}
+            </section>
+            {invites.some(
+              (invite) =>
+                invite.status === "pending" &&
+                invite.identity?.email.toLowerCase() === inviteeEmail.trim().toLowerCase(),
+            ) && (
+              <p role="status" className="text-sm text-amber-800">
+                A pending invitation already exists for this email. You can return to the list and
+                reuse its code.
+              </p>
+            )}
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"

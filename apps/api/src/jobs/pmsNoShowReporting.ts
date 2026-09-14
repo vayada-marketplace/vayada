@@ -8,17 +8,29 @@ import {
 } from "../domains/pmsNoShowReporting.js";
 
 type ProviderConfig = { apiBaseUrl: string; apiKey: string; fetch?: typeof fetch };
-export async function runNoShowReport(pool: pg.Pool, config: ProviderConfig, workerId: string) {
+export async function runNoShowReport(
+  pool: pg.Pool,
+  config: ProviderConfig,
+  workerId: string,
+  propertyId?: string,
+) {
+  if (
+    propertyId !== undefined &&
+    (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(propertyId) ||
+      config.apiBaseUrl !== "https://staging.channex.io")
+  ) {
+    throw new Error("Scoped no-show worker requires a property UUID and exact staging URL");
+  }
   const db = await pool.connect();
   let job: ReportJob | undefined;
   try {
     await db.query("BEGIN");
     job = (
       await db.query<ReportJob>(
-        `SELECT * FROM platform.jobs WHERE queue_name=$1 AND
+        `SELECT * FROM platform.jobs WHERE queue_name=$1 AND ($2::uuid IS NULL OR property_id=$2::uuid) AND
       ((status='pending' AND run_after<=now()) OR (status='running' AND locked_at<now()-interval '5 minutes'))
       ORDER BY run_after FOR UPDATE SKIP LOCKED LIMIT 1`,
-        [NO_SHOW_QUEUE],
+        [NO_SHOW_QUEUE, propertyId ?? null],
       )
     ).rows[0];
     if (!job) {

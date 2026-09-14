@@ -29,7 +29,7 @@ describe("PMS inventory public offer projection", () => {
     expect(target.queries.some((query) => query.includes("SET status = 'published'"))).toBe(false);
   });
 
-  it("projects stock, seasonal rates, and currency once then publishes the durable event", async () => {
+  it("invalidates priced offers once then publishes the durable event", async () => {
     const target = projectionPool({ profileAvailable: true, projectedOfferDays: 366 });
     const projector = createTargetPmsInventoryPublicOfferProjection({
       connectionString: "postgresql://unused",
@@ -47,53 +47,9 @@ describe("PMS inventory public offer projection", () => {
     expect(claim).toContain("outbox.destination = 'distribution.inventory-projection'");
     expect(claim).toContain("outbox.event_type = 'pms.inventory.projection_refresh_requested'");
     expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("inventory.available_count");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "hashtextextended(concat('pms-inventory:', $1::text), 0)",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("AS effective_rate");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("rate_plan.currency");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("'rateType', input.rate_type");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "input.capabilities -> 'paymentMethods'",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).not.toContain(
-      "input.capabilities ->> 'payAtProperty'",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("profile.policies");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "LEFT JOIN pms.flexible_rate_plan_cancellation_extensions cancellation_extension",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "THEN input.cancellation_policy_snapshot\n        ELSE input.policies || input.cancellation_policy_snapshot",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "cancellation_extension.cancellation_terms",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      ") ->> 'flexibleCancellationType' = 'partial_refund'",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "'cancellation', input.cancellation_summary",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "input.stay_date >= ($2::timestamptz AT TIME ZONE input.timezone)::date",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "input.stay_date < ($2::timestamptz AT TIME ZONE input.timezone)::date THEN 'closed'",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("input.inventory_status = 'closed'");
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "COALESCE(inventory.rate_gate_open, TRUE) AS rate_gate_open",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "input.rate_gate_open\n      AND input.room_type_active",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "CASE WHEN input.rate_gate_open THEN input.available_count ELSE 0 END",
-    );
-    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain(
-      "ON CONFLICT (property_id, public_offer_key, stay_date) DO UPDATE",
-    );
+    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).toContain("sellable_publicly = FALSE");
+    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).not.toContain("base_rate_amount");
+    expect(PROJECT_PMS_INVENTORY_TO_PUBLIC_OFFERS).not.toContain("INSERT INTO");
   });
 
   it("does not duplicate stock or offers after the event has already been published", async () => {
@@ -115,7 +71,7 @@ describe("PMS inventory public offer projection", () => {
     });
     expect(
       target.queries.filter((query) =>
-        query.includes("INSERT INTO distribution.public_room_offer_snapshots"),
+        query.includes("UPDATE distribution.public_room_offer_snapshots offer SET"),
       ),
     ).toHaveLength(1);
   });
@@ -295,11 +251,11 @@ function projectionPool(options: {
     }
     if (
       text.includes("FROM distribution.public_hotel_bookability_profiles") &&
-      !text.includes("INSERT INTO distribution.public_room_offer_snapshots")
+      !text.includes("UPDATE distribution.public_room_offer_snapshots offer SET")
     ) {
       return rows(options.profileAvailable ? ([{ exists: 1 }] as unknown as T[]) : ([] as T[]));
     }
-    if (text.includes("INSERT INTO distribution.public_room_offer_snapshots")) {
+    if (text.includes("UPDATE distribution.public_room_offer_snapshots offer SET")) {
       if (options.projectionError) throw options.projectionError;
       return rows(
         Array.from({ length: options.projectedOfferDays ?? 0 }, (_, index) => ({

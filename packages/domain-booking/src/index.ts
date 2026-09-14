@@ -659,3 +659,6 @@ export * from "./conversionFunnel.js";
 export * from "./bookingPromotions.js";
 
 export * from "./roomCombinationSearch.js";
+
+export * from "./replacementPricingEvidence.js";
+export * from "./affiliateBookingDestination.js";

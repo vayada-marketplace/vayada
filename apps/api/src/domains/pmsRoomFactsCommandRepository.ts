@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -121,6 +122,8 @@ const MANAGE_PERMISSION = "pms.operations.manage";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const EXPECTED_INBOUND_FOREIGN_KEYS = new Set([
+  "pms.channex_staging_catalog_references:fk_pms_staging_catalog_room_property:pms.room_types",
+  "pms.room_type_closures:room_type_closures_room_type_id_property_id_fkey:pms.room_types",
   "pms.rooms:fk_pms_rooms_room_type_property:pms.room_types",
   "pms.rate_plans:fk_pms_rate_plans_room_type_property:pms.room_types",
   "pms.rate_rules:fk_pms_rate_rules_room_type_property:pms.room_types",
@@ -348,6 +351,11 @@ export function createPgPmsRoomFactsCommandRepository(
       return runCommand(command, UPDATE_SPEC, async (client, acceptedAt) => {
         const current = await lockActiveRoomType(client, command.propertyId, command.roomTypeId);
         if (!current) return finalized(updateFailure({ code: "room_type_not_found" }));
+        const eligibility = (
+          await readPmsRoomOperatingEligibility(client, command.propertyId)
+        ).find((room) => room.roomTypeId === command.roomTypeId);
+        if (eligibility?.state !== "operating")
+          return finalized(updateFailure({ code: "room_type_not_found" }));
         const currentRevision = positiveDatabaseInteger(current.roomFactsRevision);
         if (currentRevision !== command.expectedRevision) {
           return finalized(
@@ -967,6 +975,7 @@ async function inspectDeleteReferences(
        distribution.public_room_offer_snapshots,
        pms.channel_rate_plan_mappings,
        pms.channel_room_type_mappings,
+       pms.channex_staging_catalog_references,
        pms.inventory_days,
        pms.non_refundable_rate_plan_source_rooms,
        pms.operational_booking_assignments,
@@ -976,6 +985,7 @@ async function inspectDeleteReferences(
        pms.recurring_pricing_source_room_values,
        pms.room_blocks,
        pms.room_type_media,
+       pms.room_type_closures,
        pms.rooms,
        platform.jobs,
        platform.outbox_events
@@ -1105,8 +1115,14 @@ async function inspectDeleteReferences(
          +
          (SELECT count(*) FROM pms.channel_rate_plan_mappings mapping
           WHERE mapping.property_id = $1::uuid AND mapping.room_type_id = $2::uuid)
+         +
+         (SELECT count(*) FROM pms.channex_staging_catalog_references ref
+          WHERE ref.property_id=$1::uuid AND ref.room_type_id=$2::uuid)
        )::bigint AS "channelReferenceCount",
        (
+         (SELECT count(*) FROM pms.room_type_closures closure
+          WHERE closure.property_id=$1::uuid AND closure.room_type_id=$2::uuid)
+         +
          (SELECT count(*)
           FROM pms.room_types room_type
           WHERE room_type.property_id = $1::uuid
