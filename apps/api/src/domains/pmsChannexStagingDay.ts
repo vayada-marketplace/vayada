@@ -13,7 +13,7 @@ export const stagingDay = {
   roomTypeId: "487d717d-6e61-4696-9ea9-3338f069ca06",
   stayDate: "2026-09-14",
 } as const;
-const auditKey = `pms.staging-day:${scope.propertyId}:${stagingDay.roomTypeId}:${stagingDay.stayDate}:v1`;
+export const noShowStagingDay = { ...stagingDay, stayDate: "2026-09-20" } as const;
 const hash = (value: unknown): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function requireState(condition: unknown): asserts condition {
@@ -23,10 +23,29 @@ function requireState(condition: unknown): asserts condition {
 /** Explicit one-date exception; never changes recurring configuration or coverage. */
 export async function prepareChannexStagingDay(
   config: ApiConfig,
-  input: { catalogHash: string; approvalRef: string; applyHash?: string },
+  input: {
+    catalogHash: string;
+    approvalRef: string;
+    applyHash?: string;
+    noShow?: boolean;
+    catalogApprovalRef?: string;
+  },
   request: typeof fetch = fetch,
 ) {
-  requireState(/^VAY-2013:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef));
+  requireState(input.noShow === undefined || typeof input.noShow === "boolean");
+  const day = input.noShow ? noShowStagingDay : stagingDay;
+  const auditKey = `pms.staging-day:${scope.propertyId}:${day.roomTypeId}:${day.stayDate}:v1`;
+  const approvalPattern = input.noShow
+    ? /^VAY-1535:[a-zA-Z0-9:_-]{1,120}$/
+    : /^VAY-2013:[a-zA-Z0-9:_-]{1,120}$/;
+  requireState(approvalPattern.test(input.approvalRef));
+  requireState(
+    input.noShow
+      ? typeof input.catalogApprovalRef === "string" &&
+          /^VAY-2013:[a-zA-Z0-9:_-]{1,120}$/.test(input.catalogApprovalRef)
+      : input.catalogApprovalRef === undefined,
+  );
+  const catalogApprovalRef = input.noShow ? input.catalogApprovalRef! : input.approvalRef;
   requireState(/^[a-f0-9]{64}$/.test(input.catalogHash));
   requireState(input.applyHash === undefined || /^[a-f0-9]{64}$/.test(input.applyHash));
   const catalog = await adoptChannexStagingCatalog(
@@ -35,7 +54,7 @@ export async function prepareChannexStagingDay(
       providerPropertyId: scope.providerPropertyId,
       bookingId: scope.bookingId,
       revisionId: scope.revisionId,
-      approvalRef: input.approvalRef,
+      approvalRef: catalogApprovalRef,
       retainedRevision: true,
       preImport: true,
     },
@@ -44,13 +63,13 @@ export async function prepareChannexStagingDay(
   requireState(
     catalog.outcome === "replayed" &&
       catalog.hash === input.catalogHash &&
-      catalog.roomTypeId === stagingDay.roomTypeId,
+      catalog.roomTypeId === day.roomTypeId,
   );
   const providerGuard: Record<string, unknown> = {};
   const query = new URLSearchParams({
     "filter[property_id]": scope.providerPropertyId,
-    "filter[date][gte]": stagingDay.stayDate,
-    "filter[date][lte]": stagingDay.stayDate,
+    "filter[date][gte]": day.stayDate,
+    "filter[date][lte]": day.stayDate,
     "filter[restrictions]": "stop_sell",
   });
   for (const kind of ["availability", "restrictions"] as const) {
@@ -62,7 +81,7 @@ export async function prepareChannexStagingDay(
     requireState(response.ok);
     const data = (await response.json()) as { data?: Record<string, Record<string, unknown>> };
     providerGuard[kind] =
-      data.data?.[kind === "availability" ? scope.roomId : scope.rateId]?.[stagingDay.stayDate];
+      data.data?.[kind === "availability" ? scope.roomId : scope.rateId]?.[day.stayDate];
   }
   requireState(
     typeof providerGuard.availability === "number" &&
@@ -81,7 +100,7 @@ export async function prepareChannexStagingDay(
     await pool.end();
     throw error;
   });
-  const values = [scope.propertyId, stagingDay.roomTypeId, stagingDay.stayDate];
+  const values = [scope.propertyId, day.roomTypeId, day.stayDate];
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='15s'");
@@ -109,7 +128,7 @@ export async function prepareChannexStagingDay(
       externalRoomTypeId: scope.roomId,
       externalRatePlanId: scope.rateId,
     });
-    requireState(reference.length === 1 && reference[0]!.roomTypeId === stagingDay.roomTypeId);
+    requireState(reference.length === 1 && reference[0]!.roomTypeId === day.roomTypeId);
     const room = (
       await client.query(
         `SELECT id::text AS "roomTypeId",property_id::text AS "propertyId",name,description,category,active,
@@ -182,17 +201,23 @@ export async function prepareChannexStagingDay(
       calendar &&
         calendar.sourceInputs.roomBindings.some(
           (r) =>
-            r.roomTypeId === stagingDay.roomTypeId &&
+            r.roomTypeId === day.roomTypeId &&
             r.sourceRoomFactsRevision === 2 &&
             r.sourceRoomUnitsRevision === 2 &&
             r.physicalCapacityCount === 1 &&
             r.startingSellableLimitCount === 1,
         ),
     );
+    if (input.noShow) {
+      requireState(
+        calendar.schedule.mode === "recurring" &&
+          hash(calendar.schedule.periods) === hash([{ startsOn: "09-20", endsOn: "09-21" }]),
+      );
+    }
     const evidence = {
       version: "pms-staging-date-exception.v1",
       ...scope,
-      ...stagingDay,
+      ...day,
       catalogHash: catalog.hash,
       providerGuard,
       binding,
@@ -203,6 +228,7 @@ export async function prepareChannexStagingDay(
       approvalRef: input.approvalRef,
       originalState: "absent",
       capacity: 1,
+      ...(input.noShow ? { purpose: "no-show", catalogApprovalRef } : {}),
     };
     const previewHash = hash(evidence);
     const existing = (
@@ -229,7 +255,7 @@ export async function prepareChannexStagingDay(
       requireState((count === 0 || count === 1) && current.state.available_count === 1 - count);
       const assignments = (
         await client.query(
-          `SELECT b.source_booking_id,m.external_revision_id FROM pms.operational_booking_assignments a
+          `SELECT b.source_booking_id,b.booking_channel,m.external_revision_id,m.external_booking_id,m.connection_id::text,a.check_in::text,a.check_out::text FROM pms.operational_booking_assignments a
          JOIN booking.guest_bookings b ON b.property_id=a.property_id AND b.id=a.guest_booking_id
          LEFT JOIN pms.channel_booking_mappings m ON m.property_id=b.property_id AND m.guest_booking_id=b.id
          WHERE a.property_id=$1::uuid AND a.room_type_id=$2::uuid AND a.check_in<=$3::date AND a.check_out>$3::date`,
@@ -238,21 +264,31 @@ export async function prepareChannexStagingDay(
       ).rows;
       requireState(
         assignments.length === count &&
-          assignments.every(
-            (a) =>
-              a.source_booking_id === `channex:${scope.propertyId}:${scope.bookingId}` &&
-              a.external_revision_id === scope.revisionId,
+          assignments.every((a) =>
+            input.noShow
+              ? a.connection_id === binding.id &&
+                a.booking_channel === "booking_com" &&
+                /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(a.external_booking_id ?? "") &&
+                /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(
+                  a.external_revision_id ?? "",
+                ) &&
+                a.source_booking_id === `channex:${scope.propertyId}:${a.external_booking_id}` &&
+                a.check_in === day.stayDate &&
+                a.check_out === "2026-09-21"
+              : a.source_booking_id === `channex:${scope.propertyId}:${scope.bookingId}` &&
+                a.external_revision_id === scope.revisionId,
           ),
       );
       await client.query("ROLLBACK");
-      return { outcome: "replayed", hash: previewHash, ...stagingDay };
+      return { outcome: "replayed", hash: previewHash, ...day };
     }
     requireState(!current);
     requireState(
       !(
         await client.query(
-          `SELECT 1 FROM pms.operational_booking_assignments WHERE property_id=$1::uuid AND room_type_id=$2::uuid`,
-          values.slice(0, 2),
+          `SELECT 1 FROM pms.operational_booking_assignments WHERE property_id=$1::uuid AND room_type_id=$2::uuid
+           AND (NOT $4::boolean OR (check_in<=$3::date AND check_out>$3::date))`,
+          [...values, input.noShow === true],
         )
       ).rowCount,
     );
@@ -261,7 +297,7 @@ export async function prepareChannexStagingDay(
       return {
         outcome: "preview",
         hash: previewHash,
-        ...stagingDay,
+        ...day,
         baseCalendarRevision: revision,
       };
     }
@@ -271,7 +307,7 @@ export async function prepareChannexStagingDay(
       [
         {
           propertyId: scope.propertyId,
-          ...stagingDay,
+          ...day,
           calendarRevision: revision,
           inventoryRevision: 1,
           sourceRevisions: { generated: revision, channel: 0, manual: 0, block: 0, booking: 0 },
@@ -299,12 +335,12 @@ export async function prepareChannexStagingDay(
       [
         auditKey,
         scope.propertyId,
-        stagingDay.roomTypeId,
+        day.roomTypeId,
         { hash: previewHash, evidence, inventorySignature: created.signature },
       ],
     );
     await client.query("COMMIT");
-    return { outcome: "applied", hash: previewHash, ...stagingDay, baseCalendarRevision: revision };
+    return { outcome: "applied", hash: previewHash, ...day, baseCalendarRevision: revision };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
