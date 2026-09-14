@@ -200,7 +200,11 @@ filter never changes inventory, coverage, recurrence or provider state.
 `prepareChannexStagingDay --no-show` prepares only September 20, 2026 for the
 same existing synthetic Double room at capacity one. It requires an explicit
 `VAY-1535:` approval and a separate `--catalog-approval-ref VAY-2013:...` for
-read-only verification of the retained catalog receipt. No arbitrary date, room,
+identifying the retained catalog approval in the new day’s evidence. The new day
+validates the accepted reference and hash against the current connection binding
+and active room mapping under locks; it does not re-fetch the historical hotel’s
+OTA pricing. Historical pricing can change from Standard to OBP after adoption.
+The September 14 path still performs its original live catalog replay. No arbitrary date, room,
 capacity or runtime is accepted. The September 14 command, hash and receipt
 remain unchanged. September 20 has its own immutable audit key and approval hash;
 the current calendar must still be revision 9 with the accepted September 20–21

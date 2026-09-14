@@ -6,6 +6,7 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { adoptChannexStagingCatalog } from "./channexStagingCatalogAdoption.js";
 import { prepareChannexStagingDay, stagingDay, noShowStagingDay } from "./pmsChannexStagingDay.js";
 import { retainedRevisionScope as scope } from "./channexStagingCatalogEvidence.js";
 import { config, databaseUrl } from "./channexStagingCatalogTestFixture.js";
@@ -470,6 +471,67 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
       );
     }
   });
+  it("uses the retained reference for new capacity when historical OTA pricing changes", async () => {
+    const adoption = vi.mocked(adoptChannexStagingCatalog);
+    adoption.mockRejectedValueOnce(new Error("invalid_retained_ota_catalog"));
+    await expect(run()).rejects.toThrow("invalid_retained_ota_catalog");
+    adoption.mockClear();
+    const preview = await runNoShow();
+    expect(preview.outcome).toBe("preview");
+    expect((await runNoShow(preview.hash)).outcome).toBe("applied");
+    expect((await runNoShow(preview.hash)).outcome).toBe("replayed");
+    expect(adoption).not.toHaveBeenCalled();
+    await expect(
+      prepareChannexStagingDay(
+        config(),
+        {
+          ...noShowInput,
+          catalogHash: "b".repeat(64),
+        },
+        request,
+      ),
+    ).rejects.toThrow("staging_day_conflict");
+  });
+
+  it.each([
+    "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+    "UPDATE pms.channel_room_type_mappings SET external_room_type_id='changed-provider-room' WHERE property_id=$1",
+  ])("rejects no-show reference drift without writing capacity: %s", async (mutation) => {
+    const preview = await runNoShow();
+    await db.query(mutation, [scope.propertyId]);
+    const before = await snapshot();
+    await expect(runNoShow(preview.hash)).rejects.toThrow("staging_day_conflict");
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("rejects unsafe no-show runtime before authenticated provider reads", async () => {
+    const base = config();
+    for (const unsafe of [
+      { ...base, apiRuntime: "legacy" as typeof base.apiRuntime },
+      { ...base, backgroundWorkersEnabled: true },
+      { ...base, targetDatabaseUrl: undefined },
+      ...[
+        { apiBaseUrl: "https://app.channex.io" },
+        { apiKey: undefined },
+        { stagingRestrictionsPropertyId: randomUUID() },
+        {
+          capabilityModes: {
+            ...base.channexManagement.capabilityModes,
+            bookingSync: "enabled" as typeof base.channexManagement.capabilityModes.bookingSync,
+          },
+        },
+      ].map((overrides) => ({
+        ...base,
+        channexManagement: { ...base.channexManagement, ...overrides },
+      })),
+    ]) {
+      await expect(prepareChannexStagingDay(unsafe, noShowInput, request)).rejects.toThrow(
+        "staging_day_conflict",
+      );
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("keeps no-show approval and hashes distinct and rolls back rejected applies", async () => {
     const before = await snapshot();
     const old = await run();
