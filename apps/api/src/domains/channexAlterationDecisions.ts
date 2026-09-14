@@ -6,6 +6,9 @@ import type {
 } from "../integrations/channexRequestDecisions.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
+import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
+import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const inputSchema = z.object({
   propertyId: uuid,
@@ -45,7 +48,7 @@ export async function decideChannexAlteration(
     pool: pg.Pool;
     journalPool: pg.Pool;
     provider: Provider;
-    assertAvailability: (
+    assertAvailability?: (
       transaction: pg.PoolClient,
       input: {
         propertyId: string;
@@ -90,7 +93,11 @@ export async function decideChannexAlteration(
       decision = journalSchema.parse(metadata["decision"]);
       if (decision.action !== input.action) throw new Error("alteration_decision_conflict");
     } else {
-      if (row.status !== "pending") throw new Error("alteration_not_pending");
+      if (
+        row.status !== "pending" ||
+        (metadata["providerState"] && metadata["providerState"] !== "pending")
+      )
+        throw new Error("alteration_not_pending");
       decision = {
         action: input.action,
         actorUserId: input.actorUserId,
@@ -179,8 +186,23 @@ export async function decideChannexAlteration(
           row.changes["currency"] !== booking.currency)
       )
         throw new Error("alteration_booking_snapshot_changed");
+      if (input.action === "accept" && (await hasBookingFinancialEvidence(client, input))) {
+        // No send has started. Release the queued intent so staff can still decline.
+        // Commit independently: the booking/binding locks stay held until rollback below.
+        const cleared = await config.journalPool.query(
+          `UPDATE booking.booking_change_requests change
+           SET requested_changes=requested_changes #- '{channex,decision}',updated_at=now()
+           FROM booking.guest_bookings booking WHERE change.guest_booking_id=booking.id
+             AND change.id=$1 AND booking.id=$2 AND booking.property_id=$3
+             AND change.requested_changes #>> '{channex,decision,action}'='accept'
+             AND change.requested_changes #>> '{channex,decision,sendStartedAt}' IS NULL`,
+          [input.changeRequestId, input.bookingId, input.propertyId],
+        );
+        if (cleared.rowCount !== 1) throw new Error("alteration_decision_not_saved");
+        throw new Error("alteration_finance_reconciliation_required");
+      }
       if (input.action === "accept")
-        await config.assertAvailability(client, {
+        await (config.assertAvailability ?? assertChannexAlterationAvailability)(client, {
           propertyId: input.propertyId,
           bookingId: input.bookingId,
           changes: row.changes,

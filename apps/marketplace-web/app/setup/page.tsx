@@ -24,6 +24,7 @@ export default async function MarketplaceSetupPage({ searchParams }: Marketplace
         defaultEntryProduct="marketplace"
         defaultReturnTo={ROUTES.MARKETPLACE}
         adaptiveShellEnabled={adaptiveShellEnabled}
+        airbnbImportEnabled={process.env.AIRBNB_IMPORT_CALLBACK_ENABLED === "true"}
       />
     </Suspense>
   );

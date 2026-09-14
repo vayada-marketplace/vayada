@@ -51,11 +51,23 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   targetState: ChannexManagementTargetStatePort;
   pool?: Pool;
   ariSyncMutating?: boolean;
+  stagingRestrictionsPropertyId?: string;
+  stagingMealsEnabled?: boolean;
+  stagingInventoryEnabled?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
   return {
-    claim: (input) => claim(pool, config.targetState, input, config.ariSyncMutating ?? true),
+    claim: (input) =>
+      claim(
+        pool,
+        config.targetState,
+        input,
+        config.ariSyncMutating ?? true,
+        config.stagingRestrictionsPropertyId ?? null,
+        config.stagingMealsEnabled ?? false,
+        config.stagingInventoryEnabled ?? false,
+      ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
     succeed: (job, result, input) => complete(pool, config.targetState, job, result, input),
     fail: (job, failure, input) => fail(pool, config.targetState, job, failure, input),
@@ -70,6 +82,9 @@ async function claim(
   targetState: ChannexManagementTargetStatePort,
   input: { workerId: string; now: Date },
   ariSyncMutating: boolean,
+  stagingRestrictionsPropertyId: string | null,
+  stagingMealsEnabled: boolean,
+  stagingInventoryEnabled: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
     if (ariSyncMutating)
@@ -79,7 +94,9 @@ async function claim(
        FROM pms.channel_connections connection
        JOIN hotel_catalog.property_locations location ON location.property_id=connection.property_id
        WHERE connection.provider='channex' AND location.timezone IS NOT NULL
-         AND connection.connection_status IN ('connected','degraded')`,
+         AND connection.connection_status IN ('connected','degraded')
+         AND ($1::uuid IS NULL OR connection.property_id = $1::uuid)`,
+        [stagingRestrictionsPropertyId],
       );
     const result = await client.query<JobRow>(
       `SELECT id::text AS "jobId", property_id::text AS "propertyId",
@@ -87,6 +104,11 @@ async function claim(
          max_attempts AS "maxAttempts", payload
        FROM platform.jobs
        WHERE queue_name = $1
+         AND ($4::uuid IS NULL OR (property_id = $4::uuid
+           AND (($6::boolean AND $3::boolean AND payload->>'operationType' = 'update_inventory_rules')
+             OR (payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
+             OR ($5::boolean AND payload->>'operationType' = 'provision'
+               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
@@ -99,7 +121,14 @@ async function claim(
        )
        ORDER BY priority DESC, run_after, created_at
        FOR UPDATE SKIP LOCKED LIMIT 1`,
-      [PMS_CHANNEX_MANAGEMENT_QUEUE, LEASE_MS, ariSyncMutating],
+      [
+        PMS_CHANNEX_MANAGEMENT_QUEUE,
+        LEASE_MS,
+        ariSyncMutating,
+        stagingRestrictionsPropertyId,
+        stagingMealsEnabled,
+        stagingInventoryEnabled,
+      ],
     );
     const row = result.rows[0];
     if (!row) return null;
