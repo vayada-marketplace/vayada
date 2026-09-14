@@ -227,3 +227,16 @@ exact property/organization/authority revision, then uses the final gate's datab
 time after all waits to require capture <= time < validUntil (null is unbounded).
 The writer must stage every blocking write first and roll back on rejection.
 No additional database work follows inside this helper; it returns time only.
+
+## Promo mutation from retained validation
+
+`redeemLockedCurrentQuotePromo(client, slug, current, guestBookingId)` reuses the
+existing redemption algorithm with the successful pre-mutation revalidation from
+this same retained transaction. It checks public scope and booking evidence, then
+consumes only a positive applied code amount atomically. A locked replay must
+match the captured promo definition, code, source revision and exact discount.
+The standalone `redeemCurrentQuotePromo` keeps its fresh-validation behavior.
+Neither path completes booking acceptance. Final deadline checks and full rollback
+remain mandatory. A real PostgreSQL regression verifies that own consumption
+invalidates fresh repricing, retained validation still replays the same application,
+and rollback restores both usage count and absence of the application.
