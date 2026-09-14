@@ -277,9 +277,16 @@ Finance guard for records created later. No financial records are changed by thi
 fallback, and identical totals do not establish identical nightly economics.
 
 Bookings without financial records continue through the existing availability,
-provider decision and revision validation path. This does not verify provider
-price semantics or activate runtime flags; supported sandbox end-to-end evidence
-and reviewed cutover are still required before activation. A Channex reply is one
+provider decision and revision validation path. On 2026-09-14, Flamur explicitly
+waived the real Airbnb end-to-end test for this scope because no Airbnb account
+is available. Record that test as skipped, not passed; it no longer blocks review
+of this limited implementation. Local integration tests use simulated provider
+responses and do not establish real Airbnb behavior. No test-account provisioning
+or further support follow-up is required for this scope.
+
+This waiver does not activate runtime flags or automatic financial updates.
+Any future live activation needs a separate reviewed cutover decision that
+explicitly accounts for the unverified provider behavior. A Channex reply is one
 possible source of financial mapping evidence, not a prerequisite for this scope.
 
 ### Provider economics evidence required before worker wiring
