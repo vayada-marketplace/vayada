@@ -15,6 +15,7 @@ import type {
   WorkosWebhookVerifier,
 } from "../routes/workosWebhooks.js";
 import { lockWorkosProviderIdentity } from "./workosIdentityLock.js";
+import { assertNotBootstrapProtectedUser } from "./legacyOwnerSignupGuard.js";
 
 type PgWorkosWebhookStoreConfig = {
   connectionString: string;
@@ -517,6 +518,7 @@ async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promis
     await lockWorkosProviderIdentity(client, input.workosUserId);
     const existingUserId = await findUserIdByWorkosUserId(client, input.workosUserId);
     if (existingUserId) {
+      await assertNotBootstrapProtectedUser(client, existingUserId);
       await client.query(
         `UPDATE identity.users
          SET email = $1,

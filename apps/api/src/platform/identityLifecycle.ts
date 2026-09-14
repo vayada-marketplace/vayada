@@ -17,6 +17,7 @@ import type {
 import pg from "pg";
 
 import { lockWorkosProviderIdentity } from "./workosIdentityLock.js";
+import { assertNotBootstrapProtectedUser } from "./legacyOwnerSignupGuard.js";
 
 type PgIdentityLifecycleCommandBusConfig = {
   connectionString: string;
@@ -81,6 +82,7 @@ async function createIdentityUser(
       );
       const existingUserId = existingIdentity.rows[0]?.user_id;
       if (existingUserId) {
+        await assertNotBootstrapProtectedUser(client, existingUserId);
         const organizationId =
           command.payload.organization && command.payload.membership
             ? await grantIdentityAccessWithClient(client, {
@@ -113,6 +115,7 @@ async function createIdentityUser(
     );
     const existingEmailUserId = existingEmail.rows[0]?.id;
     if (existingEmailUserId) {
+      await assertNotBootstrapProtectedUser(client, existingEmailUserId);
       if (command.payload.providerIdentity?.providerUserId) {
         await insertExternalIdentityWithClient(client, existingEmailUserId, command);
       }
