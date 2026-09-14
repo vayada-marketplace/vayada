@@ -1,7 +1,7 @@
 # Replacement booking acceptance (VAY-1543)
 
-Status: durable acceptance schema and final-time prerequisite implemented; full
-acceptance writer, replay repository and public submission remain pending. Authority:
+Status: durable schema, historical decoder/replay reader, Finance capture and
+final-time prerequisite implemented; full writer and public submission remain pending. Authority:
 [direct pricing consumption](direct-replacement-pricing-consumption.md).
 Migration 0210 adds immutable storage without enabling booking submission or payment
 execution. The current price preview remains a quote, not a reservation.
@@ -127,10 +127,10 @@ gate again afterward. A rejected gate requires full transaction rollback.
 The legacy `createTargetGuestBooking` converts `quote_sessions`, constructs legacy
 selected-offer/policy snapshots and numeric amount projections, and performs
 lifecycle/read-model work. It is not a replacement writer and cannot safely be
-called with a fabricated old quote. Required next slices are the scoped immutable
-acceptance decoder and replay repository, owner-preserving reservation/
-promo composition, same-transaction Finance/add-on capture and replacement
-booking/lifecycle/revenue projections, then the complete orchestrator.
+called with a fabricated old quote. Required next slices are owner-preserving reservation/promo composition,
+same-transaction add-on capture and replacement booking/lifecycle/revenue
+projections, then the complete orchestrator. Finance capture and historical replay
+readers below remain internal prerequisites until that composition is verified.
 
 Guest age semantics: retain every actual age 0–17 exactly in the immutable quote.
 Booking guest `adultAgeThreshold` classifies those ages; it is not a maximum age
@@ -177,9 +177,9 @@ is substituted for accepted billing/commission values.
 Schema tests use a dedicated PostgreSQL database and synthetic storage shapes to
 verify scoped references, independent uniqueness, missing/malformed envelopes,
 exact evidence retention, immutable history and transaction rollback. They do not
-establish a domain-valid PMS reservation or completed checkout. Full domain
-snapshot decoding, replay repository, owner capture and the acceptance writer
-remain required. No runtime write or public acceptance route is added by0210.
+establish a domain-valid PMS reservation or completed checkout. The historical decoder/replay reader and Finance capture below build on this
+schema. Add-on owner capture, the acceptance writer and real transactional race
+coverage remain required. No runtime write or public acceptance route is added by0210.
 
 ## Historical acceptance reading
 
@@ -212,3 +212,8 @@ earliest `validUntil`. Retain all locks and check this deadline again at final
 acceptance after later waits. The current quote-time gate alone does not enforce
 Finance expiration. This helper creates no acceptance record, does not execute
 payments and does not substitute payment capability evidence for billing terms.
+
+Capture/replay tests currently mock SQL boundaries. Before activation, exercise
+real subscription-update versus capture lock ordering and transaction retries,
+in addition to the inventory/promo/receipt races above. Unit ordering assertions
+are not evidence that competing owner transactions cannot deadlock.
