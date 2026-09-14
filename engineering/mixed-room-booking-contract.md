@@ -108,7 +108,10 @@ intact. Switching between single and mixed selections preserves the reference.
 Show "Accommodation for N guests", each room quantity/name, allocation and rate
 terms, and the combined full-stay price. Carry the selection through add-ons,
 guest details, payment, confirmation, draft restoration, and the pending editor.
-Changing dates or guests requires revalidation; an expired selection cannot be
+The pending editor can adjust guest allocations within every held room even when
+public search has no unreserved stock. Preserve exact room/rate identities; allocation
+totals must match the party before quote, and the server still validates current
+occupancy and verified receipt credit. Changing dates or guests requires revalidation; an expired selection cannot be
 silently replaced with its first room. Preserve existing styling, accessibility,
 localization, and analytics step behavior.
 

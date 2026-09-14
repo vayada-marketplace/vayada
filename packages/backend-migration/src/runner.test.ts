@@ -21,6 +21,17 @@ import { assertSafeTestDatabase } from "./testUtils.js";
 // ---------------------------------------------------------------------------
 
 describe("computeChecksum", () => {
+  it("preserves the applied 0181 migration checksum, including its original header", async () => {
+    // Applied by release 8b0237d4e. Renumbering the filename did not change its bytes.
+    const content = await readFile(
+      new URL("../migrations/0181_channex_adoption_manifest_foundation.sql", import.meta.url),
+      "utf8",
+    );
+    expect(computeChecksum(content)).toBe(
+      "52b369b565210947c167baea9f5e5a358c6500319eb307e7496132e7da3c2d57",
+    );
+  });
+
   it("returns a stable sha256 hex string", () => {
     const content = "SELECT 1;";
     const expected = createHash("sha256").update(content, "utf8").digest("hex");

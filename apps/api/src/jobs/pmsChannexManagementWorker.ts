@@ -19,6 +19,7 @@ export type ChannexManagementJob = {
 export type ChannexManagementProviderSuccess = {
   ok: true;
   alertRecoveryVerified?: boolean;
+  createdProperty?: { environment: "staging" | "production"; externalPropertyId: string };
   providerRequestId?: string;
   externalPropertyId?: string;
   connectionStatus?: "connected" | "disconnected";

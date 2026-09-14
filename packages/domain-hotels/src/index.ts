@@ -289,3 +289,5 @@ export type {
 } from "./platformMarketplaceActivation.js";
 
 export * from "./nearbyView.js";
+
+export * from "./preparedHotelImport.js";

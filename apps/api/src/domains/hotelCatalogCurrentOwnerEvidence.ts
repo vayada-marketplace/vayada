@@ -72,6 +72,16 @@ async function readOwner<Key extends HotelCatalogCurrentOwnerKey>(
       return Object.freeze({ outcome: "missing" as const, reason: "property_scope" as const });
     if (row.propertyId !== scope.propertyId)
       return Object.freeze({ outcome: "malformed" as const });
+    // A policy that has never existed is a valid initial owner revision. A
+    // deleted policy retains its revision ledger and must still fail closed.
+    if (
+      ownerKey === "hotel_catalog.policy" &&
+      row.ownerPropertyId === null &&
+      row.revision === null
+    ) {
+      const evidence = createHotelCatalogCurrentOwnerEvidence(ownerKey, scope, 0)!;
+      return Object.freeze({ outcome: "available" as const, evidence });
+    }
     if (row.ownerPropertyId === null)
       return Object.freeze({ outcome: "missing" as const, reason: "owner_state" as const });
     if (row.ownerPropertyId !== scope.propertyId || !revision(row.revision))
