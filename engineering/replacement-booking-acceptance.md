@@ -240,3 +240,15 @@ Neither path completes booking acceptance. Final deadline checks and full rollba
 remain mandatory. A real PostgreSQL regression verifies that own consumption
 invalidates fresh repricing, retained validation still replays the same application,
 and rollback restores both usage count and absence of the application.
+## Inventory composition prerequisite
+
+`reserveRevalidatedQuoteInventory(client, slug, current)` reuses a successful
+pre-mutation `lockCurrentQuoteRevalidation` result from that exact retained
+READ COMMITTED transaction. It verifies current public scope and exact immutable
+stored quote binding, then calls the existing PMS reservation implementation.
+The PMS callback checks retained public scope instead of recalculating prices;
+PMS replay/fingerprint/status, calendar, capacity, day locks and rollback behavior
+remain intact. `reserveCurrentQuoteInventory` keeps its fresh-revalidation path.
+Evidence from a prior transaction or client request cannot use this internal
+contract. This is an inventory hold, not accepted-booking replay or final acceptance;
+the caller still owns final quote/Finance timing and atomic rollback of all effects.

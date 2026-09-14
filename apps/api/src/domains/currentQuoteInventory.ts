@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
 import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
@@ -12,6 +13,39 @@ export async function reserveCurrentQuoteInventory(
   slug: unknown,
   quoteId: unknown,
 ) {
+  const stored = await loadScopedQuote(client, slug, quoteId);
+  return reserveScopedQuote(client, slug, stored, async () => {
+    if (!(await lockCurrentQuoteRevalidation(client, slug, stored.quote.quoteId)))
+      throw new Error("Quote inventory is unavailable");
+  });
+}
+
+type RevalidatedQuote = NonNullable<Awaited<ReturnType<typeof lockCurrentQuoteRevalidation>>>;
+
+/** Internal composition path: current MUST come from lockCurrentQuoteRevalidation
+ * on this exact client/READ COMMITTED transaction before inventory/promo mutations,
+ * with every owner lock retained. It is not a posted request or proof transferable
+ * between transactions. Reuses PMS replay, calendar, availability and mutation locks;
+ * does not reprice after this command's own effects. Caller handles accepted-command
+ * replay first, final clock/Finance checks after all waits, and full rollback. */
+export async function reserveRevalidatedQuoteInventory(
+  client: PoolClient,
+  slug: unknown,
+  current: RevalidatedQuote,
+) {
+  const stored = await loadScopedQuote(client, slug, current.quote.quoteId);
+  if (
+    current.kind !== "current_quote_price" ||
+    !isDeepStrictEqual(stored.scope, current.scope) ||
+    !isDeepStrictEqual(stored.quote, current.quote)
+  )
+    throw new Error("Quote inventory is unavailable");
+  return reserveScopedQuote(client, slug, stored, async () => {
+    await requireSamePublicScope(client, slug, stored.scope);
+  });
+}
+
+async function loadScopedQuote(client: PoolClient, slug: unknown, quoteId: unknown) {
   if (
     typeof quoteId !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(quoteId)
@@ -29,7 +63,25 @@ export async function reserveCurrentQuoteInventory(
     ? decodeCurrentPricingQuoteRecord(row.payload, scope.propertyId, row.id)
     : null;
   if (!record) throw new Error("Quote inventory is unavailable");
-  const { quote } = record;
+  return { quote: record.quote, scope };
+}
+
+async function requireSamePublicScope(
+  client: PoolClient,
+  slug: unknown,
+  scope: NonNullable<Awaited<ReturnType<typeof lockPublicPricingAuthority>>>,
+) {
+  if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope))
+    throw new Error("Quote inventory is unavailable");
+}
+
+async function reserveScopedQuote(
+  client: PoolClient,
+  slug: unknown,
+  stored: Awaited<ReturnType<typeof loadScopedQuote>>,
+  requireLockedQuote: () => Promise<void>,
+) {
+  const { quote, scope } = stored;
   const reservation = await reservePmsQuoteInventory(
     client,
     {
@@ -40,12 +92,8 @@ export async function reserveCurrentQuoteInventory(
       checkOut: quote.stay.checkOut,
       rooms: quote.stay.rooms,
     },
-    async () => {
-      if (!(await lockCurrentQuoteRevalidation(client, slug, quote.quoteId)))
-        throw new Error("Quote inventory is unavailable");
-    },
+    requireLockedQuote,
   );
-  if (!(await lockPublicPricingAuthority(client, slug)))
-    throw new Error("Quote inventory is unavailable");
+  await requireSamePublicScope(client, slug, scope);
   return { quote, ...reservation };
 }
