@@ -185,10 +185,10 @@ locking and all collision checks; receipt insertion failure rolls back both.
 Storage does not verify signatures, prove the owners were prepared or implement
 replay. Its hashes must be revalidated by the consumer, never treated as approval.
 
-Signup collision protection remains unwired: `identityLifecycle.ts` can reuse a
-user by email and `workosWebhooks.ts` can insert a new UUID. Guarding only migration
-inserts would miss these paths. Do not enable this preparation until both are
-covered by the separately reviewed shared collision boundary.
+The [prepared-owner signup guard](legacy-owner-signup-guard.md) denies receipt-marked
+existing-user reuse in lifecycle creation and webhook user upserts. New-UUID
+inserts still need the scoped index; other identity mutation paths remain
+unguarded. Do not enable preparation until the entire shared boundary is covered.
 
 ## Scoped email-index proposal
 
@@ -215,7 +215,7 @@ Do not use IF NOT EXISTS as proof: verify the exact schema, expression, predicat
 uniqueness and valid/ready flags of the installed index before any account write.
 Retain the guard after preparation; removal needs separate drift/recovery review.
 
-Uniqueness is not ownership or linking authority. `identityLifecycle.ts` must
-also reject email-only linking to prepared owners; the provider path must bind
-the exact approved external/internal identity. Those protections remain unwired,
-so an index proposal or installed index alone never enables account preparation.
+Uniqueness is not ownership or linking authority. The prepared-owner guard covers
+only two caller paths; the provider path must still bind the exact approved
+external/internal identity. Neither this partial protection nor an installed
+index enables account preparation.
