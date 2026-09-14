@@ -211,7 +211,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
            WHERE membership.organization_id = $1 AND membership.id = $2
              AND membership.role_key = ANY($3::text[])
              AND membership.status IN ('active', 'suspended') AND staff.status = 'active'
-           FOR UPDATE OF membership, staff`,
+           FOR UPDATE OF membership FOR SHARE OF staff`,
           [normalized.organizationId, normalized.membershipId, hotelStaffRoleKeys],
         );
         const previous = target.rows[0];
@@ -369,7 +369,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              AND membership.role_key = ANY($3::text[])
              AND membership.status IN ('active', 'suspended')
              AND staff.status IN ('active', 'suspended')
-           FOR UPDATE OF membership, staff, organization`,
+           FOR UPDATE OF membership, organization FOR SHARE OF staff`,
           [normalized.organizationId, normalized.membershipId, hotelStaffRoleKeys],
         );
         const previous = target.rows[0];
@@ -965,7 +965,7 @@ async function lockAuthorizedManager(
      WHERE membership.organization_id = $1 AND membership.user_id = $2
        AND membership.status = 'active' AND organization.kind = 'hotel_group'
        AND organization.status = 'active' AND actor.status = 'active'
-     FOR UPDATE OF membership, organization, actor`,
+     FOR UPDATE OF membership, organization FOR SHARE OF actor`,
     [organizationId, actorUserId],
   );
   const row = result.rows[0];
