@@ -74,3 +74,21 @@ required; the query caps at seventeen to detect duplicate/extra matches. The
 result includes sensitive email only for in-memory downstream comparison, not
 reporting. It proves a historical association, not current source ownership or
 production readiness. Protected QA hotel IDs are rejected. No writes occur.
+
+## Combined diagnostic assessment
+
+`assessLegacyOwnerBootstrap` composes the scoped source reader, scoped target
+reader and WorkOS exact external-ID/email GET lookups. Each database read uses
+its own REPEATABLE READ, READ ONLY transaction, rolled back and released before
+provider calls. Cleanup failure blocks and discards the connection. The provider
+client exposes only read methods. A pinned organization control checks provider
+configuration, not hotel ownership. Lookup pagination/errors/filter mismatch
+fail closed; 404 is absence only for exact external-ID lookup. An email-only
+candidate never authorizes a link. Known source/target blockers skip user lookups.
+
+The result contains only the non-executable planner diagnosis, with no emails,
+provider responses or database errors. Freshness covers the entire assessment,
+not just its last request. This is not an atomic snapshot across systems and
+does not prove current source ownership: source evidence remains historical.
+The caller must verify environments and source approvals; no production runner,
+approval validator, identity writer, membership planner or user contact is wired.
