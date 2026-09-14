@@ -125,6 +125,66 @@ describe.skipIf(!url)("Booking.com no-show durable reporting", () => {
       ],
     );
   }
+  it.each(["pending", "running"])(
+    "leaves other-property %s jobs untouched by a scoped worker",
+    async (status) => {
+      await seed();
+      await store.submit(context, p, booking, false, false);
+      await db.query(
+        "UPDATE platform.jobs SET status=$2,locked_by='prior-worker',locked_at=now()-interval '10 minutes' WHERE resource_id=$1 AND queue_name=$3",
+        [booking, status, NO_SHOW_QUEUE],
+      );
+      const before = (
+        await db.query("SELECT * FROM platform.jobs WHERE resource_id=$1 AND queue_name=$2", [
+          booking,
+          NO_SHOW_QUEUE,
+        ])
+      ).rows;
+      await runNoShowReport(
+        db,
+        { apiBaseUrl: "https://staging.channex.io", apiKey: "test", fetch: fetcher },
+        "scoped-worker",
+        other,
+      );
+      expect(
+        (
+          await db.query("SELECT * FROM platform.jobs WHERE resource_id=$1 AND queue_name=$2", [
+            booking,
+            NO_SHOW_QUEUE,
+          ])
+        ).rows,
+      ).toEqual(before);
+      expect(posts).toBe(0);
+      // Clear this isolated fixture so it cannot affect later unscoped worker tests.
+      await db.query(
+        "UPDATE platform.jobs SET status='dead_lettered',finished_at=now(),locked_at=NULL,locked_by=NULL WHERE resource_id=$1 AND queue_name=$2",
+        [booking, NO_SHOW_QUEUE],
+      );
+    },
+  );
+
+  it("delivers only the configured staging property's report", async () => {
+    await seed();
+    await store.submit(context, p, booking, false, false);
+    await expect(
+      runNoShowReport(
+        db,
+        { apiBaseUrl: "https://app.channex.io", apiKey: "test", fetch: fetcher },
+        "scoped-worker",
+        p,
+      ),
+    ).rejects.toThrow("exact staging URL");
+    expect(posts).toBe(0);
+    await runNoShowReport(
+      db,
+      { apiBaseUrl: "https://staging.channex.io", apiKey: "test", fetch: fetcher },
+      "scoped-worker",
+      p,
+    );
+    expect(posts).toBe(1);
+    expect(await store.get(p, booking)).toMatchObject({ status: "submitted" });
+  });
+
   it("replays concurrent requests, submits once, and keeps OTA confirmation unconfirmed", async () => {
     await seed();
     expect(await store.get(p, booking)).toMatchObject({

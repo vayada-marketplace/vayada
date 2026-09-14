@@ -1,3 +1,4 @@
+import type { PreparedHotelImport } from "@vayada/domain-hotels";
 import { apiClient } from "./client";
 
 export const HOTEL_SETUP_TRACKS = ["hotel_operations", "creator_marketplace"] as const;
@@ -14,6 +15,7 @@ export type HotelAccountInviteCreateRequest = {
   property: {
     displayName: string;
   };
+  preparedData?: PreparedHotelImport;
   selectedTracks: HotelSetupTrack[];
 };
 
