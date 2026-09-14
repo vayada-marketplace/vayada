@@ -1,27 +1,18 @@
 import {
-  createFinancePaymentMethodsSourceEntityRevision,
-  parseFinancePaymentReadinessSnapshot,
   type FinancePaymentMethodsSourceEntityRevision,
   type FinancePaymentReadinessSnapshot,
 } from "@vayada/domain-finance";
 import {
-  parsePmsPricingSourceSnapshot,
-  parsePmsRecurringPricingBookingEvidence,
-  type FlexibleRatePlanSnapshot,
   type FlexibleCancellationTerms,
   type NonRefundableCancellationTerms,
   type PmsPricingSourceSnapshot,
   type PmsRecurringPricingBookingEvidence,
-  type PmsRecurringPricingSourceSnapshot,
-  type RecurringPricingRoomEvidence,
   type RoomPublicationSnapshot,
 } from "@vayada/domain-pms";
 
 import {
   BOOKING_PRICING_ROUNDING_MODE,
   BOOKING_PRICING_SCALE,
-  createBookingPricingSourceFingerprint,
-  parseBookingPricingSourceFingerprint,
   type BookingPricingSourceFingerprint,
 } from "./bookingPricingEvidence.js";
 
@@ -29,8 +20,6 @@ export const BOOKING_PRICE_CALCULATION_CONTRACT_VERSION = "booking-price-calcula
 export const BOOKING_PRICE_V1_ALLOCATION_RULE =
   "single_room_type_aggregate_guest_count.v1" as const;
 export const BOOKING_PRICE_MAX_MINOR_UNITS = "9223372036854775807" as const;
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DECIMAL_PATTERN = /^(0|[1-9][0-9]{0,12})(?:\.([0-9]{1,18}))?$/;
 const MINOR_UNITS_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 
@@ -185,7 +174,7 @@ export function applyBookingPricePercentageDiscount(
   });
 }
 
-/** Current canonical room rate, without guest-count adjustments or channel markup. */
+/** Temporary unavailable boundary; the old nightly resolver was removed in VAY-1546. */
 export function createBookingNightlyRoomPriceResolver(input: {
   pricing: PmsPricingSourceSnapshot;
   recurringPricing: PmsRecurringPricingBookingEvidence;
@@ -196,98 +185,10 @@ export function createBookingNightlyRoomPriceResolver(input: {
   stayDate: string,
   datePrice?: { amountDecimal: string; currency: string },
 ) => BookingPriceMinorUnits {
-  const pricing = parsePmsPricingSourceSnapshot(input.pricing);
-  const recurring = parsePmsRecurringPricingBookingEvidence(input.recurringPricing);
-  const plan = pricing?.flexibleRatePlans.find(
-    (item) =>
-      item.roomTypeId === input.roomTypeId && item.flexibleRatePlanId === input.flexibleRatePlanId,
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
   );
-  if (
-    !pricing ||
-    !recurring ||
-    !plan ||
-    pricing.propertyId !== recurring.propertyId ||
-    pricing.pricingCurrency.currency !== recurring.currency ||
-    pricing.pricingCurrency.pricingCurrencyRevision !== recurring.pricingCurrencyRevision ||
-    plan.sourceRoomFactsRevision !== input.roomFactsRevision
-  ) {
-    throw new TypeError(
-      "Nightly pricing is missing or stale; refresh the canonical flexible plan.",
-    );
-  }
-  const sources = recurring.sources.filter(
-    (source) =>
-      source.lifecycle !== "disabled" &&
-      (source.sourceKind === "season" || source.sourceKind === "weekend_surcharge"),
-  );
-  for (const source of sources) {
-    if (
-      source.lifecycle !== "active" ||
-      source.currency !== recurring.currency ||
-      source.pricingCurrencyRevision !== recurring.pricingCurrencyRevision
-    ) {
-      throw new TypeError(`Nightly pricing source ${source.sourceId} is invalid or stale.`);
-    }
-  }
-  const applicable = sources.filter((source) =>
-    source.sourceKind === "season"
-      ? source.roomPrices.some((room) => room.roomTypeId === input.roomTypeId)
-      : source.sourceKind === "weekend_surcharge" &&
-        source.roomSurcharges.some((room) => room.roomTypeId === input.roomTypeId),
-  );
-  for (const source of applicable) {
-    if (
-      !sourceMatchesRoomPlan(
-        source,
-        input.roomTypeId,
-        input.flexibleRatePlanId,
-        plan.flexibleRatePlanRevision,
-        input.roomFactsRevision,
-      )
-    ) {
-      throw new TypeError(
-        `Nightly pricing source ${source.sourceId} has stale room/plan revisions.`,
-      );
-    }
-  }
-  return (stayDate, datePrice) => {
-    if (!isIsoDate(stayDate))
-      throw new TypeError("Nightly pricing requires a property-local stay date.");
-    const monthDay = stayDate.slice(5);
-    const weekday = (
-      ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const
-    )[new Date(`${stayDate}T00:00:00Z`).getUTCDay()]!;
-    const seasons = applicable.filter(
-      (source) =>
-        source.sourceKind === "season" &&
-        (source.startMonthDay <= source.endMonthDay
-          ? monthDay >= source.startMonthDay && monthDay <= source.endMonthDay
-          : monthDay >= source.startMonthDay || monthDay <= source.endMonthDay),
-    );
-    const weekends = applicable.filter(
-      (source) => source.sourceKind === "weekend_surcharge" && source.weekdays.includes(weekday),
-    );
-    if (seasons.length > 1 || weekends.length > 1)
-      throw new TypeError("Nightly pricing sources overlap.");
-    const season = seasons[0];
-    const weekend = weekends[0];
-    const amounts = roomNightAmounts(
-      plan.baseAmount.amountDecimal,
-      season?.sourceKind === "season"
-        ? season.roomPrices.find((room) => room.roomTypeId === input.roomTypeId)?.amountDecimal
-        : undefined,
-      weekend?.sourceKind === "weekend_surcharge"
-        ? weekend.roomSurcharges.find((room) => room.roomTypeId === input.roomTypeId)?.amountDecimal
-        : undefined,
-    );
-    if (datePrice && datePrice.currency !== recurring.currency)
-      throw new TypeError("Date price currency does not match canonical pricing.");
-    const total = datePrice
-      ? requireExactMinorUnits(datePrice.amountDecimal)
-      : boundedMinorUnits(amounts.base + amounts.weekend);
-    if (total <= 0n) throw new TypeError("Nightly price must be positive.");
-    return minorUnits(total);
-  };
 }
 
 /** A percentage with up to four decimal places, rounded once at the currency boundary. */
@@ -307,366 +208,13 @@ export function applyBookingPriceMarkup(amount: BookingPriceMinorUnits, percent:
   )!;
 }
 
-function roomNightAmounts(base: string, season?: string, weekend?: string) {
-  return {
-    base: requireExactMinorUnits(season ?? base),
-    weekend: weekend ? requireExactMinorUnits(weekend) : 0n,
-  };
-}
-
 export function calculateBookingPrice(
   input: BookingPriceCalculationInput,
 ): BookingPriceCalculation {
-  const parsed = parseCalculationInput(input);
-  const plan = parsed.pricing.flexibleRatePlans.find(
-    ({ roomTypeId, flexibleRatePlanId }) =>
-      roomTypeId === parsed.roomTypeId && flexibleRatePlanId === parsed.flexibleRatePlanId,
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
   );
-  if (!plan) return invalidInput();
-  const room = parsed.roomPublication.rooms.find(
-    ({ roomTypeId }) => roomTypeId === parsed.roomTypeId,
-  );
-  if (!room || room.sourceRevisions.roomFactsRevision !== plan.sourceRoomFactsRevision)
-    return invalidInput();
-
-  const sourceById = new Map(
-    parsed.recurringPricing.sources.map((source) => [source.sourceId, source]),
-  );
-  const additionalGuest = parsed.additionalGuestSourceId
-    ? requireSource(sourceById, parsed.additionalGuestSourceId, "additional_guest", parsed, plan)
-    : null;
-  const nonRefundable =
-    parsed.selectedRate.kind === "non_refundable"
-      ? requireSource(sourceById, parsed.selectedRate.sourceId, "non_refundable", parsed, plan)
-      : null;
-  if (!additionalGuest && parsed.chargeableGuestCount !== 0) return invalidInput();
-  if (
-    additionalGuest &&
-    parsed.chargeableGuestCount >
-      Math.max(0, room.facts.occupancy.maxGuests - additionalGuest.includedGuests) *
-        parsed.roomCount
-  )
-    return invalidInput();
-  const finance = parsed.financePaymentReadiness;
-  if (
-    nonRefundable &&
-    (!finance?.pricingCurrency.matchesCurrent ||
-      finance.pricingCurrency.current?.currency !== parsed.pricing.pricingCurrency.currency ||
-      finance.pricingCurrency.current.pricingCurrencyRevision !==
-        parsed.pricing.pricingCurrency.pricingCurrencyRevision ||
-      !finance.methods.some(
-        (method) =>
-          method.method === "card" &&
-          method.selected &&
-          method.availability === "available" &&
-          method.readiness === "ready",
-      ))
-  )
-    return invalidInput();
-
-  const nights = parsed.nights.map((night) => {
-    const season = night.appliedSeasonSourceId
-      ? requireSource(sourceById, night.appliedSeasonSourceId, "season", parsed, plan)
-      : null;
-    const weekend = night.appliedWeekendSurchargeSourceId
-      ? requireSource(
-          sourceById,
-          night.appliedWeekendSurchargeSourceId,
-          "weekend_surcharge",
-          parsed,
-          plan,
-        )
-      : null;
-    const seasonRoom = season?.roomPrices.find(
-      ({ roomTypeId }) => roomTypeId === parsed.roomTypeId,
-    );
-    const weekendRoom = weekend?.roomSurcharges.find(
-      ({ roomTypeId }) => roomTypeId === parsed.roomTypeId,
-    );
-    if ((season && !seasonRoom) || (weekend && !weekendRoom)) return invalidInput();
-
-    const amounts = roomNightAmounts(
-      plan.baseAmount.amountDecimal,
-      seasonRoom?.amountDecimal,
-      weekendRoom?.amountDecimal,
-    );
-    const baseRoomTotal = boundedMinorUnits(amounts.base * BigInt(parsed.roomCount));
-    const weekendRoomTotal = boundedMinorUnits(amounts.weekend * BigInt(parsed.roomCount));
-    const additionalGuestTotal = additionalGuest
-      ? boundedMinorUnits(
-          requireExactMinorUnits(additionalGuest.amountDecimal) *
-            BigInt(parsed.chargeableGuestCount),
-        )
-      : 0n;
-    const flexibleNightTotal = boundedMinorUnits(
-      baseRoomTotal + weekendRoomTotal + additionalGuestTotal,
-    );
-    const discounted = nonRefundable
-      ? applyBookingPricePercentageDiscount(
-          String(flexibleNightTotal),
-          nonRefundable.discountPercent,
-        )
-      : null;
-    if (nonRefundable && !discounted) return invalidInput();
-    const finalNightTotal = discounted ? BigInt(discounted.finalMinorUnits) : flexibleNightTotal;
-
-    return {
-      stayDate: night.stayDate,
-      baseAmount: seasonRoom
-        ? {
-            kind: "seasonal" as const,
-            amountDecimal: seasonRoom.amountDecimal,
-            source: sourceRevision(season!),
-          }
-        : {
-            kind: "standard" as const,
-            amountDecimal: plan.baseAmount.amountDecimal,
-            flexibleRatePlanId: plan.flexibleRatePlanId,
-            flexibleRatePlanRevision: plan.flexibleRatePlanRevision,
-          },
-      baseRoomTotalMinorUnits: minorUnits(baseRoomTotal),
-      weekendSurcharge: weekendRoom
-        ? {
-            amountDecimal: weekendRoom.amountDecimal,
-            roomTotalMinorUnits: minorUnits(weekendRoomTotal),
-            source: sourceRevision(weekend!),
-          }
-        : null,
-      additionalGuest: additionalGuest
-        ? {
-            amountDecimal: additionalGuest.amountDecimal,
-            includedGuestsPerRoom: additionalGuest.includedGuests,
-            chargeableGuestCount: parsed.chargeableGuestCount,
-            totalMinorUnits: minorUnits(additionalGuestTotal),
-            source: sourceRevision(additionalGuest),
-          }
-        : null,
-      flexibleNightTotalMinorUnits: minorUnits(flexibleNightTotal),
-      nonRefundableDiscount: nonRefundable
-        ? {
-            discountPercent: nonRefundable.discountPercent,
-            amountMinorUnits: discounted!.discountMinorUnits,
-            source: sourceRevision(nonRefundable),
-          }
-        : null,
-      finalNightTotalMinorUnits: minorUnits(finalNightTotal),
-    };
-  });
-
-  return deepFreeze({
-    contractVersion: BOOKING_PRICE_CALCULATION_CONTRACT_VERSION,
-    organizationId: parsed.organizationId,
-    propertyId: parsed.propertyId,
-    roomTypeId: parsed.roomTypeId,
-    flexibleRatePlanId: parsed.flexibleRatePlanId,
-    pricingSourceFingerprint: parsed.pricingSourceFingerprint,
-    currency: parsed.pricing.pricingCurrency.currency,
-    scale: BOOKING_PRICING_SCALE,
-    roundingMode: BOOKING_PRICING_ROUNDING_MODE,
-    allocationRule: BOOKING_PRICE_V1_ALLOCATION_RULE,
-    roomCount: parsed.roomCount,
-    includedGuestsPerRoom: additionalGuest?.includedGuests ?? null,
-    chargeableGuestCount: parsed.chargeableGuestCount,
-    selectedRate: nonRefundable
-      ? {
-          kind: "non_refundable",
-          paymentTiming: nonRefundable.paymentTiming,
-          cancellationTerms: nonRefundable.cancellationTerms,
-          source: sourceRevision(nonRefundable),
-          financePaymentMethodsSource: createFinancePaymentMethodsSourceEntityRevision(
-            finance!.propertyId,
-            finance!.paymentMethodsRevision,
-          ),
-        }
-      : { kind: "flexible", cancellationTerms: plan.cancellationTerms },
-    sourceRevisions: {
-      pricingCurrencyRevision: parsed.pricing.pricingCurrency.pricingCurrencyRevision,
-      roomFactsRevision: plan.sourceRoomFactsRevision,
-      flexibleRatePlanRevision: plan.flexibleRatePlanRevision,
-      optionalPricingAggregateRevision: parsed.recurringPricing.optionalPricingAggregateRevision,
-    },
-    nights,
-    stayTotalMinorUnits: minorUnits(
-      nights.reduce(
-        (total, night) => boundedMinorUnits(total + BigInt(night.finalNightTotalMinorUnits)),
-        0n,
-      ),
-    ),
-  });
-}
-
-function parseCalculationInput(input: BookingPriceCalculationInput): BookingPriceCalculationInput {
-  try {
-    if (
-      !isPlainData(input) ||
-      !isExactRecord(input, [
-        "organizationId",
-        "propertyId",
-        "roomTypeId",
-        "flexibleRatePlanId",
-        "pricingSourceFingerprint",
-        "roomCount",
-        "chargeableGuestCount",
-        "additionalGuestSourceId",
-        "selectedRate",
-        "nights",
-        "pricing",
-        "recurringPricing",
-        "roomPublication",
-        "financePaymentReadiness",
-      ])
-    )
-      return invalidInput();
-    if (
-      !isCanonicalUuid(input.organizationId) ||
-      !isCanonicalUuid(input.propertyId) ||
-      !isCanonicalUuid(input.roomTypeId) ||
-      !isCanonicalUuid(input.flexibleRatePlanId) ||
-      !parseBookingPricingSourceFingerprint(input.pricingSourceFingerprint) ||
-      !isIntegerInRange(input.roomCount, 1, 99) ||
-      !isIntegerInRange(input.chargeableGuestCount, 0, 9_999) ||
-      !Array.isArray(input.nights) ||
-      input.nights.length < 1 ||
-      input.nights.length > 366 ||
-      !isNullableUuid(input.additionalGuestSourceId)
-    )
-      return invalidInput();
-    if (
-      (!isExactRecord(input.selectedRate, ["kind"]) || input.selectedRate.kind !== "flexible") &&
-      (!isExactRecord(input.selectedRate, ["kind", "sourceId"]) ||
-        input.selectedRate.kind !== "non_refundable" ||
-        !isCanonicalUuid(input.selectedRate.sourceId))
-    )
-      return invalidInput();
-
-    const pricing = parsePmsPricingSourceSnapshot(structuredClone(input.pricing));
-    const recurringPricing = parsePmsRecurringPricingBookingEvidence(
-      structuredClone(input.recurringPricing),
-    );
-    const roomPublication = structuredClone(input.roomPublication);
-    const financePaymentReadiness =
-      input.financePaymentReadiness === null
-        ? null
-        : parseFinancePaymentReadinessSnapshot(structuredClone(input.financePaymentReadiness));
-    if (
-      !pricing ||
-      !recurringPricing ||
-      pricing.propertyId !== input.propertyId ||
-      recurringPricing.propertyId !== input.propertyId ||
-      pricing.pricingCurrency.currency !== recurringPricing.currency ||
-      pricing.pricingCurrency.pricingCurrencyRevision !==
-        recurringPricing.pricingCurrencyRevision ||
-      (input.financePaymentReadiness !== null &&
-        (!financePaymentReadiness || financePaymentReadiness.propertyId !== input.propertyId))
-    )
-      return invalidInput();
-    if (
-      createBookingPricingSourceFingerprint(
-        { organizationId: input.organizationId, propertyId: input.propertyId },
-        { roomPublication, pricing, recurringPricing },
-      ) !== input.pricingSourceFingerprint
-    )
-      return invalidInput();
-
-    const nights = input.nights.map((night) => {
-      if (
-        !isExactRecord(night, [
-          "stayDate",
-          "appliedSeasonSourceId",
-          "appliedWeekendSurchargeSourceId",
-        ]) ||
-        !isIsoDate(night.stayDate) ||
-        !isNullableUuid(night.appliedSeasonSourceId) ||
-        !isNullableUuid(night.appliedWeekendSurchargeSourceId)
-      )
-        return invalidInput();
-      return {
-        stayDate: night.stayDate,
-        appliedSeasonSourceId: night.appliedSeasonSourceId,
-        appliedWeekendSurchargeSourceId: night.appliedWeekendSurchargeSourceId,
-      };
-    });
-    nights.sort((left, right) => compareCodeUnits(left.stayDate, right.stayDate));
-    if (new Set(nights.map(({ stayDate }) => stayDate)).size !== nights.length)
-      return invalidInput();
-
-    return {
-      ...structuredClone(input),
-      pricingSourceFingerprint: input.pricingSourceFingerprint,
-      pricing,
-      recurringPricing,
-      roomPublication,
-      financePaymentReadiness,
-      nights,
-    };
-  } catch {
-    return invalidInput();
-  }
-}
-
-function requireSource<Kind extends PmsRecurringPricingSourceSnapshot["sourceKind"]>(
-  sourceById: ReadonlyMap<string, PmsRecurringPricingSourceSnapshot>,
-  sourceId: string,
-  kind: Kind,
-  input: BookingPriceCalculationInput,
-  plan: FlexibleRatePlanSnapshot,
-): Extract<PmsRecurringPricingSourceSnapshot, { sourceKind: Kind }> {
-  const source = sourceById.get(sourceId);
-  if (
-    !source ||
-    source.sourceKind !== kind ||
-    source.lifecycle !== "active" ||
-    source.currency !== input.pricing.pricingCurrency.currency ||
-    source.pricingCurrencyRevision !== input.pricing.pricingCurrency.pricingCurrencyRevision ||
-    !sourceMatchesRoomPlan(
-      source,
-      input.roomTypeId,
-      input.flexibleRatePlanId,
-      plan.flexibleRatePlanRevision,
-      plan.sourceRoomFactsRevision,
-    )
-  )
-    return invalidInput();
-  return source as Extract<PmsRecurringPricingSourceSnapshot, { sourceKind: Kind }>;
-}
-
-function sourceMatchesRoomPlan(
-  source: PmsRecurringPricingSourceSnapshot,
-  roomTypeId: string,
-  flexibleRatePlanId: string,
-  flexibleRatePlanRevision: number,
-  roomFactsRevision: number,
-): boolean {
-  const matches = (room: RecurringPricingRoomEvidence) =>
-    room.roomTypeId === roomTypeId &&
-    room.roomFactsRevision === roomFactsRevision &&
-    room.flexibleRatePlanId === flexibleRatePlanId &&
-    room.flexibleRatePlanRevision === flexibleRatePlanRevision;
-  switch (source.sourceKind) {
-    case "season":
-      return source.roomPrices.some(matches);
-    case "weekend_surcharge":
-      return source.roomSurcharges.some(matches);
-    case "additional_guest":
-      return matches(source);
-    case "non_refundable":
-      return source.roomPlans.some(matches);
-  }
-}
-
-function sourceRevision(source: PmsRecurringPricingSourceSnapshot): BookingAppliedSourceRevision {
-  return {
-    sourceId: source.sourceId,
-    sourceRevision: source.sourceRevision,
-    validationRevision: source.validation.validationRevision,
-    materializationRevision: source.materializationRevision,
-  };
-}
-
-function requireExactMinorUnits(value: string): bigint {
-  const parsed = roundBookingPriceDecimalToMinorUnits(value);
-  if (!parsed || formatBookingPriceMinorUnits(parsed) !== value) return invalidInput();
-  return BigInt(parsed);
 }
 
 function roundRatioHalfUp(numerator: bigint, denominator: bigint): bigint {
@@ -684,84 +232,12 @@ function boundedMinorUnits(value: bigint): bigint {
   return value;
 }
 
-function isCanonicalUuid(value: unknown): value is string {
-  return typeof value === "string" && UUID_PATTERN.test(value);
-}
-
-function isNullableUuid(value: unknown): value is string | null {
-  return value === null || isCanonicalUuid(value);
-}
-
 function isIntegerInRange(value: unknown, minimum: number, maximum: number): value is number {
   return (
     Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum
   );
 }
 
-function isExactRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const actual = Object.getOwnPropertyNames(value).sort(compareCodeUnits);
-  const expected = [...keys].sort(compareCodeUnits);
-  return (
-    actual.length === expected.length &&
-    actual.every(
-      (key, index) =>
-        key === expected[index] && Object.prototype.propertyIsEnumerable.call(value, key),
-    )
-  );
-}
-
-function isPlainData(value: unknown, seen = new Set<object>()): boolean {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  )
-    return true;
-  if (typeof value !== "object" || seen.has(value)) return false;
-  seen.add(value);
-  const prototype = Object.getPrototypeOf(value);
-  if (Array.isArray(value)) {
-    if (prototype !== Array.prototype) return false;
-    if (Object.getOwnPropertyNames(value).length !== value.length + 1) return false;
-    for (let index = 0; index < value.length; index += 1) {
-      if (
-        !Object.prototype.hasOwnProperty.call(value, index) ||
-        !Object.prototype.propertyIsEnumerable.call(value, index)
-      )
-        return false;
-    }
-  } else if (prototype !== Object.prototype) return false;
-  if (Object.getOwnPropertySymbols(value).length > 0) return false;
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  for (const [key, descriptor] of Object.entries(descriptors)) {
-    if (key === "length" && Array.isArray(value)) continue;
-    if (!descriptor.enumerable || !("value" in descriptor) || !isPlainData(descriptor.value, seen))
-      return false;
-  }
-  seen.delete(value);
-  return true;
-}
-
-function isIsoDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function invalidInput(): never {
   throw new TypeError("Booking price calculation input is invalid");
-}
-
-function deepFreeze<Value>(value: Value): Value {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const nested of Object.values(value)) deepFreeze(nested);
-  }
-  return value;
 }

@@ -514,6 +514,15 @@ export function PresentHotelStep(props: AdaptiveSetupStepComponentProps) {
       noValidate
     >
       {saveError && <AdaptiveSaveError message={saveError} onRetry={() => void continueSetup()} />}
+      {props.editHotelDetails && (
+        <button
+          type="button"
+          className={adaptiveSecondaryButtonClass}
+          onClick={props.editHotelDetails}
+        >
+          Edit hotel identity, location and contact details
+        </button>
+      )}
       <AdaptiveStepCard>
         <div className="grid gap-6 sm:grid-cols-2">
           <label className="block sm:max-w-sm">

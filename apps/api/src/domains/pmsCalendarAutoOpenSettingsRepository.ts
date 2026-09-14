@@ -262,6 +262,8 @@ async function readSetupError(
             AND binding.room_type_id=room.id
             AND binding.calendar_revision=(SELECT calendar_revision FROM current_calendar)
            WHERE room.property_id=$1::uuid AND room.active IS TRUE
+             AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+               WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
              AND (binding.room_type_id IS NULL
                OR binding.source_room_facts_revision IS DISTINCT FROM room.room_facts_revision
                OR binding.source_room_units_revision IS DISTINCT FROM room.room_units_revision)
@@ -272,6 +274,8 @@ async function readSetupError(
              ON room.property_id=binding.property_id
             AND room.id=binding.room_type_id
             AND room.active IS TRUE
+            AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+              WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)
            WHERE binding.property_id=$1::uuid
              AND binding.calendar_revision=(SELECT calendar_revision FROM current_calendar)
              AND room.id IS NULL
@@ -281,6 +285,8 @@ async function readSetupError(
            JOIN pms.room_types room_type
              ON room_type.property_id=room.property_id AND room_type.id=room.room_type_id
            WHERE room.property_id=$1::uuid AND room_type.active IS TRUE
+             AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+               WHERE closure.property_id=room_type.property_id AND closure.room_type_id=room_type.id)
              AND room.status<>'retired' AND room.operational_label_status<>'verified'
          ) AS "labelsUnverified"`,
       [propertyId],
