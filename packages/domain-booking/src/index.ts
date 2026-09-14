@@ -662,3 +662,5 @@ export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
 export * from "./affiliateBookingDestination.js";
+
+export * from "./affiliateBookingEvidence.js";

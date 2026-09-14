@@ -220,3 +220,23 @@ terms acceptance, property authorization and the chosen evidence path are ready.
 
 This draft does not complete VAY-1505 or unblock unresolved commercial behavior.
 No product routes, schema migrations, provider connections or payment effects change.
+
+## Package validation slice — 14 September 2026
+
+`domain-booking` exports `parseAffiliateBookingEvidence` for decoded JSON and
+`matchesAffiliateEvidenceBinding` for separately resolved server-owned connection
+and evidence metadata. The latter checks identity consistency, not authentication
+or authority of the asserted facts. Reauthorize before intake and queued work.
+Successful parsing/binding does not mean durable acceptance, verified stay,
+creator attribution or commission eligibility. No runtime route is connected yet.
+
+Version 1 rejects unknown fields and preserves absent versus explicit-null facts.
+IDs/revisions/evidence references are 1–256 characters, candidate references 1–512,
+methods 1–64, and at most 32 candidates. Strings cannot contain control/format
+characters or surrounding whitespace; opaque IDs are never trimmed/coerced.
+Amounts use nonnegative decimal strings with up to 18 integer and 6 fractional
+digits; currencies use three uppercase letters, without currency-policy approval.
+Dates must be real ISO calendar dates; UTC timestamps use `Z` and up to three
+fractional second digits. These are transport bounds, not attribution, retention,
+monetary rounding or provider capability decisions. An adapter must explicitly
+qualify any source format outside these bounds rather than silently truncate it.
