@@ -774,3 +774,28 @@ identified pending creation, binding matching, one unresolved rate across dates,
 concurrent claim exclusion, other-rate independence, and no implicit release
 following intent failure. A real sender and its late-response tests follow this
 storage dependency; this contract does not authorize provider writes.
+
+
+### Current-publication initial ARI claim (VAY-1545)
+
+`claimPublishedChannexInitialAri` commits local ownership for one validated date.
+It reuses the locked current publication, owners, explicit primary occupancy,
+identified creation and complete receipt gate. Exact retained configuration
+observation must match that attempt, intent, version, binding and manual plan.
+The existing nightly calculator supplies every adult occupancy's inclusive room
+total and explicit restriction values. Zero totals cannot form provider rates;
+there is no partial occupancy claim or additional channel markup.
+
+The immutable request follows the official [ARI multi-occupancy format](https://docs.channex.io/api-v.1-documentation/ari):
+one `values` item with property/rate IDs, date, `rates` occupancy/decimal pairs and
+six explicit restriction fields. Identity comes from the current creation gate.
+Insertion and final owner/lease checks share one transaction; losing authority
+rolls back the attempt. An existing unresolved provider-rate attempt returns
+`ari_reconciliation_required`, including a retry for the same date. The result
+contains only durable correlation IDs, never the request or a callable sender.
+
+This is local ownership only. Provider capability, property-local current-date
+and horizon admission, closure while staging, fresh bounded dispatch, retained
+original-response evidence and authoritative reconciliation remain required
+before any runtime sender can consume it. No HTTP, readback completion, release
+of unresolved ownership, room availability or activation is added here.
