@@ -1,3 +1,5 @@
+import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
+import { createReplacementBookingQuoteIssuer, requirePublicQuoteKey } from "./replacementBookingQuote.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
@@ -34,7 +36,6 @@ import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import {
   allocateMixedQuoteDiscount,
-  createTargetMixedCheckoutQuote,
   mixedSelectionOffer,
   mixedSelectionPromotion,
 } from "./bookingWebMixedSnapshot.js";
@@ -584,6 +585,11 @@ export async function registerBookingWebPublicRoutes(
 
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings/quote",
+    { bodyLimit: 64 * 1024, async onRequest(request, reply) {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      requirePublicQuoteKey(request);
+    } },
     async (request, reply) => {
       const body = request.body ?? {};
       const response = await checkoutAdapter.quoteBooking(
@@ -1344,6 +1350,8 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
+  const issueReplacementQuote = createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(pool, 300));
+
   const editCleanupTimer = setInterval(() => {
     void releaseAbandonedBookingEdits(pool, config).catch(() =>
       console.warn("Pending booking edit cleanup failed; it will retry."),
@@ -1777,36 +1785,7 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async quoteBooking(slug, request, context) {
-      const action = async (executor: BookingWebQueryExecutor) => {
-        const property = await resolveTargetCheckoutProperty(executor, slug, true);
-        if (context) {
-          const reservation = await reserveTargetCheckoutCommand(
-            executor,
-            property.propertyId,
-            context,
-          );
-          if (reservation.status === "replay") return reservation.body;
-        }
-        if (request["roomSelection"] !== undefined && !config.mixedRoomSelectionsEnabled)
-          throw createHttpError(400, "Room selection checkout is not available.");
-        const quote = await (
-          request["roomSelection"] !== undefined
-            ? createTargetMixedCheckoutQuote
-            : createTargetCheckoutQuote
-        )(executor, property, request, context?.occurredAt ?? config.now?.() ?? new Date());
-        const body = serializeTargetCheckoutQuote(quote);
-        if (context) {
-          await recordTargetCheckoutCommand(executor, {
-            propertyId: property.propertyId,
-            context,
-            resourceType: "checkout_quote",
-            resourceId: quote.publicQuoteReference,
-            body,
-          });
-        }
-        return body;
-      };
-      return context ? withTargetCheckoutTransaction(pool, action) : action(pool);
+      return issueReplacementQuote(slug, request, context?.idempotencyKey);
     },
     async confirmAuthorization(slug, handle, context) {
       if (!context) throw createHttpError(400, "Checkout command context is required.");
