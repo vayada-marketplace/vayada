@@ -44,7 +44,12 @@ export function bookingQuoteAcceptanceRequirements(quoteInput: unknown, policyIn
   if (!choices) return null;
   return {
     quote,
-    policy: { ...policyInput, choices },
+    policy: {
+      propertyId: quote.stay.propertyId,
+      sourceRevision: policyInput.sourceRevision,
+      disclosureHash: policyInput.disclosureHash,
+      choices,
+    },
     quoteEvidenceId: digest(quote),
     guestPolicyEvidenceId: digest({ ...policyInput, choices }),
   };
