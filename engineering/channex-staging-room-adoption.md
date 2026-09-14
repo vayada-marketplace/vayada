@@ -183,3 +183,14 @@ concurrent apply, rollback and replay on PostgreSQL 16/17. A deployed canary
 must prove only the target date/room changed and normal import produces exactly
 one OTA GBP100 nightly evidence row; protected bookings, original failed job,
 recurrence, coverage, all other inventory rows and provider state remain intact.
+
+### Retained inventory after terminal room closure
+
+Calendar impact reads must distinguish the current coverage manifest from
+historical inventory retained by the owned terminal room-closure command.
+Exclude a row outside the current calendar's room bindings only when a matching
+property/room closure receipt exists, the date is on or after its cutoff,
+`closure_source_revision` is one, and the row is closed with zero available,
+assigned and blocked counts. Keep all other rows in the strict manifest check,
+including pre-cutoff history or rows without complete closure proof. This read
+filter never changes inventory, coverage, recurrence or provider state.
