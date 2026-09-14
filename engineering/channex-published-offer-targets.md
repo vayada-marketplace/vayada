@@ -923,3 +923,35 @@ Return a correlated restriction observation without retaining completion evidenc
 reconciling ownership or activating the target. Transport ambiguity and task
 acknowledgements remain unresolved regardless of matching restrictions. Price and
 original-task completion verification are separate requirements.
+
+### Original task finish observation (VAY-1545)
+
+Read-only staging investigation on 2026-09-14 found `GET /api/v1/tasks/:taskId`
+in Channex's public web client (`assets/index-C8PX-x_S.js`, Tasks.find), then
+verified HTTP 200 with the existing property-scoped API key. Task
+`5ff7d7b6-f455-4309-a19d-383442c09c50` returned `type: task`, matching top-level
+and attributes IDs, `task: Property.UpdateRestrictions`, `success: true`, empty
+errors, received/executed/finished timestamps and the original values payload.
+The signed-in property task UI independently displayed the same result and finish
+time, with no changes to sync to OTAs. These are historical fixture observations;
+no new upload or provider mutation was made. Sanitized evidence is in local
+`vayada-testing/evidence/vay1545-task-api/task-observation.json`.
+
+The adapter requests only a validated task UUID, snapshots the expected original
+payload, requires every value to belong to the expected property, and accepts only
+matching IDs/type/task/exact payload, explicit success, empty errors and ordered
+valid received/executed/finished timestamps. It returns only identifiers and the
+three timestamps. Discard user/IP/source details, provider error text, raw payload
+and channel events. Missing, pending, failed, mismatched or ambiguous responses
+remain unavailable. Task IDs must ultimately come from immutable original receipts,
+not job payloads or caller completion flags; a future domain service must enforce
+that provenance and current ownership before using observations.
+
+Observed timestamps use timezone-less UTC with microseconds, consistent with the
+client's UTC display conversion. Preserve those strings and compare all six
+fraction digits. This is an observed task finish marker, not a provider guarantee
+that execution cannot ever be replayed, a supported-public-API stability promise,
+or OTA delivery proof. Do not release ownership or activate from this adapter.
+The public task API's lifecycle/retry guarantees and occupancy price readback
+still require verification before definitive reconciliation. Never substitute a
+browser session token for the scoped API key. Keep the runtime sender disabled.
