@@ -78,9 +78,9 @@ partner commission snapshots; quote amount lines alone do not establish ownershi
 4. Reserve the PMS inventory bundle using the already validated immutable quote,
    write booking/booker/add-ons and immutable acceptance evidence, consume only a
    positive applied promo discount and stage status/read-model/outbox effects.
-   These are all uncommitted writes on the caller connection. The existing helpers
-   require refactoring to consume trusted, locked pre-mutation evidence before
-   they can be composed here; the orchestration is not implemented by this design.
+   These are all uncommitted writes on the caller connection. The inventory and
+   promo composition helpers below now consume trusted, locked pre-mutation
+   evidence; the complete writer orchestration remains unimplemented.
 5. Stage the command receipt's complete result and every potentially blocking
    insert/update, including FK, unique-index and receipt locks. Run the final-time
    gate below. The append-only acceptance record keeps its database insertion
@@ -92,8 +92,8 @@ A critical ordering constraint: `redeemCurrentQuotePromo` currently invokes full
 revalidation. Its own `current_uses` increment changes the promo source fingerprint;
 revalidating afterward would reject the command's own mutation. Similarly, a
 fresh availability check after its own PMS reservation can observe reduced free
-inventory. The future writer needs owner APIs accepting the previously locked
-validation, or explicit reservation-credit-aware checks. Do not fix either by
+inventory. The retained-validation owner APIs below address this ordering for the future
+writer; accepted-command replay still precedes fresh inventory checks. Do not fix either by
 ignoring arbitrary source changes, refunding/re-reserving, or skipping authority.
 Reuse the existing PMS inventory and Booking promo mutation algorithms after
 separating their pre-mutation validation; do not introduce parallel calculators.
@@ -240,6 +240,7 @@ Neither path completes booking acceptance. Final deadline checks and full rollba
 remain mandatory. A real PostgreSQL regression verifies that own consumption
 invalidates fresh repricing, retained validation still replays the same application,
 and rollback restores both usage count and absence of the application.
+
 ## Inventory composition prerequisite
 
 `reserveRevalidatedQuoteInventory(client, slug, current)` reuses a successful
