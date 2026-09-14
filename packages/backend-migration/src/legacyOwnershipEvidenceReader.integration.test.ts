@@ -4,6 +4,10 @@ import { readLegacyOwnershipTargetRow } from "./channexAdoptionTargetRows.js";
 import { readLegacyOwnershipDrift } from "./legacyOwnershipEvidenceReader.js";
 import { readLegacyOwnershipTargetEvidence } from "./legacyOwnershipRelationships.js";
 import {
+  verifyLegacyCurrentOwnerIdentity,
+  type LegacyOwnerIdentityEvidence,
+} from "./legacyCurrentOwnerIdentity.js";
+import {
   LEGACY_OWNERSHIP_ROW_TABLES,
   type LegacyOwnershipFingerprint,
 } from "./legacyOwnershipBeforeState.js";
@@ -13,6 +17,12 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
   let client: pg.Client;
   const fingerprints: LegacyOwnershipFingerprint[] = [];
   const legacyHotelId = "00000000-0000-4000-8000-000000000099";
+  let identityProof: LegacyOwnerIdentityEvidence;
+  const verifiedSession = () => ({
+    workosUserId: "user_synthetic",
+    workosOrgId: "org_synthetic",
+    expiresAt: Math.floor(Date.now() / 1000) + 300,
+  });
   beforeAll(async () => {
     const parsed = new URL(url!);
     if (
@@ -50,7 +60,27 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
         ADD COLUMN resource_type text, ADD COLUMN resource_id text, ADD COLUMN relationship text;
       ALTER TABLE hotel_catalog.property_source_links ADD COLUMN property_id uuid, ADD COLUMN source_id text,
         ADD COLUMN source_system text, ADD COLUMN source_table text, ADD COLUMN relationship text`);
-    await client.query("UPDATE identity.organizations SET kind = 'hotel_group'");
+    await client.query("ALTER TABLE identity.organizations ADD COLUMN workos_org_id text");
+    await client.query(
+      "UPDATE identity.organizations SET kind = 'hotel_group', status = 'suspended', workos_org_id = 'org_synthetic'",
+    );
+    await client.query(`CREATE TABLE identity.external_identities (id uuid PRIMARY KEY, user_id uuid NOT NULL,
+      provider text NOT NULL, provider_user_id text, raw_profile jsonb NOT NULL);
+      INSERT INTO identity.external_identities VALUES ('00000000-0000-4000-8000-000000000096',
+      '00000000-0000-4000-8000-000000000001', 'workos', 'user_synthetic', '{}')`);
+    const externalIdentity = await readLegacyOwnershipTargetRow(
+      client,
+      "identity.external_identities",
+      "00000000-0000-4000-8000-000000000096",
+    );
+    identityProof = {
+      userId: id("user"),
+      organizationId: id("organization"),
+      externalIdentityId: externalIdentity.id,
+      externalIdentitySha256: externalIdentity.rowStateSha256,
+      workosUserId: "user_synthetic",
+      workosOrgId: "org_synthetic",
+    };
     await client.query(
       "UPDATE identity.organization_memberships SET user_id = $1, organization_id = $2, role_key = 'hotel_owner', access_origin = 'agency'",
       [id("user"), id("organization")],
@@ -207,6 +237,47 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
         outcome: "blocked",
         reason: "source_link_conflict",
       });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it("matches verified session IDs against current database bindings, not email", async () => {
+    await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY");
+    try {
+      expect(
+        await verifyLegacyCurrentOwnerIdentity(client, identityProof, verifiedSession()),
+      ).toEqual({
+        outcome: "identity_matches",
+        userStatus: "pending",
+        organizationStatus: "suspended",
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each([
+    [
+      "suspended user",
+      "UPDATE identity.users SET status = 'suspended'",
+      "current_identity_conflict",
+    ],
+    [
+      "competing WorkOS identity",
+      `INSERT INTO identity.external_identities SELECT '00000000-0000-4000-8000-000000000095', user_id, provider, 'user_other', raw_profile FROM identity.external_identities`,
+      "current_identity_conflict",
+    ],
+    [
+      "changed identity metadata",
+      "UPDATE identity.external_identities SET raw_profile = '{\"changed\":true}'",
+      "current_identity_drift",
+    ],
+  ])("rejects %s in current identity bindings", async (_name, sql, reason) => {
+    await client.query("BEGIN");
+    try {
+      await client.query(sql!);
+      expect(
+        await verifyLegacyCurrentOwnerIdentity(client, identityProof, verifiedSession()),
+      ).toEqual({ outcome: "blocked", reason });
     } finally {
       await client.query("ROLLBACK");
     }
