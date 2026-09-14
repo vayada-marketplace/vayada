@@ -754,3 +754,14 @@ fail closed; public access is checked again after reads. The catalogue has no
 amounts or availability promise. The existing date-specific /offers contract is
 not reinterpreted as this catalogue. Guest quoting and booking acceptance retain
 their own date, age, availability and current-evidence checks.
+
+The browser room-selection step reads the unpriced catalogue, requires an explicit
+current offer for every physical room, and collects adults and each child's age
+at check-in. Blank ages cannot become zero. Mixed currencies cannot be combined.
+Only a submitted, matching, unexpired quote supplies display money; edits, tenant
+changes, cancellation and expiry retire the result. Currency formatting uses the
+shared accounting scale and decimal strings, without conversion or local pricing.
+The new /book entry replaces the retired guest-details step with room selection
+and a price preview; it offers no reservation submission until atomic acceptance
+and complete guest/policy disclosure are connected. Optional extras/promo controls
+and the remaining old checkout screens are separate unfinished work.
