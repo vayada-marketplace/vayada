@@ -45,6 +45,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
   const values = useRef<Data>({});
   const dirty = useRef(false),
     busy = useRef(false),
+    continuing = useRef(false),
     generation = useRef(0);
   const retryCommand = useRef<{ fingerprint: string; key: string } | null>(null);
   const [data, setData] = useState<Data>({});
@@ -63,7 +64,8 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
   useEffect(
     () =>
       registerBeforeLeave(async () => {
-        if (busy.current) throw new Error("Wait for guest rules to finish saving.");
+        if (busy.current && !continuing.current)
+          throw new Error("Wait for guest rules to finish saving.");
         if (dirty.current) throw new Error("Save your guest rules before leaving this step.");
       }),
     [registerBeforeLeave],
@@ -79,6 +81,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
     setSaved(false);
     dirty.current = false;
     busy.current = false;
+    continuing.current = false;
     retryCommand.current = null;
     void bookingGuestRulesClient
       .load(propertyId, controller.signal)
@@ -155,22 +158,27 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
     setSaving(true);
     setError(null);
     try {
-      const result = await bookingGuestRulesClient.save(
-        propertyId,
-        expectedRevision,
-        choices,
-        retryCommand.current.key,
-      );
-      if (current !== generation.current) return;
-      canonical.current = result;
-      dirty.current = false;
-      retryCommand.current = null;
-      setSaved(true);
+      if (!saved) {
+        const result = await bookingGuestRulesClient.save(
+          propertyId,
+          expectedRevision,
+          choices,
+          retryCommand.current.key,
+        );
+        if (current !== generation.current) return;
+        canonical.current = result;
+        dirty.current = false;
+        retryCommand.current = null;
+        setSaved(true);
+      }
+      continuing.current = true;
+      await props.saveAndContinue({ recheckBeforeLeaveOnRetry: true });
     } catch (cause) {
       if (current === generation.current) setError(guestRulesErrorMessage(cause));
     } finally {
       if (current === generation.current) {
         busy.current = false;
+        continuing.current = false;
         setSaving(false);
       }
     }
@@ -369,7 +377,7 @@ export function GuestExperienceStep(props: AdaptiveSetupStepComponentProps) {
           className={adaptivePrimaryButtonClass}
           disabled={saving || !confirmed}
         >
-          {saving ? "Saving…" : "Save guest rules"}
+          {saving ? "Please wait…" : saved ? "Continue" : "Save and continue"}
         </button>
       </div>
     </form>

@@ -638,3 +638,14 @@ retain booking.settings.manage. Both use the same scoped authorization checks.
 This is setup configuration state, not public publication readiness. Cancellation,
 payment, operating-calendar, public visibility and booking acceptance gates remain
 separate; no catalog projection receipt or publication readiness is fabricated.
+
+
+The guest-rule editor delegates to the setup controller's save-and-continue action
+only after the owner save succeeds. The controller refreshes the route before
+navigating. A failed navigation/refresh retry must not append another guest-rule
+revision. Pending saves block leaving and duplicate submits; responses from a
+previous property/organization scope cannot advance the current route. This does
+not turn setup completion into public bookability.
+Guest-rule navigation requests explicitly recheck the leave guard on controller
+retries so edits made after a failed refresh cannot be discarded by the shell's
+Retry button. Existing draft-writing steps retain their current retry behavior.

@@ -83,13 +83,14 @@ describe("replacement guest rules editor", () => {
     expect(mocks.save).not.toHaveBeenCalled();
     h.renderer.unmount();
   });
-  it("saves confirmed rules without rates and without advancing readiness", async () => {
+  it("saves confirmed rules then delegates refreshed navigation to the controller", async () => {
     const h = await render();
     await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
     await submit(h.renderer);
     expect(mocks.save).toHaveBeenCalledWith(propertyId, propertyId, choices, expect.any(String));
     expect(JSON.stringify(h.renderer.toJSON())).toContain("Guest rules saved.");
-    expect(h.props.saveAndContinue).not.toHaveBeenCalled();
+    expect(h.props.saveAndContinue).toHaveBeenCalledOnce();
+    expect(h.props.refreshRoute).not.toHaveBeenCalled();
     await expect(h.leave()).resolves.toBeUndefined();
     h.renderer.unmount();
   });
@@ -120,6 +121,64 @@ describe("replacement guest rules editor", () => {
     const first = mocks.save.mock.calls[0];
     await submit(h.renderer);
     expect(mocks.save.mock.calls[1]).toEqual(first);
+    h.renderer.unmount();
+  });
+  it("allows the controller leave guard after saving and retries navigation without another write", async () => {
+    const h = await render();
+    vi.mocked(h.props.saveAndContinue).mockImplementationOnce(async () => {
+      await h.leave();
+      throw new Error("Setup progress unavailable");
+    });
+    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
+    await submit(h.renderer);
+    expect(JSON.stringify(h.renderer.toJSON())).toContain("Guest rules saved.");
+    expect(JSON.stringify(h.renderer.toJSON())).toContain("Setup progress unavailable");
+    await submit(h.renderer);
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(h.props.saveAndContinue).toHaveBeenCalledTimes(2);
+    h.renderer.unmount();
+  });
+  it("blocks navigation and duplicate submits while the save is pending", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.save.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const h = await render();
+    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
+    await submit(h.renderer);
+    await submit(h.renderer);
+    await expect(h.leave()).rejects.toThrow("Wait for guest rules");
+    expect(h.props.saveAndContinue).not.toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalledOnce();
+    await act(async () => finish({ revision: organizationId, choices }));
+    expect(h.props.saveAndContinue).toHaveBeenCalledOnce();
+    h.renderer.unmount();
+  });
+  it("ignores a saved response after the property scope changes", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.save.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const h = await render();
+    await act(async () => confirm(h.renderer).props.onChange({ target: { checked: true } }));
+    await submit(h.renderer);
+    await act(async () =>
+      h.renderer.update(
+        createElement(GuestExperienceStep, {
+          ...h.props,
+          route: {
+            ...h.props.route,
+            scope: { ...h.props.route.scope, propertyId: organizationId },
+          },
+        }),
+      ),
+    );
+    await act(async () => finish({ revision: organizationId, choices }));
+    expect(h.props.saveAndContinue).not.toHaveBeenCalled();
     h.renderer.unmount();
   });
   it("does not expose the editor after a failed authorized load", async () => {
