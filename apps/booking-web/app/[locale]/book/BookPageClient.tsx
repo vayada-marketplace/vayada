@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReplacementGuestRules from "@/components/booking/ReplacementGuestRules";
+import ReplacementQuoteExtras from "@/components/booking/ReplacementQuoteExtras";
+import { getReplacementAddons, type PricingAddon } from "@/services/api/replacementAddons";
+import {
+  buildReplacementAddonSelection,
+  type ReplacementExtrasValue,
+} from "@/services/api/replacementAddonSelection";
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
@@ -31,6 +38,24 @@ function RoomQuoteForm({ slug }: { slug: string }) {
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
+  const [extras, setExtras] = useState<ReplacementExtrasValue | null>(null);
+  const [allocationRevision, setAllocationRevision] = useState(0);
+  const [addonCatalogue, setAddonCatalogue] = useState<PricingAddon[] | null>(null);
+  const [addonError, setAddonError] = useState(false);
+  const [addonReload, setAddonReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setAddonCatalogue(null);
+    setAddonError(false);
+    void getReplacementAddons(slug, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setAddonCatalogue(value);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAddonError(true);
+      });
+    return () => controller.abort();
+  }, [slug, addonReload]);
   const [choices, setChoices] = useState<RoomChoice[]>([]);
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
@@ -54,13 +79,35 @@ function RoomQuoteForm({ slug }: { slug: string }) {
       });
     return () => controller.abort();
   }, [slug, reload]);
-  const request =
+  const baseRequest =
     rooms && payment
       ? roomQuoteRequest(rooms, choices, checkIn, checkOut, payment, promoCode)
       : null;
+  const addons = buildReplacementAddonSelection(
+    addonCatalogue ?? [],
+    baseRequest?.selection ?? null,
+    allocationRevision,
+    extras,
+  );
+  const request =
+    baseRequest && addons !== null
+      ? {
+          ...baseRequest,
+          selection: {
+            ...baseRequest.selection,
+            version: "public-pricing-selection.v2" as const,
+            addons,
+          },
+        }
+      : null;
+  const changeChoices = (change: (current: RoomChoice[]) => RoomChoice[]) => {
+    setChoices(change);
+    setAllocationRevision((value) => value + 1);
+    setExtras(null);
+  };
   const { quote, error, loading, submit } = useReplacementQuote(slug, request);
   const update = (id: string, patch: Partial<RoomChoice>) =>
-    setChoices((current) =>
+    changeChoices((current) =>
       current.map((choice) => (choice.selectionId === id ? { ...choice, ...patch } : choice)),
     );
 
@@ -206,7 +253,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
                   type="button"
                   className="underline"
                   onClick={() =>
-                    setChoices((current) =>
+                    changeChoices((current) =>
                       current.filter((room) => room.selectionId !== choice.selectionId),
                     )
                   }
@@ -220,10 +267,32 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             type="button"
             className={button}
             disabled={choices.length >= 99}
-            onClick={() => setChoices((current) => [...current, newRoom()])}
+            onClick={() => changeChoices((current) => [...current, newRoom()])}
           >
             Add room
           </button>
+          {addonError ? (
+            <p role="alert">
+              Extra options are unavailable.{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setAddonReload((value) => value + 1)}
+              >
+                Retry extras
+              </button>
+            </p>
+          ) : addonCatalogue === null ? (
+            <p role="status">Loading optional extras…</p>
+          ) : (
+            <ReplacementQuoteExtras
+              catalogue={addonCatalogue}
+              selection={baseRequest?.selection ?? null}
+              allocationRevision={allocationRevision}
+              value={extras}
+              onChange={setExtras}
+            />
+          )}
           <label className="block">
             Promo code (optional)
             <input
@@ -266,7 +335,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           <button
             className="underline"
             onClick={() => {
-              setChoices((current) => current.map((choice) => ({ ...choice, publicOfferKey: "" })));
+              changeChoices((current) =>
+                current.map((choice) => ({ ...choice, publicOfferKey: "" })),
+              );
               setReload((value) => value + 1);
             }}
           >
@@ -299,6 +370,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               ]),
             )}
           />
+          <ReplacementGuestRules key={quote.quoteId} slug={slug} quote={quote} />
           <p className="text-sm text-gray-600">
             This is a price preview. No room is reserved and no payment is taken. Online reservation
             submission is currently unavailable.
