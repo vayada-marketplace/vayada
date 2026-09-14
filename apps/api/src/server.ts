@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
@@ -411,6 +412,7 @@ const bankTransferBookings = bankTransferCodec
   : undefined;
 
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
