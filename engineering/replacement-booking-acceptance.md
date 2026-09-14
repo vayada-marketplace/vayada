@@ -169,8 +169,8 @@ bytes/hash; update, delete and truncate are forbidden.
 Finance fields use existing `billing_plan_snapshot`, `commission_terms_snapshot`
 and `finance_terms_captured_at` representations, supplied explicitly with no
 fallback defaults. Empty commission objects are rejected, including for fixed
-plans; a legitimate fixed-plan snapshot retains its explicit zero/affiliate fee
-values and Finance configuration timestamp. This schema does not establish owner
+plans; a legitimate fixed-plan snapshot retains its nominal fee values and
+Finance configuration timestamp. Fixed-plan charging is resolved downstream. This schema does not establish owner
 capture or verify arbitrary commission object semantics. No Finance capability ID
 is substituted for accepted billing/commission values.
 
@@ -195,3 +195,20 @@ with success status200. No receipt means only “no recorded command”; the fut
 writer must reserve the command/quote keys and repeat the read after any wait.
 These readers neither reserve inventory nor create a booking or validate current
 PMS occupancy. The immutable bundle retains opaque PMS receipt IDs for its owner.
+## Finance capture prerequisite
+
+`lockFinancePricingAcceptanceTerms(client, slug)` resolves public scope itself,
+locks the property and its exact organization billing entitlement and Finance
+onboarding commission rule, then rechecks authority and database time. It reuses
+the existing Finance billing mapper after strict validation. Missing configuration,
+unselected/invalid plans, malformed present fees and expired evidence fail closed.
+For a real onboarding rule, absent optional fees retain Finance's existing rules:
+channel fee equals the nominal rate and affiliate fee is zero. This is different
+from inventing missing Finance configuration. Fixed-plan snapshots retain nominal
+fees (currently5); downstream plan semantics determine whether a fee is charged.
+
+The result supplies existing billing/commission/capture timestamp fields and the
+earliest `validUntil`. Retain all locks and check this deadline again at final
+acceptance after later waits. The current quote-time gate alone does not enforce
+Finance expiration. This helper creates no acceptance record, does not execute
+payments and does not substitute payment capability evidence for billing terms.
