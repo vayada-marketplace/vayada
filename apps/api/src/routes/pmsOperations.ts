@@ -1,3 +1,4 @@
+import type { PmsRoomClosureRepository } from "../domains/pmsRoomClosureCommandRepository.js";
 import { DEFAULT_FLEXIBLE_CANCELLATION_POLICY } from "../domains/pmsDefaultCancellationPolicy.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
@@ -1023,6 +1024,7 @@ export type PmsOperationsRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
   commandRepository?: PmsOperationsCommandRepository;
+  roomClosureRepository?: PmsRoomClosureRepository;
   linkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   resolveOnboardingRoomCurrency?: (propertyId: string) => Promise<string | null>;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -1226,6 +1228,7 @@ export async function registerPmsOperationsRoutes(
   app.addHook("onClose", async () => {
     await repository.close?.();
     await commandRepository?.close?.();
+    await options.roomClosureRepository?.dispose();
     await options.linkedInventoryGroupCommandRepository?.close();
     await bookingGuestPiiPort?.close?.();
     await options.propertyPlanReadRepository?.close?.();
@@ -1251,6 +1254,8 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/room-types/:roomTypeId",
     "/properties/:propertyId/room-types/:roomTypeId/duplicate",
     "/properties/:propertyId/room-types/:roomTypeId/retirement-impact",
+    "/properties/:propertyId/room-types/:roomTypeId/closure-impact",
+    "/properties/:propertyId/room-types/:roomTypeId/close",
     "/properties/:propertyId/linked-inventory-groups",
     "/properties/:propertyId/linked-inventory-groups/:groupId",
     "/properties/:propertyId/plan-limits",
@@ -1276,6 +1281,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/messaging/threads/:threadId/notes",
     "/properties/:propertyId/messaging/threads/:threadId/assist",
     "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
+    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/close",
     "/properties/:propertyId/messaging/quick-replies",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/update",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/archive",
@@ -2357,7 +2363,9 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
           thread: redactInboxGuestContact(result.value.thread, canReadGuestContact),
-          availableProviderActions: result.value.availableProviderActions,
+          availableProviderActions:
+            options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
+          providerActions: result.value.providerActions ?? [],
           timeline: result.value.timeline.map((item) => item.item),
           previousCursor: result.value.previousCursor,
         };
@@ -2598,47 +2606,54 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
-    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
-    { onRequest: inboxStaffCommandAuthorization(options) },
-    async (request, reply) => {
-      const input = parseInboxProviderAction(request);
-      if ("error" in input) return sendPmsOperationsError(reply, input.error);
-      if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
-      if (!options.inboxProviderActionPort)
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      const { propertyId, threadId } = request.params;
-      try {
-        const result = await options.inboxProviderActionPort.noReplyNeeded({
-          propertyId,
-          threadId,
-          ...inboxCommandActor(request.authContext!),
-          idempotencyKey: input.value.idempotencyKey,
-        });
-        if (!result.ok) return sendInboxProviderActionError(reply, result.error);
-        if (!validInboxProviderAction(result.value, propertyId, threadId))
-          throw new Error("Inbox provider-action scope mismatch");
-        return reply.code(202).send({
-          contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
-          propertyId: result.value.propertyId,
-          threadId: result.value.threadId,
-          action: result.value.action,
-          jobId: result.value.jobId,
-          acceptedAt: result.value.acceptedAt,
-          attentionStateChanged: result.value.attentionStateChanged,
-        });
-      } catch {
-        request.log.error("PMS Inbox provider action failed");
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      }
-    },
-  );
+  for (const providerAction of ["no-reply-needed", "close"] as const)
+    app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
+      `/properties/:propertyId/messaging/threads/:threadId/provider-actions/${providerAction}`,
+      { onRequest: inboxStaffCommandAuthorization(options) },
+      async (request, reply) => {
+        const input = parseInboxProviderAction(request);
+        if ("error" in input) return sendPmsOperationsError(reply, input.error);
+        if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
+        if (!options.inboxProviderActionPort)
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        const { propertyId, threadId } = request.params;
+        try {
+          const result = await options.inboxProviderActionPort.noReplyNeeded({
+            propertyId,
+            threadId,
+            expectedVersion: input.value.expectedVersion,
+            action: providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed",
+            ...inboxCommandActor(request.authContext!),
+            idempotencyKey: input.value.idempotencyKey,
+          });
+          if (!result.ok) return sendInboxProviderActionError(reply, result.error);
+          if (
+            !validInboxProviderAction(result.value, propertyId, threadId) ||
+            result.value.action !==
+              (providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed")
+          )
+            throw new Error("Inbox provider-action scope mismatch");
+          return reply.code(202).send({
+            contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
+            propertyId: result.value.propertyId,
+            threadId: result.value.threadId,
+            action: result.value.action,
+            jobId: result.value.jobId,
+            acceptedAt: result.value.acceptedAt,
+            attentionStateChanged: result.value.attentionStateChanged,
+          });
+        } catch {
+          request.log.error("PMS Inbox provider action failed");
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        }
+      },
+    );
 
   app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
     "/properties/:propertyId/messaging/threads/:threadId/read",
@@ -3341,6 +3356,92 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
     handleCheckoutChargeMarkPaid,
   );
+
+  if (options.roomClosureRepository) {
+    const closure = options.roomClosureRepository;
+    for (const method of ["GET", "POST"] as const)
+      app.route<{ Params: PmsRoomTypeParams; Body: unknown }>({
+        method,
+        url: `/properties/:propertyId/room-types/:roomTypeId/${method === "GET" ? "closure-impact" : "close"}`,
+        handler: async (request, reply) => {
+          if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? []))
+            return sendPmsOperationsError(reply, originNotAllowed());
+          const { propertyId, roomTypeId } = request.params;
+          if (!enforcePmsOperationsManagePolicy(request, reply, propertyId, ["owner", "operator"]))
+            return reply;
+          if (!isUuid(propertyId) || !isUuid(roomTypeId))
+            return sendPmsOperationsError(
+              reply,
+              invalidBody("Property and room IDs must be UUIDs."),
+            );
+          const context = request.authContext!;
+          if (context.selectedOrganization.kind !== "hotel_group")
+            return reply.code(403).send({ ok: false, error: { code: "setup_scope_unavailable" } });
+          const scope = {
+            propertyId,
+            roomTypeId,
+            organizationId: context.selectedOrganization.organizationId,
+            actorUserId: context.actor.internalUserId,
+          };
+          let result;
+          if (method === "GET") result = await closure.preview(scope);
+          else {
+            const raw = objectBody(request.body);
+            const idempotencyKey = singleIdempotencyKey(request);
+            const revisions = [
+              "expectedRoomFactsRevision",
+              "expectedRoomUnitsRevision",
+              "expectedCalendarRevision",
+            ] as const;
+            if (
+              !raw ||
+              !idempotencyKey ||
+              Object.keys(raw).length !== 4 ||
+              !revisions.every(
+                (key) =>
+                  Number.isSafeInteger(raw[key]) &&
+                  Number(raw[key]) > 0 &&
+                  Number(raw[key]) <= 2147483647,
+              ) ||
+              !(
+                raw.expectedActivePublicationRevisionId === null ||
+                (typeof raw.expectedActivePublicationRevisionId === "string" &&
+                  isUuid(raw.expectedActivePublicationRevisionId))
+              )
+            )
+              return sendPmsOperationsError(
+                reply,
+                invalidBody(
+                  "Closure requires three source revisions, the active publication revision (or null), and one Idempotency-Key header.",
+                ),
+              );
+            result = await closure.closeRoom({
+              ...scope,
+              idempotencyKey,
+              expectedRoomFactsRevision: Number(raw.expectedRoomFactsRevision),
+              expectedRoomUnitsRevision: Number(raw.expectedRoomUnitsRevision),
+              expectedCalendarRevision: Number(raw.expectedCalendarRevision),
+              expectedActivePublicationRevisionId: raw.expectedActivePublicationRevisionId as
+                | string
+                | null,
+              requestId: context.audit.requestId,
+              correlationId: context.audit.correlationId,
+            });
+          }
+          return reply
+            .code(
+              result.ok
+                ? 200
+                : result.error.code === "setup_scope_unavailable"
+                  ? 403
+                  : result.error.code === "room_type_not_found"
+                    ? 404
+                    : 409,
+            )
+            .send(result);
+        },
+      });
+  }
 
   if (commandRepository) {
     app.post<{ Params: PmsPropertyParams; Body: unknown }>(
@@ -4384,6 +4485,11 @@ function enforcePmsOperationsManagePolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyId: string,
+  allowedRelationships: readonly ("owner" | "operator" | "front_desk")[] = [
+    "owner",
+    "operator",
+    "front_desk",
+  ],
 ): boolean {
   try {
     enforceRoutePolicy(request, {
@@ -4401,7 +4507,7 @@ function enforcePmsOperationsManagePolicy(
         product: "pms",
         resourceType: "pms_property",
         resourceId: propertyId,
-        allowedRelationships: ["owner", "operator", "front_desk"],
+        allowedRelationships,
       },
     });
     return true;
@@ -6203,14 +6309,19 @@ function parseInboxAssistance(request: FastifyRequest<{ Body: unknown }>):
 
 function parseInboxProviderAction(
   request: FastifyRequest<{ Body: unknown }>,
-): { value: { idempotencyKey: string } } | { error: PmsOperationsError } {
+): { value: { idempotencyKey: string; expectedVersion: number } } | { error: PmsOperationsError } {
   const idempotencyKey = singleIdempotencyKey(request);
   const body = request.body === undefined ? {} : objectBody(request.body);
-  if (!idempotencyKey || !body || Object.keys(body).length > 0)
+  if (
+    !idempotencyKey ||
+    !body ||
+    Object.keys(body).some((key) => key !== "expectedVersion") ||
+    !validInboxVersion(body.expectedVersion)
+  )
     return {
       error: invalidInboxStaffCommand("Inbox provider-action request is invalid."),
     };
-  return { value: { idempotencyKey } };
+  return { value: { idempotencyKey, expectedVersion: body.expectedVersion as number } };
 }
 
 function normalizedInboxQuickReplyFields(
@@ -6497,7 +6608,9 @@ function sendInboxProviderActionError(
   const statusCode =
     error.code === "thread_not_found"
       ? 404
-      : error.code === "provider_action_unavailable" || error.code === "idempotency_conflict"
+      : error.code === "thread_version_conflict" ||
+          error.code === "provider_action_unavailable" ||
+          error.code === "idempotency_conflict"
         ? 409
         : 400;
   return sendPmsOperationsError(reply, {
@@ -6690,7 +6803,7 @@ function validInboxProviderAction(
   return (
     value.propertyId === propertyId &&
     value.threadId === threadId &&
-    value.action === "booking_com_no_reply_needed" &&
+    ["booking_com_no_reply_needed", "channex_close"].includes(value.action) &&
     isUuid(value.jobId) &&
     isCanonicalInboxInstant(value.acceptedAt) &&
     value.attentionStateChanged === false

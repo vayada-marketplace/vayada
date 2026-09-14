@@ -75,6 +75,108 @@ describe("AdaptiveHotelSetupController", () => {
     vi.unstubAllGlobals();
   });
 
+  it("saves before an exact review edit and preserves product return context", async () => {
+    mocks.searchParams = new URLSearchParams({
+      propertyId,
+      step: "review",
+      returnProduct: "pms",
+      returnTo: "/calendar",
+    });
+    mocks.getRoute.mockResolvedValue(operationsRoute("review"));
+    const beforeLeave = vi.fn().mockResolvedValue(undefined);
+    let context!: AdaptiveSetupStepRenderContext;
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(
+        createElement(AdaptiveHotelSetupController, {
+          propertyId,
+          requestedStepId: "review",
+          onExit: vi.fn(),
+          beforeLeave,
+          StepForm: (props) => {
+            context = props;
+            return null;
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      context.goToStep!("rooms", "room-2");
+    });
+    expect(beforeLeave).toHaveBeenCalledTimes(1);
+    const destination = new URL(mocks.push.mock.calls[0][0], "https://example.com");
+    expect(Object.fromEntries(destination.searchParams)).toMatchObject({
+      propertyId,
+      step: "rooms",
+      entity: "room-2",
+      returnProduct: "pms",
+      returnTo: "/calendar",
+    });
+    await act(async () => tree.unmount());
+  });
+
+  it("holds a review edit when saving conflicts and ignores inactive track destinations", async () => {
+    mocks.searchParams = setupSearchParams("review");
+    mocks.getRoute.mockResolvedValue(operationsRoute("review"));
+    const beforeLeave = vi
+      .fn()
+      .mockRejectedValue(new ApiErrorResponse(409, { code: "draft_revision_conflict" }));
+    let context!: AdaptiveSetupStepRenderContext;
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(
+        createElement(AdaptiveHotelSetupController, {
+          propertyId,
+          requestedStepId: "review",
+          onExit: vi.fn(),
+          beforeLeave,
+          StepForm: (props) => {
+            context = props;
+            return null;
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      context.goToStep!("marketplace_preferences");
+    });
+    expect(beforeLeave).not.toHaveBeenCalled();
+    await act(async () => {
+      context.goToStep!("rooms", "room-2");
+    });
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(currentShell().staleDraftMessage).toContain("another tab");
+    await act(async () => tree.unmount());
+  });
+
+  it("saves before returning to the existing hotel details editor", async () => {
+    const onEditHotelDetails = vi.fn();
+    const beforeLeave = vi.fn().mockResolvedValue(undefined);
+    let context!: AdaptiveSetupStepRenderContext;
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(
+        createElement(AdaptiveHotelSetupController, {
+          propertyId,
+          requestedStepId: "pricing",
+          onExit: vi.fn(),
+          beforeLeave,
+          onEditHotelDetails,
+          StepForm: (props) => {
+            context = props;
+            return null;
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      context.editHotelDetails!();
+    });
+    expect(beforeLeave).toHaveBeenCalledTimes(1);
+    expect(onEditHotelDetails).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
   it.each(["return", "refresh"] as const)(
     "loads an authorized Stripe %s on the exact property's Payments step",
     async (stripe) => {
@@ -415,7 +517,7 @@ function setupSearchParams(stepId: string): URLSearchParams {
   });
 }
 
-function operationsRoute(resumeStepId: "pricing" | "payments") {
+function operationsRoute(resumeStepId: "pricing" | "payments" | "review") {
   return {
     ...buildPropertySetupRoute({
       organizationId,

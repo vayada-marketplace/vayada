@@ -20,7 +20,7 @@ generation from the queued job; reject a changed binding. Do not match on guest,
 dates, public reference or a local ID that happens to resemble a provider ID.
 
 Preserve the original booking snapshot on replay. Duplicate requests cannot
-overwrite a proposal or reopen a locally/provider resolved request. A changed
+overwrite a proposal or reopen a request resolved locally or by the provider. A changed
 proposal under the same provider event ID is an evidence conflict for review.
 Never copy an arbitrary webhook body directly to the intake: the future worker
 must pull the live-feed event from Channex and validate its property and identity.
@@ -102,6 +102,14 @@ port, provider-owned rows dispatch to the durable coordinator before direct-book
 logic. The port is absent in server runtime until reconciliation/cutover is ready.
 Property plus booking plus request identity are resolved from storage; browser
 provider identifiers are never accepted. Existing `enforceRoutePolicy` applies.
+
+Booking consumes a required, read-only `ExternalChangePresentationPort` supplied
+at server composition. The connectivity adapter owns provider-marker
+classification and the staff-safe projection; Booking treats provider metadata as
+opaque. Classification remains available with decision writes disabled and treats
+malformed provider markers as externally managed, preventing direct accept/decline
+from bypassing the provider workflow. Registering this read-only adapter does not
+enable decisions or workers.
 
 Responses add a sanitized `providerRequest` projection. Provider acknowledgement
 is `awaiting_confirmation`, not an applied booking change. Unknown sends offer
@@ -256,6 +264,31 @@ filters cannot silently drop conflicting evidence. Provider revision freshness,
 binding ownership, Finance payment/folio handling and gross-price interpretation
 remain the coordinator's responsibility; this reader does not activate the workflow.
 
+### Operation without provider clarification
+
+VAY-1551 proceeds with a limited scope without waiting for a support reply.
+Declines and readback of already-sent decisions do not require monetary inference.
+Before a new accept POST, the coordinator checks the existing Finance guard while
+holding the booking lock: any nightly revenue evidence, payment or folio blocks
+acceptance. It removes only the unsent queued intent, allowing staff to decline,
+and returns an explicit message that no approval was sent. It never clears an
+intent whose send has started. The authoritative revision applier retains its
+Finance guard for records created later. No financial records are changed by this
+fallback, and identical totals do not establish identical nightly economics.
+
+Bookings without financial records continue through the existing availability,
+provider decision and revision validation path. On 2026-09-14, Flamur explicitly
+waived the real Airbnb end-to-end test for this scope because no Airbnb account
+is available. Record that test as skipped, not passed; it no longer blocks review
+of this limited implementation. Local integration tests use simulated provider
+responses and do not establish real Airbnb behavior. No test-account provisioning
+or further support follow-up is required for this scope.
+
+This waiver does not activate runtime flags or automatic financial updates.
+Any future live activation needs a separate reviewed cutover decision that
+explicitly accounts for the unverified provider behavior. A Channex reply is one
+possible source of financial mapping evidence, not a prerequisite for this scope.
+
 ### Provider economics evidence required before worker wiring
 
 The [Airbnb channel settings reference](https://docs.channex.io/channel-api-examples/airbnb#airbnb-connection-settings-reference)
@@ -324,3 +357,7 @@ Linked inventory,
 missing materialization and in-house stays require review and block application.
 Those limitations remain activation gates, alongside finance-source freshness
 validation, periodic scans and sanctioned provider end-to-end evidence.
+
+### Additional activation prerequisite after main integration
+
+Keep alteration application disabled until its assignment updates also reconcile the generic Channex worker's `assignment_payload.channexStay` and `channexRevision` metadata and released slots. Otherwise a later generic modified or canceled revision can fail with `operational_assignment_conflict`. Cover alteration followed by generic modification and cancellation before activation. This prerequisite is separate from the waived live Airbnb account test.

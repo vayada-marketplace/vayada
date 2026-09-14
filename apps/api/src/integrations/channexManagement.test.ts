@@ -2,9 +2,45 @@ import { coversAlertScope } from "./channexManagementPlans.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
-import { channexRequests, createChannexManagementProvider } from "./channexManagement.js";
+import {
+  ChannexAriMappingMissingError,
+  channexRequests,
+  createChannexManagementProvider,
+} from "./channexManagement.js";
 
 describe("Channex management provider", () => {
+  it.each([
+    [new ChannexAriMappingMissingError(), "mapping_missing"],
+    [new Error("Missing property binding"), "invalid_state"],
+  ])("classifies planning failures inside the property lock", async (error, code) => {
+    let locked = false;
+    const fetcher = vi.fn<typeof fetch>();
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "test",
+      fetch: fetcher,
+      plans: {
+        plan: async () => {
+          throw new Error("Unlocked plan must not run");
+        },
+        withPropertyLock: async (_job, work) => {
+          locked = true;
+          try {
+            return await work(async () => {
+              expect(locked).toBe(true);
+              throw error;
+            });
+          } finally {
+            locked = false;
+          }
+        },
+      },
+    });
+    expect(await provider.execute(job("sync_ari"))).toMatchObject({ ok: false, code });
+    expect(locked).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("executes a prepared action with provider authentication", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(204));
     const onProgress = vi.fn();

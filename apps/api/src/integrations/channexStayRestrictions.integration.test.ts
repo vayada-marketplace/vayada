@@ -118,13 +118,13 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       bookingRevisionHandoff: vi.fn(),
     });
   }
-  async function values() {
-    const plan = await port().plan(job());
-    return (
-      plan.requests.find((r) => r.path === "/api/v1/restrictions")!.body as {
-        values: Record<string, unknown>[];
-      }
-    ).values;
+  async function expectPricingUnavailable(
+    input: Parameters<ReturnType<typeof port>["plan"]>[0] = job(),
+  ) {
+    await expect(port().plan(input)).rejects.toMatchObject({
+      code: "PRICING_UNAVAILABLE",
+      statusCode: 503,
+    });
   }
   async function allowed(checkIn: string, checkOut: string, ratePlanId = rate) {
     return (
@@ -137,7 +137,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       })) === null
     );
   }
-  it("sends Friday arrival minimum, maximum, boundary closures and rate-scoped stop sell", async () => {
+  it("retains local arrival, departure and rate-scoped restrictions while ARI is unavailable", async () => {
     await replaceStayRestrictions(db, property, {
       roomTypeId: room,
       ratePlanId: rate,
@@ -147,27 +147,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         { ...base, startsOn: "2026-09-14", stopSell: true },
       ],
     });
-    const rows = await values();
-    expect(rows.every((row) => !("rate" in row))).toBe(true);
-    expect(rows.find((r) => r.rate_plan_id === rate && r.date_from === "2026-09-11")).toMatchObject(
-      {
-        property_id: property,
-        min_stay_arrival: 3,
-        min_stay_through: 1,
-        max_stay: 14,
-        stop_sell: false,
-      },
-    );
-    expect(rows.find((r) => r.rate_plan_id === rate && r.date_from === "2026-09-13")).toMatchObject(
-      { closed_to_arrival: true, closed_to_departure: true },
-    );
-    expect(rows.find((r) => r.rate_plan_id === rate && r.date_from === "2026-09-14")).toMatchObject(
-      { stop_sell: true },
-    );
-    expect(
-      rows.filter((r) => r.rate_plan_id === otherRate).every((r) => r.stop_sell === false),
-    ).toBe(true);
-    expect(rows.every((r) => String(r.date_from) >= "2026-09-11")).toBe(true);
+    await expectPricingUnavailable();
     expect(await allowed("2026-09-11", "2026-09-13")).toBe(false);
     expect(await allowed("2026-09-11", "2026-09-14")).toBe(true);
     expect(await allowed("2026-09-11", "2026-09-26")).toBe(false);
@@ -177,7 +157,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
     expect(await allowed("2026-09-14", "2026-09-15")).toBe(false);
     expect(await allowed("2026-09-14", "2026-09-15", otherRate)).toBe(true);
   });
-  it("recomputes fallback on shortening, disabling and deleting, including old retry jobs", async () => {
+  it("retains restriction edits while old ARI retry jobs cannot contact the provider", async () => {
     await db.query(
       `INSERT INTO pms.rate_rules(property_id,room_type_id,rule_type,starts_on,ends_on,min_stay_nights,max_stay_nights)
       VALUES($1,$2,'season','2026-09-11','2026-09-15',2,14)`,
@@ -199,35 +179,20 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       plans: port(),
       fetch: fetcher,
     });
-    await provider.execute(oldJob);
     for (const rules of [
       [{ ...replacement.rules[0]!, endsOn: "2026-09-11" }],
       [{ ...replacement.rules[0]!, enabled: false }],
       [],
     ]) {
       await replaceStayRestrictions(db, property, { ...replacement, rules });
-      expect(await provider.execute({ ...oldJob, attemptNumber: 2 })).toMatchObject({ ok: true });
-      const body = JSON.parse(fetcher.mock.calls.at(-1)![1]!.body as string);
-      expect(
-        body.values.find(
-          (r: Record<string, unknown>) => r.rate_plan_id === rate && r.date_from === "2026-09-14",
-        ),
-      ).toMatchObject({
-        min_stay_arrival: 2,
-        min_stay_through: 1,
-        max_stay: 14,
-        stop_sell: false,
-        closed_to_arrival: false,
-        closed_to_departure: false,
+      await expectPricingUnavailable({ ...oldJob, attemptNumber: 2 });
+      expect(await provider.execute({ ...oldJob, attemptNumber: 2 })).toMatchObject({
+        ok: false,
+        code: "invalid_state",
       });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(await allowed("2026-09-12", "2026-09-14")).toBe(true);
     }
-    await db.query("DELETE FROM pms.rate_rules WHERE property_id=$1", [property]);
-    expect((await values())[0]).toMatchObject({
-      min_stay_arrival: 1,
-      max_stay: 0,
-      min_stay_through: 1,
-      stop_sell: false,
-    });
     expect(
       (
         await db.query(
@@ -236,8 +201,252 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
         )
       ).rows[0].n,
     ).toBeGreaterThan(0);
+    // Several full-horizon recomputations share the populated CI database.
+  }, 15_000);
+  it("scopes refresh and claims to one property and leaves other operations untouched", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES($1::uuid,'channex',$1::text,'active','repair')",
+      [otherProperty],
+    );
+    await db.query(
+      "INSERT INTO pms.channel_connections(property_id,provider,connection_status,external_property_id) VALUES($1::uuid,'channex','connected',$1::text)",
+      [otherProperty],
+    );
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'outside')", [otherProperty]);
+    await db.query("SELECT pms.enqueue_restriction_ari($1,'full-ari')", [property]);
+    await db.query(
+      "UPDATE platform.jobs SET payload=payload-'restrictionsOnly', priority=100 WHERE property_id=$1",
+      [property],
+    );
+    const before = (
+      await db.query("SELECT * FROM platform.jobs WHERE property_id=ANY($1::uuid[]) ORDER BY id", [
+        [property, otherProperty],
+      ])
+    ).rows;
+    const worker = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      stagingRestrictionsPropertyId: property,
+      targetState: { succeed: vi.fn(), fail: vi.fn() },
+      pool: {
+        end: async () => {},
+        connect: async () => ({
+          release() {},
+          query: ((text: string, values?: unknown[]) =>
+            db.query(
+              (
+                {
+                  BEGIN: "SAVEPOINT scoped_worker",
+                  COMMIT: "RELEASE SAVEPOINT scoped_worker",
+                  ROLLBACK: "ROLLBACK TO SAVEPOINT scoped_worker",
+                } as Record<string, string>
+              )[text] ?? text,
+              values,
+            )) as pg.PoolClient["query"],
+        }),
+      },
+    });
+    const claimed = await worker.claim({ workerId: "scoped", now: new Date() });
+    expect(claimed).toMatchObject({
+      propertyId: property,
+      input: { operationType: "sync_ari", restrictionsOnly: true },
+    });
+    expect(
+      (
+        await db.query("SELECT * FROM platform.jobs WHERE id=ANY($1::uuid[]) ORDER BY id", [
+          before.map((row) => row.id),
+        ])
+      ).rows,
+    ).toEqual(before);
+    expect(
+      (
+        await db.query(
+          "SELECT count(*)::int n FROM platform.jobs WHERE property_id=$1 AND job_key LIKE '%full:%'",
+          [otherProperty],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(await worker.claim({ workerId: "scoped", now: new Date() })).toBeNull();
   });
-  it("delivers automatic changes and daily full sync through guarded, serialized durable jobs", async () => {
+
+  it("rejects staging meal provisioning without modifying established mappings", async () => {
+    await db.query("UPDATE pms.rate_plans SET meal_plan='breakfast' WHERE id=$1", [rate]);
+    const planner = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      stagingMealsPropertyId: property,
+      bookingRevisionHandoff: async () => {},
+      pool: { query: db.query.bind(db), end: async () => {} } as unknown as pg.Pool,
+    });
+    const input = {
+      ...job(),
+      input: {
+        operationType: "provision" as const,
+        mealRatePlanId: rate,
+        commandId: randomUUID(),
+        idempotencyKey: "staging-meal",
+        actorUserId: randomUUID(),
+      },
+    };
+    const before = (
+      await db.query(
+        "SELECT * FROM pms.channel_rate_plan_mappings WHERE property_id=$1 ORDER BY id",
+        [property],
+      )
+    ).rows;
+    await expect(planner.plan(input)).rejects.toMatchObject({
+      code: "PRICING_UNAVAILABLE",
+      statusCode: 503,
+    });
+    expect(
+      (
+        await db.query(
+          "SELECT * FROM pms.channel_rate_plan_mappings WHERE property_id=$1 ORDER BY id",
+          [property],
+        )
+      ).rows,
+    ).toEqual(before);
+  });
+
+  it("claims only explicitly scoped meal jobs when opted in", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    const jobs = [
+      [otherProperty, { operationType: "provision", mealRatePlanId: rate }],
+      [property, { operationType: "provision" }],
+      [property, { operationType: "provision", mealRatePlanId: "invalid" }],
+      [property, { operationType: "sync_bookings", mealRatePlanId: rate }],
+      [property, { operationType: "provision", mealRatePlanId: rate }],
+    ] as const;
+    const ids: string[] = [];
+    for (const [owner, payload] of jobs) {
+      const id = randomUUID();
+      ids.push(id);
+      await db.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','property',$2,$3::jsonb)`,
+        [id, owner, JSON.stringify(payload)],
+      );
+    }
+    const worker = (enabled: boolean) =>
+      createPgPmsChannexManagementWorkerStore({
+        connectionString: url!,
+        ariSyncMutating: false,
+        stagingRestrictionsPropertyId: property,
+        stagingMealsEnabled: enabled,
+        targetState: { succeed: vi.fn(), fail: vi.fn() },
+        pool: {
+          end: async () => {},
+          connect: async () => ({
+            release() {},
+            query: ((text: string, values?: unknown[]) =>
+              db.query(
+                (
+                  {
+                    BEGIN: "SAVEPOINT meal_worker",
+                    COMMIT: "RELEASE SAVEPOINT meal_worker",
+                    ROLLBACK: "ROLLBACK TO SAVEPOINT meal_worker",
+                  } as Record<string, string>
+                )[text] ?? text,
+                values,
+              )) as pg.PoolClient["query"],
+          }),
+        },
+      });
+    expect(await worker(false).claim({ workerId: "meals", now: new Date() })).toBeNull();
+    const claimed = await worker(true).claim({ workerId: "meals", now: new Date() });
+    expect(claimed).toMatchObject({
+      jobId: ids[4],
+      propertyId: property,
+      input: { operationType: "provision", mealRatePlanId: rate },
+    });
+    expect(
+      (
+        await db.query("SELECT status FROM platform.jobs WHERE id=ANY($1::uuid[])", [
+          ids.slice(0, 4),
+        ])
+      ).rows,
+    ).toEqual(Array.from({ length: 4 }, () => ({ status: "pending" })));
+  });
+
+  it("claims only opted-in inventory rules for the staging property", async () => {
+    const otherProperty = randomUUID();
+    await db.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Other')",
+      [otherProperty],
+    );
+    const jobs = [
+      [otherProperty, { operationType: "update_inventory_rules" }],
+      [property, { operationType: "provision" }],
+      [property, { operationType: "provision", mealRatePlanId: "invalid" }],
+      [property, { operationType: "sync_bookings", mealRatePlanId: rate }],
+      [property, { operationType: "update_inventory_rules" }],
+    ] as const;
+    const ids: string[] = [];
+    for (const [owner, payload] of jobs) {
+      const id = randomUUID();
+      ids.push(id);
+      await db.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,payload)
+        VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','property',$2,$3::jsonb)`,
+        [id, owner, JSON.stringify(payload)],
+      );
+    }
+    // Suppress the unrelated periodic restrictions enqueue for this claim-only test.
+    await db.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [property]);
+    const worker = (enabled: boolean, ari = true) =>
+      createPgPmsChannexManagementWorkerStore({
+        connectionString: url!,
+        ariSyncMutating: ari,
+        stagingRestrictionsPropertyId: property,
+        stagingInventoryEnabled: enabled,
+        targetState: { succeed: vi.fn(), fail: vi.fn() },
+        pool: {
+          end: async () => {},
+          connect: async () => ({
+            release() {},
+            query: ((text: string, values?: unknown[]) =>
+              db.query(
+                (
+                  {
+                    BEGIN: "SAVEPOINT meal_worker",
+                    COMMIT: "RELEASE SAVEPOINT meal_worker",
+                    ROLLBACK: "ROLLBACK TO SAVEPOINT meal_worker",
+                  } as Record<string, string>
+                )[text] ?? text,
+                values,
+              )) as pg.PoolClient["query"],
+          }),
+        },
+      });
+    expect(await worker(false).claim({ workerId: "meals", now: new Date() })).toBeNull();
+    expect(await worker(true, false).claim({ workerId: "inventory", now: new Date() })).toBeNull();
+    const claimed = await worker(true).claim({ workerId: "meals", now: new Date() });
+    expect(claimed).toMatchObject({
+      jobId: ids[4],
+      propertyId: property,
+      input: { operationType: "update_inventory_rules" },
+    });
+    expect(
+      (
+        await db.query("SELECT status FROM platform.jobs WHERE id=ANY($1::uuid[])", [
+          ids.slice(0, 4),
+        ])
+      ).rows,
+    ).toEqual(Array.from({ length: 4 }, () => ({ status: "pending" })));
+  });
+
+  it("retains guarded serialized durable jobs while ARI execution is unavailable", async () => {
     const pool = {
       end: async () => {},
       connect: async () => ({
@@ -281,17 +490,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
     const claimed = await worker.claim({ workerId: "worker", now: new Date() });
     expect(claimed).toMatchObject({ propertyId: property, input: { operationType: "sync_ari" } });
     expect(claimed!.input).not.toHaveProperty("restrictions");
-    const automaticPlan = await port().plan(claimed!);
-    expect(automaticPlan.requests).toHaveLength(2);
-    expect(automaticPlan.requests[0]?.body).toEqual({
-      property: { settings: { min_stay_type: "arrival" } },
-    });
-    expect(automaticPlan.requests[1]?.path).toBe("/api/v1/restrictions");
-    expect(
-      (automaticPlan.requests[1]?.body as { values: unknown[] }).values.every(
-        (value) => !("rate" in (value as object)),
-      ),
-    ).toBe(true);
+    await expectPricingUnavailable(claimed!);
     expect(await worker.claim({ workerId: "other-worker", now: new Date() })).toBeNull();
     expect(
       (
@@ -359,10 +558,7 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       db.query("SET CONSTRAINTS pms.pms_validate_calendar_stay_restrictions IMMEDIATE"),
     ).rejects.toThrow("Conflicting");
     await db.query("ROLLBACK TO calendar");
-    expect((await values()).find((row) => row.rate_plan_id === rate)).toMatchObject({
-      min_stay_arrival: 1,
-      max_stay: 2,
-    });
+    await expectPricingUnavailable();
   });
 
   it("rejects conflicting overlaps and tenant-crossing mappings before provider delivery", async () => {
@@ -391,7 +587,8 @@ describe.skipIf(!url)("canonical Channex stay restrictions", () => {
       plans: port(),
       fetch: fetcher,
     });
-    expect(await provider.execute(job())).toMatchObject({ ok: false, code: "mapping_missing" });
+    await expectPricingUnavailable();
+    expect(await provider.execute(job())).toMatchObject({ ok: false, code: "invalid_state" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

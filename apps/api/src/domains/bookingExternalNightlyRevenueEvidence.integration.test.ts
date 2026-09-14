@@ -126,6 +126,8 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
       [OTA_BOOKING, OTA_REFERENCE],
     );
     expect(evidence.rows[0]!.ok).toBe(true);
+    // prettier-ignore
+    await(async()=>{const correctionTarget=(await client.query<{id:string}>("SELECT id::text FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND line_position=2",[OTA_BOOKING])).rows[0]!.id;await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1",[OTA_BOOKING]);await expect(append({idempotencyKey:"ota-out-of-range-refund",lines:[line("2026-09-01","-50","exact",{occupiedRoomNights:0,economicEvent:"refund",lifecycleState:"refunded",linePosition:2,correctsEvidenceId:correctionTarget})]})).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError);const removed=await append({idempotencyKey:"ota-out-of-range-removal",lines:[line("2026-09-01","-50","exact",{occupiedRoomNights:-1,economicEvent:"occupancy_adjustment",lifecycleState:"corrected",linePosition:2,correctsEvidenceId:correctionTarget})]});expect(removed.outcome).toBe("appended");await expect(append({idempotencyKey:"ota-out-of-range-reactivation",lines:[line("2026-09-01","50","exact",{economicEvent:"occupancy_adjustment",lifecycleState:"corrected",linePosition:2,correctsEvidenceId:removed.evidenceIds[0]})]})).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError)})();
   });
 
   it("corrects removed-room revenue and commission atomically using original rules", async () => {
@@ -264,6 +266,18 @@ describe.skipIf(!DATABASE_URL)("external nightly revenue evidence (PostgreSQL)",
         )
       ).rows[0],
     ).toEqual({ count: 1 });
+  });
+
+  it("rejects manual corrections for removed positions even with a matching manual target", async () => {
+    const base = await append({ sourceKind: "manual", lines: [line("2026-09-01", "100", "exact", { linePosition: 2 })] });
+    await client.query("UPDATE booking.guest_bookings SET room_count=1 WHERE id=$1", [OTA_BOOKING]);
+    await expect(append({
+      sourceKind: "manual", idempotencyKey: "manual-removed-correction",
+      lines: [line("2026-09-01", "10", "exact", {
+        linePosition: 2, occupiedRoomNights: 0, economicEvent: "correction",
+        lifecycleState: "corrected", correctsEvidenceId: base.evidenceIds[0],
+      })],
+    })).rejects.toBeInstanceOf(ExternalRevenueEvidenceScopeError);
   });
 
   it("permits money corrections for removed positions but rejects stale occupancy targets", async () => {

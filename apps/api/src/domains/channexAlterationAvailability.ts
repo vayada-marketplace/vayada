@@ -13,7 +13,7 @@ const schema = z.object({
     requestedCheckIn: z.iso.date(),
     requestedCheckOut: z.iso.date(),
     rooms: z
-      .array(z.object({ roomTypeId: uuid }))
+      .array(z.object({ roomTypeId: z.uuid() }))
       .min(1)
       .max(100),
     channex: z.object({ connectionId: uuid }),
