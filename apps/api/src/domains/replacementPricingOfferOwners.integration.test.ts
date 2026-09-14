@@ -1,3 +1,4 @@
+import { claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
@@ -20,7 +21,7 @@ const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture(total = 2, publishedAdults = 2) {
+  async function fixture(total = 2, publishedAdults = 2, baseMinor = "10000") {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
     const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
     const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
@@ -69,7 +70,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
         offers: terms.filter((t) => t.roomTypeId === id).map((t) => ({ id: t.offerId, termsRevision: t.revision,
           meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
-          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
+          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: baseMinor }, months: [], seasons: [], weekdays: [], dates: [] } },
           restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
         })),
       })) };
@@ -100,8 +101,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     }
     return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId, currentTermsSource };
   }
-  async function serviceFixture(total = 2, publishedAdults = 2) {
-    const f = await fixture(total, publishedAdults),
+  async function serviceFixture(total = 2, publishedAdults = 2, baseMinor = "10000") {
+    const f = await fixture(total, publishedAdults, baseMinor),
       propertyId = f.scope.propertyId,
       jobId = randomUUID();
     await pool.query(
@@ -161,8 +162,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
-  async function creationFixture() {
-    const f = await serviceFixture();
+  async function creationFixture(baseMinor = "10000") {
+    const f = await serviceFixture(2, 2, baseMinor);
     await f.publish();
     const roomTypeId = f.snapshot.rooms[0].roomTypeId,
       externalRoomTypeId = randomUUID();
@@ -191,14 +192,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
     return { data: { type: "rate_plan", id, attributes } };
   }
-  async function recordingFixture() {
-    const f = await creationFixture();
+  async function recordingFixture(baseMinor = "10000") {
+    const f = await creationFixture(baseMinor);
     const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
     if (claim.kind !== "claimed") throw new Error("claim required");
     return { ...f, claim, response: createdResponse(claim.request.body) };
   }
-  async function receiptFixture() {
-    const f = await recordingFixture();
+  async function receiptFixture(baseMinor = "10000") {
+    const f = await recordingFixture(baseMinor);
     const connectionId = (
       await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
         f.claim.targetId,
@@ -282,8 +283,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await prepared.dispatch(ports)).toMatchObject({ reason: "dispatch_already_used" });
     expect(create).toHaveBeenCalledOnce();
   }, 30000);
-  async function configurationFixture() {
-    const f = await receiptFixture();
+  async function configurationFixture(baseMinor = "10000") {
+    const f = await receiptFixture(baseMinor);
     await (
       await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
     )();
@@ -292,6 +293,210 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     return f;
   }
+  async function initialAriFixture(baseMinor = "10000") {
+    const f = await configurationFixture(baseMinor);
+    expect(
+      await retainChannexOfferConfiguration(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        async () => f.response().json(),
+      ),
+    ).toMatchObject({ kind: "configuration_retained" });
+    const claim = (date = "2030-06-14") =>
+      claimPublishedChannexInitialAri(pool, f.input, f.selection, f.claim.attemptId, date);
+    return { ...f, claimAri: claim };
+  }
+  it("claims all occupancy totals and explicit restrictions for the current identified rate", async () => {
+    const f = await initialAriFixture(),
+      result = await f.claimAri();
+    expect(result).toMatchObject({
+      kind: "ari_claimed",
+      targetId: f.claim.targetId,
+      intentId: f.claim.intentId,
+      version: f.claim.version,
+    });
+    if (result.kind !== "ari_claimed") throw new Error("claim required");
+    const row = (
+      await pool.query("SELECT * FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+        result.attemptId,
+      ])
+    ).rows[0];
+    const rate = ((await f.response().json()) as { data: { id: string } }).data.id;
+    expect(row).toMatchObject({
+      creation_attempt_id: f.claim.attemptId,
+      job_attempt_id: result.jobAttemptId,
+      worker_id: f.input.workerId,
+      state: "unresolved",
+      request_body: {
+        values: [
+          {
+            property_id: f.scope.propertyId,
+            rate_plan_id: rate,
+            date: "2030-06-14",
+            rates: [
+              { occupancy: 1, rate: "100.00" },
+              { occupancy: 2, rate: "100.00" },
+            ],
+            min_stay_arrival: 1,
+            min_stay_through: 1,
+            max_stay: 0,
+            closed_to_arrival: false,
+            closed_to_departure: false,
+            stop_sell: false,
+          },
+        ],
+      },
+    });
+    for (const date of ["2030-06-14", "2030-06-15"])
+      expect(await f.claimAri(date)).toMatchObject({
+        kind: "unavailable",
+        reason: "ari_reconciliation_required",
+      });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE target_id=$1",
+          [f.claim.targetId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+    expect(
+      (
+        await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
+          f.claim.targetId,
+        ])
+      ).rows[0].active_version,
+    ).toBeNull();
+  });
+  it.each([
+    "configuration",
+    "tampered_configuration",
+    "receipt",
+    "lease",
+    "binding",
+    "terms",
+    "date",
+  ])(
+    "rejects initial ARI claim with unavailable %s without persisting an attempt",
+    async (variant) => {
+      const f = await initialAriFixture();
+      if (variant === "configuration")
+        await pool.query(
+          "UPDATE pms.channex_offer_target_intents SET result_evidence='{}' WHERE id=$1",
+          [f.claim.intentId],
+        );
+      if (variant === "tampered_configuration")
+        await pool.query(
+          "UPDATE pms.channex_offer_target_intents SET result_evidence=jsonb_set(result_evidence,'{configuration,attemptId}',to_jsonb($2::text)) WHERE id=$1",
+          [f.claim.intentId, randomUUID()],
+        );
+      if (variant === "receipt")
+        await (
+          await prepareChannexReceiptPersistence(
+            pool,
+            { ...f.correlation, receiptId: randomUUID() },
+            new Response("{}", { status: 500 }),
+          )
+        )();
+      if (variant === "lease")
+        await pool.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+      if (variant === "binding")
+        await pool.query(
+          "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+          [f.scope.propertyId],
+        );
+      if (variant === "terms")
+        await f.booking.save(f.context, f.scope, {
+          requestId: randomUUID(),
+          expectedRevision: f.terms[0].revision,
+          terms: f.termsInput,
+        });
+      expect(await f.claimAri(variant === "date" ? "2030-02-30" : "2030-06-14")).toMatchObject({
+        kind: "unavailable",
+      });
+      expect(
+        (
+          await pool.query(
+            "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE target_id=$1",
+            [f.claim.targetId],
+          )
+        ).rows[0].count,
+      ).toBe(0);
+    },
+  );
+  it("does not claim initial ARI from unidentified creation or a foreign attempt", async () => {
+    const f = await receiptFixture(),
+      other = await initialAriFixture();
+    expect(
+      await claimPublishedChannexInitialAri(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        "2030-06-14",
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(
+      await claimPublishedChannexInitialAri(
+        pool,
+        other.input,
+        other.selection,
+        f.claim.attemptId,
+        "2030-06-14",
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+  });
+  it("rolls back an initial ARI claim when authority is lost before commit", async () => {
+    const f = await initialAriFixture();
+    let reached = false;
+    const intercepted = interceptRead(async (c, sql) => {
+      if (!reached && sql.includes("INSERT INTO pms.channex_offer_ari_attempts")) {
+        reached = true;
+        await c.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+      }
+    });
+    expect(
+      await claimPublishedChannexInitialAri(
+        intercepted,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        "2030-06-14",
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(reached).toBe(true);
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE target_id=$1",
+          [f.claim.targetId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+
+  it("retains exact decimal room totals without multiplying by occupancy", async () => {
+    const f = await initialAriFixture("13950"),
+      result = await f.claimAri();
+    if (result.kind !== "ari_claimed") throw new Error("claim required");
+    const row = (
+      await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+        result.attemptId,
+      ])
+    ).rows[0];
+    expect(row.request_body.values[0].rates).toEqual([
+      { occupancy: 1, rate: "139.50" },
+      { occupancy: 2, rate: "139.50" },
+    ]);
+  });
   async function restrictionFixture() {
     const f = await configurationFixture();
     const rateId = ((await f.response().json()) as { data: { id: string } }).data.id;

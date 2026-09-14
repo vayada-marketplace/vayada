@@ -1,3 +1,4 @@
+import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { verifyChannexNightRestrictions } from "../integrations/channexRestrictionReadback.js";
@@ -109,6 +110,7 @@ export async function readPublishedPricingForChannexJob(
     createClaim: _createClaim,
     identification: _identification,
     configurationIdentity: _configurationIdentity,
+    ariClaim: _ariClaim,
     ...evidence
   } = result;
   return evidence;
@@ -138,9 +140,33 @@ export async function claimPublishedChannexOfferCreate(
   return { kind: "claimed" as const, ...result.createClaim };
 }
 
+/** Commits local initial upload ownership only; no dispatch or activation permission. */
+export async function claimPublishedChannexInitialAri(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  date: string,
+) {
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const result = await withSelectedChannexTarget(pool, input, selection, {
+    kind: "ari_claim",
+    attemptId,
+    date,
+  });
+  if (result.kind !== "available") return result;
+  if (!result.ariClaim) throw new Error("Initial ARI claim missing");
+  return { kind: "ari_claimed" as const, ...result.ariClaim };
+}
+
 type TargetWork =
   | "reserve"
   | "claim"
+  | { kind: "ari_claim"; attemptId: string; date: string }
   | { kind: "retained"; attemptId: string }
   | { kind: "configuration"; attemptId: string; observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>> }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
@@ -481,6 +507,16 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
+    let ariClaim:
+      | {
+          attemptId: string;
+          targetId: string;
+          intentId: string;
+          version: string;
+          jobAttemptId: string;
+          workerId: string;
+        }
+      | undefined;
     let identification: { attemptId: string; externalRatePlanId: string } | undefined;
     let configurationIdentity: ReturnType<typeof readChannexCreatedRateIdentity> | undefined;
     if (selection) {
@@ -647,7 +683,10 @@ async function withPublishedChannexPricing(
             )
           ).rows[0];
           if (!attempt || !attempt.matches) return unavailable("creation_attempt_unavailable");
-          if ("kind" in work && work.kind === "configuration") {
+          if (
+            "kind" in work &&
+            (work.kind === "configuration" || work.kind === "ari_claim")
+          ) {
             if (
               attempt.state !== "identified" ||
               !(await channexCreationReceiptsResolved(client, target.id))
@@ -658,7 +697,91 @@ async function withPublishedChannexPricing(
               externalRoomTypeId: mapping.external_room_type_id as string,
               externalRatePlanId: attempt.external_rate_plan_id as string,
             };
-            if (work.observation) {
+            if (work.kind === "ari_claim") {
+              const evidence = JSON.stringify({
+                schemaVersion: 1,
+                attemptId: attempt.id,
+                intentId: intent.id,
+                version: intent.version,
+                bindingGeneration: binding.binding_generation,
+                observation: {
+                  ...configurationIdentity,
+                  mealType: plan.configuration.meal_type,
+                  configuration: plan.configuration,
+                },
+              });
+              if (
+                !(
+                  await client.query(
+                    "SELECT 1 FROM pms.channex_offer_target_intents WHERE id=$1 AND result_evidence->'configuration'=$2::jsonb",
+                    [intent.id, evidence],
+                  )
+                ).rowCount
+              )
+                return unavailable("configuration_evidence_unavailable");
+              const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+              if (
+                ![
+                  configurationIdentity.externalPropertyId,
+                  configurationIdentity.externalRatePlanId,
+                ].every((id) => uuid.test(id))
+              )
+                return unavailable("restriction_scope_unavailable");
+              const prepared = prepareChannexAdultNightPrices(room, {
+                propertyId: lease.propertyId,
+                roomTypeId: room.roomTypeId,
+                offerId: selection.offerId,
+                date: work.date,
+                expectedRevision: snapshot.revision,
+                expectedTermsRevisions: Object.fromEntries(
+                  owners.terms
+                    .filter((t) => t.roomTypeId === room.roomTypeId)
+                    .map((t) => [t.offerId, t.revision]),
+                ),
+              });
+              if (prepared.kind !== "prepared") return prepared;
+              // Channex requires strictly positive rates; never export a partial occupancy set.
+              if (prepared.candidates.some((c) => BigInt(c.projection.night.totalMinor) <= 0n))
+                return unavailable("provider_rate_unavailable");
+              const request = {
+                values: [
+                  {
+                    property_id: configurationIdentity.externalPropertyId,
+                    rate_plan_id: configurationIdentity.externalRatePlanId,
+                    date: prepared.candidates[0].projection.night.date,
+                    rates: prepared.candidates.map(({ occupancy, rate }) => ({ occupancy, rate })),
+                    ...prepared.candidates[0].restrictionCandidate,
+                  },
+                ],
+              };
+              const created = (
+                await client.query(
+                  `INSERT INTO pms.channex_offer_ari_attempts
+                           (creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+                           SELECT $1,a.id,a.worker_id,$2,$3::jsonb FROM platform.job_attempts a
+                           WHERE a.job_id=$4 AND a.attempt_number=$5 AND a.worker_id=$6
+                           ON CONFLICT (external_property_id,external_rate_plan_id) WHERE state='unresolved'
+                           DO NOTHING RETURNING id,job_attempt_id,worker_id`,
+                  [
+                    attempt.id,
+                    work.date,
+                    JSON.stringify(request),
+                    lease.jobId,
+                    lease.attemptNumber,
+                    lease.workerId,
+                  ],
+                )
+              ).rows[0];
+              if (!created) return unavailable("ari_reconciliation_required");
+              ariClaim = {
+                ...reservation,
+                attemptId: created.id,
+                jobAttemptId: created.job_attempt_id,
+                workerId: created.worker_id,
+              };
+            }
+
+            if (work.kind === "configuration" && work.observation) {
               const observed = work.observation;
               if (
                 observed.externalPropertyId !== configurationIdentity.externalPropertyId ||
@@ -780,6 +903,7 @@ async function withPublishedChannexPricing(
       createClaim,
       identification,
       configurationIdentity,
+      ariClaim,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
