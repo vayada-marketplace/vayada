@@ -1,3 +1,4 @@
+import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
@@ -1306,6 +1307,10 @@ const app = buildApp({
     : undefined,
   bookingReservationsRepository,
   financePaymentSetup: financePaymentSetupRuntime.routes,
+  bookingGuestChoices: {
+    store: createBookingGuestChoiceStore(propertySetupOwnerPool, client => createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client })),
+    propertyAccessRepository: bookingPropertyAccessRepository,
+  },
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,

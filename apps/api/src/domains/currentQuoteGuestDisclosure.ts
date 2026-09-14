@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { lockCurrentBookingGuestChoices } from "./bookingGuestPolicyRepository.js";
+import { lockCurrentGuestChoiceRevision } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { bookingQuoteAcceptanceRequirements } from "./bookingQuoteAcceptanceInput.js";
 
@@ -14,7 +14,7 @@ export async function lockCurrentQuoteGuestDisclosure(
 ) {
   const scope = await lockPublicPricingAuthority(client, slug);
   if (!scope) return null;
-  const guest = await lockCurrentBookingGuestChoices(
+  const guest = await lockCurrentGuestChoiceRevision(
     client,
     scope.propertyId,
     scope.organizationId,

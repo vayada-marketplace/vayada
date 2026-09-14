@@ -715,22 +715,6 @@ export async function readCurrentBookingGuestPolicyRevision(
   return result.rows[0] ? projectRevision(result.rows[0]) : null;
 }
 
-/** Confirmed guest choices only; legacy rate disclosures are not replacement pricing evidence.
- * Caller owns the transaction and acquires public/inventory authority before this owner lock. */
-export async function lockCurrentBookingGuestChoices(
-  client: BookingGuestPolicyReadClient,
-  propertyId: string,
-  organizationId: string,
-) {
-  await lockProperty(client, propertyId);
-  const current = await readCurrentBookingGuestPolicyRevision(client, propertyId, organizationId);
-  if (!current) return null;
-  return {
-    propertyId: current.propertyId,
-    sourceRevision: `guest-policy:${current.revisionId}:${current.confirmation.confirmationId}`,
-    choices: structuredClone(current.bundle.choices),
-  };
-}
 
 async function readRevision(
   client: RepositoryClient,

@@ -17,7 +17,6 @@ import { createBookingGuestPolicyProjectionHandler } from "./bookingGuestPolicyP
 import { createBookingGuestPolicyOutboxProjector } from "./bookingGuestPolicyProjectionRuntime.js";
 import {
   createPgBookingGuestPolicyRepository,
-  lockCurrentBookingGuestChoices,
   type BookingGuestPolicyRepositoryPool,
 } from "./bookingGuestPolicyRepository.js";
 
@@ -112,31 +111,6 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Booking guest-policy repository"
     await projectionPool.end();
     await cleanup();
     await admin.end();
-  });
-
-  it("reads only confirmed current guest choices in scope and holds the owner lock", async () => {
-    expect(await lockCurrentBookingGuestChoices(admin, propertyId, organizationId)).toBeNull();
-    const created = await repository.persistGuestPolicy(command("choice-reader", 0));
-    if (!created.ok) throw new Error("Expected policy");
-    const peer = await projectionPool.connect();
-    await admin.query("BEGIN");
-    try {
-      const result = await lockCurrentBookingGuestChoices(admin, propertyId, organizationId);
-      expect(result).toEqual({
-        propertyId,
-        sourceRevision: `guest-policy:${created.revision.revisionId}:${created.revision.confirmation.confirmationId}`,
-        choices: created.revision.bundle.choices,
-      });
-      expect(await lockCurrentBookingGuestChoices(admin, propertyId, actorUserId)).toBeNull();
-      const lock = await peer.query(
-        "SELECT pg_try_advisory_xact_lock(hashtext('booking.guest_policy'), hashtext($1::uuid::text)) AS acquired",
-        [propertyId],
-      );
-      expect(lock.rows[0].acquired).toBe(false);
-    } finally {
-      await admin.query("ROLLBACK");
-      peer.release();
-    }
   });
 
   it("persists and reloads ranges in immutable bundles, with revision checks and public projection", async () => {

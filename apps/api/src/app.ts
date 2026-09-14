@@ -1,3 +1,4 @@
+import { registerBookingGuestChoiceRoutes, type BookingGuestChoiceRoutesOptions } from "./routes/bookingGuestChoices.js";
 import { registerReplacementPricingRoutes, type ReplacementPricingRoutesOptions } from "./routes/replacementPricing.js";
 import {
   registerAirbnbImportRoutes,
@@ -295,6 +296,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  bookingGuestChoices?: BookingGuestChoiceRoutesOptions;
   financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
@@ -778,6 +780,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     customDomainRepository: options.bookingCustomDomainRepository,
     changeRequestRepository: options.bookingChangeRequestRepository,
   });
+  if (options.bookingGuestChoices) app.register(registerBookingGuestChoiceRoutes, { prefix: "/api/booking", ...options.bookingGuestChoices });
   if (options.bookingGuestPolicy) {
     app.register(registerBookingGuestPolicyRoutes, {
       prefix: "/api/booking",

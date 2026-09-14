@@ -4,10 +4,10 @@ import type { PoolClient } from "pg";
 import { replacementStayKey, type StoredPricingQuote } from "@vayada/domain-booking";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { lockCurrentBookingGuestChoices } from "./bookingGuestPolicyRepository.js";
+import { lockCurrentGuestChoiceRevision } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
-vi.mock("./bookingGuestPolicyRepository.js", () => ({ lockCurrentBookingGuestChoices: vi.fn() }));
+vi.mock("./bookingGuestChoiceStore.js", () => ({ lockCurrentGuestChoiceRevision: vi.fn() }));
 vi.mock("./currentQuoteRevalidation.js", () => ({ lockCurrentQuoteRevalidation: vi.fn() }));
 const roomTypeId = "00000000-0000-4000-8000-000000000001",
   revision = "00000000-0000-4000-8000-000000000002";
@@ -102,7 +102,7 @@ const choices = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(lockPublicPricingAuthority).mockResolvedValue(scope);
-  vi.mocked(lockCurrentBookingGuestChoices).mockResolvedValue({
+  vi.mocked(lockCurrentGuestChoiceRevision).mockResolvedValue({
     propertyId: "hotel",
     sourceRevision: "guest-policy:confirmed-1",
     choices: { ...choices },
@@ -124,20 +124,20 @@ it("binds exact replacement quote, confirmed guest choices and current timezone 
   expect(result!.policy.disclosureHash).toBe(
     "sha256:" + createHash("sha256").update(result!.disclosureJson).digest("hex"),
   );
-  expect(lockCurrentBookingGuestChoices).toHaveBeenCalledWith(client, "hotel", "org");
+  expect(lockCurrentGuestChoiceRevision).toHaveBeenCalledWith(client, "hotel", "org");
   expect(lockCurrentQuoteRevalidation).toHaveBeenCalledWith(client, "hotel", "quote-1");
   expect(vi.mocked(lockPublicPricingAuthority).mock.invocationCallOrder[0]).toBeLessThan(
-    vi.mocked(lockCurrentBookingGuestChoices).mock.invocationCallOrder[0],
+    vi.mocked(lockCurrentGuestChoiceRevision).mock.invocationCallOrder[0],
   );
-  expect(vi.mocked(lockCurrentBookingGuestChoices).mock.invocationCallOrder[0]).toBeLessThan(
+  expect(vi.mocked(lockCurrentGuestChoiceRevision).mock.invocationCallOrder[0]).toBeLessThan(
     vi.mocked(lockCurrentQuoteRevalidation).mock.invocationCallOrder[0],
   );
 });
 it("denies absent public authority, absent confirmed choices and a stale quote", async () => {
   vi.mocked(lockPublicPricingAuthority).mockResolvedValueOnce(null);
   expect(await lockCurrentQuoteGuestDisclosure(client, "hotel", "quote-1")).toBeNull();
-  expect(lockCurrentBookingGuestChoices).not.toHaveBeenCalled();
-  vi.mocked(lockCurrentBookingGuestChoices).mockResolvedValueOnce(null);
+  expect(lockCurrentGuestChoiceRevision).not.toHaveBeenCalled();
+  vi.mocked(lockCurrentGuestChoiceRevision).mockResolvedValueOnce(null);
   expect(await lockCurrentQuoteGuestDisclosure(client, "hotel", "quote-1")).toBeNull();
   expect(lockCurrentQuoteRevalidation).not.toHaveBeenCalled();
   vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValueOnce(null);
@@ -169,7 +169,7 @@ it("rejects scope mismatches and requires renewed acknowledgment for changed cho
     { sourceRevision: "guest-policy:confirmed-2" },
     { choices: { ...choices, phoneRequired: false } },
   ]) {
-    vi.mocked(lockCurrentBookingGuestChoices).mockResolvedValueOnce({
+    vi.mocked(lockCurrentGuestChoiceRevision).mockResolvedValueOnce({
       propertyId: "hotel",
       sourceRevision: "guest-policy:confirmed-1",
       choices,
@@ -178,7 +178,7 @@ it("rejects scope mismatches and requires renewed acknowledgment for changed cho
     const updated = await lockCurrentQuoteGuestDisclosure(client, "hotel", "quote-1");
     expect(updated!.guestPolicyEvidenceId).not.toBe(original!.guestPolicyEvidenceId);
   }
-  vi.mocked(lockCurrentBookingGuestChoices).mockResolvedValueOnce({
+  vi.mocked(lockCurrentGuestChoiceRevision).mockResolvedValueOnce({
     propertyId: "another",
     sourceRevision: "guest-policy:1",
     choices,

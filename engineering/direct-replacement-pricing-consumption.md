@@ -595,3 +595,20 @@ This owner foundation does not yet replace the setup routes/readiness projection
 or switch the disclosure reader. That wiring must select this owner explicitly,
 without a silent legacy fallback, and publish changes to affected consumers before
 activation. The old policy repository remains for existing unrelated consumers.
+
+
+Guest-rule API wiring supersedes the pending reader-switch step above. Protected
+GET/PUT `/api/booking/properties/:propertyId/guest-rules` uses the existing Booking
+settings permission, entitlement, linked-property and assignment checks. PUT accepts
+only `expectedRevision`, `confirmed`, and `choices`, with a single Idempotency-Key
+header; actor and organization come from authenticated context. GET returns the
+current revision/choices or an explicit unconfigured result. Missing policy is never
+replaced with defaults. Writes reauthorize through the existing PostgreSQL Booking
+scope port, and return 400/403/409 for invalid input, denial and edit/retry conflicts.
+The quote disclosure reader now consumes this owner exclusively. Older confirmed
+bundles no longer satisfy replacement checkout; properties must explicitly save
+new rules. These endpoints do not make public bookability/readiness projections
+ready, provide a hotel editor, or create bookings. Those remain separate work.
+
+Database authorization uses the same transaction connection for reads and writes;
+it must not acquire another pooled connection while holding the guest-owner lock.
