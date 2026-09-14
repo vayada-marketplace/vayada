@@ -682,3 +682,15 @@ The public wrapper still requires public authority before and after these reads.
 Both return the same pricing source fingerprint; no duplicate calculator or
 legacy-price fallback is introduced. PMS publication content mapping and separate
 room/media/calendar/inventory readiness remain required downstream.
+
+
+Replacement public offers use an explicit quote_required rate variant: the exact
+`pricing-offer.v2` key already consumed by public selection, currency, pricing
+publication revision, terms revision and meal-plan kind. There is no default
+nightly amount, refundability claim or fixed payment timing. Dates and per-room
+guests are required to resolve those through current quote evidence. Mapping
+requires each exact room/offer terms reference and never merges equal offer IDs
+from different rooms. Distribution validates/sanitizes this variant and still
+checks Finance currency and payment readiness. Older flat rate records remain
+decodable; they are not produced by the replacement mapper. This is an offer
+content prerequisite, not the completed PMS source or a public quote endpoint.
