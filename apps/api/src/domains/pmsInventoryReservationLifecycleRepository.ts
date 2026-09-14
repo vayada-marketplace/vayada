@@ -284,7 +284,7 @@ export function createPgPmsInventoryReservationLifecycleRepository(
  * must establish fresh quote validation or verify the caller's already-locked
  * pre-mutation evidence on this same transaction. It cannot authorize posted or
  * cross-transaction evidence. Existing held-inventory replay precedes the callback;
- * PMS locks/calendar/capacity/replay validation remain mandatory in either path. */
+ * Existing PMS fresh-reservation checks and held-bundle replay checks are unchanged. */
 export async function reservePmsQuoteInventory(
   client: PmsInventoryReservationLifecycleRepositoryClient,
   input: {

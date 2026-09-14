@@ -95,7 +95,7 @@ it("rejects a stale fresh quote but allows PMS to replay existing held inventory
 });
 
 it("reserves from same-transaction pre-mutation evidence without repricing after own effects", async () => {
-  const current = { kind: "current_quote_price", scope, quote } as Parameters<
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
     typeof reserveRevalidatedQuoteInventory
   >[2];
   vi.mocked(lockCurrentQuoteRevalidation).mockResolvedValue(null);
@@ -131,7 +131,7 @@ it("rejects changed stored quote or property/organization/authority evidence bef
   expect(reservePmsQuoteInventory).not.toHaveBeenCalled();
 });
 it("retains PMS replay and propagates replay/capacity failures without another calculator", async () => {
-  const current = { kind: "current_quote_price", scope, quote } as Parameters<
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
     typeof reserveRevalidatedQuoteInventory
   >[2];
   vi.mocked(reservePmsQuoteInventory).mockResolvedValueOnce({ ...held, replayed: true });
@@ -147,7 +147,7 @@ it("retains PMS replay and propagates replay/capacity failures without another c
   expect(lockCurrentQuoteRevalidation).not.toHaveBeenCalled();
 });
 it("fails after PMS waits when public scope is revoked or changed", async () => {
-  const current = { kind: "current_quote_price", scope, quote } as Parameters<
+  const current = { kind: "current_quote_price", scope, quote } as unknown as Parameters<
     typeof reserveRevalidatedQuoteInventory
   >[2];
   vi.mocked(lockPublicPricingAuthority)
