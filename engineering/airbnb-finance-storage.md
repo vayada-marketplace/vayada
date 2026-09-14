@@ -20,12 +20,15 @@ without deleting audit history or joining it onto every nightly row.
 
 - Accept only the scoped reader's full replacement for an authoritative modified
   Airbnb revision. Validate the local booking's property, provider source reference,
-  currency, confirmed lifecycle and updated dates/room count in the same transaction.
+  currency, confirmed lifecycle and updated dates/room count/total in the same transaction.
 - The caller must establish provider acceptance, channel/binding ownership, room
   mapping, revision freshness and the channel settings applicable to that revision.
   Supply a revision-bound settings evidence reference; current channel metadata alone
   is insufficient. No implicit channel-setting changes or defaults.
-- Serialize through the booking row lock. Require the expected previous financial
+- Require READ COMMITTED isolation and serialize through the booking row lock, so
+  a waiter sees the committed successor after acquiring the lock. Reject snapshot
+  isolation modes rather than comparing against stale Finance state.
+  Require the expected previous financial
   revision (null only for initial capture). Reject older/equal provider timestamps,
   competing successors and changes to provider/channel identity or amount basis.
   Preserve microsecond timestamps; opaque revision IDs do not define ordering.
