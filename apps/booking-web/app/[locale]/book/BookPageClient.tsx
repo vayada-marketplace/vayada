@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import {
@@ -38,6 +39,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     setCheckIn(params.get("checkIn") ?? "");
     setCheckOut(params.get("checkOut") ?? "");
   }, []);
+  const [promoCode, setPromoCode] = useState("");
   const [payment, setPayment] = useState<"" | "card" | "pay_at_property">("");
   useEffect(() => {
     const controller = new AbortController();
@@ -53,7 +55,9 @@ function RoomQuoteForm({ slug }: { slug: string }) {
     return () => controller.abort();
   }, [slug, reload]);
   const request =
-    rooms && payment ? roomQuoteRequest(rooms, choices, checkIn, checkOut, payment) : null;
+    rooms && payment
+      ? roomQuoteRequest(rooms, choices, checkIn, checkOut, payment, promoCode)
+      : null;
   const { quote, error, loading, submit } = useReplacementQuote(slug, request);
   const update = (id: string, patch: Partial<RoomChoice>) =>
     setChoices((current) =>
@@ -221,6 +225,15 @@ function RoomQuoteForm({ slug }: { slug: string }) {
             Add room
           </button>
           <label className="block">
+            Promo code (optional)
+            <input
+              className={field}
+              value={promoCode}
+              maxLength={200}
+              onChange={(event) => setPromoCode(event.target.value)}
+            />
+          </label>
+          <label className="block">
             Payment preference
             <select
               className={field}
@@ -275,6 +288,17 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           </p>
           <p>Due now: {displayQuoteMoney(quote.dueNowMinor, quote.currency)}</p>
           <p>Due later: {displayQuoteMoney(quote.dueLaterMinor, quote.currency)}</p>
+          <ReplacementQuoteTerms
+            quote={quote}
+            roomNames={Object.fromEntries(
+              choices.map((choice) => [
+                choice.selectionId,
+                rooms?.find((room) =>
+                  room.offers.some((offer) => offer.publicOfferKey === choice.publicOfferKey),
+                )?.name ?? "",
+              ]),
+            )}
+          />
           <p className="text-sm text-gray-600">
             This is a price preview. No room is reserved and no payment is taken. Online reservation
             submission is currently unavailable.

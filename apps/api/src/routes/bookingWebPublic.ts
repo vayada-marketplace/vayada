@@ -1,4 +1,5 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { createReplacementBookingQuoteIssuer, requirePublicQuoteKey } from "./replacementBookingQuote.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
@@ -235,6 +236,7 @@ export type BookingWebCheckoutAdapter = {
     context: BookingWebCheckoutCommandContext,
   ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
+  getPricingAddons?(slug: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -516,6 +518,13 @@ export async function registerBookingWebPublicRoutes(
     reply.header("X-Robots-Tag", "noindex");
     if (!checkoutAdapter.getPricingOffers) throw createHttpError(404, "Pricing offers unavailable.");
     return checkoutAdapter.getPricingOffers(request.params.slug);
+  });
+
+  app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug/pricing-addons", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    reply.header("X-Robots-Tag", "noindex");
+    if (!checkoutAdapter.getPricingAddons) throw createHttpError(404, "Pricing extras unavailable.");
+    return checkoutAdapter.getPricingAddons(request.params.slug);
   });
 
   app.get<{ Params: BookingWebHotelParams; Querystring: PublicHotelQuoteQuery }>(
@@ -1360,6 +1369,7 @@ export function createTargetBookingWebCheckoutAdapter(
     });
 
   const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingAddons = createPublicPricingAddonCatalog(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(pool, 300));
 
   const editCleanupTimer = setInterval(() => {
@@ -1793,6 +1803,13 @@ export function createTargetBookingWebCheckoutAdapter(
         });
         return body;
       });
+    },
+    async getPricingAddons(slug) {
+      let addons;
+      try { addons = await pricingAddons.read(slug); }
+      catch (error) { throw Object.assign(new Error("Pricing extras temporarily unavailable.", { cause: error }), { statusCode: 503 }); }
+      if (!addons) throw createHttpError(404, "Pricing extras unavailable.");
+      return addons;
     },
     async getPricingOffers(slug) {
       let offers;

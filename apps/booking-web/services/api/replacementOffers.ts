@@ -83,12 +83,14 @@ export function roomQuoteRequest(
   checkIn: string,
   checkOut: string,
   paymentMethod: PublicBookingQuoteRequest["paymentMethod"],
+  promoCode = "",
 ): PublicBookingQuoteRequest | null {
   const date = (v: string) =>
     /^\d{4}-\d{2}-\d{2}$/.test(v) &&
     Number.isFinite(Date.parse(v)) &&
     new Date(v).toISOString().slice(0, 10) === v;
   if (
+    promoCode.trim().length > 200 ||
     !date(checkIn) ||
     !date(checkOut) ||
     checkOut <= checkIn ||
@@ -124,7 +126,7 @@ export function roomQuoteRequest(
       checkOut,
       currency: Array.from(currencies)[0],
       addons: [],
-      promoCode: null,
+      promoCode: promoCode.trim() || null,
       rooms: choices.map((choice) => ({
         selectionId: choice.selectionId,
         publicOfferKey: choice.publicOfferKey,
