@@ -1,3 +1,4 @@
+import { bookingQuoteAcceptanceRequirements, parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { redeemCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
@@ -1598,6 +1599,162 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(results.filter((v) => v.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((v) => v.status === "rejected")).toHaveLength(1);
     expect(await r.uses()).toBe(1);
+  });
+
+  async function acceptanceFixture(child = false) {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms);
+    const selection = child
+      ? {
+          ...f.selection,
+          rooms: f.selection.rooms.map((r, i) =>
+            i === 0 ? { ...r, guests: { adults: 1, childAgesAtCheckIn: [8] } } : r,
+          ),
+        }
+      : f.selection;
+    const quote = (
+      await createCurrentPricingQuoteStore(pool, 300).issue(f.scope.propertyId, {
+        requestId: randomUUID(),
+        selection,
+        paymentMethod: "pay_at_property",
+      })
+    ).quote;
+    // Synthetic policy-owner evidence: this helper does not claim owner freshness.
+    const policy = {
+      propertyId: f.scope.propertyId,
+      sourceRevision: "guest-policy:1",
+      disclosureHash: "sha256:" + "a".repeat(64),
+      choices: {
+        defaultGuestLanguage: "en",
+        childrenEnabled: true,
+        adultAgeThreshold: 18,
+        phoneRequired: true,
+        arrivalTimeEnabled: false,
+        specialRequestsEnabled: true,
+        checkInTime: "15:00",
+        checkOutTime: "11:00",
+      },
+    };
+    const ack = (p = policy) => {
+      const r = bookingQuoteAcceptanceRequirements(quote, p)!;
+      expect(r).not.toBeNull();
+      return {
+        accepted: true,
+        quoteEvidenceId: r.quoteEvidenceId,
+        guestPolicyEvidenceId: r.guestPolicyEvidenceId,
+      };
+    };
+    const input = {
+      version: "booking-quote-acceptance.v1",
+      requestId: "accept-one",
+      quoteId: quote.quoteId,
+      acceptance: ack(),
+      guest: {
+        firstName: " Ada ",
+        lastName: "Lovelace",
+        email: " ADA@example.test ",
+        phone: "+44 12345678",
+        countryCode: "GB",
+        arrivalTime: null,
+        specialRequests: " Quiet room please. ",
+      },
+    };
+    return { quote, policy, input, ack };
+  }
+  it("binds guest acknowledgment to the exact quote and policy, with deterministic normalized identity", async () => {
+    const f = await acceptanceFixture();
+    const parsed = parseBookingQuoteAcceptanceInput(f.input, f.quote, f.policy)!;
+    expect(parsed).toMatchObject({
+      guest: { firstName: "Ada", email: "ada@example.test", specialRequests: "Quiet room please." },
+    });
+    expect(parsed.fingerprint).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(
+      parseBookingQuoteAcceptanceInput(
+        { ...f.input, requestId: "another", guest: parsed.guest },
+        f.quote,
+        f.policy,
+      )?.fingerprint,
+    ).toBe(parsed.fingerprint);
+    expect(
+      parseBookingQuoteAcceptanceInput(
+        { ...f.input, guest: { ...f.input.guest, firstName: "Grace" } },
+        f.quote,
+        f.policy,
+      )?.fingerprint,
+    ).not.toBe(parsed.fingerprint);
+    expect(
+      parseBookingQuoteAcceptanceInput(f.input, f.quote, {
+        ...f.policy,
+        sourceRevision: "guest-policy:2",
+      }),
+    ).toBeNull();
+    expect(
+      parseBookingQuoteAcceptanceInput(
+        { ...f.input, acceptance: { ...f.input.acceptance, quoteEvidenceId: "old" } },
+        f.quote,
+        f.policy,
+      ),
+    ).toBeNull();
+  });
+  it("rejects missing acknowledgment, malformed guest data and posted authority or amounts", async () => {
+    const f = await acceptanceFixture();
+    for (const input of [
+      { ...f.input, totalMinor: "1" },
+      { ...f.input, propertyId: f.policy.propertyId },
+      { ...f.input, acceptance: { ...f.input.acceptance, accepted: false } },
+      ...[
+        { firstName: " " },
+        { email: "bad-address" },
+        { phone: null },
+        { phone: "\u0000" },
+        { arrivalTime: "24:00" },
+        { countryCode: "UKK" },
+        { specialRequests: "x".repeat(2001) },
+        { firstName: "Ada\nOther" },
+      ].map((guest) => ({ ...f.input, guest: { ...f.input.guest, ...guest } })),
+    ])
+      expect(parseBookingQuoteAcceptanceInput(input, f.quote, f.policy)).toBeNull();
+  });
+  it("honors current phone, arrival and special-request controls without silent fallback", async () => {
+    const f = await acceptanceFixture();
+    const policy = {
+      ...f.policy,
+      choices: {
+        ...f.policy.choices,
+        phoneRequired: false,
+        arrivalTimeEnabled: true,
+        specialRequestsEnabled: false,
+      },
+    };
+    const input = {
+      ...f.input,
+      acceptance: f.ack(policy),
+      guest: { ...f.input.guest, phone: null, arrivalTime: "18:30", specialRequests: null },
+    };
+    expect(parseBookingQuoteAcceptanceInput(input, f.quote, policy)).not.toBeNull();
+    expect(
+      parseBookingQuoteAcceptanceInput(
+        { ...input, guest: { ...input.guest, specialRequests: "Please" } },
+        f.quote,
+        policy,
+      ),
+    ).toBeNull();
+  });
+  it("rejects child allocations outside the acknowledged guest policy", async () => {
+    const f = await acceptanceFixture(true);
+    expect(parseBookingQuoteAcceptanceInput(f.input, f.quote, f.policy)).not.toBeNull();
+    for (const choices of [
+      { ...f.policy.choices, childrenEnabled: false },
+      { ...f.policy.choices, adultAgeThreshold: 8 },
+    ]) {
+      const policy = { ...f.policy, choices };
+      expect(
+        parseBookingQuoteAcceptanceInput(
+          { ...f.input, acceptance: f.ack(policy) },
+          f.quote,
+          policy,
+        ),
+      ).toBeNull();
+    }
   });
 
 });
