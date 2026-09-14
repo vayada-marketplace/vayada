@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
+import type { ChannexAdoptionSingleHumanAuthority } from "./channexAdoptionConsumer.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import { verifyLegacyOwnerApprovalEnvelope } from "./legacyOwnerApprovalEnvelope.js";
 
 type Authority = "migration_owner" | "security_owner";
@@ -23,7 +25,7 @@ export async function verifyLegacyOwnerApprovals(
     executionPrincipal: string;
     signingPrincipals: ReadonlyMap<string, string>;
     actors: ReadonlyMap<string, { principal: string; authorities: readonly Authority[] }>;
-    singleHumanDualAuthority?: { actorUserId: string; decisionId: string };
+    singleHumanDualAuthority?: ChannexAdoptionSingleHumanAuthority;
   },
   clock: () => Date = () => new Date(),
 ): Promise<{ outcome: "approvals_match_requires_eligibility" }> {
@@ -33,10 +35,12 @@ export async function verifyLegacyOwnerApprovals(
     verificationKeys: new Map(input.verificationKeys),
   };
   const initialTime = clock();
-  const { envelope } = verifyLegacyOwnerApprovalEnvelope({ ...captured, now: initialTime });
+  const initialVerification = verifyLegacyOwnerApprovalEnvelope({ ...captured, now: initialTime });
+  const { envelope } = initialVerification;
   const fail = (): never => {
     throw new Error("Legacy owner approval registry mismatch");
   };
+  if (initialVerification.freshness !== "current") return fail();
   const signingPrincipal = policy.signingPrincipals.get(envelope.signingKeyId);
   if (
     !signingPrincipal?.trim() ||
@@ -101,12 +105,14 @@ export async function verifyLegacyOwnerApprovals(
   if (principals[0] === principals[1]) {
     const actor = result.rows[0]!.actorUserId;
     if (
-      !dual?.decisionId.trim() ||
+      dual?.decisionId !== SINGLE_HUMAN_DUAL_AUTHORITY_DECISION ||
       dual.actorUserId !== actor ||
+      principals.some((principal) => principal !== dual.principal) ||
       result.rows.some((row) => row.actorUserId !== actor)
     )
       return fail();
   }
-  verifyLegacyOwnerApprovalEnvelope({ ...captured, now: clock() });
+  if (verifyLegacyOwnerApprovalEnvelope({ ...captured, now: clock() }).freshness !== "current")
+    return fail();
   return { outcome: "approvals_match_requires_eligibility" };
 }

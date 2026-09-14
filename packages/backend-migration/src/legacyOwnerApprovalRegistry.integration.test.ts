@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import { SINGLE_HUMAN_DUAL_AUTHORITY_DECISION } from "./channexAdoptionConsumer.js";
 import {
   hashLegacyOwnerApprovalEvidence,
   LEGACY_OWNER_APPROVAL_VERSION,
@@ -74,7 +75,11 @@ describe.skipIf(!url)("owner approval registry on fresh fully migrated local dat
         { principal: "human:fixture", authorities: ["migration_owner", "security_owner"] as const },
       ],
     ]),
-    singleHumanDualAuthority: { actorUserId: id(1), decisionId: "fixture-only-dual-approval" },
+    singleHumanDualAuthority: {
+      actorUserId: id(1),
+      principal: "human:fixture",
+      decisionId: SINGLE_HUMAN_DUAL_AUTHORITY_DECISION,
+    },
   });
   beforeAll(async () => {
     const parsed = new URL(url!);
@@ -96,7 +101,7 @@ describe.skipIf(!url)("owner approval registry on fresh fully migrated local dat
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0192");
+    expect(result.applied).toContain("0211");
     await client.query(
       "INSERT INTO identity.users(id,email) VALUES ($1,'owner-approval@example.test')",
       [id(1)],
@@ -180,13 +185,19 @@ describe.skipIf(!url)("owner approval registry on fresh fully migrated local dat
   });
   it.each([
     "missing dual policy",
+    "wrong dual decision",
+    "wrong dual principal",
     "machine signer",
     "machine actor",
     "unapproved actor",
     "wrong role",
   ])("rejects %s", async (change) => {
     const config = policy();
-    if (change === "missing dual policy") config.singleHumanDualAuthority.decisionId = "";
+    if (change === "missing dual policy") config.singleHumanDualAuthority = undefined as never;
+    if (change === "wrong dual decision")
+      config.singleHumanDualAuthority.decisionId = "VAY-1320@wrong" as never;
+    if (change === "wrong dual principal")
+      config.singleHumanDualAuthority.principal = "human:someone-else";
     if (change === "machine signer") config.executionPrincipal = "machine:signer";
     if (change === "machine actor") config.actors.get(id(1))!.principal = "machine:executor";
     if (change === "unapproved actor") config.actors.clear();
@@ -222,7 +233,7 @@ describe.skipIf(!url)("owner approval registry on fresh fully migrated local dat
       verifyLegacyOwnerApprovals(client, input, policy(), () =>
         ++reads === 1 ? clock() : new Date(envelope.expiresAt),
       ),
-    ).rejects.toThrow("invalid_time_window");
+    ).rejects.toThrow("registry mismatch");
   });
   it("revokes PUBLIC access", async () => {
     expect(

@@ -1,3 +1,4 @@
+-- Migration: 0211_legacy_owner_approval_registry
 -- VAY-2017: engineering/legacy-pms-ownership-restoration.md
 -- Separate from clean Channex adoption. No product access or runtime grants.
 CREATE TABLE platform.legacy_owner_approval_records (
