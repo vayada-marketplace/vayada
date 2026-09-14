@@ -190,6 +190,14 @@ describe.skipIf(!url)("approved exact staging alert recovery", () => {
       await commands.recoverStagingAlert!(context, randomUUID(), f.input.alertId, 0),
     ).toMatchObject({ ok: false });
     expect(await Promise.all([recover(), recover()])).toEqual([{ ok: true }, { ok: true }]);
+    expect(
+      (
+        await db.query(
+          "SELECT id FROM platform.jobs WHERE queue_name='pms.channex.webhooks' AND job_key=$1",
+          [`alert:${f.input.alertId}:round:0`],
+        )
+      ).rows,
+    ).toEqual([{ id: prepared.jobId }]);
     await runChannexBookingJobs(url!, {
       apiBaseUrl: "https://staging.channex.io",
       apiKey: "synthetic",
@@ -269,9 +277,24 @@ describe.skipIf(!url)("approved exact staging alert recovery", () => {
       `UPDATE platform.jobs SET job_metadata=jsonb_set(job_metadata,'{stagingAlertRecovery,expiresAt}','"2000-01-01T00:00:00.000Z"') WHERE id=$1`,
       [prepared.jobId],
     );
+    const recoveryState = async () =>
+      (
+        await db.query(
+          `SELECT to_jsonb(a) alert, to_jsonb(j) job FROM pms.channel_operational_alerts a
+         CROSS JOIN platform.jobs j WHERE a.id=$1 AND j.id=$2`,
+          [f.input.alertId, prepared.jobId],
+        )
+      ).rows;
+    const expiredState = await recoveryState();
     expect(
       await commands.recoverStagingAlert!(context, propertyId, f.input.alertId, 0),
     ).toMatchObject({ ok: false });
+    await expect(
+      stagingAlertRecovery(config(), { ...f.input, execute: true }, f.request),
+    ).rejects.toThrow("staging_alert_not_prepared");
+    expect(f.request).not.toHaveBeenCalled();
+    expect(await recoveryState()).toEqual(expiredState);
+    expect(expiredState[0].alert.resolved_at).toBeNull();
     const g = await fixture();
     await stagingAlertRecovery(config(), g.input);
     expect(await commands.recoverStagingAlert!(context, propertyId, g.input.alertId, 0)).toEqual({
