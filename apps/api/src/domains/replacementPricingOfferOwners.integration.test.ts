@@ -1,5 +1,5 @@
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
-import { claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
+import { prepareChannexInitialAriDispatch, claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
@@ -508,6 +508,216 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       { occupancy: 1, rate: "139.50" },
       { occupancy: 2, rate: "139.50" },
     ]);
+  });
+  async function initialDispatchFixture() {
+    const f = await initialAriFixture();
+    const prepared = await prepareChannexInitialAriDispatch(
+      pool,
+      f.input,
+      f.selection,
+      f.claim.attemptId,
+      initialAriDate,
+    );
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const get = vi.fn(async (path: string) =>
+      path.includes("room_types") ? providerRoom(f) : f.response().json(),
+    );
+    const taskId = randomUUID();
+    const post = vi.fn(
+      async (_payload: { body: unknown }) =>
+        new Response(
+          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+        ),
+    );
+    return { ...f, prepared, get, post, taskId };
+  }
+  it("dispatches closed initial ARI once and retains an acknowledgement without releasing ownership", async () => {
+    const f = await initialDispatchFixture();
+    const first = f.prepared.dispatch(f);
+    expect(await f.prepared.dispatch(f)).toEqual({
+      kind: "unavailable",
+      reason: "dispatch_already_used",
+    });
+    const result = await first;
+    expect(result.kind).toBe("retained");
+    expect(f.get).toHaveBeenCalledTimes(2);
+    expect(f.post).toHaveBeenCalledOnce();
+    expect(f.post.mock.calls[0]![0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/restrictions",
+      body: { values: [{ date: initialAriDate, stop_sell: true }] },
+    });
+    const rows = await pool.query(
+      `SELECT a.state,a.request_body,r.task_ids,r.http_status FROM pms.channex_offer_ari_attempts a JOIN pms.channex_offer_ari_receipts r ON r.attempt_id=a.id WHERE a.creation_attempt_id=$1`,
+      [f.claim.attemptId],
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]).toMatchObject({
+      state: "unresolved",
+      task_ids: [f.taskId],
+      http_status: 200,
+      request_body: f.post.mock.calls[0]![0].body,
+    });
+    expect(
+      (
+        await prepareChannexInitialAriDispatch(
+          pool,
+          f.input,
+          f.selection,
+          f.claim.attemptId,
+          initialAriDate,
+        )
+      ).kind,
+    ).toBe("unavailable");
+  });
+  it.each(["before", "during"])(
+    "blocks initial ARI when the lease expires %s preflight",
+    async (when) => {
+      const f = await initialDispatchFixture();
+      const expire = () =>
+        pool.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+      if (when === "before") await expire();
+      const get = vi.fn(async (path: string) => {
+        await expire();
+        return f.get(path);
+      });
+      expect(await f.prepared.dispatch({ get, post: f.post })).toMatchObject({
+        kind: "unavailable",
+        reason: "lease_unavailable",
+      });
+      expect(f.post).not.toHaveBeenCalled();
+      if (when === "before") expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["room_types", "rate_plans"])(
+    "blocks initial ARI with incompatible live %s metadata",
+    async (endpoint) => {
+      const f = await initialDispatchFixture();
+      const ports = {
+        get: async (path: string) => (path.includes(endpoint) ? {} : f.get(path)),
+        post: f.post,
+      };
+      expect(await f.prepared.dispatch(ports)).toEqual({
+        kind: "unavailable",
+        reason: "ari_preflight_unavailable",
+      });
+      expect(f.post).not.toHaveBeenCalled();
+      expect(await f.prepared.dispatch(f)).toMatchObject({ reason: "dispatch_already_used" });
+    },
+  );
+  it.each(["throw", "timeout"])(
+    "retains an ambiguous initial ARI %s without resending",
+    async (mode) => {
+      const f = await initialDispatchFixture();
+      const post = vi.fn(async () => {
+        if (mode === "timeout") return new Promise<Response>(() => {});
+        throw new Error("private transport error");
+      });
+      expect((await f.prepared.dispatch({ get: f.get, post })).kind).toBe("retained");
+      expect(await f.prepared.dispatch(f)).toMatchObject({ reason: "dispatch_already_used" });
+      expect(post).toHaveBeenCalledOnce();
+      const rows = await pool.query(
+        `SELECT a.state,r.http_status,r.task_ids,r.has_warnings,r.outcome FROM pms.channex_offer_ari_attempts a JOIN pms.channex_offer_ari_receipts r ON r.attempt_id=a.id WHERE a.creation_attempt_id=$1`,
+        [f.claim.attemptId],
+      );
+      expect(rows.rows).toEqual([
+        {
+          state: "unresolved",
+          http_status: null,
+          task_ids: [],
+          has_warnings: true,
+          outcome: "transport_error",
+        },
+      ]);
+    },
+  );
+  it("retains a late initial ARI response after lease loss", async () => {
+    const f = await initialDispatchFixture();
+    expect(
+      (
+        await f.prepared.dispatch({
+          get: f.get,
+          post: async (payload) => {
+            await pool.query(
+              "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+              [f.input.jobId],
+            );
+            return f.post(payload);
+          },
+        })
+      ).kind,
+    ).toBe("retained");
+    expect(f.post).toHaveBeenCalledOnce();
+  });
+  it("retries only receipt persistence after a storage lock", async () => {
+    const f = await initialDispatchFixture();
+    const blocker = await pool.connect();
+    try {
+      const result = await f.prepared.dispatch({
+        get: f.get,
+        post: async (payload) => {
+          await blocker.query("BEGIN");
+          await blocker.query("SELECT id FROM pms.channex_offer_targets WHERE id=$1 FOR UPDATE", [
+            f.claim.targetId,
+          ]);
+          return f.post(payload);
+        },
+      });
+      expect(result.kind).toBe("receipt_pending");
+      await blocker.query("ROLLBACK");
+      if (result.kind !== "receipt_pending") throw new Error("persist retry required");
+      await result.persist();
+      await result.persist();
+      expect(await f.prepared.dispatch(f)).toMatchObject({ reason: "dispatch_already_used" });
+      expect(f.post).toHaveBeenCalledOnce();
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+  });
+  it("rechecks the property timezone after initial ARI preflight", async () => {
+    const f = await initialDispatchFixture();
+    const result = await f.prepared.dispatch({
+      get: async (path) => {
+        await pool.query(
+          "UPDATE hotel_catalog.property_locations SET timezone='Invalid/Zone' WHERE property_id=$1",
+          [f.scope.propertyId],
+        );
+        return f.get(path);
+      },
+      post: f.post,
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "ari_date_unavailable" });
+    expect(f.post).not.toHaveBeenCalled();
+  });
+  it("blocks initial ARI when a receipt arrives during preflight", async () => {
+    const f = await initialDispatchFixture();
+    const attempt = (
+      await pool.query(
+        "SELECT id,job_attempt_id,worker_id FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1",
+        [f.claim.attemptId],
+      )
+    ).rows[0];
+    const result = await f.prepared.dispatch({
+      get: async (path) => {
+        await (
+          await prepareChannexAriTransportFailurePersistence(pool, {
+            ...f.correlation,
+            receiptId: randomUUID(),
+            attemptId: attempt.id,
+            jobAttemptId: attempt.job_attempt_id,
+            workerId: attempt.worker_id,
+          })
+        )();
+        return f.get(path);
+      },
+      post: f.post,
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "ari_dispatch_unavailable" });
+    expect(f.post).not.toHaveBeenCalled();
   });
   async function ariReceiptFixture() {
     const f = await initialAriFixture(),
