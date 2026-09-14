@@ -57,7 +57,8 @@ export async function readUncapturedNightlyRevenueCandidates(
      WHERE booking.lifecycle_status IN ('confirmed','completed')
        AND ($1::uuid IS NULL OR booking.id>$1::uuid)
        AND NOT EXISTS(SELECT 1 FROM booking.nightly_revenue_evidence evidence
-         WHERE evidence.guest_booking_id=booking.id AND evidence.economic_event='room_night')
+         WHERE evidence.guest_booking_id=booking.id AND evidence.economic_event='room_night'
+           AND evidence.command_key NOT LIKE 'backfill:v1:%')
      ORDER BY booking.id LIMIT $2`,
     [options.afterGuestBookingId ?? null, limit],
   );

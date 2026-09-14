@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { readUncapturedNightlyRevenueCandidates } from "./bookingNightlyRevenueBackfillReader.js";
 import { verifyAppliedNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillVerification.js";
 import { applyNightlyRevenueBackfillPage } from "./bookingNightlyRevenueBackfillWriter.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
@@ -8,6 +9,8 @@ const DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY = "11810000-0000-4000-8000-000000000001";
 const BOOKING = "11810000-0000-4000-8000-000000000002";
 const ROOM = "11810000-0000-4000-8000-000000000003";
+const PRODUCER_BOOKING = "11810000-0000-4000-8000-000000000004";
+const MIXED_BOOKING = "11810000-0000-4000-8000-000000000005";
 describe.skipIf(!DATABASE_URL)("nightly revenue backfill writer (PostgreSQL)", () => {
   it("appends, replays, and corrects retained amounts without rewriting history", async () => {
     assertSafeTestDatabase(DATABASE_URL!);
@@ -67,6 +70,39 @@ describe.skipIf(!DATABASE_URL)("nightly revenue backfill writer (PostgreSQL)", (
         storedRows: 2,
         revisionCount: 2,
       });
+      await client.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,lifecycle_status,
+         check_in,check_out,room_count,currency,total_amount,balance_amount,booking_channel,direct_booking_source)
+         VALUES($1,$2,'VAY-1181-PRODUCER','booking','confirmed','2026-09-14','2026-09-15',1,'EUR',15,15,'direct','booking_engine')`,
+        [PRODUCER_BOOKING, PROPERTY],
+      );
+      await client.query(
+        `INSERT INTO booking.nightly_revenue_evidence(property_id,guest_booking_id,room_type_id,
+         stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,
+         lifecycle_state,source_kind,evidence_quality,source_revision,line_position,command_key)
+         VALUES($1,$2,$3,'2026-09-14','2026-09-14','EUR',15,1,'room_night','confirmed',
+           'direct','exact',1,1,'direct-booking:producer-owned')`,
+        [PROPERTY, PRODUCER_BOOKING, ROOM],
+      );
+      await client.query(
+        `INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,lifecycle_status,
+         check_in,check_out,room_count,currency,total_amount,balance_amount,booking_channel,direct_booking_source)
+         VALUES($1,$2,'VAY-1181-MIXED','booking','confirmed','2026-09-14','2026-09-16',1,'EUR',30,30,'direct','booking_engine')`,
+        [MIXED_BOOKING, PROPERTY],
+      );
+      await client.query(
+        `INSERT INTO booking.nightly_revenue_evidence(property_id,guest_booking_id,room_type_id,
+         stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,
+         lifecycle_state,source_kind,evidence_quality,source_revision,line_position,command_key)
+         VALUES
+           ($1,$2,$3,'2026-09-14','2026-09-14','EUR',15,1,'room_night','confirmed','direct','exact',1,1,'backfill:v1:mixed'),
+           ($1,$2,$3,'2026-09-15','2026-09-15','EUR',15,1,'room_night','confirmed','direct','exact',1,1,'direct-booking:mixed')`,
+        [PROPERTY, MIXED_BOOKING, ROOM],
+      );
+      const correctionPage = await readUncapturedNightlyRevenueCandidates(client, { limit: 10 });
+      expect(correctionPage.candidates.map(({ guestBookingId }) => guestBookingId)).toEqual([
+        BOOKING,
+      ]);
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       await client.end();
