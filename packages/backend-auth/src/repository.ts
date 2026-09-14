@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { AuthError } from "./errors.js";
 import type {
   InternalUserStatus,
   MembershipStatus,
@@ -83,25 +84,41 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
 
   return {
     async findUserByProviderUserId(provider, providerUserId) {
-      const result = await pool.query<{
-        user_id: string;
-        email: string;
-        name: string | null;
-        phone: string | null;
-        profile_picture_url: string | null;
-        profile_picture_media_object_id: string | null;
-        status: InternalUserStatus;
-      }>(
-        `SELECT u.id AS user_id, u.email, u.name, u.phone,
-                u.profile_picture_url, u.profile_picture_media_object_id, u.status
+      const result = await pool
+        .query<{
+          user_id: string;
+          email: string;
+          name: string | null;
+          phone: string | null;
+          profile_picture_url: string | null;
+          profile_picture_media_object_id: string | null;
+          status: InternalUserStatus;
+          bootstrap_protected: unknown;
+        }>(
+          `SELECT u.id AS user_id, u.email, u.name, u.phone,
+                u.profile_picture_url, u.profile_picture_media_object_id, u.status,
+                EXISTS (
+                  SELECT 1 FROM platform.legacy_owner_bootstrap_receipts receipt
+                  WHERE u.id = ANY(receipt.owner_user_ids)
+                ) AS bootstrap_protected
          FROM identity.external_identities ei
          JOIN identity.users u ON u.id = ei.user_id
          WHERE ei.provider = $1 AND ei.provider_user_id = $2
          LIMIT 1`,
-        [provider, providerUserId],
-      );
+          [provider, providerUserId],
+        )
+        .catch(() => {
+          throw new Error("Identity session evidence unavailable");
+        });
       const row = result.rows[0];
       if (!row) return null;
+      // A hold must throw: null lets session callers enter JIT identity creation.
+      if (row.bootstrap_protected !== false) {
+        throw new AuthError(
+          "USER_RECONCILIATION_REQUIRED",
+          "Legacy owner account reconciliation required",
+        );
+      }
       return {
         userId: row.user_id,
         email: row.email,
