@@ -94,7 +94,7 @@ it("discloses each physical room's actual name, meal, cancellation and payment t
   expect(rooms[1].textContent).toContain("Room only (no meals)");
   expect(rooms[1].textContent).toContain("Non-refundable.");
   expect(rooms[1].textContent).not.toContain("Free cancellation");
-  expect(document.body.textContent).toContain("guest policies still need to be provided");
+  expect(document.body.textContent).toContain("Please also review our guest rules");
   expect(document.querySelector("button")).toBeNull();
   expect(checkbox().closest("label")?.textContent).toContain("price preview");
 });
