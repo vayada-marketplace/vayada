@@ -124,3 +124,25 @@ denials after preparation; login or health alone is not an access test.
 No existing read approval authorizes either writer. Real isolated rehearsals and
 production execution require their own exact write/recovery approval. This
 document and its review do not complete VAY-2017.
+
+## Internal receipt storage (0194)
+
+`platform.legacy_owner_bootstrap_receipts` records one immutable success per
+command ID, with the operation version, environment, canonical sorted unique
+subset of one to eight owner UUIDs, source run and evidence hashes, target
+before/after hashes, approval-envelope hash and executor-principal hash. It
+contains no contact fields or provider credentials. The checkpoint is restricted
+to `internal_users_prepared`; it cannot represent provider or access completion.
+
+The table rejects UPDATE, DELETE and TRUNCATE and grants no PUBLIC access or
+executor privilege. Owner UUIDs are historical evidence, not foreign keys that
+prevent later legitimate account deletion. A future controlled writer must
+insert pending users and the receipt in the same transaction, after approval
+locking and all collision checks; receipt insertion failure rolls back both.
+Storage does not verify signatures, prove the owners were prepared or implement
+replay. Its hashes must be revalidated by the consumer, never treated as approval.
+
+Signup collision protection remains unwired: `identityLifecycle.ts` can reuse a
+user by email and `workosWebhooks.ts` can insert a new UUID. Guarding only migration
+inserts would miss these paths. Do not enable this preparation until both are
+covered by the separately reviewed shared collision boundary.
