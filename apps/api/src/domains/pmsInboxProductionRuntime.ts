@@ -78,6 +78,7 @@ export function createPmsInboxProductionRuntime(
   input: {
     connectionString: string;
     attachmentMediaAccessEnabled: boolean;
+    providerMutationEnabled?: boolean;
     emailReplyRoutes?: PmsInboxEmailReplyRouteReadPort;
     emailDeliveryRoutes?: PmsInboxDeliveryEmailRoutePort;
     assistanceService?: PmsInboxAssistanceServicePort;
@@ -117,12 +118,14 @@ export function createPmsInboxProductionRuntime(
       pool,
       emailReplyRoutes,
       attachmentMediaAccessEnabled: input.attachmentMediaAccessEnabled,
+      providerMutationEnabled: input.providerMutationEnabled ?? false,
     }),
     pmsInboxMarkReadPort: createPgPmsInboxMarkReadPort({
       connectionString: input.connectionString,
       pool,
     }),
     pmsInboxProviderActionPort: createPgPmsInboxProviderActionPort({
+      mutationEnabled: input.providerMutationEnabled ?? false,
       connectionString: input.connectionString,
       pool,
     }),
