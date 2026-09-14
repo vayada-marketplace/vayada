@@ -799,3 +799,22 @@ and horizon admission, closure while staging, fresh bounded dispatch, retained
 original-response evidence and authoritative reconciliation remain required
 before any runtime sender can consume it. No HTTP, readback completion, release
 of unresolved ownership, room availability or activation is added here.
+
+
+### Original ARI response evidence (VAY-1545)
+
+ARI responses are observations, not completed delivery. Preserve HTTP status,
+a bounded safe request ID, at most100 distinct UUID task IDs from an entirely
+valid task list, and conservative warning presence. Missing/malformed tasks,
+missing/malformed/nonempty warning metadata and root errors/warnings do not
+produce clean evidence. Do not retain response messages, echoed payloads,
+credentials or exception text. Even a clean200 task acknowledgement does not
+release unresolved ownership or grant activation.
+
+Creation and ARI share a response-body reader with the existing64KiB UTF-8 and
+five-second bounds; their evidence parsers remain separate. Original-response
+receipts must bind to the upload attempt/job/worker and remain append-only after
+lease loss. Receipt insertion must fence the target row so an older transaction
+cannot reconcile from a stale receipt snapshot. Repeat persistence uses the same
+receipt ID and exact evidence; it never reissues HTTP. Storage and bounded
+capture precede a runtime dispatcher and authoritative reconciliation service.
