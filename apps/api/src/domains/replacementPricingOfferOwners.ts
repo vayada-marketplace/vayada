@@ -1,3 +1,4 @@
+import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -698,6 +699,16 @@ async function withPublishedChannexPricing(
               externalRatePlanId: attempt.external_rate_plan_id as string,
             };
             if (work.kind === "ari_claim") {
+              const location = (
+                await client.query(
+                  "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT",
+                  [lease.propertyId],
+                )
+              ).rows[0];
+              const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0]
+                .now as Date;
+              const dateAdmission = admitChannexInitialAriDate(work.date, location?.timezone, now);
+              if (dateAdmission.kind !== "admitted") return dateAdmission;
               const evidence = JSON.stringify({
                 schemaVersion: 1,
                 attemptId: attempt.id,
