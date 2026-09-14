@@ -8,12 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   choices,
-  compositionFixture,
   now,
   organizationId,
   pricingEvidence,
   propertyId,
-  revisionFixture,
 } from "./bookingGuestPolicyTestFixtures.js";
 import { createBookingBookingPublicationSource } from "./domains/bookingBookingPublicationSource.js";
 import { createHotelCatalogBookingPublicationSource } from "./domains/hotelCatalogBookingPublicationSource.js";
@@ -125,15 +123,13 @@ describe("production Booking publication owner sources", () => {
         ],
       })),
     };
+    const rules = { ...scope, sourceRevision: `guest-choices:${propertyId}`, confirmedAt: now, choices: { ...choices, checkInUntil: "23:00", checkOutFrom: "07:00" } };
+    const getCurrentGuestRules = vi.fn().mockResolvedValue(rules);
     const source = createBookingBookingPublicationSource({
       connectionString: "postgres://unused",
       pool: pool as any,
       design,
-      guestPolicy: {
-        async getCurrentGuestPolicy() {
-          return revisionFixture({ bundle: compositionFixture({ ...choices, checkInUntil: "23:00", checkOutFrom: "07:00" }).bundle });
-        },
-      },
+      guestRules: { getCurrentGuestRules },
     });
     const designResult = await design.getBookingDesignReadiness(scope);
     if (designResult.outcome !== "ready") throw new Error(JSON.stringify(designResult));
@@ -163,6 +159,16 @@ describe("production Booking publication owner sources", () => {
         supportedQuoteParameters: { childrenSupported: true, adultAgeThreshold: 18 },
       },
     });
+
+    expect(evidence.entities[1]?.bindings).toBeUndefined();
+    getCurrentGuestRules.mockResolvedValue({ ...rules, sourceRevision: `guest-choices:${organizationId}` });
+    await expect(source.getSnapshot(manifestRequest(evidence.sources))).resolves.toEqual({ outcome: "unavailable", owner: "booking" });
+    getCurrentGuestRules.mockResolvedValue(null);
+    expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({ outcome: "evidence", entities: [ {}, { blockers: [{ code: "guest_policy_not_configured" }] } ] });
+    for (const invalid of [{ ...rules, organizationId: propertyId }, { ...rules, choices: {} }, { ...rules, sourceRevision: "guest-policy:1" }, { ...rules, confirmedAt: "invalid" }]) {
+      getCurrentGuestRules.mockResolvedValue(invalid);
+      expect(await source.getBookingLaunchEvidence(scope)).toMatchObject({ outcome: "unavailable" });
+    }
   });
 
   it("projects exact PMS room, rate, and 366-day calendar evidence", async () => {

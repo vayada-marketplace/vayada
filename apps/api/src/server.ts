@@ -1,3 +1,4 @@
+import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
@@ -1032,7 +1033,7 @@ const bookingPublicationRuntime = (() => {
     bookingHostBase: config.bookingHostBase,
     mediaResolver: pmsRoomPublicationRuntime.mediaResolver,
     design: bookingDesignReadinessProvider,
-    guestPolicy: bookingGuestPolicyRepository,
+    guestRules: createBookingGuestChoicePublicationReader(propertySetupOwnerPool),
     rooms: pmsRoomPublicationRuntime.readModel,
     pricing: pmsPricingReadModel,
     recurringPricing: propertySetupPmsRuntime.recurringPricing,

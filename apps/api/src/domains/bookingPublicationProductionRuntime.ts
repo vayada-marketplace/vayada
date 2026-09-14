@@ -1,10 +1,10 @@
+import type { BookingGuestChoicePublicationReader } from "./bookingGuestChoicePublication.js";
 import {
   createBookingLaunchReadinessProvider,
   type BookingPublicationAuditContext,
   type BookingPublicationCommandPort,
   type BookingPublicationOperation,
   type BookingDesignReadinessPort,
-  type BookingGuestPolicyReadPort,
   type BookingMandatoryChargeConfirmationEvidencePort,
   type ReadyBookingPublicationEvidence,
 } from "@vayada/domain-booking";
@@ -144,7 +144,7 @@ export function createBookingPublicationProductionRuntime(config: {
   bookingHostBase?: string;
   mediaResolver: HotelMediaResolutionPort;
   design: BookingDesignReadinessPort;
-  guestPolicy: Pick<BookingGuestPolicyReadPort, "getCurrentGuestPolicy">;
+  guestRules: BookingGuestChoicePublicationReader;
   rooms: RoomPublicationSnapshotPort;
   pricing: Pick<PmsPricingReadPort, "getPricingSourceSnapshot">;
   recurringPricing: Pick<PmsRecurringPricingReadPort, "getRecurringPricingBookingEvidence">;
@@ -160,7 +160,7 @@ export function createBookingPublicationProductionRuntime(config: {
   const booking = createBookingBookingPublicationSource({
     connectionString: config.connectionString,
     design: config.design,
-    guestPolicy: config.guestPolicy,
+    guestRules: config.guestRules,
   });
   const pms = createPmsBookingPublicationSource({
     rooms: config.rooms,
