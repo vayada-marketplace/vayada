@@ -57,3 +57,14 @@ References: [rate options](https://docs.channex.io/api-v.1-documentation/rate-pl
 Local sanitized probe: `evidence/vay1545-multioccupancy/RESULT.md` in the shared
 testing directory. This metadata correction alone does not complete the deployed
 calculator-to-Channex flow or downstream OTA acceptance.
+
+Initial ARI dispatch now checks the scoped provider property's
+`settings.min_stay_type` before room/rate preflight and POST. Because the immutable
+request includes both explicit minimum-stay fields, only `both` passes; arrival,
+through, unknown or missing mode returns `ari_restriction_capability_unavailable`.
+It sends nothing and creates no provider receipt. Existing claimed-attempt holds
+and one-shot dispatch semantics remain; this check does not release/retry claims
+or change property settings. The post-preflight authority recheck still applies.
+A mode read is only a necessary capability observation: it does not prove the
+setting cannot change afterward or that the subsequent upload executed. Exact
+original receipt/task and independent current-value verification remain required.
