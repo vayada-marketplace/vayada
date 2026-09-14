@@ -811,6 +811,22 @@ produce clean evidence. Do not retain response messages, echoed payloads,
 credentials or exception text. Even a clean200 task acknowledgement does not
 release unresolved ownership or grant activation.
 
+The September14 closed-flow receipt retained an ambiguous warning flag despite
+later exact task and value observations. That historical flag cannot establish
+which condition occurred. Capture a bounded `warningReason` enum for future
+responses: `invalid_tasks`, `root_errors`, `root_warnings`, `invalid_meta`,
+`invalid_warnings`, or `provider_warnings`, in that precedence order. Use null
+for a clean response or a non-JSON outcome already explained by `outcome`.
+This records the first blocker only, never provider text or a complete warning
+inventory. Preserve the existing `hasWarnings` calculation and admission gate.
+Persist the classification with the same immutable receipt; old rows remain
+unclassified, with no backfill from later GETs or fabricated response evidence.
+
+The [official ARI response contract](https://docs.channex.io/api-v.1-documentation/ari)
+shows an empty `meta.warnings` array on clean acceptance and warns that HTTP200
+can include rejected items. Keep requiring that explicit clean shape; successful
+task/readback evidence cannot make a warning-bearing original receipt clean.
+
 Creation and ARI share a response-body reader with the existing64KiB UTF-8 and
 five-second bounds; their evidence parsers remain separate. Original-response
 receipts must bind to the upload attempt/job/worker and remain append-only after
