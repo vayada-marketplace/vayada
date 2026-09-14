@@ -1,6 +1,6 @@
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { prepareChannexInitialAriDispatch, claimPublishedChannexInitialAri } from "./replacementPricingOfferOwners.js";
-import { readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
+import { readCurrentChannexStagedRestrictions, readCurrentChannexNightRestrictions } from "./replacementPricingOfferOwners.js";
 import { retainChannexOfferConfiguration, prepareChannexOfferDispatch, recordRetainedChannexOfferCreate as recordRetained } from "./replacementPricingOfferOwners.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
 import { verifyChannexOfferRoom, verifyChannexOfferConfiguration } from "../integrations/channexOfferConfiguration.js";
@@ -742,6 +742,169 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
     return { ...f, ariCorrelation: correlation, taskId, ariResponse: response };
   }
+  async function stagedReadFixture() {
+    const f = await ariReceiptFixture();
+    const stored = (
+      await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+        f.ariCorrelation.attemptId,
+      ])
+    ).rows[0].request_body.values[0];
+    const { property_id, rate_plan_id, date, rates: _rates, ...restrictions } = stored;
+    const response = { data: { [rate_plan_id]: { [date]: restrictions } } };
+    const get = vi.fn(async () => response);
+    const read = (port: (path: string, signal: AbortSignal) => Promise<unknown> = get) =>
+      readCurrentChannexStagedRestrictions(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        f.ariCorrelation.attemptId,
+        port,
+      );
+    return { ...f, get, read, response, stored };
+  }
+  it("reads the immutable closed upload and keeps ambiguous ownership unresolved", async () => {
+    const f = await stagedReadFixture();
+    await (
+      await prepareChannexAriTransportFailurePersistence(pool, f.ariCorrelation)
+    )();
+    const result = await f.read();
+    expect(result).toMatchObject({
+      kind: "staged_restrictions_observed",
+      creationAttemptId: f.claim.attemptId,
+      ariAttemptId: f.ariCorrelation.attemptId,
+      observation: { date: initialAriDate, restrictions: { stop_sell: true } },
+    });
+    expect(f.get).toHaveBeenCalledOnce();
+    const row = (
+      await pool.query("SELECT state FROM pms.channex_offer_ari_attempts WHERE id=$1", [
+        f.ariCorrelation.attemptId,
+      ])
+    ).rows[0];
+    expect(row.state).toBe("unresolved");
+  });
+  it.each(["property_id", "rate_plan_id", "date"])(
+    "rejects stored request %s outside its immutable identity",
+    async (field) => {
+      const template = await stagedReadFixture(),
+        f = await initialAriFixture();
+      const body = {
+        values: [
+          {
+            ...template.stored,
+            property_id: f.scope.propertyId,
+            rate_plan_id: ((await f.response().json()) as { data: { id: string } }).data.id,
+            [field]: field === "date" ? nextAriDate : randomUUID(),
+          },
+        ],
+      };
+      const row = (
+        await pool.query(
+          `INSERT INTO pms.channex_offer_ari_attempts(creation_attempt_id,job_attempt_id,worker_id,service_date,request_body)
+         VALUES($1,$2,$3,$4,$5::jsonb) RETURNING id`,
+          [
+            f.claim.attemptId,
+            f.claim.jobAttemptId,
+            f.claim.workerId,
+            initialAriDate,
+            JSON.stringify(body),
+          ],
+        )
+      ).rows[0];
+      const get = vi.fn();
+      expect(
+        await readCurrentChannexStagedRestrictions(
+          pool,
+          f.input,
+          f.selection,
+          f.claim.attemptId,
+          row.id,
+          get,
+        ),
+      ).toMatchObject({ kind: "unavailable", reason: "ari_attempt_unavailable" });
+      expect(get).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects an upload from a different creation before GET", async () => {
+    const f = await stagedReadFixture(),
+      other = await ariReceiptFixture();
+    expect(
+      await readCurrentChannexStagedRestrictions(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        other.ariCorrelation.attemptId,
+        f.get,
+      ),
+    ).toMatchObject({ kind: "unavailable", reason: "ari_attempt_unavailable" });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it.each(["before", "during"])("rejects authority loss %s staged restriction GET", async (when) => {
+    const f = await stagedReadFixture();
+    const expire = () =>
+      pool.query(
+        "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+        [f.input.jobId],
+      );
+    if (when === "before") await expire();
+    const result = await f.read(async () => {
+      await expire();
+      return f.get();
+    });
+    expect(result).toMatchObject({ kind: "unavailable", reason: "lease_unavailable" });
+    if (when === "before") expect(f.get).not.toHaveBeenCalled();
+  });
+  it("rejects a receipt arriving during staged restriction GET", async () => {
+    const f = await stagedReadFixture();
+    const result = await f.read(async () => {
+      await (
+        await prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, f.ariResponse())
+      )();
+      return f.get();
+    });
+    expect(result).toMatchObject({
+      kind: "unavailable",
+      reason: "staged_restriction_observation_stale",
+    });
+  });
+  it("rejects changed room mapping during staged restriction GET", async () => {
+    const f = await stagedReadFixture();
+    const result = await f.read(async () => {
+      await pool.query(
+        "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1",
+        [f.scope.propertyId, randomUUID()],
+      );
+      return f.get();
+    });
+    expect(result.kind).toBe("unavailable");
+  });
+  it("requires retained configuration before staged restriction GET", async () => {
+    const f = await stagedReadFixture();
+    await pool.query(
+      "UPDATE pms.channex_offer_target_intents SET result_evidence=result_evidence-'configuration' WHERE id=$1",
+      [f.claim.intentId],
+    );
+    expect(await f.read()).toMatchObject({
+      kind: "unavailable",
+      reason: "configuration_evidence_unavailable",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it("does not accept desired open restrictions as staged closed evidence", async () => {
+    const f = await stagedReadFixture();
+    f.response.data[f.stored.rate_plan_id][f.stored.date].stop_sell = false;
+    await expect(f.read()).rejects.toThrow("restriction_readback_mismatch");
+  });
+  it("rejects a reconciled upload before GET", async () => {
+    const f = await stagedReadFixture();
+    await pool.query(
+      "UPDATE pms.channex_offer_ari_attempts SET state='reconciled',reconciliation_evidence='{\"test\":true}'::jsonb WHERE id=$1",
+      [f.ariCorrelation.attemptId],
+    );
+    expect(await f.read()).toMatchObject({ kind: "unavailable", reason: "ari_attempt_unavailable" });
+    expect(f.get).not.toHaveBeenCalled();
+  });
   it("retains late ARI receipts idempotently without releasing ownership", async () => {
     const f = await ariReceiptFixture(),
       response = f.ariResponse();
