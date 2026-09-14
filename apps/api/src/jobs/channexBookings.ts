@@ -1,3 +1,7 @@
+import {
+  assertStagingAlertApproval,
+  type StagingAlertApproval,
+} from "../domains/channexStagingAlertRecovery.js";
 import { adoptChannexStagingCatalog } from "../domains/channexStagingCatalogAdoption.js";
 import { stagingRevisionHash } from "../domains/channexStagingCatalogEvidence.js";
 import type { BookingChannel } from "@vayada/domain-booking";
@@ -88,11 +92,12 @@ async function claim(pool:pg.Pool,workerId:string,scope?:StagingImportScope):Pro
            (id=$4::uuid AND payload->>'propertyId'=$5 AND payload->>'providerPropertyId'=$6
             AND resource_id=$7 AND payload->>'channelBookingId'=$7 AND payload->>'revision'=$8
             AND job_metadata->'stagingImport'->>'bindingGeneration'=$9
-            AND job_metadata#>>'{stagingImport,catalogHash}' IS NOT DISTINCT FROM $10::text)) AND
+            AND job_metadata#>>'{stagingImport,catalogHash}' IS NOT DISTINCT FROM $10::text
+            AND job_metadata->'stagingAlertRecovery' IS NOT DISTINCT FROM $11::jsonb)) AND
           ((status='pending' AND run_after<=now() AND attempts_count<max_attempts) OR
            (status='running' AND locked_at<=now()-($3::bigint*interval '1 millisecond')))
          ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null],
+        [QUEUE, TYPE, LEASE_MS, scope?.jobId??null, scope?.propertyId??null, scope?.providerPropertyId??null, scope?.channelBookingId??null, scope?.revision??null, scope?.bindingGeneration??null, scope?.catalogHash??null,scope?.alertRecovery?JSON.stringify(scope.alertRecovery):null],
       )
     ).rows[0];
     if (!row) return null;
@@ -166,6 +171,10 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,scope?:StagingImpo
     const bookingIds = new Set(mappings.map((row) => row.guestBookingId));
     if (bookingIds.size > 1) throw new Failure("ambiguous_booking_mapping", false);
     const replayed=mappings.some(row=>row.revisionId===revision.id),metadata=JSON.stringify({providerSource:mappings.length?mappings[0]!.providerSource:revision.providerSource,latestProviderSource:revision.providerSource,providerPropertyId:job.providerPropertyId,providerInsertedAt:revision.insertedAt,providerRevision:revision.semanticRevision});
+    if(scope?.alertRecovery){
+      if(await assertStagingAlertApproval(client,scope,scope.alertRecovery,job.id)!==revision.roomCount)throw new Failure("staging_alert_mapping_changed",false);
+      if(!replayed || mappings.some(m=>m.revisionId!==revision.id || m.guestBookingId!==scope.alertRecovery!.canonicalBookingId))throw new Failure("staging_alert_mapping_changed",false);
+    }
     if(replayed){await recordHandled(client,job,revision,"replayed");return true}
     const newest=mappings.reduce<string|null>((latest,row)=>row.insertedAt&&(!latest||row.insertedAt>latest)?row.insertedAt:latest,tombstone?.insertedAt??null);
     if(newest&&revision.insertedAt&&revision.insertedAt<newest){await recordHandled(client,job,revision,"stale");return true}
@@ -305,7 +314,7 @@ async function providerRequest(options:Parameters<typeof runChannexBookingJobs>[
 // prettier-ignore
 function active(options:Parameters<typeof runChannexBookingJobs>[1]){if(options.signal?.aborted)throw new Failure("worker_shutdown",true);if(!options.ownsMutation())throw new Failure("ownership_frozen",true)}
 // prettier-ignore
-async function heartbeat(pool:pg.Pool,job:Job,options:Parameters<typeof runChannexBookingJobs>[1]){active(options);await transaction(pool,async client=>{await fence(client,job);if(options.stagingImport)await stagingBinding(client,options.stagingImport)})}
+async function heartbeat(pool:pg.Pool,job:Job,options:Parameters<typeof runChannexBookingJobs>[1]){active(options);await transaction(pool,async client=>{await fence(client,job);if(options.stagingImport){await stagingBinding(client,options.stagingImport);if(options.stagingImport.alertRecovery)await assertStagingAlertApproval(client,options.stagingImport,options.stagingImport.alertRecovery,job.id)}})}
 // prettier-ignore
 async function fence(client:pg.PoolClient,job:Job){const locked=await client.query("UPDATE platform.jobs SET locked_at=now(),updated_at=now() WHERE id=$1::uuid AND attempts_count=$2 AND status='running' AND locked_by=$3 RETURNING id",[job.id,job.attempt,job.workerId]);if(!locked.rowCount)throw new LeaseLost()}
 // prettier-ignore
@@ -388,6 +397,7 @@ type StagingImportScope = {
   channelBookingId: string;
   revision: string;
   bindingGeneration: string;
+  alertRecovery?: StagingAlertApproval;
   catalogHash?: string;
   revisionHash?: string;
   retainedRevision?: boolean;
@@ -428,7 +438,9 @@ export async function importChannexStagingReservation(
     !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef) ||
     (input.catalogHash !== undefined &&
       (!/^[a-f0-9]{64}$/.test(input.catalogHash) ||
-        (input.retainedRevision ? input.channelId !== undefined : !uuid.test(input.channelId ?? "")) ||
+        (input.retainedRevision
+          ? input.channelId !== undefined
+          : !uuid.test(input.channelId ?? "")) ||
         input.repairAssignments)) ||
     ((input.channelId !== undefined || input.retainedRevision) && !input.catalogHash)
   ) {
