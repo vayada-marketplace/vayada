@@ -10,6 +10,7 @@ vi.mock("next/link", () => ({
 
 const api = vi.hoisted(() => ({
   roster: vi.fn(),
+  admins: vi.fn(),
   roles: vi.fn(),
   properties: vi.fn(),
   access: vi.fn(),
@@ -20,6 +21,7 @@ const api = vi.hoisted(() => ({
 vi.mock("@/services/api/pmsStaffClient", async (original) => ({
   ...(await original<object>()),
   getPmsStaffRoster: api.roster,
+  getPmsAccountAdmins: api.admins,
   getPmsTeamRoles: api.roles,
   getPmsStaffAccess: api.access,
   getPmsStaffInvitation: api.invitation,
@@ -43,6 +45,7 @@ import TeamActionDialog from "./TeamActionDialog";
 beforeEach(() => {
   vi.clearAllMocks();
   api.roster.mockResolvedValue([]);
+  api.admins.mockResolvedValue({ admins: [], actorMembershipId: "actor" });
   api.roles.mockResolvedValue({ roles: [], canManageRoles: true });
   api.properties.mockResolvedValue([{ id: "property", name: "Sample property" }]);
 });
