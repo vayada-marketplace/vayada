@@ -402,6 +402,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         name: "Staff Example",
         email: "staff@example.com",
         roleKey: "housekeeping",
+        roleDefinitionId: null,
+        roleName: null,
+        propertyAccessMode: "assigned",
         propertyIds: [property],
         status: "active",
         lastActiveAt: "2026-08-24T12:00:00.000Z",
@@ -411,6 +414,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         name: "Staff Example",
         email: "pending@example.com",
         roleKey: "front_desk",
+        roleDefinitionId: null,
+        roleName: null,
+        propertyAccessMode: "assigned",
         propertyIds: [property],
         status: "pending",
         lastActiveAt: null,
@@ -445,6 +451,70 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       [org, property],
     );
     expect(await repository.listRoster(org)).toEqual([]);
+  });
+
+  it.each(["expired", "revoked"])(
+    "prepares a fresh revision after a %s invitation and rejects concurrent reuse",
+    async (status) => {
+      expect(await repository.prepareInvitation(org, "STAFF@example.com")).toEqual({
+        configurationRevision: 1,
+      });
+      const first = await repository.persist(command());
+      if (first.outcome !== "created") throw new Error("expected invitation");
+      expect(await repository.prepareInvitation(org, "staff@example.com")).toBeNull();
+      await client.query(
+        "UPDATE identity.staff_invitations SET status = $2, delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = 'synthetic-old-invitation', expires_at = now() - interval '1 minute' WHERE id = $1",
+        [first.invitationId, status],
+      );
+      const prepared = await repository.prepareInvitation(org, "staff@example.com");
+      expect(prepared).toEqual({ configurationRevision: 2 });
+      expect(await repository.prepareInvitation(otherOrg, "staff@example.com")).toEqual({
+        configurationRevision: 1,
+      });
+      const replacement = command({
+        revision: prepared!.configurationRevision,
+        idempotencyKey: "replacement",
+        commandId: "replacement-command",
+      });
+      expect(await repository.persist(replacement)).toMatchObject({ outcome: "created" });
+      expect(
+        await repository.persist({ ...replacement, idempotencyKey: "competing" }),
+      ).toMatchObject({ outcome: "rejected", reason: "configuration_conflict" });
+      expect(await repository.persist(replacement)).toMatchObject({ outcome: "idempotent_replay" });
+    },
+  );
+
+  it("shows live saved-role names and all-property invitation scope", async () => {
+    const invite = command({ email: "all-roster@example.com" });
+    invite.payload.propertyAccessMode = "all";
+    invite.payload.propertyIds = [];
+    const pending = await repository.persist(invite);
+    if (pending.outcome !== "created") throw new Error("expected invitation");
+    const definition = await client.query(
+      "SELECT id FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'front_desk'",
+      [org],
+    );
+    const roleId = definition.rows[0].id;
+    await client.query(
+      "UPDATE identity.staff_invitations SET role_definition_id = $2 WHERE id = $1",
+      [pending.invitationId, roleId],
+    );
+    expect(
+      (await repository.listRoster(org)).find((row) => row.id === pending.invitationId),
+    ).toMatchObject({
+      roleDefinitionId: roleId,
+      roleName: "Front desk",
+      propertyAccessMode: "all",
+      propertyIds: [property, secondProperty],
+    });
+    await client.query(
+      "UPDATE identity.organization_resource_links SET status = 'suspended' WHERE organization_id = $1 AND resource_id = $2",
+      [org, secondProperty],
+    );
+    expect(
+      (await repository.listRoster(org)).find((row) => row.id === pending.invitationId)
+        ?.propertyIds,
+    ).toEqual([property]);
   });
 
   it("normalizes absent overrides and rejects unsupported delegated scope", async () => {

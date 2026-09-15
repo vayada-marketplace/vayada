@@ -12,7 +12,7 @@ import type {
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
 import Fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   registerStaffInvitationRoutes,
@@ -153,6 +153,9 @@ function fakes() {
               }
             : null;
         },
+        async prepareInvitation() {
+          return { configurationRevision: 2 };
+        },
         async listRoster(id) {
           rosterOrganizations.push(id);
           return [
@@ -161,6 +164,9 @@ function fakes() {
               name: "Staff Example",
               email: "staff@example.test",
               roleKey: "front_desk" as const,
+              roleDefinitionId: null,
+              roleName: null,
+              propertyAccessMode: "assigned" as const,
               propertyIds: [propertyId],
               status: "active" as const,
               lastActiveAt: "2026-08-24T00:00:00.000Z",
@@ -501,6 +507,28 @@ describe("staff invitation routes", () => {
     });
     expect(fake.deliveries).toEqual([invitationId]);
     expect(JSON.stringify(response.body)).not.toMatch(/provider|token|accept/i);
+  });
+
+  it("prepares invitation revisions only with management permission and a valid email", async () => {
+    const fake = fakes();
+    const prepared = vi.fn(async () => ({ configurationRevision: 2 }));
+    fake.options.repository.prepareInvitation = prepared;
+    app = await testApp(fake.options);
+    const send = (email: string, authenticated = true) =>
+      injectJson(app!, {
+        method: "POST",
+        url: "/api/identity/staff/invitations/prepare",
+        headers: authenticated ? { authorization: "Bearer valid-token" } : {},
+        payload: { email },
+      });
+    expect(await send("test@example.test")).toMatchObject({
+      statusCode: 200,
+      body: { configurationRevision: 2 },
+    });
+    expect(prepared).toHaveBeenCalledWith(organizationId, "test@example.test");
+    expect((await send("invalid")).statusCode).toBe(400);
+    expect((await send("test@example.test", false)).statusCode).toBe(401);
+    expect(prepared).toHaveBeenCalledOnce();
   });
 
   it("lists only the authenticated organization's roster", async () => {

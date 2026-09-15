@@ -43,6 +43,9 @@ type StaffRosterRow = {
   name: string | null;
   email: string;
   role_key: HotelStaffRoleKey;
+  role_definition_id: string | null;
+  role_name: string | null;
+  property_access_mode: "all" | "assigned";
   property_ids: string[];
   status: StaffRosterMember["status"];
   last_active_at: Date | null;
@@ -79,6 +82,9 @@ export type StaffRosterMember = {
   name: string | null;
   email: string;
   roleKey: HotelStaffRoleKey;
+  roleDefinitionId: string | null;
+  roleName: string | null;
+  propertyAccessMode: "all" | "assigned";
   propertyIds: string[];
   status: "active" | "pending" | "deactivated";
   lastActiveAt: string | null;
@@ -97,6 +103,16 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
+    async prepareInvitation(organizationId: string, email: string) {
+      const result = await pool.query<{ revision: number; pending: boolean }>(
+        `SELECT COALESCE(max(configuration_revision), 0) + 1 AS revision,
+                COALESCE(bool_or(status = 'pending' AND (expires_at IS NULL OR expires_at > now())), false) AS pending
+         FROM identity.staff_invitations WHERE organization_id = $1 AND email = $2`,
+        [organizationId, email.trim().toLowerCase()],
+      );
+      const row = result.rows[0]!;
+      return row.pending ? null : { configurationRevision: row.revision };
+    },
     async getInvitation(organizationId: string, invitationId: string) {
       if (!canonicalUuid(invitationId)) return null;
       const result = await pool.query<{
@@ -240,6 +256,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              AND link.status = 'active'
          ), roster AS (
            SELECT membership.id, staff.name, staff.email, membership.role_key,
+                  membership.role_definition_id, definition.name AS role_name, membership.property_access_mode,
                   CASE WHEN membership.status = 'active' AND staff.status = 'active'
                     THEN 'active' ELSE 'deactivated' END AS status,
                   (SELECT max(external.last_login_at)
@@ -257,6 +274,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                   ) AS property_ids
            FROM identity.organization_memberships membership
            JOIN identity.users staff ON staff.id = membership.user_id
+           LEFT JOIN identity.organization_roles definition ON definition.id = membership.role_definition_id
+             AND definition.organization_id = membership.organization_id
            JOIN identity.organizations organization ON organization.id = membership.organization_id
            WHERE membership.organization_id = $1 AND organization.kind = 'hotel_group'
              AND organization.status = 'active'
@@ -264,21 +283,26 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              AND membership.status IN ('active', 'suspended')
            UNION ALL
            SELECT invitation.id, invitation.display_name, invitation.email, invitation.role_key,
+                  invitation.role_definition_id, definition.name, invitation.property_access_mode,
                   'pending', NULL,
                   ARRAY(
                     SELECT property.property_id::text
-                    FROM identity.staff_invitation_property_assignments assignment
-                    JOIN canonical_properties property ON property.property_id = assignment.property_id
-                    WHERE assignment.invitation_id = invitation.id
+                    FROM canonical_properties property
+                    WHERE invitation.property_access_mode = 'all' OR EXISTS (
+                      SELECT 1 FROM identity.staff_invitation_property_assignments assignment
+                      WHERE assignment.invitation_id = invitation.id AND assignment.property_id = property.property_id
+                    )
                     ORDER BY property.property_id
                   )
            FROM identity.staff_invitations invitation
+           LEFT JOIN identity.organization_roles definition ON definition.id = invitation.role_definition_id
+             AND definition.organization_id = invitation.organization_id
            JOIN identity.organizations organization ON organization.id = invitation.organization_id
            WHERE invitation.organization_id = $1 AND organization.kind = 'hotel_group'
              AND organization.status = 'active' AND invitation.status = 'pending'
              AND (invitation.expires_at IS NULL OR invitation.expires_at > now())
          )
-         SELECT id, name, email, role_key, property_ids, status, last_active_at
+         SELECT id, name, email, role_key, role_definition_id, role_name, property_access_mode, property_ids, status, last_active_at
          FROM roster
          ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
                   lower(COALESCE(name, email)), id`,
@@ -289,6 +313,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         name: row.name,
         email: row.email,
         roleKey: row.role_key,
+        roleDefinitionId: row.role_definition_id,
+        roleName: row.role_name,
+        propertyAccessMode: row.property_access_mode,
         propertyIds: row.property_ids,
         status: row.status,
         lastActiveAt: row.last_active_at?.toISOString() ?? null,
