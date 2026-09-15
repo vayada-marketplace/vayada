@@ -200,6 +200,17 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
     await revoke();
     await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
   });
+  it("pins catalog resolution despite a shadowed session search path", async () => {
+    await client.query(`CREATE FUNCTION public.current_setting(text) RETURNS text
+      LANGUAGE sql AS $$ SELECT CASE WHEN $1='transaction_isolation' THEN 'read committed' ELSE '1s' END $$;
+      SET LOCAL search_path=public,pg_catalog;
+      SET LOCAL lock_timeout='0'`);
+    expect(
+      (await client.query("SELECT current_setting('lock_timeout') AS value")).rows[0]?.value,
+    ).toBe("1s");
+    await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+    expect((await client.query("SHOW search_path")).rows[0]?.search_path).toBe("pg_catalog");
+  });
   it.each(["missing", "executor", "signer", "authority", "dual"])(
     "rejects invalid principal policy: %s",
     async (kind) => {
