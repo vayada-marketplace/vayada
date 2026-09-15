@@ -452,3 +452,13 @@ Assignment activation still requires background role-aware eligibility checks;
 the accepted job reason alone does not provide that parity. Validation: two role
 lifecycle tests, 48 staff PostgreSQL regressions, backend-auth build/typecheck,
 API typecheck and independent review with no actionable findings.
+
+### Role command routes
+
+POST `/api/identity/staff/roles` and PATCH/DELETE `/roles/:roleId` now expose the
+reviewed role commands. All require active hotel-group Account-admin authority,
+idempotency, strict fields, and revision for changes. Tenant/actor audit fields
+come from authentication; class and preset fields cannot be supplied. Stale or
+in-use changes return conflict. These routes do not assign roles to members.
+Validation: 65 staff route tests, API typecheck and independent adversarial
+review with no actionable findings.
