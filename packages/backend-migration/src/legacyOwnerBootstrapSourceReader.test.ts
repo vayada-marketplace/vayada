@@ -80,25 +80,45 @@ function rows() {
 const client = (output = rows(), settings = { readonly: "on", isolation: "repeatable read" }) => ({
   query: vi
     .fn()
+    .mockResolvedValueOnce({ rows: [] })
+    .mockResolvedValueOnce({ rows: [] })
     .mockResolvedValueOnce({ rows: [settings] })
-    .mockResolvedValueOnce({ rows: output }),
+    .mockImplementation(async (sql: string, _values?: unknown[]) => ({
+      rows: sql.includes("AS safe FROM pg_class")
+        ? [{ safe: true }]
+        : sql.startsWith("SELECT * FROM (")
+          ? output
+          : [],
+    })),
 });
 beforeEach(() => {
   vi.mocked(readSourceLedger).mockResolvedValue(structuredClone(ledger));
 });
 describe("bounded source reader", () => {
+  it("reports uncertain cleanup distinctly without exposing database errors", async () => {
+    const db = client(rows(), { readonly: "off", isolation: "read committed" });
+    db.query.mockImplementation(async () => {
+      throw Error("private@example.invalid");
+    });
+    await expect(readLegacyOwnerBootstrapSources(db as never, request())).rejects.toThrow(
+      /^OWNER_SOURCE_ROLLBACK_FAILED$/,
+    );
+  });
   it("reads only exact IDs and returns projected source fields", async () => {
     const db = client(),
       input = request();
     const output = await readLegacyOwnerBootstrapSources(db as never, input);
     expect(output).toHaveLength(8);
     expect(output.every((o) => o.sourceOwnership === "matched")).toBe(true);
-    expect(db.query.mock.calls[1]![1]).toEqual([
+    const projection = db.query.mock.calls.find(([sql]) =>
+      String(sql).startsWith("SELECT * FROM ("),
+    )!;
+    expect(projection[1]).toEqual([
       input.sourceRunId,
       input.owners.map((o) => o.ownerId),
       input.owners.map((o) => o.hotelId),
     ]);
-    expect(db.query.mock.calls[1]![0]).toContain("LIMIT 17");
+    expect(projection[0]).toContain("LIMIT 17");
     expect(Object.keys(output[0]!)).toEqual([
       "ownerId",
       "email",
