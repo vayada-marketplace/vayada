@@ -137,6 +137,10 @@ export const staffAccessPermissionKeys = [
   "booking.flow.manage",
   "booking.settings.read",
   "booking.settings.manage",
+  "booking.addons.read",
+  "booking.addons.manage",
+  "booking.promos.read",
+  "booking.promos.manage",
 ] as const satisfies readonly PermissionKey[];
 
 export type StaffAccessPermissionKey = (typeof staffAccessPermissionKeys)[number];
@@ -215,6 +219,8 @@ const requiredLowerPermissions: Partial<
   "booking.design.manage": ["booking.design.read"],
   "booking.flow.manage": ["booking.flow.read"],
   "booking.settings.manage": ["booking.settings.read"],
+  "booking.addons.manage": ["booking.addons.read"],
+  "booking.promos.manage": ["booking.promos.read"],
 };
 
 const canonicalPropertyId =
