@@ -203,6 +203,25 @@ Do not use IF NOT EXISTS as proof: verify the exact schema, expression, predicat
 uniqueness and valid/ready flags of the installed index before any account write.
 Retain the guard after preparation; removal needs separate drift/recovery review.
 
+`verifyLegacyOwnerEmailIndex` checks a catalog snapshot against the exact scoped
+proposal on PostgreSQL 16/17. It requires UTF8, standard-conforming strings and
+`search_path = pg_catalog`; callers set these within their controlled transaction.
+It compares exact PostgreSQL expression/predicate rendering without stripping
+literal whitespace or casts, plus table/schema, btree/text operator class,
+default collation, database collation-version consistency, unique/valid/ready/live
+flags and single-expression/no-INCLUDE shape. The underlying email column must
+also be ordinary non-null text with default collation: its collation controls
+`lower`, even when the final encoded hash has default collation. Unknown rendering or metadata
+fails closed with a sanitized error; this is deliberately not a general SQL
+equivalence checker. No row or DDL writes occur in the check.
+
+A passed snapshot is neither approval nor protection from a later DROP INDEX.
+The future writer must acquire an independently authorized DDL-excluding table
+lock before this check and retain it through its write transaction. Independently
+bind the supplied hashes to the approved owners, database and normalization;
+the helper cannot establish those facts or verify historical index build quality.
+It returns `executable: false` and does not enable preparation on its own.
+
 Uniqueness is not ownership or linking authority. The prepared-owner guard covers
 only selected caller paths; the provider path must still bind the exact approved
 external/internal identity. Neither this partial protection nor an installed
