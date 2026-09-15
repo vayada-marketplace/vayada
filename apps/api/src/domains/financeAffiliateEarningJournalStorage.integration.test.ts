@@ -1,49 +1,12 @@
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-const databaseUrl = process.env["TEST_DATABASE_URL"];
-const id = (n: number) => `15100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
-const migration = await readFile(
-  new URL("0195_finance_affiliate_earning_journal.sql", migrations),
-  "utf8",
-);
-const platform = await readFile(new URL("0010_platform_jobs_events_audit.sql", migrations), "utf8");
+import type pg from "pg";
+import { beforeEach, describe, expect, it } from "vitest";
+import { databaseUrl, earningJournalFixture, id } from "./financeAffiliateEarningTestFixture.js";
 describe.skipIf(!databaseUrl)("affiliate earning journal storage", () => {
-  const name = `vay1510_journal_test_${randomUUID().replaceAll("-", "")}`;
-  const admin = new pg.Client({ connectionString: databaseUrl });
+  const fixture = earningJournalFixture();
   let pool: pg.Pool;
-  beforeAll(async () => {
-    if (!/(^|[_-])test([_-]|$)/i.test(new URL(databaseUrl!).pathname.slice(1)))
-      throw new Error("Requires isolated test database");
-    await admin.connect();
-    await admin.query(`CREATE DATABASE ${name}`);
-    const url = new URL(databaseUrl!);
-    url.pathname = `/${name}`;
-    pool = new pg.Pool({ connectionString: url.toString() });
-  });
-  afterAll(async () => {
-    await pool?.end();
-    if (pool) await admin.query(`DROP DATABASE ${name}`);
-    await admin.end();
-  });
   beforeEach(async () => {
-    await pool.query(`DROP SCHEMA IF EXISTS finance,platform,identity,hotel_catalog CASCADE;
-      CREATE SCHEMA finance; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
-      CREATE TABLE identity.users(id UUID PRIMARY KEY);
-      CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
-      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY);`);
-    await pool.query(
-      platform.slice(
-        platform.indexOf("CREATE FUNCTION platform.prevent_append_only_mutation()"),
-        platform.indexOf("CREATE TABLE platform.domain_events ("),
-      ),
-    );
-    await pool.query(migration);
-    await pool.query("INSERT INTO identity.users VALUES ($1)", [id(1)]);
-    await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(4)]);
-    await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1)", [id(3)]);
+    pool = fixture.pool();
     await pool.query(
       `INSERT INTO finance.affiliate_earning_journal
       (id,property_id,booking_id,stay_item_id,revision,source_revision,input_digest,calculation_input,outcome,actor_user_id,organization_id,request_id)
