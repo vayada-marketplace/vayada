@@ -228,6 +228,17 @@ requests, true source-activity assertion and current target before/after hashes.
 Pinned keys/environment/clock remain trusted. Signature matching alone requires
 registry authorities, revocation and locked eligibility; it authorizes no write.
 
+Migration 0215 admits the transition contract without replacing owner/setup
+contracts; coordinated integration must apply owner admission 0213 first.
+The registry verifier requires a caller-owned READ COMMITTED transaction with
+bounded timeouts, locks the exact two approval rows in ID order FOR UPDATE and
+then reads current revocations in a separate statement. Revocation inserts'
+foreign-key KEY SHARE locks serialize against those locks. It verifies exact
+envelope/version/environment/expiry and trusted dual-authority/principal policy,
+rejects policy-filtered reads, and retains locks until the caller commits or
+rolls back. Failures require rollback. Eligibility, original-prepare verification
+and the atomic claim/event consumer remain mandatory; no grant or writer is added.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
