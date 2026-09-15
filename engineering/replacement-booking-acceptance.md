@@ -1,7 +1,8 @@
 # Replacement booking acceptance (VAY-1543)
 
-Status: durable schema, historical decoder/replay reader, Finance capture and
-final-time prerequisite implemented; full writer and public submission remain pending. Authority:
+Status: durable schema, historical replay, Finance capture, retained inventory/promo
+helpers, draft/add-on staging, frozen acceptance mode and the final-time gate are
+implemented. The full writer and public submission remain pending. Authority:
 [direct pricing consumption](direct-replacement-pricing-consumption.md).
 Migration 0210 adds immutable storage without enabling booking submission or payment
 execution. The current price preview remains a quote, not a reservation.
@@ -271,3 +272,19 @@ booking ID/reference, retains owner locks, and rolls back every write on failure
 This is an internal staging step: it does not confirm a booking, issue a receipt,
 write accepted history, collect a deposit, or activate public submission. The
 complete orchestrator still owns final freshness after all blocking writes.
+
+## Frozen acceptance mode
+
+Following [VAY-1274](booking-acceptance-mode-contract.md), new replacement quotes
+capture `acceptanceMode` from the locked Booking settings row at issuance. Only
+`instant` and `request` are valid; missing settings do not imply instant booking.
+The additive field remains absent in older historical records, which still decode
+without mutation. Fresh draft staging refuses those older quotes and requires a
+new quote; it never fills in today's setting as a substitute.
+
+Price revalidation and issuance replay retain the original quote's mode after a
+settings edit. New quotes capture the new mode. The exact quote/disclosure hash
+binds the frozen value, and draft booking metadata preserves it for downstream
+lifecycle handling. Both modes still stage only a draft here. Public presentation
+of confirmation versus property approval, request deadlines and actual lifecycle
+transitions remain required before submission can be enabled.
