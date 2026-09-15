@@ -252,6 +252,18 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ## Implementation stack and evidence
 
+### Booking section permission rollout
+
+Deploy validation support for `booking.addons.read/manage` and
+`booking.promos.read/manage` before migrating existing permission overrides.
+These are separate section keys with explicit read-before-manage requirements.
+The support-only slice changes no route policy or persisted grants. A successor
+migration preserves existing Settings-based capabilities and denials before
+switching Add-ons and Promos route policies. Confirm the support revision is
+running on every API/worker instance before that migration; old validators
+would reject the expanded overrides. Existing invalid overrides must remain
+invalid rather than being silently repaired into grants.
+
 ### Dynamic property scope
 
 Migration `0199_staff_invitation_dynamic_property_scope.sql` permits agency staff
