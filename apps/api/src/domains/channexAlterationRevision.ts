@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ChannexAlterationNightlyPriceScope } from "../integrations/channexAlterationNightlyPrices.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
@@ -43,6 +44,7 @@ export async function applyChannexAlterationRevision(
   client: PmsOccupiedInventoryClient,
   scope: Scope,
   value: unknown,
+  captureFinancials?: (scope: ChannexAlterationNightlyPriceScope) => Promise<void>,
 ): Promise<boolean> {
   const requests = await client.query<{ id: string }>(
     `SELECT id FROM booking.booking_change_requests
@@ -342,6 +344,19 @@ export async function applyChannexAlterationRevision(
     ],
     updatedAt,
   );
+  if (captureFinancials)
+    await captureFinancials({
+      revisionId: revision.id,
+      providerBookingId: revision.booking_id,
+      providerPropertyId: revision.property_id,
+      currency: revision.currency,
+      checkIn: revision.arrival_date,
+      checkOut: revision.departure_date,
+      rooms: desired.map((item, index) => ({
+        roomTypeId: item.roomTypeId,
+        providerRoomTypeId: revision.rooms[index]!.room_type_id,
+      })),
+    });
   await client.query(
     `UPDATE booking.booking_change_requests SET status='accepted',decided_at=now(),
     requested_changes=jsonb_set(requested_changes,'{channex,appliedRevisionId}',to_jsonb($2::text)),updated_at=now() WHERE id=$1`,
