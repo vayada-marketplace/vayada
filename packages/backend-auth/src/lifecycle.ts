@@ -510,6 +510,8 @@ export type UpdateStaffAccessPayload = Omit<
 > & {
   membershipId: string;
   expectedRevision?: string;
+  roleDefinitionId?: string;
+  expectedRoleRevision?: string;
   membershipStatus?: "active" | "suspended";
 };
 

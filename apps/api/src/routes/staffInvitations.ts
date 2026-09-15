@@ -53,6 +53,8 @@ const invitationBodyKeys = new Set([
   "productAccess",
 ]);
 const accessBodyKeys = new Set([
+  "roleDefinitionId",
+  "expectedRoleRevision",
   "propertyAccessMode",
   "roleKey",
   "propertyIds",
@@ -472,12 +474,20 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
 function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
   if (!plainRecord(value) || Object.keys(value).some((key) => !accessBodyKeys.has(key)))
     return null;
-  const access = parseStaffAccess(value);
+  const access = parseStaffAccess(value, value["roleDefinitionId"] !== undefined);
+  const roleDefinitionId = value["roleDefinitionId"];
+  const expectedRoleRevision = value["expectedRoleRevision"];
   const expectedRevision = value["expectedRevision"];
   const membershipStatus = value["membershipStatus"];
   const productAccess = value["productAccess"];
   if (
     !access ||
+    ((roleDefinitionId !== undefined || expectedRoleRevision !== undefined) &&
+      (typeof roleDefinitionId !== "string" ||
+        !roleUuid(roleDefinitionId) ||
+        typeof expectedRoleRevision !== "string" ||
+        !/^[1-9][0-9]*$/.test(expectedRoleRevision) ||
+        expectedRevision === undefined)) ||
     (expectedRevision !== undefined &&
       (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision))) ||
     (membershipStatus !== undefined &&
@@ -490,6 +500,12 @@ function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
     return null;
   return {
     ...access,
+    ...(roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: roleDefinitionId as string,
+          expectedRoleRevision: expectedRoleRevision as string,
+        }),
     ...(productAccess === undefined
       ? {}
       : { productAccess: productAccess as { pms: boolean; booking: boolean } }),
@@ -505,7 +521,10 @@ function parseStaffStatusRequest(value: unknown): "active" | "deactivated" | nul
   return value["status"] === "active" || value["status"] === "deactivated" ? value["status"] : null;
 }
 
-function parseStaffAccess(value: Record<string, unknown>): StaffAccessRequest | null {
+function parseStaffAccess(
+  value: Record<string, unknown>,
+  savedRole = false,
+): StaffAccessRequest | null {
   const propertyIds = value["propertyIds"];
   const overrides = value["permissionOverrides"];
   if (
@@ -527,7 +546,9 @@ function parseStaffAccess(value: Record<string, unknown>): StaffAccessRequest | 
   };
   if (
     typeof access.propertyAccessMode !== "string" ||
-    validateStaffInviteAccess({ ...access, propertyAccessMode: access.propertyAccessMode }).length
+    validateStaffInviteAccess({ ...access, propertyAccessMode: access.propertyAccessMode }).filter(
+      (issue) => !savedRole || issue !== "missing_required_permission",
+    ).length
   )
     return null;
   return {

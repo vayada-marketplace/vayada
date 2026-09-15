@@ -544,6 +544,32 @@ describe("staff invitation routes", () => {
     }
   });
 
+  it("requires paired saved-role revisions and defers role hierarchy to the repository", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const payload = {
+      roleKey: "hotel_custom",
+      propertyIds: [propertyId],
+      permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      roleDefinitionId: staffMembershipId,
+      expectedRoleRevision: "1",
+      expectedRevision: "a".repeat(64),
+    };
+    expect((await patchAccess(app, payload)).statusCode).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject(payload);
+    for (const patch of [
+      { roleDefinitionId: undefined },
+      { expectedRoleRevision: undefined },
+      { expectedRevision: undefined },
+      { roleDefinitionId: null },
+      { roleDefinitionId: "invalid" },
+      { expectedRoleRevision: "0" },
+      { expectedRoleRevision: 1 },
+    ])
+      expect((await patchAccess(app, { ...payload, ...patch })).statusCode).toBe(400);
+    expect(fake.accessCommands).toHaveLength(1);
+  });
+
   it("accepts dynamic invitation scope and requires a revision for explicit member scope saves", async () => {
     const fake = fakes();
     app = await testApp(fake.options);
