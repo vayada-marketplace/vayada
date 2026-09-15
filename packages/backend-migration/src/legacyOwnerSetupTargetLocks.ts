@@ -15,7 +15,7 @@ export async function lockAndCheckLegacyOwnerSetupTargets(
   expected: Parameters<typeof parseLegacyOwnerSetupCommand>[1],
   emailSha256: readonly string[],
   clock: () => Date = () => new Date(),
-): Promise<{ outcome: "targets_absent_locked_requires_authorized_write"; executable: false }> {
+) {
   let savepoint = false;
   try {
     const captured = structuredClone(expected);
@@ -43,13 +43,15 @@ export async function lockAndCheckLegacyOwnerSetupTargets(
       WHERE c.oid = 'identity.external_identities'::regclass
       AND a.attname = 'provider_email'`);
     if (visibility.rows.length !== 1 || visibility.rows[0]?.allowed !== true) throw new Error();
-    const normalized = await client.query<{ hash: string }>(
-      `SELECT ${OWNER_EMAIL_INDEX_EXPRESSION} AS hash FROM unnest($1::text[]) AS v(email)`,
-      [command.owners.map((owner) => owner.email)],
+    const normalized = await client.query<{ ownerId: string; hash: string }>(
+      `SELECT owner_id::text AS "ownerId", ${OWNER_EMAIL_INDEX_EXPRESSION} AS hash
+       FROM unnest($1::uuid[], $2::text[]) AS v(owner_id,email) ORDER BY owner_id`,
+      [command.owners.map((owner) => owner.ownerId), command.owners.map((owner) => owner.email)],
     );
     const hashes = normalized.rows.map((row) => row.hash);
     if (
       hashes.length !== command.owners.length ||
+      normalized.rows.some((row, i) => row.ownerId !== command.owners[i]!.ownerId) ||
       new Set(hashes).size !== hashes.length ||
       hashes.some((hash) => !scope.includes(hash))
     )
@@ -69,7 +71,14 @@ export async function lockAndCheckLegacyOwnerSetupTargets(
     // Database checks may consume the evidence/command lifetime.
     parseLegacyOwnerSetupCommand(payload, captured, clock());
     await client.query("RELEASE SAVEPOINT vay2017_setup_target_locks");
-    return { outcome: "targets_absent_locked_requires_authorized_write", executable: false };
+    return {
+      outcome: "targets_absent_locked_requires_authorized_write" as const,
+      executable: false as const,
+      owners: normalized.rows.map((row) => ({
+        ownerId: row.ownerId,
+        normalizedEmailSha256: row.hash,
+      })),
+    };
   } catch {
     if (savepoint) {
       try {

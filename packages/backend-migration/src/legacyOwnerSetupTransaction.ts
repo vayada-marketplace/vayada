@@ -3,10 +3,12 @@ import { verifyLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSour
 import { inspectLegacyOwnerSetupReplay } from "./legacyOwnerSetupReplay.js";
 import { lockAndCheckLegacyOwnerSetupTargets } from "./legacyOwnerSetupTargetLocks.js";
 import { writeLegacyOwnerSetupCheckpoint } from "./legacyOwnerSetupCheckpoint.js";
+import { verifyLegacyOwnerTargetAbsence } from "./legacyOwnerTargetAbsence.js";
 
 /** Internal transaction composition, NOT an authorized runtime/CLI.
- * Caller independently authenticates historical ledger/rows, actual target DB,
- * reviewed target-before artifacts and eight-email scope before calling.
+ * Caller independently authenticates historical ledger/rows, actual target DB
+ * and eight-email scope before calling. Reviewed target-before content is
+ * authenticated here through the signed command and compared with locked SQL.
  * Dedicated bounded READ COMMITTED transaction; no network/provider I/O here.
  * Retain locks until outer completion. Roll back ALL on failure; discard the
  * connection if rollback fails. Never log inputs (protected contact evidence).
@@ -19,6 +21,7 @@ export async function prepareLegacyOwnerSetupTransaction(
   sourceTrust: Parameters<typeof verifyLegacyOwnerCurrentSourceEvidence>[3],
   policy: Parameters<typeof inspectLegacyOwnerSetupReplay>[3],
   emailScope: readonly string[],
+  targetArtifacts: readonly string[],
   clock: () => Date = () => new Date(),
 ) {
   let savepoint = false;
@@ -28,6 +31,7 @@ export async function prepareLegacyOwnerSetupTransaction(
     const evidence = structuredClone(artifacts);
     const trust = { ...sourceTrust, verificationKeys: new Map(sourceTrust.verificationKeys) };
     const scope = [...emailScope];
+    const before = [...targetArtifacts];
     const authority = {
       ...policy,
       signingPrincipals: new Map(policy.signingPrincipals),
@@ -39,6 +43,7 @@ export async function prepareLegacyOwnerSetupTransaction(
     const verifySource = () =>
       verifyLegacyOwnerCurrentSourceEvidence(request, context, evidence, trust, clock());
     verifySource();
+    const reviewed = verifyLegacyOwnerTargetAbsence(request, context, before, scope, clock());
     await client.query("SAVEPOINT vay2017_setup_transaction");
     savepoint = true;
     const replay = await inspectLegacyOwnerSetupReplay(client, request, context, authority, clock);
@@ -48,13 +53,15 @@ export async function prepareLegacyOwnerSetupTransaction(
       savepoint = false;
       return { outcome: "matching_receipt_found" as const, receipt: replay.receipt };
     }
-    await lockAndCheckLegacyOwnerSetupTargets(
+    const observed = await lockAndCheckLegacyOwnerSetupTargets(
       client,
       request.commandPayload,
       context,
       scope,
       clock,
     );
+    if (JSON.stringify(observed.owners) !== JSON.stringify(reviewed)) throw new Error();
+    verifyLegacyOwnerTargetAbsence(request, context, before, scope, clock());
     verifySource();
     const checkpoint = await writeLegacyOwnerSetupCheckpoint(
       client,
