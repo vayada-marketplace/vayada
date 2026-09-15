@@ -287,6 +287,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       role_definition_id = NULL, pms_access_enabled = true, booking_access_enabled = true WHERE id = $1`,
       [membership],
     );
+    await client.query(
+      "DELETE FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'agency_manager'",
+      [org],
+    );
     await client.query("COMMIT");
     await client.query(
       "DELETE FROM identity.organization_memberships WHERE organization_id = $1 AND user_id = $2",
