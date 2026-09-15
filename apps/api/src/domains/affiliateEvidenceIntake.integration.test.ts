@@ -1,3 +1,4 @@
+import { ingestBookingAffiliateCreation as ingestNative } from "./bookingAffiliateCreationIntake.js";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
@@ -99,6 +100,113 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
       (SELECT count(*)::int FROM booking.affiliate_evidence_deliveries) AS deliveries`)
     ).rows[0];
   }
+  const nativeScope = { organizationId: id(1), propertyId: id(2), bookingId: id(3) };
+  async function seedNative() {
+    await pool.query(`CREATE TABLE booking.guest_bookings(id UUID PRIMARY KEY,property_id UUID,
+      source_system TEXT DEFAULT 'booking',source_booking_id TEXT,booking_channel TEXT DEFAULT 'direct',
+      direct_booking_source TEXT DEFAULT 'booking_engine',created_at TIMESTAMPTZ DEFAULT '2026-01-01Z',
+      quote_session_id UUID,checkout_context_id UUID);
+      CREATE TABLE booking.booking_status_events(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        guest_booking_id UUID REFERENCES booking.guest_bookings(id),event_type TEXT DEFAULT 'guest_booking.created',
+        actor_type TEXT DEFAULT 'guest',occurred_at TIMESTAMPTZ DEFAULT '2026-01-01Z',
+        event_payload JSONB DEFAULT '{"requestId":"native-request"}');`);
+    await pool.query(
+      "INSERT INTO booking.guest_bookings(id,property_id,quote_session_id,checkout_context_id) VALUES ($1,$2,$3,$4)",
+      [id(3), id(2), id(4), id(5)],
+    );
+    await pool.query(
+      "INSERT INTO booking.booking_status_events(id,guest_booking_id) VALUES ($1,$2)",
+      [id(6), id(3)],
+    );
+  }
+  it("stores native creation provenance once across concurrent calls and exposes it for review", async () => {
+    await seedNative();
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => ingestNative(pool, nativeScope)),
+    );
+    expect(results.filter((r) => r.outcome === "accepted")).toHaveLength(1);
+    expect(results.filter((r) => r.outcome === "duplicate")).toHaveLength(3);
+    const receipt = results[0]!;
+    if (receipt.outcome === "rejected") throw new Error("native fixture failed");
+    const review = await readReview(pool, id(2), id(1), receipt.observationId);
+    expect(review.snapshot).toMatchObject({
+      sourceEventKey: `native-creation:${id(6)}`,
+      sourceOccurredAt: "2026-01-01T00:00:00.000Z",
+      booking: { externalPropertyId: id(2), reservationId: id(3), reservationItemId: null },
+      facts: {},
+      provenance: { evidenceReference: `booking-status-event:${id(6)}`, originActor: "unknown" },
+    });
+    expect(review.connectionId).toBe(`vayada-booking:${id(2)}`);
+    expect(review.reviewRequired).toBe(false);
+    expect(await counts()).toEqual({ observations: 1, deliveries: 4 });
+    await pool.query("UPDATE identity.organization_resource_links SET status='suspended'");
+    expect(await ingestNative(pool, nativeScope)).toMatchObject({
+      code: "unauthorized_connection",
+    });
+  });
+  it.each([
+    "UPDATE booking.guest_bookings SET source_system='pms'",
+    "UPDATE booking.guest_bookings SET checkout_context_id=NULL",
+    "UPDATE booking.guest_bookings SET quote_session_id=NULL",
+    "DELETE FROM booking.booking_status_events",
+    "UPDATE booking.booking_status_events SET actor_type='system'",
+    "UPDATE booking.booking_status_events SET occurred_at='2026-01-02Z'",
+    "UPDATE booking.booking_status_events SET event_payload='{}'",
+    "INSERT INTO booking.booking_status_events(guest_booking_id) SELECT id FROM booking.guest_bookings",
+    `UPDATE booking.guest_bookings SET property_id='${id(9)}'`,
+  ])("rejects native evidence gaps without a receipt: %s", async (change) => {
+    await seedNative();
+    await pool.query(change);
+    expect(await ingestNative(pool, nativeScope)).toMatchObject({
+      code: "unauthorized_connection",
+    });
+    expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+  });
+  it.each([
+    "UPDATE booking.guest_bookings SET source_system='pms'",
+    "UPDATE booking.booking_status_events SET actor_type='system'",
+    "INSERT INTO booking.booking_status_events(guest_booking_id) SELECT id FROM booking.guest_bookings",
+  ])("locks native source through receipt commit: %s", async (change) => {
+    await seedNative();
+    const gate = await pool.connect(),
+      writer = await pool.connect();
+    let pending: ReturnType<typeof ingestNative> | undefined, update: Promise<unknown> | undefined;
+    try {
+      await gate.query("SELECT pg_advisory_lock(15050002)");
+      await pool.query(`CREATE FUNCTION booking.pause_native() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN PERFORM pg_advisory_xact_lock(15050002); RETURN NEW; END; $$;
+        CREATE TRIGGER pause_native BEFORE INSERT ON booking.affiliate_evidence_deliveries
+        FOR EACH ROW EXECUTE FUNCTION booking.pause_native();`);
+      pending = ingestNative(pool, nativeScope);
+      await vi.waitFor(
+        async () =>
+          expect(
+            (
+              await pool.query(
+                "SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory'",
+              )
+            ).rowCount,
+          ).toBe(1),
+        { timeout: 3000 },
+      );
+      const pid = (await writer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      update = writer.query(change);
+      await waitForLock(pid);
+      await gate.query("SELECT pg_advisory_unlock(15050002)");
+      expect(await pending).toMatchObject({ outcome: "accepted" });
+      await update;
+      expect(await ingestNative(pool, nativeScope)).toMatchObject({
+        code: "unauthorized_connection",
+      });
+      expect(await counts()).toEqual({ observations: 1, deliveries: 1 });
+    } finally {
+      await gate.query("SELECT pg_advisory_unlock_all()");
+      await pending;
+      await update;
+      gate.release();
+      writer.release();
+    }
+  });
   it.each([
     "UPDATE identity.organizations SET status='suspended'",
     "UPDATE identity.organizations SET kind='creator_workspace'",

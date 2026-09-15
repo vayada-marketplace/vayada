@@ -38,10 +38,29 @@ export async function ingestAffiliateEvidence(
 ): Promise<Result> {
   const observation = parseAffiliateBookingEvidence(input);
   if (!observation) return { outcome: "rejected", code: "invalid_contract" };
+  return ingestAffiliateEvidenceFromSource(pool, async (client) => {
+    const authority = await resolveAuthority(client, structuredClone(observation));
+    return authority ? { observation, authority } : null;
+  });
+}
+
+/** Internal source preparation and durable receipt share one transaction. */
+export async function ingestAffiliateEvidenceFromSource(
+  pool: pg.Pool,
+  prepare: (client: pg.PoolClient) => Promise<{
+    observation: AffiliateBookingEvidenceObservation;
+    authority: Authority;
+  } | null>,
+): Promise<Result> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const authority = await resolveAuthority(client, structuredClone(observation));
+    const prepared = await prepare(client);
+    if (!prepared) {
+      await client.query("ROLLBACK");
+      return { outcome: "rejected", code: "unauthorized_connection" };
+    }
+    const { observation, authority } = prepared;
     const identity =
       authority &&
       identifyAffiliateEvidenceReplay(
@@ -123,7 +142,10 @@ export async function ingestAffiliateEvidence(
 }
 
 /** Shared identity/catalog authorization boundary; locks survive until intake commits. */
-async function lockCurrentHotelScope(client: pg.PoolClient, binding: AffiliateEvidenceBinding) {
+export async function lockCurrentHotelScope(
+  client: pg.PoolClient,
+  binding: AffiliateEvidenceBinding,
+) {
   const { organizationId, propertyId } = binding;
   // Internal UUIDs must be canonical: alternate spellings must not create replay identities.
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

@@ -318,3 +318,31 @@ source adapter must coordinate its lock ordering with these locks, retry aborted
 transactions safely, and supply its own permission/entitlement or service-grant
 checks. No default connection grant, public write endpoint or collection worker is
 enabled. Retention/export/deletion policy still precedes live collection.
+
+## Internal native creation connection — 15 September 2026
+
+`ingestBookingAffiliateCreation` accepts trusted canonical organization/property/booking
+IDs, and prepares source evidence inside the durable intake transaction. It reuses
+`bookingAffiliateCreationEvidence.ts` unchanged from PR1937 (commit
+33dbb23f65bd433d45fc48a312927d9097fcccdd). This stack incorporates that same reader;
+coordinate both PRs when merging. No alternate creation detector is introduced.
+
+The entry point locks current hotel scope, the native booking (`FOR UPDATE`), and
+its status events (`FOR SHARE`), then validates the original native event. The
+booking foreign key blocks concurrent new event inserts while the booking lock is
+held. Missing, unsupported or contradictory creation evidence rejects without a
+receipt. Shared intake commits the source-derived observation under the same locks.
+No callback, guest payload or caller-provided facts can assert provenance here.
+
+Native connection identity is `vayada-booking:<property UUID>` (a local namespace,
+not an external provider grant); event/reference identities contain the original
+status-event UUID. Mapping `vayada-creation.v1` records original creation time and
+empty partial facts. It does not infer present reservation/stay state, money or
+absence of a referral. `originActor=unknown` preserves the guest-origin limitation
+of the shared vocabulary; a native guest creation is not independent stay proof.
+
+This is an internal entry point, with no route or worker registration. Its caller
+must authorize the operation on every call through user permissions/entitlements
+or a defined service grant; current DB ownership alone is not that grant. Live
+collection and creator matching remain gated by their existing decisions. No
+browser transport, consent or retention policy is selected by this adapter.
