@@ -497,3 +497,14 @@ writers provide durable jobs for role/override changes. Validation: 11 PostgreSQ
 worker tests including member-save-to-cleanup, 48 staff and two role regressions,
 backend-auth build and API typecheck. Independent review identified the missing
 existing-member enqueue path; fixed and confirmed.
+
+### Saved member role reads
+
+Member access reads include the tenant-scoped saved role definition and configured
+permissions from its defaults plus individual overrides. Product, status and
+property gates remain separate from this configuration. Role definition changes
+invalidate the member access revision. NULL references preserve legacy behavior;
+invalid referenced policies fail closed. Until the assignment-aware writer lands,
+legacy access writes reject referenced members. Validation: 49 PostgreSQL staff
+tests, 65 route tests, backend-auth build, API typecheck and independent review
+with no actionable findings.
