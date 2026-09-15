@@ -14,6 +14,7 @@ describe.skipIf(!url)("organization role catalog", () => {
     await client.connect();
     const org = randomUUID(),
       user = randomUUID(),
+      staffUser = randomUUID(),
       protectedRole = randomUUID();
     const command = (
       payload: Partial<TeamRoleCreateCommand["payload"]> = {},
@@ -43,6 +44,10 @@ describe.skipIf(!url)("organization role catalog", () => {
       await client.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
         user,
         `${user}@example.com`,
+      ]);
+      await client.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
+        staffUser,
+        `${staffUser}@example.com`,
       ]);
       await client.query(
         `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, status, property_access_mode, access_origin) VALUES ($1, $2, 'hotel_owner', 'active', 'all', 'agency')`,
@@ -94,6 +99,98 @@ describe.skipIf(!url)("organization role catalog", () => {
         presetKey: null,
         baseRoleKey: "housekeeping",
       });
+      const edit = (expectedRevision: string, defaultPermissions: string[]) =>
+        repository.change({
+          ...command(),
+          payload: {
+            organizationId: org,
+            roleId: clone!.id,
+            expectedRevision,
+            operation: "update",
+            name: "Housekeeping clone",
+            description: "Updated",
+            defaultPermissions,
+          },
+        });
+      await expect(edit("1", ["pms.calendar.read", "pms.inbox.read"])).resolves.toMatchObject({
+        outcome: "updated",
+      });
+      await client.query(
+        `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, status, property_access_mode, access_origin, role_definition_id, permission_overrides) VALUES ($1, $2, 'housekeeping', 'active', 'all', 'agency', $3, '{"grant":["pms.calendar.manage"],"deny":[]}')`,
+        [org, staffUser, clone!.id],
+      );
+      await expect(edit("2", [])).resolves.toMatchObject({
+        outcome: "rejected",
+        reason: "invalid_member_overrides",
+      });
+      expect((await repository.list(org)).find((role) => role.id === clone!.id)!.revision).toBe(
+        "2",
+      );
+      await expect(edit("2", ["pms.calendar.read"])).resolves.toMatchObject({ outcome: "updated" });
+      await expect(edit("2", ["pms.calendar.read"])).resolves.toMatchObject({
+        outcome: "rejected",
+        reason: "stale_revision",
+      });
+      const deletion = {
+        ...command(),
+        payload: {
+          organizationId: org,
+          roleId: clone!.id,
+          expectedRevision: "3",
+          operation: "delete" as const,
+        },
+      };
+      await client.query(
+        `INSERT INTO identity.staff_invitations
+        (organization_id, email, inviter_membership_id, inviter_user_id, inviter_name_snapshot, role_key, permission_overrides, property_access_mode, configuration_revision, command_id, idempotency_key_hash, request_fingerprint_hash, request_id, request_source, reason, requested_at, role_definition_id)
+        SELECT $1, 'role-mutation-invite@example.com', member.id, member.user_id, 'Test admin', 'housekeeping', '{"grant":["pms.calendar.manage"],"deny":[]}', 'all', 1, $3, $4, $4, $3, 'api', 'Test pending role', now(), $2 FROM identity.organization_memberships member WHERE member.organization_id = $1 AND member.role_key = 'hotel_owner'`,
+        [org, clone!.id, randomUUID(), randomBytes(32)],
+      );
+      await expect(repository.change(deletion)).resolves.toMatchObject({
+        outcome: "rejected",
+        reason: "role_in_use",
+      });
+      await client.query(
+        `UPDATE identity.organization_memberships SET status = 'inactive' WHERE user_id = $1`,
+        [staffUser],
+      );
+      await expect(repository.change(deletion)).resolves.toMatchObject({
+        outcome: "rejected",
+        reason: "role_in_use",
+      });
+      await expect(edit("3", [])).resolves.toMatchObject({
+        outcome: "rejected",
+        reason: "invalid_member_overrides",
+      });
+      await client.query(
+        `UPDATE identity.staff_invitations SET status = 'revoked' WHERE organization_id = $1`,
+        [org],
+      );
+      await expect(repository.change(deletion)).resolves.toMatchObject({
+        outcome: "deleted",
+        roleId: clone!.id,
+      });
+      const historical = await client.query(
+        `SELECT role_definition_id FROM identity.staff_invitations WHERE organization_id = $1`,
+        [org],
+      );
+      expect(historical.rows).toEqual([{ role_definition_id: null }]);
+      await expect(repository.change(deletion)).resolves.toMatchObject({
+        outcome: "idempotent_replay",
+        roleId: clone!.id,
+      });
+      await expect(
+        repository.change({
+          ...deletion,
+          idempotencyKey: randomUUID(),
+          payload: { ...deletion.payload, roleId: adminRole, expectedRevision: "1" },
+        }),
+      ).resolves.toMatchObject({ outcome: "rejected", reason: "invalid_source_role" });
+      const jobs = await client.query(
+        `SELECT job_metadata FROM platform.jobs WHERE organization_id = $1`,
+        [org],
+      );
+      expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "role_permissions_changed" } }]);
       await expect(
         repository.create(
           command({
@@ -127,18 +224,26 @@ describe.skipIf(!url)("organization role catalog", () => {
         `SELECT action FROM platform.product_audit_events WHERE organization_id = $1`,
         [org],
       );
-      expect(audits.rows).toEqual([
-        { action: "identity.team_role.created" },
-        { action: "identity.team_role.created" },
+      expect(audits.rows.map((row) => row.action).sort()).toEqual([
+        "identity.team_role.created",
+        "identity.team_role.created",
+        "identity.team_role.deleted",
+        "identity.team_role.updated",
+        "identity.team_role.updated",
       ]);
       const keys = await client.query(
         `SELECT status FROM platform.idempotency_keys WHERE organization_id = $1`,
         [org],
       );
-      expect(keys.rows).toEqual([{ status: "completed" }, { status: "completed" }]);
+      expect(keys.rows).toHaveLength(5);
+      expect(keys.rows.every((row) => row.status === "completed")).toBe(true);
     } finally {
       await client.query("BEGIN");
       await client.query("SET LOCAL session_replication_role = replica");
+      await client.query(`DELETE FROM platform.jobs WHERE organization_id = $1`, [org]);
+      await client.query(`DELETE FROM identity.staff_invitations WHERE organization_id = $1`, [
+        org,
+      ]);
       await client.query(`DELETE FROM platform.product_audit_events WHERE organization_id = $1`, [
         org,
       ]);
@@ -151,7 +256,9 @@ describe.skipIf(!url)("organization role catalog", () => {
         org,
       ]);
       await client.query(`DELETE FROM identity.organizations WHERE id = $1`, [org]);
-      await client.query(`DELETE FROM identity.users WHERE id = $1`, [user]);
+      await client.query(`DELETE FROM identity.users WHERE id = ANY($1::uuid[])`, [
+        [user, staffUser],
+      ]);
       await client.query("COMMIT");
       await repository.close();
       await client.end();

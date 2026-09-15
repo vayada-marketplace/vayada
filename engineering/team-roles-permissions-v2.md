@@ -440,3 +440,15 @@ is forbidden. No HTTP writer or role assignment is activated in this slice.
 Validation: two PostgreSQL catalog/command lifecycle tests including concurrent
 replay, conflicts, protected clones, manager/suspended actor denial and audit
 counts; backend-auth build/typecheck. Independent review found no actionable issue.
+
+### Role edit and deletion commands
+
+Role updates/deletion reuse the admin-locked audit/idempotency transaction and
+require the current role revision. Edits preserve class/preset and reject invalid
+member or pending-invitation overrides. Deletion rejects live references, clears
+inactive membership/historical invitation references, and cannot remove Account
+admin. Inbox-read loss schedules a separate reconciliation job per member.
+Assignment activation still requires background role-aware eligibility checks;
+the accepted job reason alone does not provide that parity. Validation: two role
+lifecycle tests, 48 staff PostgreSQL regressions, backend-auth build/typecheck,
+API typecheck and independent review with no actionable findings.
