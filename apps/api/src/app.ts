@@ -14,6 +14,8 @@ import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRe
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import type { AffiliateEvidenceReviewRepository } from "./domains/affiliateEvidenceReview.js";
+import { registerMarketplaceAffiliateEvidenceRoutes } from "./routes/marketplaceAffiliateEvidence.js";
 import { registerMarketplaceAffiliateDestinationRoutes } from "./routes/marketplaceAffiliateDestinations.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
@@ -373,6 +375,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
+  marketplaceAffiliateEvidenceReviewRepository?: AffiliateEvidenceReviewRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -601,6 +604,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceAffiliateDestinationRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliateDestinationRepository,
+    });
+  }
+  if (options.marketplaceAffiliateEvidenceReviewRepository) {
+    app.register(registerMarketplaceAffiliateEvidenceRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateEvidenceReviewRepository,
     });
   }
   if (options.marketplaceAffiliatePolicyRepository) {

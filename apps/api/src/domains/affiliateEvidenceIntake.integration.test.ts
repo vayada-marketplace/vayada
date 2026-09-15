@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
+import { readAffiliateEvidenceReview as readReview } from "./affiliateEvidenceReview.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ingestAffiliateEvidence as ingest,
@@ -69,7 +70,10 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
     await pool.query(`DROP SCHEMA IF EXISTS booking,platform,identity,hotel_catalog CASCADE;
       DROP TABLE IF EXISTS scope_fixture; CREATE TABLE scope_fixture(active boolean); INSERT INTO scope_fixture VALUES (true);
       CREATE SCHEMA booking; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
-      CREATE TABLE identity.organizations(id UUID PRIMARY KEY); CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY);`);
+      CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
+      CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY,profile_status TEXT DEFAULT 'incomplete');
+      CREATE TABLE identity.organization_resource_links(organization_id UUID,resource_id TEXT,product TEXT,
+        resource_type TEXT,status TEXT,relationship TEXT);`);
     await pool.query(
       platform.slice(
         platform.indexOf("CREATE FUNCTION platform.prevent_append_only_mutation()"),
@@ -79,6 +83,10 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
     await pool.query(migration);
     await pool.query("INSERT INTO identity.organizations VALUES ($1)", [id(1)]);
     await pool.query("INSERT INTO hotel_catalog.properties VALUES ($1)", [id(2)]);
+    await pool.query(
+      "INSERT INTO identity.organization_resource_links VALUES ($1,$2,'marketplace','hotel_profile','active','owner')",
+      [id(1), id(2)],
+    );
   });
   afterAll(async () => {
     await pool?.end();
@@ -91,6 +99,42 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
       (SELECT count(*)::int FROM booking.affiliate_evidence_deliveries) AS deliveries`)
     ).rows[0];
   }
+  it("scopes paginated review, including conflicts outside the visible page", async () => {
+    const receipt = await ingest(pool, sample(), resolve);
+    if (receipt.outcome === "rejected") throw new Error("fixture failed");
+    await ingest(pool, { ...sample(), facts: { reservationStatus: "cancelled" } }, resolve);
+    // Deliberately equal microsecond timestamps exercise the UUID cursor tie-breaker.
+    await pool.query(
+      `INSERT INTO booking.affiliate_evidence_deliveries
+      (id,observation_id,organization_id,property_id,fact_digest,mapping_version,snapshot,received_at)
+      SELECT gen_random_uuid(),o.id,o.organization_id,o.property_id,o.fact_digest,o.mapping_version,
+        o.snapshot,statement_timestamp() FROM booking.affiliate_evidence_observations o,
+        generate_series(1,51) WHERE o.id=$1`,
+      [receipt.observationId],
+    );
+    const first = await readReview(pool, id(2), id(1), receipt.observationId);
+    expect(first.deliveries).toHaveLength(50);
+    expect(first.reviewRequired).toBe(true);
+    expect(first.deliveries.every((d: { factConflict: boolean }) => !d.factConflict)).toBe(true);
+    const second = await readReview(pool, id(2), id(1), receipt.observationId, first.nextCursor);
+    expect(second.deliveries).toHaveLength(3);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.deliveries, ...second.deliveries].map((d) => d.id)).size).toBe(53);
+    expect(await readReview(pool, id(3), id(1), receipt.observationId)).toBeNull();
+    expect(await readReview(pool, id(2), id(3), receipt.observationId)).toBeNull();
+    expect(await readReview(pool, id(2), id(1), receipt.observationId, id(9))).toBeNull();
+    const other = await ingest(pool, { ...sample(), sourceEventKey: "other" }, resolve);
+    if (other.outcome === "rejected") throw new Error("fixture failed");
+    const otherPage = await readReview(pool, id(2), id(1), other.observationId);
+    expect(
+      await readReview(pool, id(2), id(1), receipt.observationId, otherPage.deliveries[0].id),
+    ).toBeNull();
+    await pool.query("UPDATE identity.organization_resource_links SET status='inactive'");
+    expect(await readReview(pool, id(2), id(1), receipt.observationId)).toBeNull();
+    await pool.query("UPDATE identity.organization_resource_links SET status='active'");
+    await pool.query("UPDATE hotel_catalog.properties SET profile_status='disabled'");
+    expect(await readReview(pool, id(2), id(1), receipt.observationId)).toBeNull();
+  });
   it("serializes concurrent duplicates and keeps every delivery with one original receipt", async () => {
     const results = await Promise.all(
       Array.from({ length: 12 }, () => ingest(pool, sample(), resolve)),

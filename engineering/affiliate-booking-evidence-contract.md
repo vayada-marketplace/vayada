@@ -283,3 +283,19 @@ No processing worker, collection route, earning outcome or retention duration is
 enabled. Runtime authorization, source authority and retention/export/deletion
 policy must be resolved before live collection; append-only storage is not a
 decision to retain records forever. Corrections never overwrite source history.
+
+## Authorized review read — 15 September 2026
+
+`GET /api/marketplace/properties/:propertyId/affiliate-evidence/:observationId`
+requires active hotel-group identity/membership, `marketplace.profile.manage`, an
+active Marketplace entitlement and owner/operator property access. The repository
+also checks current organization ownership and enabled property in the same SQL
+snapshot as the evidence read. Every response is `no-store`.
+
+The response includes the original snapshot, connection/mapping version, overall
+historical `reviewRequired`, and up to 50 newest deliveries with fact/provenance
+discrepancy flags. `nextCursor` is the last returned delivery ID; pass it as `after`.
+Unknown or differently scoped observation/cursor returns 404. Each page is a fresh
+read; new deliveries may change the overall review flag between requests. Flags
+describe recorded discrepancies, not verification, creator attribution or earning
+eligibility. This read does not enable intake or resolve browser capture decisions.
