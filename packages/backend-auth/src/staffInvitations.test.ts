@@ -474,6 +474,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     await repository.updateAccess(edit);
     expect(await repository.getAccess(org, staffMembership)).toEqual({
       membershipId: staffMembership,
+      roleDefinitionId: null,
+      roleDefinition: null,
+      configuredPermissions: expect.arrayContaining(["pms.inbox.read", "pms.inbox.reply"]),
       revision: expect.stringMatching(/^[a-f0-9]{64}$/),
       productAccess: { pms: true, booking: true },
       roleKey: "front_desk",
@@ -491,6 +494,58 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       status: "suspended",
       propertyIds: [property],
     });
+  });
+
+  it("reads saved role defaults and invalidates the access revision when the role changes", async () => {
+    await repository.updateAccess(updateCommand());
+    const roleId = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1, $2, 'Saved front desk', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+        [roleId, org],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = $2,
+         permission_overrides = '{"grant":["pms.inbox.reply"],"deny":[]}' WHERE id = $1`,
+        [staffMembership, roleId],
+      );
+      const before = (await repository.getAccess(org, staffMembership))!;
+      expect(before).toMatchObject({
+        roleDefinitionId: roleId,
+        roleDefinition: { id: roleId, name: "Saved front desk", baseRoleKey: "front_desk" },
+        configuredPermissions: ["pms.inbox.read", "pms.inbox.reply"],
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.inbox.read","pms.calendar.read"]' WHERE id = $1`,
+        [roleId],
+      );
+      const after = (await repository.getAccess(org, staffMembership))!;
+      expect(after.revision).not.toBe(before.revision);
+      expect(after.configuredPermissions).toEqual([
+        "pms.calendar.read",
+        "pms.inbox.read",
+        "pms.inbox.reply",
+      ]);
+      expect(await repository.updateAccess(updateCommand())).toEqual({
+        outcome: "rejected",
+        reason: "invalid_command",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(after);
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["identity.staff.manage"]' WHERE id = $1`,
+        [roleId],
+      );
+      await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+        "Staff access configuration is unavailable",
+      );
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
   });
 
   it("saves dynamic scope without assignment rows and returns safely to selected properties", async () => {
