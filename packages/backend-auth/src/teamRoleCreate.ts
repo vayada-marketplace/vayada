@@ -242,7 +242,7 @@ export async function runTeamRoleCommand(
           [normalized.organizationId, roleId],
         );
         await client.query(
-          `UPDATE identity.staff_invitations SET role_definition_id = NULL WHERE organization_id = $1 AND role_definition_id = $2 AND (status <> 'pending' OR expires_at <= now())`,
+          `UPDATE identity.staff_invitations SET role_definition_id = NULL, status = CASE WHEN status = 'pending' THEN 'expired' ELSE status END WHERE organization_id = $1 AND role_definition_id = $2 AND (status <> 'pending' OR expires_at <= now())`,
           [normalized.organizationId, roleId],
         );
         await client.query(

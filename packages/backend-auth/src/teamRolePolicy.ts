@@ -1,4 +1,5 @@
 import {
+  externalOwnerPermissionCeiling,
   hasValidStaffPermissionHierarchy,
   parseStaffPermissionOverrides,
   staffAccessPermissionKeys,
@@ -24,31 +25,6 @@ export const teamRolePresetBases = {
 
 // External-owner ceilings permit property operations, not agency administration.
 // The new owner preset will use read-only defaults within this ceiling.
-const externalOwnerCeiling = new Set<string>([
-  "pms.dashboard.read",
-  "pms.dashboard.operations.read",
-  "pms.dashboard.finance.read",
-  "pms.calendar.read",
-  "pms.calendar.manage",
-  "pms.reservation.read",
-  "pms.reservation.update",
-  "pms.reservation.cancel",
-  "pms.inbox.read",
-  "pms.inbox.reply",
-  "pms.room_status.read",
-  "pms.rooms_rates.read",
-  "pms.rooms_rates.manage",
-  "pms.channel_manager.read",
-  "pms.finance.read",
-  "pms.settings.read",
-  "pms.guest_contact.read",
-  "booking.analytics.read",
-  "booking.design.read",
-  "booking.design.manage",
-  "booking.flow.read",
-  "booking.flow.manage",
-  "booking.settings.read",
-]);
 
 export function teamRolePermissionCeiling(policy: TeamRolePolicy): readonly PermissionKey[] | null {
   const bases: Record<TeamRoleSecurityClass, readonly string[]> = {
@@ -76,7 +52,7 @@ export function teamRolePermissionCeiling(policy: TeamRolePolicy): readonly Perm
   if (policy.securityClass === "account_admin")
     return policy.presetKey === "account_admin" ? [] : null;
   if (policy.securityClass === "external_owner")
-    return [...externalOwnerCeiling] as PermissionKey[];
+    return [...externalOwnerPermissionCeiling] as PermissionKey[];
   return staffAccessPermissionKeys.filter(
     (key) =>
       key !== "finance.billing.manage" &&

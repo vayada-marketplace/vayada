@@ -428,6 +428,10 @@ export function createAuthorizationResolver(
       permissions = [
         ...new Set([
           ...resolved,
+          // New external-owner presets need property navigation without changing legacy grants.
+          ...(definition?.securityClass === "external_owner"
+            ? ["hotel_catalog.property_manifest.read" as const]
+            : []),
           ...rolePermissions.filter((key) => key === "hotel_catalog.property_manifest.read"),
         ]),
       ];

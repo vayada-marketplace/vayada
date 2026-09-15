@@ -588,3 +588,26 @@ four supported edit sections. Finance/channel-manager edit and Booking Chat are
 not invented to match illustrative mock counts. Existing members are unaffected
 until an explicit saved-role assignment. Validation covers all six presets through
 the runtime policy validator and checks legacy preservation and deletion behavior.
+
+### External-owner agency management (migration 0198)
+
+Account admins can invite external owners through saved roles, read their access,
+edit assigned properties/products/permissions, and suspend/reactivate/remove them.
+Managers cannot perform these owner mutations even when their own access is broader.
+New owner invitations and access edits require a saved role and assigned scope;
+the existing operational ceiling is shared by legacy override and saved-role checks.
+The Property owner preset remains read-only. Referenced owner roles get property
+navigation without adding global grants to legacy owner memberships.
+
+WorkOS delivery uses `hotel_member`; webhook ordering guards include external
+owners and acceptance cannot replace an existing owner membership. Terminal invite
+history may clear role references during deletion; elapsed pending invitations
+are marked expired atomically. The migration leaves existing rows unchanged.
+Deploy schema/readers before enabling owner invitation writes. Delegated-staff
+activation, owner-driven invitation/mutation, and full product-route coverage are
+still pending and unsupported delegated memberships continue to fail closed.
+
+Validation: local PostgreSQL invitation/acceptance/edit/status and manager-denial
+flows; mocked provider role mapping; role deletion with revoked/elapsed owner
+invitations; saved-owner resolver/product-veto coverage; API webhook/route tests.
+No real invitation was sent. Independent review's history-cleanup finding is fixed.
