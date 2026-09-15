@@ -45,6 +45,50 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox staff-command transactions", () => {
     await admin.end();
   });
 
+  it("checks the assignee's current role and permits read-only Inbox recipients", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox recipient', 'staff', 'front_desk', '[]')`,
+      [ASSIGNEE_MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [ASSIGNEE_MEMBERSHIP],
+    );
+    await expect(
+      commands.assign(assignment("no-inbox", { assigneeMembershipId: ASSIGNEE_MEMBERSHIP })),
+    ).resolves.toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    await admin.query(
+      `UPDATE identity.organization_roles SET default_permissions = '["pms.inbox.read"]' WHERE id = $1`,
+      [ASSIGNEE_MEMBERSHIP],
+    );
+    await expect(
+      commands.assign(assignment("read-inbox", { assigneeMembershipId: ASSIGNEE_MEMBERSHIP })),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("rejects a read-only actor's note and assignment before persisting anything", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox viewer', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+      [ACTOR_MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [ACTOR_MEMBERSHIP],
+    );
+    await expect(
+      commands.assign(assignment("readonly", { assigneeMembershipId: ASSIGNEE_MEMBERSHIP })),
+    ).rejects.toThrow("PMS Inbox assignment command failed");
+    await expect(commands.addNote(note("readonly-note"))).rejects.toThrow(
+      "PMS Inbox internal-note command failed",
+    );
+    expect((await state()).counts).toMatchObject({
+      idempotency: 0,
+      events: 0,
+      audits: 0,
+      notes: 0,
+    });
+  });
+
   it("assigns and clears eligible staff with one mutation per key", async () => {
     const input = assignment("assign", { assigneeMembershipId: ASSIGNEE_MEMBERSHIP });
     const first = await commands.assign(input);
@@ -297,9 +341,9 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox staff-command transactions", () => {
       `INSERT INTO identity.organization_memberships
          (id, organization_id, user_id, status, role_key, property_access_mode, access_origin)
        VALUES
-         ($1::uuid, $4::uuid, $5::uuid, 'active', 'owner', 'all', 'agency'),
-         ($2::uuid, $4::uuid, $6::uuid, 'active', 'manager', 'assigned', 'agency'),
-         ($3::uuid, $4::uuid, $7::uuid, 'active', 'manager', 'assigned', 'agency')`,
+         ($1::uuid, $4::uuid, $5::uuid, 'active', 'hotel_owner', 'all', 'agency'),
+         ($2::uuid, $4::uuid, $6::uuid, 'active', 'hotel_manager', 'assigned', 'agency'),
+         ($3::uuid, $4::uuid, $7::uuid, 'active', 'hotel_manager', 'assigned', 'agency')`,
       [
         ACTOR_MEMBERSHIP,
         ASSIGNEE_MEMBERSHIP,
@@ -428,6 +472,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox staff-command transactions", () => {
         "DELETE FROM identity.product_entitlements WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",
+        "DELETE FROM identity.organization_roles WHERE organization_id = $1::uuid",
       ])
         await admin.query(statement, [ORGANIZATION]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
