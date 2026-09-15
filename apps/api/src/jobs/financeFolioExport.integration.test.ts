@@ -1,6 +1,8 @@
 import { PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import {
+  FINANCE_EXPENSE_CSV_CONTENT_TYPE,
+  FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
   type FinanceFolioCsvArtifact,
@@ -9,9 +11,12 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  FINANCE_EXPENSE_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_QUEUE,
+  createPgFinanceFolioExportJobRepository,
 } from "../domains/financeFolioExportRepository.js";
+import type { FinanceExpenseExportArtifact } from "../domains/financeExpenseReadModel.js";
 import {
   createS3FinanceFolioExportArtifactWriter,
   type FinanceFolioExportArtifactWriter,
@@ -26,7 +31,7 @@ const NOW = new Date("2026-09-15T01:00:00.000Z"),
   EXPIRES = "2026-09-16T00:00:00.000Z",
   SNAPSHOT_AT = "2026-09-14T23:59:59.999Z";
 // prettier-ignore
-const PROPERTY="11340000-0000-4000-8000-000000000020",JOB="11340000-0000-4000-8000-000000000021",ORG="11340000-0000-4000-8000-000000000022",COMMAND="11340000-0000-4000-8000-000000000023",CAUSE="11340000-0000-4000-8000-000000000024",ACTOR="11340000-0000-4000-8000-000000000025";
+const PROPERTY="11340000-0000-4000-8000-000000000020",JOB="11340000-0000-4000-8000-000000000021",ORG="11340000-0000-4000-8000-000000000022",COMMAND="11340000-0000-4000-8000-000000000023",CAUSE="11340000-0000-4000-8000-000000000024",ACTOR="11340000-0000-4000-8000-000000000025",EXPENSE="11340000-0000-4000-8000-000000000026",CATEGORY="11340000-0000-4000-8000-000000000027";
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
   throw new Error("Unsafe test database");
 
@@ -34,7 +39,7 @@ if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathna
 it("writes immutable private CSV bytes with integrity and expiry metadata", async () => {
   const send = vi.fn(async (_command: unknown) => ({})), destroy = vi.fn();
   const writer = createS3FinanceFolioExportArtifactWriter({ bucketName: "test-private", s3Client: { send, destroy } as unknown as S3Client });
-  const stored = await writer.write({ exportId: JOB, body: "guest,amount\r\nAda,12\r\n", contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, expiresAt: EXPIRES });
+  const stored = await writer.write({ exportId: JOB, body: "guest,amount\r\nAda,12\r\n", contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, formatVersion: FINANCE_FOLIO_CSV_VERSION, expiresAt: EXPIRES });
   const command = send.mock.calls[0]![0] as PutObjectCommand;
   expect(command.input).toMatchObject({ Bucket: "test-private", Key: `private/finance/financials-exports/${JOB}/${FINANCE_FOLIO_CSV_VERSION}.csv`, ContentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, CacheControl: "private, no-store", ChecksumSHA256: createHash("sha256").update("guest,amount\r\nAda,12\r\n").digest("base64"), Metadata: { "expires-at": EXPIRES } });
   expect(command.input.Expires?.toISOString()).toBe(EXPIRES);
@@ -46,9 +51,11 @@ it("writes immutable private CSV bytes with integrity and expiry metadata", asyn
 describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   const admin = new pg.Client({ connectionString: URL ?? "postgresql://disabled" }), pool = new pg.Pool({ connectionString: URL ?? "postgresql://disabled", max: 2 });
   const artifact: FinanceFolioCsvArtifact = { formatVersion: FINANCE_FOLIO_CSV_VERSION, contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, propertyId: PROPERTY, currency: "EUR", filename: `pms-financials-folios-${PROPERTY}.csv`, rowCount: 0, body: '"property_id"\r\n', auditEvidence: [] };
-  const read = { exportReady: vi.fn(async () => artifact) };
+  const expenseSelection={expenseId:EXPENSE,revision:1,categoryId:CATEGORY,categoryRevision:1,categoryName:"Operations",paymentStatus:"unpaid" as const,paidOn:null};
+  const expenseArtifact: FinanceExpenseExportArtifact = { formatVersion: FINANCE_EXPENSE_CSV_VERSION, contentType: FINANCE_EXPENSE_CSV_CONTENT_TYPE, propertyId: PROPERTY, currency: "EUR", filename: `pms-financials-expenses-${PROPERTY}.csv`, rowCount: 1, body: '"property_id"\r\n"expense"\r\n', auditEvidence: [expenseSelection] };
+  const read = { exportReady: vi.fn(async () => artifact), exportCsv: vi.fn(async () => expenseArtifact) };
   beforeAll(async () => { await admin.connect(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]); });
-  beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); });
+  beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([admin.end(), pool.end()]); });
 
   it("renders one immutable manifest, stores only sanitized metadata, and audits success", async () => {
@@ -56,11 +63,28 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     writer.write.mockImplementationOnce(async({exportId,body})=>{expect((await admin.query("SELECT lifecycle_status FROM platform.media_objects WHERE id=$1",[exportId])).rows[0]?.lifecycle_status).toBe("upload_pending");await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{workerId:"worker-two",clock:()=>afterRender})).resolves.toEqual({succeeded:0,retryScheduled:0,deadLettered:0});return receipt(exportId,body)});
     await expect(runFinanceFolioExportJobs(pool, read, writer, { workerId: "worker-one", clock: () => times.shift()! })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
     expect(read.exportReady).toHaveBeenCalledWith(PROPERTY, "EUR", expect.objectContaining({ snapshotAt: SNAPSHOT_AT, manifest: [] }));
-    expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, expiresAt: EXPIRES });
+    expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, formatVersion: FINANCE_FOLIO_CSV_VERSION, expiresAt: EXPIRES });
     const row = (await admin.query(`SELECT job.status,job.attempts_count::int attempts,job.job_metadata->'artifact' artifact,(SELECT status FROM platform.job_attempts WHERE job_id=job.id) attempt,(SELECT redacted_payload FROM platform.product_audit_events WHERE job_id=job.id AND action='finance.folio_export.succeeded') audit,(SELECT audit_metadata FROM platform.product_audit_events WHERE job_id=job.id AND action='finance.folio_export.succeeded') "auditMetadata",(SELECT jsonb_build_object('purpose',purpose,'owner',owner_organization_id,'property',property_id,'status',lifecycle_status,'retainedUntil',to_char(retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'key',storage_key) FROM platform.media_objects WHERE id=job.id) media,to_jsonb(job)::text serialized FROM platform.jobs job WHERE id=$1`, [JOB])).rows[0];
     expect(row).toMatchObject({ status: "succeeded", attempts: 1, attempt: "succeeded", artifact: { mediaId: JOB, filename: artifact.filename, contentType: artifact.contentType, formatVersion: artifact.formatVersion, rowCount: 0, expiresAt: EXPIRES }, audit: { outcome: "succeeded", attemptNumber: 1, rowCount: 0, manifestCount: 0 }, auditMetadata:{organizationId:ORG,initiatingActorUserId:ACTOR}, media:{purpose:"finance.financials_export",owner:ORG,property:PROPERTY,status:"active",retainedUntil:EXPIRES,key:`private/finance/financials-exports/${JOB}/${FINANCE_FOLIO_CSV_VERSION}.csv`} });
     expect(row.artifact).not.toHaveProperty("storageKey"); expect(row.artifact).not.toHaveProperty("bucketName");
     expect(row.serialized).not.toContain(artifact.body);
+  });
+
+  it("renders expense manifests through the same durable worker without folio access", async () => {
+    await insertExpenseJob(); const writer=fakeWriter();
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    expect(read.exportCsv).toHaveBeenCalledWith(PROPERTY,"EUR",expect.objectContaining({formatVersion:FINANCE_EXPENSE_CSV_VERSION,manifest:[expenseSelection]}));expect(read.exportReady).not.toHaveBeenCalled();
+    expect(writer.write).toHaveBeenCalledWith({exportId:JOB,body:expenseArtifact.body,contentType:FINANCE_EXPENSE_CSV_CONTENT_TYPE,formatVersion:FINANCE_EXPENSE_CSV_VERSION,expiresAt:EXPIRES});
+    expect((await admin.query("SELECT job_metadata->'artifact' artifact,(SELECT storage_key FROM platform.media_objects WHERE id=platform.jobs.id) key,(SELECT action FROM platform.product_audit_events WHERE job_id=platform.jobs.id) action,(SELECT audit_metadata->>'jobType' FROM platform.product_audit_events WHERE job_id=platform.jobs.id) \"jobType\" FROM platform.jobs WHERE id=$1",[JOB])).rows[0]).toMatchObject({artifact:{formatVersion:FINANCE_EXPENSE_CSV_VERSION,filename:expenseArtifact.filename},key:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`,action:"finance.expense_export.succeeded",jobType:FINANCE_EXPENSE_EXPORT_JOB});
+    await expect(createPgFinanceFolioExportJobRepository({pool,searchDigest:async()=>"a".repeat(64)}).find({exportId:JOB,organizationId:ORG,propertyId:PROPERTY,now:NOW})).resolves.toMatchObject({state:"ready",artifact:{filename:expenseArtifact.filename,storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`}});
+  });
+
+  it("rejects unbound expense artifacts and labels malformed expense jobs correctly", async () => {
+    await insertExpenseJob();const writer=fakeWriter();read.exportCsv.mockResolvedValueOnce({...expenseArtifact,auditEvidence:[{...expenseSelection,revision:2}]});
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(writer.write).not.toHaveBeenCalled();
+    await cleanupJobs();await insertExpenseJob(FINANCE_FOLIO_CSV_VERSION);read.exportCsv.mockClear();
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(read.exportCsv).not.toHaveBeenCalled();
+    expect((await admin.query("SELECT attempt.error_message,dead.failure_summary,audit.action FROM platform.jobs job JOIN platform.job_attempts attempt ON attempt.job_id=job.id JOIN platform.dead_letter_events dead ON dead.job_id=job.id JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.id=$1",[JOB])).rows[0]).toEqual({error_message:"Finance expense export failed (invalid_export_evidence).",failure_summary:"Finance expense export failed (invalid_export_evidence).",action:"finance.expense_export.dead_lettered"});
   });
 
   it("retries storage failures at the same object key and recovers an expired lease", async () => {
@@ -88,9 +112,10 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     const stale=(await admin.query("SELECT job_attempt_id IS NOT NULL attempt,failure_payload FROM platform.dead_letter_events WHERE job_id=$1",[JOB])).rows[0];expect(stale).toMatchObject({attempt:true,failure_payload:{lastAttemptAt:NOW.toISOString(),ownerPackage:"backend-events",replayEligible:true}});
   });
 
-  function fakeWriter() { const writer: FinanceFolioExportArtifactWriter & { write: ReturnType<typeof vi.fn> } = { bucketName: "test-private", write: vi.fn(async ({ exportId, body }) => receipt(exportId,body)) }; return writer; }
-  function receipt(exportId:string,body:string){return{bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/${FINANCE_FOLIO_CSV_VERSION}.csv`,checksumSha256:createHash("sha256").update(body).digest("hex"),sizeBytes:Buffer.byteLength(body)}}
+  function fakeWriter() { const writer: FinanceFolioExportArtifactWriter & { write: ReturnType<typeof vi.fn> } = { bucketName: "test-private", write: vi.fn(async ({ exportId, body, formatVersion }) => receipt(exportId,body,formatVersion)) }; return writer; }
+  function receipt(exportId:string,body:string,formatVersion:string=FINANCE_FOLIO_CSV_VERSION){return{bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`,checksumSha256:createHash("sha256").update(body).digest("hex"),sizeBytes:Buffer.byteLength(body)}}
   async function insertJob(options: { status?: "pending"|"running"; attempts?: number; lockedAt?: string } = {}) { const snapshot={formatVersion:FINANCE_FOLIO_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{sort:"createdAt_desc",state:"ready"},snapshotAt:SNAPSHOT_AT,manifest:[]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash([]),formatVersion:FINANCE_FOLIO_CSV_VERSION,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,max_attempts,run_after,locked_at,locked_by,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,3,$7,$8,$9,'property',$10::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$11::jsonb,$12::jsonb)`,[JOB,`${FINANCE_FOLIO_EXPORT_JOB}:${PROPERTY}:test`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,options.status??"pending",options.attempts??0,ACCEPTED,options.lockedAt??null,options.status==="running"?"old-worker":null,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);if(options.status==="running")await admin.query("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1,$2,'running','old-worker',$3)",[JOB,options.attempts,options.lockedAt]); }
+  async function insertExpenseJob(metadataFormatVersion:string=FINANCE_EXPENSE_CSV_VERSION){const snapshot={formatVersion:FINANCE_EXPENSE_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{from:"2026-09-01",to:"2026-09-30",sort:"incurredOn_desc"},snapshotAt:SNAPSHOT_AT,manifest:[expenseSelection]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash(snapshot.manifest),formatVersion:metadataFormatVersion,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`,[JOB,`${FINANCE_EXPENSE_EXPORT_JOB}:${PROPERTY}:expense`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_EXPENSE_EXPORT_JOB,ACCEPTED,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);}
   async function cleanupJobs(){await admin.query("BEGIN");try{await admin.query("SET LOCAL session_replication_role=replica");for(const sql of ["DELETE FROM platform.media_objects WHERE property_id=$1","DELETE FROM platform.product_audit_events WHERE property_id=$1","DELETE FROM platform.dead_letter_events WHERE property_id=$1","DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE property_id=$1)","DELETE FROM platform.jobs WHERE property_id=$1","DELETE FROM platform.domain_events WHERE property_id=$1","DELETE FROM platform.idempotency_keys WHERE property_id=$1"])await admin.query(sql,[PROPERTY]);await admin.query("COMMIT");}catch(error){await admin.query("ROLLBACK");throw error;}}
   async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
 });

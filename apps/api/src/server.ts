@@ -678,7 +678,10 @@ const financeExpenseGenerationPool =
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
     : undefined;
 const financeFolioExportWorker =
-  config.backgroundWorkersEnabled && financeFolioRuntime && config.platformMediaServing
+  config.backgroundWorkersEnabled &&
+  financeFolioRuntime &&
+  financeExpenseRuntime &&
+  config.platformMediaServing
     ? {
         pool: new pg.Pool({
           connectionString: targetDatabaseUrl,
@@ -2194,7 +2197,10 @@ const runFinanceFolioExports = () => {
   if (!financeFolioExportWorker || activeFinanceFolioExports) return;
   activeFinanceFolioExports = runFinanceFolioExportJobs(
     financeFolioExportWorker.pool,
-    financeFolioRuntime!.routes.repository,
+    {
+      exportReady: financeFolioRuntime!.routes.repository.exportReady,
+      exportCsv: financeExpenseRuntime!.routes.read.exportCsv,
+    },
     financeFolioExportWorker.writer,
   )
     .then((result) => {
