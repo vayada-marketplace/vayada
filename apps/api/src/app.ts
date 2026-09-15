@@ -602,7 +602,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
   if (options.marketplaceAffiliateCompletionRepository) {
     app.register(registerMarketplaceAffiliateCompletionRoutes, {
-      prefix: "/api/marketplace", repository: options.marketplaceAffiliateCompletionRepository,
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateCompletionRepository,
     });
   }
   if (options.marketplaceAffiliateDestinationRepository) {
