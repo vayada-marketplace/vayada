@@ -295,3 +295,23 @@ idempotency key, so a manual retry can obtain a new quote. Network errors and ot
 conflicts preserve the key; a late refresh response cannot retire a newer attempt.
 Changing the displayed mode clears the previous terms acknowledgement. The page
 continues to identify itself as a price preview, with no reservation or payment.
+
+## Initial pay-at-property lifecycle staging
+
+After `stagePricingBookingDraft`, `stagePricingBookingLifecycle` uses the retained
+pre-mutation revalidation on the same transaction to reserve PMS inventory. It
+checks the draft's exact stay, amounts, unpaid balance, mode and quote metadata,
+then stages the booking status, creation event and direct booking summary together.
+Frozen `instant` becomes `confirmed`; frozen `request` becomes `pending_payment`
+with `hostResponseDeadlineAt` exactly 24 hours after database time, following
+VAY-1274 and the existing request-expiry sweep. Neither path collects payment.
+The PMS bundle is retained in `booking_metadata.inventoryReservation` for the
+existing release boundary. A repeated lifecycle call fails instead of creating
+another event or extending a deadline; completed acceptance replay occurs earlier.
+
+This helper does not commit or expose a route. The caller must still stage exact
+revenue, required outbox effects, completed receipt and immutable acceptance, then
+run the final quote/Finance deadline check after all blocking writes. Any failure
+requires rollback of the whole transaction, including inventory and earlier draft
+writes. Lifecycle storage tests use real PostgreSQL but mock authority and PMS;
+they do not establish complete acceptance or live inventory-release integration.
