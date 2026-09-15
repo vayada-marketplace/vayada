@@ -49,3 +49,13 @@ coverage. JavaScript case-fold comparisons are not database collision evidence.
 
 Parsing returns the protected command and digest with `executable: false`.
 Errors are sanitized; never log commands or contacts.
+
+`verifyLegacyOwnerSetupRequest` composes parsing with signature verification.
+It derives the expected digest from the complete command bytes and also requires
+exact envelope/command ID, environment, issuedAt and expiresAt agreement. A valid
+signature over inconsistent metadata still rejects; signing a new envelope does
+not renew expired command evidence. The result includes protected parsed values
+and always `executable: false`, with fixed `LEGACY_OWNER_SETUP_REQUEST_INVALID`
+errors. It does not read approval records, authenticate evidence artifacts or
+acquire locks. The future consumer must pass these exact bound bytes/digest to
+the locked registry check and reverify fresh evidence before any write.
