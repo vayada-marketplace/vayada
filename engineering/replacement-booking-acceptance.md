@@ -127,9 +127,9 @@ gate again afterward. A rejected gate requires full transaction rollback.
 The legacy `createTargetGuestBooking` converts `quote_sessions`, constructs legacy
 selected-offer/policy snapshots and numeric amount projections, and performs
 lifecycle/read-model work. It is not a replacement writer and cannot safely be
-called with a fabricated old quote. Required next slices are owner-preserving reservation/promo composition,
-same-transaction add-on capture and replacement booking/lifecycle/revenue
-projections, then the complete orchestrator. Finance capture and historical replay
+called with a fabricated old quote. The retained-owner reservation/promo helpers and draft booking/add-on staging now exist.
+Required next slices are replacement lifecycle/revenue projections, receipt and
+acceptance persistence, and the complete orchestrator. Finance capture and historical replay
 readers below remain internal prerequisites until that composition is verified.
 
 Guest age semantics: retain every actual age 0–17 exactly in the immutable quote.
@@ -178,8 +178,8 @@ Schema tests use a dedicated PostgreSQL database and synthetic storage shapes to
 verify scoped references, independent uniqueness, missing/malformed envelopes,
 exact evidence retention, immutable history and transaction rollback. They do not
 establish a domain-valid PMS reservation or completed checkout. The historical decoder/replay reader and Finance capture below build on this
-schema. Add-on owner capture, the acceptance writer and real transactional race
-coverage remain required. No runtime write or public acceptance route is added by0210.
+schema. Add-on capture and staging now exist as internal prerequisites; the complete
+acceptance writer and real transactional race coverage remain required. No runtime write or public acceptance route is added by0210.
 
 ## Historical acceptance reading
 
@@ -253,3 +253,21 @@ remain intact. `reserveCurrentQuoteInventory` keeps its fresh-revalidation path.
 Evidence from a prior transaction or client request cannot use this internal
 contract. This is an inventory hold, not accepted-booking replay or final acceptance;
 the caller still owns final quote/Finance timing and atomic rollback of all effects.
+
+## Draft booking and captured add-on staging
+
+`projectPricingBookingAddons` maps retained pre-mutation add-on owner evidence to
+exact service-date rows, preserving selections, ownership and partner commission.
+It refuses amounts that existing numeric(15,2) columns cannot represent exactly.
+`persistPricingBookingAddons` locks the scoped draft booking and checks its quote,
+stay, currency, total and edit revision. Identical existing rows replay; conflicting
+rows or historical revisions fail. It never recaptures or reprices an add-on.
+
+`stagePricingBookingDraft` stages a draft/unpaid pay-at-property booking, the
+normalized booker, and those captured add-on rows on the caller's retained
+connection. It binds the stored quote, exact disclosure and consent command to
+the current public scope and supplied Finance capture. The caller allocates the
+booking ID/reference, retains owner locks, and rolls back every write on failure.
+This is an internal staging step: it does not confirm a booking, issue a receipt,
+write accepted history, collect a deposit, or activate public submission. The
+complete orchestrator still owns final freshness after all blocking writes.
