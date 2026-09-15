@@ -20,6 +20,7 @@ import {
   createPgStaffInvitationAcceptanceRepository,
   createPgStaffInvitationDeliveryRepository,
   createPgStaffInvitationRepository,
+  createPgTeamRoleRepository,
   createPgStaffRemovalJobRepository,
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
@@ -1190,6 +1191,7 @@ const staffInvitationRuntime =
         });
         return {
           repository,
+          roles: createPgTeamRoleRepository({ connectionString: config.auth.databaseUrl }),
           deliveryRepository,
           removalJobRepository,
           delivery: createStaffInvitationDeliveryCoordinator({
@@ -1836,6 +1838,7 @@ app.addHook("onClose", async () => {
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),
     staffInvitationRuntime?.repository.close(),
+    staffInvitationRuntime?.roles.close(),
     staffInvitationRuntime?.deliveryRepository.close(),
     staffInvitationRuntime?.removalJobRepository.close(),
     financeOtaCommissionSettingsRepository?.close(),

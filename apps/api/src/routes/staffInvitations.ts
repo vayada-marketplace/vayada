@@ -8,6 +8,7 @@ import {
   type UpdateStaffAccessCommand,
   type UpdateStaffStatusCommand,
   createPgStaffInvitationRepository,
+  createPgTeamRoleRepository,
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
 } from "@vayada/backend-auth";
@@ -28,6 +29,7 @@ type StaffRemoval = Pick<ReturnType<typeof createStaffRemovalCoordinator>, "revo
 
 export type StaffInvitationRoutesOptions = {
   repository: StaffInvitationRepository;
+  roles: Pick<ReturnType<typeof createPgTeamRoleRepository>, "list">;
   delivery: StaffInvitationDelivery;
   removal: StaffRemoval;
 };
@@ -85,6 +87,18 @@ export async function registerStaffInvitationRoutes(
       throw error;
     }
   };
+
+  app.get("/roles", { onRequest: authorize }, async (request, reply) => {
+    const context = authorized.get(request);
+    if (!context) throw new Error("Team role authorization was not resolved");
+    reply.header("Cache-Control", "no-store");
+    try {
+      const roles = await options.roles.list(context.selectedOrganization.organizationId);
+      return reply.send({ roles, canManageRoles: context.membership.roleKey === "hotel_owner" });
+    } catch {
+      return reply.status(500).send({ code: "team_roles_read_failed" });
+    }
+  });
 
   app.get("/members", { onRequest: authorize }, async (request, reply) => {
     const context = authorized.get(request);
