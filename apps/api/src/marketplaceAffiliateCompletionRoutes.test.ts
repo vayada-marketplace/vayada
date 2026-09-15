@@ -74,7 +74,10 @@ async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure
 describe("Hotel affiliate completion HTTP read", () => {
   it("passes exact authorized scope and distinguishes pending, completed and unavailable", async () => {
     const { app, repository } = await setup();
-    expect((await app.inject({ url: path, headers })).json()).toEqual({
+    const pending = await app.inject({ url: path, headers });
+    expect(pending.statusCode).toBe(200);
+    expect(pending.headers["cache-control"]).toBe("no-store");
+    expect(pending.json()).toEqual({
       status: "pending",
       reason: "completion_unconfirmed",
     });
@@ -111,6 +114,7 @@ describe("Hotel affiliate completion HTTP read", () => {
     repository.read.mockResolvedValue({ status: "pending", reason: "scope_unavailable" });
     const unavailable = await app.inject({ url: path, headers });
     expect(unavailable.statusCode).toBe(404);
+    expect(unavailable.headers["cache-control"]).toBe("no-store");
     expect(unavailable.json()).toEqual({ code: "scope_unavailable" });
   });
   it("denies absent/invalid authentication without reading evidence", async () => {
