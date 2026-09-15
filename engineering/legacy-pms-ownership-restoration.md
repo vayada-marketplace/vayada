@@ -190,6 +190,37 @@ original success after revocation is a receipt, not renewed eligibility.
 
 ## Required tests and implementation slices
 
+### Retained transition storage (0214)
+
+`platform.legacy_historical_binding_transitions` stores append-only `prepare`
+and `compensate` events under `legacy-historical-binding-transition.v1`. Each
+command UUID is unique. The original claim UUID is retained by a restrictive
+foreign key; the original pair, provider, migration source, creation timestamp
+and source-run evidence are recorded alongside full command, approval-envelope,
+executor and target before/after hashes. No raw contact/provider payload is stored.
+The target hashes cover the complete evidence set, not just claim state.
+
+A compensation has its own command and fresh approval-envelope hash, references
+one original prepare uniquely, retains its exact environment/pair/provenance and
+matches its prepared after-hash as the compensation before-hash. It cannot refer
+to another compensation. The new after-hash describes the actual restored
+historical state, including its own update timestamp; it need not equal the old
+before-hash. The only stored state edges are historical to verified_non_active
+and the reverse. Source-inactive evidence and either protected QA/staging key
+are excluded; this version has no inactive-source override.
+
+This is storage, not an executable signed command or authorization. Inserting an
+event does not alter or certify current claims/connections. The future consumer
+must authenticate the full payload and registry authorities, verify current
+eligibility and exhaustive claim/connection evidence under locks, and atomically
+compare-and-set the claim and insert the event/audit. It must verify stored
+provenance against the real claim, preserve disconnected/null connections and
+reject stale replay/compensation. No consumer, signature contract admission,
+runtime grant, activation or access release is added by this migration. The
+existing append-only triggers reject update/delete/truncate; PUBLIC has no access.
+
+### Remaining consumer and integration coverage
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
