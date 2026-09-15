@@ -3,7 +3,10 @@ import pg from "pg";
 import { parseStaffPermissionOverrides, validateStaffInviteAccess } from "./lifecycle.js";
 import type { RepositoryConfig } from "./repository.js";
 import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
-import { enqueueInboxAssignmentReconciliation } from "./staffInvitations.js";
+import {
+  authorizeStaffInvitationAcceptance,
+  enqueueInboxAssignmentReconciliation,
+} from "./staffInvitations.js";
 
 export type StaffInvitationAcceptanceEvent = {
   providerEventId: string;
@@ -31,6 +34,7 @@ export type StaffInvitationAcceptanceResult =
   | { outcome: "rejected"; reason: RejectionReason };
 
 type InvitationRow = {
+  inviter_user_id: string;
   role_definition_id: string | null;
   role_definition: (TeamRolePolicy & { id: string }) | null;
   pms_access_enabled: boolean;
@@ -73,9 +77,16 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await client.query(
+          `SELECT organization.id FROM identity.organizations organization
+           JOIN identity.staff_invitations invitation ON invitation.organization_id = organization.id
+           WHERE invitation.provider_invitation_id = $1 FOR UPDATE OF organization`,
+          [event.providerInvitationId],
+        );
         const invitation = (
           await client.query<InvitationRow>(
             `SELECT invitation.id, invitation.organization_id, invitation.email, invitation.role_key,
+                    invitation.inviter_user_id,
                     invitation.role_definition_id,
                     CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
                       'id', definition.id, 'securityClass', definition.security_class,
@@ -170,6 +181,16 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           return reject("provider_identity_mismatch", identity);
         }
 
+        if (
+          !(await authorizeStaffInvitationAcceptance(
+            client,
+            invitation.organization_id,
+            invitation.inviter_user_id,
+            identity.user_id,
+            invitation.id,
+          ))
+        )
+          return reject("invitation_access_invalid", identity);
         const overrides = parseStaffPermissionOverrides(invitation.permission_overrides);
         if (
           !overrides ||

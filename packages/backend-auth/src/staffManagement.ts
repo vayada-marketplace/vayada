@@ -18,7 +18,14 @@ export async function loadManagedStaffAccess(
   client: pg.PoolClient,
   organizationId: string,
   membershipId: string,
+  source: "membership" | "invitation" = "membership",
 ): Promise<ManagedStaffAccess | null> {
+  const invitation = source === "invitation";
+  const table = invitation ? "staff_invitations" : "organization_memberships";
+  const assignments = invitation
+    ? "staff_invitation_property_assignments"
+    : "membership_property_assignments";
+  const assignmentKey = invitation ? "invitation_id" : "membership_id";
   const result = await client.query<{
     id: string;
     role_key: string;
@@ -33,17 +40,17 @@ export async function loadManagedStaffAccess(
     permissions: string[];
     scope_valid: boolean;
   }>(
-    `SELECT member.id, member.role_key, member.access_origin, member.property_access_mode,
+    `SELECT member.id, member.role_key, ${invitation ? "'agency'" : "member.access_origin"} AS access_origin, member.property_access_mode,
             member.pms_access_enabled, member.booking_access_enabled, member.role_definition_id, member.permission_overrides,
             CASE WHEN role.id IS NULL THEN NULL ELSE jsonb_build_object('securityClass', role.security_class,
               'baseRoleKey', role.base_role_key, 'presetKey', role.preset_key, 'defaultPermissions', role.default_permissions) END AS definition,
             ARRAY(SELECT permission_key FROM identity.role_permission_grants WHERE organization_kind = 'hotel_group' AND role_key = member.role_key) AS permissions,
-            ARRAY(SELECT property_id::text FROM identity.membership_property_assignments WHERE membership_id = member.id) AS property_ids,
-            NOT EXISTS (SELECT 1 FROM identity.membership_property_assignments assignment WHERE assignment.membership_id = member.id
+            ARRAY(SELECT property_id::text FROM identity.${assignments} WHERE ${assignmentKey} = member.id) AS property_ids,
+            NOT EXISTS (SELECT 1 FROM identity.${assignments} assignment WHERE assignment.${assignmentKey} = member.id
               AND NOT EXISTS (SELECT 1 FROM identity.organization_resource_links link WHERE link.organization_id = member.organization_id
                 AND link.product = 'hotel_catalog' AND link.resource_type = 'property' AND link.resource_id = assignment.property_id::text
                 AND link.relationship IN ('owner', 'operator') AND link.status = 'active')) AS scope_valid
-     FROM identity.organization_memberships member LEFT JOIN identity.organization_roles role
+     FROM identity.${table} member LEFT JOIN identity.organization_roles role
        ON role.id = member.role_definition_id AND role.organization_id = member.organization_id
      WHERE member.organization_id = $1 AND member.id = $2 FOR UPDATE OF member`,
     [organizationId, membershipId],
@@ -81,7 +88,7 @@ export async function loadManagedStaffAccess(
   }
   return permissions
     ? {
-        membershipId: row.id,
+        ...(invitation ? {} : { membershipId: row.id }),
         roleKey: row.role_key,
         isManagerRole:
           row.role_key === "hotel_manager" &&
@@ -101,6 +108,8 @@ export function withinStaffManagementScope(
 ): boolean {
   if (
     manager.accessOrigin !== "agency" ||
+    manager.roleKey !== "hotel_manager" ||
+    manager.isManagerRole === false ||
     !manager.permissions.includes("identity.staff.manage") ||
     worker.accessOrigin !== "agency" ||
     (worker.membershipId && worker.membershipId === manager.membershipId) ||

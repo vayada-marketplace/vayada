@@ -305,7 +305,6 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           client,
           normalized.organizationId,
           normalized.actorUserId,
-          true,
         );
         if (!manager) {
           await client.query("ROLLBACK");
@@ -463,7 +462,6 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           client,
           normalized.organizationId,
           normalized.actorUserId,
-          true,
         );
         if (!manager) {
           await client.query("ROLLBACK");
@@ -765,6 +763,18 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
         }
+        if (
+          (manager.role_key !== "hotel_owner" && normalized.expectedRevision === undefined) ||
+          !(await managerMayChangeMember(
+            client,
+            manager,
+            normalized.organizationId,
+            normalized.membershipId,
+          ))
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+        }
         if (previous.role_definition_id !== null && normalized.roleDefinitionId === undefined) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "invalid_command" as const };
@@ -779,13 +789,13 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         }
         if (normalized.roleDefinitionId !== undefined) {
           if (
-            manager.role_key !== "hotel_owner" ||
             manager.access_origin !== "agency" ||
-            manager.property_access_mode !== "all" ||
             previous.access_origin !== "agency" ||
-            (manager.permission_overrides !== null &&
-              JSON.stringify(parseStaffPermissionOverrides(manager.permission_overrides)) !==
-                JSON.stringify({ grant: [], deny: [] }))
+            (manager.role_key === "hotel_owner" &&
+              (manager.property_access_mode !== "all" ||
+                (manager.permission_overrides !== null &&
+                  JSON.stringify(parseStaffPermissionOverrides(manager.permission_overrides)) !==
+                    JSON.stringify({ grant: [], deny: [] }))))
           ) {
             await client.query("ROLLBACK");
             return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
@@ -856,6 +866,18 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
            SELECT $1, property_id FROM unnest($2::uuid[]) property_id`,
           [normalized.membershipId, normalized.propertyIds],
         );
+        // Validate the complete proposed state inside this transaction before committing it.
+        if (
+          !(await managerMayChangeMember(
+            client,
+            manager,
+            normalized.organizationId,
+            normalized.membershipId,
+          ))
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+        }
         const nextPropertyIds = new Set(normalized.propertyIds);
         const previousOverrides =
           previous.permission_overrides === null
@@ -1054,12 +1076,12 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
               ? { grant: [], deny: [] }
               : parseStaffPermissionOverrides(inviterRow.permission_overrides);
           if (
-            inviterRow.role_key !== "hotel_owner" ||
             inviterRow.access_origin !== "agency" ||
-            inviterRow.property_access_mode !== "all" ||
-            !overrides ||
-            overrides.grant.length ||
-            overrides.deny.length
+            (inviterRow.role_key === "hotel_owner" &&
+              (inviterRow.property_access_mode !== "all" ||
+                !overrides ||
+                overrides.grant.length ||
+                overrides.deny.length))
           ) {
             await client.query("ROLLBACK");
             return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
@@ -1085,6 +1107,30 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           }
         }
 
+        if (inviterRow.role_key !== "hotel_owner") {
+          const existing = await client.query<{ id: string; source: "membership" | "invitation" }>(
+            `SELECT member.id, 'membership' AS source FROM identity.organization_memberships member
+             JOIN identity.users person ON person.id = member.user_id
+             WHERE member.organization_id = $1 AND lower(person.email) = $2
+             UNION ALL SELECT id, 'invitation' FROM identity.staff_invitations
+             WHERE organization_id = $1 AND email = $2 AND status = 'pending'`,
+            [normalized.organizationId, normalized.email],
+          );
+          for (const target of existing.rows) {
+            if (
+              !(await managerMayChangeMember(
+                client,
+                inviterRow,
+                normalized.organizationId,
+                target.id,
+                target.source,
+              ))
+            ) {
+              await client.query("ROLLBACK");
+              return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+            }
+          }
+        }
         const previous = await client.query<{ id: string; status: string }>(
           `UPDATE identity.staff_invitations
            SET status = CASE WHEN expires_at <= now() THEN 'expired' ELSE 'revoked' END, updated_at = now()
@@ -1134,6 +1180,18 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              SELECT $1, property_id FROM unnest($2::uuid[]) property_id`,
           [invitationId, normalized.propertyIds],
         );
+        if (
+          !(await managerMayChangeMember(
+            client,
+            inviterRow,
+            normalized.organizationId,
+            invitationId,
+            "invitation",
+          ))
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+        }
         await client.query("COMMIT");
         return {
           outcome: "created" as const,
@@ -1370,8 +1428,13 @@ async function lockAuthorizedManager(
   client: pg.PoolClient,
   organizationId: string,
   actorUserId: string,
-  allowReferencedManager = false,
 ): Promise<InviterRow | null> {
+  // Invitation acceptance already holds this lock; use the same order in every writer.
+  const organization = await client.query(
+    "SELECT id FROM identity.organizations WHERE id = $1 AND kind = 'hotel_group' AND status = 'active' FOR UPDATE",
+    [organizationId],
+  );
+  if (!organization.rowCount) return null;
   const result = await client.query<InviterRow>(
     `SELECT membership.id AS membership_id, membership.role_key, actor.name, actor.email, membership.permission_overrides,
             membership.access_origin, membership.property_access_mode, membership.role_definition_id,
@@ -1395,7 +1458,7 @@ async function lockAuthorizedManager(
     [organizationId, actorUserId],
   );
   const row = result.rows[0];
-  return row && hasStaffManage(row, allowReferencedManager) ? row : null;
+  return row && hasStaffManage(row) ? row : null;
 }
 
 async function managerMayChangeMember(
@@ -1403,18 +1466,40 @@ async function managerMayChangeMember(
   manager: InviterRow,
   organizationId: string,
   membershipId: string,
+  source: "membership" | "invitation" = "membership",
 ): Promise<boolean> {
   if (manager.role_key === "hotel_owner") return true;
   const actor = await loadManagedStaffAccess(client, organizationId, manager.membership_id);
-  const target = await loadManagedStaffAccess(client, organizationId, membershipId);
+  const target = await loadManagedStaffAccess(client, organizationId, membershipId, source);
   return Boolean(actor && target && withinStaffManagementScope(actor, target));
 }
 
-function hasStaffManage(row: InviterRow, allowReferencedManager = false): boolean {
+export async function authorizeStaffInvitationAcceptance(
+  client: pg.PoolClient,
+  organizationId: string,
+  inviterUserId: string,
+  recipientUserId: string,
+  invitationId: string,
+): Promise<boolean> {
+  const manager = await lockAuthorizedManager(client, organizationId, inviterUserId);
+  if (
+    !manager ||
+    !(await managerMayChangeMember(client, manager, organizationId, invitationId, "invitation"))
+  )
+    return false;
+  const existing = await client.query<{ id: string }>(
+    "SELECT id FROM identity.organization_memberships WHERE organization_id = $1 AND user_id = $2",
+    [organizationId, recipientUserId],
+  );
+  return (
+    !existing.rows[0] ||
+    managerMayChangeMember(client, manager, organizationId, existing.rows[0].id)
+  );
+}
+
+function hasStaffManage(row: InviterRow): boolean {
   if (row.role_definition_id !== null) {
     const role = row.role_definition;
-    // Callers enable referenced managers only when they enforce the command ceiling.
-    if (role?.securityClass !== "account_admin" && !allowReferencedManager) return false;
     if (!role || role.id !== row.role_definition_id || role.baseRoleKey !== row.role_key)
       return false;
     return (
