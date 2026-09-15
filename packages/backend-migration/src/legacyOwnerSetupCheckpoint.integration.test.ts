@@ -16,6 +16,8 @@ import { hashLegacyOwnerSetupEnvelope } from "./legacyOwnerSetupApprovals.js";
 import { hashLegacyOwnerSetupValue } from "./legacyOwnerSetupReceiptHashes.js";
 import { runMigrations } from "./runner.js";
 import { collectLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceCollector.js";
+import { inspectLegacyOwnerSetupRecovery } from "./legacyOwnerSetupRecovery.js";
+import { verifyLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceEvidence.js";
 
 const url = process.env["VAY2017_CHECKPOINT_TEST_DATABASE_URL"];
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -163,8 +165,11 @@ const transactionFixture = (alter?: (row: Record<string, unknown>, i: number) =>
 };
 
 const verifiedUrl = process.env.VAY2017_VERIFIED_TARGET_TEST_DATABASE_URL;
-describe.skipIf(!verifiedUrl)("same-client verified target transaction as restricted LOGIN", () => {
+const recoveryUrl = process.env.VAY2017_RECOVERY_TEST_DATABASE_URL;
+const fixtureUrl = verifiedUrl ?? recoveryUrl;
+describe.skipIf(!fixtureUrl)("same-client verified target transaction as restricted LOGIN", () => {
   let admin: pg.Client, executor: pg.Client, identity: LegacyOwnerSetupTargetIdentity;
+  let executorConfig: pg.ClientConfig, recoveryPool: pg.Pool | undefined;
   let fixture: ReturnType<typeof transactionFixture>;
   const sourceAdmins: pg.Client[] = [],
     sourcePools: pg.Pool[] = [];
@@ -172,17 +177,19 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
   const hashes = () =>
     command().owners.map((o) => createHash("sha256").update(o.email).digest("hex"));
   beforeAll(async () => {
-    const parsed = new URL(verifiedUrl!);
+    const parsed = new URL(fixtureUrl!);
     if (
+      (verifiedUrl && recoveryUrl) ||
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !["56634", "56635"].includes(parsed.port) ||
-      parsed.pathname !== "/vay2017_verified_target_test" ||
+      !(recoveryUrl ? ["56636", "56637"] : ["56634", "56635"]).includes(parsed.port) ||
+      parsed.pathname !==
+        (recoveryUrl ? "/vay2017_recovery_test" : "/vay2017_verified_target_test") ||
       parsed.search ||
       parsed.hash
     )
       throw new Error("Dedicated verified target fixture required");
-    admin = new pg.Client({ connectionString: verifiedUrl });
+    admin = new pg.Client({ connectionString: fixtureUrl });
     await admin.connect();
     expect(
       (await admin.query("SELECT 1 FROM pg_namespace WHERE nspname='identity'")).rowCount,
@@ -190,7 +197,7 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     expect(
       (
         await runMigrations({
-          connectionString: verifiedUrl!,
+          connectionString: fixtureUrl!,
           migrationsDir: join(import.meta.dirname, "../migrations"),
           environment: "local",
         })
@@ -234,7 +241,7 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     // Separate synthetic source databases; no target executor can read source contacts.
     const pins: { databaseName: string; databaseOid: number }[] = [];
     for (const kind of ["auth", "pms"] as const) {
-      const sourceUrl = new URL(verifiedUrl!);
+      const sourceUrl = new URL(fixtureUrl!);
       sourceUrl.pathname = `/vay2017_pipeline_${kind}`;
       const sourceAdmin = new pg.Client({ connectionString: sourceUrl.toString() });
       sourceAdmins.push(sourceAdmin);
@@ -318,8 +325,10 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
         ],
       );
     parsed.username = "vay2017_setup_executor";
-    executor = new pg.Client({ connectionString: parsed.toString() });
+    executorConfig = { connectionString: parsed.toString(), connectionTimeoutMillis: 2000 };
+    executor = new pg.Client(executorConfig);
     await executor.connect();
+    if (recoveryUrl) recoveryPool = new pg.Pool({ ...executorConfig, max: 1 });
   }, 120_000);
   beforeEach(async () => {
     await executor.query("BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'");
@@ -329,6 +338,7 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     await executor.query("ROLLBACK");
   });
   afterAll(async () => {
+    await recoveryPool?.end();
     await Promise.allSettled(sourcePools.map((pool) => pool.end()));
     await Promise.allSettled(sourceAdmins.map((client) => client.end()));
     await executor?.end();
@@ -359,6 +369,126 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
       (SELECT count(*)::int FROM identity.users WHERE id<> '${id(90)}') AS owners,
       (SELECT count(*)::int FROM platform.legacy_owner_bootstrap_receipts) AS receipts`)
     ).rows[0];
+  if (recoveryUrl) {
+    it("recovers only durable exact receipts after an indeterminate commit, never retries writes", async () => {
+      const recover = (chosen = fixture, target: unknown = identity, clock = () => now) =>
+        inspectLegacyOwnerSetupRecovery(
+          recoveryPool!,
+          target,
+          chosen.request,
+          expected,
+          chosen.artifacts,
+          chosen.trust,
+          policy,
+          clock,
+        );
+      expect(await recover()).toEqual({
+        outcome: "no_receipt_observed",
+        executable: false,
+        receipt: null,
+      });
+      expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+      await prepare();
+      // Original approval locks are still held: recovery cannot report absence yet.
+      await expect(recover()).rejects.toThrow("LEGACY_OWNER_SETUP_RECOVERY_FAILED");
+      expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+      await executor.end(); // Real disconnect before COMMIT rolls back the first attempt.
+      executor = new pg.Client(executorConfig);
+      await executor.connect();
+      expect(await recover()).toHaveProperty("outcome", "no_receipt_observed");
+      expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+      await executor.query(
+        "BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'; SET LOCAL synchronous_commit='on'",
+      );
+      await prepare();
+      verifyLegacyOwnerCurrentSourceEvidence(
+        fixture.request,
+        expected,
+        fixture.artifacts,
+        fixture.trust,
+        now,
+      );
+      // Real database commit, synthetic lost acknowledgement (not a network proxy).
+      await expect(
+        (async () => {
+          await executor.query("COMMIT");
+          throw new Error("synthetic lost acknowledgement");
+        })(),
+      ).rejects.toThrow("synthetic lost acknowledgement");
+      await executor.end();
+      executor = new pg.Client(executorConfig);
+      await executor.connect();
+      const recovered = await recover();
+      expect(recovered).toMatchObject({
+        outcome: "matching_receipt_found",
+        executable: false,
+        receipt: { commandId: id(99), checkpoint: "internal_users_prepared" },
+      });
+      expect(await recover()).toEqual(recovered);
+      expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+      const copied = {
+        ...fixture,
+        request: {
+          ...fixture.request,
+          verificationKeys: new Map(fixture.request.verificationKeys),
+        },
+        artifacts: structuredClone(fixture.artifacts),
+      };
+      const capturedClient = await recoveryPool!.connect();
+      vi.spyOn(recoveryPool!, "connect").mockImplementationOnce((async () => {
+        copied.request.detachedSignature = "changed during acquisition";
+        copied.request.verificationKeys.clear();
+        copied.artifacts.length = 0;
+        return capturedClient;
+      }) as pg.Pool["connect"]);
+      expect(await recover(copied)).toEqual(recovered);
+      vi.restoreAllMocks();
+      const failedClient = await recoveryPool!.connect();
+      const query = failedClient.query.bind(failedClient);
+      let rollbacks = 0;
+      vi.spyOn(recoveryPool!, "connect").mockImplementationOnce(
+        (async () => failedClient) as pg.Pool["connect"],
+      );
+      vi.spyOn(failedClient, "query").mockImplementation((async (
+        sql: string,
+        values?: unknown[],
+      ) => {
+        if (sql === "ROLLBACK" && ++rollbacks === 2)
+          throw new Error("synthetic private cleanup detail");
+        return query(sql, values);
+      }) as typeof failedClient.query);
+      const release = vi.spyOn(failedClient, "release");
+      await expect(recover()).rejects.toThrow(/^LEGACY_OWNER_SETUP_RECOVERY_FAILED$/);
+      expect(release).toHaveBeenCalledWith(true);
+      vi.restoreAllMocks();
+      expect(await recover()).toEqual(recovered);
+      expect(
+        (await executor.query("SELECT DISTINCT status FROM identity.users WHERE id<>$1", [id(90)]))
+          .rows,
+      ).toEqual([{ status: "pending" }]);
+      for (const table of ["organizations", "organization_memberships", "external_identities"])
+        expect(
+          (await executor.query(`SELECT count(*)::int n FROM identity.${table}`)).rows[0].n,
+        ).toBe(0);
+      await expect(
+        recover(fixture, { ...identity, databaseOid: identity.databaseOid + 1 }),
+      ).rejects.toThrow("LEGACY_OWNER_SETUP_RECOVERY_FAILED");
+      await expect(recover(fixture, identity, () => new Date(command().expiresAt))).rejects.toThrow(
+        "LEGACY_OWNER_SETUP_RECOVERY_FAILED",
+      );
+      const changed = transactionFixture();
+      changed.request.detachedSignature = "invalid";
+      await expect(recover(changed)).rejects.toThrow("LEGACY_OWNER_SETUP_RECOVERY_FAILED");
+      await admin.query(
+        `INSERT INTO platform.legacy_owner_approval_revocations
+        (approval_record_id,revoked_by_user_id,revoked_at,reason_sha256) VALUES($1,$2,$3,$4)`,
+        [id(91), id(90), now, sha],
+      );
+      await expect(recover()).rejects.toThrow("LEGACY_OWNER_SETUP_RECOVERY_FAILED");
+      expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+    }, 15_000);
+    return;
+  }
   it("rereads both sources, prepares eight pending users, rolls back and retries without duplication", async () => {
     const fromReads = { ...fixture, artifacts: await collectSources() };
     expect(await prepare(identity, fromReads)).toHaveProperty(
