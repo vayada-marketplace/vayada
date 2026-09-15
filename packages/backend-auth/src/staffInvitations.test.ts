@@ -430,19 +430,41 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(await repository.getAccess(org, staffMembership)).toMatchObject({
       permissionOverrides: { grant: [], deny: [] },
     });
+    await client.query("BEGIN");
+    await client.query(
+      "UPDATE identity.organization_memberships SET role_key = 'external_owner', property_access_mode = 'assigned' WHERE id = $1",
+      [membership],
+    );
     await client.query(
       "UPDATE identity.organization_memberships SET access_origin = 'external_owner' WHERE id = $1",
       [staffMembership],
     );
+    await client.query(
+      `INSERT INTO identity.membership_delegations
+      (organization_id, subject_membership_id, delegator_membership_id, created_by_membership_id)
+      VALUES ($1, $2, $3, $3)`,
+      [org, staffMembership, membership],
+    );
+    await client.query("COMMIT");
     try {
       await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
         "Staff access configuration is unavailable",
       );
     } finally {
+      await client.query("BEGIN");
+      await client.query(
+        "DELETE FROM identity.membership_delegations WHERE subject_membership_id = $1",
+        [staffMembership],
+      );
       await client.query(
         "UPDATE identity.organization_memberships SET access_origin = 'agency' WHERE id = $1",
         [staffMembership],
       );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', property_access_mode = 'all' WHERE id = $1",
+        [membership],
+      );
+      await client.query("COMMIT");
     }
   });
 
