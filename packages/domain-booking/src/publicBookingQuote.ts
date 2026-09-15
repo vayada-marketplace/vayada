@@ -21,6 +21,7 @@ export type PublicBookingQuote = Readonly<{
   checkOut: string;
   currency: string;
   paymentMethod: string;
+  acceptanceMode: "instant" | "request";
   issuedAt: string;
   expiresAt: string;
   totalMinor: string;
@@ -56,6 +57,7 @@ export function parsePublicBookingQuote(
       "checkOut",
       "currency",
       "paymentMethod",
+      "acceptanceMode",
       "issuedAt",
       "expiresAt",
       "totalMinor",
@@ -72,6 +74,7 @@ export function parsePublicBookingQuote(
     value.checkOut !== request.selection.checkOut ||
     value.currency !== request.selection.currency ||
     value.paymentMethod !== request.paymentMethod ||
+    (value.acceptanceMode !== "instant" && value.acceptanceMode !== "request") ||
     !iso(value.issuedAt) ||
     !iso(value.expiresAt) ||
     value.expiresAt <= value.issuedAt ||

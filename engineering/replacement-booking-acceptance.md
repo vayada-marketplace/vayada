@@ -285,6 +285,13 @@ new quote; it never fills in today's setting as a substitute.
 Price revalidation and issuance replay retain the original quote's mode after a
 settings edit. New quotes capture the new mode. The exact quote/disclosure hash
 binds the frozen value, and draft booking metadata preserves it for downstream
-lifecycle handling. Both modes still stage only a draft here. Public presentation
-of confirmation versus property approval, request deadlines and actual lifecycle
-transitions remain required before submission can be enabled.
+lifecycle handling. Both modes still stage only a draft here. The public quote now exposes the frozen mode and guest terms explain confirmation
+versus property approval. Request deadlines and actual lifecycle transitions remain
+required before submission can be enabled.
+
+Public quotes require an explicit mode; an older stored quote without one returns
+HTTP409 with `QUOTE_REFRESH_REQUIRED`. The browser retires only that exact attempt's
+idempotency key, so a manual retry can obtain a new quote. Network errors and other
+conflicts preserve the key; a late refresh response cannot retire a newer attempt.
+Changing the displayed mode clears the previous terms acknowledgement. The page
+continues to identify itself as a price preview, with no reservation or payment.

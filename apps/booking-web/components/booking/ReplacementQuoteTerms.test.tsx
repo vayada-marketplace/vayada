@@ -13,6 +13,7 @@ const quote: PublicBookingQuote = {
   checkOut: "2027-02-03",
   currency: "EUR",
   paymentMethod: "pay_at_property",
+  acceptanceMode: "instant",
   issuedAt: "2027-01-01T00:00:00.000Z",
   expiresAt: "2027-01-01T00:05:00.000Z",
   totalMinor: "30000",
@@ -184,4 +185,20 @@ it("blocks agreement for future, expired or unnamed rooms", () => {
   vi.setSystemTime(new Date(quote.expiresAt));
   render();
   expect(checkbox().disabled).toBe(true);
+});
+
+it("shows the frozen confirmation mode and revokes agreement when it changes", () => {
+  render();
+  expect(document.body.textContent).toContain("No separate approval from us is needed.");
+  expect(document.body.textContent).not.toContain("Your booking will need our approval.");
+  acknowledge();
+  render({ quote: { ...quote, acceptanceMode: "request" } });
+  expect(document.body.textContent).toContain("Your booking will need our approval.");
+  expect(document.body.textContent).toContain("Sending a request does not confirm your stay.");
+  expect(document.body.textContent).not.toContain("No separate approval from us is needed.");
+  expect(checkbox().checked).toBe(false);
+  expect(change).toHaveBeenLastCalledWith(null);
+  expect(document.body.textContent).toContain(
+    "This price preview does not reserve a room or take payment.",
+  );
 });

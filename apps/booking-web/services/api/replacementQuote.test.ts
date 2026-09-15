@@ -10,7 +10,7 @@ const request: PublicBookingQuoteRequest = {
   ] },
 };
 const reply = () => ({
-  version: "public-booking-quote.v1", quoteId: "11111111-1111-4111-8111-111111111111", replayed: false,
+  acceptanceMode: "instant", version: "public-booking-quote.v1", quoteId: "11111111-1111-4111-8111-111111111111", replayed: false,
   checkIn: request.selection.checkIn, checkOut: request.selection.checkOut, currency: "EUR", paymentMethod: "pay_at_property",
   issuedAt: "2026-09-14T12:00:00.000Z", expiresAt: "2026-09-14T12:05:00.000Z", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600",
   lines: [{ kind: "room", selectionId: "one", amountMinor: "15000" }, { kind: "room", selectionId: "two", amountMinor: "10000" }, { kind: "discount", selectionId: null, amountMinor: "4400" }],
@@ -92,4 +92,36 @@ it("does not let a late expired response invalidate a newer retry key", async ()
   await expect(late).rejects.toThrow("expired");
   await requestReplacementQuote("hotel", request);
   expect(sentKey(3)).toBe(sentKey(2));
+});
+
+it("requires an explicit confirmation mode without inferring an instant booking", () => {
+  for (const acceptanceMode of ["instant", "request"])
+    expect(parsePublicBookingQuote({ ...reply(), acceptanceMode }, request)?.acceptanceMode).toBe(acceptanceMode);
+  const missing = { ...reply() };
+  Reflect.deleteProperty(missing, "acceptanceMode");
+  expect(parsePublicBookingQuote(missing, request)).toBeNull();
+  for (const acceptanceMode of [undefined, null, "automatic", true])
+    expect(parsePublicBookingQuote({ ...reply(), acceptanceMode }, request)).toBeNull();
+});
+
+
+it("rotates only the exact refresh-required request key, preserving newer and uncertain attempts", async () => {
+  const stale = () => new Response(JSON.stringify({ code: "QUOTE_REFRESH_REQUIRED" }), { status: 409 });
+  let late!: (value: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { late = resolve; }));
+  const old = requestReplacementQuote("hotel", request);
+  const oldRejected = expect(old).rejects.toMatchObject({ status: 409 });
+  fetcher.mockResolvedValueOnce(stale());
+  await expect(requestReplacementQuote("hotel", request)).rejects.toMatchObject({ status: 409 });
+  expect(sentKey(0)).toBe(sentKey(1));
+  await requestReplacementQuote("hotel", request);
+  expect(sentKey(2)).not.toBe(sentKey(0));
+  late(stale());
+  await oldRejected;
+  await requestReplacementQuote("hotel", request);
+  expect(sentKey(3)).toBe(sentKey(2));
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ code: "OTHER_CONFLICT" }), { status: 409 }));
+  await expect(requestReplacementQuote("hotel", request)).rejects.toMatchObject({ status: 409 });
+  await requestReplacementQuote("hotel", request);
+  expect(sentKey(5)).toBe(sentKey(4));
 });

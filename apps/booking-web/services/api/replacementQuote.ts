@@ -2,7 +2,7 @@ import {
   parsePublicBookingQuote,
   type PublicBookingQuoteRequest,
 } from "@vayada/domain-booking/replacement-pricing";
-import { bookingWebPublic } from "./client";
+import { ApiError, bookingWebPublic } from "./client";
 import {
   expireCheckoutIdempotencyKeyAt,
   getCheckoutIdempotencyKey,
@@ -17,11 +17,25 @@ export async function requestReplacementQuote(
   const body = structuredClone(request);
   const identity = JSON.stringify([slug, body]);
   const key = getCheckoutIdempotencyKey("replacement-quote", identity);
-  const raw = await bookingWebPublic.post<unknown>(
-    `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quote`,
-    body,
-    { headers: { "Idempotency-Key": key }, signal, cache: "no-store" },
-  );
+  let raw: unknown;
+  try {
+    raw = await bookingWebPublic.post<unknown>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quote`,
+      body,
+      { headers: { "Idempotency-Key": key }, signal, cache: "no-store" },
+    );
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.status === 409 &&
+      error.detail &&
+      typeof error.detail === "object" &&
+      "code" in error.detail &&
+      error.detail.code === "QUOTE_REFRESH_REQUIRED"
+    )
+      expireCheckoutIdempotencyKeyAt("replacement-quote", identity, new Date().toISOString(), key);
+    throw error;
+  }
   signal?.throwIfAborted();
   const quote = parsePublicBookingQuote(raw, body);
   if (!quote) throw new Error("The quote could not be verified. Please try again.");
