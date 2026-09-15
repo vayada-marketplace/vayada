@@ -4,12 +4,15 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   FINANCE_EXPENSE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  buildFinanceExpenseCsvArtifact,
   parseFinanceExpenseExportSnapshot,
   parseFinanceExpenseExportQuery,
   parseFinanceExpenseQuery,
   type FinanceExpense,
   type FinanceExpenseCategory,
   type FinanceExpenseEnvelope,
+  type FinanceExpenseCsvArtifact,
+  type FinanceExpenseCsvItem,
   type FinanceExpenseExportQuery,
   type FinanceExpenseExportSnapshot,
   type FinanceExpenseIncompleteEvidence,
@@ -43,6 +46,7 @@ export type FinanceExpenseReadModel = {
   expense(propertyId: string, expenseId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceExpense }) | null>;
   recurringRule(propertyId: string, ruleId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceRecurringExpenseRule }) | null>;
   captureExport(propertyId: string, query: FinanceExpenseExportQuery): Promise<{ envelope: FinanceExpenseEnvelope; snapshot: FinanceExpenseExportSnapshot } | null>;
+  exportCsv(propertyId: string, currency: string, snapshot: FinanceExpenseExportSnapshot): Promise<FinanceExpenseCsvArtifact | null>;
   expenses(propertyId: string, query: FinanceExpenseQuery): Promise<FinanceExpensesReadResponse | null>; close(): Promise<void>;
 };
 export class FinanceExpenseCursorError extends TypeError {
@@ -151,6 +155,22 @@ export function createPgFinanceExpenseReadModel(config: { connectionString?: str
       const snapshot = parseFinanceExpenseExportSnapshot({ formatVersion: FINANCE_EXPENSE_CSV_VERSION, propertyId: meta.propertyId, currency: meta.currency, filters: query, snapshotAt: row.snapshotAt, manifest: row.manifest });
       if (!snapshot) throw new FinanceExpenseEvidenceError("Expense export manifest is invalid");
       return { envelope: base(meta, compact({ financeExpenses: row.financeFreshAt })), snapshot };
+    },
+    async exportCsv(propertyId, currency, rawSnapshot) {
+      const snapshot = parseFinanceExpenseExportSnapshot(rawSnapshot);
+      propertyId = uuid(propertyId);
+      if (!snapshot || snapshot.propertyId !== propertyId || snapshot.currency !== currency) throw new FinanceExpenseEvidenceError("Expense export manifest scope changed");
+      const meta = await envelope(propertyId); if (!meta) return null;
+      if (currency !== meta.currency) throw new FinanceExpenseEvidenceError("Expense export currency changed");
+      const rows = (await pool.query<ExpenseRow>(`SELECT ${EXPENSE_COLUMNS} FROM unnest($3::uuid[]) WITH ORDINALITY selected(id,ordinal) JOIN finance.expenses e ON e.id=selected.id AND e.property_id=$1::uuid WHERE e.currency=$2 ORDER BY selected.ordinal`, [propertyId, currency, snapshot.manifest.map(({ expenseId }) => expenseId)])).rows;
+      if (rows.length !== snapshot.manifest.length) throw new FinanceExpenseEvidenceError("Expense export manifest changed");
+      const expenses: FinanceExpenseCsvItem[] = rows.map((row, index) => {
+        const selected = snapshot.manifest[index]!;
+        if (row.id !== selected.expenseId || row.categoryId !== selected.categoryId || row.revision < selected.revision) throw new FinanceExpenseEvidenceError("Expense export manifest changed");
+        const { paymentStatus: _, paidOn: __, revision: ___, ...stable } = expense(row);
+        return selected.paymentStatus === "paid" ? { ...stable, revision: selected.revision, categoryName: selected.categoryName, paymentStatus: "paid", paidOn: selected.paidOn! } : { ...stable, revision: selected.revision, categoryName: selected.categoryName, paymentStatus: "unpaid", paidOn: null };
+      });
+      return buildFinanceExpenseCsvArtifact({ propertyId, currency, expenses });
     },
     async close() { if (ownsPool) await pool.end?.(); },
   };

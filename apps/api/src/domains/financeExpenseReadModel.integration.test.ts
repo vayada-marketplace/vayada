@@ -121,7 +121,7 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await expect(read.expenses(PROPERTY, { ...filtered, cursor: Buffer.from("{").toString("base64url") })).rejects.toBeInstanceOf(FinanceExpenseCursorError);
   });
 
-  it("captures an immutable, ordered manifest for the complete filtered export", async () => {
+  it("captures and materializes an immutable filtered export after settlement", async () => {
     const query = { from: "2026-08-01", to: "2026-08-11", categoryId: CATEGORY, paymentStatus: "unpaid" as const, recurring: false, origin: "manual" as const, search: "Alpha", sort: "amount_desc" as const };
     const result = await read.captureExport(PROPERTY.toUpperCase(), query);
     expect(result).toMatchObject({ envelope: { propertyId: PROPERTY, currency: "EUR", sourceFreshness: { financeExpenses: expect.any(String) } }, snapshot: { formatVersion: "pms-financials-expenses.v1", propertyId: PROPERTY, currency: "EUR", filters: query, snapshotAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), manifest: [
@@ -131,8 +131,14 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     ] } });
     await admin.query("UPDATE finance.expenses SET payment_status='paid',paid_on='2026-08-11',revision=revision+1 WHERE id=$1", [EXPENSE]);
     expect(result?.snapshot.manifest[1]).toMatchObject({ expenseId: EXPENSE, revision: 1, paymentStatus: "unpaid", paidOn: null });
+    const artifact = await read.exportCsv(PROPERTY, "EUR", result!.snapshot);
+    expect(artifact).toMatchObject({ propertyId: PROPERTY, currency: "EUR", rowCount: 3 });
+    const expenseRow = artifact!.body.split("\r\n").find((line) => line.includes(EXPENSE));
+    expect(expenseRow).toContain('"unpaid","",'); expect(expenseRow).toMatch(/,"1"$/);
     await expect(read.captureExport(PROPERTY, query)).resolves.toMatchObject({ snapshot: { manifest: [{ expenseId: CORRECTION }, { expenseId: SMALL }] } });
     await expect(read.captureExport(EMPTY, query)).resolves.toMatchObject({ snapshot: { manifest: [] } });
+    await expect(read.exportCsv(OTHER, "EUR", result!.snapshot)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError);
+    await expect(read.exportCsv(PROPERTY, "USD", result!.snapshot)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError);
   });
 
   async function cleanup() {
