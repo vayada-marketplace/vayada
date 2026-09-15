@@ -2216,5 +2216,19 @@
   "settings.team.section.booking.promos": "Aktionen",
   "settings.team.section.booking.promos.description": "Aktionscodes und Angebote",
   "settings.team.section.booking.settings": "Einstellungen",
-  "settings.team.section.booking.settings.description": "Zahlungen, Richtlinien und Domain"
+  "settings.team.section.booking.settings.description": "Zahlungen, Richtlinien und Domain",
+  "settings.team.roleInUse": "Diese Rolle wird noch verwendet. Weise Mitgliedern und Einladungen zuerst eine andere Rolle zu.",
+  "settings.team.conflict": "Diese Einstellungen wurden inzwischen geändert. Schließe sie und öffne sie erneut, um den aktuellen Stand zu laden.",
+  "settings.team.forbidden": "Deine aktuellen Berechtigungen erlauben diese Änderung nicht.",
+  "settings.team.saveUnconfirmed": "Das Speichern konnte nicht bestätigt werden. Wiederhole den Vorgang, um dieselbe Anfrage sicher zu prüfen.",
+  "settings.team.viewPermissions": "Berechtigungen ansehen",
+  "settings.team.editRole": "Rolle bearbeiten",
+  "settings.team.createRole": "Rolle erstellen",
+  "settings.team.close": "Schließen",
+  "settings.team.saveRole": "Rolle speichern",
+  "settings.team.startFromRole": "Ausgangsrolle",
+  "settings.team.blankRole": "Leere benutzerdefinierte Rolle",
+  "settings.team.roleName": "Rollenname",
+  "settings.team.roleDescription": "Beschreibung",
+  "settings.team.adminFullAccess": "Der Account-Admin hat vollständigen Zugriff auf das Konto, einschließlich Abrechnung und Teamverwaltung. Diese Systemrolle kann nicht bearbeitet werden."
 }
