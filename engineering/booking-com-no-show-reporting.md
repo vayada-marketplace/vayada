@@ -92,3 +92,16 @@ remain mandatory. Other properties' jobs and production behavior are preserved.
 A supported imported Booking.com test reservation and its canonical binding must
 exist before end-to-end testing; do not fabricate production mappings or enable
 unscoped booking sync to create that prerequisite.
+
+## Earlier sanctioned fixture — September 15, 2026
+
+VAY-1535 authorizes one additional synthetic September 15–16 stay for immediate
+provider validation, preserving the September 20 reservation. The staging-only
+capacity CLI accepts `--no-show --no-show-date 2026-09-15`; omitted date still
+selects September 20. No other new dates are accepted. This remains an explicit
+one-date capacity exception to the unchanged calendar9, with separate hashed
+audit provenance and all binding, provider closure, physical capacity, occupancy,
+publication and transaction guards. It does not rewrite booking dates, widen
+normal calendar coverage, or change no-show eligibility. Import the new exact
+provider tuple through the existing catalog preview/apply and scoped import flow;
+report only in the actual provider window using the authorized waive-fee choice.
