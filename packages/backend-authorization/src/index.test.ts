@@ -232,6 +232,42 @@ describe("createAuthorizationResolver", () => {
     defaultPermissions: ["pms.calendar.read"],
   };
 
+  it("resolves assigned saved owners without changing legacy grants and applies product vetoes", async () => {
+    const scope = propertyScope({
+      roleKey: "external_owner",
+      mode: "assigned",
+      assignedPropertyIds: [PROPERTY_A],
+      roleDefinitionId: definition.id,
+      roleDefinition: {
+        ...definition,
+        securityClass: "external_owner",
+        baseRoleKey: "external_owner",
+        presetKey: "property_owner",
+        defaultPermissions: ["pms.calendar.read", "booking.analytics.read"],
+      },
+    });
+    const resolver = createAuthorizationResolver(
+      { findPermissionsForRole: async () => [] },
+      undefined,
+      propertyScopeRepository(scope),
+    );
+    const candidate = contextFor({ roleKey: "external_owner" });
+    expect((await resolver(candidate)).permissions).toEqual([
+      "booking.analytics.read",
+      "pms.calendar.read",
+      "hotel_catalog.property_manifest.read",
+    ]);
+    expect((await resolver(candidate)).propertyAccess?.assignedPropertyIds).toEqual([PROPERTY_A]);
+    scope.productAccess = { pms: false, booking: true };
+    expect((await resolver(candidate)).permissions).toEqual([
+      "booking.analytics.read",
+      "hotel_catalog.property_manifest.read",
+    ]);
+    scope.roleDefinitionId = null;
+    scope.roleDefinition = null;
+    expect((await resolver(candidate)).permissions).toEqual([]);
+  });
+
   it("resolves live organization defaults instead of legacy base-role grants", async () => {
     const scope = propertyScope({
       roleKey: "hotel_custom",

@@ -205,6 +205,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
       const configuredPermissions = resolveSavedStaffPermissions(row, permissionOverrides);
       if (
         row.access_origin !== "agency" ||
+        (row.role_key === "external_owner" && row.property_access_mode !== "assigned") ||
         !row.scope_valid ||
         !["all", "assigned"].includes(row.property_access_mode) ||
         !permissionOverrides ||
@@ -775,6 +776,19 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
         }
+        if (
+          previous.role_key === "external_owner" &&
+          normalized.roleKey !== "external_owner" &&
+          (
+            await client.query(
+              "SELECT 1 FROM identity.membership_delegations WHERE organization_id = $1 AND delegator_membership_id = $2 LIMIT 1",
+              [normalized.organizationId, normalized.membershipId],
+            )
+          ).rowCount
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "invalid_command" as const };
+        }
         if (previous.role_definition_id !== null && normalized.roleDefinitionId === undefined) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "invalid_command" as const };
@@ -1273,6 +1287,8 @@ function normalize(command: CreateStaffInviteCommand) {
       command.payload.expectedRoleRevision !== undefined) &&
       (!canonicalUuid(command.payload.roleDefinitionId ?? "") ||
         !/^[1-9][0-9]*$/.test(command.payload.expectedRoleRevision ?? ""))) ||
+    (command.payload.roleKey === "external_owner" &&
+      command.payload.roleDefinitionId === undefined) ||
     validateStaffInviteAccess(command.payload).filter(
       (issue) =>
         command.payload.roleDefinitionId === undefined || issue !== "missing_required_permission",
@@ -1340,6 +1356,8 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
       (!canonicalUuid(command.payload.roleDefinitionId ?? "") ||
         !/^[1-9][0-9]*$/.test(command.payload.expectedRoleRevision ?? "") ||
         command.payload.expectedRevision === undefined)) ||
+    (command.payload.roleKey === "external_owner" &&
+      command.payload.roleDefinitionId === undefined) ||
     validateStaffInviteAccess(command.payload).filter(
       (issue) =>
         // Referenced-role hierarchy is checked against locked saved defaults below.

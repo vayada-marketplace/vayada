@@ -105,6 +105,7 @@ export const hotelStaffRoleKeys = [
   "front_desk",
   "housekeeping",
   "hotel_custom",
+  "external_owner",
 ] as const;
 
 export type HotelStaffRoleKey = (typeof hotelStaffRoleKeys)[number];
@@ -166,7 +167,44 @@ export const staffRoleDefaultPermissions: Readonly<
   ],
   housekeeping: ["pms.dashboard.read", "pms.calendar.read", "pms.room_status.read"],
   hotel_custom: [],
+  external_owner: [
+    "pms.dashboard.read",
+    "pms.dashboard.operations.read",
+    "pms.dashboard.finance.read",
+    "pms.calendar.read",
+    "pms.reservation.read",
+    "pms.room_status.read",
+    "pms.rooms_rates.read",
+    "pms.finance.read",
+    "booking.analytics.read",
+  ],
 };
+
+export const externalOwnerPermissionCeiling: readonly string[] = [
+  "pms.dashboard.read",
+  "pms.dashboard.operations.read",
+  "pms.dashboard.finance.read",
+  "pms.calendar.read",
+  "pms.calendar.manage",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.reservation.cancel",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.room_status.read",
+  "pms.rooms_rates.read",
+  "pms.rooms_rates.manage",
+  "pms.channel_manager.read",
+  "pms.finance.read",
+  "pms.settings.read",
+  "pms.guest_contact.read",
+  "booking.analytics.read",
+  "booking.design.read",
+  "booking.design.manage",
+  "booking.flow.read",
+  "booking.flow.manage",
+  "booking.settings.read",
+];
 
 export type StaffPermissionOverrides = {
   grant: readonly StaffAccessPermissionKey[];
@@ -273,6 +311,15 @@ export function validateStaffPermissionOverrides(input: {
   ) {
     issues.add("forbidden_permission");
   }
+  if (
+    input.roleKey === "external_owner" &&
+    [...grant, ...deny, ...effectivePermissions].some(
+      (key) =>
+        key !== "hotel_catalog.property_manifest.read" &&
+        !externalOwnerPermissionCeiling.includes(key),
+    )
+  )
+    issues.add("forbidden_permission");
   if (!hasValidStaffPermissionHierarchy(effectivePermissions)) {
     issues.add("missing_required_permission");
   }
@@ -287,6 +334,7 @@ export function validateStaffInviteAccess(input: {
 }): readonly StaffInviteAccessValidationIssue[] {
   const issues = new Set<StaffInviteAccessValidationIssue>();
   if (
+    (input.roleKey === "external_owner" && input.propertyAccessMode !== "assigned") ||
     !["assigned", "all"].includes(input.propertyAccessMode) ||
     (input.propertyAccessMode === "all" && input.propertyIds.length !== 0)
   ) {

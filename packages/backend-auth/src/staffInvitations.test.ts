@@ -1,3 +1,4 @@
+import { createPgTeamRoleRepository } from "./teamRoles.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1948,6 +1949,184 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(await repository.getInvitation(org, second.invitationId)).not.toBeNull();
   });
 
+  it.each(["revoked", "elapsed"])(
+    "deletes unused owner roles after %s invitation history",
+    async (state) => {
+      const roles = createPgTeamRoleRepository({ connectionString: TEST_DATABASE_URL! });
+      const roleId = randomUUID();
+      try {
+        await client.query(
+          "INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Historical owner', 'external_owner', 'external_owner', '[\"pms.calendar.read\"]')",
+          [roleId, org],
+        );
+        const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+        invite.payload = {
+          ...invite.payload,
+          roleKey: "external_owner",
+          roleDefinitionId: roleId,
+          expectedRoleRevision: "1",
+          permissionOverrides: { grant: [], deny: [] },
+        };
+        const created = await repository.persist(invite);
+        if (created.outcome !== "created") throw new Error(JSON.stringify(created));
+        await client.query(
+          "UPDATE identity.staff_invitations SET status = $2, delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = id::text, expires_at = now() - interval '1 day' WHERE id = $1",
+          [created.invitationId, state === "revoked" ? "revoked" : "pending"],
+        );
+        expect(
+          await roles.change({
+            ...invite,
+            commandId: randomUUID(),
+            idempotencyKey: randomUUID(),
+            payload: { organizationId: org, roleId, expectedRevision: "1", operation: "delete" },
+          }),
+        ).toMatchObject({ outcome: "deleted" });
+        expect(
+          (
+            await client.query(
+              "SELECT status, role_definition_id FROM identity.staff_invitations WHERE id = $1",
+              [created.invitationId],
+            )
+          ).rows[0],
+        ).toEqual({
+          status: state === "revoked" ? "revoked" : "expired",
+          role_definition_id: null,
+        });
+      } finally {
+        await client.query("DELETE FROM identity.staff_invitations WHERE role_definition_id = $1", [
+          roleId,
+        ]);
+        await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+        await roles.close();
+      }
+    },
+  );
+
+  it("invites a saved external owner with assigned read-only access and protects the member from replacement", async () => {
+    const role = (
+      await client.query(
+        "SELECT id, revision::text FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'property_owner'",
+        [org],
+      )
+    ).rows[0];
+    const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+    invite.payload = {
+      ...invite.payload,
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      expectedRoleRevision: role.revision,
+      permissionOverrides: { grant: [], deny: [] },
+    };
+    for (const patch of [
+      { propertyAccessMode: "all" as const, propertyIds: [] },
+      { roleDefinitionId: undefined, expectedRoleRevision: undefined },
+      { permissionOverrides: { grant: ["identity.staff.manage" as const], deny: [] } },
+      { permissionOverrides: { grant: ["pms.settings.manage" as const], deny: [] } },
+    ])
+      expect(
+        await repository.persist({ ...invite, payload: { ...invite.payload, ...patch } }),
+      ).toMatchObject({ outcome: "rejected" });
+    const created = await repository.persist(invite);
+    if (created.outcome !== "created") throw new Error(JSON.stringify(created));
+    expect(await repository.getInvitation(org, created.invitationId)).toMatchObject({
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      propertyAccessMode: "assigned",
+    });
+    const sendInvitation = vi.fn(async (claim: StaffInvitationDeliveryClaim) =>
+      providerResponse(claim),
+    );
+    const delivery = createStaffInvitationDeliveryCoordinator({
+      repository: deliveryRepository,
+      provider: { sendInvitation },
+    });
+    expect(await delivery.deliver(created.invitationId)).toMatchObject({ outcome: "delivered" });
+    expect(sendInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ roleSlug: "hotel_member" }),
+    );
+    expect(
+      await acceptanceRepository.reconcile(acceptanceEvent(`invitation_${created.invitationId}`)),
+    ).toMatchObject({ outcome: "accepted", membershipId: staffMembership });
+    const saved = (await repository.getAccess(org, staffMembership))!;
+    expect(saved.roleKey).toBe("external_owner");
+    expect(saved.configuredPermissions.every((key) => key.endsWith(".read"))).toBe(true);
+    expect(saved.configuredPermissions).not.toContain("pms.guest_contact.read");
+    expect(
+      (await repository.listRoster(org)).find((member) => member.id === staffMembership)?.roleKey,
+    ).toBe("external_owner");
+    expect(await repository.getAccess(otherOrg, staffMembership)).toBeNull();
+    const update = updateCommand({ idempotencyKey: randomUUID() });
+    update.payload = {
+      ...update.payload,
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      expectedRoleRevision: role.revision,
+      expectedRevision: saved.revision,
+      propertyIds: saved.propertyIds,
+      permissionOverrides: { grant: [], deny: [] },
+      productAccess: { pms: false, booking: true },
+    };
+    expect(await repository.updateAccess(update)).toMatchObject({ outcome: "updated" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      productAccess: { pms: false, booking: true },
+    });
+    const replacement = await deliveredInvitation(2);
+    expect(
+      await acceptanceRepository.reconcile(acceptanceEvent(replacement.providerInvitationId)),
+    ).toMatchObject({ outcome: "rejected", reason: "membership_protected" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      productAccess: { pms: false, booking: true },
+    });
+    expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+    expect(
+      await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+    ).toMatchObject({ outcome: "updated" });
+    const managerRole = randomUUID();
+    try {
+      await client.query(
+        "INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions) SELECT $1, organization_id, 'Owner ceiling manager', 'staff', 'hotel_manager', 'agency_manager', default_permissions || '[\"identity.staff.manage\"]'::jsonb FROM identity.organization_roles WHERE id = $2",
+        [managerRole, role.id],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2 WHERE id = $1",
+        [membership, managerRole],
+      );
+      const before = await repository.getAccess(org, staffMembership);
+      expect(
+        await repository.updateStatus(statusCommand({ idempotencyKey: randomUUID() })),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(
+        await repository.updateAccess({
+          ...update,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          payload: { ...update.payload, expectedRevision: before!.revision },
+        }),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(
+        await repository.persist({
+          ...invite,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          payload: { ...invite.payload, email: "new-owner@example.com" },
+        }),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', role_definition_id = NULL WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [managerRole]);
+    }
+  });
+
   it("validates invitation role revisions and applies live defaults on acceptance", async () => {
     const roleId = randomUUID();
     let invitationId: string | undefined;
@@ -2049,6 +2228,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     try {
       let waiting = false;
       for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        await client.query("SELECT pg_stat_clear_snapshot()");
         waiting = (
           await client.query<{ waiting: boolean }>(`SELECT EXISTS (
           SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()
