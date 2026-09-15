@@ -1,5 +1,9 @@
 import pg from "pg";
-import { createTeamRole, type TeamRoleCreateCommand } from "./teamRoleCreate.js";
+import {
+  runTeamRoleCommand,
+  type TeamRoleCreateCommand,
+  type TeamRoleChangeCommand,
+} from "./teamRoleCreate.js";
 import type { RepositoryConfig } from "./repository.js";
 import {
   teamRolePermissionCeiling,
@@ -24,7 +28,10 @@ export function createPgTeamRoleRepository(config: RepositoryConfig) {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
   return {
     create(command: TeamRoleCreateCommand) {
-      return createTeamRole(pool, command);
+      return runTeamRoleCommand(pool, command);
+    },
+    change(command: TeamRoleChangeCommand) {
+      return runTeamRoleCommand(pool, command);
     },
     async list(organizationId: string): Promise<TeamRole[]> {
       const result = await pool.query<{

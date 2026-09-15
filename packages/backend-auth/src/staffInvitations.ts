@@ -935,7 +935,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
   };
 }
 
-async function enqueueInboxAssignmentReconciliation(
+export async function enqueueInboxAssignmentReconciliation(
   client: pg.PoolClient,
   input: {
     organizationId: string;
@@ -947,7 +947,8 @@ async function enqueueInboxAssignmentReconciliation(
       | "membership_removed"
       | "membership_suspended"
       | "property_access_removed"
-      | "product_access_removed";
+      | "product_access_removed"
+      | "role_permissions_changed";
   },
 ): Promise<void> {
   const inserted = await client.query(
@@ -961,7 +962,7 @@ async function enqueueInboxAssignmentReconciliation(
      ON CONFLICT (queue_name, job_key) DO NOTHING
      RETURNING id`,
     [
-      `${inboxAssignmentReconciliationJobType}:${input.idempotencyId}`,
+      `${inboxAssignmentReconciliationJobType}:${input.idempotencyId}:${input.membershipId}`,
       inboxAssignmentReconciliationJobType,
       input.organizationId,
       input.membershipId,

@@ -627,12 +627,14 @@ function validReason(
   | "membership_removed"
   | "membership_suspended"
   | "property_access_removed"
-  | "product_access_removed" {
+  | "product_access_removed"
+  | "role_permissions_changed" {
   return (
     value === "membership_removed" ||
     value === "membership_suspended" ||
     value === "property_access_removed" ||
-    value === "product_access_removed"
+    value === "product_access_removed" ||
+    value === "role_permissions_changed"
   );
 }
 
