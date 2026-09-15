@@ -43,6 +43,8 @@ type StaffAccessRequest = Omit<
 >;
 
 const invitationBodyKeys = new Set([
+  "roleDefinitionId",
+  "expectedRoleRevision",
   "propertyAccessMode",
   "email",
   "name",
@@ -447,12 +449,18 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
   const email = typeof value["email"] === "string" ? value["email"].trim().toLowerCase() : "";
   const name = typeof value["name"] === "string" ? value["name"].trim() : undefined;
   const productAccess = value["productAccess"];
-  const access = parseStaffAccess(value);
+  const roleDefinitionId = value["roleDefinitionId"];
+  const expectedRoleRevision = value["expectedRoleRevision"];
+  const access = parseStaffAccess(value, roleDefinitionId !== undefined);
   if (
     email.length > 320 ||
     !/^[^\s@]+@[^\s@]+$/.test(email) ||
     (value["name"] !== undefined && (!name || name.length > 200)) ||
     !access ||
+    ((roleDefinitionId !== undefined || expectedRoleRevision !== undefined) &&
+      (!roleUuid(roleDefinitionId) ||
+        typeof expectedRoleRevision !== "string" ||
+        !/^[1-9][0-9]*$/.test(expectedRoleRevision))) ||
     (productAccess !== undefined && !validProductAccess(productAccess)) ||
     !Number.isSafeInteger(value["configurationRevision"]) ||
     (value["configurationRevision"] as number) < 1 ||
@@ -465,6 +473,12 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
     ...(name ? { name } : {}),
     ...access,
     configurationRevision: value["configurationRevision"] as number,
+    ...(roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: roleDefinitionId as string,
+          expectedRoleRevision: expectedRoleRevision as string,
+        }),
     ...(productAccess === undefined
       ? {}
       : { productAccess: productAccess as { pms: boolean; booking: boolean } }),

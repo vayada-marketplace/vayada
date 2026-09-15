@@ -522,3 +522,16 @@ role. Validation: 53 PostgreSQL staff/role tests, 66 route tests, backend-auth b
 and typecheck, API typecheck. Independent review found the manager and acceptance
 activation gaps; both were fixed and confirmed. Invitation role configuration,
 bounded managers, external owners and the Team UI remain pending.
+
+### Invitation role configuration and acceptance
+
+Invitation creation accepts a saved role reference with its expected revision,
+validated against the same tenant and immutable policy. Referenced invitation
+creation is Account-admin-only pending bounded manager support. Acceptance reads
+live role defaults, validates individual overrides, and copies the reference
+atomically. Existing referenced members stay protected from invitation overwrite.
+Acceptance schedules Inbox reconciliation and records the reference in its audit.
+Legacy invitation fingerprints and exact replays remain compatible. Validation:
+52 PostgreSQL staff tests, 67 route tests, backend-auth build/typecheck, API
+typecheck; independent review found no actionable issues. Resend configuration,
+bounded manager support, external owners and the full UI remain pending.

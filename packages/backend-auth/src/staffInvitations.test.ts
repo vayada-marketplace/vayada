@@ -1697,6 +1697,82 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     return { ...created, providerInvitationId };
   }
 
+  it("validates invitation role revisions and applies live defaults on acceptance", async () => {
+    const roleId = randomUUID();
+    let invitationId: string | undefined;
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1, $2, 'Invitation role', 'staff', 'hotel_custom', '["pms.inbox.read"]')`,
+        [roleId, org],
+      );
+      const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+      invite.payload = {
+        ...invite.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: roleId,
+        expectedRoleRevision: "1",
+        permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      };
+      for (const patch of [
+        { expectedRoleRevision: "2" },
+        { roleDefinitionId: randomUUID() },
+        { roleKey: "front_desk" as const },
+        { expectedRoleRevision: undefined },
+      ]) {
+        expect(
+          await repository.persist({ ...invite, payload: { ...invite.payload, ...patch } }),
+        ).toMatchObject({ outcome: "rejected" });
+      }
+      const created = await repository.persist(invite);
+      expect(created.outcome).toBe("created");
+      if (created.outcome !== "created") throw new Error("Expected saved role invitation");
+      invitationId = created.invitationId;
+      await client.query(
+        `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
+        [invitationId, `invitation_${invitationId}`],
+      );
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read","pms.inbox.read"]' WHERE id = $1`,
+        [roleId],
+      );
+      expect(await repository.persist(invite)).toMatchObject({
+        outcome: "idempotent_replay",
+        invitationId,
+      });
+      const event = acceptanceEvent(`invitation_${invitationId}`);
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({
+        outcome: "accepted",
+        membershipId: staffMembership,
+      });
+      const saved = (await repository.getAccess(org, staffMembership))!;
+      expect(saved).toMatchObject({
+        roleDefinitionId: roleId,
+        configuredPermissions: ["pms.calendar.read", "pms.inbox.read", "pms.inbox.reply"],
+      });
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({
+        outcome: "idempotent_replay",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(saved);
+      const jobs = await client.query(
+        "SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1",
+        [event.providerEventId],
+      );
+      expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "role_permissions_changed" } }]);
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      if (invitationId)
+        await client.query(
+          "UPDATE identity.staff_invitations SET role_definition_id = NULL WHERE id = $1",
+          [invitationId],
+        );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
+  });
+
   async function expectAcceptance(
     invitation: Awaited<ReturnType<typeof deliveredInvitation>>,
     expected: object,
