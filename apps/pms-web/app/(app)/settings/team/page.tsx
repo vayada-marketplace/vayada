@@ -3,11 +3,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
 
+import PropertyAccessMatrix from "@/components/settings/team/PropertyAccessMatrix";
+import MemberAccessDialog from "@/components/settings/team/MemberAccessDialog";
+import RoleEditorDialog from "@/components/settings/team/RoleEditorDialog";
+import TeamRoleCards from "@/components/settings/team/TeamRoleCards";
+import TeamActionDialog, { type TeamAction } from "@/components/settings/team/TeamActionDialog";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
 import { useTranslation } from "@/lib/i18n";
 import { listPmsProperties, type PmsPropertySummary } from "@/services/api/pmsPropertyClient";
 import {
   getPmsStaffRoster,
+  getPmsTeamRoles,
+  getPmsStaffAccess,
+  getPmsStaffInvitation,
+  deletePmsTeamRole,
+  removePmsStaff,
+  invitePmsStaff,
+  pmsStaffResendInput,
+  type PmsTeamRole,
+  type PmsStaffAccess,
+  type PmsInviteResult,
   updatePmsStaffStatus,
   type PmsStaffMember,
 } from "@/services/api/pmsStaffClient";
@@ -23,6 +38,16 @@ const roleLabelKeys: Record<PmsStaffMember["roleKey"], string> = {
 export default function TeamSettingsPage() {
   const { t, locale } = useTranslation();
   const sections = getPmsSettingsSections(false, t);
+  const [roles, setRoles] = useState<PmsTeamRole[]>([]);
+  const [canManageRoles, setCanManageRoles] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [opening, setOpening] = useState(false);
+  const [dialog, setDialog] = useState<
+    | { kind: "member"; access?: PmsStaffAccess; name?: string }
+    | { kind: "role"; role?: PmsTeamRole }
+    | { kind: "action"; action: TeamAction }
+    | null
+  >(null);
   const [members, setMembers] = useState<PmsStaffMember[]>([]);
   const [properties, setProperties] = useState<PmsPropertySummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,10 +63,13 @@ export default function TeamSettingsPage() {
     setLoading(true);
     setError("");
     try {
-      const [nextMembers, nextProperties] = await Promise.all([
+      const [nextMembers, nextProperties, catalog] = await Promise.all([
         getPmsStaffRoster(),
-        listPmsProperties().catch(() => []),
+        listPmsProperties(),
+        getPmsTeamRoles(),
       ]);
+      setRoles(catalog.roles);
+      setCanManageRoles(catalog.canManageRoles);
       setMembers(nextMembers);
       setProperties(nextProperties);
     } catch {
@@ -95,15 +123,90 @@ export default function TeamSettingsPage() {
     }
   };
 
+  const saved = (message: string) => {
+    setDialog(null);
+    setFeedback(message);
+    void loadRoster();
+  };
+  const invitationMessage = (result: PmsInviteResult) =>
+    t(
+      result.delivery === "delivered"
+        ? "settings.team.invitationSent"
+        : "settings.team.invitationDeliveryPending",
+    );
+  async function openMember(member: PmsStaffMember) {
+    setOpening(true);
+    setFeedback("");
+    try {
+      if (member.status === "pending") {
+        const input = pmsStaffResendInput(await getPmsStaffInvitation(member.id));
+        setDialog({
+          kind: "action",
+          action: {
+            title: t("settings.team.resendInvitation"),
+            description: t("settings.team.resendConfirm", { email: member.email }),
+            write: async (key) => invitationMessage(await invitePmsStaff(input, key)),
+          },
+        });
+      } else {
+        const [access, catalog] = await Promise.all([
+          getPmsStaffAccess(member.id),
+          getPmsTeamRoles(),
+        ]);
+        if (
+          access.roleDefinitionId &&
+          catalog.roles.find((role) => role.id === access.roleDefinitionId)?.revision !==
+            access.roleDefinition?.revision
+        )
+          throw new Error("Role changed while opening member access");
+        setRoles(catalog.roles);
+        setCanManageRoles(catalog.canManageRoles);
+        setDialog({
+          kind: "member",
+          access,
+          name: member.name || member.email,
+        });
+      }
+    } catch {
+      setFeedback(t("settings.team.loadError"));
+    } finally {
+      setOpening(false);
+    }
+  }
   const propertyNames = new Map(properties.map((property) => [property.id, property.name]));
 
   return (
     <SettingsLayout title={t("settings.title")} sections={sections} activeId="team">
       <SettingsSection
         id="team"
-        title={t("settings.navigation.team")}
+        title={t("settings.team.pageTitle")}
         description={t("settings.team.description")}
       >
+        {feedback && (
+          <p role="status" className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
+            {feedback}
+          </p>
+        )}
+        {!loading && !error && (
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm text-gray-500">
+              {t("settings.team.summary", {
+                active: members.filter((member) => member.status === "active").length,
+                invited: members.filter((member) => member.status === "pending").length,
+                suspended: members.filter((member) => member.status === "deactivated").length,
+                properties: properties.length,
+              })}
+            </p>
+            <button
+              type="button"
+              disabled={opening}
+              onClick={() => setDialog({ kind: "member" })}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white"
+            >
+              {t("settings.team.inviteTeammate")}
+            </button>
+          </div>
+        )}
         {loading ? (
           <SettingsCard>
             <p role="status" className="text-sm text-gray-500">
@@ -158,16 +261,24 @@ export default function TeamSettingsPage() {
                   {members.map((member) => (
                     <tr key={member.id}>
                       <td className="px-4 py-3 md:px-5">
-                        <p className="font-medium text-gray-900">{member.name || member.email}</p>
-                        {member.name && <p className="text-xs text-gray-500">{member.email}</p>}
+                        <p className="font-medium text-gray-900">
+                          {member.status === "pending"
+                            ? t("settings.team.pendingInvite")
+                            : member.name || member.email}
+                        </p>
+                        {(member.name || member.status === "pending") && (
+                          <p className="text-xs text-gray-500">{member.email}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-700">
-                        {t(roleLabelKeys[member.roleKey])}
+                        {member.roleName ?? t(roleLabelKeys[member.roleKey])}
                       </td>
                       <td className="max-w-64 px-4 py-3 text-gray-700">
-                        {member.propertyIds
-                          .map((propertyId) => propertyNames.get(propertyId) ?? propertyId)
-                          .join(", ")}
+                        {member.propertyAccessMode === "all"
+                          ? t("settings.team.allFutureProperties")
+                          : member.propertyIds
+                              .map((propertyId) => propertyNames.get(propertyId) ?? propertyId)
+                              .join(", ")}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -181,35 +292,76 @@ export default function TeamSettingsPage() {
                       </td>
                       <td className="px-4 py-3 md:px-5">
                         {member.status === "pending" ? (
-                          <span className="text-xs text-gray-500">
-                            {t("settings.team.invitationPending")}
-                          </span>
-                        ) : (
                           <button
                             type="button"
-                            disabled={updatingMemberId !== null}
-                            onClick={() => void changeStatus(member)}
-                            aria-busy={updatingMemberId === member.id}
-                            aria-label={
-                              updatingMemberId === member.id
-                                ? t("settings.team.savingStatus", {
-                                    name: member.name || member.email,
-                                  })
-                                : t(
-                                    member.status === "active"
-                                      ? "settings.team.deactivateNamed"
-                                      : "settings.team.reactivateNamed",
-                                    { name: member.name || member.email },
-                                  )
-                            }
-                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={opening}
+                            onClick={() => void openMember(member)}
+                            className="text-sm text-primary-600"
                           >
-                            {updatingMemberId === member.id
-                              ? t("common.saving")
-                              : member.status === "active"
-                                ? t("settings.team.deactivate")
-                                : t("settings.team.reactivate")}
+                            {t("settings.team.resendInvitation")}
                           </button>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={opening || updatingMemberId !== null}
+                              onClick={() => void openMember(member)}
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs"
+                            >
+                              {t("settings.team.editMemberAccess")}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={opening || updatingMemberId !== null}
+                              onClick={() => void changeStatus(member)}
+                              aria-busy={updatingMemberId === member.id}
+                              aria-label={
+                                updatingMemberId === member.id
+                                  ? t("settings.team.savingStatus", {
+                                      name: member.name || member.email,
+                                    })
+                                  : t(
+                                      member.status === "active"
+                                        ? "settings.team.deactivateNamed"
+                                        : "settings.team.reactivateNamed",
+                                      { name: member.name || member.email },
+                                    )
+                              }
+                              className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updatingMemberId === member.id
+                                ? t("common.saving")
+                                : member.status === "active"
+                                  ? t("settings.team.deactivate")
+                                  : t("settings.team.reactivate")}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={opening || updatingMemberId !== null}
+                              className="text-xs text-red-600"
+                              onClick={() =>
+                                setDialog({
+                                  kind: "action",
+                                  action: {
+                                    title: t("settings.team.removeMember"),
+                                    description: t("settings.team.removeConfirm", {
+                                      name: member.name || member.email,
+                                    }),
+                                    write: async (key) => {
+                                      const result = await removePmsStaff(member.id, key);
+                                      return t(
+                                        result.providerStatus === "revoked"
+                                          ? "settings.team.memberRemoved"
+                                          : "settings.team.memberRemovedPending",
+                                      );
+                                    },
+                                  },
+                                })
+                              }
+                            >
+                              {t("settings.team.removeMember")}
+                            </button>
+                          </div>
                         )}
                         {actionFeedback?.memberId === member.id && (
                           <p
@@ -226,6 +378,59 @@ export default function TeamSettingsPage() {
               </table>
             </div>
           </SettingsCard>
+        )}
+        {!loading && !error && (
+          <TeamRoleCards
+            roles={roles}
+            canManage={canManageRoles}
+            onCreate={() => setDialog({ kind: "role" })}
+            onEdit={(role) => setDialog({ kind: "role", role })}
+            onDelete={(role) =>
+              setDialog({
+                kind: "action",
+                action: {
+                  title: t("settings.team.deleteRole"),
+                  description: t("settings.team.deleteRoleConfirm", { name: role.name }),
+                  write: async (key) => {
+                    await deletePmsTeamRole(role.id, role.revision, key);
+                    return t("settings.team.roleDeleted");
+                  },
+                },
+              })
+            }
+          />
+        )}
+        {!loading && !error && members.length > 0 && properties.length > 0 && (
+          <PropertyAccessMatrix members={members} properties={properties} />
+        )}
+        {dialog?.kind === "member" && (
+          <MemberAccessDialog
+            access={dialog.access}
+            memberName={dialog.name}
+            roles={roles}
+            properties={properties}
+            canManageRoles={canManageRoles}
+            onClose={() => setDialog(null)}
+            onSaved={(result) =>
+              saved(result ? invitationMessage(result) : t("settings.team.accessSaved"))
+            }
+          />
+        )}
+        {dialog?.kind === "role" && (
+          <RoleEditorDialog
+            role={dialog.role}
+            roles={roles}
+            canManage={canManageRoles}
+            onClose={() => setDialog(null)}
+            onSaved={() => saved(t("settings.team.roleSaved"))}
+          />
+        )}
+        {dialog?.kind === "action" && (
+          <TeamActionDialog
+            action={dialog.action}
+            onClose={() => setDialog(null)}
+            onSaved={saved}
+          />
         )}
       </SettingsSection>
     </SettingsLayout>
