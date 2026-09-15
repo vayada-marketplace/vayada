@@ -637,6 +637,115 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     }
   });
 
+  it("allows bounded manager status changes and rejects broader workers before removal", async () => {
+    const managerRole = randomUUID(),
+      workerRole = randomUUID(),
+      cloneRole = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions)
+        VALUES ($1, $3, 'Bounded manager', 'staff', 'hotel_manager', 'agency_manager', '["identity.staff.manage","pms.calendar.read"]'),
+               ($2, $3, 'Bounded worker', 'staff', 'hotel_custom', NULL, '["pms.calendar.read"]')`,
+        [managerRole, workerRole, org],
+      );
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+        VALUES ($1, $2, 'Manager clone without authority', 'staff', 'hotel_manager', '["pms.calendar.read"]')`,
+        [cloneRole, org],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2, property_access_mode = 'assigned' WHERE id = $1`,
+        [membership, managerRole],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_custom', role_definition_id = $2 WHERE id = $1`,
+        [staffMembership, workerRole],
+      );
+      await client.query(
+        `INSERT INTO identity.membership_property_assignments (membership_id, property_id) VALUES ($1, $3), ($2, $3)`,
+        [membership, staffMembership, property],
+      );
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+      expect(
+        await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+      ).toMatchObject({ outcome: "updated" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = NULL,
+        permission_overrides = '{"grant":["pms.calendar.read"],"deny":[]}' WHERE id = $1`,
+        [staffMembership],
+      );
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2,
+        permission_overrides = NULL WHERE id = $1`,
+        [staffMembership, cloneRole],
+      );
+      expect(
+        await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+      ).toMatchObject({ outcome: "updated" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_custom', role_definition_id = $2 WHERE id = $1`,
+        [staffMembership, workerRole],
+      );
+      expect(
+        await repository.updateStatus(statusCommand({ membershipId: membership })),
+      ).toMatchObject({ outcome: "rejected" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET booking_access_enabled = false WHERE id = $1`,
+        [membership],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.organization_memberships SET booking_access_enabled = true WHERE id = $1`,
+        [membership],
+      );
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read","pms.calendar.manage"]' WHERE id = $1`,
+        [workerRole],
+      );
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read"]' WHERE id = $1`,
+        [workerRole],
+      );
+      await client.query(
+        `UPDATE identity.membership_property_assignments SET property_id = $2 WHERE membership_id = $1`,
+        [staffMembership, secondProperty],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.membership_property_assignments SET property_id = $2 WHERE membership_id = $1`,
+        [staffMembership, property],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({ outcome: "removed" });
+    } finally {
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = ANY($1::uuid[])`,
+        [[membership, staffMembership]],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_owner', property_access_mode = 'all', booking_access_enabled = true WHERE id = $1`,
+        [membership],
+      );
+      await client.query(
+        `DELETE FROM identity.membership_property_assignments WHERE membership_id = $1`,
+        [membership],
+      );
+      await client.query(`DELETE FROM identity.organization_roles WHERE id = ANY($1::uuid[])`, [
+        [managerRole, workerRole, cloneRole],
+      ]);
+    }
+  });
+
   it("keeps referenced managers out of legacy mutation paths pending bounded authorization", async () => {
     const roleId = randomUUID();
     try {

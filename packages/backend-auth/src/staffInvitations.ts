@@ -16,6 +16,7 @@ import {
 } from "./lifecycle.js";
 import type { RepositoryConfig } from "./repository.js";
 import type { PermissionKey } from "./types.js";
+import { loadManagedStaffAccess, withinStaffManagementScope } from "./staffManagement.js";
 import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
 
 type StaffRoleDefinition = TeamRolePolicy & { id: string; name: string; revision: string };
@@ -304,6 +305,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           client,
           normalized.organizationId,
           normalized.actorUserId,
+          true,
         );
         if (!manager) {
           await client.query("ROLLBACK");
@@ -366,6 +368,17 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         if (!previous) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
+        }
+        if (
+          !(await managerMayChangeMember(
+            client,
+            manager,
+            normalized.organizationId,
+            normalized.membershipId,
+          ))
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
         }
         await client.query(
           `UPDATE identity.organization_memberships
@@ -450,6 +463,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           client,
           normalized.organizationId,
           normalized.actorUserId,
+          true,
         );
         if (!manager) {
           await client.query("ROLLBACK");
@@ -524,6 +538,17 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         if (!previous) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
+        }
+        if (
+          !(await managerMayChangeMember(
+            client,
+            manager,
+            normalized.organizationId,
+            normalized.membershipId,
+          ))
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
         }
         await client.query(
           `UPDATE identity.organization_memberships
@@ -1345,6 +1370,7 @@ async function lockAuthorizedManager(
   client: pg.PoolClient,
   organizationId: string,
   actorUserId: string,
+  allowReferencedManager = false,
 ): Promise<InviterRow | null> {
   const result = await client.query<InviterRow>(
     `SELECT membership.id AS membership_id, membership.role_key, actor.name, actor.email, membership.permission_overrides,
@@ -1369,14 +1395,26 @@ async function lockAuthorizedManager(
     [organizationId, actorUserId],
   );
   const row = result.rows[0];
-  return row && hasStaffManage(row) ? row : null;
+  return row && hasStaffManage(row, allowReferencedManager) ? row : null;
 }
 
-function hasStaffManage(row: InviterRow): boolean {
+async function managerMayChangeMember(
+  client: pg.PoolClient,
+  manager: InviterRow,
+  organizationId: string,
+  membershipId: string,
+): Promise<boolean> {
+  if (manager.role_key === "hotel_owner") return true;
+  const actor = await loadManagedStaffAccess(client, organizationId, manager.membership_id);
+  const target = await loadManagedStaffAccess(client, organizationId, membershipId);
+  return Boolean(actor && target && withinStaffManagementScope(actor, target));
+}
+
+function hasStaffManage(row: InviterRow, allowReferencedManager = false): boolean {
   if (row.role_definition_id !== null) {
     const role = row.role_definition;
-    // Referenced managers require the bounded command authorization implemented next.
-    if (role?.securityClass !== "account_admin") return false;
+    // Callers enable referenced managers only when they enforce the command ceiling.
+    if (role?.securityClass !== "account_admin" && !allowReferencedManager) return false;
     if (!role || role.id !== row.role_definition_id || role.baseRoleKey !== row.role_key)
       return false;
     return (

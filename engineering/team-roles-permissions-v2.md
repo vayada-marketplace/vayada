@@ -546,3 +546,15 @@ without revoking the newer invite, and exact replays preserve their original
 result. Validation: 53 PostgreSQL staff tests, 68 route tests, backend-auth
 build/typecheck and API typecheck; independent review found no actionable issues.
 The Team UI will call this read before resending through the existing delivery flow.
+
+### Manager status and removal limits
+
+Managers may suspend, reactivate and remove workers only within their live
+permissions, enabled products and property scope. Self, admin, agency-manager and
+external-owner targets are protected. Read-only custom clones of the manager
+base remain workers. Referenced and legacy memberships share the manifest-read
+baseline. Saved managers remain blocked from invitation/access writes until those
+commands gain the same limits. Validation: 54 PostgreSQL staff tests, 12 ceiling
+unit tests, backend-auth build/typecheck and API typecheck. Independent review
+found mixed-role baseline and manager-clone compatibility gaps; both fixed with
+PostgreSQL regressions.
