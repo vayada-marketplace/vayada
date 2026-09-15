@@ -28,6 +28,7 @@ const correctCommandId = "11320000-0000-4000-8000-000000000007";
 const readyCommandId = "11320000-0000-4000-8000-000000000008";
 const archiveCommandId = "11320000-0000-4000-8000-000000000009";
 const now = "2026-08-21T10:00:00.000Z";
+const exportExpiresAt = "2026-08-21T10:01:00.000Z";
 const root = `/api/finance/properties/${propertyId}/financials/folios`;
 const exportRoot = `/api/finance/properties/${propertyId}/financials/exports`;
 const money = { amount: "12.0000", currency: "EUR" };
@@ -75,6 +76,11 @@ type Commands = NonNullable<FinanceFolioRoutesOptions["commands"]> & {
 };
 // prettier-ignore
 type ExportJobs = NonNullable<FinanceFolioRoutesOptions["exports"]> & { enqueue: ReturnType<typeof vi.fn> };
+type ExportDownloads = NonNullable<FinanceFolioRoutesOptions["exportDownloads"]> & {
+  read: { find: ReturnType<typeof vi.fn> };
+  signer: { signPrivateDownload: ReturnType<typeof vi.fn> };
+  now: ReturnType<typeof vi.fn>;
+};
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 
@@ -97,9 +103,11 @@ function commands(): Commands {
 
 // prettier-ignore
 function exportJobs(): ExportJobs { return { enqueue: vi.fn(async () => ({ status: "created", exportId, envelope: exportCapture.envelope })) } as ExportJobs; }
+// prettier-ignore
+function exportDownloads(): ExportDownloads { return { read:{find:vi.fn(async()=>({state:"ready",expiresAt:exportExpiresAt,artifact:{mediaId:exportId,bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/pms-financials-folios.v1.csv`,visibility:"private",lifecycleStatus:"active",filename:`pms-financials-folios-${propertyId}.csv`,contentType:"text/csv; charset=utf-8",sizeBytes:42}}))},signer:{signPrivateDownload:vi.fn(async()=>"https://signed.example/folio.csv")},serving:{bucketName:"test-private",cdnBaseUrl:"https://cdn.example",cdnOriginHost:"origin.example",publicPathPrefix:"media",publicCacheControl:"public, max-age=31536000, immutable",privateDownloadTtlSeconds:300,privateDownloadMaxTtlSeconds:900},now:vi.fn(()=>new Date(now))} as ExportDownloads; }
 
 // prettier-ignore
-async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs) {
+async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads) {
   const instance = buildApp({
     logger: false,
     browserAllowedOrigins: ["https://pms.example"],
@@ -108,6 +116,7 @@ async function app(repository: Ports, auth: RequestContext | null = context(), w
       propertyAccessRepository: agencyPropertyAccessRepository,
       ...(write ? { commands: write } : {}),
       ...(exports ? { exports } : {}),
+      ...(exportDownloads ? { exportDownloads } : {}),
     },
   });
   instance.decorateRequest("authContext", null);
@@ -319,6 +328,111 @@ describe("Financials folio export route", () => {
     expect(
       await instance.inject({ method: "POST", url: exportRoot, payload: { private: true } }),
     ).toMatchObject({ statusCode: 403 });
+  });
+
+  it("returns scoped export status and a retention-capped private download", async () => {
+    const access = exportDownloads(),
+      instance = await app(ports(), context(), undefined, undefined, access);
+    const response = await instance.inject({
+      method: "GET",
+      url: `${exportRoot}/${exportId.toUpperCase()}`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      contractVersion: "pms-financials-export.v1",
+      propertyId,
+      item: {
+        resourceId: exportId,
+        state: "ready",
+        expiresAt: exportExpiresAt,
+        artifact: {
+          mediaId: exportId,
+          filename: `pms-financials-folios-${propertyId}.csv`,
+          contentType: "text/csv; charset=utf-8",
+          sizeBytes: 42,
+        },
+        download: {
+          method: "GET",
+          url: "https://signed.example/folio.csv",
+          expiresAt: exportExpiresAt,
+        },
+      },
+    });
+    expect(access.read.find).toHaveBeenCalledWith({
+      exportId,
+      organizationId: "11320000-0000-4000-8000-000000000011",
+      propertyId,
+      now: new Date(now),
+    });
+    expect(access.signer.signPrivateDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucketName: "test-private",
+        method: "GET",
+        expiresInSeconds: 60,
+        cacheControl: "private, no-store",
+        responseContentDisposition: `attachment; filename="pms-financials-folios-${propertyId}.csv"`,
+        responseContentType: "text/csv; charset=utf-8",
+      }),
+    );
+
+    for (const state of ["pending", "running", "failed", "expired"] as const) {
+      access.read.find.mockResolvedValueOnce({ state, expiresAt: exportExpiresAt });
+      const status = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+      expect(status.json()).toEqual({
+        contractVersion: "pms-financials-export.v1",
+        propertyId,
+        item: { resourceId: exportId, state, expiresAt: exportExpiresAt },
+      });
+    }
+    expect(access.signer.signPrivateDownload).toHaveBeenCalledTimes(1);
+    access.read.find.mockResolvedValueOnce(null);
+    expect(
+      await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` }),
+    ).toMatchObject({ statusCode: 404 });
+
+    const late = exportDownloads();
+    late.now.mockReturnValueOnce(new Date(now)).mockReturnValueOnce(new Date(exportExpiresAt));
+    const lateResponse = await (
+      await app(ports(), context(), undefined, undefined, late)
+    ).inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(lateResponse.json()).toEqual({
+      contractVersion: "pms-financials-export.v1",
+      propertyId,
+      item: { resourceId: exportId, state: "expired", expiresAt: exportExpiresAt },
+    });
+    expect(late.signer.signPrivateDownload).not.toHaveBeenCalled();
+  });
+
+  it("authorizes status before lookup and rejects unsafe download evidence", async () => {
+    const denied = exportDownloads(),
+      unauthorized = await app(ports(), context({ permissions: [] }), undefined, undefined, denied);
+    expect(
+      await unauthorized.inject({ method: "GET", url: `${exportRoot}/private` }),
+    ).toMatchObject({ statusCode: 403 });
+    expect(denied.read.find).not.toHaveBeenCalled();
+    const access = exportDownloads(),
+      instance = await app(ports(), context(), undefined, undefined, access);
+    access.signer.signPrivateDownload.mockResolvedValueOnce("http://must-not-leak.example/file");
+    const unsafe = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(unsafe.statusCode).toBe(500);
+    expect(JSON.stringify(unsafe.json())).not.toContain("must-not-leak");
+    access.read.find.mockResolvedValueOnce({
+      state: "ready",
+      expiresAt: exportExpiresAt,
+      artifact: {
+        mediaId: exportId,
+        bucketName: "test-private",
+        storageKey: "private/must-not-leak.csv",
+        visibility: "private",
+        lifecycleStatus: "active",
+        filename: "must-not-leak.csv",
+        contentType: "text/csv; charset=utf-8",
+        sizeBytes: 42,
+      },
+    });
+    const invalid = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(invalid.statusCode).toBe(500);
+    expect(JSON.stringify(invalid.json())).not.toContain("must-not-leak");
   });
 });
 

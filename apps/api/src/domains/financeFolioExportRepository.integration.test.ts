@@ -121,6 +121,59 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
     expect(stored.rows[0].payload.snapshot.manifest).toEqual([]);
   });
 
+  it("reads status only inside the immutable property and organization scope", async () => {
+    const created = await repository.enqueue(command("status"));
+    if (created.status === "conflict") throw new Error("Expected status export");
+    const expiresAt = (
+      await admin.query<{ expiresAt: string }>(
+        `SELECT job_metadata->>'expiresAt' AS "expiresAt" FROM platform.jobs WHERE id=$1`,
+        [created.exportId],
+      )
+    ).rows[0]!.expiresAt;
+    const lookup = {
+      exportId: created.exportId,
+      organizationId: ORG,
+      propertyId: PROPERTY_A,
+      now: new Date(),
+    };
+    await expect(repository.find(lookup)).resolves.toMatchObject({ state: "pending", expiresAt });
+    await expect(repository.find({ ...lookup, organizationId: ORG_B })).resolves.toBeNull();
+    await admin.query("UPDATE platform.jobs SET status='succeeded',finished_at=now() WHERE id=$1", [
+      created.exportId,
+    ]);
+    await admin.query(
+      `INSERT INTO platform.media_objects(id,bucket,storage_key,visibility,purpose,owner_organization_id,property_id,resource_product,resource_type,resource_id,lifecycle_status,content_type,size_bytes,checksum_sha256,original_filename,source_system,source_table,source_row_id,retained_until,created_by_user_id)
+      VALUES($1::uuid,'test-private',$2,'private','finance.financials_export',$3,$4,'finance','financials_export',$1::uuid::text,'active','text/csv; charset=utf-8',42,repeat('a',64),$5,'platform','platform.jobs',$1::uuid::text,$6::timestamptz,$7)`,
+      [
+        created.exportId,
+        `private/finance/financials-exports/${created.exportId}/pms-financials-folios.v1.csv`,
+        ORG,
+        PROPERTY_A,
+        `pms-financials-folios-${PROPERTY_A}.csv`,
+        expiresAt,
+        ACTOR,
+      ],
+    );
+    await expect(repository.find(lookup)).resolves.toMatchObject({
+      state: "ready",
+      artifact: {
+        mediaId: created.exportId,
+        bucketName: "test-private",
+        visibility: "private",
+        lifecycleStatus: "active",
+        sizeBytes: 42,
+      },
+    });
+    await expect(
+      repository.find({ ...lookup, now: new Date(new Date(expiresAt).getTime() + 1) }),
+    ).resolves.toEqual({ state: "expired", expiresAt });
+    await admin.query(
+      "UPDATE platform.media_objects SET storage_key='private/wrong.csv' WHERE id=$1",
+      [created.exportId],
+    );
+    await expect(repository.find(lookup)).rejects.toThrow("status evidence is invalid");
+  });
+
   it("rolls back the idempotency key, job, and audit together", async () => {
     // prettier-ignore
     for (const [key, organizationId] of [["wrong-org", ORG_B], ["missing-org", MISSING]] as const)
@@ -139,7 +192,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
   // prettier-ignore
   function command(key: string, propertyId = PROPERTY_A, manifest: Array<{ folioId: string; revisionId: string; revision: number; sourceDigest: string }> = []) { const filters = { state: "ready" as const, search: "guest@example.test", sort: "createdAt_desc" as const }; return { commandId: REVISION, idempotencyKey: `VAY-1134-${key}`, organizationId: ORG, propertyId, currency: "EUR", filters, snapshot: { formatVersion: "pms-financials-folios.v1" as const, propertyId, currency: "EUR", filters, snapshotAt: new Date(Date.now() - 60_000).toISOString(), manifest }, envelope: { contractVersion: "pms-financials.v1" as const, propertyId, currency: "EUR", timeZone: "Europe/Berlin", generatedAt: "2026-08-21T10:00:00.000Z", sourceFreshness: { pmsPricing: "2026-08-21T09:00:00.000Z" }, incompleteEvidence: [] }, audit: { actorUserId: ACTOR, requestId: `request-${key}`, correlationId: `correlation-${key}`, causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z" } }; }
   // prettier-ignore
-  async function cleanup() { await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; DELETE FROM platform.product_audit_events WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.jobs WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.idempotency_keys WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_payment_references WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_lines WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_revisions WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folios WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM identity.organization_resource_links WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organization_memberships WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organizations WHERE id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.users WHERE id='${ACTOR}'; COMMIT`); }
+  async function cleanup() { await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; DELETE FROM platform.product_audit_events WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.media_objects WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.jobs WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.idempotency_keys WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_payment_references WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_lines WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_revisions WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folios WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM identity.organization_resource_links WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organization_memberships WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organizations WHERE id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.users WHERE id='${ACTOR}'; COMMIT`); }
 });
 
 it("binds job payloads to durable scope, fingerprint, timestamps, and expiry", () => {
