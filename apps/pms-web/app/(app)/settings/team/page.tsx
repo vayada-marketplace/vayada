@@ -17,6 +17,7 @@ const roleLabelKeys: Record<PmsStaffMember["roleKey"], string> = {
   front_desk: "settings.team.roleFrontDesk",
   housekeeping: "settings.team.roleHousekeeping",
   hotel_custom: "settings.team.roleCustom",
+  external_owner: "settings.team.roleOwner",
 };
 
 export default function TeamSettingsPage() {
