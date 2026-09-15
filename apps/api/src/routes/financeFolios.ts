@@ -5,6 +5,8 @@ import {
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import {
+  FINANCE_FOLIO_CSV_CONTENT_TYPE,
+  FINANCE_FOLIO_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
   parseFinanceFolioExportFilters,
   parseFinanceFolioExportSnapshot,
@@ -22,6 +24,7 @@ import { z } from "zod";
 import {
   type FinanceFolioExportCommand,
   type FinanceFolioExportEnqueueResult,
+  type FinanceFolioExportStatus,
 } from "../domains/financeFolioExportRepository.js";
 import {
   type FinanceFolioCommandResult,
@@ -37,14 +40,32 @@ import {
   type FinanceFolioReadRepository,
 } from "../domains/financeFolioReadRepository.js";
 import { enforceRoutePolicy } from "./policy.js";
+import {
+  createPrivateDownloadPolicy,
+  type PlatformMediaServingConfig,
+} from "../platform/mediaServing.js";
+import type { PlatformMediaPrivateDownloadSigner } from "../platform/platformMediaS3.js";
 
-type Params = { propertyId: string; folioId?: string };
+type Params = { propertyId: string; folioId?: string; exportId?: string };
 type Scope = { context: RequestContext; propertyId: string };
 export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
   repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
   exports?: {
     enqueue(command: FinanceFolioExportCommand): Promise<FinanceFolioExportEnqueueResult>;
+  };
+  exportDownloads?: {
+    read: {
+      find(input: {
+        exportId: string;
+        organizationId: string;
+        propertyId: string;
+        now: Date;
+      }): Promise<FinanceFolioExportStatus | null>;
+    };
+    signer: PlatformMediaPrivateDownloadSigner;
+    serving: PlatformMediaServingConfig;
+    now?: () => Date;
   };
   commands?: {
     create(command: CreateFinanceFolioCommand): Promise<FinanceFolioCommandResult>;
@@ -121,6 +142,30 @@ export async function registerFinanceFolioRoutes(
       }),
     );
 
+  if (options.exportDownloads)
+    app.get(`${EXPORT_ROOT}/:exportId`, { onRequest: read }, async (request, reply) =>
+      safe(reply, async () => {
+        const exportId = canonicalUuid((request.params as Params).exportId);
+        if (!exportId || !empty(request.query)) return bad(reply);
+        const current = scopes.get(request)!,
+          now = options.exportDownloads!.now?.() ?? new Date();
+        const value = await options.exportDownloads!.read.find({
+          exportId,
+          organizationId: current.context.selectedOrganization.organizationId,
+          propertyId: current.propertyId,
+          now,
+        });
+        if (!value) return missing(reply);
+        return exportStatusResponse(
+          reply,
+          value,
+          current.propertyId,
+          exportId,
+          options.exportDownloads!,
+        );
+      }),
+    );
+
   if (!options.commands) return;
   app.post(ROOT, { onRequest: write }, async (request, reply) =>
     safe(reply, async () => {
@@ -171,6 +216,96 @@ export async function registerFinanceFolioRoutes(
   app.delete(`${ROOT}/:folioId`, { onRequest: write }, async (request, reply) =>
     transition(request, reply, scopes, options.commands!, "archive"),
   );
+}
+
+async function exportStatusResponse(
+  reply: FastifyReply,
+  value: FinanceFolioExportStatus,
+  propertyId: string,
+  exportId: string,
+  access: NonNullable<FinanceFolioRoutesOptions["exportDownloads"]>,
+) {
+  if (
+    !record(value) ||
+    !exact(
+      value,
+      value.state === "ready" ? ["state", "expiresAt", "artifact"] : ["state", "expiresAt"],
+    ) ||
+    !["pending", "running", "failed", "expired", "ready"].includes(String(value.state)) ||
+    typeof value.expiresAt !== "string" ||
+    !utc(value.expiresAt)
+  )
+    return commandViolation();
+  const item: Record<string, unknown> = {
+    resourceId: exportId,
+    state: value.state,
+    expiresAt: value.expiresAt,
+  };
+  if (value.state === "ready") {
+    const artifact = value.artifact,
+      signingAt = access.now?.() ?? new Date(),
+      remaining = Math.floor((new Date(value.expiresAt).getTime() - signingAt.getTime()) / 1000);
+    if (!Number.isFinite(remaining)) return commandViolation();
+    if (remaining < 1)
+      return reply.send({
+        contractVersion: "pms-financials-export.v1",
+        propertyId,
+        item: { resourceId: exportId, state: "expired", expiresAt: value.expiresAt },
+      });
+    if (
+      !record(artifact) ||
+      !exact(artifact, [
+        "mediaId",
+        "bucketName",
+        "storageKey",
+        "visibility",
+        "lifecycleStatus",
+        "filename",
+        "contentType",
+        "sizeBytes",
+      ]) ||
+      artifact.mediaId !== exportId ||
+      artifact.bucketName !== access.serving.bucketName ||
+      artifact.storageKey !==
+        `private/finance/financials-exports/${exportId}/${FINANCE_FOLIO_CSV_VERSION}.csv` ||
+      artifact.visibility !== "private" ||
+      artifact.lifecycleStatus !== "active" ||
+      typeof artifact.bucketName !== "string" ||
+      typeof artifact.storageKey !== "string" ||
+      artifact.filename !== `pms-financials-folios-${propertyId}.csv` ||
+      artifact.contentType !== FINANCE_FOLIO_CSV_CONTENT_TYPE ||
+      typeof artifact.sizeBytes !== "number" ||
+      !Number.isSafeInteger(artifact.sizeBytes) ||
+      artifact.sizeBytes <= 0
+    )
+      return commandViolation();
+    const policy = createPrivateDownloadPolicy(
+        access.serving,
+        {
+          bucketName: artifact.bucketName,
+          storageKey: artifact.storageKey,
+          visibility: "private",
+          status: "active",
+          originalFilename: artifact.filename,
+          contentType: artifact.contentType,
+        },
+        { ttlSeconds: Math.min(access.serving.privateDownloadTtlSeconds, remaining) },
+      ),
+      url = await access.signer.signPrivateDownload(policy);
+    if (!secureUrl(url)) return commandViolation();
+    item.download = {
+      method: "GET",
+      url,
+      expiresAt: new Date(signingAt.getTime() + policy.expiresInSeconds * 1000).toISOString(),
+    };
+    item.artifact = {
+      mediaId: artifact.mediaId,
+      filename: artifact.filename,
+      contentType: artifact.contentType,
+      sizeBytes: artifact.sizeBytes,
+    };
+  }
+  return reply.send({ contractVersion: "pms-financials-export.v1", propertyId, item });
 }
 
 function exportResponse(
@@ -464,6 +599,15 @@ function trimmed(value: string) {
 }
 function email(value: string) {
   return trimmed(value) && value.includes("@");
+}
+function secureUrl(value: unknown) {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 // prettier-ignore
 function utc(value: string) { const match = /^((?!0000)\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?Z$/.exec(value); if (!match) return false; const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),hour=Number(match[4]),minute=Number(match[5]),second=Number(match[6]),parsed=new Date(0); parsed.setUTCFullYear(year,month-1,day); parsed.setUTCHours(hour,minute,second,0); return Number.isFinite(parsed.getTime()) && parsed.getUTCFullYear()===year && parsed.getUTCMonth()===month-1 && parsed.getUTCDate()===day && parsed.getUTCHours()===hour && parsed.getUTCMinutes()===minute && parsed.getUTCSeconds()===second; }

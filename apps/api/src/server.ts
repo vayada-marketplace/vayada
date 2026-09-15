@@ -1528,7 +1528,20 @@ const app = buildApp({
           : {}),
       }
     : undefined,
-  financeFolios: financeFolioRuntime?.routes,
+  financeFolios: financeFolioRuntime
+    ? {
+        ...financeFolioRuntime.routes,
+        ...(platformMediaRuntime
+          ? {
+              exportDownloads: {
+                read: financeFolioRuntime.routes.exports,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
+              },
+            }
+          : {}),
+      }
+    : undefined,
   pmsInboxAttachmentMedia:
     pmsInboxRuntime && platformMediaRuntime
       ? {

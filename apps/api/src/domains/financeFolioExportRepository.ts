@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 // prettier-ignore
-import { FINANCE_FOLIO_CSV_VERSION, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
+import { FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_FOLIO_CSV_VERSION, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
 import pg, { type PoolClient } from "pg";
 export const FINANCE_FOLIO_EXPORT_QUEUE = "finance.financials-exports";
 export const FINANCE_FOLIO_EXPORT_JOB = "finance.folio-csv-export.v1";
@@ -15,6 +15,8 @@ export type FinanceFolioExportEnqueueResult = { status: "created" | "replayed"; 
 // prettier-ignore
 export type FinanceFolioExportCommand = { commandId: string; idempotencyKey: string; organizationId: string; propertyId: string; currency: string; filters: FinanceFolioExportFilters; snapshot: FinanceFolioExportSnapshot; envelope: FinanceFolioEnvelope; audit: FinanceFolioExportAudit };
 // prettier-ignore
+export type FinanceFolioExportStatus = { state:"pending"|"running"|"failed"|"expired"; expiresAt:string } | { state:"ready"; expiresAt:string; artifact:{ mediaId:string; bucketName:string; storageKey:string; visibility:"private"; lifecycleStatus:"active"; filename:string; contentType:string; sizeBytes:number } };
+// prettier-ignore
 type ExpectedPayload = { organizationId: string; propertyId: string; currency: string; payloadFingerprint: string; acceptedAt: string; snapshotAt: string; expiresAt: string; now: Date };
 // prettier-ignore
 type MacPort = { generateMac(input: { KeyId: string; MacAlgorithm: "HMAC_SHA_256"; Message: Uint8Array }): Promise<{ Mac?: Uint8Array }> };
@@ -27,6 +29,24 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
     throw new Error("Finance folio export jobs require a search digester");
   const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 3 });
   return {
+    async find(input: { exportId:string; organizationId:string; propertyId:string; now:Date }): Promise<FinanceFolioExportStatus|null> {
+      if (![input.exportId,input.organizationId,input.propertyId].every(uuid) || !Number.isFinite(input.now.getTime())) throw new TypeError("Invalid folio export lookup");
+      const row=(await pool.query<{status:string;expiresAt:string;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_metadata->>'expiresAt' AS "expiresAt",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
+        FROM platform.jobs job LEFT JOIN platform.media_objects media ON media.id=job.id AND media.owner_organization_id=$3::uuid AND media.property_id=$2::uuid AND media.storage_kind='vayada_managed' AND media.purpose='finance.financials_export' AND media.resource_product='finance' AND media.resource_type='financials_export' AND media.resource_id=job.id::text AND media.source_system='platform' AND media.source_table='platform.jobs' AND media.source_row_id=job.id::text
+        WHERE job.id=$1::uuid AND job.property_id=$2::uuid AND job.tenant_scope='property'
+          AND job.queue_name=$4 AND job.job_type=$5 AND job.resource_product='finance'
+          AND job.resource_type='financials_export' AND job.resource_id=job.id::text
+          AND job.payload->>'organizationId'=$3::text AND job.job_metadata->>'organizationId'=$3::text`,[input.exportId,input.propertyId,input.organizationId,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB])).rows[0];
+      if (!row) return null;
+      if (!instant(row.expiresAt)) throw new Error("Finance folio export status evidence is invalid");
+      if (!["pending","running","failed","canceled","dead_lettered","succeeded"].includes(row.status)) throw new Error("Finance folio export status evidence is invalid");
+      if (input.now.getTime()>=new Date(row.expiresAt).getTime()) return {state:"expired",expiresAt:row.expiresAt};
+      if (row.status==="pending"||row.status==="running") return {state:row.status,expiresAt:row.expiresAt};
+      if (["failed","canceled","dead_lettered"].includes(row.status)) return {state:"failed",expiresAt:row.expiresAt};
+      const filename=`pms-financials-folios-${input.propertyId}.csv`,storageKey=`private/finance/financials-exports/${input.exportId}/${FINANCE_FOLIO_CSV_VERSION}.csv`;
+      if (row.status!=="succeeded"||row.mediaId!==input.exportId||!trimmed(row.bucketName,1,200)||row.storageKey!==storageKey||row.visibility!=="private"||row.lifecycleStatus!=="active"||row.filename!==filename||row.contentType!==FINANCE_FOLIO_CSV_CONTENT_TYPE||!Number.isSafeInteger(row.sizeBytes)||row.sizeBytes===null||row.sizeBytes<=0||row.retainedUntil!==row.expiresAt) throw new Error("Finance folio export status evidence is invalid");
+      return {state:"ready",expiresAt:row.expiresAt,artifact:{mediaId:row.mediaId,bucketName:row.bucketName,storageKey:row.storageKey,visibility:"private",lifecycleStatus:"active",filename:row.filename,contentType:row.contentType,sizeBytes:row.sizeBytes}};
+    },
     async enqueue(input: FinanceFolioExportCommand): Promise<FinanceFolioExportEnqueueResult> {
       const filters = parseFinanceFolioExportFilters(input.filters);
       const snapshot = parseFinanceFolioExportSnapshot(input.snapshot);
@@ -265,7 +285,7 @@ function instantMillis(value: unknown): number | null {
   const millis = new Date(value).getTime();
   return Number.isFinite(millis) && new Date(millis).toISOString() === value ? millis : null;
 }
-const trimmed = (value: unknown, min: number, max: number) =>
+const trimmed = (value: unknown, min: number, max: number): value is string =>
   typeof value === "string" && value === value.trim() && value.length >= min && value.length <= max;
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
