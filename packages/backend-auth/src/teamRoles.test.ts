@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
 import { createPgTeamRoleRepository } from "./teamRoles.js";
+import { validateTeamRoleDefaults } from "./teamRolePolicy.js";
 import type { TeamRoleCreateCommand } from "./teamRoleCreate.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -41,6 +42,15 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organizations (id, kind, name, slug) VALUES ($1::uuid, 'hotel_group', 'Role command test', $1::text)`,
         [org],
       );
+      // Validate real migration presets, then isolate custom-role command fixtures.
+      const presets = await repository.list(org);
+      expect(presets).toHaveLength(6);
+      expect(presets.every(validateTeamRoleDefaults)).toBe(true);
+      await client.query("BEGIN; SET LOCAL session_replication_role = replica");
+      await client.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
+        org,
+      ]);
+      await client.query("COMMIT");
       await client.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
         user,
         `${user}@example.com`,
@@ -280,6 +290,15 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organizations (id, kind, name, slug) VALUES ($1::uuid, 'hotel_group', 'Role test', $1::text), ($2::uuid, 'hotel_group', 'Other role test', $2::text)`,
         [org, other],
       );
+      // Validate real migration presets, then isolate custom-role command fixtures.
+      const presets = await repository.list(org);
+      expect(presets).toHaveLength(6);
+      expect(presets.every(validateTeamRoleDefaults)).toBe(true);
+      await client.query("BEGIN; SET LOCAL session_replication_role = replica");
+      await client.query("DELETE FROM identity.organization_roles WHERE organization_id = $1", [
+        org,
+      ]);
+      await client.query("COMMIT");
       await client.query(`INSERT INTO identity.users (id, email) VALUES ($1, $2)`, [
         user,
         `${user}@example.com`,
@@ -292,7 +311,7 @@ describe.skipIf(!url)("organization role catalog", () => {
         `INSERT INTO identity.organization_memberships (organization_id, user_id, role_key, status, property_access_mode, role_definition_id, access_origin) VALUES ($1, $2, 'hotel_custom', 'active', 'all', $3, 'agency')`,
         [org, user, role],
       );
-      await expect(repository.list(other)).resolves.toEqual([]);
+      expect(await repository.list(other)).toHaveLength(6);
       const roles = await repository.list(org);
       expect(roles).toHaveLength(1);
       expect(roles[0]).toMatchObject({

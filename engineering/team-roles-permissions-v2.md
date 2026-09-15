@@ -571,3 +571,20 @@ waiting for the organization. Validation: 55 PostgreSQL staff tests, 12 ceiling
 unit tests, backend-auth build/typecheck and API typecheck. Independent review
 identified the acceptance lock inversion; fixed and confirmed. Manager role CRUD
 and privileged targets remain prohibited. Frontend integration remains pending.
+
+### Preset initialization (migration 0197)
+
+Existing hotel-group accounts and newly inserted accounts receive six saved roles.
+Initialization never assigns members or invitations; null references retain their
+legacy permissions. A deleted preset is not recreated by reads or account edits.
+The insert trigger is installed before the backfill under the migration transaction
+lock so concurrent account creation cannot miss initialization. Account deletion
+may cascade its roles; direct Account admin role edits/deletion stay prohibited.
+A pre-existing custom name collision aborts instead of overwriting customer data.
+
+Preset section counts must reflect supported permission keys. Property owner is
+read-only, Housekeeping has no edit/contact grants, and Reservation manager has
+four supported edit sections. Finance/channel-manager edit and Booking Chat are
+not invented to match illustrative mock counts. Existing members are unaffected
+until an explicit saved-role assignment. Validation covers all six presets through
+the runtime policy validator and checks legacy preservation and deletion behavior.
