@@ -493,6 +493,52 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     });
   });
 
+  it("saves dynamic scope without assignment rows and returns safely to selected properties", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      propertyAccessMode: "all",
+      propertyIds: [],
+      expectedRevision: before.revision,
+    };
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+    const all = (await repository.getAccess(org, staffMembership))!;
+    expect(all).toMatchObject({ propertyAccessMode: "all", propertyIds: [] });
+    const restrict = updateCommand();
+    restrict.payload.expectedRevision = all.revision;
+    expect(await repository.updateAccess(restrict)).toMatchObject({ outcome: "updated" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "assigned",
+      propertyIds: [property],
+    });
+    const jobs = await client.query(
+      `SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1`,
+      [restrict.commandId],
+    );
+    expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "property_access_removed" } }]);
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+    expect((await repository.getAccess(org, staffMembership))!.propertyAccessMode).toBe("assigned");
+  });
+
+  it("rejects all-property saves without revisions or with snapshot property IDs", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    for (const propertyIds of [[], [property]]) {
+      const edit = updateCommand();
+      edit.payload = {
+        ...edit.payload,
+        propertyAccessMode: "all",
+        propertyIds,
+        ...(propertyIds.length ? { expectedRevision: before.revision } : {}),
+      };
+      expect(await repository.updateAccess(edit)).toEqual({
+        outcome: "rejected",
+        reason: "invalid_command",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    }
+  });
+
   it("hides foreign, admin, missing and removed access targets", async () => {
     for (const [tenant, target] of [
       [otherOrg, staffMembership],
@@ -1447,6 +1493,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
   async function deliveredInvitation(
     revision = 1,
     productAccess?: { pms: boolean; booking: boolean },
+    propertyAccessMode: "assigned" | "all" = "assigned",
   ) {
     const invite = command({
       commandId: `accept-command-${revision}`,
@@ -1454,6 +1501,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       revision,
     });
     if (productAccess !== undefined) invite.payload.productAccess = productAccess;
+    invite.payload.propertyAccessMode = propertyAccessMode;
+    if (propertyAccessMode === "all") invite.payload.propertyIds = [];
     const created = await repository.persist(invite);
     if (created.outcome !== "created") throw new Error("expected invitation creation");
     const providerInvitationId = `invitation_${created.invitationId}`;
@@ -1530,6 +1579,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         ])
       ).rows[0]?.role_key,
     ).toBe("housekeeping");
+  });
+
+  it("accepts a dynamic property invitation without materializing assignments", async () => {
+    const invitation = await deliveredInvitation(1, undefined, "all");
+    await expectAcceptance(invitation, { outcome: "accepted" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "all",
+      propertyIds: [],
+    });
   });
 
   it.each([

@@ -252,6 +252,18 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ## Implementation stack and evidence
 
+### Dynamic property scope
+
+Migration `0199_staff_invitation_dynamic_property_scope.sql` permits agency staff
+invitations with `propertyAccessMode: "all"`. Both invitation and membership
+commands require an empty `propertyIds` array for this mode and store no snapshot
+assignments. Acceptance preserves the mode; authorization uses active canonical
+organization links from each fresh context. Selected scope still requires at
+least one validated property. Explicit HTTP membership scope changes require
+the loaded revision, and all-mode commands require it at the repository boundary.
+Switching back to selected scope schedules Inbox assignment reconciliation.
+External-owner and delegated-staff scope ceilings remain assigned-only.
+
 ### Product veto foundation
 
 Migration `0198_membership_product_access.sql` stores independent PMS and Booking

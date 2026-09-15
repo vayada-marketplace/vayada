@@ -32,16 +32,14 @@ export type StaffInvitationRoutesOptions = {
   removal: StaffRemoval;
 };
 
-type StaffInvitationRequest = Omit<
-  CreateStaffInviteCommand["payload"],
-  "organizationId" | "propertyAccessMode"
->;
+type StaffInvitationRequest = Omit<CreateStaffInviteCommand["payload"], "organizationId">;
 type StaffAccessRequest = Omit<
   UpdateStaffAccessCommand["payload"],
-  "organizationId" | "membershipId" | "propertyAccessMode"
+  "organizationId" | "membershipId"
 >;
 
 const invitationBodyKeys = new Set([
+  "propertyAccessMode",
   "email",
   "name",
   "roleKey",
@@ -51,6 +49,7 @@ const invitationBodyKeys = new Set([
   "productAccess",
 ]);
 const accessBodyKeys = new Set([
+  "propertyAccessMode",
   "roleKey",
   "propertyIds",
   "permissionOverrides",
@@ -148,7 +147,6 @@ export async function registerStaffInvitationRoutes(
         payload: {
           organizationId: context.selectedOrganization.organizationId,
           membershipId: request.params.membershipId,
-          propertyAccessMode: "assigned",
           ...body,
         },
       };
@@ -293,7 +291,6 @@ export async function registerStaffInvitationRoutes(
       payload: {
         organizationId: context.selectedOrganization.organizationId,
         ...body,
-        propertyAccessMode: "assigned",
       },
     };
 
@@ -363,6 +360,7 @@ function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
     (membershipStatus !== undefined &&
       (expectedRevision === undefined ||
         (membershipStatus !== "active" && membershipStatus !== "suspended"))) ||
+    (value["propertyAccessMode"] !== undefined && expectedRevision === undefined) ||
     (productAccess !== undefined &&
       (expectedRevision === undefined || !validProductAccess(productAccess)))
   )
@@ -399,13 +397,19 @@ function parseStaffAccess(value: Record<string, unknown>): StaffAccessRequest | 
   }
   const access = {
     roleKey: value["roleKey"],
-    propertyAccessMode: "assigned",
+    propertyAccessMode:
+      value["propertyAccessMode"] === undefined ? "assigned" : value["propertyAccessMode"],
     propertyIds,
     permissionOverrides: { grant: overrides["grant"], deny: overrides["deny"] },
   };
-  if (validateStaffInviteAccess(access).length) return null;
+  if (
+    typeof access.propertyAccessMode !== "string" ||
+    validateStaffInviteAccess({ ...access, propertyAccessMode: access.propertyAccessMode }).length
+  )
+    return null;
   return {
     roleKey: access.roleKey as StaffAccessRequest["roleKey"],
+    propertyAccessMode: access.propertyAccessMode as "assigned" | "all",
     propertyIds,
     permissionOverrides: access.permissionOverrides as StaffAccessRequest["permissionOverrides"],
   };
