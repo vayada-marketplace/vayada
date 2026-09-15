@@ -1324,6 +1324,7 @@
   "settings.team.roleManager": "Manager",
   "settings.team.roleFrontDesk": "Front Desk",
   "settings.team.roleHousekeeping": "Housekeeping",
+  "settings.team.roleOwner": "Property owner",
   "settings.team.roleCustom": "Custom",
   "settings.team.statusActive": "Active",
   "settings.team.statusPending": "Pending",

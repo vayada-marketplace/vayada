@@ -1331,6 +1331,7 @@
   "settings.team.roleManager": "Manager",
   "settings.team.roleFrontDesk": "Rezeption",
   "settings.team.roleHousekeeping": "Housekeeping",
+  "settings.team.roleOwner": "Eigentümer",
   "settings.team.roleCustom": "Benutzerdefiniert",
   "settings.team.statusActive": "Aktiv",
   "settings.team.statusPending": "Ausstehend",
