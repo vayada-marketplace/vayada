@@ -2,11 +2,16 @@ import { getTimezone } from "countries-and-timezones";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
+  FINANCE_EXPENSE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  parseFinanceExpenseExportSnapshot,
+  parseFinanceExpenseExportQuery,
   parseFinanceExpenseQuery,
   type FinanceExpense,
   type FinanceExpenseCategory,
   type FinanceExpenseEnvelope,
+  type FinanceExpenseExportQuery,
+  type FinanceExpenseExportSnapshot,
   type FinanceExpenseIncompleteEvidence,
   type FinanceExpenseQuery,
   type FinanceRecurringExpenseRule,
@@ -37,6 +42,7 @@ export type FinanceExpenseReadModel = {
   categories(propertyId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceExpenseCategory[] }) | null>;
   expense(propertyId: string, expenseId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceExpense }) | null>;
   recurringRule(propertyId: string, ruleId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceRecurringExpenseRule }) | null>;
+  captureExport(propertyId: string, query: FinanceExpenseExportQuery): Promise<{ envelope: FinanceExpenseEnvelope; snapshot: FinanceExpenseExportSnapshot } | null>;
   expenses(propertyId: string, query: FinanceExpenseQuery): Promise<FinanceExpensesReadResponse | null>; close(): Promise<void>;
 };
 export class FinanceExpenseCursorError extends TypeError {
@@ -68,6 +74,11 @@ type ExpenseRow = Omit<FinanceExpense, "amount" | "paymentStatus" | "paidOn"> & 
   updatedAt: string;
 };
 type CategoryRow = FinanceExpenseCategory & { updatedAt: string; amount?: string };
+type ExpenseExportCaptureRow = {
+  snapshotAt: string;
+  financeFreshAt: string | null;
+  manifest: unknown;
+};
 type RuleRow = Omit<FinanceRecurringExpenseRule, "notes"> & {
   notes: string | null;
   updatedAt: string;
@@ -132,6 +143,15 @@ export function createPgFinanceExpenseReadModel(config: { connectionString?: str
       return { ...base(meta, compact({ financeExpenses: summary.financeFreshAt, bookingOccupancyThrough: summary.bookingFreshThrough }), incompleteEvidence),
         summary: { totalMtd: moneyMetric(current, prior, meta.currency), perOccupiedNight: moneyMetric(divide(current, currentNights), divide(prior, priorNights), meta.currency), unpaidAmount: moneyMetric(fixed(summary.currentUnpaid), fixed(summary.priorUnpaid), meta.currency), unpaidCount: countMetric(number(summary.currentUnpaidCount), number(summary.priorUnpaidCount)) }, categories, page };
     },
+    async captureExport(propertyId, rawQuery) {
+      const query = parseFinanceExpenseExportQuery(rawQuery);
+      if (!query) throw new TypeError("Finance expense export request is malformed");
+      const meta = await envelope(propertyId); if (!meta) return null;
+      const row = await consistentRead(pool, (client) => readExportManifest(client, meta, query));
+      const snapshot = parseFinanceExpenseExportSnapshot({ formatVersion: FINANCE_EXPENSE_CSV_VERSION, propertyId: meta.propertyId, currency: meta.currency, filters: query, snapshotAt: row.snapshotAt, manifest: row.manifest });
+      if (!snapshot) throw new FinanceExpenseEvidenceError("Expense export manifest is invalid");
+      return { envelope: base(meta, compact({ financeExpenses: row.financeFreshAt })), snapshot };
+    },
     async close() { if (ownsPool) await pool.end?.(); },
   };
 }
@@ -168,6 +188,19 @@ async function readPage(pool: Pick<FinanceReadClient, "query">, meta: Meta, quer
   const rows = (await pool.query<ExpenseRow>(`SELECT ${EXPENSE_COLUMNS} FROM finance.expenses e JOIN finance.expense_categories c ON c.id=e.category_id AND c.property_id=e.property_id WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT $${values.length}`, values)).rows;
   const items = rows.slice(0, query.limit).map(expense);
   return { items, nextCursor: rows.length > query.limit ? encodeCursor(meta.propertyId, query, items.at(-1)!) : null, limit: query.limit };
+}
+
+// prettier-ignore
+async function readExportManifest(pool: Pick<FinanceReadClient, "query">, meta: Meta, query: FinanceExpenseExportQuery): Promise<ExpenseExportCaptureRow> {
+  const values: unknown[] = [meta.propertyId, meta.currency, query.from, query.to], where = [`e.property_id=$1::uuid`, `e.currency=$2`, `e.incurred_on BETWEEN $3::date AND $4::date`, ACTIVE];
+  const add = (sql: string, value: unknown) => { values.push(value); where.push(sql.replace("?", `$${values.length}`)); };
+  if (query.categoryId) add(`e.category_id=?::uuid`, query.categoryId);
+  if (query.paymentStatus) add(`e.payment_status=?`, query.paymentStatus);
+  if (query.recurring !== undefined) where.push(`e.recurring_rule_id IS ${query.recurring ? "NOT " : ""}NULL`);
+  if (query.origin) add(`e.origin=?`, query.origin);
+  if (query.search) { values.push(query.search.toLowerCase()); where.push(`(position($${values.length} in lower(e.vendor))>0 OR position($${values.length} in lower(c.name))>0)`); }
+  const order = query.sort === "amount_desc" ? `e.amount DESC,e.incurred_on DESC,e.id` : `e.incurred_on DESC,e.id`;
+  return (await pool.query<ExpenseExportCaptureRow>(`SELECT to_char(date_trunc('milliseconds',transaction_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "snapshotAt",max(s."updatedAt")::text AS "financeFreshAt",COALESCE(jsonb_agg(jsonb_build_object('expenseId',s."expenseId",'revision',s.revision,'categoryId',s."categoryId",'categoryRevision',s."categoryRevision",'categoryName',s."categoryName",'paymentStatus',s."paymentStatus",'paidOn',s."paidOn") ORDER BY s.ordinal),'[]') AS manifest FROM (SELECT e.id::text AS "expenseId",e.revision::int AS revision,c.id::text AS "categoryId",c.revision::int AS "categoryRevision",c.name AS "categoryName",e.payment_status AS "paymentStatus",e.paid_on::text AS "paidOn",GREATEST(e.updated_at,c.updated_at) AS "updatedAt",row_number() OVER(ORDER BY ${order}) AS ordinal FROM finance.expenses e JOIN finance.expense_categories c ON c.id=e.category_id AND c.property_id=e.property_id WHERE ${where.join(" AND ")}) s`, values)).rows[0]!;
 }
 
 // prettier-ignore
