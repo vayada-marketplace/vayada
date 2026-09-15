@@ -252,6 +252,19 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ## Implementation stack and evidence
 
+### Organization role storage
+
+Migration `0196_organization_role_definitions.sql` adds tenant-owned definitions
+with names, descriptions, default permission arrays, immutable security class,
+base role key and optional preset identity. Database revisions increase on edits;
+the reserved Account admin definition cannot be updated or deleted. Composite
+foreign keys keep membership/invitation role references in the same organization.
+All existing references remain null and continue using existing authorization.
+No roles are seeded or assigned in this schema-only step. Do not populate those
+references before the resolver, validated writers and acceptance support ship.
+Those successors must validate permission ceilings and base-key consistency,
+and define cleanup of historical references before allowing unused-role deletion.
+
 ### Booking section permission rollout
 
 Deploy validation support for `booking.addons.read/manage` and
