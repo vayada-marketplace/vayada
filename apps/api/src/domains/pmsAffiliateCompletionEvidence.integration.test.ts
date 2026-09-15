@@ -18,10 +18,23 @@ function context(): RequestContext {
       membershipId: id(8),
       status: "active",
       roleKey: "owner",
+      propertyAccess: {
+        mode: "all",
+        roleKey: "owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+      },
       workosRoleSlugs: [],
       permissions: ["marketplace.profile.manage"],
     },
     linkedResources: [
+      {
+        product: "hotel_catalog",
+        resourceType: "property",
+        resourceId: id(3),
+        status: "active",
+        relationship: "owner",
+      },
       {
         product: "marketplace",
         resourceType: "hotel_profile",
@@ -192,6 +205,28 @@ describe.skipIf(!databaseUrl)("PMS affiliate completion evidence", () => {
   ])("rejects persisted scope loss: %s", async (sql) => {
     await pool.query(sql);
     expect(await read(pool, input())).toEqual({ status: "pending", reason: "scope_unavailable" });
+  });
+  it("denies an assigned owner outside their property despite organization-wide links", async () => {
+    const request = input();
+    request.context.membership.propertyAccess = {
+      mode: "assigned",
+      roleKey: "owner",
+      accessOrigin: "agency",
+      assignedPropertyIds: [id(99)],
+    };
+    await expect(read(pool, request)).rejects.toThrow();
+    request.context.membership.propertyAccess.assignedPropertyIds = [id(3)];
+    expect(await read(pool, request)).toMatchObject({ status: "completed" });
+  });
+  it("fails closed without resolved membership scope or canonical property linkage", async () => {
+    const request = input();
+    delete request.context.membership.propertyAccess;
+    await expect(read(pool, request)).rejects.toThrow();
+    const noCanonical = input();
+    noCanonical.context.linkedResources = noCanonical.context.linkedResources.filter(
+      (r) => r.product !== "hotel_catalog",
+    );
+    await expect(read(pool, noCanonical)).rejects.toThrow();
   });
   it("propagates database errors instead of returning confirmation", async () => {
     await pool.query("DROP TABLE platform.product_audit_events");

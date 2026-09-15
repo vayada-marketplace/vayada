@@ -1,6 +1,10 @@
 import type pg from "pg";
 import type { RequestContext } from "@vayada/backend-auth";
-import { requireActiveEntitlement, requireResourceAccess } from "@vayada/backend-authorization";
+import {
+  requireActiveEntitlement,
+  requireResourceAccess,
+  requirePropertyAccess,
+} from "@vayada/backend-authorization";
 import type { PmsAffiliateCompletionEvidence } from "@vayada/domain-pms";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -35,6 +39,16 @@ export async function readPmsAffiliateCompletionEvidence(
     key: "marketplace-hotel-profile",
     resource,
   });
+  // Fresh auth must include canonical membership scope; never infer all-property access.
+  await requirePropertyAccess(
+    context,
+    { findMembershipPropertyScope: async () => null },
+    {
+      propertyId,
+      targetResource: { product: "marketplace", resourceType: "hotel_profile" },
+      allowedRelationships: ["owner", "operator"],
+    },
+  );
   const result = await database.query(
     `
     SELECT a.id AS stay_item_id, a.assignment_status, b.lifecycle_status,
