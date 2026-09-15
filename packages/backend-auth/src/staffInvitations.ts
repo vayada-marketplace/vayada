@@ -96,6 +96,62 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
+    async getInvitation(organizationId: string, invitationId: string) {
+      if (!canonicalUuid(invitationId)) return null;
+      const result = await pool.query<{
+        id: string;
+        email: string;
+        name: string | null;
+        roleKey: HotelStaffRoleKey;
+        propertyAccessMode: "all" | "assigned";
+        propertyIds: string[];
+        permissionOverrides: unknown;
+        configurationRevision: number;
+        productAccess: { pms: boolean; booking: boolean };
+        roleDefinitionId: string | null;
+        roleDefinition: StaffRoleDefinition | null;
+        deliveryState: string;
+        expiresAt: Date | null;
+      }>(
+        `SELECT invitation.id, invitation.email, invitation.display_name AS name,
+                invitation.role_key AS "roleKey", invitation.property_access_mode AS "propertyAccessMode",
+                invitation.permission_overrides AS "permissionOverrides", invitation.configuration_revision AS "configurationRevision",
+                jsonb_build_object('pms', invitation.pms_access_enabled, 'booking', invitation.booking_access_enabled) AS "productAccess",
+                invitation.role_definition_id AS "roleDefinitionId", invitation.delivery_state AS "deliveryState", invitation.expires_at AS "expiresAt",
+                CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
+                  'id', definition.id, 'name', definition.name, 'revision', definition.revision::text,
+                  'securityClass', definition.security_class, 'baseRoleKey', definition.base_role_key,
+                  'presetKey', definition.preset_key, 'defaultPermissions', definition.default_permissions
+                ) END AS "roleDefinition",
+                ARRAY(SELECT property_id::text FROM identity.staff_invitation_property_assignments
+                      WHERE invitation_id = invitation.id ORDER BY property_id) AS "propertyIds"
+         FROM identity.staff_invitations invitation
+         JOIN identity.organizations organization ON organization.id = invitation.organization_id
+         LEFT JOIN identity.organization_roles definition ON definition.id = invitation.role_definition_id AND definition.organization_id = invitation.organization_id
+         WHERE invitation.organization_id = $1 AND invitation.id = $2 AND invitation.status = 'pending'
+           AND organization.kind = 'hotel_group' AND organization.status = 'active'`,
+        [organizationId, invitationId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      const overrides = parseStaffPermissionOverrides(row.permissionOverrides);
+      if (
+        !overrides ||
+        validateStaffInviteAccess({ ...row, permissionOverrides: overrides }).filter(
+          (issue) => row.roleDefinitionId === null || issue !== "missing_required_permission",
+        ).length ||
+        (row.roleDefinitionId !== null &&
+          (!row.roleDefinition ||
+            row.roleDefinition.baseRoleKey !== row.roleKey ||
+            !resolveTeamRolePermissions(row.roleDefinition, overrides)))
+      )
+        throw new Error("Invitation configuration is unavailable");
+      return {
+        ...row,
+        permissionOverrides: overrides,
+        expiresAt: row.expiresAt?.toISOString() ?? null,
+      };
+    },
     async getAccess(organizationId: string, membershipId: string) {
       const result = await pool.query<
         StaffAccessTargetRow & {
@@ -952,6 +1008,20 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "configuration_conflict" as const };
         }
+        if (normalized.expectedInvitationId !== undefined) {
+          const current = await client.query<{ id: string; configuration_revision: number }>(
+            `SELECT id, configuration_revision FROM identity.staff_invitations
+             WHERE organization_id = $1 AND email = $2 AND status = 'pending' FOR UPDATE`,
+            [normalized.organizationId, normalized.email],
+          );
+          if (
+            current.rows[0]?.id !== normalized.expectedInvitationId ||
+            normalized.configurationRevision !== current.rows[0].configuration_revision + 1
+          ) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "configuration_conflict" as const };
+          }
+        }
 
         if (normalized.roleDefinitionId !== undefined) {
           const overrides =
@@ -1109,6 +1179,8 @@ function normalize(command: CreateStaffInviteCommand) {
     !command.commandId.trim() ||
     !command.idempotencyKey.trim() ||
     !command.payload.email.trim() ||
+    (command.payload.expectedInvitationId !== undefined &&
+      !canonicalUuid(command.payload.expectedInvitationId)) ||
     !Number.isInteger(command.payload.configurationRevision) ||
     command.payload.configurationRevision <= 0 ||
     (command.payload.productAccess !== undefined &&
@@ -1138,6 +1210,9 @@ function normalize(command: CreateStaffInviteCommand) {
     propertyIds,
     permissionOverrides,
     configurationRevision: command.payload.configurationRevision,
+    ...(command.payload.expectedInvitationId === undefined
+      ? {}
+      : { expectedInvitationId: command.payload.expectedInvitationId.toLowerCase() }),
     ...(command.payload.roleDefinitionId === undefined
       ? {}
       : {

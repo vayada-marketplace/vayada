@@ -21,7 +21,13 @@ import { enforceRoutePolicy } from "./policy.js";
 
 type StaffInvitationRepository = Pick<
   ReturnType<typeof createPgStaffInvitationRepository>,
-  "getAccess" | "listRoster" | "persist" | "remove" | "updateAccess" | "updateStatus"
+  | "getAccess"
+  | "getInvitation"
+  | "listRoster"
+  | "persist"
+  | "remove"
+  | "updateAccess"
+  | "updateStatus"
 >;
 type StaffInvitationDelivery = Pick<
   ReturnType<typeof createStaffInvitationDeliveryCoordinator>,
@@ -43,6 +49,7 @@ type StaffAccessRequest = Omit<
 >;
 
 const invitationBodyKeys = new Set([
+  "expectedInvitationId",
   "roleDefinitionId",
   "expectedRoleRevision",
   "propertyAccessMode",
@@ -105,6 +112,27 @@ export async function registerStaffInvitationRoutes(
       return reply.status(500).send({ code: "team_roles_read_failed" });
     }
   });
+
+  app.get<{ Params: { invitationId: string } }>(
+    "/invitations/:invitationId",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const context = authorized.get(request);
+      if (!context) throw new Error("Invitation authorization was not resolved");
+      reply.header("Cache-Control", "no-store");
+      try {
+        const invitation = await options.repository.getInvitation(
+          context.selectedOrganization.organizationId,
+          request.params.invitationId,
+        );
+        return invitation
+          ? reply.send(invitation)
+          : reply.status(404).send({ code: "invitation_not_found" });
+      } catch {
+        return reply.status(500).send({ code: "invitation_read_failed" });
+      }
+    },
+  );
 
   for (const method of ["POST", "PATCH", "DELETE"] as const) {
     app.route<{ Params: { roleId: string }; Body: unknown }>({
@@ -454,6 +482,7 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
   const access = parseStaffAccess(value, roleDefinitionId !== undefined);
   if (
     email.length > 320 ||
+    (value["expectedInvitationId"] !== undefined && !roleUuid(value["expectedInvitationId"])) ||
     !/^[^\s@]+@[^\s@]+$/.test(email) ||
     (value["name"] !== undefined && (!name || name.length > 200)) ||
     !access ||
@@ -473,6 +502,9 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
     ...(name ? { name } : {}),
     ...access,
     configurationRevision: value["configurationRevision"] as number,
+    ...(value["expectedInvitationId"] === undefined
+      ? {}
+      : { expectedInvitationId: value["expectedInvitationId"] as string }),
     ...(roleDefinitionId === undefined
       ? {}
       : {

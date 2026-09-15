@@ -1697,6 +1697,44 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     return { ...created, providerInvitationId };
   }
 
+  it("reads saved invitation settings and rejects stale replacement requests", async () => {
+    const invite = command();
+    const first = await repository.persist(invite);
+    if (first.outcome !== "created") throw new Error("Expected invitation");
+    expect(await repository.getInvitation(otherOrg, first.invitationId)).toBeNull();
+    expect(await repository.getInvitation(org, "invalid")).toBeNull();
+    expect(await repository.getInvitation(org, first.invitationId)).toMatchObject({
+      id: first.invitationId,
+      email: invite.payload.email.trim().toLowerCase(),
+      configurationRevision: 1,
+      propertyIds: [property],
+      permissionOverrides: invite.payload.permissionOverrides,
+      roleDefinitionId: null,
+      deliveryState: "ready",
+    });
+    const replacement = command({
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      revision: 2,
+    });
+    replacement.payload.expectedInvitationId = first.invitationId;
+    const second = await repository.persist(replacement);
+    expect(second).toMatchObject({
+      outcome: "created",
+      supersededInvitationId: first.invitationId,
+    });
+    expect(await repository.getInvitation(org, first.invitationId)).toBeNull();
+    expect(await repository.persist(replacement)).toMatchObject({ outcome: "idempotent_replay" });
+    const stale = command({ commandId: randomUUID(), idempotencyKey: randomUUID(), revision: 3 });
+    stale.payload.expectedInvitationId = first.invitationId;
+    expect(await repository.persist(stale)).toMatchObject({
+      outcome: "rejected",
+      reason: "configuration_conflict",
+    });
+    if (second.outcome !== "created") throw new Error("Expected replacement");
+    expect(await repository.getInvitation(org, second.invitationId)).not.toBeNull();
+  });
+
   it("validates invitation role revisions and applies live defaults on acceptance", async () => {
     const roleId = randomUUID();
     let invitationId: string | undefined;
@@ -1728,6 +1766,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       expect(created.outcome).toBe("created");
       if (created.outcome !== "created") throw new Error("Expected saved role invitation");
       invitationId = created.invitationId;
+      expect(await repository.getInvitation(org, invitationId)).toMatchObject({
+        roleDefinitionId: roleId,
+        roleDefinition: { id: roleId, revision: "1" },
+      });
       await client.query(
         `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
         [invitationId, `invitation_${invitationId}`],
