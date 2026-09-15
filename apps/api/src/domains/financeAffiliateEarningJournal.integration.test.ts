@@ -1,18 +1,15 @@
-import { readFile } from "node:fs/promises";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseFinanceAffiliatePercentagePolicy } from "@vayada/domain-finance";
-import { context, databaseUrl, id, publicationFixture } from "./affiliatePublicationTestFixture.js";
+import {
+  context,
+  databaseUrl,
+  id,
+  earningJournalFixture,
+} from "./financeAffiliateEarningTestFixture.js";
 import {
   recordAffiliateEarningCalculation as record,
   type AffiliateEarningEvidenceResolver,
 } from "./financeAffiliateEarningJournal.js";
-const migration = await readFile(
-  new URL(
-    "../../../../packages/backend-migration/migrations/0182_finance_affiliate_earning_journal.sql",
-    import.meta.url,
-  ),
-  "utf8",
-);
 const calculation = () => ({
   scope: {
     propertyId: id(3),
@@ -43,10 +40,7 @@ const resolver =
   (value = calculation()): AffiliateEarningEvidenceResolver =>
   async (_client, request) => ({ sourceRevision: request.sourceRevision, calculation: value });
 describe.skipIf(!databaseUrl)("affiliate earning journal command", () => {
-  const fixture = publicationFixture();
-  beforeEach(async () => {
-    await fixture.pool().query(migration);
-  });
+  const fixture = earningJournalFixture();
   const input = (sourceRevision = 1) => ({
     context: context(),
     propertyId: id(3),
