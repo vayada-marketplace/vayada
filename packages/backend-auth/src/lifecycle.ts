@@ -501,6 +501,7 @@ export type CreateStaffInvitePayload = {
   propertyIds: readonly string[];
   permissionOverrides: StaffPermissionOverrides;
   configurationRevision: number;
+  expectedInvitationId?: string;
   roleDefinitionId?: string;
   expectedRoleRevision?: string;
   productAccess?: { pms: boolean; booking: boolean };
@@ -508,7 +509,7 @@ export type CreateStaffInvitePayload = {
 
 export type UpdateStaffAccessPayload = Omit<
   CreateStaffInvitePayload,
-  "email" | "name" | "configurationRevision"
+  "email" | "name" | "configurationRevision" | "expectedInvitationId"
 > & {
   membershipId: string;
   expectedRevision?: string;
