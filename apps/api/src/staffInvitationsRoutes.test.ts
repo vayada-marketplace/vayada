@@ -44,6 +44,7 @@ function fakes() {
   const revocationJobs: string[] = [];
   const deliveries: string[] = [];
   const rosterOrganizations: string[] = [];
+  const accessReads: string[][] = [];
   let result: PersistResult = { outcome: "created", invitationId };
   let updateResult: UpdateResult = { outcome: "updated", membershipId: staffMembershipId };
   let statusResult: StatusResult = {
@@ -68,6 +69,7 @@ function fakes() {
     revocationJobs,
     deliveries,
     rosterOrganizations,
+    accessReads,
     setResult(value: PersistResult) {
       result = value;
     },
@@ -85,6 +87,19 @@ function fakes() {
     },
     options: {
       repository: {
+        async getAccess(org, id) {
+          accessReads.push([org, id]);
+          return id === staffMembershipId
+            ? {
+                membershipId: id,
+                roleKey: "front_desk" as const,
+                status: "active" as const,
+                propertyAccessMode: "assigned" as const,
+                propertyIds: [propertyId],
+                permissionOverrides: { grant: [], deny: ["booking.analytics.read"] },
+              }
+            : null;
+        },
         async listRoster(id) {
           rosterOrganizations.push(id);
           return [
@@ -184,6 +199,62 @@ async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
 describe("staff invitation routes", () => {
   let app: Awaited<ReturnType<typeof testApp>> | undefined;
   afterEach(async () => app?.close());
+
+  it("reads saved staff configuration without product entitlement or resource requirements", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/identity/staff/members/${staffMembershipId}/access?organizationId=foreign`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({
+      propertyAccessMode: "assigned",
+      permissionOverrides: { grant: [], deny: ["booking.analytics.read"] },
+    });
+    expect(fake.accessReads).toEqual([[organizationId, staffMembershipId]]);
+    expect(JSON.stringify(response.json())).not.toMatch(/workos|provider|token/i);
+  });
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized access reads %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/identity/staff/members/${staffMembershipId}/access`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.accessReads).toEqual([]);
+  });
+
+  it("hides missing targets and database errors", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const request = {
+      method: "GET" as const,
+      url: `/api/identity/staff/members/missing/access`,
+      headers: { authorization: "Bearer valid-token" },
+    };
+    const missing = await app.inject(request);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ code: "staff_member_not_found" });
+    fake.options.repository.getAccess = async () => {
+      throw new Error("private SQL data");
+    };
+    const failed = await app.inject(request);
+    expect(failed.statusCode).toBe(500);
+    expect(failed.json()).toEqual({ code: "staff_access_read_failed" });
+  });
 
   it("creates and delivers an assigned invitation from authenticated context", async () => {
     const fake = fakes();

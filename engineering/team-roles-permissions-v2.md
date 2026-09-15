@@ -252,6 +252,28 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ## Implementation stack and evidence
 
+### Configuration read API (first backend slice)
+
+`GET /api/identity/staff/members/:membershipId/access` uses the existing
+`identity.staff.manage` policy and active actor/membership/hotel-group checks.
+Organization identity comes exclusively from `RequestContext`; query parameters
+cannot change it. As with roster and status routes, this identity management
+read requires no PMS/Booking subscription or linked product resource.
+
+The uncached response contains `membershipId`, `roleKey`, membership `status`
+(`active`/`suspended`), `propertyAccessMode`, stored `propertyIds`, and validated
+`permissionOverrides` (`grant`/`deny`). Null overrides mean empty differences
+from role defaults. Stored assignments are not the effective all-property list.
+Missing, foreign, removed, owner and invitation targets return the same `404`
+`staff_member_not_found`. Malformed configuration, unsupported delegation scope,
+unlinked assignments or storage failures return generic `500`
+`staff_access_read_failed`, without provider details or stored invalid values.
+Unauthorized reads return `401`/`403` before repository access.
+
+This read does not yet supply an atomic-save revision, custom roles or product
+settings; those are successor contracts. No new editor may save through it until
+the atomic command and revision contract are delivered.
+
 1. This contract and decisions; no runtime changes.
 2. Authorized configuration read model and invitation delivery/revision readback.
 3. Organization roles: schema, commands, resolver and seeded preset decisions.
