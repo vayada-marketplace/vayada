@@ -107,6 +107,31 @@ future write transaction and complete command/current-evidence validation still
 must be implemented. A read before a concurrent revocation is not permission to
 write afterward. Tests use synthetic keys and principals, never real approvals.
 
+### Approval/revocation transaction boundary
+
+`lockAndVerifyLegacyOwnerSetupApprovals` requires a dedicated caller-owned
+READ COMMITTED transaction with nonzero lock and statement timeouts. It validates
+the signature, requires an explicit transaction through a savepoint, and locks
+both exact approval rows in UUID order with FOR UPDATE. The existing revocation
+foreign key must acquire KEY SHARE on its approval row, so a concurrent revocation
+cannot commit while these locks remain held. Conversely, if revocation acquired
+its lock first, setup waits and then checks the registry in a separate fresh
+READ COMMITTED statement, observing that committed revocation. A stale repeatable
+read snapshot is not allowed. Revocation means committed registry state; an
+uncommitted request cannot retroactively cancel an earlier serialized operation.
+
+The helper releases only its savepoint, retaining row locks until the outer
+transaction ends. The caller must roll back the entire transaction on failure,
+retain the locks through atomic users/receipt persistence, and recheck expiry and
+fresh command evidence immediately before writing. Caller rollback to an earlier
+savepoint or transaction completion ends this protection. The foreign key and
+its enforcement are trusted installed schema prerequisites, not optional checks.
+
+This helper still returns `executable: false`; it does not validate a complete
+setup command, establish current ownership, create users or receipts, or provide
+an executor/CLI. Synthetic PostgreSQL tests force both blocking orders and prove
+revocation visibility; no production lock or write is authorized by these tests.
+
 ## Provider preparation is a later, separate operation
 
 Only after an approved internal-row receipt and a fresh source/target/provider

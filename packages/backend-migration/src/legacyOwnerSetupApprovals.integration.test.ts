@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import { lockAndVerifyLegacyOwnerSetupApprovals } from "./legacyOwnerSetupApprovalLocks.js";
 import {
   hashLegacyOwnerSetupEnvelope,
   verifyLegacyOwnerSetupApprovals,
@@ -80,6 +81,8 @@ describe.skipIf(!url)("setup approvals on a fresh dedicated local database", () 
   }, 120_000);
   beforeEach(async () => {
     await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '10s'");
   });
   afterEach(async () => {
     await client.query("ROLLBACK");
@@ -261,4 +264,114 @@ describe.skipIf(!url)("setup approvals on a fresh dedicated local database", () 
       ).rejects.toMatchObject({ code: "55000" });
     },
   );
+  it.each([
+    "ROLLBACK",
+    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+    "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    "SET LOCAL lock_timeout = '0'",
+    "SET LOCAL statement_timeout = '0'",
+    "SET TRANSACTION READ ONLY",
+  ])("rejects an unsafe caller transaction: %s", async (sql) => {
+    await client.query(sql);
+    await expect(
+      lockAndVerifyLegacyOwnerSetupApprovals(client, input, policy(), clock),
+    ).rejects.toThrow(/^LEGACY_OWNER_SETUP_APPROVAL_LOCKS_INVALID$/);
+  });
+  it("rejects absent records and an expired signature without write authority", async () => {
+    await expect(
+      lockAndVerifyLegacyOwnerSetupApprovals(client, input, policy(), clock),
+    ).rejects.toThrow(/^LEGACY_OWNER_SETUP_APPROVAL_LOCKS_INVALID$/);
+    await expect(
+      lockAndVerifyLegacyOwnerSetupApprovals(
+        client,
+        input,
+        policy(),
+        () => new Date(envelope.expiresAt),
+      ),
+    ).rejects.toThrow(/^LEGACY_OWNER_SETUP_APPROVAL_LOCKS_INVALID$/);
+  });
+  // Last test deliberately commits synthetic approvals so other connections
+  // can see them. The entire dedicated fixture database is disposable.
+  it("serializes both revocation orders using actual PostgreSQL blockers", async () => {
+    await seed();
+    await client.query("COMMIT");
+    const revoker = new pg.Client({ connectionString: url });
+    const observer = new pg.Client({ connectionString: url });
+    const connected: pg.Client[] = [];
+    let pending: Promise<unknown> | undefined;
+    try {
+      for (const connection of [revoker, observer]) {
+        await connection.connect();
+        connected.push(connection);
+      }
+      for (const connection of [client, revoker]) {
+        await connection.query("BEGIN");
+        await connection.query("SET LOCAL lock_timeout = '5s'");
+        await connection.query("SET LOCAL statement_timeout = '10s'");
+      }
+      const firstPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const secondPid = (await revoker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const blocked = async (holder: number, waiter: number) => {
+        await expect
+          .poll(
+            async () =>
+              (
+                await observer.query("SELECT $1::int = ANY(pg_blocking_pids($2::int)) AS blocked", [
+                  holder,
+                  waiter,
+                ])
+              ).rows[0].blocked,
+            { timeout: 2_000 },
+          )
+          .toBe(true);
+      };
+      expect(await lockAndVerifyLegacyOwnerSetupApprovals(client, input, policy(), clock)).toEqual({
+        outcome: "approvals_locked_requires_command_validation",
+        executable: false,
+      });
+      pending = revoker
+        .query("INSERT INTO platform.legacy_owner_approval_revocations VALUES($1,$2,$3,$4,now())", [
+          id(11),
+          id(1),
+          clock(),
+          "f".repeat(64),
+        ])
+        .then(
+          () => "inserted",
+          () => "failed",
+        );
+      await blocked(firstPid, secondPid);
+      expect(
+        (await observer.query("SELECT * FROM platform.legacy_owner_approval_revocations")).rows,
+      ).toEqual([]);
+      await client.query("ROLLBACK");
+      expect(await pending).toBe("inserted");
+
+      // The uncommitted revocation now holds FK KEY SHARE. Setup must wait,
+      // then see the committed revocation in a fresh statement and reject.
+      await client.query("BEGIN");
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("SET LOCAL statement_timeout = '10s'");
+      pending = lockAndVerifyLegacyOwnerSetupApprovals(client, input, policy(), clock).then(
+        () => "accepted",
+        (error: Error) => error.message,
+      );
+      await blocked(secondPid, firstPid);
+      await revoker.query("COMMIT");
+      expect(await pending).toBe("LEGACY_OWNER_SETUP_APPROVAL_LOCKS_INVALID");
+      await client.query("ROLLBACK");
+      expect(
+        (await observer.query("SELECT count(*)::int AS n FROM identity.users")).rows[0].n,
+      ).toBe(1);
+      expect(
+        (await observer.query("SELECT * FROM platform.legacy_owner_bootstrap_receipts")).rows,
+      ).toEqual([]);
+    } finally {
+      await Promise.allSettled(
+        [client, ...connected].map((connection) => connection.query("ROLLBACK")),
+      );
+      await pending;
+      await Promise.allSettled(connected.map((connection) => connection.end()));
+    }
+  }, 20_000);
 });
