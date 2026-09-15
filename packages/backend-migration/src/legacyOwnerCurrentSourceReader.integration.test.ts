@@ -1,4 +1,6 @@
 import pg from "pg";
+import { generateKeyPairSync, verify } from "node:crypto";
+import { collectLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceCollector.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readLegacyOwnerCurrentSources } from "./legacyOwnerCurrentSourceReader.js";
 
@@ -69,6 +71,46 @@ describe.skipIf(!url)("current owner source reader on isolated PostgreSQL", () =
     await Promise.allSettled([auth?.end(), pms?.end(), a?.end(), p?.end()]);
   });
   const read = () => readLegacyOwnerCurrentSources(auth, pms, input);
+  it("collects signed evidence directly from both column-limited source databases", async () => {
+    const keys = generateKeyPairSync("ed25519");
+    const collect = () =>
+      collectLegacyOwnerCurrentSourceEvidence(
+        auth,
+        pms,
+        input,
+        {
+          environment: "local",
+          sourceRunId: "vay1351-" + "a".repeat(24),
+          sourceLedgerSha256: "a".repeat(64),
+          authDatabaseSha256: "b".repeat(64),
+          pmsDatabaseSha256: "c".repeat(64),
+          signingKeyId: "synthetic-live",
+        },
+        keys,
+      );
+    const artifacts = await collect();
+    expect(artifacts).toHaveLength(8);
+    for (const [i, artifact] of artifacts.entries()) {
+      expect(JSON.parse(artifact.canonicalPayload)).toMatchObject({
+        ...pairs[i],
+        sourceStatus: "pending",
+        email: `owner${i}@example.invalid`,
+      });
+      expect(
+        verify(
+          null,
+          Buffer.from(
+            "vayada:legacy-owner-internal-setup:v1\0current-source-attestation\0" +
+              artifact.canonicalPayload,
+          ),
+          keys.publicKey,
+          Buffer.from(artifact.detachedSignature, "base64url"),
+        ),
+      ).toBe(true);
+    }
+    await a.query("UPDATE public.users SET status='suspended'");
+    await expect(collect()).rejects.toThrow(/^LEGACY_OWNER_CURRENT_SOURCE_COLLECTION_FAILED$/);
+  });
   it("reads only approved columns/pairs from two separate authenticated database sessions", async () => {
     const rows = await read();
     expect(rows).toHaveLength(8);
