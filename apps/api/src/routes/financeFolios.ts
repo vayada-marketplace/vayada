@@ -5,9 +5,13 @@ import {
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import {
+  FINANCE_EXPENSE_CSV_CONTENT_TYPE,
+  FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  parseFinanceExpenseExportQuery,
+  parseFinanceExpenseExportSnapshot,
   parseFinanceFolioExportFilters,
   parseFinanceFolioExportSnapshot,
   parseFinanceFolioQuery,
@@ -22,10 +26,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
-  type FinanceFolioExportCommand,
-  type FinanceFolioExportEnqueueResult,
+  type FinanceExportCommand,
+  type FinanceExportEnqueueResult,
   type FinanceFolioExportStatus,
 } from "../domains/financeFolioExportRepository.js";
+import {
+  FinanceExpenseEvidenceError,
+  type FinanceExpenseReadModel,
+} from "../domains/financeExpenseReadModel.js";
 import {
   type FinanceFolioCommandResult,
   type CreateFinanceFolioCommand,
@@ -51,8 +59,9 @@ type Scope = { context: RequestContext; propertyId: string };
 export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
   repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
+  expenseExports?: Pick<FinanceExpenseReadModel, "captureExport">;
   exports?: {
-    enqueue(command: FinanceFolioExportCommand): Promise<FinanceFolioExportEnqueueResult>;
+    enqueue(command: FinanceExportCommand): Promise<FinanceExportEnqueueResult>;
   };
   exportDownloads?: {
     read: {
@@ -114,31 +123,60 @@ export async function registerFinanceFolioRoutes(
         if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
           return bad(reply);
         const current = scopes.get(request)!;
-        const rawCapture = await options.repository.captureReadyExport(
-          current.propertyId,
-          value.filters,
-        );
-        if (!rawCapture) return missing(reply);
-        const capture = exportCapture(rawCapture, current.propertyId, value.filters);
-        return exportResponse(
-          reply,
-          await options.exports!.enqueue({
-            ...value,
-            organizationId: current.context.selectedOrganization.organizationId,
-            propertyId: current.propertyId,
+        const { tab: _, ...command } = value;
+        const scoped = {
+          ...command,
+          organizationId: current.context.selectedOrganization.organizationId,
+          propertyId: current.propertyId,
+          audit: {
+            actorUserId: current.context.actor.internalUserId,
+            requestId: current.context.audit.requestId,
+            correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
+            causationId: value.commandId,
+            requestedAt: current.context.audit.receivedAt,
+          },
+        };
+        let result: FinanceExportEnqueueResult;
+        if (value.tab === "folios") {
+          const raw = await options.repository.captureReadyExport(
+            current.propertyId,
+            value.filters,
+          );
+          if (!raw) return missing(reply);
+          const capture = exportCapture(
+            raw,
+            current.propertyId,
+            value.filters,
+            parseFinanceFolioExportSnapshot,
+          );
+          result = await options.exports!.enqueue({
+            ...scoped,
+            filters: value.filters,
             currency: capture.snapshot.currency,
             snapshot: capture.snapshot,
             envelope: capture.envelope,
-            audit: {
-              actorUserId: current.context.actor.internalUserId,
-              requestId: current.context.audit.requestId,
-              correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
-              causationId: value.commandId,
-              requestedAt: current.context.audit.receivedAt,
-            },
-          }),
-          current.propertyId,
-        );
+          });
+        } else {
+          const raw = await required(options.expenseExports).captureExport(
+            current.propertyId,
+            value.filters,
+          );
+          if (!raw) return missing(reply);
+          const capture = exportCapture(
+            raw,
+            current.propertyId,
+            value.filters,
+            parseFinanceExpenseExportSnapshot,
+          );
+          result = await options.exports!.enqueue({
+            ...scoped,
+            filters: value.filters,
+            currency: capture.snapshot.currency,
+            snapshot: capture.snapshot,
+            envelope: capture.envelope,
+          });
+        }
+        return exportResponse(reply, result, current.propertyId);
       }),
     );
 
@@ -266,14 +304,14 @@ async function exportStatusResponse(
       ]) ||
       artifact.mediaId !== exportId ||
       artifact.bucketName !== access.serving.bucketName ||
-      artifact.storageKey !==
-        `private/finance/financials-exports/${exportId}/${FINANCE_FOLIO_CSV_VERSION}.csv` ||
+      !expectedExportArtifact(artifact.storageKey, artifact.filename, propertyId, exportId) ||
       artifact.visibility !== "private" ||
       artifact.lifecycleStatus !== "active" ||
       typeof artifact.bucketName !== "string" ||
       typeof artifact.storageKey !== "string" ||
-      artifact.filename !== `pms-financials-folios-${propertyId}.csv` ||
-      artifact.contentType !== FINANCE_FOLIO_CSV_CONTENT_TYPE ||
+      ![FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_EXPENSE_CSV_CONTENT_TYPE].includes(
+        artifact.contentType as typeof FINANCE_FOLIO_CSV_CONTENT_TYPE,
+      ) ||
       typeof artifact.sizeBytes !== "number" ||
       !Number.isSafeInteger(artifact.sizeBytes) ||
       artifact.sizeBytes <= 0
@@ -310,7 +348,7 @@ async function exportStatusResponse(
 
 function exportResponse(
   reply: FastifyReply,
-  value: FinanceFolioExportEnqueueResult,
+  value: FinanceExportEnqueueResult,
   propertyId: string,
 ) {
   if (!record(value)) return commandViolation();
@@ -339,10 +377,15 @@ function exportResponse(
 }
 
 // prettier-ignore
-function exportCapture(value: unknown, propertyId: string, filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>>) {
+type ExportRequest =
+  | { commandId: string; idempotencyKey: string; tab: "folios"; filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>> }
+  | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> };
+
+// prettier-ignore
+function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null) {
   if (!record(value) || !exact(value, ["envelope", "snapshot"])) return commandViolation();
   const parsedEnvelope = envelope.safeParse(value.envelope);
-  const snapshot = parseFinanceFolioExportSnapshot(value.snapshot);
+  const snapshot = parse(value.snapshot);
   if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || parsedEnvelope.data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== parsedEnvelope.data.currency) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
   return { envelope: parsedEnvelope.data, snapshot };
 }
@@ -351,19 +394,49 @@ function exportRequest(value: unknown) {
   if (!record(value) || !exact(value, ["commandId", "idempotencyKey", "tab", "filters", "format"]))
     return null;
   const commandId = canonicalUuid(value.commandId);
-  const filters = parseFinanceFolioExportFilters(value.filters);
+  const filters =
+    value.tab === "folios"
+      ? parseFinanceFolioExportFilters(value.filters)
+      : value.tab === "expenses"
+        ? parseFinanceExpenseExportQuery(value.filters)
+        : null;
   if (
     !commandId ||
     typeof value.idempotencyKey !== "string" ||
     value.idempotencyKey !== value.idempotencyKey.trim() ||
     value.idempotencyKey.length < 8 ||
     value.idempotencyKey.length > 200 ||
-    value.tab !== "folios" ||
     value.format !== "csv" ||
     !filters
   )
     return null;
-  return { commandId, idempotencyKey: value.idempotencyKey, filters };
+  return {
+    commandId,
+    idempotencyKey: value.idempotencyKey,
+    tab: value.tab,
+    filters,
+  } as ExportRequest;
+}
+
+function expectedExportArtifact(
+  storageKey: unknown,
+  filename: unknown,
+  propertyId: string,
+  exportId: string,
+) {
+  return [
+    [FINANCE_FOLIO_CSV_VERSION, `pms-financials-folios-${propertyId}.csv`],
+    [FINANCE_EXPENSE_CSV_VERSION, `pms-financials-expenses-${propertyId}.csv`],
+  ].some(
+    ([version, expectedFilename]) =>
+      storageKey === `private/finance/financials-exports/${exportId}/${version}.csv` &&
+      filename === expectedFilename,
+  );
+}
+
+function required<T>(value: T | undefined): T {
+  if (!value) return commandViolation();
+  return value;
 }
 
 function authorization(
@@ -618,6 +691,8 @@ async function safe(reply: FastifyReply, work: () => Promise<unknown>) {
   } catch (cause) {
     if (cause instanceof FinanceFolioCursorError) return bad(reply, cause.code);
     if (cause instanceof FinanceFolioEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceExpenseEvidenceError)
       return reply.status(422).send({ code: cause.code });
     return reply.status(500).send({ code: "finance_folio_port_contract_violation" });
   }

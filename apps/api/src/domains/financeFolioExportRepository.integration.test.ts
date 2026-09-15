@@ -18,7 +18,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
   let searchDigestCalls = 0,
     searchDigestFails = false;
   // prettier-ignore
-  const repository = createPgFinanceFolioExportJobRepository({ connectionString: URL ?? "postgresql://disabled", searchDigest: async (search) => { searchDigestCalls += 1; if (searchDigestFails) throw new Error("KMS unavailable"); return createHmac("sha256", SEARCH_DIGEST_KEY).update(search).digest("hex"); } });
+  const repository = createPgFinanceFolioExportJobRepository({ connectionString: URL ?? "postgresql://disabled", searchDigest: async (domain, search) => { searchDigestCalls += 1; if (searchDigestFails) throw new Error("KMS unavailable"); return searchFingerprint(domain, search); } });
   beforeAll(async () => admin.connect());
   beforeEach(async () => {
     searchDigestCalls = 0;
@@ -85,7 +85,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
     // prettier-ignore
     expect(evidence.rows[0].job_metadata).toMatchObject({ actorUserId: ACTOR, organizationId: ORG, requestId: "request-shared", correlationId: "correlation-shared", causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z", payloadFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/), manifestDigest: fingerprint([]) });
     // prettier-ignore
-    expect(evidence.rows[0].redacted_payload).toMatchObject({ filters: { searchPresent: true, searchHash: "e3e242b81d2d2ad0c1b2f580bd934e472aa0295ee01f8499579c14ef0fdfd2a0" }, manifestDigest: fingerprint([]) });
+    expect(evidence.rows[0].redacted_payload).toMatchObject({ filters: { searchPresent: true, searchHash: searchFingerprint("folio", "guest@example.test") }, manifestDigest: fingerprint([]) });
     // prettier-ignore
     expect(evidence.rows[0]).toMatchObject({ jobAiVisible: false, correlation_id: "correlation-shared", causation_id: CAUSE, actor_user_id: ACTOR });
     expect(evidence.rows[0].private_payload).toEqual({});
@@ -119,6 +119,48 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
     // prettier-ignore
     const stored = await admin.query("SELECT payload FROM platform.jobs WHERE id=$1", [first.status === "conflict" ? PROPERTY_B : first.exportId]);
     expect(stored.rows[0].payload.snapshot.manifest).toEqual([]);
+  });
+
+  it("enqueues expense snapshots with a distinct idempotency and audit contract", async () => {
+    const input = expenseCommand("expense");
+    const created = await repository.enqueue(input);
+    if (created.status === "conflict") throw new Error("Expected expense export");
+    await expect(repository.enqueue(input)).resolves.toMatchObject({
+      status: "replayed",
+      exportId: created.exportId,
+    });
+    await expect(repository.enqueue(command("expense"))).resolves.toMatchObject({
+      status: "created",
+    });
+    const row = (
+      await admin.query(
+        `SELECT j.job_type,j.payload,j.job_metadata,a.action,a.redacted_payload FROM platform.jobs j JOIN platform.product_audit_events a ON a.job_id=j.id WHERE j.id=$1`,
+        [created.exportId],
+      )
+    ).rows[0];
+    expect(row).toMatchObject({
+      job_type: "finance.expense-csv-export.v1",
+      payload: {
+        organizationId: ORG,
+        snapshot: { formatVersion: "pms-financials-expenses.v1", filters: input.filters },
+      },
+      job_metadata: {
+        formatVersion: "pms-financials-expenses.v1",
+        manifestDigest: fingerprint(input.snapshot.manifest),
+      },
+      action: "finance.expense_export.requested",
+      redacted_payload: {
+        formatVersion: "pms-financials-expenses.v1",
+        filters: {
+          from: "2026-08-01",
+          to: "2026-08-31",
+          paymentStatus: "unpaid",
+          sort: "incurredOn_desc",
+          searchPresent: true,
+          searchHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      },
+    });
   });
 
   it("reads status only inside the immutable property and organization scope", async () => {
@@ -192,6 +234,8 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
   // prettier-ignore
   function command(key: string, propertyId = PROPERTY_A, manifest: Array<{ folioId: string; revisionId: string; revision: number; sourceDigest: string }> = []) { const filters = { state: "ready" as const, search: "guest@example.test", sort: "createdAt_desc" as const }; return { commandId: REVISION, idempotencyKey: `VAY-1134-${key}`, organizationId: ORG, propertyId, currency: "EUR", filters, snapshot: { formatVersion: "pms-financials-folios.v1" as const, propertyId, currency: "EUR", filters, snapshotAt: new Date(Date.now() - 60_000).toISOString(), manifest }, envelope: { contractVersion: "pms-financials.v1" as const, propertyId, currency: "EUR", timeZone: "Europe/Berlin", generatedAt: "2026-08-21T10:00:00.000Z", sourceFreshness: { pmsPricing: "2026-08-21T09:00:00.000Z" }, incompleteEvidence: [] }, audit: { actorUserId: ACTOR, requestId: `request-${key}`, correlationId: `correlation-${key}`, causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z" } }; }
   // prettier-ignore
+  function expenseCommand(key: string) { const filters = { from: "2026-08-01", to: "2026-08-31", paymentStatus: "unpaid" as const, search: "Vendor Secret", sort: "incurredOn_desc" as const }; return { commandId: REVISION, idempotencyKey: `VAY-1134-${key}`, organizationId: ORG, propertyId: PROPERTY_A, currency: "EUR", filters, snapshot: { formatVersion: "pms-financials-expenses.v1" as const, propertyId: PROPERTY_A, currency: "EUR", filters, snapshotAt: new Date(Date.now() - 60_000).toISOString(), manifest: [] }, envelope: { contractVersion: "pms-financials.v1" as const, propertyId: PROPERTY_A, currency: "EUR", timeZone: "Europe/Berlin", generatedAt: "2026-08-21T10:00:00.000Z", sourceFreshness: { financeExpenses: "2026-08-21T09:00:00.000Z" }, incompleteEvidence: [] }, audit: { actorUserId: ACTOR, requestId: `request-${key}`, correlationId: `correlation-${key}`, causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z" } }; }
+  // prettier-ignore
   async function cleanup() { await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; DELETE FROM platform.product_audit_events WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.media_objects WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.jobs WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.idempotency_keys WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_payment_references WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_lines WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_revisions WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folios WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM identity.organization_resource_links WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organization_memberships WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organizations WHERE id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.users WHERE id='${ACTOR}'; COMMIT`); }
 });
 
@@ -231,19 +275,29 @@ it("binds job payloads to durable scope, fingerprint, timestamps, and expiry", (
 });
 
 it("uses the configured KMS MAC key for search redaction", async () => {
-  const mac = Uint8Array.from({ length: 32 }, (_, index) => index);
-  const generateMac = vi.fn(async () => ({ Mac: mac }));
+  const generateMac = vi.fn(async (input: { Message: Uint8Array }) => ({
+    Mac: createHash("sha256").update(input.Message).digest(),
+  }));
   const digest = createKmsFinanceFolioExportSearchDigest({
     kms: { generateMac },
     keyArn: "test-key",
   });
-  await expect(digest("Guest@example.test")).resolves.toBe(Buffer.from(mac).toString("hex"));
-  expect(generateMac).toHaveBeenCalledWith({
+  const folio = await digest("folio", "Guest@example.test");
+  const expense = await digest("expense", "Guest@example.test");
+  expect(folio).not.toBe(expense);
+  expect(generateMac).toHaveBeenNthCalledWith(1, {
     KeyId: "test-key",
     MacAlgorithm: "HMAC_SHA_256",
     Message: Buffer.from("finance-folio-export-search-v1\0Guest@example.test"),
+  });
+  expect(generateMac).toHaveBeenNthCalledWith(2, {
+    KeyId: "test-key",
+    MacAlgorithm: "HMAC_SHA_256",
+    Message: Buffer.from("finance-expense-export-search-v1\0Guest@example.test"),
   });
 });
 
 // prettier-ignore
 const fingerprint = (value: unknown) => createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
+const searchFingerprint = (domain: "folio" | "expense", search: string) =>
+  createHmac("sha256", SEARCH_DIGEST_KEY).update(`${domain}\0${search}`).digest("hex");

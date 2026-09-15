@@ -1535,6 +1535,7 @@ const app = buildApp({
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
+        expenseExports: financeExpenseRuntime!.routes.read,
         ...(platformMediaRuntime
           ? {
               exportDownloads: {
