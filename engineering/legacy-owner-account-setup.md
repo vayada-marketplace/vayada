@@ -207,3 +207,19 @@ Uniqueness is not ownership or linking authority. The prepared-owner guard cover
 only selected caller paths; the provider path must still bind the exact approved
 external/internal identity. Neither this partial protection nor an installed
 index enables account preparation.
+
+## Local collision and atomicity evidence
+
+`legacyOwnerBootstrapRace.integration.test.ts` uses a fresh dedicated loopback
+database and the proposed index. It forces a competing insert to block on the
+first transaction (observed through PostgreSQL blocking PIDs), then tests both
+commit orders. A committed pending user and receipt exclude the competing signup;
+a committed signup excludes the pending-user insert without leaving a receipt.
+If receipt insertion fails, rolling back preparation permits the waiting signup
+and leaves no prepared account. Uncommitted users/receipts are invisible to a
+third connection; all resulting users remain without memberships.
+
+These are synthetic SQL storage-contract tests, not an implemented executor or
+real signup/API flow. They do not validate installed production index metadata,
+signature/approval handling, current ownership, or provider behavior. Those
+checks remain prerequisites; no fixture receipt authorizes real preparation.
