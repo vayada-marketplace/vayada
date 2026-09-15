@@ -150,11 +150,13 @@ the now-existing users to be absent. Errors contain no contacts or SQL details.
 
 This is an internal composition, not the authorized runner: it inherits the
 requirement to independently authenticate historical ledger/rows, actual target
-database identity, reviewed target-before artifacts and the eight-email scope.
+database identity and the eight-email scope. Required [target-before artifacts](legacy-owner-target-absence.md)
+are authenticated through the signed command before SQL and compared with live
+PostgreSQL normalization/absence under retained locks before a new checkpoint.
 No boolean/callback can waive those missing runtime integrations. Reuse the scoped
 historical source reader in a separate read-only transaction; do not read source
-databases or call providers while target locks are held. Exact target identity and
-before-state artifact contracts still need implementation before runtime wiring.
+databases or call providers while target locks are held. Actual target identity
+verification still needs integration before runtime wiring.
 
 The caller owns a dedicated bounded READ COMMITTED transaction and must retain
 all locks until completion, recheck freshness immediately before committing and
