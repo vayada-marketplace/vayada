@@ -418,3 +418,14 @@ populated by this slice. Do not activate assignment writers until role command,
 invitation acceptance and background/Inbox authorization parity are delivered.
 Validation: 31 selected resolver and PostgreSQL tests; affected typecheck and API
 build. Independent review caught and verified the property-manifest baseline fix.
+
+### Role catalog read
+
+`GET /api/identity/staff/roles` uses active hotel-group staff-management
+authorization and selects only the current organization. It returns validated
+definitions, revision, immutable class ceilings and counts of active/suspended
+member references plus unexpired pending invitations. Removed memberships and
+expired invitations are excluded. Only Account admin receives the role-management
+capability. The response is not cached. No presets or references are created.
+Validation: PostgreSQL catalog lifecycle test, 39 staff route tests, backend-auth
+build and API typecheck; independent review found no actionable issue.

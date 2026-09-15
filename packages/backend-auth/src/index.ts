@@ -179,3 +179,4 @@ export {
   requireAuthContext,
   type BackendAuthPluginOptions,
 } from "./plugin.js";
+export { createPgTeamRoleRepository, type TeamRole } from "./teamRoles.js";
