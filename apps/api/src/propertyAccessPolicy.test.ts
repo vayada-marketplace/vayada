@@ -43,6 +43,47 @@ function context(): RequestContext {
 }
 
 describe("enforcePropertyRoutePolicy", () => {
+  it.each(["pms", "booking"] as const)(
+    "denies disabled %s before the handler runs",
+    async (product) => {
+      const candidate = context();
+      const permission = product === "pms" ? "pms.operations.read" : "booking.settings.read";
+      const resolution = await createAuthorizationResolver(
+        { findPermissionsForRole: async () => [permission] },
+        { findEntitlementsForContext: async () => [{ product, key: "test", status: "active" }] },
+        {
+          findMembershipPropertyScope: async () => ({
+            mode: "all",
+            roleKey: "front_desk",
+            accessOrigin: "agency",
+            assignedPropertyIds: [],
+            productAccess: { pms: product !== "pms", booking: product !== "booking" },
+          }),
+        },
+      )(candidate);
+      candidate.membership.permissions = resolution.permissions;
+      candidate.entitlements = resolution.entitlements ?? [];
+      const handled = vi.fn();
+      const app = Fastify({ logger: false });
+      app.decorateRequest("authContext", null);
+      app.addHook("onRequest", async (request) => {
+        request.authContext = candidate;
+      });
+      app.get("/product", async (request) => {
+        enforceRoutePolicy(request, { permission });
+        handled();
+        return { ok: true };
+      });
+      try {
+        expect((await app.inject({ method: "GET", url: "/product" })).statusCode).toBe(403);
+        expect(handled).not.toHaveBeenCalled();
+        expect(candidate.entitlements).toEqual([]);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   it("blocks direct URLs for unassigned properties before the handler runs", async () => {
     const repository: PropertyAccessRepository = {
       async findMembershipPropertyScope() {

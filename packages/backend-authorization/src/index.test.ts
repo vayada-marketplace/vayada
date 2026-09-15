@@ -204,6 +204,7 @@ function propertyScope(overrides: Partial<MembershipPropertyScope> = {}): Member
     accessOrigin: "agency",
     assignedPropertyIds: [],
     permissionOverrides: null,
+    productAccess: { pms: true, booking: true },
     ...overrides,
   };
 }
@@ -222,6 +223,68 @@ function requirement(
 }
 
 describe("createAuthorizationResolver", () => {
+  it("preserves identity management with both products disabled", async () => {
+    const resolution = await createAuthorizationResolver(
+      { findPermissionsForRole: async () => ["identity.staff.manage", "pms.operations.read"] },
+      undefined,
+      propertyScopeRepository(propertyScope({ productAccess: { pms: false, booking: false } })),
+    )(hotelContext);
+    expect(resolution.permissions).toEqual(["identity.staff.manage"]);
+  });
+
+  it("does not require hotel product flags in a creator workspace", async () => {
+    const resolution = await createAuthorizationResolver(
+      { findPermissionsForRole: async () => ["marketplace.profile.manage"] },
+      undefined,
+      undefined,
+    )(creatorContext);
+    expect(resolution.permissions).toEqual(["marketplace.profile.manage"]);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+    [false, false],
+    [true, true],
+  ])("applies PMS=%s and Booking=%s after member grants", async (pms, booking) => {
+    const subscriptions: ProductEntitlement[] = [
+      { product: "pms", key: "pms", status: "active" },
+      entitlement("active"),
+    ];
+    const resolution = await createAuthorizationResolver(
+      { findPermissionsForRole: async () => ["booking.settings.read"] },
+      { findEntitlementsForContext: async () => subscriptions },
+      propertyScopeRepository(
+        propertyScope({
+          roleKey: "hotel_custom",
+          productAccess: { pms, booking },
+          permissionOverrides: { grant: ["pms.calendar.read"], deny: [] },
+        }),
+      ),
+    )(contextFor({ roleKey: "hotel_custom" }));
+
+    expect(resolution.permissions).toEqual([
+      ...(booking ? ["booking.settings.read"] : []),
+      ...(pms ? ["pms.calendar.read"] : []),
+    ]);
+    expect(resolution.entitlements).toEqual(
+      subscriptions.filter((item) => (item.product === "pms" ? pms : booking)),
+    );
+    expect(subscriptions).toHaveLength(2);
+  });
+
+  it.each([undefined, { pms: "true", booking: true }, { pms: true, booking: null }])(
+    "fails closed for absent or malformed product flags: %j",
+    async (productAccess) => {
+      const resolution = await createAuthorizationResolver(
+        { findPermissionsForRole: async () => ["pms.operations.read"] },
+        { findEntitlementsForContext: async () => [entitlement("active")] },
+        propertyScopeRepository(propertyScope({ productAccess })),
+      )(hotelContext);
+      expect(resolution).toEqual({ permissions: [], entitlements: [] });
+    },
+  );
+
   it("loads permissions for the selected organization kind and role", async () => {
     const calls: Array<{ kind: OrganizationKind; roleKey: string }> = [];
     const repository: RolePermissionRepository = {
@@ -440,6 +503,11 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgEntitlementRepository", () => {
 
     try {
       await resetProductEntitlementsTable(client);
+      await client.query(`
+        INSERT INTO identity.organizations (id, kind, name, slug) VALUES
+          ('00000000-0000-0000-0000-000000000001', 'hotel_group', 'Entitlement test', 'entitlement-test-one'),
+          ('00000000-0000-0000-0000-000000000002', 'hotel_group', 'Other entitlement test', 'entitlement-test-two')
+        ON CONFLICT (id) DO NOTHING`);
       await client.query(
         `INSERT INTO identity.product_entitlements
            (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id, expires_at)
@@ -569,6 +637,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgPropertyAccessRepository", () => {
         mode: "assigned",
         roleKey: "front_desk",
         accessOrigin: "agency",
+        productAccess: { pms: true, booking: true },
         assignedPropertyIds: [DB_PROPERTY],
         permissionOverrides: {
           grant: ["booking.analytics.read"],
@@ -586,6 +655,17 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgPropertyAccessRepository", () => {
       ).resolves.toMatchObject({
         permissions: ["pms.calendar.read", "booking.analytics.read"],
       });
+      await client.query(
+        `UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1`,
+        [DB_MEMBERSHIP],
+      );
+      await expect(
+        createAuthorizationResolver(
+          { findPermissionsForRole: async () => ["pms.calendar.read", "pms.calendar.manage"] },
+          undefined,
+          repository,
+        )(dbContext),
+      ).resolves.toMatchObject({ permissions: ["booking.analytics.read"] });
       await client.query(
         `UPDATE identity.organization_memberships
          SET permission_overrides = '{"grant":["pms.reservation.cancel"],"deny":[]}'
