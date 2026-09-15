@@ -96,7 +96,7 @@ describe.skipIf(!url)("owner approval registry on fresh fully migrated local dat
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0193");
+    expect(result.applied).toContain("0211");
     await client.query(
       "INSERT INTO identity.users(id,email) VALUES ($1,'owner-approval@example.test')",
       [id(1)],

@@ -35,7 +35,7 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0194");
+    expect(result.applied).toContain("0212");
   }, 120_000);
   afterAll(async () => {
     await client?.end();
