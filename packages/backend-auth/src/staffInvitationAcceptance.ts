@@ -201,6 +201,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
                invited_at = COALESCE(identity.organization_memberships.invited_at, EXCLUDED.invited_at),
                updated_at = now()
              WHERE identity.organization_memberships.status <> 'suspended'
+               AND identity.organization_memberships.role_definition_id IS NULL
                AND identity.organization_memberships.access_origin = 'agency'
                AND identity.organization_memberships.role_key NOT IN ('hotel_owner', 'owner', 'operator')
              RETURNING id`,

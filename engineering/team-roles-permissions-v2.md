@@ -508,3 +508,17 @@ invalid referenced policies fail closed. Until the assignment-aware writer lands
 legacy access writes reject referenced members. Validation: 49 PostgreSQL staff
 tests, 65 route tests, backend-auth build, API typecheck and independent review
 with no actionable findings.
+
+### Saved role assignment
+
+Account admins can assign saved worker roles with member and selected-role
+revision checks. The transaction verifies tenant, base role and permission
+hierarchy against locked defaults, records the role reference in the audit, and
+schedules Inbox reconciliation when the reference changes. Legacy fingerprints
+and exact replays remain compatible. Referenced non-admin actors cannot use legacy
+mutation paths until bounded manager authorization lands. Legacy invitation
+acceptance rejects already-referenced members rather than overwriting their base
+role. Validation: 53 PostgreSQL staff/role tests, 66 route tests, backend-auth build
+and typecheck, API typecheck. Independent review found the manager and acceptance
+activation gaps; both were fixed and confirmed. Invitation role configuration,
+bounded managers, external owners and the Team UI remain pending.

@@ -548,6 +548,132 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     }
   });
 
+  it("assigns a saved worker role atomically with role and member revision checks", async () => {
+    const invitation = await deliveredInvitation(55);
+    const roleId = randomUUID(),
+      replacementId = randomUUID();
+    try {
+      for (const id of [roleId, replacementId])
+        await client.query(
+          `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1::uuid, $2, $1::text, 'staff', 'hotel_custom', '["pms.inbox.read"]')`,
+          [id, org],
+        );
+      const before = (await repository.getAccess(org, staffMembership))!;
+      const edit = updateCommand();
+      edit.payload = {
+        ...edit.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: roleId,
+        expectedRoleRevision: "1",
+        expectedRevision: before.revision,
+        permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      };
+      for (const patch of [
+        { expectedRoleRevision: "2" },
+        { roleDefinitionId: randomUUID() },
+        { roleKey: "front_desk" as const },
+        { expectedRevision: "0".repeat(64) },
+        {
+          permissionOverrides: { grant: [], deny: ["pms.inbox.read"] as const },
+          roleDefinitionId: undefined,
+        },
+      ]) {
+        const invalid = { ...updateCommand(), payload: { ...edit.payload, ...patch } };
+        expect(await repository.updateAccess(invalid)).toMatchObject({ outcome: "rejected" });
+        expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+      }
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager' WHERE id = $1",
+        [membership],
+      );
+      expect(await repository.updateAccess(edit)).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner' WHERE id = $1",
+        [membership],
+      );
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+      const saved = (await repository.getAccess(org, staffMembership))!;
+      await expectAcceptance(invitation, { outcome: "rejected", reason: "membership_protected" });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(saved);
+      expect(saved).toMatchObject({
+        roleDefinitionId: roleId,
+        configuredPermissions: ["pms.inbox.read", "pms.inbox.reply"],
+      });
+      const switchRole = {
+        ...updateCommand(),
+        payload: {
+          ...edit.payload,
+          roleDefinitionId: replacementId,
+          expectedRevision: saved.revision,
+        },
+      };
+      expect(await repository.updateAccess(switchRole)).toMatchObject({ outcome: "updated" });
+      const jobs = await client.query(
+        "SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1",
+        [switchRole.commandId],
+      );
+      expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "role_permissions_changed" } }]);
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+      expect((await repository.getAccess(org, staffMembership))!.roleDefinitionId).toBe(
+        replacementId,
+      );
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner' WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = ANY($1::uuid[])", [
+        [roleId, replacementId],
+      ]);
+    }
+  });
+
+  it("keeps referenced managers out of legacy mutation paths pending bounded authorization", async () => {
+    const roleId = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions)
+         VALUES ($1, $2, 'Agency manager test', 'staff', 'hotel_manager', 'agency_manager', '["identity.staff.manage"]')`,
+        [roleId, org],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2 WHERE id = $1",
+        [membership, roleId],
+      );
+      expect(await repository.persist(command())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.updateAccess(updateCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', role_definition_id = NULL WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
+  });
+
   it("saves dynamic scope without assignment rows and returns safely to selected properties", async () => {
     const before = (await repository.getAccess(org, staffMembership))!;
     const edit = updateCommand();
