@@ -8,6 +8,7 @@ import {
 } from "@vayada/backend-authorization";
 import {
   calculateAffiliateEarning,
+  normalizeAffiliateEarningCalculation,
   type AffiliateEarningResult,
   type AffiliateEarningSnapshot,
 } from "@vayada/domain-finance";
@@ -122,19 +123,16 @@ export async function recordAffiliateEarningCalculation(
     if (!access.rowCount) return await fail("scope_unavailable");
     const proof = await resolve(client, { ...input, propertyId });
     if (!proof) return await fail("evidence_unavailable");
+    const calculation = normalizeAffiliateEarningCalculation(proof.calculation);
+    if (!calculation) return await fail("invalid_evidence");
     if (
       proof.sourceRevision !== sourceRevision ||
-      proof.calculation.scope.propertyId !== propertyId ||
-      proof.calculation.scope.bookingId !== bookingId ||
-      proof.calculation.scope.stayItemId !== stayItemId
+      calculation.scope.propertyId !== propertyId ||
+      calculation.scope.bookingId !== bookingId ||
+      calculation.scope.stayItemId !== stayItemId
     )
       return await fail("evidence_scope_mismatch");
-    // Build the recorded input explicitly; a resolver cannot inject a caller-selected previous total.
-    const calculation = {
-      scope: proof.calculation.scope,
-      policy: proof.calculation.policy,
-      evidence: proof.calculation.evidence,
-    };
+    // Only bounded, normalized owner evidence reaches the immutable journal.
     const payload = json(calculation),
       digest = createHash("sha256").update(payload).digest("hex");
     const prior = await client.query(

@@ -192,6 +192,32 @@ describe.skipIf(!databaseUrl)("affiliate earning journal command", () => {
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(await count()).toBe(1);
   });
+  it.each(["incomplete", "conflicting"] as const)(
+    "rejects malformed %s evidence before persistence, including changed scope",
+    async (status) => {
+      await record(fixture.pool(), input(), resolver());
+      for (const creatorProfileId of [id(21), id(99)]) {
+        for (const invalid of [
+          { netAccommodationMinor: "-1" },
+          { references: Array(101).fill("evidence") },
+          { references: ["x".repeat(257)] },
+        ]) {
+          const value = calculation();
+          await expect(
+            record(fixture.pool(), input(2), async () => ({
+              sourceRevision: 2,
+              calculation: {
+                ...value,
+                scope: { ...value.scope, creatorProfileId },
+                evidence: { ...value.evidence, status, ...invalid },
+              },
+            })),
+          ).resolves.toMatchObject({ code: "invalid_evidence" });
+          expect(await count()).toBe(1);
+        }
+      }
+    },
+  );
   it("rejects unavailable, mismatched or malformed evidence and rolls back storage failure", async () => {
     await expect(record(fixture.pool(), input(), async () => null)).resolves.toMatchObject({
       code: "evidence_unavailable",
