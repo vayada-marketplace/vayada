@@ -1,3 +1,8 @@
+import {
+  lockPmsInboxRolePermissions,
+  type PmsInboxRoleActor,
+} from "../domains/pmsInboxRolePermissions.js";
+
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 export type PmsInboxAssignmentReconciliationClient = {
@@ -346,8 +351,8 @@ async function reconcileJob(
     );
     if (lease.rowCount !== 1)
       throw new Error("PMS Inbox assignment reconciliation lost its worker lease");
-    const membership = await client.query(
-      `SELECT 1
+    const membership = await client.query<PmsInboxRoleActor>(
+      `SELECT membership.role_key AS "roleKey", membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides"
        FROM identity.organization_memberships membership
        JOIN identity.organizations organization ON organization.id = membership.organization_id
        JOIN identity.users staff ON staff.id = membership.user_id
@@ -356,7 +361,16 @@ async function reconcileJob(
       [job.membershipId, job.organizationId],
     );
     if (membership.rowCount !== 1) throw new OrganizationScopeMismatch();
-    const assignments = await findInvalidAssignments(client, job);
+    const permissions = await lockPmsInboxRolePermissions(
+      client,
+      job.organizationId!,
+      membership.rows[0]!,
+    );
+    const assignments = await findInvalidAssignments(
+      client,
+      job,
+      permissions?.has("pms.inbox.read") === true,
+    );
     for (const assignment of assignments) await clearAssignment(client, job, assignment);
     await finishJob(client, job, assignments.length);
     await client.query("COMMIT");
@@ -372,6 +386,7 @@ async function reconcileJob(
 async function findInvalidAssignments(
   client: PmsInboxAssignmentReconciliationClient,
   job: ReconciliationJob,
+  hasInboxRead: boolean,
 ): Promise<InvalidAssignment[]> {
   const result = await client.query<InvalidAssignment>(
     `SELECT thread.id::text AS "threadId", thread.property_id::text AS "propertyId",
@@ -394,6 +409,7 @@ async function findInvalidAssignments(
          WHERE membership.id = thread.assigned_to_membership_id
            AND membership.organization_id = $2::uuid AND membership.status = 'active'
            AND membership.pms_access_enabled
+           AND $3::boolean
            AND (membership.property_access_mode = 'all' OR EXISTS (
              SELECT 1 FROM identity.membership_property_assignments assignment
              WHERE assignment.membership_id = membership.id
@@ -402,7 +418,7 @@ async function findInvalidAssignments(
        )
      ORDER BY thread.property_id, thread.id
      FOR UPDATE OF thread`,
-    [job.membershipId, job.organizationId],
+    [job.membershipId, job.organizationId, hasInboxRead],
   );
   return result.rows;
 }
