@@ -68,6 +68,29 @@ receipt uniqueness, append-only privileges, audit atomicity and approval locking
 before a consumer can use it. No invented principal or synthetic signature may
 authorize a real operation.
 
+### Separate setup signature boundary
+
+The setup envelope uses `contractVersion = legacy-owner-internal-setup.v1` with
+exact fields `commandId`, `environment`, `issuedAt`, `expiresAt`, `commandSha256`,
+`migrationApprovalRecordId`, `securityApprovalRecordId` and `signingKeyId`.
+Require canonical JSON, distinct authority record IDs, a valid current time
+window and an allowlisted Ed25519 public key. Signature bytes use the fixed
+prefix `vayada:legacy-owner-internal-setup:v1\0envelope\0`; never accept the
+ownership-restoration signature domain or a caller-selected operation domain.
+
+The signature checker compares `commandSha256` against an independently supplied
+expected digest for the complete protected command described above. It does not
+define or validate that command's row/evidence schema, authenticate its contents,
+read approval records, establish signer/executor separation or permit writes.
+The future consumer must derive the expected digest from the reviewed complete
+command, not echo the envelope field. A successful signature check returns only
+`signature_matches_requires_registry` and `executable: false`.
+
+Keep the existing ownership-restoration verifier unchanged and unable to accept
+setup envelopes. Admission of setup approvals to existing immutable storage,
+revocation serialization and full command validation remain separate required
+implementation steps; migration 0193 currently accepts only ownership evidence.
+
 ## Provider preparation is a later, separate operation
 
 Only after an approved internal-row receipt and a fresh source/target/provider
