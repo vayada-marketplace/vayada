@@ -59,3 +59,31 @@ and always `executable: false`, with fixed `LEGACY_OWNER_SETUP_REQUEST_INVALID`
 errors. It does not read approval records, authenticate evidence artifacts or
 acquire locks. The future consumer must pass these exact bound bytes/digest to
 the locked registry check and reverify fresh evidence before any write.
+
+## Final storage stage
+
+`writeLegacyOwnerSetupCheckpoint` is an internal persistence primitive, not the
+complete authorized executor. No runtime/CLI calls it. Its caller must first
+authenticate evidence, verify the bound request and locked approvals, check
+receipt replay and fresh conflicts, and hold the verified email-index/DDL guard.
+Supplying syntactically valid audit hashes is not proof of those prerequisites.
+
+It requires an outer transaction, reparses the protected command, and inserts
+only the exact UUID/email/name rows with explicit pending status and issuedAt
+timestamps. One SQL statement writes all selected users and their receipt. It
+checks the returned rows before recording success; partial/skipped/changed
+inserts or receipt failure roll back to the helper's savepoint. No upserts,
+replacement IDs, organization/membership/provider writes or automatic commits.
+On uncertain rollback the caller must discard the connection, not commit.
+
+Receipt source evidence hashes canonical `{ledger, owners}` with contacts,
+status, expectedTarget and targetBeforeSha256 omitted from each owner; all other
+source/current references remain. Before-state hashes canonical sorted
+`{ownerId,targetBeforeSha256}` entries. Their domains are the setup prefix plus
+NUL, `source-evidence`/`target-before`, NUL. After-state hashes UTF8
+`vayada:legacy-owner-internal-setup:v1:target-after`, NUL, and PostgreSQL's
+`jsonb_agg(jsonb_build_object(...returned fields...) ORDER BY id)::text` bytes.
+Fields are exactly id/email/name/status/created_at/updated_at, with both timestamps
+rendered as UTC millisecond ISO strings independent of session timezone. These are storage fingerprints,
+not evidence authentication. A duplicate command rejects here; approved exact
+replay must be resolved by the future consumer before this insert-only stage.
