@@ -1,6 +1,6 @@
 # Team, roles & permissions: VAY-1439 implementation contract
 
-Status: proposed extension; unresolved product choices are listed below. This
+Status: implementation authorized; confirmed decisions and remaining preset details are listed below. This
 document does not change runtime authorization or authorize a migration of
 existing users. [VAY-1439](https://linear.app/vayadacom/issue/VAY-1439)
 owns the complete feature; each implementation PR must identify its covered
@@ -84,17 +84,20 @@ and independent per-member overrides. Security classes and their permission
 allowlists are server-owned policy, never values an ordinary role editor can
 create or expand:
 
-| Security class | Ceiling and assignment rules                                                                                                                                         |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account admin  | Reserved `hotel_owner`; assignment only through provisioning or authenticated admin transfer, never custom-role commands                                             |
-| Staff          | Validated staff section keys; no billing, ownership transfer, platform administration or team delegation; manager team authority remains the explicit decision below |
-| Housekeeping   | Staff ceiling excluding guest contact permission; customized or cloned Housekeeping roles retain this class                                                          |
-| External owner | Existing external-owner ceiling and assigned-only scope; delegation permission remains a separate admin-controlled grant, never an editable role default             |
+| Security class | Ceiling and assignment rules                                                                                                                             |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account admin  | Reserved `hotel_owner`; assignment only through provisioning or authenticated admin transfer, never custom-role commands                                 |
+| Staff          | Validated staff section keys; no billing, ownership transfer or platform administration; Agency managers may manage workers within the limits below      |
+| Housekeeping   | Staff ceiling excluding guest contact permission; customized or cloned Housekeeping roles retain this class                                              |
+| External owner | Existing external-owner ceiling and assigned-only scope; delegation permission remains a separate admin-controlled grant, never an editable role default |
 
 Custom roles start in the Staff class. Duplicating a protected preset retains its
 class; changing its name never changes the class. A role's class cannot change
 through role-default edits. Only the account admin may create/edit/delete role
-definitions. Until manager authority is decided, agency staff cannot assign
+definitions. Agency managers may invite and manage workers within their own effective
+permission, property and product ceilings. They cannot edit themselves, another
+Agency manager, an Account admin or an External owner; grant management authority;
+change role definitions; or transfer ownership. Other agency staff cannot assign
 another member's role. Preserve the external-owner contract's exception when
 that flow is delivered: an owner with current delegation permission may select
 permitted Staff/Housekeeping roles for their own invited or delegated staff,
@@ -227,16 +230,22 @@ Existing sessions resolve the new configuration on their next request.
 Reconcile coarse WorkOS roles through
 durable retryable work; provider events cannot restore the previous Vayada role.
 
-## Product decisions still required
+## Confirmed product decisions and preset details
 
-1. Agency manager: the mockup implies team management, while v1 forbids it.
-   Recommendation: permit managing workers only, retaining admin-only billing,
-   transfer, admin mutation and privilege/role ceilings.
-2. Property owner: recommendation is the existing `external_owner` identity
-   model with read-only defaults; its current defaults include operations writes.
-   Do not convert existing owners or bypass delegation through a renamed staff
-   role. Confirm the exact six view-only sections before seeding the new preset.
-3. Role presets need exact section levels, not only counts. The ticket names
+Confirmed by Flamur in this task on 15 September 2026:
+
+1. Agency managers may manage staff. Billing and admin transfer remain
+   Account-admin-only. Implement the bounded worker-management rules above;
+   this supersedes v1's blanket prohibition for Agency managers, not its other
+   security boundaries.
+2. Property owners use the `external_owner` model and receive read-only access
+   to assigned properties by default. Existing owners are not silently migrated
+   from their current permissions. New role presets use these defaults.
+
+Remaining implementation details (derive and document conservative mappings
+before each affected slice; do not treat the confirmed choices as unresolved):
+
+1. Role presets need exact section levels, not only counts. The ticket names
    sixteen sections but gives different counts without their mapping. Confirm
    Front desk/Housekeeping differences from v1, dashboard sublevels, financial
    and channel Edit meaning, and the former admin's post-transfer role.
