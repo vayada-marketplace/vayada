@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import Modal from "@/components/Modal";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -9,6 +9,8 @@ import {
 } from "@/lib/settings/teamAccessForm";
 import {
   invitePmsStaff,
+  preparePmsStaffInvitation,
+  type PmsStaffInviteInput,
   savePmsStaffAccess,
   type PmsInviteResult,
   type PmsStaffAccess,
@@ -40,6 +42,7 @@ export default function MemberAccessDialog({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const mutation = useTeamWrite();
+  const preparedInvitation = useRef<{ key: string; input: PmsStaffInviteInput }>();
   const choices = assignableTeamRoles(roles, canManageRoles);
   const selected = choices.find((role) => role.id === draft.roleId);
   const validRole = !!selected || (!!access && !access.roleDefinitionId && !draft.roleId);
@@ -75,16 +78,21 @@ export default function MemberAccessDialog({
             },
             key,
           );
-        else
-          result = await invitePmsStaff(
-            {
-              ...configuration,
-              email: input.email,
-              ...(input.name ? { name: input.name } : {}),
-              configurationRevision: 1,
-            },
-            key,
-          );
+        else {
+          if (preparedInvitation.current?.key !== key) {
+            const prepared = await preparePmsStaffInvitation(input.email);
+            preparedInvitation.current = {
+              key,
+              input: {
+                ...configuration,
+                email: input.email,
+                ...(input.name ? { name: input.name } : {}),
+                configurationRevision: prepared.configurationRevision,
+              },
+            };
+          }
+          result = await invitePmsStaff(preparedInvitation.current.input, key);
+        }
       },
     );
     if (saved) onSaved(result);

@@ -2251,5 +2251,6 @@
   "settings.team.sendInvitation": "Einladung senden",
   "settings.team.inviteName": "Name (optional)",
   "settings.team.inviteEmail": "E-Mail",
-  "settings.team.confirmRoleReset": "Standardeinstellungen der neuen Rolle verwenden und bestehende Berechtigungsanpassungen ersetzen. Prüfe die Bereichszugriffe vor dem Speichern."
+  "settings.team.confirmRoleReset": "Standardeinstellungen der neuen Rolle verwenden und bestehende Berechtigungsanpassungen ersetzen. Prüfe die Bereichszugriffe vor dem Speichern.",
+  "settings.team.invitationAlreadyPending": "Für diese Adresse steht bereits eine Einladung aus. Schließe diesen Dialog und sende sie über die Teamliste erneut."
 }
