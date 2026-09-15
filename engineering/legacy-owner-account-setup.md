@@ -145,8 +145,39 @@ replay. Its hashes must be revalidated by the consumer, never treated as approva
 The [prepared-owner signup guard](legacy-owner-signup-guard.md) denies receipt-marked
 existing-user reuse in lifecycle creation/webhook upserts, lifecycle email changes
 and active/pending status changes, plus the shared subject access-grant helper. New-UUID
-inserts still need the scoped index; other identity mutation paths remain
-unguarded. Do not enable preparation until the entire shared boundary is covered.
+inserts still need the scoped index. Preparation remains blocked until the
+applicable identity writers, session denial and collision boundary are verified
+together; separate stacked PRs are not an integrated release.
+
+## Organization changes are not owner restoration
+
+This contract inserts only previously absent pending users and their receipts;
+it creates no memberships. A membership's user foreign key prevents an existing
+membership from referencing an absent user. Consequently, changing an existing
+organization's resource links or product entitlements alone cannot grant the
+newly prepared owner access. This conclusion depends on the strict absent-user
+contract and the guarded membership writers; it does not apply to preparing an
+existing account or appending a receipt afterward.
+
+Do not introduce an organization-wide hold or infer historical ownership from
+an email match or current membership enumeration. Other authorized members may
+continue legitimate work. Before later restoration, compare current organization,
+membership, resource-link and entitlement state with the exact independently
+approved before-state. Drift invalidates that restoration attempt; it is not
+permission to overwrite current state with legacy values.
+
+Privileged commands that name a target account remain separate review points:
+admin track activation (`adminActivation.accountUserId`), property provisioning
+(`targetAccountUserId`) and offer creation (`hotelUserId`). Their existence is not
+proof of an absent-owner bootstrap bypass, nor are they certified for subsequent
+access release by this analysis. Reassess them against that later operation's
+contract before restoring memberships or releasing access.
+
+The session hold in PR #2216 is a sibling of the membership/staff guard stack,
+not included merely by deploying PR #2232. Integrate and test both with receipt
+schema/read privileges and the scoped collision index before preparation.
+This scope clarification adds no executor or write authority and waives no
+production-readiness or ownership-verification gate.
 
 ## Scoped email-index proposal
 

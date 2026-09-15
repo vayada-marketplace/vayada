@@ -164,9 +164,12 @@ once prepared rows exist, rolling back to unguarded app code is unsafe.
 ## Preparation remains blocked after the first callers
 
 Receipt lookup alone does not police every identity mutation. Before enabling
-preparation, separately cover organization-only resource-link grants,
-session reconciliation and other
-identity writers. Inventory their direct SQL and transaction boundaries. Do not
+preparation, integrate session reconciliation protection and verify the remaining
+identity writers and their transaction boundaries. Organization-only grants do
+not by themselves give a previously absent, membership-less prepared user access;
+see the [bootstrap scope and later restoration checks](legacy-owner-account-setup.md#organization-changes-are-not-owner-restoration).
+This is not certification of privileged target-account provisioning or later
+membership restoration. Do not
 block legitimate suspension/deletion by blindly placing a blanket guard ahead of
 all lifecycle commands; restrictive actions need their own reviewed behavior.
 
