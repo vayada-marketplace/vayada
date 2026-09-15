@@ -38,6 +38,8 @@ type StaffRosterRow = {
   last_active_at: Date | null;
 };
 type StaffAccessTargetRow = {
+  pms_access_enabled: boolean;
+  booking_access_enabled: boolean;
   id: string;
   status: "active" | "suspended";
   access_origin: string;
@@ -92,6 +94,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         `SELECT membership.id, membership.role_key, membership.permission_overrides,
                 membership.property_access_mode, membership.access_origin, membership.status,
                 membership.updated_at::text AS updated_at,
+                membership.pms_access_enabled, membership.booking_access_enabled,
                 ARRAY(SELECT assignment.property_id::text
                       FROM identity.membership_property_assignments assignment
                       WHERE assignment.membership_id = membership.id
@@ -138,6 +141,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
       return {
         membershipId: row.id,
         revision: staffAccessRevision(row),
+        productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
         roleKey: row.role_key as HotelStaffRoleKey,
         status: row.status,
         propertyAccessMode: row.property_access_mode as "all" | "assigned",
@@ -624,6 +628,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         const target = await client.query<StaffAccessTargetRow>(
           `SELECT membership.id, membership.status, membership.access_origin,
                   membership.updated_at::text AS updated_at,
+                  membership.pms_access_enabled, membership.booking_access_enabled,
                   ARRAY(SELECT permission_key FROM identity.role_permission_grants
                         WHERE organization_kind = 'hotel_group'
                           AND role_key = membership.role_key ORDER BY permission_key) AS role_permissions,
@@ -680,7 +685,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         await client.query(
           `UPDATE identity.organization_memberships
            SET role_key = $3, permission_overrides = $4::jsonb,
-               property_access_mode = 'assigned', status = COALESCE($5, status), updated_at = now()
+               property_access_mode = 'assigned', status = COALESCE($5, status), updated_at = now(),
+               pms_access_enabled = COALESCE($6, pms_access_enabled),
+               booking_access_enabled = COALESCE($7, booking_access_enabled)
            WHERE organization_id = $1 AND id = $2`,
           [
             normalized.organizationId,
@@ -688,6 +695,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             normalized.roleKey,
             JSON.stringify(normalized.permissionOverrides),
             normalized.membershipStatus ?? null,
+            normalized.productAccess?.pms ?? null,
+            normalized.productAccess?.booking ?? null,
           ],
         );
         await client.query(
@@ -702,6 +711,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         const nextPropertyIds = new Set(normalized.propertyIds);
         if (
           normalized.membershipStatus === "suspended" ||
+          normalized.productAccess?.pms === false ||
           previous.property_access_mode === "all" ||
           previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId))
         )
@@ -714,9 +724,15 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             reason:
               normalized.membershipStatus === "suspended"
                 ? "membership_suspended"
-                : "property_access_removed",
+                : normalized.productAccess?.pms === false
+                  ? "product_access_removed"
+                  : "property_access_removed",
           });
         const next = {
+          productAccess: normalized.productAccess ?? {
+            pms: previous.pms_access_enabled,
+            booking: previous.booking_access_enabled,
+          },
           membershipStatus: normalized.membershipStatus ?? previous.status,
           roleKey: normalized.roleKey,
           permissionOverrides: normalized.permissionOverrides,
@@ -749,6 +765,10 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             }),
             JSON.stringify({
               previous: {
+                productAccess: {
+                  pms: previous.pms_access_enabled,
+                  booking: previous.booking_access_enabled,
+                },
                 membershipStatus: previous.status,
                 roleKey: previous.role_key,
                 permissionOverrides: previous.permission_overrides,
@@ -916,7 +936,11 @@ async function enqueueInboxAssignmentReconciliation(
     idempotencyId: string;
     correlationId: string;
     commandId: string;
-    reason: "membership_removed" | "membership_suspended" | "property_access_removed";
+    reason:
+      | "membership_removed"
+      | "membership_suspended"
+      | "property_access_removed"
+      | "product_access_removed";
   },
 ): Promise<void> {
   const inserted = await client.query(
@@ -992,6 +1016,9 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
     (command.payload.membershipStatus !== undefined &&
       (command.payload.expectedRevision === undefined ||
         !["active", "suspended"].includes(command.payload.membershipStatus))) ||
+    (command.payload.productAccess !== undefined &&
+      (command.payload.expectedRevision === undefined ||
+        !validProductAccess(command.payload.productAccess))) ||
     validateStaffInviteAccess(command.payload).length
   ) {
     return null;
@@ -1006,6 +1033,14 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
       deny: [...command.payload.permissionOverrides.deny].sort(),
     },
     actorUserId: actor.userId,
+    ...(command.payload.productAccess === undefined
+      ? {}
+      : {
+          productAccess: {
+            pms: command.payload.productAccess.pms,
+            booking: command.payload.productAccess.booking,
+          },
+        }),
     ...(command.payload.expectedRevision === undefined
       ? {}
       : { expectedRevision: command.payload.expectedRevision }),
@@ -1137,6 +1172,7 @@ function staffAccessRevision(row: StaffAccessTargetRow): string {
   return hash(
     JSON.stringify({
       id: row.id,
+      productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
       role: row.role_key,
       status: row.status,
       origin: row.access_origin,
@@ -1147,4 +1183,17 @@ function staffAccessRevision(row: StaffAccessTargetRow): string {
       rolePermissions: row.role_permissions,
     }),
   ).toString("hex");
+}
+
+export function validProductAccess(value: unknown): value is { pms: boolean; booking: boolean } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 2 &&
+    "pms" in value &&
+    "booking" in value &&
+    typeof value.pms === "boolean" &&
+    typeof value.booking === "boolean"
+  );
 }

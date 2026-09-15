@@ -126,7 +126,11 @@ export {
   type RepositoryConfig,
 } from "./repository.js";
 
-export { createPgStaffInvitationRepository, type StaffRosterMember } from "./staffInvitations.js";
+export {
+  createPgStaffInvitationRepository,
+  validProductAccess,
+  type StaffRosterMember,
+} from "./staffInvitations.js";
 export {
   createPgStaffRemovalJobRepository,
   type StaffRemovalJobClaim,

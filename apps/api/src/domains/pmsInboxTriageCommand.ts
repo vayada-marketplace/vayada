@@ -254,6 +254,7 @@ async function lockActorScope(
      JOIN identity.organization_memberships membership
        ON membership.id = $4::uuid AND membership.organization_id = organization.id
       AND membership.user_id = actor.id AND membership.status = 'active'
+      AND membership.pms_access_enabled
      WHERE property.id = $2::uuid
        AND (membership.property_access_mode = 'all' OR EXISTS (
          SELECT 1 FROM identity.membership_property_assignments assignment

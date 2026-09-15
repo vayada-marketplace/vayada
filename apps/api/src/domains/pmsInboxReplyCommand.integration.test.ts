@@ -475,7 +475,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
     ]);
   });
 
-  it.each(["organization", "membership", "assignment", "permission"])(
+  it.each(["organization", "membership", "assignment", "permission", "product"])(
     "holds revoked originating %s despite another active property owner",
     async (revoked) => {
       const accepted = await reply.reply(command(`revoked-${revoked}`));
@@ -488,6 +488,11 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
       else if (revoked === "membership")
         await admin.query(
           "UPDATE identity.organization_memberships SET status = 'suspended' WHERE id = $1::uuid",
+          [MEMBERSHIP],
+        );
+      else if (revoked === "product")
+        await admin.query(
+          "UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1::uuid",
           [MEMBERSHIP],
         );
       else if (revoked === "assignment")
