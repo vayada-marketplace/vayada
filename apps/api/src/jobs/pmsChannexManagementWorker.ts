@@ -47,7 +47,7 @@ export type ChannexManagementProviderFailure = {
 export type ChannexManagementProvider = {
   execute(
     job: ChannexManagementJob,
-    input?: { onProgress?: () => Promise<void> },
+    input?: { onProgress?: () => Promise<void>; workerId?: string },
   ): Promise<ChannexManagementProviderSuccess | ChannexManagementProviderFailure>;
 };
 
@@ -91,6 +91,7 @@ export async function runPmsChannexManagementWorkerOnce(input: {
   let result: ChannexManagementProviderSuccess | ChannexManagementProviderFailure;
   try {
     result = await input.provider.execute(job, {
+      workerId: input.workerId,
       onProgress: () => input.store.heartbeat(job, { workerId: input.workerId }),
     });
   } catch (error) {

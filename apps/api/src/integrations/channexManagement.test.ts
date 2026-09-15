@@ -511,3 +511,60 @@ describe("recovery after canonical stay-rule synchronization", () => {
     ).toBe("rate,min_stay_arrival,stop_sell");
   });
 });
+
+
+describe("closed upload worker completion", () => {
+  it.each(["capability", "lease", "held", "retry", "foreign", "oversized"])(
+    "stops %s completion before the outgoing plan",
+    async (mode) => {
+      const plan = vi.fn(async () => ({ requests: [] }));
+      const fetcher = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ padding: "x".repeat(65536) })),
+      );
+      const reconcile = vi.fn(async (_lease, get) => {
+        if (mode === "foreign" || mode === "oversized")
+          await get(
+            mode === "foreign" ? "https://example.test/api/v1/tasks/id" : "/api/v1/tasks/id",
+            new AbortController().signal,
+          );
+        return {
+          kind: "unavailable" as const,
+          reason:
+            mode === "retry" ? "reconciliation_batch_pending" : "ari_receipt_history_unavailable",
+        };
+      });
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan },
+        canSyncAri: mode !== "capability",
+        fetch: fetcher,
+        reconcileClosedUploads: reconcile,
+      });
+      const result = await provider.execute(
+        job("sync_ari"),
+        mode === "lease" ? {} : { workerId: "worker" },
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        code: ["retry", "foreign", "oversized"].includes(mode)
+          ? "provider_unavailable"
+          : "invalid_state",
+      });
+      expect(plan).not.toHaveBeenCalled();
+      if (["capability", "lease"].includes(mode)) expect(reconcile).not.toHaveBeenCalled();
+      if (mode !== "oversized") expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it("does not run pricing completion for booking synchronization", async () => {
+    const reconcile = vi.fn();
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      plans: { plan: async () => ({ requests: [] }) },
+      reconcileClosedUploads: reconcile,
+    });
+    await provider.execute(job("sync_bookings"));
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+});

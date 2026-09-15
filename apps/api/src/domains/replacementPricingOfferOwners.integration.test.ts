@@ -1,3 +1,5 @@
+import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
+import { createChannexManagementProvider } from "../integrations/channexManagement.js";
 import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexStagedPrices } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
@@ -1150,6 +1152,70 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0];
     return { ...f, get, task, restrictions, reconcile, retain, state };
   }
+  it("discovers and reconciles only the leased property uploads through the worker provider", async () => {
+    const f = await reconciliationFixture(),
+      foreign = await reconciliationFixture();
+    await f.retain();
+    await foreign.retain();
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
+      const parsed = new URL(String(url));
+      return new Response(JSON.stringify(await f.get(parsed.pathname + parsed.search)));
+    });
+    const plan = vi.fn(async () => {
+      throw new Error("Pricing dispatch remains unavailable");
+    });
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      canSyncAri: true,
+      plans: { plan },
+      fetch: fetcher,
+      reconcileClosedUploads: (lease, get) => reconcilePendingChannexUploads(pool, lease, get),
+    });
+    const job = {
+      jobId: f.input.jobId,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      attemptNumber: f.input.attemptNumber,
+      maxAttempts: 3,
+      input: {
+        operationType: "sync_ari" as const,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+      },
+    };
+    expect(await provider.execute(job, { workerId: f.input.workerId })).toMatchObject({
+      ok: false,
+      code: "invalid_state",
+    });
+    expect((await f.state()).state).toBe("reconciled");
+    expect((await foreign.state()).state).toBe("unresolved");
+    const calls = fetcher.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    expect(await provider.execute(job, { workerId: f.input.workerId })).toMatchObject({ ok: false });
+    expect(fetcher).toHaveBeenCalledTimes(calls);
+    expect(plan).toHaveBeenCalledTimes(2);
+  });
+  it("rejects stale worker identity before discovering pending uploads", async () => {
+    const f = await reconciliationFixture();
+    await f.retain();
+    expect(
+      await reconcilePendingChannexUploads(pool, { ...f.input, workerId: "old-worker" }, f.get),
+    ).toMatchObject({ kind: "unavailable", reason: "lease_unavailable" });
+    expect(f.get).not.toHaveBeenCalled();
+    expect((await f.state()).state).toBe("unresolved");
+  });
+  it("holds discovered uploads without original receipts", async () => {
+    const f = await reconciliationFixture();
+    expect(await reconcilePendingChannexUploads(pool, f.input, f.get)).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_receipt_history_unavailable",
+    });
+    expect(f.get).not.toHaveBeenCalled();
+    expect((await f.state()).state).toBe("unresolved");
+  });
   it("reconciles closed ARI atomically with all provider observations and cannot replay", async () => {
     const f = await reconciliationFixture();
     await f.retain();
