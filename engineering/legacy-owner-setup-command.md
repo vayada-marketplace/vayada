@@ -114,3 +114,26 @@ replay. The caller still must authenticate those artifacts and check expiry
 immediately before the eventual write. Local synthetic PostgreSQL tests compose
 this guard with the checkpoint and prove retained locks using blocking PIDs;
 they are not production or complete executor evidence.
+
+# Request/registry-before-receipt composition
+
+`inspectLegacyOwnerSetupReplay` verifies the complete signed request and locks
+current migration/security approvals before any receipt lookup. Callers must
+first authenticate evidence artifacts, target database and trusted policy; this
+helper does not implement those prerequisites. It requires the same dedicated,
+bounded READ COMMITTED transaction used by later conflict checks and writes.
+Immutable command/authority uniqueness makes same-command requests use the same
+approval rows, serializing retries. Preserve those locks until outer completion.
+
+It derives audit hashes from the exact envelope and configured executor principal
+(canonical JSON under `vayada:legacy-owner-internal-setup:v1\0executor-principal\0`).
+Receipt matching checks every command-derived fingerprint, exact owners, operation,
+environment, checkpoint and intended after-state. It never infers completion from
+current user rows or creates/repairs anything. A missing receipt still requires
+evidence/target checks; a matching receipt returns only its restricted reference,
+not permission to write or grant access. A caller can see its own uncommitted
+receipt: the result alone is not proof of durability. Expired/revoked requests deny
+even for a matching receipt; later historical audit access is a separate operation.
+The helper rejects active receipt RLS and rechecks request expiry after reads.
+Failure rolls back its own savepoint; the caller must roll back all, or discard the
+connection if rollback failed. No runtime/CLI is wired and VAY-2017 remains open.
