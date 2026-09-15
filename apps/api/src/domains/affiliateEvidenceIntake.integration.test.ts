@@ -2,7 +2,10 @@ import { ingestBookingAffiliateCreation as ingestNative } from "./bookingAffilia
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
-import { readAffiliateEvidenceReview as readReview } from "./affiliateEvidenceReview.js";
+import {
+  readAffiliateEvidenceReview as readReview,
+  readNativeAffiliateCreation as readNative,
+} from "./affiliateEvidenceReview.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ingestAffiliateEvidence as ingest,
@@ -119,6 +122,91 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
       [id(6), id(3)],
     );
   }
+  it("keeps authorization and native source in one read-only snapshot", async () => {
+    await seedNative();
+    const client = await pool.connect();
+    const intercepted = {
+      connect: async () => ({
+        query: async (sql: string, values?: unknown[]) => {
+          const result = await client.query(sql, values);
+          if (sql.startsWith("SELECT p.id")) {
+            // Commit from another connection between authorization and source reads.
+            await pool.query(
+              "UPDATE identity.organizations SET status='suspended'; UPDATE booking.guest_bookings SET source_system='pms'",
+            );
+          }
+          return result;
+        },
+        release: () => client.release(),
+      }),
+    } as unknown as pg.Pool;
+    expect(await readNative(intercepted, id(2), id(1), id(3))).toMatchObject({
+      status: "recorded",
+      source: "vayada_booking",
+    });
+    expect(
+      (await pool.query("SELECT source_system FROM booking.guest_bookings")).rows[0].source_system,
+    ).toBe("pms");
+    expect(await readNative(pool, id(2), id(1), id(3))).toBeNull();
+    expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+  });
+  it("does not expose an existing native booking from another property or organization", async () => {
+    await seedNative();
+    await pool.query(`INSERT INTO identity.organizations(id) VALUES ('${id(9)}');
+      INSERT INTO hotel_catalog.properties(id) VALUES ('${id(8)}');
+      INSERT INTO identity.organization_resource_links VALUES ('${id(9)}','${id(8)}','marketplace','hotel_profile','active','owner');
+      INSERT INTO booking.guest_bookings(id,property_id,quote_session_id,checkout_context_id)
+        VALUES ('${id(7)}','${id(8)}','${id(4)}','${id(5)}');
+      INSERT INTO booking.booking_status_events(guest_booking_id) VALUES ('${id(7)}');`);
+    expect(await readNative(pool, id(8), id(9), id(7))).toMatchObject({ status: "recorded" });
+    expect(await readNative(pool, id(2), id(1), id(7))).toBeNull();
+    expect(await readNative(pool, id(8), id(1), id(7))).toBeNull();
+    expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+  });
+  it("inspects native creation without persisting evidence or exposing internal traces", async () => {
+    await seedNative();
+    expect(await readNative(pool, id(2), id(1), id(3))).toEqual({
+      status: "recorded",
+      propertyId: id(2),
+      bookingId: id(3),
+      source: "vayada_booking",
+      originalBookedAt: "2026-01-01T00:00:00.000Z",
+      creationEventId: id(6),
+    });
+    expect(await readNative(pool, id(2), id(1), id(9))).toBeNull();
+    expect(await readNative(pool, id(9), id(1), id(3))).toBeNull();
+    expect(await readNative(pool, id(2), id(9), id(3))).toBeNull();
+    await pool.query("UPDATE booking.guest_bookings SET source_system='pms'");
+    expect(await readNative(pool, id(2), id(1), id(3))).toEqual({
+      status: "pending",
+      reason: "unsupported_source",
+    });
+    await pool.query("UPDATE booking.guest_bookings SET source_system='booking'");
+    await pool.query("UPDATE booking.booking_status_events SET actor_type='system'");
+    expect(await readNative(pool, id(2), id(1), id(3))).toEqual({
+      status: "needs_review",
+      reason: "conflicting_creation_evidence",
+    });
+    await pool.query("DELETE FROM booking.booking_status_events");
+    expect(await readNative(pool, id(2), id(1), id(3))).toEqual({
+      status: "pending",
+      reason: "creation_evidence_missing",
+    });
+    expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+  });
+  it.each([
+    "UPDATE identity.organizations SET status='suspended'",
+    "UPDATE identity.organizations SET kind='creator_workspace'",
+    "UPDATE hotel_catalog.properties SET profile_status='disabled'",
+    "UPDATE identity.organization_resource_links SET status='suspended'",
+    "UPDATE identity.organization_resource_links SET relationship='front_desk'",
+    "DELETE FROM identity.organization_resource_links",
+  ])("rechecks DB scope before native inspection: %s", async (change) => {
+    await seedNative();
+    await pool.query(change);
+    expect(await readNative(pool, id(2), id(1), id(3))).toBeNull();
+    expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+  });
   it("stores native creation provenance once across concurrent calls and exposes it for review", async () => {
     await seedNative();
     const results = await Promise.all(

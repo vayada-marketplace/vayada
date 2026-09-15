@@ -1,4 +1,5 @@
 import pg from "pg";
+import { readBookingAffiliateCreationEvidence } from "./bookingAffiliateCreationEvidence.js";
 
 /** Internal scoped read; route authorization is supplemented with current DB ownership. */
 export async function readAffiliateEvidenceReview(
@@ -46,9 +47,54 @@ export async function readAffiliateEvidenceReview(
   return { ...row, deliveries, nextCursor: row.deliveries.length > 50 ? deliveries[49].id : null };
 }
 
+/** One read-only snapshot covers current tenant access and native source evidence. */
+export async function readNativeAffiliateCreation(
+  pool: pg.Pool,
+  propertyId: string,
+  organizationId: string,
+  bookingId: string,
+) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (![propertyId, organizationId, bookingId].every((id) => uuid.test(id))) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const scope = await client.query(
+      `SELECT p.id FROM hotel_catalog.properties p
+       JOIN identity.organization_resource_links link ON link.resource_id=p.id::text
+       JOIN identity.organizations org ON org.id=link.organization_id
+       WHERE p.id=$1 AND p.profile_status <> 'disabled' AND org.id=$2
+         AND org.kind='hotel_group' AND org.status='active' AND link.product='marketplace'
+         AND link.resource_type='hotel_profile' AND link.status='active'
+         AND link.relationship IN ('owner','operator') LIMIT 1`,
+      [propertyId, organizationId],
+    );
+    if (!scope.rowCount) return null;
+    const source = await readBookingAffiliateCreationEvidence(client, { propertyId, bookingId });
+    if (source.status === "pending" && source.reason === "scope_unavailable") return null;
+    if (source.status !== "recorded") return source;
+    return {
+      status: source.status,
+      propertyId: source.propertyId,
+      bookingId: source.bookingId,
+      source: source.source,
+      originalBookedAt: source.originalBookedAt,
+      creationEventId: source.creationEventId,
+    };
+  } finally {
+    try {
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+  }
+}
+
 export function createPgAffiliateEvidenceReviewRepository(connectionString: string) {
   const pool = new pg.Pool({ connectionString, max: 3 });
   return {
+    readNative: (propertyId: string, organizationId: string, bookingId: string) =>
+      readNativeAffiliateCreation(pool, propertyId, organizationId, bookingId),
     read: (
       propertyId: string,
       organizationId: string,

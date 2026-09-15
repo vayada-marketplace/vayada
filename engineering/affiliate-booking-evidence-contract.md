@@ -346,3 +346,19 @@ must authorize the operation on every call through user permissions/entitlements
 or a defined service grant; current DB ownership alone is not that grant. Live
 collection and creator matching remain gated by their existing decisions. No
 browser transport, consent or retention policy is selected by this adapter.
+
+## Authorized native source inspection — 15 September 2026
+
+`GET /api/marketplace/properties/:propertyId/affiliate-evidence/native-bookings/:bookingId/creation`
+requires the same active hotel-group user/membership, profile-management permission,
+owner/operator property link and entitlement as stored evidence review. The
+repository rechecks active organization, enabled property and current link within
+a read-only repeatable-read transaction shared with the existing native reader.
+Authorization describes that transaction snapshot; every later request rechecks it.
+
+Returns recorded creation identifiers/time or the reader's pending/needs_review
+reason. Missing or cross-scope records return 404; malformed IDs or a cursor on this
+unpaginated endpoint return 422. All responses are no-store. Internal request and
+correlation IDs are omitted. The endpoint creates no receipt/delivery, invokes no
+intake, and does not certify attribution or completion. Durable collection and
+caller activation decisions remain separate; no retention default is implied.

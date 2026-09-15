@@ -7,6 +7,7 @@ import { registerMarketplaceAffiliateEvidenceRoutes } from "./routes/marketplace
 const propertyId = "15050000-0000-4000-8000-000000000002";
 const observationId = "15050000-0000-4000-8000-000000000003";
 const path = `/properties/${propertyId}/affiliate-evidence/${observationId}`;
+const nativePath = `/properties/${propertyId}/affiliate-evidence/native-bookings/${observationId}/creation`;
 const headers = { authorization: "Bearer valid" };
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => {
@@ -16,6 +17,7 @@ async function setup(mutate: (context: RequestContext) => void = () => {}) {
   const app = Fastify();
   apps.push(app);
   const repository = {
+    readNative: vi.fn().mockResolvedValue({ status: "recorded", bookingId: observationId }),
     read: vi.fn().mockResolvedValue({ observationId, deliveries: [], nextCursor: null }),
     close: vi.fn(async () => {}),
   };
@@ -65,10 +67,13 @@ it("reads exact authorized scope and keeps successful, missing and failed reads 
   expect(failed.statusCode).toBe(500);
   expect(failed.headers["cache-control"]).toBe("no-store");
 });
-it("denies absent/invalid auth and malformed cursor/IDs before reading", async () => {
+it.each([path, nativePath])("rejects invalid auth and IDs: %s", async (path) => {
   const { app, repository } = await setup();
   for (const authorization of [undefined, "Bearer invalid"]) {
-    const result = await app.inject({ url: path, headers: authorization ? { authorization } : {} });
+    const result = await app.inject({
+      url: path,
+      headers: authorization ? { authorization } : {},
+    });
     expect(result.statusCode).toBe(401);
     expect(result.headers["cache-control"]).toBe("no-store");
   }
@@ -79,6 +84,7 @@ it("denies absent/invalid auth and malformed cursor/IDs before reading", async (
   ])
     expect((await app.inject({ url, headers })).statusCode).toBe(422);
   expect(repository.read).not.toHaveBeenCalled();
+  expect(repository.readNative).not.toHaveBeenCalled();
 });
 it("allows an operator with an entitlement scoped to this property", async () => {
   const { app, repository } = await setup((context) => {
@@ -91,8 +97,10 @@ it("allows an operator with an entitlement scoped to this property", async () =>
   });
   expect((await app.inject({ url: path, headers })).statusCode).toBe(200);
   expect(repository.read).toHaveBeenCalledWith(propertyId, "org-1", observationId, null);
+  expect((await app.inject({ url: nativePath, headers })).statusCode).toBe(200);
+  expect(repository.readNative).toHaveBeenCalledWith(propertyId, "org-1", observationId);
 });
-it("enforces the complete identity, permission, entitlement and property denial matrix", async () => {
+it.each([path, nativePath])("enforces hotel access: %s", async (path) => {
   const denials: ((context: RequestContext) => void)[] = [
     (c) => {
       c.membership.permissions = [];
@@ -141,10 +149,11 @@ it("enforces the complete identity, permission, entitlement and property denial 
     expect(result.statusCode).toBe(403);
     expect(result.headers["cache-control"]).toBe("no-store");
     expect(repository.read).not.toHaveBeenCalled();
+    expect(repository.readNative).not.toHaveBeenCalled();
   }
 });
-it("mounts in the real app and keeps upstream authentication failures uncached", async () => {
-  const repository = { read: vi.fn(), close: vi.fn(async () => {}) };
+it.each([path, nativePath])("keeps app auth failures uncached: %s", async (path) => {
+  const repository = { readNative: vi.fn(), read: vi.fn(), close: vi.fn(async () => {}) };
   const app = buildApp({
     logger: false,
     marketplaceAffiliateEvidenceReviewRepository: repository,
@@ -161,5 +170,31 @@ it("mounts in the real app and keeps upstream authentication failures uncached",
   const result = await app.inject({ url: `/api/marketplace${path}`, headers });
   expect(result.statusCode).toBe(503);
   expect(result.headers["cache-control"]).toBe("no-store");
+  expect(repository.read).not.toHaveBeenCalled();
+});
+
+it("inspects native creation with scoped reads, no cursor and no-store outcomes", async () => {
+  const { app, repository } = await setup();
+  for (const result of [
+    { status: "recorded", bookingId: observationId },
+    { status: "pending", reason: "creation_evidence_missing" },
+    { status: "needs_review", reason: "conflicting_creation_evidence" },
+  ]) {
+    repository.readNative.mockResolvedValueOnce(result);
+    const response = await app.inject({ url: nativePath, headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(result);
+    expect(response.headers["cache-control"]).toBe("no-store");
+  }
+  expect(repository.readNative).toHaveBeenLastCalledWith(propertyId, "org-1", observationId);
+  repository.readNative.mockResolvedValueOnce(null);
+  expect((await app.inject({ url: nativePath, headers })).statusCode).toBe(404);
+  repository.readNative.mockRejectedValueOnce(new Error("database unavailable"));
+  const failed = await app.inject({ url: nativePath, headers });
+  expect(failed.statusCode).toBe(500);
+  expect(failed.headers["cache-control"]).toBe("no-store");
+  expect(
+    (await app.inject({ url: `${nativePath}?after=${observationId}`, headers })).statusCode,
+  ).toBe(422);
   expect(repository.read).not.toHaveBeenCalled();
 });
