@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { RequestContext } from "@vayada/backend-auth";
-import { requireActiveEntitlement, requireResourceAccess } from "@vayada/backend-authorization";
+import {
+  requireActiveEntitlement,
+  requireResourceAccess,
+  requirePropertyAccess,
+} from "@vayada/backend-authorization";
 import {
   calculateAffiliateEarning,
   type AffiliateEarningResult,
@@ -89,6 +93,16 @@ export async function recordAffiliateEarningCalculation(
     key: "marketplace-hotel-profile",
     resource,
   });
+  // Fresh caller context must include canonical membership scope, including assigned properties.
+  await requirePropertyAccess(
+    context,
+    { findMembershipPropertyScope: async () => null },
+    {
+      propertyId,
+      targetResource: { product: "marketplace", resourceType: "hotel_profile" },
+      allowedRelationships: ["owner", "operator"],
+    },
+  );
   const client = await pool.connect(),
     key = [propertyId, bookingId, stayItemId];
   const fail = async (code: string): Promise<Result> => {

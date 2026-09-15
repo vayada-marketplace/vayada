@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseFinanceAffiliatePercentagePolicy } from "@vayada/domain-finance";
 import {
   context,
@@ -147,6 +147,12 @@ describe.skipIf(!databaseUrl)("affiliate earning journal command", () => {
       (c: ReturnType<typeof context>) => {
         c.linkedResources = [];
       },
+      (c: ReturnType<typeof context>) => {
+        delete c.membership.propertyAccess;
+      },
+      (c: ReturnType<typeof context>) => {
+        c.linkedResources = c.linkedResources.filter((r) => r.product !== "hotel_catalog");
+      },
     ]) {
       const request = input();
       mutate(request.context);
@@ -161,6 +167,29 @@ describe.skipIf(!databaseUrl)("affiliate earning journal command", () => {
     await expect(record(fixture.pool(), input(), resolver())).resolves.toMatchObject({
       code: "scope_unavailable",
     });
+    expect(await count()).toBe(1);
+  });
+  it("enforces assigned properties and revoked membership before resolver or replay", async () => {
+    await record(fixture.pool(), input(), resolver());
+    const request = input(),
+      resolve = vi.fn(resolver());
+    request.context.membership.propertyAccess = {
+      ...context().membership.propertyAccess!,
+      mode: "assigned",
+      assignedPropertyIds: [id(99)],
+    };
+    await expect(record(fixture.pool(), request, resolve)).rejects.toThrow();
+    expect(resolve).not.toHaveBeenCalled();
+    request.context.membership.propertyAccess.assignedPropertyIds = [id(3)];
+    await expect(record(fixture.pool(), request, resolve)).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+    });
+    request.context.membership.status = "inactive";
+    await expect(record(fixture.pool(), request, resolve)).resolves.toMatchObject({
+      code: "scope_unavailable",
+    });
+    expect(resolve).toHaveBeenCalledTimes(1);
     expect(await count()).toBe(1);
   });
   it("rejects unavailable, mismatched or malformed evidence and rolls back storage failure", async () => {
