@@ -183,6 +183,7 @@ jobs:
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
           src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
           src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
           src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
