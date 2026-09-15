@@ -260,3 +260,26 @@ fact identity. Future durable intake must append and review those records even f
 equal digests; this helper does not classify provenance discrepancies as harmless.
 It neither stores/acknowledges observations nor orders revisions, projects lifecycle,
 deduplicates commissions or joins creators. It requires no retention-policy default.
+
+## Durable intake slice — 15 September 2026
+
+Migration 0193 adds booking-owned original observations and delivery snapshots.
+`ingestAffiliateEvidence` validates before opening a transaction; an injected
+server-owned authority reader must reauthorize and lock connection, property and
+evidence-reference scope until commit. There is no default authority reader or
+public endpoint. Wiring a real connector must provide those locks and fresh grants.
+
+A unique delivery key and row lock serialize first receipts and concurrent retries.
+Every authorized delivery is appended, including changed facts and provenance.
+The original observation and first receipt are immutable. Equal digests return the
+original receipt; conflicting digests return `event_key_conflict` only after the
+conflicting snapshot commits. Any historical fact conflict or change to provenance
+kind/actor/command keeps subsequent duplicates in review. Reference-only changes
+remain recorded without manufacturing a provenance conflict.
+
+Database failures roll back both writes. Ambiguous commit failures may be retried:
+the original identity remains stable, while another delivery may be retained.
+No processing worker, collection route, earning outcome or retention duration is
+enabled. Runtime authorization, source authority and retention/export/deletion
+policy must be resolved before live collection; append-only storage is not a
+decision to retain records forever. Corrections never overwrite source history.
