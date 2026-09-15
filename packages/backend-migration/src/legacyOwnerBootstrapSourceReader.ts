@@ -31,7 +31,7 @@ type ProjectedRow = {
 
 /**
  * Historical snapshot association only, never current ownership or access.
- * Caller independently verifies environment, full visibility and an approved
+ * Caller independently verifies database identity/environment and an approved
  * request binding exact row hashes/ordinals + ledger hash to the eight pairs.
  * Output email is sensitive: consume in memory, never log/serialize to reports.
  */
@@ -69,7 +69,13 @@ export async function readLegacyOwnerBootstrapSources(
     )
   )
     throw Error("INVALID_OWNER_SOURCE_SCOPE");
+  let savepoint = false;
   try {
+    await client.query("SAVEPOINT vay2017_owner_history");
+    savepoint = true;
+    // Catalog rows can predate concurrent RLS DDL in the caller's snapshot.
+    // This setting errors on policy-filtered reads; it never bypasses policies.
+    await client.query("SET LOCAL search_path = pg_catalog; SET LOCAL row_security = off");
     const settings = (
       await client.query(`SELECT current_setting('transaction_read_only') AS readonly,
       current_setting('transaction_isolation') AS isolation`)
@@ -79,6 +85,25 @@ export async function readLegacyOwnerBootstrapSources(
       !["repeatable read", "serializable"].includes(settings.isolation)
     )
       throw Error();
+    // Retain relation locks through the snapshot; views, inheritance and RLS
+    // must never hide extra/conflicting evidence or replace its representation.
+    const tables = [
+      "migration_source_auth.snapshot_rows",
+      "migration_source_pms.snapshot_rows",
+      "platform.source_extraction_runs",
+      "platform.source_extraction_sources",
+      "platform.source_extraction_tables",
+    ];
+    for (const table of tables) {
+      await client.query(`SELECT run_id FROM ${table} WHERE false`);
+      const { rows } = await client.query<{ safe: boolean }>(
+        `SELECT c.relkind='r' AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity
+          AND NOT EXISTS(SELECT 1 FROM pg_inherits WHERE inhrelid=c.oid OR inhparent=c.oid)
+          AS safe FROM pg_class c WHERE c.oid=$1::regclass`,
+        [table],
+      );
+      if (rows.length !== 1 || rows[0]?.safe !== true) throw Error();
+    }
     const ledger = await readSourceLedger(client, expected.sourceRunId);
     if (
       ledger.run.environment !== expected.sourceEnvironment ||
@@ -111,7 +136,7 @@ export async function readLegacyOwnerBootstrapSources(
       ],
     );
     if (rows.length !== 16) throw Error();
-    return expected.owners.map((owner) => {
+    const result = expected.owners.map((owner) => {
       const users = rows.filter((row) => row.database === "auth" && row.id === owner.ownerId);
       const hotels = rows.filter((row) => row.database === "pms" && row.id === owner.hotelId);
       if (users.length !== 1 || hotels.length !== 1) throw Error();
@@ -141,7 +166,18 @@ export async function readLegacyOwnerBootstrapSources(
             : ("conflict" as const),
       };
     });
+    await client.query("RELEASE SAVEPOINT vay2017_owner_history");
+    savepoint = false;
+    return result;
   } catch {
+    if (savepoint) {
+      try {
+        await client.query("ROLLBACK TO SAVEPOINT vay2017_owner_history");
+        await client.query("RELEASE SAVEPOINT vay2017_owner_history");
+      } catch {
+        throw Error("OWNER_SOURCE_ROLLBACK_FAILED");
+      }
+    }
     throw Error("OWNER_SOURCE_READ_FAILED");
   }
 }
