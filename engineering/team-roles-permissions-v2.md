@@ -474,3 +474,14 @@ unit tests and API typecheck. A queued reply loses delivery eligibility after
 assignment to a read-only role and calls no provider. Independent review found
 no actionable issues. Other Inbox mutation/assignment/reconciliation guards
 still need parity before role assignment activation.
+
+### Remaining Inbox command role checks
+
+Reply, triage, internal notes and assignments now revalidate locked live Inbox
+read/reply permissions. Mark-read requires only read. Assignment recipients must
+have live Inbox read access and belong to the acting organization. Unit fixtures
+now provide actual role fields; PostgreSQL staff fixtures use canonical manager
+roles instead of a retired alias with no grants. Validation: 52 PostgreSQL tests
+across four suites, 30 command unit tests, API typecheck and independent review
+with no actionable findings. Reconciliation parity remains before assignment
+activation.

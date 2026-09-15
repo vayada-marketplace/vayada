@@ -63,7 +63,18 @@ class FakeDatabase {
   private result(text: string, values?: readonly unknown[]) {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) return ok([]);
     if (text.includes("FROM hotel_catalog.properties property"))
-      return this.options.actorScope === false ? ok([]) : ok([{ displayName: "Front Desk" }]);
+      return this.options.actorScope === false
+        ? ok([])
+        : ok([
+            {
+              displayName: "Front Desk",
+              roleKey: "hotel_owner",
+              roleDefinitionId: null,
+              permissionOverrides: null,
+            },
+          ]);
+    if (text.includes("FROM identity.role_permission_grants"))
+      return ok([{ permissionKey: "pms.inbox.read" }, { permissionKey: "pms.inbox.reply" }]);
     if (text.includes("FROM identity.product_entitlements"))
       return this.options.entitlement === false
         ? ok([])
@@ -73,7 +84,16 @@ class FakeDatabase {
     if (text.includes("FROM identity.organization_memberships membership"))
       return this.options.assignee === false
         ? ok([])
-        : ok([{ membershipId: ASSIGNEE, displayName: "Night Manager" }]);
+        : ok([
+            {
+              membershipId: ASSIGNEE,
+              displayName: "Night Manager",
+              organizationId: ORGANIZATION,
+              roleKey: "front_desk",
+              roleDefinitionId: null,
+              permissionOverrides: null,
+            },
+          ]);
     if (text.includes("FROM pms.message_threads"))
       return this.options.thread === false
         ? ok([])
@@ -167,7 +187,7 @@ describe("PostgreSQL PMS Inbox staff commands", () => {
 
     const eligibility = database.call("FROM identity.organization_memberships membership");
     expect(eligibility.text).toContain("assignment.property_id = $1::uuid");
-    expect(eligibility.values).toEqual([PROPERTY, ASSIGNEE]);
+    expect(eligibility.values).toEqual([PROPERTY, ASSIGNEE, ORGANIZATION]);
     expect(database.call("UPDATE pms.message_threads").values).toEqual([
       PROPERTY,
       THREAD,

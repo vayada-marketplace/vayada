@@ -475,6 +475,20 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
     ]);
   });
 
+  it("rejects a new reply after assignment to a read-only role", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox viewer', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+      [MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [MEMBERSHIP],
+    );
+    await expect(reply.reply(command("role-readonly"))).rejects.toThrow(
+      "PMS Inbox reply command failed",
+    );
+  });
+
   it.each(["organization", "membership", "assignment", "permission", "product", "role"])(
     "holds revoked originating %s despite another active property owner",
     async (revoked) => {
