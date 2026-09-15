@@ -994,3 +994,30 @@ IO and reject changes. All task IDs come from the retained receipt, never the
 caller. Return correlated task observations only, without persistence, ownership
 release, retry permission or activation. Even all matching finish markers do not
 establish provider lifecycle/replay guarantees or complete price/OTA delivery.
+
+
+### Closed initial upload reconciliation (VAY-1545, September15 decision)
+
+The user accepted Channex's documented sequential FIFO processing plus the exact
+successful finished original task as the completion boundary. This supersedes
+above requirements for a separate provider no-replay guarantee before this
+closed initial upload can be reconciled. It is an accepted integration assumption,
+not a newly obtained provider guarantee or OTA delivery proof.
+
+`reconcileCurrentChannexInitialAri` accepts internal attempt identifiers and a
+provider GET port, never caller-supplied completion evidence. Under current
+publication/lease/target authority, require one clean immutable original receipt.
+Read every original task against the full immutable request, then every occupancy
+price and the six exact closed restrictions under one bounded deadline. No
+partial observation set qualifies. Recheck the complete attempt/receipt history,
+publication, reservation and provider configuration in the final locked
+transaction. Persist a bounded verification attestation (original receipt ID, task/price counts,
+SHA-256 of sanitized observations and exact restriction observation) and mark only that unresolved attempt
+reconciled atomically; loss of current authority rolls back the transition.
+
+Missing/ambiguous receipts, task or price/rule mismatch, late receipts and changed
+ownership remain unresolved. Concurrent calls cannot both reconcile; a repeated
+call returns unavailable without fetching or sending again. This command does
+not restore a dispatch closure or weaken the initial sender's history guard.
+Room availability, complete horizon coverage, guest/meal/channel semantics and
+activation remain separate requirements. No runtime caller is enabled here.

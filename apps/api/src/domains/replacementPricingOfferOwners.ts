@@ -4,7 +4,7 @@ import { verifyChannexAriTaskFinish } from "../integrations/channexAriTaskReadba
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
 import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { verifyChannexStagedNightRestrictions, verifyChannexNightRestrictions } from "../integrations/channexRestrictionReadback.js";
 import { prepareChannexReceiptPersistence, prepareChannexTransportFailurePersistence } from "./channexCreationReceiptStore.js";
@@ -173,7 +173,7 @@ export async function claimPublishedChannexInitialAri(
 type TargetWork =
   | "reserve"
   | "claim"
-  | { kind: "ari_observe"; attemptId: string; ariAttemptId: string; taskRead?: true }
+  | { kind: "ari_observe"; attemptId: string; ariAttemptId: string; taskRead?: true; reconciliation?: { expected: unknown; evidence: unknown } }
   | { kind: "ari_claim"; attemptId: string; date: string }
   | { kind: "ari_dispatch"; attemptId: string; date: string; ariAttemptId: string; jobAttemptId: string; workerId: string }
   | { kind: "retained"; attemptId: string }
@@ -460,6 +460,85 @@ export async function readCurrentChannexAriTaskFinishes(
     ariAttemptId,
     ...before.reservation,
     observations,
+  };
+}
+/** Reconcile one closed upload from original provider evidence; never activate or resend. */
+export async function reconcileCurrentChannexInitialAri(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+  ariAttemptId: string,
+  get: (path: string, signal: AbortSignal) => Promise<unknown>,
+) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (![attemptId, ariAttemptId].every((id) => typeof id === "string" && uuid.test(id)))
+    return { kind: "unavailable" as const, reason: "invalid_attempt" };
+  const lease = { ...input },
+    selected = { ...selection };
+  const work = { kind: "ari_observe" as const, attemptId, ariAttemptId, taskRead: true as const };
+  const before = await withSelectedChannexTarget(pool, lease, selected, work);
+  if (before.kind !== "available") return before;
+  const original = before.stagedAri,
+    identity = before.configurationIdentity;
+  if (!original?.taskIds || !identity) throw new Error("Original ARI tasks missing");
+  const room = before.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
+  const evidence = await boundedProviderCall(async (signal) => {
+    const read = (_method: "GET", path: string) => {
+      signal.throwIfAborted();
+      return get(path, signal);
+    };
+    const tasks = [];
+    for (const taskId of original.taskIds!) {
+      signal.throwIfAborted();
+      tasks.push(
+        await verifyChannexAriTaskFinish(
+          { taskId, externalPropertyId: identity.externalPropertyId, request: original.request },
+          read,
+        ),
+      );
+    }
+    const prices = await verifyChannexStagedNightPrices(
+      room,
+      selected.offerId,
+      selected.primaryOccupancy,
+      identity,
+      original.request,
+      read,
+    );
+    const restrictions = await verifyChannexStagedNightRestrictions(original.request, read);
+    return {
+      schemaVersion: 1,
+      completionBasis: "finished_task_fifo",
+      originalReceiptId: original.receiptId,
+      taskCount: tasks.length,
+      priceCount: prices.prices.length,
+      // Original task IDs and requested values already live in immutable storage.
+      // Keep the verification attestation bounded even for 100 tasks/occupancies.
+      observationsSha256: createHash("sha256")
+        .update(JSON.stringify({ tasks, prices, restrictions }))
+        .digest("hex"),
+      restrictions,
+    };
+  });
+  const after = await withSelectedChannexTarget(pool, lease, selected, {
+    ...work,
+    reconciliation: {
+      expected: {
+        stagedAri: before.stagedAri,
+        reservation: before.reservation,
+        configurationIdentity: before.configurationIdentity,
+        publication: before.publication,
+      },
+      evidence,
+    },
+  });
+  if (after.kind !== "available") return after;
+  return {
+    kind: "ari_reconciled" as const,
+    creationAttemptId: attemptId,
+    ariAttemptId,
+    ...after.reservation,
   };
 }
 /** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
@@ -752,7 +831,7 @@ async function withPublishedChannexPricing(
           request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown };
         }
       | undefined;
-    let stagedAri: { attemptId: string; request: unknown; history: unknown; taskIds?: string[] } | undefined;
+    let stagedAri: { attemptId: string; request: unknown; history: unknown; taskIds?: string[]; receiptId?: string } | undefined;
     let ariRequest: { method: "POST"; path: "/api/v1/restrictions"; body: unknown } | undefined;
     let ariClaim:
       | {
@@ -994,7 +1073,7 @@ async function withPublishedChannexPricing(
               if (work.taskRead) {
                 const receipts = (
                   await client.query(
-                    "SELECT outcome,http_status,has_warnings,task_ids FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY id",
+                    "SELECT id,outcome,http_status,has_warnings,task_ids FROM pms.channex_offer_ari_receipts WHERE attempt_id=$1 ORDER BY id",
                     [stored.id],
                   )
                 ).rows;
@@ -1014,6 +1093,7 @@ async function withPublishedChannexPricing(
                 )
                   return unavailable("ari_receipt_history_unavailable");
                 stagedAri.taskIds = tasks;
+                stagedAri.receiptId = receipt.id;
               }
             }
             if (work.kind === "ari_claim" || work.kind === "ari_dispatch") {
@@ -1243,6 +1323,18 @@ async function withPublishedChannexPricing(
           }
         }
       }
+    }
+    if (typeof work === "object" && "kind" in work && work.kind === "ari_observe" && work.reconciliation) {
+      if (!isDeepStrictEqual(work.reconciliation.expected, {
+        stagedAri, reservation, configurationIdentity, publication: snapshot,
+      })) return unavailable("ari_reconciliation_stale");
+      const saved = await client.query(
+        `UPDATE pms.channex_offer_ari_attempts
+         SET state='reconciled',reconciliation_evidence=$2::jsonb
+         WHERE id=$1 AND state='unresolved' RETURNING id`,
+        [work.ariAttemptId, JSON.stringify(work.reconciliation.evidence)],
+      );
+      if (!saved.rowCount) return unavailable("ari_attempt_unavailable");
     }
     // Held source/owner locks protect existing evidence; repeat time-sensitive
     // readiness and authority at the final boundary before returning any prices.
