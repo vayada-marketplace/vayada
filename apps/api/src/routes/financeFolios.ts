@@ -6,6 +6,8 @@ import {
 } from "@vayada/backend-authorization";
 import {
   PMS_FINANCIALS_CONTRACT_VERSION,
+  parseFinanceFolioExportFilters,
+  parseFinanceFolioExportSnapshot,
   parseFinanceFolioQuery,
   parseFinanceFolioRevisionCommand,
   parseFinanceFolioWrite,
@@ -17,6 +19,10 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
+import {
+  type FinanceFolioExportCommand,
+  type FinanceFolioExportEnqueueResult,
+} from "../domains/financeFolioExportRepository.js";
 import {
   type FinanceFolioCommandResult,
   type CreateFinanceFolioCommand,
@@ -36,7 +42,10 @@ type Params = { propertyId: string; folioId?: string };
 type Scope = { context: RequestContext; propertyId: string };
 export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
-  repository: Pick<FinanceFolioReadRepository, "list" | "detail">;
+  repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
+  exports?: {
+    enqueue(command: FinanceFolioExportCommand): Promise<FinanceFolioExportEnqueueResult>;
+  };
   commands?: {
     create(command: CreateFinanceFolioCommand): Promise<FinanceFolioCommandResult>;
     correct(command: CorrectFinanceFolioCommand): Promise<FinanceFolioCommandResult>;
@@ -46,6 +55,7 @@ export type FinanceFolioRoutesOptions = {
 };
 
 const ROOT = "/finance/properties/:propertyId/financials/folios";
+const EXPORT_ROOT = "/finance/properties/:propertyId/financials/exports";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export async function registerFinanceFolioRoutes(
@@ -75,6 +85,41 @@ export async function registerFinanceFolioRoutes(
       return value ? reply.send(detailResponse(value, propertyId)) : missing(reply);
     }),
   );
+
+  if (options.exports)
+    app.post(EXPORT_ROOT, { onRequest: read }, async (request, reply) =>
+      safe(reply, async () => {
+        const value = exportRequest(request.body);
+        if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
+          return bad(reply);
+        const current = scopes.get(request)!;
+        const rawCapture = await options.repository.captureReadyExport(
+          current.propertyId,
+          value.filters,
+        );
+        if (!rawCapture) return missing(reply);
+        const capture = exportCapture(rawCapture, current.propertyId, value.filters);
+        return exportResponse(
+          reply,
+          await options.exports!.enqueue({
+            ...value,
+            organizationId: current.context.selectedOrganization.organizationId,
+            propertyId: current.propertyId,
+            currency: capture.snapshot.currency,
+            snapshot: capture.snapshot,
+            envelope: capture.envelope,
+            audit: {
+              actorUserId: current.context.actor.internalUserId,
+              requestId: current.context.audit.requestId,
+              correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
+              causationId: value.commandId,
+              requestedAt: current.context.audit.receivedAt,
+            },
+          }),
+          current.propertyId,
+        );
+      }),
+    );
 
   if (!options.commands) return;
   app.post(ROOT, { onRequest: write }, async (request, reply) =>
@@ -126,6 +171,64 @@ export async function registerFinanceFolioRoutes(
   app.delete(`${ROOT}/:folioId`, { onRequest: write }, async (request, reply) =>
     transition(request, reply, scopes, options.commands!, "archive"),
   );
+}
+
+function exportResponse(
+  reply: FastifyReply,
+  value: FinanceFolioExportEnqueueResult,
+  propertyId: string,
+) {
+  if (!record(value)) return commandViolation();
+  if (value.status === "conflict")
+    return exact(value, ["status"])
+      ? reply.status(409).send({ code: "idempotency_key_reused" })
+      : commandViolation();
+  if (!["created", "replayed"].includes(String(value.status))) return commandViolation();
+  const exportId = canonicalUuid(value.exportId);
+  const parsed = envelope.safeParse(value.envelope);
+  if (
+    !exportId ||
+    !exact(value, ["status", "exportId", "envelope"]) ||
+    !parsed.success ||
+    parsed.data.propertyId !== propertyId ||
+    parsed.data.incompleteEvidence.some(
+      (item) => item.amount && item.amount.currency !== parsed.data.currency,
+    )
+  )
+    return commandViolation();
+  return reply.status(value.status === "created" ? 202 : 200).send({
+    ...parsed.data,
+    item: { resourceId: exportId, state: "pending" },
+    outcome: value.status,
+  });
+}
+
+// prettier-ignore
+function exportCapture(value: unknown, propertyId: string, filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>>) {
+  if (!record(value) || !exact(value, ["envelope", "snapshot"])) return commandViolation();
+  const parsedEnvelope = envelope.safeParse(value.envelope);
+  const snapshot = parseFinanceFolioExportSnapshot(value.snapshot);
+  if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || parsedEnvelope.data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== parsedEnvelope.data.currency) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
+  return { envelope: parsedEnvelope.data, snapshot };
+}
+
+function exportRequest(value: unknown) {
+  if (!record(value) || !exact(value, ["commandId", "idempotencyKey", "tab", "filters", "format"]))
+    return null;
+  const commandId = canonicalUuid(value.commandId);
+  const filters = parseFinanceFolioExportFilters(value.filters);
+  if (
+    !commandId ||
+    typeof value.idempotencyKey !== "string" ||
+    value.idempotencyKey !== value.idempotencyKey.trim() ||
+    value.idempotencyKey.length < 8 ||
+    value.idempotencyKey.length > 200 ||
+    value.tab !== "folios" ||
+    value.format !== "csv" ||
+    !filters
+  )
+    return null;
+  return { commandId, idempotencyKey: value.idempotencyKey, filters };
 }
 
 function authorization(

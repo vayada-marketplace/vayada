@@ -64,6 +64,10 @@ import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/finance
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
+import {
+  createKmsFinanceFolioExportSearchDigest,
+  createPgFinanceFolioExportJobRepository,
+} from "./domains/financeFolioExportRepository.js";
 import { createAwsFinanceFolioKms } from "./domains/financeFolioKms.js";
 import { createPgFinanceFolioReadRepository } from "./domains/financeFolioReadRepository.js";
 import {
@@ -642,11 +646,23 @@ const financeFolioRuntime =
           recipientEncoder,
           recipientDecoder,
         });
+        const exportJobs = createPgFinanceFolioExportJobRepository({
+          connectionString: targetDatabaseUrl,
+          searchDigest: createKmsFinanceFolioExportSearchDigest({
+            kms: kms.write,
+            keyArn: config.financeFolioRecipientKms.fingerprintKeyArn,
+          }),
+        });
         return {
-          routes: { repository, commands },
+          routes: { repository, commands, exports: exportJobs },
           async close() {
             try {
-              await Promise.all([repository.close(), commands.close(), propertyContext.close()]);
+              await Promise.all([
+                repository.close(),
+                commands.close(),
+                exportJobs.close(),
+                propertyContext.close(),
+              ]);
             } finally {
               kms.close();
             }
