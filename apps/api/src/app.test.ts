@@ -2727,7 +2727,9 @@ function buildAuthenticatedApp(
       ? agencyPropertyAccessRepository
       : {
           async findMembershipPropertyScope() {
-            return options.propertyScope ?? null;
+            return options.propertyScope
+              ? { productAccess: { pms: true, booking: true }, ...options.propertyScope }
+              : null;
           },
         });
 
@@ -2788,6 +2790,10 @@ function buildAuthenticatedApp(
           return (
             options.permissions ?? [
               "booking.settings.manage",
+              "booking.addons.read",
+              "booking.addons.manage",
+              "booking.promos.read",
+              "booking.promos.manage",
               "booking.reservation.read",
               "pms.guest_contact.read",
             ]
@@ -4223,6 +4229,7 @@ describe("vayada-api", () => {
               accessOrigin: "agency",
               assignedPropertyIds: [],
               permissionOverrides,
+              productAccess: { pms: true, booking: true },
             };
           },
           async recordInvalidPermissionOverride(_context, issueCodes) {
@@ -5952,6 +5959,36 @@ describe("vayada-api", () => {
       addonItems: [bookingAddonItem],
       propertyPlan: commissionPropertyPlan,
     });
+  });
+
+  it.each([
+    ["addon-items", "booking.addons.read"],
+    ["promo-codes", "booking.promos.read"],
+  ] as const)("separates %s View from writes and general Settings", async (path, permission) => {
+    app = buildAuthenticatedApp({ permissions: [permission] });
+    const url = `/api/booking/hotels/booking_hotel_alpenrose/${path}`;
+    const headers = { authorization: "Bearer valid-token" };
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
+    for (const method of ["POST", "PATCH", "DELETE"] as const) {
+      expect(
+        (
+          await app.inject({
+            method,
+            url: method === "POST" ? url : `${url}/target`,
+            headers,
+            ...(method === "DELETE" ? {} : { payload: {} }),
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    await app.close();
+    app = buildAuthenticatedApp({ permissions: ["booking.settings.manage"] });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+    await app.close();
+    app = buildAuthenticatedApp({
+      permissions: [path === "addon-items" ? "booking.promos.read" : "booking.addons.read"],
+    });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
   });
 
   it("returns the booking add-on item read-model not-found contract", async () => {
