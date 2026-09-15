@@ -392,3 +392,14 @@ suspension, removal and transfer failure/replay. Mocked browser coverage is not
 deployed proof; record deployed revision and bounded synthetic fixture cleanup.
 The full ticket stays In Progress until shipped acceptance criteria are verified
 and the user explicitly accepts it.
+
+### Role security policy support
+
+The shared role policy validates immutable class/base/preset identity, role
+defaults, member overrides and required lower permissions. Staff defaults can
+be exceeded by explicit member overrides within the class ceiling. Billing is
+excluded; manager authority belongs only to the Agency-manager preset; cloned
+Housekeeping roles retain the guest-contact restriction. Account admin uses an
+empty immutable definition and trusted live admin grants. This support slice
+has no runtime callers or role assignments yet. Nineteen focused policy tests,
+backend-auth build/typecheck and independent adversarial review passed.

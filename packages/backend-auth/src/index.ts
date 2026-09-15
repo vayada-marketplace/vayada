@@ -127,6 +127,14 @@ export {
 } from "./repository.js";
 
 export {
+  resolveTeamRolePermissions,
+  validateTeamRoleDefaults,
+  teamRolePermissionCeiling,
+  teamRolePresetBases,
+  type TeamRolePolicy,
+  type TeamRoleSecurityClass,
+} from "./teamRolePolicy.js";
+export {
   createPgStaffInvitationRepository,
   validProductAccess,
   type StaffRosterMember,
