@@ -280,7 +280,12 @@ export function validateStaffInviteAccess(input: {
   permissionOverrides: { grant: readonly string[]; deny: readonly string[] };
 }): readonly StaffInviteAccessValidationIssue[] {
   const issues = new Set<StaffInviteAccessValidationIssue>();
-  if (input.propertyAccessMode !== "assigned") issues.add("invalid_property_access_mode");
+  if (
+    !["assigned", "all"].includes(input.propertyAccessMode) ||
+    (input.propertyAccessMode === "all" && input.propertyIds.length !== 0)
+  ) {
+    issues.add("invalid_property_access_mode");
+  }
   if (input.propertyAccessMode === "assigned" && input.propertyIds.length === 0) {
     issues.add("missing_property_assignment");
   }
@@ -486,7 +491,7 @@ export type CreateStaffInvitePayload = {
   email: string;
   name?: string;
   roleKey: HotelStaffRoleKey;
-  propertyAccessMode: "assigned";
+  propertyAccessMode: "assigned" | "all";
   propertyIds: readonly string[];
   permissionOverrides: StaffPermissionOverrides;
   configurationRevision: number;

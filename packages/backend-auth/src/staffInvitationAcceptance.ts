@@ -191,11 +191,11 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
             `INSERT INTO identity.organization_memberships
                (organization_id, user_id, status, role_key, permission_overrides,
                 property_access_mode, access_origin, invited_at, pms_access_enabled, booking_access_enabled)
-             VALUES ($1, $2, 'active', $3, $4::jsonb, 'assigned', 'agency', now(), $5, $6)
+             VALUES ($1, $2, 'active', $3, $4::jsonb, $7, 'agency', now(), $5, $6)
              ON CONFLICT (organization_id, user_id) DO UPDATE SET
                status = 'active', role_key = EXCLUDED.role_key,
                permission_overrides = EXCLUDED.permission_overrides,
-               property_access_mode = 'assigned',
+               property_access_mode = EXCLUDED.property_access_mode,
                pms_access_enabled = EXCLUDED.pms_access_enabled,
                booking_access_enabled = EXCLUDED.booking_access_enabled,
                invited_at = COALESCE(identity.organization_memberships.invited_at, EXCLUDED.invited_at),
@@ -211,6 +211,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
               JSON.stringify(overrides),
               invitation.pms_access_enabled,
               invitation.booking_access_enabled,
+              invitation.property_access_mode,
             ],
           )
         ).rows[0]?.id;
@@ -298,6 +299,7 @@ async function audit(
         membershipId,
         providerEventId: event.providerEventId,
         propertyIds: invitation.property_ids,
+        propertyAccessMode: invitation.property_access_mode,
         productAccess: {
           pms: invitation.pms_access_enabled,
           booking: invitation.booking_access_enabled,
