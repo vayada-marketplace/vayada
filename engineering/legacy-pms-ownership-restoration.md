@@ -239,6 +239,24 @@ rejects policy-filtered reads, and retains locks until the caller commits or
 rolls back. Failures require rollback. Eligibility, original-prepare verification
 and the atomic claim/event consumer remain mandatory; no grant or writer is added.
 
+`lockLegacyHistoricalBindingTarget` is a prepare-only target prerequisite in the
+caller's bounded READ COMMITTED transaction, after authority verification. It
+pins catalog resolution, takes connection SHARE NOWAIT, then the existing sorted
+external-property/management advisory keys and NOWAIT property/claim row locks.
+The relation fence is necessary: null-live-ID inserts and metadata-only updates
+do not participate in the existing binding trigger's advisory protocol. It
+briefly excludes all connection writers, not only this pair; a busy writer causes
+immediate failure, never a wait for this relation. Any partial-acquisition failure
+rolls back this helper's savepoint. Success retains locks until outer completion.
+The caller must keep that window bounded and abort the command on any failure.
+
+Under these locks it rejects incomplete/RLS-filtered visibility, fingerprints all
+physical target columns and compares exhaustive OR-key claim/connection sets.
+Inactive and protected pairs remain excluded. It does not authenticate source
+activity, verify current ownership, read replay receipts or write claims/events.
+Its non-executable result must not replace fresh source/owner eligibility,
+approval-expiry rechecks, compensation verification or atomic receipt/audit writes.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
