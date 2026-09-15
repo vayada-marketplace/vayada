@@ -50,15 +50,29 @@ before publishing or activating live earning relationships.
 These are logical records, not a proposed additional service or migration schema.
 Reuse existing domain identities and command infrastructure where applicable.
 
-| Record            | Required meaning                                                                                                                                                                                                 |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Program           | Stable Marketplace identity bound to organization, property and affiliate offer. One non-ended agreement per program/creator; multiple offers must not be silently merged.                                       |
-| Published terms   | Immutable ID, program/property/offer IDs, source draft ID/revision, exact destination and Finance policy version IDs, explicit window, attribution policy version, publication actor/time and effective instant. |
-| Participation     | Program and creator profile, pending/active/paused/ended state, revision and the hotel approval and creator acceptance records needed to activate.                                                               |
-| Acceptance        | Exact terms version, accepting creator actor/profile, time and displayed terms content reference/digest. An acceptance records assent, not hotel approval or tracking proof.                                     |
-| Hotel approval    | Exact creator/program/terms version, approving hotel actor, time and authorized property scope. Publication is not blanket creator approval.                                                                     |
-| Agreement history | Append-only activation, terms-change, pause, resume and end events, expected prior revision, actor, reason, server effective instant and request/idempotency reference.                                          |
-| Link reference    | Stable opaque link ID bound to agreement and property. Clicks later bind to the effective accepted terms; changing terms must not rewrite old clicks.                                                            |
+| Record            | Required meaning                                                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Program           | Stable Marketplace identity bound to organization, property and affiliate offer. One non-ended agreement per program/creator; multiple offers must not be silently merged.                                                                             |
+| Published terms   | Immutable ID, program/property/offer IDs, source draft ID/revision, exact destination and Finance policy version IDs, explicit window, attribution policy version, publication actor/time and effective instant.                                       |
+| Participation     | Program and creator profile, pending/active/paused/ended state, revision and the hotel approval and creator acceptance records needed to activate.                                                                                                     |
+| Acceptance        | Exact terms version, accepting creator actor/profile, time, retained immutable creator-visible content snapshot/reference and an integrity digest; a digest alone is insufficient. An acceptance records assent, not hotel approval or tracking proof. |
+| Hotel approval    | Exact creator/program/terms version, approving hotel actor, time and authorized property scope. Publication is not blanket creator approval.                                                                                                           |
+| Agreement history | Append-only activation, terms-change, pause, resume and end events, expected prior revision, actor, reason, server effective instant and request/idempotency reference.                                                                                |
+| Link reference    | Stable opaque link ID bound to agreement and property. Clicks later bind to the effective accepted terms; changing terms must not rewrite old clicks.                                                                                                  |
+
+Application/invitation attempts have their own immutable IDs, separate from the
+stable program/creator participation. Each attempt pins one published version;
+approval, acceptance, expected revisions and idempotency receipts reference that
+attempt. Decline/withdrawal history is append-only and reapplication creates a new
+attempt, not a reset of the previous one. Initial assent commands may support only
+one attempt until the separate lifecycle commands exist; storage must retain the
+stable participation identity independently of that initial terms version.
+
+Published-version `effectiveAt` is publication-scoped. Agreement terms take effect
+only through a separate activation/history event with its own server instant,
+revision and exact approval/acceptance references after activation checks pass.
+Click binding uses that agreement activation boundary, never publication time or
+assent alone. An advertised replacement cannot alter earlier accepted click terms.
 
 Published terms must retain the exact creator-visible conditions or immutable
 references sufficient to reproduce them. Mutable offer descriptions are not proof
@@ -134,6 +148,14 @@ instant and attribution outcome (including no attribution). If unresolved, evalu
 historical evidence for the original opportunity. A replacement cannot refresh a
 window or switch creators via a later click. Missing lineage remains under review;
 never infer aliases from guest names, email addresses or dates alone.
+
+Booking must expose an original opportunity ID and a canonical booking/stay-item
+mapping. The Finance journal key is `(propertyId, canonicalBookingId, canonicalStayItemId)`;
+provider aliases, replacements and group/room projections must resolve to that key
+before intake. A click selector's booking ID is not this mapping or an economic
+deduplication guarantee. Distinct genuine bookings keep distinct opportunities;
+replacement lineage preserves the original opportunity and item allocations.
+The mapping producer is still missing, as recorded in the earning evidence join.
 
 For each distinct booking, establish the complete trusted relevant click set and
 select the last eligible click. An old token or guest-editable referral field alone
