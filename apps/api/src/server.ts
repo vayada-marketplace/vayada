@@ -78,6 +78,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
+import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
@@ -212,6 +213,7 @@ import {
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
+import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
   createPgPropertySetupDraftRetentionStore,
@@ -673,6 +675,19 @@ const financeFolioRuntime =
 const financeExpenseGenerationPool =
   config.financeSource === "target"
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
+const financeFolioExportWorker =
+  config.backgroundWorkersEnabled && financeFolioRuntime && config.platformMediaServing
+    ? {
+        pool: new pg.Pool({
+          connectionString: targetDatabaseUrl,
+          max: 2,
+          connectionTimeoutMillis: 5_000,
+        }),
+        writer: createS3FinanceFolioExportArtifactWriter({
+          bucketName: config.platformMediaServing.bucketName,
+        }),
+      }
     : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
@@ -1805,7 +1820,6 @@ app.addHook("onClose", async () => {
     staffInvitationRuntime?.removalJobRepository.close(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
-    financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -2157,6 +2171,42 @@ app.addHook("onClose", async () => {
   if (financeExpenseGenerationTimer) clearInterval(financeExpenseGenerationTimer);
   await activeFinanceExpenseGeneration;
   await financeExpenseGenerationPool?.end();
+});
+
+let activeFinanceFolioExports: Promise<void> | undefined;
+const runFinanceFolioExports = () => {
+  if (!financeFolioExportWorker || activeFinanceFolioExports) return;
+  activeFinanceFolioExports = runFinanceFolioExportJobs(
+    financeFolioExportWorker.pool,
+    financeFolioRuntime!.routes.repository,
+    financeFolioExportWorker.writer,
+  )
+    .then((result) => {
+      if (result.deadLettered > 0 || result.retryScheduled > 0)
+        app.log.warn(result, "Finance folio export processing completed with attention required");
+      else if (result.succeeded > 0) app.log.info(result, "Finance folio exports completed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Finance folio export processing failed"),
+    )
+    .finally(() => {
+      activeFinanceFolioExports = undefined;
+    });
+};
+const financeFolioExportTimer = financeFolioExportWorker
+  ? setInterval(runFinanceFolioExports, 5_000)
+  : undefined;
+financeFolioExportTimer?.unref();
+if (financeFolioExportWorker) runFinanceFolioExports();
+app.addHook("onClose", async () => {
+  if (financeFolioExportTimer) clearInterval(financeFolioExportTimer);
+  await activeFinanceFolioExports;
+  try {
+    financeFolioExportWorker?.writer.close?.();
+    await financeFolioExportWorker?.pool.end();
+  } finally {
+    await financeFolioRuntime?.close();
+  }
 });
 
 let activeRetryBatch: Promise<void> | undefined;
