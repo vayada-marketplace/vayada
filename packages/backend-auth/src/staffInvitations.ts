@@ -15,6 +15,9 @@ import {
   type UpdateStaffStatusCommand,
 } from "./lifecycle.js";
 import type { RepositoryConfig } from "./repository.js";
+import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
+
+type StaffRoleDefinition = TeamRolePolicy & { id: string; name: string; revision: string };
 
 type InviterRow = {
   membership_id: string;
@@ -38,6 +41,8 @@ type StaffRosterRow = {
   last_active_at: Date | null;
 };
 type StaffAccessTargetRow = {
+  role_definition_id: string | null;
+  role_definition: StaffRoleDefinition | null;
   pms_access_enabled: boolean;
   booking_access_enabled: boolean;
   id: string;
@@ -95,6 +100,12 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                 membership.property_access_mode, membership.access_origin, membership.status,
                 membership.updated_at::text AS updated_at,
                 membership.pms_access_enabled, membership.booking_access_enabled,
+                membership.role_definition_id,
+                CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
+                  'id', definition.id, 'name', definition.name, 'revision', definition.revision::text,
+                  'securityClass', definition.security_class, 'baseRoleKey', definition.base_role_key,
+                  'presetKey', definition.preset_key, 'defaultPermissions', definition.default_permissions
+                ) END AS role_definition,
                 ARRAY(SELECT assignment.property_id::text
                       FROM identity.membership_property_assignments assignment
                       WHERE assignment.membership_id = membership.id
@@ -114,6 +125,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                         AND role_key = membership.role_key ORDER BY permission_key) AS role_permissions
          FROM identity.organization_memberships membership
          JOIN identity.organizations organization ON organization.id = membership.organization_id
+         LEFT JOIN identity.organization_roles definition
+           ON definition.id = membership.role_definition_id AND definition.organization_id = membership.organization_id
          WHERE membership.organization_id = $1 AND membership.id::text = $2
            AND organization.kind = 'hotel_group' AND organization.status = 'active'
            AND membership.role_key = ANY($3::text[])
@@ -126,20 +139,20 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         row.permission_overrides === null
           ? { grant: [], deny: [] }
           : parseStaffPermissionOverrides(row.permission_overrides);
+      const configuredPermissions = resolveSavedStaffPermissions(row, permissionOverrides);
       if (
         row.access_origin !== "agency" ||
         !row.scope_valid ||
         !["all", "assigned"].includes(row.property_access_mode) ||
         !permissionOverrides ||
-        validateStaffPermissionOverrides({
-          roleKey: row.role_key,
-          permissionOverrides,
-          rolePermissions: row.role_permissions,
-        }).length
+        !configuredPermissions
       )
         throw new Error("Staff access configuration is unavailable");
       return {
         membershipId: row.id,
+        roleDefinitionId: row.role_definition_id,
+        roleDefinition: row.role_definition,
+        configuredPermissions,
         revision: staffAccessRevision(row),
         productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
         roleKey: row.role_key as HotelStaffRoleKey,
@@ -629,6 +642,12 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           `SELECT membership.id, membership.status, membership.access_origin,
                   membership.updated_at::text AS updated_at,
                   membership.pms_access_enabled, membership.booking_access_enabled,
+                  membership.role_definition_id,
+                  CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
+                    'id', definition.id, 'name', definition.name, 'revision', definition.revision::text,
+                    'securityClass', definition.security_class, 'baseRoleKey', definition.base_role_key,
+                    'presetKey', definition.preset_key, 'defaultPermissions', definition.default_permissions
+                  ) END AS role_definition,
                   ARRAY(SELECT permission_key FROM identity.role_permission_grants
                         WHERE organization_kind = 'hotel_group'
                           AND role_key = membership.role_key ORDER BY permission_key) AS role_permissions,
@@ -640,6 +659,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                         ORDER BY assignment.property_id) AS property_ids
            FROM identity.organization_memberships membership
            JOIN identity.users staff ON staff.id = membership.user_id
+           LEFT JOIN identity.organization_roles definition
+             ON definition.id = membership.role_definition_id AND definition.organization_id = membership.organization_id
            WHERE membership.organization_id = $1 AND membership.id = $2
              AND membership.role_key = ANY($3::text[])
              AND membership.status IN ('active', 'suspended')
@@ -656,6 +677,10 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         if (!previous) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
+        }
+        if (previous.role_definition_id !== null) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "invalid_command" as const };
         }
         if (
           normalized.expectedRevision !== undefined &&
@@ -1211,6 +1236,8 @@ function staffAccessRevision(row: StaffAccessTargetRow): string {
   return hash(
     JSON.stringify({
       id: row.id,
+      roleDefinitionId: row.role_definition_id,
+      roleDefinition: row.role_definition,
       productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
       role: row.role_key,
       status: row.status,
@@ -1222,6 +1249,31 @@ function staffAccessRevision(row: StaffAccessTargetRow): string {
       rolePermissions: row.role_permissions,
     }),
   ).toString("hex");
+}
+
+function resolveSavedStaffPermissions(
+  row: StaffAccessTargetRow,
+  overrides: { grant: string[]; deny: string[] } | null,
+): string[] | null {
+  if (!overrides) return null;
+  if (row.role_definition_id !== null) {
+    const role = row.role_definition;
+    if (!role || role.id !== row.role_definition_id || role.baseRoleKey !== row.role_key)
+      return null;
+    return resolveTeamRolePermissions(role, overrides);
+  }
+  if (
+    validateStaffPermissionOverrides({
+      roleKey: row.role_key,
+      rolePermissions: row.role_permissions,
+      permissionOverrides: overrides,
+    }).length
+  )
+    return null;
+  const effective = new Set(row.role_permissions);
+  overrides.grant.forEach((key) => effective.add(key));
+  overrides.deny.forEach((key) => effective.delete(key));
+  return [...effective].sort();
 }
 
 export function validProductAccess(value: unknown): value is { pms: boolean; booking: boolean } {

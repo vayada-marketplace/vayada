@@ -120,6 +120,9 @@ function fakes() {
           return id === staffMembershipId
             ? {
                 membershipId: id,
+                roleDefinitionId: null,
+                roleDefinition: null,
+                configuredPermissions: ["pms.inbox.read"],
                 revision: "a".repeat(64),
                 productAccess: { pms: true, booking: true },
                 roleKey: "front_desk" as const,
