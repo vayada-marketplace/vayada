@@ -473,6 +473,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     await repository.updateAccess(edit);
     expect(await repository.getAccess(org, staffMembership)).toEqual({
       membershipId: staffMembership,
+      revision: expect.stringMatching(/^[a-f0-9]{64}$/),
       roleKey: "front_desk",
       status: "active",
       propertyAccessMode: "assigned",
@@ -528,6 +529,79 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
       "Staff access configuration is unavailable",
     );
+  });
+
+  it("saves access and status atomically and rejects competing stale saves", async () => {
+    const access = await repository.getAccess(org, staffMembership);
+    const first = updateCommand();
+    first.payload = {
+      ...first.payload,
+      expectedRevision: access!.revision,
+      membershipStatus: "suspended",
+    };
+    const second = updateCommand();
+    second.payload = { ...second.payload, expectedRevision: access!.revision };
+    const results = await Promise.all([
+      repository.updateAccess(first),
+      repository.updateAccess(second),
+    ]);
+    expect(results.filter((result) => result.outcome === "updated")).toHaveLength(1);
+    expect(results).toContainEqual({ outcome: "rejected", reason: "revision_conflict" });
+    const winner = results[0]?.outcome === "updated" ? first : second;
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      roleKey: winner.payload.roleKey,
+      status: winner.payload.membershipStatus ?? "active",
+      permissionOverrides: winner.payload.permissionOverrides,
+    });
+    expect(await repository.updateAccess(winner)).toMatchObject({ outcome: "idempotent_replay" });
+  });
+
+  it("cannot reactivate a globally suspended user through combined access saves", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    await client.query("UPDATE identity.users SET status = 'suspended' WHERE id = $1", [staffUser]);
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      membershipStatus: "active",
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "target_not_found",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    const sideEffects = await client.query(
+      `SELECT (SELECT count(*)::int FROM platform.idempotency_keys WHERE idempotency_metadata->>'commandId' = $1) AS keys,
+              (SELECT count(*)::int FROM platform.product_audit_events WHERE causation_id = $1) AS audits`,
+      [edit.commandId],
+    );
+    expect(sideEffects.rows[0]).toEqual({ keys: 0, audits: 0 });
+  });
+
+  it("invalidates a revision after status changes and rolls back failed combined saves", async () => {
+    const initial = (await repository.getAccess(org, staffMembership))!;
+    await repository.updateStatus(statusCommand());
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: initial.revision,
+      membershipStatus: "active",
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "revision_conflict",
+    });
+    const current = (await repository.getAccess(org, staffMembership))!;
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: current.revision,
+      propertyIds: [foreignProperty],
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "property_scope_invalid",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(current);
   });
 
   it("atomically updates, audits, and replays staff access", async () => {

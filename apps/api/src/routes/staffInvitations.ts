@@ -48,7 +48,13 @@ const invitationBodyKeys = new Set([
   "permissionOverrides",
   "configurationRevision",
 ]);
-const accessBodyKeys = new Set(["roleKey", "propertyIds", "permissionOverrides"]);
+const accessBodyKeys = new Set([
+  "roleKey",
+  "propertyIds",
+  "permissionOverrides",
+  "expectedRevision",
+  "membershipStatus",
+]);
 
 export async function registerStaffInvitationRoutes(
   app: FastifyInstance,
@@ -338,7 +344,25 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
 function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
   if (!plainRecord(value) || Object.keys(value).some((key) => !accessBodyKeys.has(key)))
     return null;
-  return parseStaffAccess(value);
+  const access = parseStaffAccess(value);
+  const expectedRevision = value["expectedRevision"];
+  const membershipStatus = value["membershipStatus"];
+  if (
+    !access ||
+    (expectedRevision !== undefined &&
+      (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision))) ||
+    (membershipStatus !== undefined &&
+      (expectedRevision === undefined ||
+        (membershipStatus !== "active" && membershipStatus !== "suspended")))
+  )
+    return null;
+  return {
+    ...access,
+    ...(expectedRevision === undefined ? {} : { expectedRevision: expectedRevision as string }),
+    ...(membershipStatus === undefined
+      ? {}
+      : { membershipStatus: membershipStatus as "active" | "suspended" }),
+  };
 }
 
 function parseStaffStatusRequest(value: unknown): "active" | "deactivated" | null {
@@ -407,6 +431,8 @@ function sendRejection(reply: FastifyReply, reason: string) {
 }
 
 function sendAccessUpdateRejection(reply: FastifyReply, reason: string) {
+  if (reason === "revision_conflict")
+    return reply.status(409).send({ code: "staff_access_revision_conflict" });
   if (reason === "inviter_not_authorized") return reply.status(403).send({ code: "forbidden" });
   if (reason === "target_not_found") {
     return reply.status(404).send({ code: "staff_member_not_found" });
