@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateAffiliateEarning as calculate,
+  normalizeAffiliateEarningCalculation as normalize,
   type AffiliateEarningScope,
 } from "./affiliateEarning.js";
 import { parseFinanceAffiliatePercentagePolicy } from "./affiliatePercentagePolicy.js";
@@ -33,6 +34,44 @@ const input = () => ({
 });
 
 describe("affiliate earning amount", () => {
+  it.each(["verified", "incomplete", "conflicting"] as const)(
+    "bounds calculation input even when evidence is %s",
+    (status) => {
+      const request = { ...input(), evidence: { ...input().evidence, status } };
+      for (const change of [
+        { netAccommodationMinor: "-1" },
+        { netAccommodationMinor: "9".repeat(31) },
+        { references: ["x".repeat(257)] },
+        { references: Array(101).fill("evidence") },
+        { references: Array<string>(1) },
+      ])
+        expect(normalize({ ...request, evidence: { ...request.evidence, ...change } })).toBeNull();
+      expect(normalize(request)).not.toBeNull();
+    },
+  );
+  it("copies bounded fields, preserves missing/draft policy, and excludes resolver extras", () => {
+    const request = input();
+    const result = normalize({
+      ...request,
+      scope: { ...request.scope, extra: "x".repeat(1000) },
+      evidence: { ...request.evidence, extra: "private" },
+      policy: { ...request.policy, extra: "private" },
+    } as Parameters<typeof normalize>[0]);
+    expect(result).toEqual({ scope, evidence: request.evidence, policy: request.policy });
+    request.evidence.references[0] = "changed";
+    expect(result!.evidence.references).toEqual(["evidence-1"]);
+    expect(normalize({ ...input(), policy: null })?.policy).toBeNull();
+    expect(
+      normalize({ ...input(), policy: { ...input().policy, approvalStatus: "draft" } })?.policy
+        ?.approvalStatus,
+    ).toBe("draft");
+    expect(
+      normalize({ ...input(), scope: { ...scope, creatorProfileId: "x".repeat(257) } }),
+    ).toBeNull();
+    expect(
+      normalize({ ...input(), policy: { ...input().policy, policyVersionId: "x".repeat(257) } }),
+    ).toBeNull();
+  });
   it.each([
     ["50000", "5000"],
     ["45000", "4500"],
