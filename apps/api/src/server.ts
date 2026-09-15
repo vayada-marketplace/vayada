@@ -1,3 +1,4 @@
+import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
 import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
@@ -688,6 +689,10 @@ const channexManagementPlans =
         },
       })
     : undefined;
+const channexUploadReconciliationPool =
+  channexManagementPlans && config.channexManagement.capabilityModes.ariSync === "mutating"
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
 const channexManagementProvider =
   channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
     ? createChannexManagementProvider({
@@ -695,6 +700,9 @@ const channexManagementProvider =
         apiKey: config.channexManagement.apiKey,
         plans: channexManagementPlans,
         canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
+        reconcileClosedUploads: channexUploadReconciliationPool
+          ? (lease, get) => reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
+          : undefined,
       })
     : undefined;
 const channexManagementWorkerStore = channexManagementProvider
@@ -1923,6 +1931,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
+    channexUploadReconciliationPool?.end(),
     channexBookingRevisionStore?.close?.(),
   ]);
 });

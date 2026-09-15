@@ -1021,3 +1021,22 @@ call returns unavailable without fetching or sending again. This command does
 not restore a dispatch closure or weaken the initial sender's history guard.
 Room availability, complete horizon coverage, guest/meal/channel semantics and
 activation remain separate requirements. No runtime caller is enabled here.
+
+
+### Worker completion of retained closed uploads (VAY-1545)
+
+For mutating `sync_ari` jobs, the provider adapter first invokes closed-upload
+reconciliation using the worker's actual ID and persisted job attempt. Discover
+unresolved uploads only from that authorized job property's stored targets and
+intents; provider IDs and completion evidence never come from job payloads.
+Recheck current authority for every candidate. Process at most ten candidates;
+more work schedules a normal bounded worker retry, skipping already reconciled
+attempts. Ambiguous/stale candidates remain held; failed GETs permit read-only
+retry, never recovery of a sender. The provider port authenticates bounded GETs
+only to its configured origin. Non-mutating ARI capability prevents this stage.
+
+This runs before the existing plan, including after process restart. A completed
+batch does not complete the sync job: provisioning/new pricing dispatch remains
+unavailable until its own coverage, availability and activation paths exist.
+No rates are created, posted or opened by this worker stage. Other operation
+types retain their existing behavior. The dedicated pool closes with the server.

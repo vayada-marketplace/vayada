@@ -32,7 +32,7 @@ describe("PMS Channex management worker", () => {
     ).resolves.toEqual({ outcome: "succeeded", jobId: "job-1", operationType: "enable" });
     expect(execute).toHaveBeenCalledWith(
       job(),
-      expect.objectContaining({ onProgress: expect.any(Function) }),
+      expect.objectContaining({ onProgress: expect.any(Function), workerId: "worker-1" }),
     );
     expect(harness.heartbeat).toHaveBeenCalledWith(job(), { workerId: "worker-1" });
     expect(harness.succeed).toHaveBeenCalledWith(
