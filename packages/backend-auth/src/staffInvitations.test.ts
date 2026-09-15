@@ -1444,14 +1444,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(provider.sendInvitation).not.toHaveBeenCalled();
   });
 
-  async function deliveredInvitation(revision = 1) {
-    const created = await repository.persist(
-      command({
-        commandId: `accept-command-${revision}`,
-        idempotencyKey: `accept-key-${revision}`,
-        revision,
-      }),
-    );
+  async function deliveredInvitation(
+    revision = 1,
+    productAccess?: { pms: boolean; booking: boolean },
+  ) {
+    const invite = command({
+      commandId: `accept-command-${revision}`,
+      idempotencyKey: `accept-key-${revision}`,
+      revision,
+    });
+    if (productAccess !== undefined) invite.payload.productAccess = productAccess;
+    const created = await repository.persist(invite);
     if (created.outcome !== "created") throw new Error("expected invitation creation");
     const providerInvitationId = `invitation_${created.invitationId}`;
     await client.query(
@@ -1527,6 +1530,111 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         ])
       ).rows[0]?.role_key,
     ).toBe("housekeeping");
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+    [false, false],
+    [true, true],
+  ])(
+    "copies invitation PMS=%s Booking=%s over existing member flags and preserves later edits on replay",
+    async (pms, booking) => {
+      const invitation = await deliveredInvitation(1, { pms, booking });
+      const stored = await client.query(
+        `SELECT pms_access_enabled, booking_access_enabled FROM identity.staff_invitations WHERE id = $1`,
+        [invitation.invitationId],
+      );
+      expect(stored.rows[0]).toEqual({ pms_access_enabled: pms, booking_access_enabled: booking });
+      await client.query(
+        `UPDATE identity.organization_memberships SET pms_access_enabled = $2, booking_access_enabled = $3 WHERE id = $1`,
+        [staffMembership, !pms, !booking],
+      );
+      await expectAcceptance(invitation, { outcome: "accepted" });
+      expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual({
+        pms,
+        booking,
+      });
+      await client.query(
+        `UPDATE identity.organization_memberships SET pms_access_enabled = $2, booking_access_enabled = $3 WHERE id = $1`,
+        [staffMembership, !pms, !booking],
+      );
+      await expectAcceptance(invitation, { outcome: "idempotent_replay" });
+      expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual({
+        pms: !pms,
+        booking: !booking,
+      });
+    },
+  );
+
+  it("includes invitation product flags in the normalized idempotency fingerprint", async () => {
+    const invite = command();
+    invite.payload.productAccess = { pms: false, booking: true };
+    expect(await repository.persist(invite)).toMatchObject({ outcome: "created" });
+    invite.payload.productAccess = { booking: true, pms: false };
+    expect(await repository.persist(invite)).toMatchObject({ outcome: "idempotent_replay" });
+    invite.payload.productAccess.pms = true;
+    expect(await repository.persist(invite)).toEqual({
+      outcome: "rejected",
+      reason: "idempotency_conflict",
+    });
+  });
+
+  it("creates a new membership with the invitation product restriction", async () => {
+    const newUser = randomUUID();
+    const newEmail = `${newUser}@example.test`;
+    let invitationId: string | undefined;
+    let newMembership: string | undefined;
+    try {
+      await client.query(
+        "INSERT INTO identity.users (id, email, status) VALUES ($1, $2, 'active')",
+        [newUser, newEmail],
+      );
+      await client.query(
+        `INSERT INTO identity.external_identities (user_id, provider, provider_user_id, provider_email, provider_email_verified) VALUES ($1, 'workos', $2, $3, true)`,
+        [newUser, newUser, newEmail],
+      );
+      const invite = command({ email: newEmail });
+      invite.payload.productAccess = { pms: false, booking: true };
+      const created = await repository.persist(invite);
+      if (created.outcome !== "created") throw new Error("expected new invitation");
+      invitationId = created.invitationId;
+      await client.query(
+        `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
+        [invitationId, newUser],
+      );
+      const accepted = await acceptanceRepository.reconcile(
+        acceptanceEvent(newUser, { providerUserId: newUser, invitationEmail: newEmail }),
+      );
+      if (accepted.outcome !== "accepted") throw new Error("expected new membership");
+      newMembership = accepted.membershipId;
+      expect((await repository.getAccess(org, newMembership))!.productAccess).toEqual({
+        pms: false,
+        booking: true,
+      });
+    } finally {
+      await client.query("BEGIN; SET LOCAL session_replication_role = replica");
+      await client.query("DELETE FROM platform.product_audit_events WHERE actor_user_id = $1", [
+        newUser,
+      ]);
+      await client.query(
+        "DELETE FROM identity.staff_invitation_property_assignments WHERE invitation_id = $1",
+        [invitationId ?? null],
+      );
+      await client.query("DELETE FROM identity.staff_invitations WHERE id = $1", [
+        invitationId ?? null,
+      ]);
+      await client.query(
+        "DELETE FROM identity.membership_property_assignments WHERE membership_id = $1",
+        [newMembership ?? null],
+      );
+      await client.query("DELETE FROM identity.organization_memberships WHERE user_id = $1", [
+        newUser,
+      ]);
+      await client.query("DELETE FROM identity.external_identities WHERE user_id = $1", [newUser]);
+      await client.query("DELETE FROM identity.users WHERE id = $1", [newUser]);
+      await client.query("COMMIT");
+    }
   });
 
   it("fails closed across provider, identity, membership, expiry, and access denials", async () => {

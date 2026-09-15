@@ -877,9 +877,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              (organization_id, email, display_name, inviter_membership_id, inviter_user_id, inviter_name_snapshot,
               role_key, permission_overrides, property_access_mode, configuration_revision, command_id,
               idempotency_key_hash, request_fingerprint_hash, supersedes_invitation_id, request_id,
-              correlation_id, request_source, reason, requested_at)
+              correlation_id, request_source, reason, requested_at, pms_access_enabled, booking_access_enabled)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'assigned', $9, $10, $11, $12,
-                   $13, $14, $15, $16, $17, $18)
+                   $13, $14, $15, $16, $17, $18, $19, $20)
            RETURNING id`,
           [
             normalized.organizationId,
@@ -900,6 +900,8 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             command.audit.source,
             command.audit.reason,
             new Date(command.audit.requestedAt),
+            normalized.productAccess?.pms ?? true,
+            normalized.productAccess?.booking ?? true,
           ],
         );
         const invitationId = inserted.rows[0]!.id;
@@ -979,6 +981,8 @@ function normalize(command: CreateStaffInviteCommand) {
     !command.payload.email.trim() ||
     !Number.isInteger(command.payload.configurationRevision) ||
     command.payload.configurationRevision <= 0 ||
+    (command.payload.productAccess !== undefined &&
+      !validProductAccess(command.payload.productAccess)) ||
     Number.isNaN(Date.parse(command.audit.requestedAt)) ||
     validateStaffInviteAccess(command.payload).length
   ) {
@@ -997,6 +1001,14 @@ function normalize(command: CreateStaffInviteCommand) {
     propertyIds,
     permissionOverrides,
     configurationRevision: command.payload.configurationRevision,
+    ...(command.payload.productAccess === undefined
+      ? {}
+      : {
+          productAccess: {
+            pms: command.payload.productAccess.pms,
+            booking: command.payload.productAccess.booking,
+          },
+        }),
     actorUserId: actor.userId,
   };
 }
