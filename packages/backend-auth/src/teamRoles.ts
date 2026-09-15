@@ -1,4 +1,5 @@
 import pg from "pg";
+import { createTeamRole, type TeamRoleCreateCommand } from "./teamRoleCreate.js";
 import type { RepositoryConfig } from "./repository.js";
 import {
   teamRolePermissionCeiling,
@@ -22,6 +23,9 @@ export function createPgTeamRoleRepository(config: RepositoryConfig) {
     throw new Error("Team role connectionString must not be empty");
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
   return {
+    create(command: TeamRoleCreateCommand) {
+      return createTeamRole(pool, command);
+    },
     async list(organizationId: string): Promise<TeamRole[]> {
       const result = await pool.query<{
         id: string;

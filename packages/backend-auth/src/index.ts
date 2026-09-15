@@ -180,3 +180,4 @@ export {
   type BackendAuthPluginOptions,
 } from "./plugin.js";
 export { createPgTeamRoleRepository, type TeamRole } from "./teamRoles.js";
+export type { TeamRoleCreateCommand } from "./teamRoleCreate.js";

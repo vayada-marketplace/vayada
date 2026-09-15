@@ -429,3 +429,14 @@ expired invitations are excluded. Only Account admin receives the role-managemen
 capability. The response is not cached. No presets or references are created.
 Validation: PostgreSQL catalog lifecycle test, 39 staff route tests, backend-auth
 build and API typecheck; independent review found no actionable issue.
+
+### Custom-role creation command
+
+The role repository can create or duplicate a role in an audited idempotent
+transaction. It locks and revalidates the live Account admin before both writes
+and replay. New roles use Staff/hotel_custom; duplicates preserve the source
+class/base and lose preset-only management authority. Account-admin duplication
+is forbidden. No HTTP writer or role assignment is activated in this slice.
+Validation: two PostgreSQL catalog/command lifecycle tests including concurrent
+replay, conflicts, protected clones, manager/suspended actor denial and audit
+counts; backend-auth build/typecheck. Independent review found no actionable issue.
