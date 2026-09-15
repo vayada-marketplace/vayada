@@ -3,8 +3,10 @@ import type { PoolClient } from "pg";
 import { beforeEach, expect, it, vi } from "vitest";
 import { stagePricingBookingDraft } from "./pricingBookingDraft.js";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
+import { persistPricingBookingAddons } from "./persistPricingBookingAddons.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
+vi.mock("./persistPricingBookingAddons.js", () => ({ persistPricingBookingAddons: vi.fn() }));
 let input: ReturnType<typeof pricingDraftFixture>;
 const query = vi.fn(async (sql: string, _values?: unknown[]) => {
   void _values;
@@ -25,6 +27,7 @@ const query = vi.fn(async (sql: string, _values?: unknown[]) => {
 const client = { query } as unknown as PoolClient;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(persistPricingBookingAddons).mockResolvedValue({ count: 0, replayed: false });
   input = pricingDraftFixture();
   vi.mocked(lockPublicPricingAuthority).mockResolvedValue(input.current.scope);
 });
@@ -43,6 +46,12 @@ it("stages exact draft/booker fields without legacy quote records or lifecycle e
   });
   expect(values?.slice(14)).toEqual(["Jane", "Guest", "jane@example.test", null, null, null, null]);
   expect(values?.[12]).toEqual(input.finance.commissionTermsSnapshot);
+  expect(persistPricingBookingAddons).toHaveBeenCalledWith(
+    client,
+    "hotel",
+    input.current,
+    input.bookingId,
+  );
 });
 it.each(["scope", "finance", "hash", "quote", "policy", "money", "guest"])(
   "rejects changed %s evidence before inserts",
@@ -117,3 +126,12 @@ it.each([
     }
   },
 );
+
+it("propagates add-on staging failures for full caller rollback", async () => {
+  vi.mocked(persistPricingBookingAddons).mockRejectedValueOnce(new Error("extras unavailable"));
+  await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow(
+    "extras unavailable",
+  );
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(true);
+  expect(query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+});

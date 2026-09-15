@@ -33,6 +33,7 @@ export function pricingDraftFixture(changeQuote?: (quote: Input["current"]["quot
   const command = parseBookingQuoteAcceptanceInput(
     {
       ...prior.acceptance_command,
+      quoteId: quote.quoteId,
       acceptance: {
         accepted: true,
         quoteEvidenceId: requirements.quoteEvidenceId,

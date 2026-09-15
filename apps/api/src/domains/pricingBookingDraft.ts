@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { pricingCurrencyScale } from "@vayada/domain-pms";
 import { parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
 import { decodeCurrentPricingQuoteRecord } from "./currentPricingQuoteStore.js";
+import { persistPricingBookingAddons } from "./persistPricingBookingAddons.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import type { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import type { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
@@ -143,6 +144,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.specialRequests,
     ],
   );
+  await persistPricingBookingAddons(client, slug, current, bookingId);
   if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
   return { bookingId, publicReference };
 }
