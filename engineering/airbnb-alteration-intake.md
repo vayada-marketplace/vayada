@@ -291,6 +291,12 @@ possible source of financial mapping evidence, not a prerequisite for this scope
 
 ### Provider economics evidence required before worker wiring
 
+**2026-09-14 update:** Channex has replied. The confirmed amount-basis and full-stay
+replacement rules, remaining accounting boundaries and adapter contract are in
+[Airbnb financial snapshots](airbnb-financial-snapshots.md). The investigation below
+is historical context; support clarifies the daily-price basis but does not make
+payout or guest-paid totals equivalent to Finance gross room revenue.
+
 The [Airbnb channel settings reference](https://docs.channex.io/channel-api-examples/airbnb#airbnb-connection-settings-reference)
 explicitly documents `booking_amount_settings` (`Payout Amount` or `Total Paid
 Amount`) and `cohost_payout_calculations` (deduct co-host commission when true).
