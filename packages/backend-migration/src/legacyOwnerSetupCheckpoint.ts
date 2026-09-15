@@ -1,13 +1,9 @@
-import { createHash } from "node:crypto";
 import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
-import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
 import { parseLegacyOwnerSetupCommand } from "./legacyOwnerSetupCommand.js";
-
-const hash = (kind: string, value: unknown) =>
-  createHash("sha256")
-    .update(`vayada:legacy-owner-internal-setup:v1\0${kind}\0`)
-    .update(canonicalizeJson(value))
-    .digest("hex");
+import {
+  legacyOwnerSetupReceiptHashes,
+  LEGACY_OWNER_SETUP_AFTER_HASH_SQL,
+} from "./legacyOwnerSetupReceiptHashes.js";
 
 /** Final storage stage only, NOT an authorized executor. Trusted caller must
  * verify evidence/signature/approvals BEFORE replay lookup, retain all approval,
@@ -31,26 +27,7 @@ export async function writeLegacyOwnerSetupCheckpoint(
       )
     )
       throw new Error();
-    const sourceHash = hash("source-evidence", {
-      ledger: command.sourceLedgerSha256,
-      owners: command.owners.map(
-        ({
-          email: _email,
-          name: _name,
-          status: _status,
-          expectedTarget: _target,
-          targetBeforeSha256: _before,
-          ...source
-        }) => source,
-      ),
-    });
-    const beforeHash = hash(
-      "target-before",
-      command.owners.map((owner) => ({
-        ownerId: owner.ownerId,
-        targetBeforeSha256: owner.targetBeforeSha256,
-      })),
-    );
+    const { sourceHash, beforeHash } = legacyOwnerSetupReceiptHashes(command);
     const rows = command.owners.map((owner) => ({
       id: owner.ownerId,
       email: owner.email,
@@ -71,12 +48,7 @@ export async function writeLegacyOwnerSetupCheckpoint(
            AND i.status='pending' AND i.created_at=$2::timestamptz AND i.updated_at=$2::timestamptz) AS valid
          FROM inserted i JOIN wanted w USING(id)
        ), after_state AS (
-         SELECT encode(sha256(convert_to('vayada:legacy-owner-internal-setup:v1:target-after','UTF8')
-           ||decode('00','hex')||convert_to(jsonb_agg(jsonb_build_object(
-             'id',id,'email',email,'name',name,'status',status,
-             'created_at',to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-             'updated_at',to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-           ) ORDER BY id)::text,'UTF8')),'hex') AS sha FROM inserted
+         SELECT ${LEGACY_OWNER_SETUP_AFTER_HASH_SQL} AS sha FROM inserted
        )
        INSERT INTO platform.legacy_owner_bootstrap_receipts
          (command_id,contract_version,environment,payload_sha256,owner_user_ids,
