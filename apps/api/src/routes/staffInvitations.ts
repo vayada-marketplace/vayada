@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   UnauthorizedError,
   validateStaffInviteAccess,
+  validProductAccess,
   type CreateStaffInviteCommand,
   type RemoveStaffCommand,
   type UpdateStaffAccessCommand,
@@ -54,6 +55,7 @@ const accessBodyKeys = new Set([
   "permissionOverrides",
   "expectedRevision",
   "membershipStatus",
+  "productAccess",
 ]);
 
 export async function registerStaffInvitationRoutes(
@@ -347,17 +349,23 @@ function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
   const access = parseStaffAccess(value);
   const expectedRevision = value["expectedRevision"];
   const membershipStatus = value["membershipStatus"];
+  const productAccess = value["productAccess"];
   if (
     !access ||
     (expectedRevision !== undefined &&
       (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision))) ||
     (membershipStatus !== undefined &&
       (expectedRevision === undefined ||
-        (membershipStatus !== "active" && membershipStatus !== "suspended")))
+        (membershipStatus !== "active" && membershipStatus !== "suspended"))) ||
+    (productAccess !== undefined &&
+      (expectedRevision === undefined || !validProductAccess(productAccess)))
   )
     return null;
   return {
     ...access,
+    ...(productAccess === undefined
+      ? {}
+      : { productAccess: productAccess as { pms: boolean; booking: boolean } }),
     ...(expectedRevision === undefined ? {} : { expectedRevision: expectedRevision as string }),
     ...(membershipStatus === undefined
       ? {}

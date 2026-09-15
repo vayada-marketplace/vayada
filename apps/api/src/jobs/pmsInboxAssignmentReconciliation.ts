@@ -136,6 +136,7 @@ async function discoverInvalidAssignments(
                 CASE WHEN membership.status <> 'active' OR organization.status <> 'active'
                            OR staff.status <> 'active'
                      THEN 'membership_suspended'
+                     WHEN NOT membership.pms_access_enabled THEN 'product_access_removed'
                      ELSE 'property_access_removed'
                 END AS reason,
                 md5(string_agg(thread.id::text || ':' || thread.version::text,
@@ -151,6 +152,7 @@ async function discoverInvalidAssignments(
              SELECT 1
              FROM identity.organization_resource_links resource
              WHERE membership.status = 'active' AND organization.status = 'active'
+               AND membership.pms_access_enabled
                AND staff.status = 'active'
                AND resource.organization_id = membership.organization_id
                AND resource.product = 'pms' AND resource.resource_type = 'pms_property'
@@ -391,6 +393,7 @@ async function findInvalidAssignments(
           AND resource.status = 'active'
          WHERE membership.id = thread.assigned_to_membership_id
            AND membership.organization_id = $2::uuid AND membership.status = 'active'
+           AND membership.pms_access_enabled
            AND (membership.property_access_mode = 'all' OR EXISTS (
              SELECT 1 FROM identity.membership_property_assignments assignment
              WHERE assignment.membership_id = membership.id
@@ -620,11 +623,16 @@ function validJob(job: ReconciliationJob): boolean {
 
 function validReason(
   value: string | null,
-): value is "membership_removed" | "membership_suspended" | "property_access_removed" {
+): value is
+  | "membership_removed"
+  | "membership_suspended"
+  | "property_access_removed"
+  | "product_access_removed" {
   return (
     value === "membership_removed" ||
     value === "membership_suspended" ||
-    value === "property_access_removed"
+    value === "property_access_removed" ||
+    value === "product_access_removed"
   );
 }
 

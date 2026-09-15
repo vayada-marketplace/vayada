@@ -499,6 +499,7 @@ export type UpdateStaffAccessPayload = Omit<
   membershipId: string;
   expectedRevision?: string;
   membershipStatus?: "active" | "suspended";
+  productAccess?: { pms: boolean; booking: boolean };
 };
 
 export type UpdateStaffStatusPayload = {

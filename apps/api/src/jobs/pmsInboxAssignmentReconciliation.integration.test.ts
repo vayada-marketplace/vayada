@@ -116,6 +116,25 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
     ).toBe(0);
   });
 
+  it("discovers and clears assignments after PMS access is disabled", async () => {
+    await admin.query("DELETE FROM platform.jobs WHERE id = $1::uuid", [JOB]);
+    await admin.query(
+      "UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1::uuid",
+      [MEMBERSHIP],
+    );
+    expect(
+      await runPmsInboxAssignmentReconciliationJobs(URL!, {
+        workerId: "product-disabled",
+        organizationId: ORGANIZATION,
+      }),
+    ).toEqual({ processed: 1, cleared: 2 });
+    const assigned = await admin.query(
+      "SELECT count(*)::int AS count FROM pms.message_threads WHERE assigned_to_membership_id = $1::uuid",
+      [MEMBERSHIP],
+    );
+    expect(assigned.rows[0].count).toBe(0);
+  });
+
   it("discovers invalid assignments even when the access-loss writer did not enqueue a job", async () => {
     await admin.query("DELETE FROM platform.jobs WHERE id = $1::uuid", [JOB]);
     await admin.query("UPDATE identity.users SET status = 'suspended' WHERE id = $1::uuid", [USER]);
