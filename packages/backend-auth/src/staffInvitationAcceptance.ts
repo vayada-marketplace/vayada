@@ -194,6 +194,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
         const overrides = parseStaffPermissionOverrides(invitation.permission_overrides);
         if (
           !overrides ||
+          (invitation.role_key === "external_owner" && invitation.role_definition_id === null) ||
           validateStaffInviteAccess({
             roleKey: invitation.role_key,
             propertyAccessMode: invitation.property_access_mode,
@@ -245,7 +246,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
              WHERE identity.organization_memberships.status <> 'suspended'
                AND identity.organization_memberships.role_definition_id IS NULL
                AND identity.organization_memberships.access_origin = 'agency'
-               AND identity.organization_memberships.role_key NOT IN ('hotel_owner', 'owner', 'operator')
+               AND identity.organization_memberships.role_key NOT IN ('hotel_owner', 'owner', 'operator', 'external_owner')
              RETURNING id`,
             [
               invitation.organization_id,
