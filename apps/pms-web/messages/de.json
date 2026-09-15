@@ -2276,5 +2276,8 @@
   "settings.team.matrixDescription": "Konfigurierte Unterkunftszuweisungen. Eingeladene und gesperrte Mitglieder haben keinen aktiven Zugriff. Produkt- und Bereichsberechtigungen schränken den Zugriff zusätzlich ein.",
   "settings.team.propertyAssigned": "Zugewiesen",
   "settings.team.propertyUnassigned": "Nicht zugewiesen",
-  "settings.team.invitationAlreadyPending": "Für diese Adresse steht bereits eine Einladung aus. Schließe diesen Dialog und sende sie über die Teamliste erneut."
+  "settings.team.invitationAlreadyPending": "Für diese Adresse steht bereits eine Einladung aus. Schließe diesen Dialog und sende sie über die Teamliste erneut.",
+  "settings.team.accountAdmin": "Kontoadministrator",
+  "settings.team.adminNeedsReview": "Die Kontoinhaberschaft muss geprüft werden: Es gibt keinen einzelnen aktiven Kontoadministrator mit der aktuellen Rolle. Bestehende Mitgliedschaften bleiben erhalten.",
+  "settings.team.yourAccount": "Dein Konto"
 }

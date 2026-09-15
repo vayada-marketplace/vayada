@@ -153,6 +153,9 @@ function fakes() {
               }
             : null;
         },
+        async listAccountAdmins() {
+          return [];
+        },
         async prepareInvitation() {
           return { configurationRevision: 2 };
         },
@@ -530,6 +533,35 @@ describe("staff invitation routes", () => {
     expect((await send("test@example.test", false)).statusCode).toBe(401);
     expect(prepared).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    [{}, 200],
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)(
+    "scopes account-admin reads to authorized organization context %j",
+    async (auth, status) => {
+      const fake = fakes();
+      const reads = vi.fn(async () => []);
+      fake.options.repository.listAccountAdmins = reads;
+      app = await testApp(fake.options, auth as Auth);
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/identity/staff/account-admins?organizationId=foreign",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(status);
+      if (status === 200) {
+        expect(reads).toHaveBeenCalledWith(organizationId);
+        expect(response.json()).toEqual({ admins: [], actorMembershipId: "membership-owner" });
+        expect(response.headers["cache-control"]).toBe("no-store");
+      } else expect(reads).not.toHaveBeenCalled();
+    },
+  );
 
   it("lists only the authenticated organization's roster", async () => {
     const fake = fakes();

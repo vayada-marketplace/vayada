@@ -56,6 +56,20 @@ export type PmsTeamRole = {
   invitationCount: number;
 };
 
+export type PmsAccountAdmin = {
+  membershipId: string;
+  name: string | null;
+  email: string;
+  roleKey: string;
+  active: boolean;
+};
+export function getPmsAccountAdmins(): Promise<{
+  admins: PmsAccountAdmin[];
+  actorMembershipId: string;
+}> {
+  return pmsOperationsClient.get("/api/identity/staff/account-admins", pmsOperationsRequestOptions);
+}
+
 export type PmsStaffAccessConfiguration = {
   roleKey: PmsStaffMember["roleKey"];
   propertyAccessMode: "all" | "assigned";

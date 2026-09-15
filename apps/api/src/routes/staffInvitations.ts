@@ -22,6 +22,7 @@ import { enforceRoutePolicy } from "./policy.js";
 type StaffInvitationRepository = Pick<
   ReturnType<typeof createPgStaffInvitationRepository>,
   | "getAccess"
+  | "listAccountAdmins"
   | "prepareInvitation"
   | "getInvitation"
   | "listRoster"
@@ -124,6 +125,15 @@ export async function registerStaffInvitationRoutes(
         : reply.status(409).send({ code: "invitation_pending" });
     },
   );
+
+  app.get("/account-admins", { onRequest: authorize }, async (request, reply) => {
+    const context = authorized.get(request)!;
+    reply.header("Cache-Control", "no-store");
+    const admins = await options.repository.listAccountAdmins(
+      context.selectedOrganization.organizationId,
+    );
+    return reply.send({ admins, actorMembershipId: context.membership.membershipId });
+  });
 
   app.get("/roles", { onRequest: authorize }, async (request, reply) => {
     const context = authorized.get(request);
