@@ -2262,5 +2262,8 @@
   "settings.team.matrixDescription": "Configured property assignments. Invitations and suspended members do not have active access. Product and section permissions further limit access.",
   "settings.team.propertyAssigned": "Assigned",
   "settings.team.propertyUnassigned": "Not assigned",
-  "settings.team.invitationAlreadyPending": "An invitation is already pending for this address. Close this dialog and resend it from the team list."
+  "settings.team.invitationAlreadyPending": "An invitation is already pending for this address. Close this dialog and resend it from the team list.",
+  "settings.team.accountAdmin": "Account admin",
+  "settings.team.adminNeedsReview": "Account ownership needs review: there is no single active account admin with the current role. Existing memberships have been preserved.",
+  "settings.team.yourAccount": "Your account"
 }

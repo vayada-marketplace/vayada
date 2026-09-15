@@ -375,6 +375,36 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(count.rows[0]?.count).toBe(0);
   });
 
+  it("reads actual account owners within the organization without choosing among anomalies", async () => {
+    expect(await repository.listAccountAdmins(org)).toEqual([
+      {
+        membershipId: membership,
+        name: "Owner Example",
+        email: "owner@example.com",
+        roleKey: "hotel_owner",
+        active: true,
+      },
+    ]);
+    expect(await repository.listAccountAdmins(otherOrg)).toEqual([
+      expect.objectContaining({ membershipId: otherMembership }),
+    ]);
+    await client.query(
+      "UPDATE identity.organization_memberships SET role_key = 'owner', property_access_mode = 'all' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.listAccountAdmins(org)).toHaveLength(2);
+    await client.query("UPDATE identity.users SET status = 'suspended' WHERE id = $1", [owner]);
+    expect(
+      (await repository.listAccountAdmins(org)).find((row) => row.membershipId === membership)
+        ?.active,
+    ).toBe(false);
+    await client.query(
+      "UPDATE identity.organization_memberships SET status = 'inactive' WHERE id = ANY($1::uuid[])",
+      [[membership, staffMembership]],
+    );
+    expect(await repository.listAccountAdmins(org)).toEqual([]);
+  });
+
   it("lists active, pending, and deactivated staff but hides removed memberships", async () => {
     await client.query(
       `INSERT INTO identity.membership_property_assignments (membership_id, property_id)

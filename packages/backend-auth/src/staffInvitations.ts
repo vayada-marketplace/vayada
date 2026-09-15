@@ -1,3 +1,4 @@
+import { listAccountAdmins } from "./accountAdmins.js";
 import { createHash } from "node:crypto";
 import pg from "pg";
 
@@ -103,6 +104,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
+    listAccountAdmins: (organizationId: string) => listAccountAdmins(pool, organizationId),
     async prepareInvitation(organizationId: string, email: string) {
       const result = await pool.query<{ revision: number; pending: boolean }>(
         `SELECT COALESCE(max(configuration_revision), 0) + 1 AS revision,

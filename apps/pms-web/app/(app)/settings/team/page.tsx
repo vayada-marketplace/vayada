@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
 
+import AccountAdminCard from "@/components/settings/team/AccountAdminCard";
 import PropertyAccessMatrix from "@/components/settings/team/PropertyAccessMatrix";
 import MemberAccessDialog from "@/components/settings/team/MemberAccessDialog";
 import RoleEditorDialog from "@/components/settings/team/RoleEditorDialog";
@@ -13,6 +14,8 @@ import { useTranslation } from "@/lib/i18n";
 import { listPmsProperties, type PmsPropertySummary } from "@/services/api/pmsPropertyClient";
 import {
   getPmsStaffRoster,
+  getPmsAccountAdmins,
+  type PmsAccountAdmin,
   getPmsTeamRoles,
   getPmsStaffAccess,
   getPmsStaffInvitation,
@@ -38,6 +41,8 @@ const roleLabelKeys: Record<PmsStaffMember["roleKey"], string> = {
 export default function TeamSettingsPage() {
   const { t, locale } = useTranslation();
   const sections = getPmsSettingsSections(false, t);
+  const [admins, setAdmins] = useState<PmsAccountAdmin[]>([]);
+  const [actorMembershipId, setActorMembershipId] = useState("");
   const [roles, setRoles] = useState<PmsTeamRole[]>([]);
   const [canManageRoles, setCanManageRoles] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -63,11 +68,14 @@ export default function TeamSettingsPage() {
     setLoading(true);
     setError("");
     try {
-      const [nextMembers, nextProperties, catalog] = await Promise.all([
+      const [nextMembers, nextProperties, catalog, account] = await Promise.all([
         getPmsStaffRoster(),
         listPmsProperties(),
         getPmsTeamRoles(),
+        getPmsAccountAdmins(),
       ]);
+      setAdmins(account.admins);
+      setActorMembershipId(account.actorMembershipId);
       setRoles(catalog.roles);
       setCanManageRoles(catalog.canManageRoles);
       setMembers(nextMembers);
@@ -207,6 +215,7 @@ export default function TeamSettingsPage() {
             </button>
           </div>
         )}
+        {!loading && !error && <AccountAdminCard admins={admins} />}
         {loading ? (
           <SettingsCard>
             <p role="status" className="text-sm text-gray-500">
@@ -291,7 +300,11 @@ export default function TeamSettingsPage() {
                         {formatLastActive(member.lastActiveAt, locale, t)}
                       </td>
                       <td className="px-4 py-3 md:px-5">
-                        {member.status === "pending" ? (
+                        {member.id === actorMembershipId ? (
+                          <span className="text-xs text-gray-500">
+                            {t("settings.team.yourAccount")}
+                          </span>
+                        ) : member.status === "pending" ? (
                           <button
                             type="button"
                             disabled={opening}
