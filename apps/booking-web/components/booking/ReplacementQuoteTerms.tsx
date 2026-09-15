@@ -128,9 +128,18 @@ export default function ReplacementQuoteTerms({
           </p>
         </section>
       ))}
+      <div className="space-y-1">
+        <h3 className="font-semibold">Booking confirmation</h3>
+        <p>
+          {quote.acceptanceMode === "request"
+            ? "Your booking will need our approval. Sending a request does not confirm your stay."
+            : "Your booking will be confirmed when you complete the booking process. No separate approval from us is needed."}
+        </p>
+      </div>
       <p>Selected payment method: {methodNames[quote.paymentMethod]}.</p>
       <p className="text-sm text-gray-600">
-        This price preview does not reserve a room or take payment. These are rate terms only. Please also review our guest rules before booking.
+        This price preview does not reserve a room or take payment. These are rate terms only.
+        Please also review our guest rules before booking.
       </p>
       {(unavailable || missingLabels) && (
         <p role="status">

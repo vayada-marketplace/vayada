@@ -40,6 +40,8 @@ export function createReplacementBookingQuoteIssuer(
         selection,
         paymentMethod: input.paymentMethod,
       });
+      if (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request")
+        throw new PricingStorageError("stale");
       const evidence = quote.evidence;
       return {
         version: "public-booking-quote.v1",
@@ -49,6 +51,7 @@ export function createReplacementBookingQuoteIssuer(
         checkOut: quote.stay.checkOut,
         currency: quote.stay.currency,
         paymentMethod: quote.paymentMethod,
+        acceptanceMode: quote.acceptanceMode,
         issuedAt: evidence.issuedAt,
         expiresAt: evidence.expiresAt,
         totalMinor: evidence.totalMinor,
@@ -80,7 +83,10 @@ export function createReplacementBookingQuoteIssuer(
       if (error.code === "invalid") throw httpError(400, "Invalid quote request.");
       if (error.code === "idempotency_conflict")
         throw httpError(409, "Quote request changed. Use a new Idempotency-Key.");
-      if (error.code === "stale") throw httpError(409, "Quote expired. Request a new quote.");
+      if (error.code === "stale")
+        throw Object.assign(httpError(409, "Quote needs refreshing. Request a new quote."), {
+          code: "QUOTE_REFRESH_REQUIRED",
+        });
       throw httpError(404, "Quote unavailable.");
     }
   };

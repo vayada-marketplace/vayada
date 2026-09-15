@@ -1446,12 +1446,23 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       expect(first.headers["cache-control"]).toBe("no-store");
       const body = first.json();
       expect(parsePublicBookingQuote(body, payload)).toEqual(body);
-      expect(body).toMatchObject({ version: "public-booking-quote.v1", replayed: false, currency: "EUR", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
+      expect(body).toMatchObject({ version: "public-booking-quote.v1", acceptanceMode: "instant", replayed: false, currency: "EUR", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
       expect(body.rooms).toHaveLength(f.selection.rooms.length);
-      expect(Object.keys(body).sort()).toEqual(["version", "quoteId", "replayed", "checkIn", "checkOut", "currency", "paymentMethod", "issuedAt", "expiresAt", "totalMinor", "dueNowMinor", "dueLaterMinor", "lines", "rooms"].sort());
+      expect(Object.keys(body).sort()).toEqual(["version", "quoteId", "replayed", "checkIn", "checkOut", "currency", "paymentMethod", "acceptanceMode", "issuedAt", "expiresAt", "totalMinor", "dueNowMinor", "dueLaterMinor", "lines", "rooms"].sort());
       expect(body.rooms.every((room: Record<string, unknown>) => Object.keys(room).sort().join(",") === "cancellation,mealPlan,payment,selectionId")).toBe(true);
       const stored = await createCurrentPricingQuoteStore(pool, 300).read(f.scope.propertyId, body.quoteId);
       expect(stored?.quote.evidence.totalMinor).toBe(body.totalMinor);
+      const oldQuote = structuredClone(stored!.quote);
+      Reflect.deleteProperty(oldQuote, "acceptanceMode");
+      const oldIssuer = createReplacementBookingQuoteIssuer({ async issue() { return { ...stored!, quote: oldQuote, replayed: true }; } });
+      await expect(oldIssuer(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 409, code: "QUOTE_REFRESH_REQUIRED" });
+      const refreshApp = Fastify();
+      try {
+        refreshApp.post("/quote", async () => oldIssuer(f.scope.propertyId, payload, randomUUID()));
+        expect((await refreshApp.inject({method: "POST", url: "/quote"})).json().code).toBe("QUOTE_REFRESH_REQUIRED");
+      } finally { await refreshApp.close(); }
+      await pool.query("UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1", [f.scope.propertyId]);
+      expect((await post(payload, { "Idempotency-Key": randomUUID() })).json().acceptanceMode).toBe("request");
       expect((await post()).json()).toEqual({ ...body, replayed: true });
       expect((await post({ ...payload, selection: { ...f.selection, promoCode: null } })).statusCode).toBe(409);
       for (const invalid of [{}, { ...payload, propertyId: randomUUID() }, { ...payload, totalMinor: "1" }, { ...payload, paymentMethod: "cash" }, { ...payload, selection: { ...f.selection, rooms: [] } }]) expect((await post(invalid)).statusCode).toBe(400);
