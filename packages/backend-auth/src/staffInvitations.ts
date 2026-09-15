@@ -15,12 +15,18 @@ import {
   type UpdateStaffStatusCommand,
 } from "./lifecycle.js";
 import type { RepositoryConfig } from "./repository.js";
+import type { PermissionKey } from "./types.js";
 import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
 
 type StaffRoleDefinition = TeamRolePolicy & { id: string; name: string; revision: string };
 
 type InviterRow = {
   membership_id: string;
+  role_key: string;
+  role_definition_id: string | null;
+  role_definition: StaffRoleDefinition | null;
+  access_origin: string;
+  property_access_mode: string;
   name: string | null;
   email: string;
   permission_overrides: unknown;
@@ -678,7 +684,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
         }
-        if (previous.role_definition_id !== null) {
+        if (previous.role_definition_id !== null && normalized.roleDefinitionId === undefined) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "invalid_command" as const };
         }
@@ -689,6 +695,40 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         ) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "revision_conflict" as const };
+        }
+        if (normalized.roleDefinitionId !== undefined) {
+          if (
+            manager.role_key !== "hotel_owner" ||
+            manager.access_origin !== "agency" ||
+            manager.property_access_mode !== "all" ||
+            previous.access_origin !== "agency" ||
+            (manager.permission_overrides !== null &&
+              JSON.stringify(parseStaffPermissionOverrides(manager.permission_overrides)) !==
+                JSON.stringify({ grant: [], deny: [] }))
+          ) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+          }
+          const role = await client.query<StaffRoleDefinition>(
+            `SELECT id, name, revision::text, security_class AS "securityClass",
+                    base_role_key AS "baseRoleKey", preset_key AS "presetKey",
+                    default_permissions AS "defaultPermissions"
+             FROM identity.organization_roles WHERE organization_id = $1 AND id = $2 FOR SHARE`,
+            [normalized.organizationId, normalized.roleDefinitionId],
+          );
+          const definition = role.rows[0];
+          if (
+            !definition ||
+            definition.baseRoleKey !== normalized.roleKey ||
+            !resolveTeamRolePermissions(definition, normalized.permissionOverrides)
+          ) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "invalid_command" as const };
+          }
+          if (definition.revision !== normalized.expectedRoleRevision) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "revision_conflict" as const };
+          }
         }
         const linkedProperties = await client.query<{ property_id: string }>(
           `SELECT property.id::text AS property_id
@@ -709,7 +749,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         }
         await client.query(
           `UPDATE identity.organization_memberships
-           SET role_key = $3, permission_overrides = $4::jsonb,
+           SET role_key = $3, permission_overrides = $4::jsonb, role_definition_id = $9,
                property_access_mode = $8, status = COALESCE($5, status), updated_at = now(),
                pms_access_enabled = COALESCE($6, pms_access_enabled),
                booking_access_enabled = COALESCE($7, booking_access_enabled)
@@ -723,6 +763,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             normalized.productAccess?.pms ?? null,
             normalized.productAccess?.booking ?? null,
             normalized.propertyAccessMode ?? "assigned",
+            normalized.roleDefinitionId ?? null,
           ],
         );
         await client.query(
@@ -740,6 +781,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             ? { grant: [], deny: [] }
             : parseStaffPermissionOverrides(previous.permission_overrides);
         const permissionsChanged =
+          (normalized.roleDefinitionId ?? null) !== previous.role_definition_id ||
           normalized.roleKey !== previous.role_key ||
           !previousOverrides ||
           (["grant", "deny"] as const).some(
@@ -773,6 +815,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                     : "role_permissions_changed",
           });
         const next = {
+          roleDefinitionId: normalized.roleDefinitionId ?? null,
           propertyAccessMode: normalized.propertyAccessMode ?? "assigned",
           productAccess: normalized.productAccess ?? {
             pms: previous.pms_access_enabled,
@@ -810,6 +853,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             }),
             JSON.stringify({
               previous: {
+                roleDefinitionId: previous.role_definition_id,
                 propertyAccessMode: previous.property_access_mode,
                 productAccess: {
                   pms: previous.pms_access_enabled,
@@ -1082,7 +1126,16 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
         !validProductAccess(command.payload.productAccess))) ||
     (command.payload.propertyAccessMode === "all" &&
       command.payload.expectedRevision === undefined) ||
-    validateStaffInviteAccess(command.payload).length
+    ((command.payload.roleDefinitionId !== undefined ||
+      command.payload.expectedRoleRevision !== undefined) &&
+      (!canonicalUuid(command.payload.roleDefinitionId ?? "") ||
+        !/^[1-9][0-9]*$/.test(command.payload.expectedRoleRevision ?? "") ||
+        command.payload.expectedRevision === undefined)) ||
+    validateStaffInviteAccess(command.payload).filter(
+      (issue) =>
+        // Referenced-role hierarchy is checked against locked saved defaults below.
+        command.payload.roleDefinitionId === undefined || issue !== "missing_required_permission",
+    ).length
   ) {
     return null;
   }
@@ -1091,6 +1144,12 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
     membershipId: command.payload.membershipId.toLowerCase(),
     ...(command.payload.propertyAccessMode === "all" ? { propertyAccessMode: "all" as const } : {}),
     roleKey: command.payload.roleKey,
+    ...(command.payload.roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: command.payload.roleDefinitionId.toLowerCase(),
+          expectedRoleRevision: command.payload.expectedRoleRevision!,
+        }),
     propertyIds: command.payload.propertyIds.map((id) => id.toLowerCase()).sort(),
     permissionOverrides: {
       grant: [...command.payload.permissionOverrides.grant].sort(),
@@ -1162,13 +1221,21 @@ async function lockAuthorizedManager(
   actorUserId: string,
 ): Promise<InviterRow | null> {
   const result = await client.query<InviterRow>(
-    `SELECT membership.id AS membership_id, actor.name, actor.email, membership.permission_overrides,
+    `SELECT membership.id AS membership_id, membership.role_key, actor.name, actor.email, membership.permission_overrides,
+            membership.access_origin, membership.property_access_mode, membership.role_definition_id,
+            CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
+              'id', definition.id, 'name', definition.name, 'revision', definition.revision::text,
+              'securityClass', definition.security_class, 'baseRoleKey', definition.base_role_key,
+              'presetKey', definition.preset_key, 'defaultPermissions', definition.default_permissions
+            ) END AS role_definition,
             ARRAY(SELECT grant_row.permission_key FROM identity.role_permission_grants grant_row
                   WHERE grant_row.organization_kind = organization.kind
                     AND grant_row.role_key = membership.role_key) AS role_permissions
      FROM identity.organization_memberships membership
      JOIN identity.organizations organization ON organization.id = membership.organization_id
      JOIN identity.users actor ON actor.id = membership.user_id
+     LEFT JOIN identity.organization_roles definition
+       ON definition.id = membership.role_definition_id AND definition.organization_id = membership.organization_id
      WHERE membership.organization_id = $1 AND membership.user_id = $2
        AND membership.status = 'active' AND organization.kind = 'hotel_group'
        AND organization.status = 'active' AND actor.status = 'active'
@@ -1180,6 +1247,20 @@ async function lockAuthorizedManager(
 }
 
 function hasStaffManage(row: InviterRow): boolean {
+  if (row.role_definition_id !== null) {
+    const role = row.role_definition;
+    // Referenced managers require the bounded command authorization implemented next.
+    if (role?.securityClass !== "account_admin") return false;
+    if (!role || role.id !== row.role_definition_id || role.baseRoleKey !== row.role_key)
+      return false;
+    return (
+      resolveTeamRolePermissions(
+        role,
+        row.permission_overrides ?? { grant: [], deny: [] },
+        row.role_permissions.filter((key): key is PermissionKey => permissionKeys.has(key)),
+      )?.includes("identity.staff.manage") ?? false
+    );
+  }
   if (row.permission_overrides === null) {
     return row.role_permissions.includes("identity.staff.manage");
   }
