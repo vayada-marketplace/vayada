@@ -1,5 +1,8 @@
 import pg from "pg";
-import { parseAffiliateBookingDestinationConfiguration } from "@vayada/domain-booking";
+import {
+  assessAffiliateDestinationTracking,
+  parseAffiliateBookingDestinationConfiguration,
+} from "@vayada/domain-booking";
 import { saveBookingAffiliateDestinationFromMarketplace as save } from "./bookingAffiliateDestinationSave.js";
 
 export async function readBookingAffiliateDestinations(
@@ -32,6 +35,11 @@ export async function readBookingAffiliateDestinations(
       configuration,
       createdAt: row.createdAt as Date,
       trackingStatus: "not_validated" as const,
+      // No trusted affiliate evidence adapter is wired yet. Configuration cannot supply proof.
+      trackingReadiness: assessAffiliateDestinationTracking(
+        { destinationVersionId: row.destinationVersionId, propertyId, enabled: true },
+        [],
+      ),
     };
   });
 }

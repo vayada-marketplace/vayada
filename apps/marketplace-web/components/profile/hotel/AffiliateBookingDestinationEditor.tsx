@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { parseAffiliateBookingDestinationConfiguration } from "@vayada/domain-booking";
+import {
+  parseAffiliateBookingDestinationConfiguration,
+  type AffiliateTrackingPurpose,
+} from "@vayada/domain-booking";
 import { targetApiClient } from "@/services/api/targetClient";
 
 type Destination = {
   destinationVersionId: string;
   configuration: { displayName: string; bookingUrl: string };
   trackingStatus: "not_validated";
+  trackingReadiness?: { status: "pending" | "verified"; missing: AffiliateTrackingPurpose[] };
+};
+const trackingChecks: Record<AffiliateTrackingPurpose, string> = {
+  referral_round_trip: "Match the creator link to the resulting booking",
+  reservation_lifecycle: "Receive booking confirmations, changes and cancellations",
+  stay_completion: "Confirm that the guest completed the stay",
+  accommodation_revenue: "Identify accommodation revenue excluding taxes and extras",
 };
 export function AffiliateBookingDestinationEditor({ propertyId }: { propertyId: string }) {
   const path = `/api/marketplace/properties/${encodeURIComponent(propertyId)}/affiliate-destinations`;
@@ -146,6 +156,29 @@ export function AffiliateBookingDestinationEditor({ propertyId }: { propertyId: 
                 {destination.configuration.bookingUrl}
               </p>
               <p className="text-sm text-amber-700">Tracking not validated</p>
+              {destination.trackingReadiness?.status === "pending" &&
+              destination.trackingReadiness.missing.length ? (
+                <details className="text-sm text-gray-600">
+                  <summary className="cursor-pointer font-medium">
+                    What still needs verification
+                  </summary>
+                  <ul className="mt-2 list-disc pl-5 space-y-1">
+                    {destination.trackingReadiness.missing.map((purpose) => (
+                      <li key={purpose}>
+                        {trackingChecks[purpose] ?? "An additional tracking check"}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2">
+                    These checks need evidence from your booking or property-management system.
+                    Saving a booking page cannot complete them.
+                  </p>
+                </details>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  Tracking verification details are unavailable.
+                </p>
+              )}
             </li>
           ))}
         </ul>

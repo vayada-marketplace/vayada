@@ -137,6 +137,15 @@ describe.skipIf(!databaseUrl)("affiliate destination save (PostgreSQL)", () => {
         destinationVersionId: saved.destinationVersionId,
         configuration: input().configuration,
         trackingStatus: "not_validated",
+        trackingReadiness: {
+          status: "pending",
+          missing: [
+            "referral_round_trip",
+            "reservation_lifecycle",
+            "stay_completion",
+            "accommodation_revenue",
+          ],
+        },
       });
       expect((await repository.list(id(3), id(4))).destinations).toHaveLength(1);
       for (const [property, organization] of [
