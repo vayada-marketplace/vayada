@@ -115,6 +115,26 @@ function fakes() {
         },
       },
       repository: {
+        async getInvitation(org, id) {
+          accessReads.push([org, id]);
+          return id === staffMembershipId
+            ? {
+                id,
+                email: "staff@example.test",
+                name: null,
+                roleKey: "front_desk" as const,
+                propertyAccessMode: "assigned" as const,
+                propertyIds: [propertyId],
+                permissionOverrides: { grant: [], deny: [] },
+                configurationRevision: 1,
+                productAccess: { pms: true, booking: true },
+                roleDefinitionId: null,
+                roleDefinition: null,
+                deliveryState: "delivered",
+                expiresAt: null,
+              }
+            : null;
+        },
         async getAccess(org, id) {
           accessReads.push([org, id]);
           return id === staffMembershipId
@@ -542,6 +562,31 @@ describe("staff invitation routes", () => {
     ]) {
       expect((await app.inject({ ...request, payload })).statusCode).toBe(400);
     }
+  });
+
+  it("reads saved invitation settings with tenant routing and no caching", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const url = `/api/identity/staff/invitations/${staffMembershipId}`;
+    expect((await app.inject({ method: "GET", url })).statusCode).toBe(401);
+    const response = await app.inject({
+      method: "GET",
+      url,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({ id: staffMembershipId, configurationRevision: 1 });
+    expect(fake.accessReads).toEqual([[organizationId, staffMembershipId]]);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/identity/staff/invitations/missing",
+          headers: { authorization: "Bearer valid-token" },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
   it("passes invitation role references and rejects incomplete role revisions", async () => {

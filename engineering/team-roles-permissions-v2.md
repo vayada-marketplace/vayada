@@ -535,3 +535,14 @@ Legacy invitation fingerprints and exact replays remain compatible. Validation:
 52 PostgreSQL staff tests, 67 route tests, backend-auth build/typecheck, API
 typecheck; independent review found no actionable issues. Resend configuration,
 bounded manager support, external owners and the full UI remain pending.
+
+### Invitation resend configuration
+
+A no-store invitation read exposes the current pending configuration, role,
+delivery state and expiry without provider identifiers. Replacement requests can
+name the expected pending invitation and must use its next configuration revision;
+the organization lock makes the check and replacement atomic. Stale requests fail
+without revoking the newer invite, and exact replays preserve their original
+result. Validation: 53 PostgreSQL staff tests, 68 route tests, backend-auth
+build/typecheck and API typecheck; independent review found no actionable issues.
+The Team UI will call this read before resending through the existing delivery flow.
