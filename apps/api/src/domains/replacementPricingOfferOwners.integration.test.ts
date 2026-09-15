@@ -1220,6 +1220,23 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     await expect(f.readTasks(get)).rejects.toThrow();
     expect(get).toHaveBeenCalledOnce();
   });
+  it("admits retained explicit Success without warnings for original task observation", async () => {
+    const f = await taskReadFixture();
+    await f.retain(
+      new Response(
+        JSON.stringify({ data: [{ type: "task", id: f.taskId }], meta: { message: "Success" } }),
+      ),
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT warning_reason,has_warnings FROM pms.channex_offer_ari_receipts WHERE id=$1",
+          [f.ariCorrelation.receiptId],
+        )
+      ).rows,
+    ).toEqual([{ warning_reason: null, has_warnings: false }]);
+    expect((await f.readTasks(async () => f.task())).kind).toBe("ari_tasks_observed");
+  });
   it("retains distinct warning classifications and rejects same-receipt diagnostic changes", async () => {
     const f = await taskReadFixture();
     const response = (meta: unknown) =>

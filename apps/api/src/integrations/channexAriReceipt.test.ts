@@ -31,6 +31,23 @@ describe("Channex ARI response evidence", () => {
       }).providerRequestId,
     ).toBeNull();
   });
+  it("accepts the retained provider Success envelope with omitted warnings", () => {
+    expect(read({ data: valid.data, meta: { message: "Success" } })).toMatchObject({
+      taskIds: [task],
+      hasWarnings: false,
+      warningReason: null,
+    });
+  });
+  it.each([
+    {},
+    { message: "success" },
+    { message: "Success", warnings: null },
+    { message: "Success", warnings: {} },
+    { message: "Success", warnings: "" },
+    { message: "Success", warnings: ["rejected"] },
+  ])("does not infer clean acceptance from ambiguous metadata", (meta) => {
+    expect(read({ data: valid.data, meta }).hasWarnings).toBe(true);
+  });
   it.each([
     [null, "invalid_tasks"],
     [{ ...valid, data: [], errors: "secret" }, "invalid_tasks"],
