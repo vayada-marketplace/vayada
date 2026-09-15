@@ -403,3 +403,18 @@ Housekeeping roles retain the guest-contact restriction. Account admin uses an
 empty immutable definition and trusted live admin grants. This support slice
 has no runtime callers or role assignments yet. Nineteen focused policy tests,
 backend-auth build/typecheck and independent adversarial review passed.
+
+### Live organization-role authorization support
+
+The authorization scope query reads role references and same-organization
+definitions together. Referenced roles resolve live defaults plus member
+overrides, verify organization/base-role identity and fail closed with audit
+on invalid definitions. NULL references keep legacy authorization. Only the
+live non-editable property-manifest baseline survives outside section defaults;
+unrelated legacy grants are excluded. Product vetoes still apply afterward.
+
+This requires migration 0201 before runtime deployment. No role references are
+populated by this slice. Do not activate assignment writers until role command,
+invitation acceptance and background/Inbox authorization parity are delivered.
+Validation: 31 selected resolver and PostgreSQL tests; affected typecheck and API
+build. Independent review caught and verified the property-manifest baseline fix.
