@@ -267,8 +267,11 @@ only with `expectedRevision` and saves it atomically with status, role, override
 and property assignments. Omission preserves existing flags. Audit captures the
 previous and next pair. Disabling PMS schedules Inbox assignment reconciliation;
 assignment eligibility and locked Inbox actor checks, including queued provider
-delivery, enforce the flag. No UI switch is exposed yet. Invitation acceptance
-and remaining background authorization paths require successor coverage.
+delivery, enforce the flag. Invitations accept the same strict pair, defaulting
+to enabled when omitted. Acceptance copies both stored flags into new and
+existing memberships; replay preserves subsequent edits. The pair participates
+in explicit invitation fingerprints and acceptance audit. No UI switch is
+exposed yet; remaining background authorization paths require successor coverage.
 The existing rejection of unsupported delegated memberships remains in place.
 
 ### Configuration read API (first backend slice)

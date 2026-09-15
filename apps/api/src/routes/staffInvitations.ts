@@ -48,6 +48,7 @@ const invitationBodyKeys = new Set([
   "propertyIds",
   "permissionOverrides",
   "configurationRevision",
+  "productAccess",
 ]);
 const accessBodyKeys = new Set([
   "roleKey",
@@ -323,12 +324,14 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
     return null;
   const email = typeof value["email"] === "string" ? value["email"].trim().toLowerCase() : "";
   const name = typeof value["name"] === "string" ? value["name"].trim() : undefined;
+  const productAccess = value["productAccess"];
   const access = parseStaffAccess(value);
   if (
     email.length > 320 ||
     !/^[^\s@]+@[^\s@]+$/.test(email) ||
     (value["name"] !== undefined && (!name || name.length > 200)) ||
     !access ||
+    (productAccess !== undefined && !validProductAccess(productAccess)) ||
     !Number.isSafeInteger(value["configurationRevision"]) ||
     (value["configurationRevision"] as number) < 1 ||
     (value["configurationRevision"] as number) > 2_147_483_647
@@ -340,6 +343,9 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
     ...(name ? { name } : {}),
     ...access,
     configurationRevision: value["configurationRevision"] as number,
+    ...(productAccess === undefined
+      ? {}
+      : { productAccess: productAccess as { pms: boolean; booking: boolean } }),
   };
 }
 
