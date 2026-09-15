@@ -17,6 +17,7 @@ import { hashLegacyOwnerSetupValue } from "./legacyOwnerSetupReceiptHashes.js";
 import { runMigrations } from "./runner.js";
 import { collectLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceCollector.js";
 import { inspectLegacyOwnerSetupRecovery } from "./legacyOwnerSetupRecovery.js";
+import { commitLegacyOwnerSetup } from "./legacyOwnerSetupCommit.js";
 import { verifyLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceEvidence.js";
 
 const url = process.env["VAY2017_CHECKPOINT_TEST_DATABASE_URL"];
@@ -166,7 +167,8 @@ const transactionFixture = (alter?: (row: Record<string, unknown>, i: number) =>
 
 const verifiedUrl = process.env.VAY2017_VERIFIED_TARGET_TEST_DATABASE_URL;
 const recoveryUrl = process.env.VAY2017_RECOVERY_TEST_DATABASE_URL;
-const fixtureUrl = verifiedUrl ?? recoveryUrl;
+const commitUrl = process.env.VAY2017_COMMIT_TEST_DATABASE_URL;
+const fixtureUrl = verifiedUrl ?? recoveryUrl ?? commitUrl;
 describe.skipIf(!fixtureUrl)("same-client verified target transaction as restricted LOGIN", () => {
   let admin: pg.Client, executor: pg.Client, identity: LegacyOwnerSetupTargetIdentity;
   let executorConfig: pg.ClientConfig, recoveryPool: pg.Pool | undefined;
@@ -179,12 +181,18 @@ describe.skipIf(!fixtureUrl)("same-client verified target transaction as restric
   beforeAll(async () => {
     const parsed = new URL(fixtureUrl!);
     if (
-      (verifiedUrl && recoveryUrl) ||
+      [verifiedUrl, recoveryUrl, commitUrl].filter(Boolean).length !== 1 ||
       !["postgres:", "postgresql:"].includes(parsed.protocol) ||
       parsed.hostname !== "127.0.0.1" ||
-      !(recoveryUrl ? ["56636", "56637"] : ["56634", "56635"]).includes(parsed.port) ||
+      !(
+        commitUrl ? ["56644", "56645"] : recoveryUrl ? ["56636", "56637"] : ["56634", "56635"]
+      ).includes(parsed.port) ||
       parsed.pathname !==
-        (recoveryUrl ? "/vay2017_recovery_test" : "/vay2017_verified_target_test") ||
+        (commitUrl
+          ? "/vay2017_commit_test"
+          : recoveryUrl
+            ? "/vay2017_recovery_test"
+            : "/vay2017_verified_target_test") ||
       parsed.search ||
       parsed.hash
     )
@@ -328,7 +336,7 @@ describe.skipIf(!fixtureUrl)("same-client verified target transaction as restric
     executorConfig = { connectionString: parsed.toString(), connectionTimeoutMillis: 2000 };
     executor = new pg.Client(executorConfig);
     await executor.connect();
-    if (recoveryUrl) recoveryPool = new pg.Pool({ ...executorConfig, max: 1 });
+    if (recoveryUrl || commitUrl) recoveryPool = new pg.Pool({ ...executorConfig, max: 1 });
   }, 120_000);
   beforeEach(async () => {
     await executor.query("BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'");
@@ -369,6 +377,119 @@ describe.skipIf(!fixtureUrl)("same-client verified target transaction as restric
       (SELECT count(*)::int FROM identity.users WHERE id<> '${id(90)}') AS owners,
       (SELECT count(*)::int FROM platform.legacy_owner_bootstrap_receipts) AS receipts`)
     ).rows[0];
+  if (commitUrl) {
+    it("owns commit, rolls back pre-dispatch failures and never retries uncertain acknowledgement", async () => {
+      const writerPool = new pg.Pool({ ...executorConfig, max: 1 });
+      let expired = false;
+      const run = (chosen = fixture, target: unknown = identity) =>
+        commitLegacyOwnerSetup(
+          writerPool,
+          target,
+          chosen.request,
+          expected,
+          chosen.artifacts,
+          chosen.trust,
+          policy,
+          hashes(),
+          chosen.targetArtifacts,
+          () => (expired ? new Date(command().expiresAt) : now),
+        );
+      const fault = async (mode: "expiry" | "rollback-tag" | "lost-ack" | "cleanup") => {
+        const client = await writerPool.connect(),
+          query = client.query.bind(client);
+        vi.spyOn(writerPool, "connect").mockImplementationOnce(
+          (async () => client) as pg.Pool["connect"],
+        );
+        let rollbacks = 0;
+        vi.spyOn(client, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+          if (mode === "cleanup" && sql === "ROLLBACK" && ++rollbacks === 2)
+            throw Error("private cleanup");
+          if (sql === "COMMIT" && mode === "rollback-tag") return query("ROLLBACK");
+          const result = await query(sql, values);
+          if (sql === "RELEASE SAVEPOINT vay2017_verified_target" && mode === "expiry")
+            expired = true;
+          if (sql === "COMMIT" && mode === "lost-ack") throw Error("private lost acknowledgement");
+          return result;
+        }) as typeof client.query);
+        return vi.spyOn(client, "release");
+      };
+      try {
+        await expect(run(fixture, { ...identity, databaseOid: 1 })).rejects.toThrow(
+          /^LEGACY_OWNER_SETUP_NOT_COMMITTED$/,
+        );
+        expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+        let released = await fault("expiry");
+        await expect(run()).rejects.toThrow(/^LEGACY_OWNER_SETUP_NOT_COMMITTED$/);
+        expect(released).toHaveBeenCalledWith(true);
+        expired = false;
+        vi.restoreAllMocks();
+        expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+        released = await fault("cleanup");
+        await expect(run(fixture, { ...identity, databaseOid: 1 })).rejects.toThrow(
+          /^LEGACY_OWNER_SETUP_NOT_COMMITTED$/,
+        );
+        expect(released).toHaveBeenCalledWith(true);
+        vi.restoreAllMocks();
+        released = await fault("rollback-tag");
+        await expect(run()).rejects.toThrow(/^LEGACY_OWNER_SETUP_COMMIT_INDETERMINATE$/);
+        expect(released).toHaveBeenCalledWith(true);
+        vi.restoreAllMocks();
+        expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+        const copied = {
+          ...fixture,
+          request: {
+            ...fixture.request,
+            verificationKeys: new Map(fixture.request.verificationKeys),
+          },
+          artifacts: structuredClone(fixture.artifacts),
+        };
+        const captured = await writerPool.connect();
+        vi.spyOn(writerPool, "connect").mockImplementationOnce((async () => {
+          copied.request.verificationKeys.clear();
+          copied.artifacts.length = 0;
+          return captured;
+        }) as pg.Pool["connect"]);
+        expect(await run(copied)).toMatchObject({
+          outcome: "commit_acknowledged",
+          executable: false,
+        });
+        vi.restoreAllMocks();
+        expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+        released = await fault("lost-ack");
+        await expect(run()).rejects.toThrow(/^LEGACY_OWNER_SETUP_COMMIT_INDETERMINATE$/);
+        expect(released).toHaveBeenCalledWith(true);
+        vi.restoreAllMocks();
+        expect(
+          await inspectLegacyOwnerSetupRecovery(
+            recoveryPool!,
+            identity,
+            fixture.request,
+            expected,
+            fixture.artifacts,
+            fixture.trust,
+            policy,
+            () => now,
+          ),
+        ).toHaveProperty("outcome", "matching_receipt_found");
+        expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+        for (const table of ["organizations", "organization_memberships", "external_identities"])
+          expect(
+            (await executor.query(`SELECT count(*)::int n FROM identity.${table}`)).rows[0].n,
+          ).toBe(0);
+        expect(
+          (
+            await executor.query("SELECT DISTINCT status FROM identity.users WHERE id<>$1", [
+              id(90),
+            ])
+          ).rows,
+        ).toEqual([{ status: "pending" }]);
+      } finally {
+        vi.restoreAllMocks();
+        await writerPool.end();
+      }
+    }, 20_000);
+    return;
+  }
   if (recoveryUrl) {
     it("recovers only durable exact receipts after an indeterminate commit, never retries writes", async () => {
       const recover = (chosen = fixture, target: unknown = identity, clock = () => now) =>
