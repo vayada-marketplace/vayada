@@ -37,6 +37,7 @@ export * from "./affiliatePercentagePolicy.js";
 export * from "./otaCommissionRules.js";
 export * from "./financialExpenses.js";
 export * from "./financialFolios.js";
+export * from "./financialReporting.js";
 export * from "./generatedExpenses.js";
 
 // ---------------------------------------------------------------------------
