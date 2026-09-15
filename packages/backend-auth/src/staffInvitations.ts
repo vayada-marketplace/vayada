@@ -5,6 +5,8 @@ import {
   hasValidStaffPermissionHierarchy,
   hotelStaffRoleKeys,
   staffAccessPermissionKeys,
+  parseStaffPermissionOverrides,
+  validateStaffPermissionOverrides,
   validateStaffInviteAccess,
   type CreateStaffInviteCommand,
   type HotelStaffRoleKey,
@@ -76,6 +78,70 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
 
   return {
+    async getAccess(organizationId: string, membershipId: string) {
+      const result = await pool.query<
+        StaffAccessTargetRow & {
+          id: string;
+          access_origin: string;
+          status: "active" | "suspended";
+          scope_valid: boolean;
+          role_permissions: string[];
+        }
+      >(
+        `SELECT membership.id, membership.role_key, membership.permission_overrides,
+                membership.property_access_mode, membership.access_origin, membership.status,
+                ARRAY(SELECT assignment.property_id::text
+                      FROM identity.membership_property_assignments assignment
+                      WHERE assignment.membership_id = membership.id
+                      ORDER BY assignment.property_id) AS property_ids,
+                NOT EXISTS (
+                  SELECT 1 FROM identity.membership_property_assignments assignment
+                  WHERE assignment.membership_id = membership.id AND NOT EXISTS (
+                    SELECT 1 FROM identity.organization_resource_links link
+                    WHERE link.organization_id = membership.organization_id
+                      AND link.product = 'hotel_catalog' AND link.resource_type = 'property'
+                      AND link.resource_id = assignment.property_id::text
+                      AND link.relationship IN ('owner', 'operator') AND link.status = 'active'
+                  )
+                ) AS scope_valid,
+                ARRAY(SELECT permission_key FROM identity.role_permission_grants
+                      WHERE organization_kind = 'hotel_group'
+                        AND role_key = membership.role_key ORDER BY permission_key) AS role_permissions
+         FROM identity.organization_memberships membership
+         JOIN identity.organizations organization ON organization.id = membership.organization_id
+         WHERE membership.organization_id = $1 AND membership.id::text = $2
+           AND organization.kind = 'hotel_group' AND organization.status = 'active'
+           AND membership.role_key = ANY($3::text[])
+           AND membership.status IN ('active', 'suspended')`,
+        [organizationId, membershipId, hotelStaffRoleKeys],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      const permissionOverrides =
+        row.permission_overrides === null
+          ? { grant: [], deny: [] }
+          : parseStaffPermissionOverrides(row.permission_overrides);
+      if (
+        row.access_origin !== "agency" ||
+        !row.scope_valid ||
+        !["all", "assigned"].includes(row.property_access_mode) ||
+        !permissionOverrides ||
+        validateStaffPermissionOverrides({
+          roleKey: row.role_key,
+          permissionOverrides,
+          rolePermissions: row.role_permissions,
+        }).length
+      )
+        throw new Error("Staff access configuration is unavailable");
+      return {
+        membershipId: row.id,
+        roleKey: row.role_key as HotelStaffRoleKey,
+        status: row.status,
+        propertyAccessMode: row.property_access_mode as "all" | "assigned",
+        propertyIds: row.property_ids,
+        permissionOverrides,
+      };
+    },
     async listRoster(organizationId: string): Promise<StaffRosterMember[]> {
       const result = await pool.query<StaffRosterRow>(
         `WITH canonical_properties AS (

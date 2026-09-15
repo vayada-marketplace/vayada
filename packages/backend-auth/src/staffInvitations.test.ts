@@ -426,6 +426,88 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(await repository.listRoster(org)).toEqual([]);
   });
 
+  it("normalizes absent overrides and rejects unsupported delegated scope", async () => {
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      permissionOverrides: { grant: [], deny: [] },
+    });
+    await client.query(
+      "UPDATE identity.organization_memberships SET access_origin = 'external_owner' WHERE id = $1",
+      [staffMembership],
+    );
+    try {
+      await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+        "Staff access configuration is unavailable",
+      );
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET access_origin = 'agency' WHERE id = $1",
+        [staffMembership],
+      );
+    }
+  });
+
+  it("reads saved overrides and scope without replacing them with role defaults", async () => {
+    const edit = updateCommand();
+    await repository.updateAccess(edit);
+    expect(await repository.getAccess(org, staffMembership)).toEqual({
+      membershipId: staffMembership,
+      roleKey: "front_desk",
+      status: "active",
+      propertyAccessMode: "assigned",
+      propertyIds: [property],
+      permissionOverrides: edit.payload.permissionOverrides,
+    });
+    await client.query(
+      "UPDATE identity.organization_memberships SET property_access_mode = 'all', status = 'suspended' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "all",
+      status: "suspended",
+      propertyIds: [property],
+    });
+  });
+
+  it("hides foreign, admin, missing and removed access targets", async () => {
+    for (const [tenant, target] of [
+      [otherOrg, staffMembership],
+      [org, membership],
+      [org, "invalid"],
+    ]) {
+      expect(await repository.getAccess(tenant!, target!)).toBeNull();
+    }
+    await client.query(
+      "UPDATE identity.organization_memberships SET status = 'inactive' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.getAccess(org, staffMembership)).toBeNull();
+  });
+
+  it("rejects malformed overrides and unlinked assignments without exposing their values", async () => {
+    await client.query(
+      "UPDATE identity.organization_memberships SET permission_overrides = $2 WHERE id = $1",
+      [staffMembership, { grant: ["private.permission"], deny: [] }],
+    );
+    await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+      "Staff access configuration is unavailable",
+    );
+    await client.query(
+      "UPDATE identity.organization_memberships SET permission_overrides = NULL WHERE id = $1",
+      [staffMembership],
+    );
+    await client.query(
+      "INSERT INTO identity.membership_property_assignments (membership_id, property_id) VALUES ($1, $2)",
+      [staffMembership, property],
+    );
+    await client.query(
+      "UPDATE identity.organization_resource_links SET status = 'suspended' WHERE organization_id = $1 AND resource_id = $2",
+      [org, property],
+    );
+    await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+      "Staff access configuration is unavailable",
+    );
+  });
+
   it("atomically updates, audits, and replays staff access", async () => {
     const edit = updateCommand();
     await expect(repository.updateAccess(edit)).resolves.toEqual({
