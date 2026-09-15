@@ -544,6 +544,27 @@ describe("staff invitation routes", () => {
     }
   });
 
+  it("passes invitation role references and rejects incomplete role revisions", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const payload = {
+      ...body(),
+      roleKey: "hotel_custom",
+      roleDefinitionId: staffMembershipId,
+      expectedRoleRevision: "1",
+      permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+    };
+    expect((await post(app, payload)).statusCode).toBe(201);
+    for (const patch of [
+      { roleDefinitionId: undefined },
+      { expectedRoleRevision: undefined },
+      { roleDefinitionId: null },
+      { expectedRoleRevision: "0" },
+    ]) {
+      expect((await post(app, { ...payload, ...patch })).statusCode).toBe(400);
+    }
+  });
+
   it("requires paired saved-role revisions and defers role hierarchy to the repository", async () => {
     const fake = fakes();
     app = await testApp(fake.options);
