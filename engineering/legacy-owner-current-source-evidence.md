@@ -66,3 +66,21 @@ and roll back successfully before protected in-memory observations return;
 uncertain cleanup discards the connection. No logs, signing keys, grants or DDL.
 This is not a cross-database atomic snapshot, legal ownership/email-control proof,
 signed evidence, a configured live collector or a production invocation.
+
+## Read-to-sign composition
+
+`collectLegacyOwnerCurrentSourceEvidence` invokes that reader itself and signs
+only its completed observations using Node's Ed25519 implementation. It accepts
+no observed-row input and does not refresh observation timestamps. Metadata and
+source pins are captured before I/O; the private key must match the independently
+pinned live-purpose public key. Signing uses the existing canonical artifact and
+domain, with wall-clock and monotonic freshness checks across reads and signing.
+Failure returns no partial artifacts or raw error details. Returned artifacts
+contain protected contacts and must not be logged or written to general evidence.
+
+This is library composition, not a configured production collector or runner.
+The operator runtime must authenticate live TLS/resource endpoints and historical
+run/ledger provenance, supply approved pairs and live-purpose keys independently,
+and bound pool acquisition. It does not grant signing authority merely because
+two supplied keys match. No key provisioning/loading, CLI, source/target writes,
+provider calls, account activation, or ownership/access decision is introduced.
