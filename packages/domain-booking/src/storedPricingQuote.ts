@@ -34,6 +34,8 @@ export type StoredPricingQuote = Readonly<{
   quoteId: string;
   evaluatorVersion: string;
   paymentMethod: string;
+  /** Absent only in historical records issued before acceptance-mode capture. */
+  acceptanceMode?: "instant" | "request";
   stay: ReplacementStay;
   evidence: ReplacementPricingEvidence;
   rooms: readonly StoredPricingRoom[];
@@ -55,11 +57,15 @@ export function parseStoredPricingQuote(value: unknown): StoredPricingQuote | nu
       "stay",
       "evidence",
       "rooms",
+      ...(pricingObject(value) && Object.hasOwn(value, "acceptanceMode") ? ["acceptanceMode"] : []),
     ]) ||
     value.version !== "stored-pricing-quote.v1" ||
     !text(value.quoteId) ||
     !text(value.evaluatorVersion) ||
     !text(value.paymentMethod) ||
+    (Object.hasOwn(value, "acceptanceMode") &&
+      value.acceptanceMode !== "instant" &&
+      value.acceptanceMode !== "request") ||
     !pricingObject(value.stay) ||
     !list(value.stay.rooms, 99) ||
     !list(value.stay.addons, 99) ||

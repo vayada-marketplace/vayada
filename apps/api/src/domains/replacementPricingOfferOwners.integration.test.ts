@@ -1559,6 +1559,20 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       client.release();
     }
   }
+  it("freezes acceptance mode through settings edits, replay and revalidation", async () => {
+    const f = await componentsFixture(fixedPolicy(), propertyTerms),
+      store = createCurrentPricingQuoteStore(pool, 300);
+    const command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+    const first = await store.issue(f.scope.propertyId, command);
+    expect(first.quote.acceptanceMode).toBe("instant");
+    await pool.query("UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1", [f.scope.propertyId]);
+    expect((await store.issue(f.scope.propertyId, command)).quote).toEqual(first.quote);
+    expect((await revalidate(f, first.quote.quoteId))?.quote.acceptanceMode).toBe("instant");
+    const second = await store.issue(f.scope.propertyId, { ...command, requestId: randomUUID() });
+    expect(second.quote.acceptanceMode).toBe("request");
+    await pool.query("UPDATE booking.booking_settings SET acceptance_mode='instant' WHERE property_id=$1", [f.scope.propertyId]);
+    expect((await revalidate(f, second.quote.quoteId))?.quote.acceptanceMode).toBe("request");
+  });
   it("revalidates exact stored prices without issuing a new quote or extending expiry", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);

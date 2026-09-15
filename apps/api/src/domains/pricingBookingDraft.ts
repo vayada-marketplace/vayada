@@ -80,6 +80,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
     parsed.acceptance.quoteEvidenceId !== disclosure.quoteEvidenceId ||
     parsed.acceptance.guestPolicyEvidenceId !== disclosure.guestPolicyEvidenceId ||
     quote.paymentMethod !== "pay_at_property" ||
+    (quote.acceptanceMode !== "instant" && quote.acceptanceMode !== "request") ||
     quote.evidence.dueNowMinor !== "0" ||
     quote.evidence.dueLaterMinor !== quote.evidence.totalMinor
   )
@@ -130,6 +131,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         pricingQuoteId: quote.quoteId,
         requestFingerprint: parsed.fingerprint,
         paymentMethod: quote.paymentMethod,
+        acceptanceMode: quote.acceptanceMode,
         pricingSelections: quote.stay.rooms,
       },
       finance.billingPlanSnapshot,

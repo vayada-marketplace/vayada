@@ -19,6 +19,14 @@ export async function lockCurrentPricingQuote(
   const { total } = payment,
     components = total.components,
     owner = components.room.owner;
+  const settings = (
+    await client.query(
+      "SELECT acceptance_mode FROM booking.booking_settings WHERE property_id=$1 FOR SHARE",
+      [total.stay.propertyId],
+    )
+  ).rows;
+  if (settings.length !== 1 || !["instant", "request"].includes(settings[0].acceptance_mode))
+    return null;
   const clock = (
     await client.query(
       `WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS now)
@@ -70,6 +78,7 @@ export async function lockCurrentPricingQuote(
     quoteId: randomUUID(),
     evaluatorVersion: "booking.current-quote.v1",
     paymentMethod: payment.method,
+    acceptanceMode: settings[0].acceptance_mode,
     stay: total.stay,
     evidence: {
       version: "pricing.v2",

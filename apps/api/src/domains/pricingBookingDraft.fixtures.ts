@@ -9,7 +9,7 @@ type Input = Parameters<typeof stagePricingBookingDraft>[2];
 export function pricingDraftFixture(changeQuote?: (quote: Input["current"]["quote"]) => void) {
   const prior = acceptanceFixture(),
     quote = prior.quote_snapshot;
-  Object.assign(quote, { paymentMethod: "pay_at_property" });
+  Object.assign(quote, { paymentMethod: "pay_at_property", acceptanceMode: "instant" });
   Object.assign(quote.evidence, { dueNowMinor: "0", dueLaterMinor: quote.evidence.totalMinor });
   Object.assign(quote.evidence.terms[0], {
     payment: { kind: "full", acceptedMethods: ["pay_at_property"] },

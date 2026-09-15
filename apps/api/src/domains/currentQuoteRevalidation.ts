@@ -68,7 +68,9 @@ export async function lockCurrentQuoteRevalidation(
   };
   const current = await lockCurrentPricingQuote(client, slug, selection, quote.paymentMethod, 900);
   if (!current) return null;
-  // Full content comparison also detects changed amounts under accidentally unchanged sources.
+  // Full price comparison detects changed amounts under accidentally unchanged sources.
+  // Acceptance mode is frozen at issuance (VAY-1274), so today's mode is not a
+  // price revision. Return the original quote and never replace its accepted policy.
   const content = (q: typeof quote) => ({
     evaluator: q.evaluatorVersion,
     method: q.paymentMethod,

@@ -224,3 +224,15 @@ it("round-trips versioned selected participants and detects changed selection id
   };
   expect(parseStoredPricingQuote(changed)).toBeNull();
 });
+
+it("retains historical absence and round-trips each explicit acceptance mode", () => {
+  const old = fixture();
+  expect(parseStoredPricingQuote(old)).toEqual(old);
+  expect(Object.hasOwn(parseStoredPricingQuote(old)!, "acceptanceMode")).toBe(false);
+  for (const acceptanceMode of ["instant", "request"] as const) {
+    const quote = { ...old, acceptanceMode };
+    expect(parseStoredPricingQuote(quote)).toEqual(quote);
+  }
+  for (const acceptanceMode of [undefined, null, "", "automatic", true, {}, " instant "])
+    expect(parseStoredPricingQuote({ ...old, acceptanceMode })).toBeNull();
+});

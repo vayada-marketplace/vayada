@@ -135,3 +135,23 @@ it("propagates add-on staging failures for full caller rollback", async () => {
   expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(true);
   expect(query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
 });
+
+it.each(["instant", "request"] as const)(
+  "preserves frozen %s mode on the draft",
+  async (acceptanceMode) => {
+    input = pricingDraftFixture((quote) => Object.assign(quote, { acceptanceMode }));
+    vi.mocked(lockPublicPricingAuthority).mockResolvedValue(input.current.scope);
+    await stagePricingBookingDraft(client, "hotel", input);
+    expect(query.mock.calls.find(([sql]) => sql.startsWith("WITH draft"))?.[1]?.[10]).toMatchObject(
+      { acceptanceMode },
+    );
+  },
+);
+it("refuses a fresh draft from an old quote without a frozen acceptance mode", async () => {
+  input = pricingDraftFixture((quote) => {
+    Reflect.deleteProperty(quote, "acceptanceMode");
+  });
+  vi.mocked(lockPublicPricingAuthority).mockResolvedValue(input.current.scope);
+  await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("unavailable");
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(false);
+});
