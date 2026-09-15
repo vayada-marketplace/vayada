@@ -7,20 +7,21 @@ product behavior; it does not activate publication, earning processing or paymen
 
 Read with [percentage policy](affiliate-percentage-policy.md),
 [booking evidence](affiliate-booking-evidence-contract.md) and
-[creator agreements](marketplace-affiliate-agreements.md). Finance owns calculation,
+[creator agreement design](https://github.com/vayada-marketplace/vayada/blob/64548eeed6d46816101dad1b30cd1210c452465e/engineering/marketplace-affiliate-agreements.md).
+That agreement/publication stack is not merged. Finance owns calculation,
 adjustments and payout state. Booking/PMS supplies authenticated evidence through
 its existing boundary; Marketplace supplies exact accepted agreement references.
 
 ## Accepted rules
 
-| Area | Rule |
-| --- | --- |
-| Completed stays | Apply the hotel's exact accepted percentage to accommodation revenue actually collected and retained after accommodation discounts/refunds. Exclude taxes and extras. |
-| Cancellation/no-show | No commission for an unconsumed cancelled or no-show stay, even when a penalty is retained. |
-| Partial refunds | Only the accommodation portion reduces commission; refunded taxes or extras do not. Full accommodation refunds reduce final commission to zero. |
-| Refund after payout | Preserve paid history and record a linked adjustment against future earnings from that same hotel. |
-| Payment timing | Require a 14-day hold and verified evidence before eligibility; pay monthly once funded and ready for transfer. |
-| Payer/fees | Hotel funds commission. Do not silently deduct a fee from the creator's displayed percentage. |
+| Area                 | Rule                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Completed stays      | Apply the hotel's exact accepted percentage to accommodation revenue actually collected and retained after accommodation discounts/refunds. Exclude taxes and extras. |
+| Cancellation/no-show | No commission for an unconsumed cancelled or no-show stay, even when a penalty is retained.                                                                           |
+| Partial refunds      | Only the accommodation portion reduces commission; refunded taxes or extras do not. Full accommodation refunds reduce final commission to zero.                       |
+| Refund after payout  | Preserve paid history and record a linked adjustment against future earnings from that same hotel.                                                                    |
+| Payment timing       | Require a 14-day hold and verified evidence before eligibility; pay monthly once funded and ready for transfer.                                                       |
+| Payer/fees           | Hotel funds commission. Do not silently deduct a fee from the creator's displayed percentage.                                                                         |
 
 No default percentage is introduced. Changing the hotel's rate does not recalculate
 an agreement's historical earnings under a newer policy version.
@@ -92,14 +93,14 @@ must not be treated as already deployed behavior or filled with hidden defaults.
 
 With an explicitly accepted 10% rate and EUR evidence:
 
-| Facts | Final commission |
-| --- | --- |
-| Completed, collected EUR500 accommodation + EUR50 tax + EUR100 extras | EUR50 |
-| EUR500 accommodation less EUR50 accommodation discount | EUR45 |
-| EUR500 accommodation less EUR100 accommodation refund | EUR40 |
-| EUR500 accommodation, EUR50 spa-only refund | EUR50 |
-| Cancelled/no-show item with EUR100 retained penalty | EUR0 |
-| EUR50 commission paid, later EUR100 accommodation refund | EUR50 payment preserved, EUR-10 adjustment, EUR40 final earning |
+| Facts                                                                 | Final commission                                                |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Completed, collected EUR500 accommodation + EUR50 tax + EUR100 extras | EUR50                                                           |
+| EUR500 accommodation less EUR50 accommodation discount                | EUR45                                                           |
+| EUR500 accommodation less EUR100 accommodation refund                 | EUR40                                                           |
+| EUR500 accommodation, EUR50 spa-only refund                           | EUR50                                                           |
+| Cancelled/no-show item with EUR100 retained penalty                   | EUR0                                                            |
+| EUR50 commission paid, later EUR100 accommodation refund              | EUR50 payment preserved, EUR-10 adjustment, EUR40 final earning |
 
 Also verify incomplete allocation stays pending; partial groups do not overlap;
 replayed refund snapshots produce one adjustment; exact historical policies survive
@@ -114,7 +115,7 @@ provider collection, agreement activation and payout execution. Finalize currenc
 precision/rounding and the hold clock in that owning contract before implementing
 those respective operations. Durable evidence and adjustment processing follow.
 
-The existing publication command must remain blocked until actual complete
+The separately proposed publication command must remain blocked until actual complete
 creator-visible commercial disclosures and validated tracking evidence are available.
 Product-policy acceptance does not satisfy its evidence prerequisites. No schema,
 route, Finance balance, provider setting or payout changes in this contract slice.
