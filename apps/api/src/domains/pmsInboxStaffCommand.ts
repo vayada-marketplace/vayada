@@ -1,3 +1,4 @@
+import { lockPmsInboxRolePermissions, type PmsInboxRoleActor } from "./pmsInboxRolePermissions.js";
 import { createHash } from "node:crypto";
 
 import pg, { type QueryResult, type QueryResultRow } from "pg";
@@ -35,8 +36,13 @@ type IdempotencyRow = {
   responseResourceId: string | null;
   idempotencyMetadata: unknown;
 };
-type ActorRow = { displayName: string; propertyAccessMode: string };
-type AssigneeRow = { membershipId: string; displayName: string; propertyAccessMode: string };
+type ActorRow = PmsInboxRoleActor & { displayName: string; propertyAccessMode: string };
+type AssigneeRow = PmsInboxRoleActor & {
+  organizationId: string;
+  membershipId: string;
+  displayName: string;
+  propertyAccessMode: string;
+};
 type ThreadRow = { version: string | number; assignedToMembershipId: string | null };
 type InsertedIdRow = { id: string };
 type VersionRow = { version: string | number };
@@ -104,7 +110,12 @@ export function createPgPmsInboxStaffCommandPort(config: {
         }
 
         const assignee = input.assigneeMembershipId
-          ? await lockEligibleAssignee(client, input.propertyId, input.assigneeMembershipId)
+          ? await lockEligibleAssignee(
+              client,
+              input.organizationId,
+              input.propertyId,
+              input.assigneeMembershipId,
+            )
           : null;
         if (input.assigneeMembershipId && !assignee) {
           const result = await commitResult(
@@ -341,7 +352,9 @@ async function lockActorScope(
 ): Promise<string | null> {
   const scope = await client.query<ActorRow>(
     `SELECT COALESCE(NULLIF(BTRIM(actor.name), ''), 'Property staff') AS "displayName",
-            membership.property_access_mode AS "propertyAccessMode"
+            membership.property_access_mode AS "propertyAccessMode", membership.role_key AS "roleKey",
+            membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides",
+            membership.organization_id AS "organizationId"
      FROM hotel_catalog.properties property
      JOIN identity.organizations organization
        ON organization.id = $1::uuid AND organization.kind = 'hotel_group'
@@ -373,6 +386,8 @@ async function lockActorScope(
       !(await lockPropertyAssignment(client, input.actorMembershipId, input.propertyId)))
   )
     return null;
+  const permissions = await lockPmsInboxRolePermissions(client, input.organizationId, actor);
+  if (!permissions?.has("pms.inbox.read") || !permissions.has("pms.inbox.reply")) return null;
   const entitlements = await client.query<{
     status: string;
     startsAt: Date | string | null;
@@ -402,13 +417,16 @@ async function lockActorScope(
 
 async function lockEligibleAssignee(
   client: PmsInboxStaffCommandClient,
+  organizationId: string,
   propertyId: string,
   membershipId: string,
 ): Promise<AssigneeRow | null> {
   const result = await client.query<AssigneeRow>(
     `SELECT membership.id::text AS "membershipId",
             COALESCE(NULLIF(BTRIM(staff.name), ''), 'Property staff') AS "displayName",
-            membership.property_access_mode AS "propertyAccessMode"
+            membership.property_access_mode AS "propertyAccessMode", membership.role_key AS "roleKey",
+            membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides",
+            membership.organization_id AS "organizationId"
      FROM identity.organization_memberships membership
      JOIN identity.organizations organization
        ON organization.id = membership.organization_id AND organization.status = 'active'
@@ -421,13 +439,14 @@ async function lockEligibleAssignee(
       AND resource.relationship IN ('owner', 'operator', 'front_desk')
       AND resource.status = 'active'
      WHERE membership.id = $2::uuid AND membership.status = 'active'
+       AND membership.organization_id = $3::uuid
        AND membership.pms_access_enabled
        AND (membership.property_access_mode = 'all' OR EXISTS (
          SELECT 1 FROM identity.membership_property_assignments assignment
          WHERE assignment.membership_id = membership.id AND assignment.property_id = $1::uuid
        ))
      FOR SHARE OF membership, organization, staff, resource`,
-    [propertyId, membershipId],
+    [propertyId, membershipId, organizationId],
   );
   const assignee = result.rows[0];
   if (
@@ -436,7 +455,8 @@ async function lockEligibleAssignee(
       !(await lockPropertyAssignment(client, membershipId, propertyId)))
   )
     return null;
-  return assignee;
+  const permissions = await lockPmsInboxRolePermissions(client, assignee.organizationId, assignee);
+  return permissions?.has("pms.inbox.read") ? assignee : null;
 }
 
 async function lockPropertyAssignment(

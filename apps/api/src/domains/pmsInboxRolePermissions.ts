@@ -7,6 +7,12 @@ import {
   type TeamRolePolicy,
 } from "@vayada/backend-auth";
 
+export type PmsInboxRoleActor = {
+  roleKey: string;
+  permissionOverrides: unknown;
+  roleDefinitionId?: string | null;
+};
+
 // Call after locking the active actor, membership and organization scope.
 export async function lockPmsInboxRolePermissions(
   client: {
@@ -16,7 +22,7 @@ export async function lockPmsInboxRolePermissions(
     ): Promise<{ rows: T[] }>;
   },
   organizationId: string,
-  actor: { roleKey: string; permissionOverrides: unknown; roleDefinitionId?: string | null },
+  actor: PmsInboxRoleActor,
 ): Promise<Set<string> | null> {
   const grants = await client.query<{ permissionKey: PermissionKey }>(
     `SELECT permission_key AS "permissionKey" FROM identity.role_permission_grants

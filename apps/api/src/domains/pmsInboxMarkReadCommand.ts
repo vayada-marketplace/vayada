@@ -1,3 +1,4 @@
+import { lockPmsInboxRolePermissions, type PmsInboxRoleActor } from "./pmsInboxRolePermissions.js";
 import { createHash } from "node:crypto";
 
 import pg, { type QueryResult, type QueryResultRow } from "pg";
@@ -200,8 +201,8 @@ async function lockActorScope(
   input: MarkReadInput,
   acceptedAt: Date,
 ): Promise<boolean> {
-  const scope = await client.query(
-    `SELECT 1
+  const scope = await client.query<PmsInboxRoleActor>(
+    `SELECT membership.role_key AS "roleKey", membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides"
      FROM hotel_catalog.properties property
      JOIN identity.organizations organization
        ON organization.id = $1::uuid AND organization.kind = 'hotel_group'
@@ -227,6 +228,12 @@ async function lockActorScope(
     [input.organizationId, input.propertyId, input.actorUserId, input.actorMembershipId],
   );
   if (!scope.rows[0]) return false;
+  const permissions = await lockPmsInboxRolePermissions(
+    client,
+    input.organizationId,
+    scope.rows[0],
+  );
+  if (!permissions?.has("pms.inbox.read")) return false;
 
   const entitlements = await client.query<{
     status: string;
