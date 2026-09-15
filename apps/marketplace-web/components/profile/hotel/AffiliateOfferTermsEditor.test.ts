@@ -77,6 +77,9 @@ it("requires explicit initial selections and saves revision zero without default
   expect(button("Save affiliate draft").props.disabled).toBe(true);
   expect(renderer.root.findByProps({ "aria-label": "Booking page" }).props.value).toBe("");
   expect(renderer.root.findByType("input").props.value).toBe("");
+  expect(renderer.root.findByProps({ "aria-label": "Approved commission rate" }).props.value).toBe(
+    "",
+  );
   await edit("select", "new");
   await edit("input", "14");
   expect(button("Save affiliate draft").props.disabled).toBe(true);
@@ -190,4 +193,24 @@ it("hides the stale form after a successful save when reload fails", async () =>
   expect(api.put).toHaveBeenCalledTimes(1);
   expect(button("Save affiliate draft")).toBeUndefined();
   expect(button("Reload affiliate terms").props.disabled).toBe(false);
+});
+
+it("uses a fresh retry key when the destination changes after a failed save", async () => {
+  await mount();
+  api.put.mockRejectedValue(new Error("network"));
+  await act(async () => button("Save affiliate draft").props.onClick());
+  await act(async () =>
+    renderer.root
+      .findByProps({ "aria-label": "Booking page" })
+      .props.onChange({ target: { value: "new-destination" } }),
+  );
+  await act(async () => button("Save affiliate draft").props.onClick());
+  const [original, changed] = api.put.mock.calls;
+  expect(changed?.[1]).toEqual({
+    expectedRevision: 3,
+    terms: { ...terms, bookingDestinationId: "new-destination" },
+  });
+  expect(changed?.[2].headers["Idempotency-Key"]).not.toBe(
+    original?.[2].headers["Idempotency-Key"],
+  );
 });
