@@ -42,13 +42,30 @@ async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure
       if (request.headers.authorization !== "Bearer valid") return;
       const context = {
         actor: { internalUserId: "actor-1", status: "active" },
-        membership: { status: "active", permissions: ["marketplace.profile.manage"] },
+        membership: {
+          status: "active",
+          permissions: ["marketplace.profile.manage"],
+          roleKey: "owner",
+          propertyAccess: {
+            mode: "all",
+            roleKey: "owner",
+            accessOrigin: "agency",
+            assignedPropertyIds: [],
+          },
+        },
         selectedOrganization: {
           organizationId: "hotel-org",
           kind: "hotel_group",
           status: "active",
         },
         linkedResources: [
+          {
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId: propertyId,
+            relationship: "owner",
+            status: "active",
+          },
           {
             product: "marketplace",
             resourceType: "hotel_profile",
@@ -141,15 +158,6 @@ describe("Hotel affiliate completion HTTP read", () => {
         c.entitlements[0]!.status = "suspended";
       },
       (c: RequestContext) => {
-        c.linkedResources = [];
-      },
-      (c: RequestContext) => {
-        c.linkedResources[0]!.relationship = "front_desk";
-      },
-      (c: RequestContext) => {
-        c.linkedResources[0]!.status = "suspended";
-      },
-      (c: RequestContext) => {
         c.actor.status = "suspended";
       },
       (c: RequestContext) => {
@@ -168,6 +176,45 @@ describe("Hotel affiliate completion HTTP read", () => {
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(repository.read).not.toHaveBeenCalled();
     }
+  });
+  it("hides inaccessible or unassigned property scope before reading evidence", async () => {
+    for (const mutate of [
+      (c: RequestContext) => {
+        c.linkedResources = [];
+      },
+      (c: RequestContext) => {
+        c.linkedResources[0]!.relationship = "front_desk";
+      },
+      (c: RequestContext) => {
+        c.linkedResources[1]!.status = "suspended";
+      },
+      (c: RequestContext) => {
+        c.membership.propertyAccess = {
+          mode: "assigned",
+          roleKey: "owner",
+          accessOrigin: "agency",
+          assignedPropertyIds: [bookingId],
+        };
+      },
+      (c: RequestContext) => {
+        delete c.membership.propertyAccess;
+      },
+    ]) {
+      const { app, repository } = await setup(mutate);
+      const response = await app.inject({ url: path, headers });
+      expect(response.statusCode).toBe(404);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(repository.read).not.toHaveBeenCalled();
+    }
+    const { app } = await setup((c) => {
+      c.membership.propertyAccess = {
+        mode: "assigned",
+        roleKey: "owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [propertyId],
+      };
+    });
+    expect((await app.inject({ url: path, headers })).statusCode).toBe(200);
   });
   it("rejects malformed IDs and does not expose a verification write", async () => {
     const { app, repository } = await setup();
