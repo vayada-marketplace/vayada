@@ -77,6 +77,45 @@ Role edits are versioned, audited and transactional. Reject deletion while
 members or pending invitations reference a role; VAY-1439 permits this simpler
 alternative to a reassignment flow.
 
+### Security ceilings versus editable defaults
+
+A role has an immutable security class, editable default section permissions,
+and independent per-member overrides. Security classes and their permission
+allowlists are server-owned policy, never values an ordinary role editor can
+create or expand:
+
+| Security class | Ceiling and assignment rules                                                                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account admin  | Reserved `hotel_owner`; assignment only through provisioning or authenticated admin transfer, never custom-role commands                                             |
+| Staff          | Validated staff section keys; no billing, ownership transfer, platform administration or team delegation; manager team authority remains the explicit decision below |
+| Housekeeping   | Staff ceiling excluding guest contact permission; customized or cloned Housekeeping roles retain this class                                                          |
+| External owner | Existing external-owner ceiling and assigned-only scope; delegation permission remains a separate admin-controlled grant, never an editable role default             |
+
+Custom roles start in the Staff class. Duplicating a protected preset retains its
+class; changing its name never changes the class. A role's class cannot change
+through role-default edits. Only the account admin may create/edit/delete role
+definitions. Until manager authority is decided, agency staff cannot assign
+another member's role. Preserve the external-owner contract's exception when
+that flow is delivered: an owner with current delegation permission may select
+permitted Staff/Housekeeping roles for their own invited or delegated staff,
+within the owner's live permission/property/product ceilings. This permits
+validated transitions between those staff classes, never creation of roles or
+assignment into Account admin/External owner classes. Other class transitions
+require an explicit audited admin command and destination-model validation;
+ordinary staff cannot change their own class or elevate themselves through a
+shared role definition.
+
+An effective section permission is the role default plus valid member grants,
+minus member denies, bounded by the immutable class and any live delegator
+ceiling. Defaults are not the ceiling: Calendar View plus a member Edit override
+is valid for Staff when its required read keys are present. Reject any defaults
+or grants outside the class ceiling on write; malformed persisted configuration
+fails closed on read. Overrides that become invalid after a role edit must be
+detected transactionally before committing that edit, with an explicit validated
+reassignment/reset required instead of silently widening or breaking access.
+The role catalog/read response exposes the class and allowed controls so the UI
+cannot imply an unavailable grant. Retain separate property and product checks.
+
 Role defaults and per-member overrides remain distinct. Changing a role must
 explicitly retain or reset overrides; saving an unrelated property edit must
 not replace unseen overrides with empty arrays. The access response includes
@@ -111,6 +150,20 @@ acceptance, auth responses, product switcher and direct API enforcement together
 New or malformed product configuration must have documented fail-closed rules;
 an explicit compatibility migration preserves existing valid access.
 
+For external-owner-delegated staff, effective product access is the intersection
+of the staff member's switches and the live delegator's switches, followed by
+normal entitlement checks. Compute the delegator's delegable permission set
+after its product veto, so retained underlying section grants cannot authorize a
+disabled product through the delegation. Apply this on every context resolution,
+manifest read, invitation acceptance and delegated access mutation. Turning PMS
+OFF for an owner removes derived PMS access on staff's next request, even when
+their own PMS switch stays ON; Booking remains independently evaluated. Pending
+invitations requesting an owner-disabled product cannot activate until the
+invitation configuration or owner's access is explicitly corrected and all
+ceilings are revalidated. Turning a product back ON restores only still-valid
+configured access. Malformed/missing delegator product state fails closed;
+agency-origin staff are unaffected by another member's product switches.
+
 For agency-origin staff, `all` means all current and future active canonical
 properties linked to the organization, with no snapshot assignment rows.
 `assigned` validates selected IDs transactionally. External owners and their
@@ -142,9 +195,36 @@ eligible membership in the same organization, with an active user.
 Before enforcing one admin, inventory zero/multiple-owner organizations and
 legacy aliases. Produce a migration exception report; never choose an admin
 arbitrarily or silently demote existing owners. Serialize transfers on the
-organization, validate the current admin again, and change old/new roles in one
-transaction under a database-enforced invariant. Explicitly define the former
-admin's resulting staff role and scope. Reconcile coarse WorkOS roles through
+organization, validate the current admin again, and change both memberships in
+one transaction under a database-enforced invariant.
+
+The transfer request includes the former admin's proposed non-admin role,
+products, property mode/assignments and overrides, with revisions for both
+memberships and any referenced role. Preview this resulting access before fresh
+authentication; bind its fingerprint to the one-use proof. There is no implicit
+fallback role or reuse of old admin grants. The default selection remains a
+product decision below, but every transfer must supply and validate a complete
+non-admin configuration. An invalid or stale configuration changes neither user.
+
+Normalize the new admin atomically: set `hotel_owner` and the reserved admin
+role reference, `all` property mode, no assignment rows, empty permission
+overrides, both membership product switches ON and `agency` access origin.
+This removes membership restrictions, not organization entitlement restrictions.
+When promoting delegated staff, explicitly adopt the membership into the agency
+and remove its subject delegation edge in the same transaction. An external owner
+who still delegates access to staff is ineligible until those dependents are
+explicitly reparented/adopted or removed through the existing lifecycle; reject
+the transfer without orphaning or silently adopting their staff. Invalid,
+cross-tenant, suspended or pending targets and self-transfer are rejected.
+
+Rewrite the former admin using the complete validated non-admin configuration,
+including its role reference, scope rows, overrides and products, retaining
+agency origin and no subject delegation. Increment both access revisions, consume
+the bound proof and write redacted before/after audit in the same transaction.
+Concurrent ordinary access edits must use compatible locking/revision checks;
+they cannot restore old restrictions or old admin privileges after the transfer.
+Existing sessions resolve the new configuration on their next request.
+Reconcile coarse WorkOS roles through
 durable retryable work; provider events cannot restore the previous Vayada role.
 
 ## Product decisions still required
@@ -178,6 +258,16 @@ Keep PRs near 400 meaningful changed lines and link each predecessor. Test
 unauthenticated, missing permission/entitlement, inactive entitlement, malformed
 role/overrides, cross-tenant/property denial, valid access, stale revisions,
 concurrent edits/transfers, replay and provider ambiguity as applicable.
+Add focused cases for Calendar View-to-Edit overrides within a class, forbidden
+custom-role/default grants, Housekeeping clones with guest-contact grants, role
+edits invalidating member overrides, and self-elevation through shared roles.
+Exercise owner PMS OFF with staff PMS ON, next-request denial, independent
+Booking access, pending acceptance while OFF, and bounded restoration after ON.
+Transfer tests start with restricted agency staff and delegated staff; assert
+the complete new/old membership configuration and immediate session behavior.
+Reject an external owner with dependents, stale role/member revisions and proof
+replays; race transfer against ordinary access edits and inject transactional
+failure to prove neither partial promotion nor partial demotion persists.
 Verify all sixteen sections in both products and direct APIs, including guest
 contact ceilings. Browser coverage includes loading/error/retry, keyboard/mobile,
 invite delivery outcomes, role overrides, product OFF, future property scope,
