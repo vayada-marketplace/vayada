@@ -1,3 +1,4 @@
+import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexStagedPrices } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
@@ -1102,6 +1103,227 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, response).then((save) => save());
     return { ...f, readTasks: read, task, retain };
   }
+  async function reconciliationFixture() {
+    const f = await stagedPriceFixture();
+    const { property_id, rate_plan_id, date, rates: _rates, ...restrictions } = f.stored;
+    const task = {
+      data: {
+        type: "task",
+        id: f.taskId,
+        attributes: {
+          id: f.taskId,
+          task: "Property.UpdateRestrictions",
+          payload: { values: [f.stored] },
+          success: true,
+          errors: [],
+          received_at: "2026-09-14T00:00:00.000001",
+          executed_at: "2026-09-14T00:00:00.000002",
+          finished_at: "2026-09-14T00:00:00.000003",
+        },
+      },
+    };
+    const get = vi.fn(async (path: string) => {
+      if (path.includes("/tasks/")) return structuredClone(task);
+      const fields = new URL(path, "https://staging.channex.io").searchParams.get(
+        "filter[restrictions]",
+      );
+      if (fields?.includes("min_stay")) return { data: { [rate_plan_id]: { [date]: restrictions } } };
+      return f.get(path);
+    });
+    const reconcile = (port: (path: string, signal: AbortSignal) => Promise<unknown> = get) =>
+      reconcileCurrentChannexInitialAri(
+        pool,
+        f.input,
+        f.selection,
+        f.claim.attemptId,
+        f.ariCorrelation.attemptId,
+        port,
+      );
+    const retain = (response = f.ariResponse()) =>
+      prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, response).then((save) => save());
+    const state = async () =>
+      (
+        await pool.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_offer_ari_attempts WHERE id=$1",
+          [f.ariCorrelation.attemptId],
+        )
+      ).rows[0];
+    return { ...f, get, task, restrictions, reconcile, retain, state };
+  }
+  it("reconciles closed ARI atomically with all provider observations and cannot replay", async () => {
+    const f = await reconciliationFixture();
+    await f.retain();
+    expect(await f.reconcile()).toMatchObject({
+      kind: "ari_reconciled",
+      ariAttemptId: f.ariCorrelation.attemptId,
+    });
+    expect(await f.state()).toMatchObject({
+      state: "reconciled",
+      reconciliation_evidence: {
+        completionBasis: "finished_task_fifo",
+        originalReceiptId: f.ariCorrelation.receiptId,
+        taskCount: 1,
+        priceCount: 2,
+        observationsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        restrictions: { restrictions: { stop_sell: true } },
+      },
+    });
+    const calls = f.get.mock.calls.length;
+    expect(await f.reconcile()).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_attempt_unavailable",
+    });
+    expect(f.get).toHaveBeenCalledTimes(calls);
+    expect(
+      (
+        await pool.query("SELECT status FROM pms.channex_offer_target_intents WHERE id=$1", [
+          f.claim.intentId,
+        ])
+      ).rows[0].status,
+    ).toBe("pending");
+  });
+  it.each(["missing", "warnings"])(
+    "keeps %s ARI receipts unresolved before reconciliation IO",
+    async (mode) => {
+      const f = await reconciliationFixture();
+      if (mode === "warnings")
+        await f.retain(
+          new Response(
+            JSON.stringify({
+              data: [{ type: "task", id: f.taskId }],
+              meta: { warnings: ["partial"] },
+            }),
+          ),
+        );
+      expect(await f.reconcile()).toMatchObject({
+        kind: "unavailable",
+        reason: "ari_receipt_history_unavailable",
+      });
+      expect(f.get).not.toHaveBeenCalled();
+      expect((await f.state()).state).toBe("unresolved");
+    },
+  );
+  it.each(["task", "price", "restriction"])(
+    "keeps mismatched %s evidence unresolved",
+    async (mode) => {
+      const f = await reconciliationFixture();
+      await f.retain();
+      if (mode === "task") f.task.data.attributes.success = false;
+      if (mode === "restriction") f.restrictions.stop_sell = false;
+      await expect(
+        f.reconcile(async (path) => {
+          if (mode === "price" && path.includes("/restrictions")) return { data: {} };
+          return f.get(path);
+        }),
+      ).rejects.toThrow();
+      expect((await f.state()).state).toBe("unresolved");
+    },
+  );
+  it.each(["lease", "receipt", "configuration"])(
+    "rolls back ARI reconciliation after %s changes during IO",
+    async (mode) => {
+      const f = await reconciliationFixture();
+      await f.retain();
+      let changed = false;
+      const result = await f.reconcile(async (path) => {
+        if (!changed) {
+          changed = true;
+          if (mode === "lease")
+            await pool.query(
+              "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+              [f.input.jobId],
+            );
+          if (mode === "configuration")
+            await pool.query(
+              "UPDATE pms.channex_offer_target_intents SET result_evidence=result_evidence-'configuration' WHERE id=$1",
+              [f.claim.intentId],
+            );
+          if (mode === "receipt")
+            await (
+              await prepareChannexAriTransportFailurePersistence(pool, {
+                ...f.ariCorrelation,
+                receiptId: randomUUID(),
+              })
+            )();
+        }
+        return f.get(path);
+      });
+      expect(result.kind).toBe("unavailable");
+      expect((await f.state()).state).toBe("unresolved");
+    },
+  );
+  it("reconciles 100 original tasks within the durable evidence size limit", async () => {
+    const f = await reconciliationFixture();
+    const ids = Array.from({ length: 100 }, () => randomUUID());
+    await f.retain(
+      new Response(
+        JSON.stringify({ data: ids.map((id) => ({ type: "task", id })), meta: { warnings: [] } }),
+      ),
+    );
+    let count = 0;
+    expect(
+      (
+        await f.reconcile(async (path) => {
+          if (!path.includes("/tasks/")) return f.get(path);
+          const id = path.split("/").at(-1)!;
+          expect(ids).toContain(id);
+          count++;
+          return { data: { ...f.task.data, id, attributes: { ...f.task.data.attributes, id } } };
+        })
+      ).kind,
+    ).toBe("ari_reconciled");
+    expect(count).toBe(100);
+    expect((await f.state()).reconciliation_evidence.taskCount).toBe(100);
+    expect(
+      (
+        await pool.query(
+          "SELECT octet_length(reconciliation_evidence::text) AS bytes FROM pms.channex_offer_ari_attempts WHERE id=$1",
+          [f.ariCorrelation.attemptId],
+        )
+      ).rows[0].bytes,
+    ).toBeLessThan(8192);
+  });
+  it("rolls back a saved ARI reconciliation when final lease verification fails", async () => {
+    const f = await reconciliationFixture();
+    await f.retain();
+    const name = `expire_reconcile_${randomUUID().replaceAll("-", "")}`;
+    // Isolated test DB: expire this lease inside the same transaction as the transition.
+    await pool.query(`CREATE FUNCTION public.${name}() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes'
+        WHERE id='${f.input.jobId}'; RETURN NEW; END $$`);
+    try {
+      await pool.query(`CREATE TRIGGER ${name} AFTER UPDATE ON pms.channex_offer_ari_attempts
+          FOR EACH ROW WHEN (NEW.id='${f.ariCorrelation.attemptId}' AND NEW.state='reconciled')
+          EXECUTE FUNCTION public.${name}()`);
+      expect(await f.reconcile()).toMatchObject({ kind: "unavailable", reason: "lease_unavailable" });
+      expect((await f.state()).state).toBe("unresolved");
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS ${name} ON pms.channex_offer_ari_attempts`);
+      await pool.query(`DROP FUNCTION public.${name}()`);
+    }
+    expect((await f.reconcile()).kind).toBe("ari_reconciled");
+  });
+  it("allows only one concurrent ARI reconciliation to commit", async () => {
+    const f = await reconciliationFixture();
+    await f.retain();
+    let started = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const get = async (path: string) => {
+      if (path.includes("/tasks/")) {
+        if (++started === 2) release();
+        await barrier;
+      }
+      return f.get(path);
+    };
+    const results = await Promise.allSettled([f.reconcile(get), f.reconcile(get)]);
+    expect(
+      results.filter((r) => r.status === "fulfilled" && r.value.kind === "ari_reconciled"),
+    ).toHaveLength(1);
+    expect((await f.state()).state).toBe("reconciled");
+  });
   it("reads only original receipt tasks and leaves ARI ownership unresolved", async () => {
     const f = await taskReadFixture();
     await f.retain();
