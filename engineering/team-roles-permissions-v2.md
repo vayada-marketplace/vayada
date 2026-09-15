@@ -462,3 +462,15 @@ come from authentication; class and preset fields cannot be supplied. Stale or
 in-use changes return conflict. These routes do not assign roles to members.
 Validation: 65 staff route tests, API typecheck and independent adversarial
 review with no actionable findings.
+
+### Inbox role-aware delivery permission checks
+
+Provider actions, queued reply delivery, assistance, quick replies and direct
+email now share a role permission reader after locking actor/organization scope.
+It locks same-tenant definitions, verifies base identity and resolves live
+defaults plus valid overrides. NULL references preserve legacy grants.
+Validation: 86 PostgreSQL tests in five affected suites, 12 permission/delivery
+unit tests and API typecheck. A queued reply loses delivery eligibility after
+assignment to a read-only role and calls no provider. Independent review found
+no actionable issues. Other Inbox mutation/assignment/reconciliation guards
+still need parity before role assignment activation.

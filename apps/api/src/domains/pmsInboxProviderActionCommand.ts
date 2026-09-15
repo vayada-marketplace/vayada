@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 
 import pg, { type QueryResult, type QueryResultRow } from "pg";
-import {
-  parseStaffPermissionOverrides,
-  validateStaffPermissionOverrides,
-} from "@vayada/backend-auth";
+import { lockPmsInboxRolePermissions } from "./pmsInboxRolePermissions.js";
 
 import type { PmsInboxProviderActionError, PmsInboxProviderActionPort } from "./pmsInbox.js";
 
@@ -42,8 +39,8 @@ type ScopeRow = {
   propertyAccessMode: string;
   roleKey: string;
   permissionOverrides: unknown;
+  roleDefinitionId: string | null;
 };
-type PermissionRow = { permissionKey: string };
 type ThreadRow = {
   sourceThreadId: string;
   providerCapable: boolean;
@@ -279,7 +276,8 @@ export async function lockPmsInboxReplyActorScope(
   const scope = await client.query<ScopeRow>(
     `SELECT membership.property_access_mode AS "propertyAccessMode",
             membership.role_key AS "roleKey",
-            membership.permission_overrides AS "permissionOverrides"
+            membership.permission_overrides AS "permissionOverrides",
+            membership.role_definition_id AS "roleDefinitionId"
      FROM hotel_catalog.properties property
      JOIN identity.organizations organization
        ON organization.id = $1::uuid AND organization.kind = 'hotel_group'
@@ -314,29 +312,8 @@ export async function lockPmsInboxReplyActorScope(
     );
     if (!assignment.rows[0]) return false;
   }
-  const permissions = await client.query<PermissionRow>(
-    `SELECT permission_key AS "permissionKey"
-     FROM identity.role_permission_grants
-     WHERE organization_kind = 'hotel_group' AND role_key = $1
-     FOR SHARE`,
-    [actor.roleKey],
-  );
-  const rolePermissions = permissions.rows.map((row) => row.permissionKey);
-  const effective = new Set(rolePermissions);
-  if (actor.permissionOverrides !== null && actor.permissionOverrides !== undefined) {
-    const overrides = parseStaffPermissionOverrides(actor.permissionOverrides);
-    if (
-      !overrides ||
-      validateStaffPermissionOverrides({
-        roleKey: actor.roleKey,
-        rolePermissions,
-        permissionOverrides: overrides,
-      }).length > 0
-    )
-      return false;
-    for (const permission of overrides.grant) effective.add(permission);
-    for (const permission of overrides.deny) effective.delete(permission);
-  }
+  const effective = await lockPmsInboxRolePermissions(client, input.organizationId, actor);
+  if (!effective) return false;
   if (!effective.has("pms.inbox.read") || !effective.has("pms.inbox.reply")) return false;
   const entitlements = await client.query<{
     status: string;
