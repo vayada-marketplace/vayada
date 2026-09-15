@@ -485,3 +485,15 @@ roles instead of a retired alias with no grants. Validation: 52 PostgreSQL tests
 across four suites, 30 command unit tests, API typecheck and independent review
 with no actionable findings. Reconciliation parity remains before assignment
 activation.
+
+### Inbox assignment reconciliation parity
+
+Queued reconciliation now resolves locked live role permissions, clearing
+assignments without Inbox read and retaining them when permission is restored
+before execution. Existing member role/override saves also schedule reconciliation
+for semantic permission changes. Status/product/property reasons retain precedence.
+The safety sweep still discovers status/product/property losses; supported role
+writers provide durable jobs for role/override changes. Validation: 11 PostgreSQL
+worker tests including member-save-to-cleanup, 48 staff and two role regressions,
+backend-auth build and API typecheck. Independent review identified the missing
+existing-member enqueue path; fixed and confirmed.

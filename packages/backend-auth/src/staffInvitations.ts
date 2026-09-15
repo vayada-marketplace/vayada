@@ -710,12 +710,27 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           [normalized.membershipId, normalized.propertyIds],
         );
         const nextPropertyIds = new Set(normalized.propertyIds);
+        const previousOverrides =
+          previous.permission_overrides === null
+            ? { grant: [], deny: [] }
+            : parseStaffPermissionOverrides(previous.permission_overrides);
+        const permissionsChanged =
+          normalized.roleKey !== previous.role_key ||
+          !previousOverrides ||
+          (["grant", "deny"] as const).some(
+            (key) =>
+              JSON.stringify([...previousOverrides[key]].sort()) !==
+              JSON.stringify(normalized.permissionOverrides[key]),
+          );
+        const propertyAccessRemoved =
+          normalized.propertyAccessMode !== "all" &&
+          (previous.property_access_mode === "all" ||
+            previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId)));
         if (
+          permissionsChanged ||
           normalized.membershipStatus === "suspended" ||
           normalized.productAccess?.pms === false ||
-          (normalized.propertyAccessMode !== "all" &&
-            (previous.property_access_mode === "all" ||
-              previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId))))
+          propertyAccessRemoved
         )
           await enqueueInboxAssignmentReconciliation(client, {
             organizationId: normalized.organizationId,
@@ -728,7 +743,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                 ? "membership_suspended"
                 : normalized.productAccess?.pms === false
                   ? "product_access_removed"
-                  : "property_access_removed",
+                  : propertyAccessRemoved
+                    ? "property_access_removed"
+                    : "role_permissions_changed",
           });
         const next = {
           propertyAccessMode: normalized.propertyAccessMode ?? "assigned",
