@@ -15,6 +15,7 @@ import { parseLegacyOwnerSetupCommand } from "./legacyOwnerSetupCommand.js";
 import { hashLegacyOwnerSetupEnvelope } from "./legacyOwnerSetupApprovals.js";
 import { hashLegacyOwnerSetupValue } from "./legacyOwnerSetupReceiptHashes.js";
 import { runMigrations } from "./runner.js";
+import { collectLegacyOwnerCurrentSourceEvidence } from "./legacyOwnerCurrentSourceCollector.js";
 
 const url = process.env["VAY2017_CHECKPOINT_TEST_DATABASE_URL"];
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -165,6 +166,9 @@ const verifiedUrl = process.env.VAY2017_VERIFIED_TARGET_TEST_DATABASE_URL;
 describe.skipIf(!verifiedUrl)("same-client verified target transaction as restricted LOGIN", () => {
   let admin: pg.Client, executor: pg.Client, identity: LegacyOwnerSetupTargetIdentity;
   let fixture: ReturnType<typeof transactionFixture>;
+  const sourceAdmins: pg.Client[] = [],
+    sourcePools: pg.Pool[] = [];
+  let collectSources: () => ReturnType<typeof collectLegacyOwnerCurrentSourceEvidence>;
   const hashes = () =>
     command().owners.map((o) => createHash("sha256").update(o.email).digest("hex"));
   beforeAll(async () => {
@@ -209,6 +213,7 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
       GRANT USAGE ON SCHEMA identity,platform TO vay2017_setup_executor;
       GRANT SELECT,INSERT,UPDATE ON identity.users TO vay2017_setup_executor;
       GRANT SELECT,UPDATE ON identity.external_identities TO vay2017_setup_executor;
+      GRANT SELECT ON identity.organizations,identity.organization_memberships TO vay2017_setup_executor;
       GRANT SELECT,UPDATE ON platform.legacy_owner_approval_records TO vay2017_setup_executor;
       GRANT SELECT ON platform.legacy_owner_approval_revocations TO vay2017_setup_executor;
       GRANT SELECT,INSERT ON platform.legacy_owner_bootstrap_receipts TO vay2017_setup_executor`);
@@ -226,6 +231,73 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     };
     expected.targetDatabaseSha256 = hashLegacyOwnerSetupValue("target-database-identity", identity);
     fixture = transactionFixture();
+    // Separate synthetic source databases; no target executor can read source contacts.
+    const pins: { databaseName: string; databaseOid: number }[] = [];
+    for (const kind of ["auth", "pms"] as const) {
+      const sourceUrl = new URL(verifiedUrl!);
+      sourceUrl.pathname = `/vay2017_pipeline_${kind}`;
+      const sourceAdmin = new pg.Client({ connectionString: sourceUrl.toString() });
+      sourceAdmins.push(sourceAdmin);
+      await sourceAdmin.connect();
+      if (kind === "auth") {
+        await sourceAdmin.query(`CREATE ROLE vay2017_pipeline_reader LOGIN;
+          CREATE TABLE public.users(id uuid PRIMARY KEY,email text,name text,type text,status text);
+          GRANT SELECT(id,email,name,type,status) ON public.users TO vay2017_pipeline_reader`);
+        for (const owner of command().owners)
+          await sourceAdmin.query("INSERT INTO public.users VALUES($1,$2,$3,'hotel','pending')", [
+            owner.ownerId,
+            owner.email,
+            owner.name,
+          ]);
+      } else {
+        await sourceAdmin.query(`CREATE TABLE public.hotels(id uuid PRIMARY KEY,user_id uuid);
+          GRANT SELECT(id,user_id) ON public.hotels TO vay2017_pipeline_reader`);
+        for (const owner of command().owners)
+          await sourceAdmin.query("INSERT INTO public.hotels VALUES($1,$2)", [
+            owner.hotelId,
+            owner.ownerId,
+          ]);
+      }
+      pins.push(
+        (
+          await sourceAdmin.query(`SELECT current_database() AS "databaseName",
+        oid::int AS "databaseOid" FROM pg_database WHERE datname=current_database()`)
+        ).rows[0],
+      );
+      sourceUrl.username = "vay2017_pipeline_reader";
+      sourceUrl.password = "";
+      sourcePools.push(
+        new pg.Pool({
+          connectionString: sourceUrl.toString(),
+          max: 1,
+          connectionTimeoutMillis: 2000,
+        }),
+      );
+    }
+    collectSources = () =>
+      collectLegacyOwnerCurrentSourceEvidence(
+        sourcePools[0]!,
+        sourcePools[1]!,
+        {
+          pairs: expected.source.owners.map(({ ownerId, hotelId }) => ({ ownerId, hotelId })),
+          auth: pins[0]!,
+          pms: pins[1]!,
+        },
+        {
+          environment: "local",
+          sourceRunId: expected.source.sourceRunId,
+          sourceLedgerSha256: sha,
+          authDatabaseSha256: sha,
+          pmsDatabaseSha256: sha,
+          signingKeyId: "source-fixture",
+        },
+        sourceKeys,
+        () => new Date(command().owners[0]!.observedAt),
+      );
+    const collected = await collectSources();
+    // These bytes now originate in actual SELECTs, not the fixture's constructed rows.
+    expect(collected).toEqual(fixture.artifacts);
+    fixture.artifacts = collected;
     await admin.query(
       "INSERT INTO identity.users(id,email) VALUES($1,'approver@example.invalid')",
       [id(90)],
@@ -257,6 +329,8 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     await executor.query("ROLLBACK");
   });
   afterAll(async () => {
+    await Promise.allSettled(sourcePools.map((pool) => pool.end()));
+    await Promise.allSettled(sourceAdmins.map((client) => client.end()));
     await executor?.end();
     await admin?.end();
     expected.targetDatabaseSha256 = sha;
@@ -285,6 +359,54 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
       (SELECT count(*)::int FROM identity.users WHERE id<> '${id(90)}') AS owners,
       (SELECT count(*)::int FROM platform.legacy_owner_bootstrap_receipts) AS receipts`)
     ).rows[0];
+  it("rereads both sources, prepares eight pending users, rolls back and retries without duplication", async () => {
+    const fromReads = { ...fixture, artifacts: await collectSources() };
+    expect(await prepare(identity, fromReads)).toHaveProperty(
+      "outcome",
+      "checkpoint_written_uncommitted",
+    );
+    expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+    await executor.query("ROLLBACK");
+    expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+    await executor.query("BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'");
+    expect(await prepare(identity, fromReads)).toHaveProperty(
+      "outcome",
+      "checkpoint_written_uncommitted",
+    );
+    expect(await prepare(identity, fromReads)).toHaveProperty("outcome", "matching_receipt_found");
+    expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM platform.legacy_owner_bootstrap_receipts"))
+        .rows[0].n,
+    ).toBe(0);
+    for (const table of ["organizations", "organization_memberships", "external_identities"])
+      expect(
+        (await executor.query(`SELECT count(*)::int n FROM identity.${table}`)).rows[0].n,
+      ).toBe(0);
+  });
+  it.each(["suspended", "rejected", "ownerChanged", "missingGrant"])(
+    "stops a new read-to-prepare attempt for %s without writes",
+    async (mode) => {
+      const a = sourceAdmins[0]!,
+        p = sourceAdmins[1]!;
+      if (mode === "suspended" || mode === "rejected")
+        await a.query("UPDATE public.users SET status=$1", [mode]);
+      if (mode === "ownerChanged")
+        await p.query("UPDATE public.hotels SET user_id=$1 WHERE id=$2", [id(88), id(11)]);
+      if (mode === "missingGrant")
+        await p.query("REVOKE SELECT(user_id) ON public.hotels FROM vay2017_pipeline_reader");
+      try {
+        await expect(
+          (async () => prepare(identity, { ...fixture, artifacts: await collectSources() }))(),
+        ).rejects.toThrow("LEGACY_OWNER_CURRENT_SOURCE_COLLECTION_FAILED");
+        expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+      } finally {
+        await a.query("UPDATE public.users SET status='pending'");
+        await p.query("UPDATE public.hotels SET user_id=$1 WHERE id=$2", [id(1), id(11)]);
+        await p.query("GRANT SELECT(user_id) ON public.hotels TO vay2017_pipeline_reader");
+      }
+    },
+  );
   it("uses actual restricted login through identity, signed approvals, absence and atomic checkpoint/replay", async () => {
     expect(
       (
@@ -400,7 +522,7 @@ describe.skipIf(!verifiedUrl)("same-client verified target transaction as restri
     expect(await counts()).toEqual({ owners: 0, receipts: 0 });
     for (const table of ["organizations", "organization_memberships", "external_identities"])
       expect(
-        (await admin.query(`SELECT count(*)::int AS n FROM identity.${table}`)).rows[0].n,
+        (await executor.query(`SELECT count(*)::int AS n FROM identity.${table}`)).rows[0].n,
       ).toBe(0);
   });
 });
