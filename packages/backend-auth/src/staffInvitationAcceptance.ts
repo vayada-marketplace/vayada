@@ -29,6 +29,8 @@ export type StaffInvitationAcceptanceResult =
   | { outcome: "rejected"; reason: RejectionReason };
 
 type InvitationRow = {
+  pms_access_enabled: boolean;
+  booking_access_enabled: boolean;
   id: string;
   organization_id: string;
   email: string;
@@ -71,6 +73,7 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           await client.query<InvitationRow>(
             `SELECT invitation.id, invitation.organization_id, invitation.email, invitation.role_key,
                     invitation.permission_overrides, invitation.property_access_mode, invitation.status,
+                    invitation.pms_access_enabled, invitation.booking_access_enabled,
                     invitation.delivery_state, invitation.expires_at <= now() AS is_expired,
                     invitation.accepted_user_id, invitation.accepted_membership_id,
                     invitation.request_id, invitation.correlation_id,
@@ -187,12 +190,14 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           await client.query<{ id: string }>(
             `INSERT INTO identity.organization_memberships
                (organization_id, user_id, status, role_key, permission_overrides,
-                property_access_mode, access_origin, invited_at)
-             VALUES ($1, $2, 'active', $3, $4::jsonb, 'assigned', 'agency', now())
+                property_access_mode, access_origin, invited_at, pms_access_enabled, booking_access_enabled)
+             VALUES ($1, $2, 'active', $3, $4::jsonb, 'assigned', 'agency', now(), $5, $6)
              ON CONFLICT (organization_id, user_id) DO UPDATE SET
                status = 'active', role_key = EXCLUDED.role_key,
                permission_overrides = EXCLUDED.permission_overrides,
                property_access_mode = 'assigned',
+               pms_access_enabled = EXCLUDED.pms_access_enabled,
+               booking_access_enabled = EXCLUDED.booking_access_enabled,
                invited_at = COALESCE(identity.organization_memberships.invited_at, EXCLUDED.invited_at),
                updated_at = now()
              WHERE identity.organization_memberships.status <> 'suspended'
@@ -204,6 +209,8 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
               identity.user_id,
               invitation.role_key,
               JSON.stringify(overrides),
+              invitation.pms_access_enabled,
+              invitation.booking_access_enabled,
             ],
           )
         ).rows[0]?.id;
@@ -291,6 +298,10 @@ async function audit(
         membershipId,
         providerEventId: event.providerEventId,
         propertyIds: invitation.property_ids,
+        productAccess: {
+          pms: invitation.pms_access_enabled,
+          booking: invitation.booking_access_enabled,
+        },
       }),
     ],
   );

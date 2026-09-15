@@ -446,6 +446,24 @@ describe("staff invitation routes", () => {
     expect(fake.deliveries).toHaveLength(0);
   });
 
+  it("passes invitation product flags and rejects malformed flags before delivery", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    expect(
+      (await post(app, { ...body(), productAccess: { pms: false, booking: true } })).statusCode,
+    ).toBe(201);
+    expect(fake.commands[0]?.payload.productAccess).toEqual({ pms: false, booking: true });
+    for (const productAccess of [
+      null,
+      { pms: true },
+      { pms: "false", booking: true },
+      { pms: true, booking: true, extra: true },
+    ]) {
+      expect((await post(app, { ...body(), productAccess })).statusCode).toBe(400);
+    }
+    expect(fake.commands).toHaveLength(1);
+  });
+
   it.each([
     ["inviter_not_authorized", 403],
     ["idempotency_conflict", 409],
