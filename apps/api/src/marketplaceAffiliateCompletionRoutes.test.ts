@@ -40,9 +40,16 @@ async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure
     app.decorateRequest("authContext", null);
     app.addHook("onRequest", async (request) => {
       if (request.headers.authorization !== "Bearer valid") return;
-      const context = {
-        actor: { internalUserId: "actor-1", status: "active" },
+      const context: RequestContext = {
+        actor: {
+          internalUserId: "actor-1",
+          status: "active",
+          email: "test@example.test",
+          providerIdentity: { provider: "workos", providerUserId: "user-test" },
+        },
         membership: {
+          membershipId: "membership-1",
+          workosRoleSlugs: [],
           status: "active",
           permissions: ["marketplace.profile.manage"],
           roleKey: "owner",
@@ -77,8 +84,10 @@ async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure
         entitlements: [
           { product: "marketplace", key: "marketplace-hotel-profile", status: "active" },
         ],
-        audit: { requestId: "request-1" },
-      } as RequestContext;
+        locale: "en",
+        currency: "EUR",
+        audit: { requestId: "request-1", source: "api", receivedAt: "2026-01-01T12:00:00Z" },
+      };
       mutate(context);
       request.authContext = context;
     });
