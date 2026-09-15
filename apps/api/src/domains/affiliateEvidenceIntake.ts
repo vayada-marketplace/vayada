@@ -50,7 +50,7 @@ export async function ingestAffiliateEvidence(
         authority.evidence,
         authority.mappingVersion,
       );
-    if (!identity || !authority) {
+    if (!identity || !authority || !(await lockCurrentHotelScope(client, authority.binding))) {
       await client.query("ROLLBACK");
       return { outcome: "rejected", code: "unauthorized_connection" };
     }
@@ -120,4 +120,32 @@ export async function ingestAffiliateEvidence(
   } finally {
     client.release();
   }
+}
+
+/** Shared identity/catalog authorization boundary; locks survive until intake commits. */
+async function lockCurrentHotelScope(client: pg.PoolClient, binding: AffiliateEvidenceBinding) {
+  const { organizationId, propertyId } = binding;
+  // Internal UUIDs must be canonical: alternate spellings must not create replay identities.
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if (![organizationId, propertyId].every((id) => uuid.test(id))) return false;
+  const organization = await client.query(
+    `SELECT id FROM identity.organizations
+     WHERE id=$1 AND kind='hotel_group' AND status='active' FOR SHARE`,
+    [organizationId],
+  );
+  if (!organization.rowCount) return false;
+  const property = await client.query(
+    `SELECT id FROM hotel_catalog.properties
+     WHERE id=$1 AND profile_status <> 'disabled' FOR SHARE`,
+    [propertyId],
+  );
+  if (!property.rowCount) return false;
+  const link = await client.query(
+    `SELECT organization_id FROM identity.organization_resource_links
+     WHERE organization_id=$1 AND resource_id=$2 AND product='marketplace'
+       AND resource_type='hotel_profile' AND status='active'
+       AND relationship IN ('owner','operator') FOR SHARE`,
+    [organizationId, propertyId],
+  );
+  return !!link.rowCount;
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { readAffiliateEvidenceReview as readReview } from "./affiliateEvidenceReview.js";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ingestAffiliateEvidence as ingest,
   type ResolveAffiliateEvidenceAuthority,
@@ -70,7 +70,7 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
     await pool.query(`DROP SCHEMA IF EXISTS booking,platform,identity,hotel_catalog CASCADE;
       DROP TABLE IF EXISTS scope_fixture; CREATE TABLE scope_fixture(active boolean); INSERT INTO scope_fixture VALUES (true);
       CREATE SCHEMA booking; CREATE SCHEMA platform; CREATE SCHEMA identity; CREATE SCHEMA hotel_catalog;
-      CREATE TABLE identity.organizations(id UUID PRIMARY KEY);
+      CREATE TABLE identity.organizations(id UUID PRIMARY KEY,kind TEXT DEFAULT 'hotel_group',status TEXT DEFAULT 'active');
       CREATE TABLE hotel_catalog.properties(id UUID PRIMARY KEY,profile_status TEXT DEFAULT 'incomplete');
       CREATE TABLE identity.organization_resource_links(organization_id UUID,resource_id TEXT,product TEXT,
         resource_type TEXT,status TEXT,relationship TEXT);`);
@@ -99,6 +99,161 @@ describe.skipIf(!url)("durable affiliate evidence intake (PostgreSQL)", () => {
       (SELECT count(*)::int FROM booking.affiliate_evidence_deliveries) AS deliveries`)
     ).rows[0];
   }
+  it.each([
+    "UPDATE identity.organizations SET status='suspended'",
+    "UPDATE identity.organizations SET kind='creator_workspace'",
+    "UPDATE hotel_catalog.properties SET profile_status='disabled'",
+    "DELETE FROM identity.organization_resource_links",
+    "UPDATE identity.organization_resource_links SET status='suspended'",
+    "UPDATE identity.organization_resource_links SET relationship='viewer'",
+    "UPDATE identity.organization_resource_links SET product='pms'",
+    "UPDATE identity.organization_resource_links SET resource_type='property'",
+    `UPDATE identity.organization_resource_links SET resource_id='${id(9)}'`,
+    `UPDATE identity.organization_resource_links SET organization_id='${id(9)}'`,
+  ])("denies first intake and retries after scope changes: %s", async (change) => {
+    await ingest(pool, sample(), resolve);
+    await pool.query(change);
+    for (const sourceEventKey of ["event-1", "new-event"]) {
+      expect(await ingest(pool, { ...sample(), sourceEventKey }, resolve)).toEqual({
+        outcome: "rejected",
+        code: "unauthorized_connection",
+      });
+    }
+    expect(await counts()).toEqual({ observations: 1, deliveries: 1 });
+  });
+  it("accepts operator ownership and rejects nonexistent or noncanonical scope", async () => {
+    await pool.query("UPDATE identity.organization_resource_links SET relationship='operator'");
+    const receipt = await ingest(pool, sample(), resolve);
+    expect(receipt.outcome).toBe("accepted");
+    if (receipt.outcome === "rejected") throw new Error("fixture failed");
+    expect(await readReview(pool, id(2), id(1), receipt.observationId)).toMatchObject({
+      observationId: receipt.observationId,
+      reviewRequired: false,
+    });
+    for (const override of [
+      { organizationId: id(9) },
+      { propertyId: id(9) },
+      { organizationId: "not-a-uuid" },
+      { propertyId: "AAAAAAAA-0000-4000-8000-000000000001" },
+    ]) {
+      expect(
+        await ingest(pool, sample(), async () => ({
+          ...authority,
+          binding: { ...binding, ...override },
+          evidence: { ...authority.evidence, ...override },
+        })),
+      ).toMatchObject({ code: "unauthorized_connection" });
+    }
+    expect(await counts()).toEqual({ observations: 1, deliveries: 1 });
+  });
+  it("rejects uppercase aliases of an existing authorized scope", async () => {
+    const canonical = {
+      ...binding,
+      organizationId: "aaaaaaaa-0000-4000-8000-000000000001",
+      propertyId: "bbbbbbbb-0000-4000-8000-000000000002",
+    };
+    await pool.query("INSERT INTO identity.organizations(id) VALUES ($1)", [
+      canonical.organizationId,
+    ]);
+    await pool.query("INSERT INTO hotel_catalog.properties(id) VALUES ($1)", [
+      canonical.propertyId,
+    ]);
+    await pool.query(
+      "INSERT INTO identity.organization_resource_links VALUES ($1,$2,'marketplace','hotel_profile','active','owner')",
+      [canonical.organizationId, canonical.propertyId],
+    );
+    const source =
+      (scope: typeof canonical): ResolveAffiliateEvidenceAuthority =>
+      async () => ({
+        ...authority,
+        binding: scope,
+        evidence: { ...authority.evidence, ...scope },
+      });
+    expect(await ingest(pool, sample(), source(canonical))).toMatchObject({ outcome: "accepted" });
+    for (const key of ["organizationId", "propertyId"] as const) {
+      const alias = { ...canonical, [key]: canonical[key].toUpperCase() };
+      expect(await ingest(pool, sample(), source(alias))).toMatchObject({
+        code: "unauthorized_connection",
+      });
+    }
+    expect(await counts()).toEqual({ observations: 1, deliveries: 1 });
+  });
+  const revocations = [
+    "UPDATE identity.organizations SET status='suspended'",
+    "UPDATE hotel_catalog.properties SET profile_status='disabled'",
+    "UPDATE identity.organization_resource_links SET status='suspended'",
+  ];
+  async function waitForLock(pid: number) {
+    await vi.waitFor(
+      async () => {
+        const row = (
+          await pool.query("SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1", [pid])
+        ).rows[0];
+        expect(row?.wait_event_type).toBe("Lock");
+      },
+      { timeout: 3000, interval: 10 },
+    );
+  }
+  it.each(revocations)("rechecks scope when revocation wins the race: %s", async (change) => {
+    const revoker = await pool.connect();
+    let pending: ReturnType<typeof ingest> | undefined;
+    let pid = 0;
+    try {
+      await revoker.query("BEGIN");
+      await revoker.query(change);
+      pending = ingest(pool, sample(), async (client) => {
+        pid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        return authority;
+      });
+      await vi.waitFor(() => expect(pid).not.toBe(0));
+      await waitForLock(pid);
+      await revoker.query("COMMIT");
+      expect(await pending).toMatchObject({ code: "unauthorized_connection" });
+      expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+    } finally {
+      await revoker.query("ROLLBACK");
+      await pending;
+      revoker.release();
+    }
+  });
+  it.each(revocations)("holds authorization until receipt commits: %s", async (change) => {
+    const gate = await pool.connect(),
+      revoker = await pool.connect();
+    let pending: ReturnType<typeof ingest> | undefined;
+    let update: Promise<unknown> | undefined;
+    let pid = 0;
+    try {
+      await gate.query("SELECT pg_advisory_lock(15050001)");
+      await pool.query(`CREATE FUNCTION booking.pause_delivery() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN PERFORM pg_advisory_xact_lock(15050001); RETURN NEW; END; $$;
+        CREATE TRIGGER pause_delivery BEFORE INSERT ON booking.affiliate_evidence_deliveries
+        FOR EACH ROW EXECUTE FUNCTION booking.pause_delivery();`);
+      pending = ingest(pool, sample(), async (client) => {
+        pid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        return authority;
+      });
+      await vi.waitFor(() => expect(pid).not.toBe(0));
+      await waitForLock(pid);
+      const revokerPid = (await revoker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      update = revoker.query(change);
+      await waitForLock(revokerPid);
+      // No receipt is visible while the authorized transaction is paused.
+      expect(await counts()).toEqual({ observations: 0, deliveries: 0 });
+      await gate.query("SELECT pg_advisory_unlock(15050001)");
+      expect(await pending).toMatchObject({ outcome: "accepted" });
+      await update;
+      expect(await ingest(pool, sample(), resolve)).toMatchObject({
+        code: "unauthorized_connection",
+      });
+      expect(await counts()).toEqual({ observations: 1, deliveries: 1 });
+    } finally {
+      await gate.query("SELECT pg_advisory_unlock_all()");
+      await pending;
+      await update;
+      gate.release();
+      revoker.release();
+    }
+  });
   it("scopes paginated review, including conflicts outside the visible page", async () => {
     const receipt = await ingest(pool, sample(), resolve);
     if (receipt.outcome === "rejected") throw new Error("fixture failed");

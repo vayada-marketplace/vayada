@@ -299,3 +299,22 @@ Unknown or differently scoped observation/cursor returns 404. Each page is a fre
 read; new deliveries may change the overall review flag between requests. Flags
 describe recorded discrepancies, not verification, creator attribution or earning
 eligibility. This read does not enable intake or resolve browser capture decisions.
+
+## Shared intake ownership enforcement — 15 September 2026
+
+After validating the adapter binding, intake independently locks the active
+hotel-group organization, enabled property and active Marketplace hotel-profile
+owner/operator link using `FOR SHARE`, in that order. Missing/revoked scope rejects
+both first intake and retries without new receipts or deliveries. Locks are held
+through the receipt transaction; a committed revocation encountered during lock
+acquisition is rechecked. Internal organization/property UUIDs must use canonical
+lowercase spelling so alternate representations cannot split replay identities.
+
+This is the shared identity/catalog authorization boundary, not a replacement for
+the adapter's authenticated connection grant or evidence-reference checks. The
+injected reader still verifies and locks source-specific authority before returning;
+it must not collect network evidence while holding this transaction. A future
+source adapter must coordinate its lock ordering with these locks, retry aborted
+transactions safely, and supply its own permission/entitlement or service-grant
+checks. No default connection grant, public write endpoint or collection worker is
+enabled. Retention/export/deletion policy still precedes live collection.
