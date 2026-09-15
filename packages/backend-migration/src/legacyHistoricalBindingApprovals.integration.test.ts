@@ -117,13 +117,13 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
   const revocations = "platform.legacy_owner_approval_revocations";
   const begin = (db = client) =>
     db.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
-  const seed = async (change: Record<string, unknown> = {}) => {
+  const seed = async (change: Record<string, unknown> = {}, offset = 0) => {
     for (const [n, authority] of [
       [31, "migration_owner"],
       [32, "security_owner"],
     ] as const) {
       const row = {
-        approval_record_id: id(n),
+        approval_record_id: id(n + offset),
         command_id: envelope.commandId,
         contract_version: envelope.contractVersion,
         environment: "local",
@@ -225,6 +225,64 @@ describe.skipIf(!url)("signed historical registry and retained row locks", () =>
       ),
     ).rejects.toThrow();
   });
+  it.each([
+    { envelope_sha256: "b".repeat(64) },
+    { contract_version: "legacy-pms-owner-evidence.v1" },
+    { contract_version: "legacy-owner-internal-setup.v1" },
+    { environment: "staging" },
+  ])("rejects mismatched stored authority %j", async (change) => {
+    const command = {
+      ...envelope,
+      commandId: id(40),
+      migrationApprovalRecordId: id(41),
+      securityApprovalRecordId: id(42),
+    };
+    const payload = canonicalizeJson(command);
+    await seed(
+      {
+        command_id: command.commandId,
+        envelope_sha256: hashLegacyHistoricalBindingEnvelope(payload),
+        ...change,
+      },
+      10,
+    );
+    const signed = {
+      ...input,
+      canonicalPayload: payload,
+      detachedSignature: sign(
+        null,
+        Buffer.from(`vayada:legacy-historical-binding-transition:v1\0envelope\0${payload}`),
+        keys.privateKey,
+      ).toString("base64url"),
+    };
+    await expect(verify(client, signed, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+  });
+  it.each(["none", "records", "revocations"])(
+    "restricted role RLS control: %s",
+    async (restriction) => {
+      await client.query(`CREATE ROLE historical_approval_fixture_role;
+      GRANT USAGE ON SCHEMA platform TO historical_approval_fixture_role;
+      GRANT SELECT, UPDATE ON ${records} TO historical_approval_fixture_role;
+      GRANT SELECT ON ${revocations} TO historical_approval_fixture_role`);
+      if (restriction !== "none") {
+        await revoke();
+        const table = restriction === "records" ? records : revocations;
+        await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;
+        CREATE POLICY fixture_hidden ON ${table} TO historical_approval_fixture_role USING (false)`);
+      }
+      await client.query("SET LOCAL ROLE historical_approval_fixture_role");
+      if (restriction === "none") {
+        expect(await verify(client, input, policy(), clock)).toEqual({
+          outcome: "approvals_locked_requires_eligibility",
+          executable: false,
+        });
+      } else {
+        const table = restriction === "records" ? records : revocations;
+        expect((await client.query(`SELECT 1 FROM ${table}`)).rowCount).toBe(0);
+        await expect(verify(client, input, policy(), clock)).rejects.toThrow("APPROVALS_INVALID");
+      }
+    },
+  );
   it.each(["REPEATABLE READ", "SERIALIZABLE"])("rejects isolation %s", async (isolation) => {
     await client.query(
       `ROLLBACK; BEGIN ISOLATION LEVEL ${isolation}; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='3s'`,
