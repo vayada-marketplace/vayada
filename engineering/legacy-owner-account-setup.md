@@ -91,6 +91,22 @@ setup envelopes. Admission of setup approvals to existing immutable storage,
 revocation serialization and full command validation remain separate required
 implementation steps; migration 0193 currently accepts only ownership evidence.
 
+Migration 0195 admits exactly the setup version alongside ownership evidence in
+the existing registry, without changing applied 0193, command/authority uniqueness,
+append-only triggers or privileges. `verifyLegacyOwnerSetupApprovals` verifies the
+setup signature first, then both exact current authority rows and absence of
+revocations. It uses a separate setup-domain envelope hash, enforces the configured
+signer/executor/authority separation and rechecks signature expiry after the read.
+Missing, mismatched or unreadable records deny with a sanitized error. Active
+row-level security on either registry table rejects rather than treating a
+filtered revocation as absent; the executor must have complete visibility.
+
+This remains a point-in-time registry check, with `executable: false`: no locks,
+records or users are created by it. Approval/revocation serialization through the
+future write transaction and complete command/current-evidence validation still
+must be implemented. A read before a concurrent revocation is not permission to
+write afterward. Tests use synthetic keys and principals, never real approvals.
+
 ## Provider preparation is a later, separate operation
 
 Only after an approved internal-row receipt and a fresh source/target/provider
