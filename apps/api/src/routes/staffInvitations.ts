@@ -7,6 +7,8 @@ import {
   type RemoveStaffCommand,
   type UpdateStaffAccessCommand,
   type UpdateStaffStatusCommand,
+  type TeamRoleCreateCommand,
+  type TeamRoleChangeCommand,
   createPgStaffInvitationRepository,
   createPgTeamRoleRepository,
   createStaffInvitationDeliveryCoordinator,
@@ -29,7 +31,7 @@ type StaffRemoval = Pick<ReturnType<typeof createStaffRemovalCoordinator>, "revo
 
 export type StaffInvitationRoutesOptions = {
   repository: StaffInvitationRepository;
-  roles: Pick<ReturnType<typeof createPgTeamRoleRepository>, "list">;
+  roles: Pick<ReturnType<typeof createPgTeamRoleRepository>, "list" | "create" | "change">;
   delivery: StaffInvitationDelivery;
   removal: StaffRemoval;
 };
@@ -99,6 +101,75 @@ export async function registerStaffInvitationRoutes(
       return reply.status(500).send({ code: "team_roles_read_failed" });
     }
   });
+
+  for (const method of ["POST", "PATCH", "DELETE"] as const) {
+    app.route<{ Params: { roleId: string }; Body: unknown }>({
+      method,
+      url: method === "POST" ? "/roles" : "/roles/:roleId",
+      onRequest: async (request, reply) => {
+        await authorize(request, reply);
+        const context = authorized.get(request);
+        if (context && context.membership.roleKey !== "hotel_owner")
+          return reply.status(403).send({ code: "forbidden" });
+      },
+      handler: async (request, reply) => {
+        const context = authorized.get(request);
+        if (!context) throw new Error("Team role authorization was not resolved");
+        reply.header("Cache-Control", "no-store");
+        const key = readIdempotencyKey(request);
+        const body = parseRoleBody(request.body, method);
+        if (!key || !body || (method !== "POST" && !roleUuid(request.params.roleId)))
+          return reply.status(400).send({ code: "invalid_request" });
+        const common = {
+          commandId: randomUUID(),
+          idempotencyKey: `hotel:${context.selectedOrganization.organizationId}:${key}`,
+          audit: {
+            actor: {
+              kind: "user" as const,
+              userId: context.actor.internalUserId,
+              organizationId: context.selectedOrganization.organizationId,
+            },
+            source: context.audit.source,
+            requestId: context.audit.requestId,
+            correlationId: context.audit.correlationId,
+            requestedAt: context.audit.receivedAt,
+            reason: `${method === "POST" ? "Create" : method === "PATCH" ? "Update" : "Delete"} team role`,
+          },
+        };
+        try {
+          const result =
+            method === "POST"
+              ? await options.roles.create({
+                  ...common,
+                  payload: { organizationId: context.selectedOrganization.organizationId, ...body },
+                } as TeamRoleCreateCommand)
+              : await options.roles.change({
+                  ...common,
+                  payload: {
+                    organizationId: context.selectedOrganization.organizationId,
+                    roleId: request.params.roleId,
+                    operation: method === "PATCH" ? "update" : "delete",
+                    ...body,
+                  },
+                } as TeamRoleChangeCommand);
+          if (result.outcome === "rejected") {
+            const status =
+              result.reason === "forbidden"
+                ? 403
+                : result.reason === "invalid_source_role"
+                  ? 404
+                  : ["invalid_command", "invalid_permissions"].includes(result.reason)
+                    ? 400
+                    : 409;
+            return reply.status(status).send({ code: result.reason });
+          }
+          return reply.status(result.outcome === "created" ? 201 : 200).send(result);
+        } catch {
+          return reply.status(500).send({ code: "team_role_write_failed" });
+        }
+      },
+    });
+  }
 
   app.get("/members", { onRequest: authorize }, async (request, reply) => {
     const context = authorized.get(request);
@@ -328,6 +399,44 @@ export async function registerStaffInvitationRoutes(
       delivery: delivery.outcome,
     });
   });
+}
+
+const roleUuid = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+function parseRoleBody(
+  value: unknown,
+  method: "POST" | "PATCH" | "DELETE",
+): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  const keys =
+    method === "DELETE"
+      ? ["expectedRevision"]
+      : method === "POST"
+        ? ["name", "description", "defaultPermissions", "sourceRoleId"]
+        : ["name", "description", "defaultPermissions", "expectedRevision"];
+  if (Object.keys(body).some((key) => !keys.includes(key))) return null;
+  if (
+    method !== "POST" &&
+    (typeof body.expectedRevision !== "string" || !/^[1-9][0-9]*$/.test(body.expectedRevision))
+  )
+    return null;
+  if (
+    method !== "DELETE" &&
+    (typeof body.name !== "string" ||
+      body.name.trim().length < 1 ||
+      body.name.trim().length > 80 ||
+      typeof body.description !== "string" ||
+      body.description.length > 1000 ||
+      !Array.isArray(body.defaultPermissions) ||
+      !body.defaultPermissions.every((key) => typeof key === "string"))
+  )
+    return null;
+  if (method === "POST" && body.sourceRoleId !== undefined && !roleUuid(body.sourceRoleId))
+    return null;
+  return body;
 }
 
 function parseRequest(value: unknown): StaffInvitationRequest | null {
