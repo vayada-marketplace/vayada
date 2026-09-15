@@ -87,3 +87,30 @@ Fields are exactly id/email/name/status/created_at/updated_at, with both timesta
 rendered as UTC millisecond ISO strings independent of session timezone. These are storage fingerprints,
 not evidence authentication. A duplicate command rejects here; approved exact
 replay must be resolved by the future consumer before this insert-only stage.
+
+# Write-time target absence guard (VAY-2017)
+
+`lockAndCheckLegacyOwnerSetupTargets` is a guard, not an executable approval.
+After independent database/evidence/scope authentication and approval locking,
+the eventual executor resolves authorized exact replay before invoking it. A
+dedicated READ COMMITTED transaction with nonzero lock and statement timeouts is
+required. It retains SHARE ROW EXCLUSIVE locks on external identities then users
+through the later checkpoint and outer commit. Acquisition uses NOWAIT and failure
+immediately rolls back its savepoint, releasing partial locks: existing writers
+use different table orders and must not deadlock with this guard. A rollback
+failure requires discarding the connection. Successful acquisition blocks ordinary
+identity writes and index DDL; production needs a reviewed short lock window.
+Use the same connection throughout, never roll back to an earlier savepoint, and
+roll back the entire transaction after any failure. Acquire no provider resources
+or network responses while holding these locks.
+
+The guard verifies the installed eight-email index and full RLS visibility,
+normalizes command emails with PostgreSQL's exact index expression, rejects
+duplicate/out-of-scope hashes, and checks existing user IDs, user emails and
+external identity user IDs/provider emails regardless of status or verification.
+It rechecks command expiry after waits. It neither authenticates evidence hashes
+nor compares fresh evidence artifacts, grants access, writes users, nor implements
+replay. The caller still must authenticate those artifacts and check expiry
+immediately before the eventual write. Local synthetic PostgreSQL tests compose
+this guard with the checkpoint and prove retained locks using blocking PIDs;
+they are not production or complete executor evidence.

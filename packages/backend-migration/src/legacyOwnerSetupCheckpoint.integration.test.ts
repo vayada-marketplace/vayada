@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
 import { planLegacyOwnerEmailIndex } from "./legacyOwnerEmailIndexPlan.js";
 import { writeLegacyOwnerSetupCheckpoint } from "./legacyOwnerSetupCheckpoint.js";
+import { lockAndCheckLegacyOwnerSetupTargets } from "./legacyOwnerSetupTargetLocks.js";
 import { runMigrations } from "./runner.js";
 
 const url = process.env["VAY2017_CHECKPOINT_TEST_DATABASE_URL"];
@@ -98,6 +99,12 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
   });
   const write = (value = command()) =>
     writeLegacyOwnerSetupCheckpoint(client, canonicalizeJson(value), expected, audit, now);
+  const scope = () =>
+    command().owners.map((o) => createHash("sha256").update(o.email).digest("hex"));
+  const guard = (value = command(), hashes = scope(), clock = () => now) =>
+    lockAndCheckLegacyOwnerSetupTargets(client, canonicalizeJson(value), expected, hashes, clock);
+  const configureGuard = () =>
+    client.query("SET LOCAL lock_timeout = '2s'; SET LOCAL statement_timeout = '5s'");
   const counts = async (connection = client) =>
     (
       await connection.query(`SELECT
@@ -140,6 +147,141 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
     await client.query("ROLLBACK");
     expect(await counts(observer)).toEqual({ users: 0, receipts: 0 });
   });
+  it("composes the absence guard and atomic checkpoint in one transaction", async () => {
+    await configureGuard();
+    expect(await guard()).toEqual({
+      outcome: "targets_absent_locked_requires_authorized_write",
+      executable: false,
+    });
+    await write();
+    expect(await counts()).toEqual({ users: 8, receipts: 1 });
+    expect(await counts(observer)).toEqual({ users: 0, receipts: 0 });
+  });
+  it.each(["owner ID", "normalized email", "external email"])(
+    "rejects existing %s without overwriting",
+    async (kind) => {
+      await configureGuard();
+      await client.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'suspended')", [
+        kind === "owner ID" ? id(1) : id(80),
+        kind === "normalized email"
+          ? `\u00a0${command().owners[0]!.email.toUpperCase()}\t`
+          : "unrelated@example.invalid",
+      ]);
+      if (kind === "external email")
+        await client.query(
+          "INSERT INTO identity.external_identities(user_id,provider,provider_email) VALUES($1,'workos',$2)",
+          [id(80), ` ${command().owners[0]!.email.toUpperCase()} `],
+        );
+      await expect(guard()).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+      expect(await counts()).toEqual({ users: 1, receipts: 0 });
+    },
+  );
+  it.each([
+    "missing index",
+    "wrong scope",
+    "collation drift",
+    "expired after wait",
+    "normalized duplicate",
+    "unbounded transaction",
+  ])("rejects %s", async (mode) => {
+    if (mode !== "unbounded transaction") await configureGuard();
+    if (mode === "missing index")
+      await client.query(`DROP INDEX identity.${planLegacyOwnerEmailIndex(scope()).indexName}`);
+    if (mode === "collation drift")
+      await client.query(
+        'ALTER TABLE identity.external_identities ALTER COLUMN provider_email TYPE text COLLATE "C"',
+      );
+    const value = command();
+    if (mode === "normalized duplicate")
+      value.owners[1]!.email = value.owners[0]!.email.toUpperCase();
+    let calls = 0;
+    await expect(
+      guard(value, mode === "wrong scope" ? scope().map(() => sha) : scope(), () =>
+        mode === "expired after wait" && calls++ > 0 ? new Date("2026-09-15T01:16:00.000Z") : now,
+      ),
+    ).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+    expect(await counts()).toEqual({ users: 0, receipts: 0 });
+  });
+  it("requires an explicit transaction", async () => {
+    await client.query("ROLLBACK");
+    await expect(guard()).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+    expect(await counts()).toEqual({ users: 0, receipts: 0 });
+  });
+  it.each(["users", "external_identities", "none"])("checks RLS visibility: %s", async (table) => {
+    await configureGuard();
+    await client.query(`CREATE ROLE vay2017_target_reader NOLOGIN;
+      GRANT USAGE ON SCHEMA identity TO vay2017_target_reader;
+      GRANT SELECT, UPDATE ON identity.users, identity.external_identities TO vay2017_target_reader`);
+    if (table !== "none")
+      await client.query(`ALTER TABLE identity.${table} ENABLE ROW LEVEL SECURITY`);
+    await client.query("SET LOCAL ROLE vay2017_target_reader");
+    if (table === "none") await expect(guard()).resolves.toHaveProperty("executable", false);
+    else await expect(guard()).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+  });
+  it("backs off and releases partial locks so an ordinary user-first identity write can finish", async () => {
+    await configureGuard();
+    await observer.query(
+      "BEGIN; SET LOCAL lock_timeout = '500ms'; SET LOCAL statement_timeout = '1s'",
+    );
+    await observer.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'pending')", [
+      id(80),
+      command().owners[0]!.email,
+    ]);
+    try {
+      await expect(guard()).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+      // Guard's outer transaction remains open: partial locks must already be gone.
+      await observer.query(
+        "INSERT INTO identity.external_identities(user_id,provider) VALUES($1,'workos')",
+        [id(80)],
+      );
+      await observer.query("COMMIT");
+      await expect(guard()).rejects.toThrow("LEGACY_OWNER_SETUP_TARGET_LOCKS_INVALID");
+      expect(await counts()).toEqual({ users: 1, receipts: 0 });
+    } finally {
+      await observer.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await observer.query("DELETE FROM identity.external_identities WHERE user_id=$1", [id(80)]);
+      await observer.query("DELETE FROM identity.users WHERE id=$1", [id(80)]);
+    }
+  });
+  it.each(["users", "external_identities"])(
+    "retains %s locks through the checkpoint until outer rollback",
+    async (table) => {
+      await configureGuard();
+      await guard();
+      await write();
+      const pid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const observerPid = (await observer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      await observer.query(
+        "BEGIN; SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '4s'",
+      );
+      const waiting = observer.query(`LOCK TABLE identity.${table} IN ROW EXCLUSIVE MODE`).then(
+        () => true,
+        () => false,
+      );
+      try {
+        let blocked = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          blocked = (
+            await client.query("SELECT $1::int = ANY(pg_blocking_pids($2)) AS blocked", [
+              pid,
+              observerPid,
+            ])
+          ).rows[0].blocked;
+          if (blocked) break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(blocked).toBe(true);
+        await client.query("ROLLBACK");
+        expect(await waiting).toBe(true);
+      } finally {
+        await client.query("ROLLBACK");
+        await waiting;
+        await observer.query("ROLLBACK");
+      }
+      expect(await counts()).toEqual({ users: 0, receipts: 0 });
+    },
+  );
   it.each(["id", "email"])("does not overwrite an existing %s conflict", async (kind) => {
     await client.query("INSERT INTO identity.users(id,email,status) VALUES($1,$2,'suspended')", [
       kind === "id" ? id(8) : id(80),
