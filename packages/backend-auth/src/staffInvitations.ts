@@ -685,7 +685,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         await client.query(
           `UPDATE identity.organization_memberships
            SET role_key = $3, permission_overrides = $4::jsonb,
-               property_access_mode = 'assigned', status = COALESCE($5, status), updated_at = now(),
+               property_access_mode = $8, status = COALESCE($5, status), updated_at = now(),
                pms_access_enabled = COALESCE($6, pms_access_enabled),
                booking_access_enabled = COALESCE($7, booking_access_enabled)
            WHERE organization_id = $1 AND id = $2`,
@@ -697,6 +697,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             normalized.membershipStatus ?? null,
             normalized.productAccess?.pms ?? null,
             normalized.productAccess?.booking ?? null,
+            normalized.propertyAccessMode ?? "assigned",
           ],
         );
         await client.query(
@@ -712,8 +713,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         if (
           normalized.membershipStatus === "suspended" ||
           normalized.productAccess?.pms === false ||
-          previous.property_access_mode === "all" ||
-          previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId))
+          (normalized.propertyAccessMode !== "all" &&
+            (previous.property_access_mode === "all" ||
+              previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId))))
         )
           await enqueueInboxAssignmentReconciliation(client, {
             organizationId: normalized.organizationId,
@@ -729,6 +731,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
                   : "property_access_removed",
           });
         const next = {
+          propertyAccessMode: normalized.propertyAccessMode ?? "assigned",
           productAccess: normalized.productAccess ?? {
             pms: previous.pms_access_enabled,
             booking: previous.booking_access_enabled,
@@ -765,6 +768,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             }),
             JSON.stringify({
               previous: {
+                propertyAccessMode: previous.property_access_mode,
                 productAccess: {
                   pms: previous.pms_access_enabled,
                   booking: previous.booking_access_enabled,
@@ -878,7 +882,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
               role_key, permission_overrides, property_access_mode, configuration_revision, command_id,
               idempotency_key_hash, request_fingerprint_hash, supersedes_invitation_id, request_id,
               correlation_id, request_source, reason, requested_at, pms_access_enabled, booking_access_enabled)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'assigned', $9, $10, $11, $12,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $21, $9, $10, $11, $12,
                    $13, $14, $15, $16, $17, $18, $19, $20)
            RETURNING id`,
           [
@@ -902,6 +906,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             new Date(command.audit.requestedAt),
             normalized.productAccess?.pms ?? true,
             normalized.productAccess?.booking ?? true,
+            normalized.propertyAccessMode ?? "assigned",
           ],
         );
         const invitationId = inserted.rows[0]!.id;
@@ -1001,6 +1006,7 @@ function normalize(command: CreateStaffInviteCommand) {
     propertyIds,
     permissionOverrides,
     configurationRevision: command.payload.configurationRevision,
+    ...(command.payload.propertyAccessMode === "all" ? { propertyAccessMode: "all" as const } : {}),
     ...(command.payload.productAccess === undefined
       ? {}
       : {
@@ -1031,6 +1037,8 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
     (command.payload.productAccess !== undefined &&
       (command.payload.expectedRevision === undefined ||
         !validProductAccess(command.payload.productAccess))) ||
+    (command.payload.propertyAccessMode === "all" &&
+      command.payload.expectedRevision === undefined) ||
     validateStaffInviteAccess(command.payload).length
   ) {
     return null;
@@ -1038,6 +1046,7 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
   return {
     organizationId: command.payload.organizationId,
     membershipId: command.payload.membershipId.toLowerCase(),
+    ...(command.payload.propertyAccessMode === "all" ? { propertyAccessMode: "all" as const } : {}),
     roleKey: command.payload.roleKey,
     propertyIds: command.payload.propertyIds.map((id) => id.toLowerCase()).sort(),
     permissionOverrides: {

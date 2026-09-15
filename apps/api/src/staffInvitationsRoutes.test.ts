@@ -337,6 +337,29 @@ describe("staff invitation routes", () => {
     }
   });
 
+  it("accepts dynamic invitation scope and requires a revision for explicit member scope saves", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const access = { ...body(), propertyAccessMode: "all", propertyIds: [] };
+    expect((await post(app, access)).statusCode).toBe(201);
+    expect(fake.commands[0]?.payload).toMatchObject({ propertyAccessMode: "all", propertyIds: [] });
+    const update = {
+      roleKey: "front_desk",
+      permissionOverrides: { grant: [], deny: [] },
+      propertyAccessMode: "all",
+      propertyIds: [],
+    };
+    expect((await patchAccess(app, update)).statusCode).toBe(400);
+    expect(
+      (await patchAccess(app, { ...update, expectedRevision: "a".repeat(64) })).statusCode,
+    ).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject({
+      propertyAccessMode: "all",
+      propertyIds: [],
+    });
+    expect((await post(app, { ...access, propertyIds: [propertyId] })).statusCode).toBe(400);
+  });
+
   it("updates assigned staff access from authenticated context", async () => {
     const fake = fakes();
     app = await testApp(fake.options);

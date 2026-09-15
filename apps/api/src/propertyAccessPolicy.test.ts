@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RequestContext } from "@vayada/backend-auth";
 import {
   createAuthorizationResolver,
+  resolveEffectivePropertyAccess,
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 
@@ -43,6 +44,34 @@ function context(): RequestContext {
 }
 
 describe("enforcePropertyRoutePolicy", () => {
+  it("resolves newly linked properties for all-mode and drops suspended links on a fresh request", async () => {
+    const repository: PropertyAccessRepository = {
+      findMembershipPropertyScope: async () => ({
+        mode: "all",
+        roleKey: "front_desk",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+      }),
+    };
+    const first = context();
+    first.linkedResources = first.linkedResources.filter((link) => link.resourceId === PROPERTY_A);
+    expect(await resolveEffectivePropertyAccess(first, repository)).toEqual({
+      mode: "all",
+      propertyIds: [PROPERTY_A],
+    });
+    const afterNewLink = context();
+    expect(await resolveEffectivePropertyAccess(afterNewLink, repository)).toEqual({
+      mode: "all",
+      propertyIds: [PROPERTY_A, PROPERTY_B],
+    });
+    afterNewLink.linkedResources = afterNewLink.linkedResources.map((link) =>
+      link.resourceId === PROPERTY_B ? { ...link, status: "suspended" } : link,
+    );
+    expect(await resolveEffectivePropertyAccess(afterNewLink, repository)).toEqual({
+      mode: "all",
+      propertyIds: [PROPERTY_A],
+    });
+  });
   it.each(["pms", "booking"] as const)(
     "denies disabled %s before the handler runs",
     async (product) => {
