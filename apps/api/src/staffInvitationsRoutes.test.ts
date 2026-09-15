@@ -92,6 +92,7 @@ function fakes() {
           return id === staffMembershipId
             ? {
                 membershipId: id,
+                revision: "a".repeat(64),
                 roleKey: "front_desk" as const,
                 status: "active" as const,
                 propertyAccessMode: "assigned" as const,
@@ -293,6 +294,39 @@ describe("staff invitation routes", () => {
     });
     expect(fake.rosterOrganizations).toEqual([organizationId]);
     expect(JSON.stringify(response.body)).not.toMatch(/workos|provider|token/i);
+  });
+
+  it("passes revision-checked combined changes and maps stale saves to conflict", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const request = {
+      method: "PATCH" as const,
+      url: `/api/identity/staff/members/${staffMembershipId}`,
+      headers: { authorization: "Bearer valid-token", "Idempotency-Key": "combined" },
+      payload: {
+        roleKey: "front_desk",
+        propertyIds: [propertyId],
+        permissionOverrides: { grant: [], deny: [] },
+        expectedRevision: "a".repeat(64),
+        membershipStatus: "suspended",
+      },
+    };
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject({
+      expectedRevision: "a".repeat(64),
+      membershipStatus: "suspended",
+    });
+    fake.setUpdateResult({ outcome: "rejected", reason: "revision_conflict" });
+    const stale = await app.inject(request);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ code: "staff_access_revision_conflict" });
+    for (const payload of [
+      { ...request.payload, expectedRevision: "bad" },
+      { ...request.payload, expectedRevision: undefined },
+      { ...request.payload, membershipStatus: "inactive" },
+    ]) {
+      expect((await app.inject({ ...request, payload })).statusCode).toBe(400);
+    }
   });
 
   it("updates assigned staff access from authenticated context", async () => {

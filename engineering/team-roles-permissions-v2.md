@@ -270,9 +270,22 @@ unlinked assignments or storage failures return generic `500`
 `staff_access_read_failed`, without provider details or stored invalid values.
 Unauthorized reads return `401`/`403` before repository access.
 
-This read does not yet supply an atomic-save revision, custom roles or product
-settings; those are successor contracts. No new editor may save through it until
-the atomic command and revision contract are delivered.
+The read also returns an opaque `revision` covering the persisted membership
+configuration, timestamp, assignment rows and current role grants. The existing
+membership PATCH accepts `expectedRevision`; mismatches return `409`
+`staff_access_revision_conflict` without changing access, status, audit or
+idempotency state. A combined save can include `membershipStatus`
+(`active`/`suspended`) only with a revision. Role, overrides, assigned properties
+and membership status commit together with audit and inbox reconciliation.
+
+The new editor must always send the loaded revision and reload after success or
+conflict. An exact idempotent replay reports the original command's success, not
+the target's current state. Old callers may omit the revision for compatibility;
+they cannot use that path for a combined status/access save. Existing status
+commands change the next read's revision. Future role/product/delegation writers
+must participate in compatible locking and extend the revision coverage before
+those controls ship. Custom roles, product switches and dynamic staff scope
+remain successor contracts; this slice changes no permission defaults.
 
 1. This contract and decisions; no runtime changes.
 2. Authorized configuration read model and invitation delivery/revision readback.

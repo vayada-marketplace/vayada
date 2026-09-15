@@ -495,7 +495,11 @@ export type CreateStaffInvitePayload = {
 export type UpdateStaffAccessPayload = Omit<
   CreateStaffInvitePayload,
   "email" | "name" | "configurationRevision"
-> & { membershipId: string };
+> & {
+  membershipId: string;
+  expectedRevision?: string;
+  membershipStatus?: "active" | "suspended";
+};
 
 export type UpdateStaffStatusPayload = {
   organizationId: string;

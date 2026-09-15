@@ -38,6 +38,11 @@ type StaffRosterRow = {
   last_active_at: Date | null;
 };
 type StaffAccessTargetRow = {
+  id: string;
+  status: "active" | "suspended";
+  access_origin: string;
+  updated_at: string;
+  role_permissions: string[];
   role_key: string;
   permission_overrides: unknown;
   property_access_mode: string;
@@ -81,15 +86,12 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
     async getAccess(organizationId: string, membershipId: string) {
       const result = await pool.query<
         StaffAccessTargetRow & {
-          id: string;
-          access_origin: string;
-          status: "active" | "suspended";
           scope_valid: boolean;
-          role_permissions: string[];
         }
       >(
         `SELECT membership.id, membership.role_key, membership.permission_overrides,
                 membership.property_access_mode, membership.access_origin, membership.status,
+                membership.updated_at::text AS updated_at,
                 ARRAY(SELECT assignment.property_id::text
                       FROM identity.membership_property_assignments assignment
                       WHERE assignment.membership_id = membership.id
@@ -135,6 +137,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         throw new Error("Staff access configuration is unavailable");
       return {
         membershipId: row.id,
+        revision: staffAccessRevision(row),
         roleKey: row.role_key as HotelStaffRoleKey,
         status: row.status,
         propertyAccessMode: row.property_access_mode as "all" | "assigned",
@@ -619,23 +622,43 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             : { outcome: "rejected" as const, reason: "idempotency_conflict" as const };
         }
         const target = await client.query<StaffAccessTargetRow>(
-          `SELECT membership.role_key, membership.permission_overrides,
+          `SELECT membership.id, membership.status, membership.access_origin,
+                  membership.updated_at::text AS updated_at,
+                  ARRAY(SELECT permission_key FROM identity.role_permission_grants
+                        WHERE organization_kind = 'hotel_group'
+                          AND role_key = membership.role_key ORDER BY permission_key) AS role_permissions,
+                  membership.role_key, membership.permission_overrides,
                   membership.property_access_mode,
                   ARRAY(SELECT assignment.property_id::text
                         FROM identity.membership_property_assignments assignment
                         WHERE assignment.membership_id = membership.id
                         ORDER BY assignment.property_id) AS property_ids
            FROM identity.organization_memberships membership
+           JOIN identity.users staff ON staff.id = membership.user_id
            WHERE membership.organization_id = $1 AND membership.id = $2
              AND membership.role_key = ANY($3::text[])
              AND membership.status IN ('active', 'suspended')
-           FOR UPDATE`,
-          [normalized.organizationId, normalized.membershipId, hotelStaffRoleKeys],
+             AND ($4::text IS NULL OR staff.status = 'active')
+           FOR UPDATE OF membership, staff`,
+          [
+            normalized.organizationId,
+            normalized.membershipId,
+            hotelStaffRoleKeys,
+            normalized.membershipStatus ?? null,
+          ],
         );
         const previous = target.rows[0];
         if (!previous) {
           await client.query("ROLLBACK");
           return { outcome: "rejected" as const, reason: "target_not_found" as const };
+        }
+        if (
+          normalized.expectedRevision !== undefined &&
+          (previous.access_origin !== "agency" ||
+            staffAccessRevision(previous) !== normalized.expectedRevision)
+        ) {
+          await client.query("ROLLBACK");
+          return { outcome: "rejected" as const, reason: "revision_conflict" as const };
         }
         const linkedProperties = await client.query<{ property_id: string }>(
           `SELECT property.id::text AS property_id
@@ -657,13 +680,14 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         await client.query(
           `UPDATE identity.organization_memberships
            SET role_key = $3, permission_overrides = $4::jsonb,
-               property_access_mode = 'assigned', updated_at = now()
+               property_access_mode = 'assigned', status = COALESCE($5, status), updated_at = now()
            WHERE organization_id = $1 AND id = $2`,
           [
             normalized.organizationId,
             normalized.membershipId,
             normalized.roleKey,
             JSON.stringify(normalized.permissionOverrides),
+            normalized.membershipStatus ?? null,
           ],
         );
         await client.query(
@@ -677,6 +701,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
         );
         const nextPropertyIds = new Set(normalized.propertyIds);
         if (
+          normalized.membershipStatus === "suspended" ||
           previous.property_access_mode === "all" ||
           previous.property_ids.some((propertyId) => !nextPropertyIds.has(propertyId))
         )
@@ -686,9 +711,13 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             idempotencyId: reservationId,
             correlationId: command.audit.correlationId ?? command.audit.requestId,
             commandId: command.commandId,
-            reason: "property_access_removed",
+            reason:
+              normalized.membershipStatus === "suspended"
+                ? "membership_suspended"
+                : "property_access_removed",
           });
         const next = {
+          membershipStatus: normalized.membershipStatus ?? previous.status,
           roleKey: normalized.roleKey,
           permissionOverrides: normalized.permissionOverrides,
           propertyIds: normalized.propertyIds,
@@ -712,6 +741,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             command.commandId,
             JSON.stringify({
               outcome: "updated",
+              membershipStatus: normalized.membershipStatus ?? previous.status,
               roleKey: normalized.roleKey,
               propertyCount: normalized.propertyIds.length,
               permissionGrantCount: normalized.permissionOverrides.grant.length,
@@ -719,6 +749,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             }),
             JSON.stringify({
               previous: {
+                membershipStatus: previous.status,
                 roleKey: previous.role_key,
                 permissionOverrides: previous.permission_overrides,
                 propertyIds: previous.property_ids,
@@ -956,6 +987,11 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
     !command.idempotencyKey.trim() ||
     !canonicalUuid(command.payload.membershipId) ||
     Number.isNaN(Date.parse(command.audit.requestedAt)) ||
+    (command.payload.expectedRevision !== undefined &&
+      !/^[a-f0-9]{64}$/.test(command.payload.expectedRevision)) ||
+    (command.payload.membershipStatus !== undefined &&
+      (command.payload.expectedRevision === undefined ||
+        !["active", "suspended"].includes(command.payload.membershipStatus))) ||
     validateStaffInviteAccess(command.payload).length
   ) {
     return null;
@@ -970,6 +1006,12 @@ function normalizeStaffAccessUpdate(command: UpdateStaffAccessCommand) {
       deny: [...command.payload.permissionOverrides.deny].sort(),
     },
     actorUserId: actor.userId,
+    ...(command.payload.expectedRevision === undefined
+      ? {}
+      : { expectedRevision: command.payload.expectedRevision }),
+    ...(command.payload.membershipStatus === undefined
+      ? {}
+      : { membershipStatus: command.payload.membershipStatus }),
   };
 }
 
@@ -1089,4 +1131,20 @@ function isPropertyScopeError(error: unknown): boolean {
       "membership_property_assignments_property_id_fkey",
     ].includes(value.constraint ?? "")
   );
+}
+
+function staffAccessRevision(row: StaffAccessTargetRow): string {
+  return hash(
+    JSON.stringify({
+      id: row.id,
+      role: row.role_key,
+      status: row.status,
+      origin: row.access_origin,
+      updatedAt: row.updated_at,
+      mode: row.property_access_mode,
+      properties: row.property_ids,
+      overrides: row.permission_overrides,
+      rolePermissions: row.role_permissions,
+    }),
+  ).toString("hex");
 }
