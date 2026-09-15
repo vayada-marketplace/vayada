@@ -33,6 +33,8 @@
     "target:cutover": "tsx src/cli/cutover.ts cutover",
     "target:cutover:abort": "tsx src/cli/cutover.ts abort",
     "target:c1-rehearsal:checks": "tsx src/cli/c1RehearsalChecks.ts",
+    "target:account-admin:preflight": "tsx src/cli/accountAdminPreflight.ts",
+    "target:account-admin:preflight:dist": "node dist/cli/accountAdminPreflight.js",
     "target:manual-booking:readiness": "tsx src/cli/manualBookingReadiness.ts",
     "target:platform-identity:bootstrap": "tsx src/cli/platformIdentityBootstrap.ts",
     "target:workos:backfill": "tsx src/cli/workosBackfill.ts",
