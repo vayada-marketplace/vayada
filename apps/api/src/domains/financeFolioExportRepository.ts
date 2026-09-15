@@ -1,15 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 // prettier-ignore
-import { FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_FOLIO_CSV_VERSION, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
+import { FINANCE_EXPENSE_CSV_VERSION, FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_FOLIO_CSV_VERSION, parseFinanceExpenseExportSnapshot, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceExpenseExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
 import pg, { type PoolClient } from "pg";
 export const FINANCE_FOLIO_EXPORT_QUEUE = "finance.financials-exports";
 export const FINANCE_FOLIO_EXPORT_JOB = "finance.folio-csv-export.v1";
+export const FINANCE_EXPENSE_EXPORT_JOB = "finance.expense-csv-export.v1";
 export const FINANCE_FOLIO_EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
 const OPERATION = "financials.folio_export.create.v1";
 // prettier-ignore
 export type FinanceFolioExportAudit = { actorUserId: string; requestId: string; correlationId: string; causationId: string; requestedAt: string };
 // prettier-ignore
 export type FinanceFolioExportJobPayload = { commandId: string; organizationId: string; snapshot: FinanceFolioExportSnapshot; expiresAt: string };
+// prettier-ignore
+export type FinanceExpenseExportJobPayload = { commandId: string; organizationId: string; snapshot: FinanceExpenseExportSnapshot; expiresAt: string };
+export type FinanceExportJobPayload = FinanceFolioExportJobPayload | FinanceExpenseExportJobPayload;
 // prettier-ignore
 export type FinanceFolioExportEnqueueResult = { status: "created" | "replayed"; exportId: string; envelope: FinanceFolioEnvelope } | { status: "conflict" };
 // prettier-ignore
@@ -31,19 +35,21 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
   return {
     async find(input: { exportId:string; organizationId:string; propertyId:string; now:Date }): Promise<FinanceFolioExportStatus|null> {
       if (![input.exportId,input.organizationId,input.propertyId].every(uuid) || !Number.isFinite(input.now.getTime())) throw new TypeError("Invalid folio export lookup");
-      const row=(await pool.query<{status:string;expiresAt:string;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_metadata->>'expiresAt' AS "expiresAt",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
+      const row=(await pool.query<{status:string;jobType:string;expiresAt:string;formatVersion:string;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_type AS "jobType",job.job_metadata->>'expiresAt' AS "expiresAt",job.job_metadata->>'formatVersion' AS "formatVersion",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
         FROM platform.jobs job LEFT JOIN platform.media_objects media ON media.id=job.id AND media.owner_organization_id=$3::uuid AND media.property_id=$2::uuid AND media.storage_kind='vayada_managed' AND media.purpose='finance.financials_export' AND media.resource_product='finance' AND media.resource_type='financials_export' AND media.resource_id=job.id::text AND media.source_system='platform' AND media.source_table='platform.jobs' AND media.source_row_id=job.id::text
         WHERE job.id=$1::uuid AND job.property_id=$2::uuid AND job.tenant_scope='property'
-          AND job.queue_name=$4 AND job.job_type=$5 AND job.resource_product='finance'
+          AND job.queue_name=$4 AND job.job_type IN ($5,$6) AND job.resource_product='finance'
           AND job.resource_type='financials_export' AND job.resource_id=job.id::text
-          AND job.payload->>'organizationId'=$3::text AND job.job_metadata->>'organizationId'=$3::text`,[input.exportId,input.propertyId,input.organizationId,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB])).rows[0];
+          AND job.payload->>'organizationId'=$3::text AND job.job_metadata->>'organizationId'=$3::text`,[input.exportId,input.propertyId,input.organizationId,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,FINANCE_EXPENSE_EXPORT_JOB])).rows[0];
       if (!row) return null;
       if (!instant(row.expiresAt)) throw new Error("Finance folio export status evidence is invalid");
       if (!["pending","running","failed","canceled","dead_lettered","succeeded"].includes(row.status)) throw new Error("Finance folio export status evidence is invalid");
       if (input.now.getTime()>=new Date(row.expiresAt).getTime()) return {state:"expired",expiresAt:row.expiresAt};
       if (row.status==="pending"||row.status==="running") return {state:row.status,expiresAt:row.expiresAt};
       if (["failed","canceled","dead_lettered"].includes(row.status)) return {state:"failed",expiresAt:row.expiresAt};
-      const filename=`pms-financials-folios-${input.propertyId}.csv`,storageKey=`private/finance/financials-exports/${input.exportId}/${FINANCE_FOLIO_CSV_VERSION}.csv`;
+      const shape=exportShape(row.jobType,row.formatVersion,input.propertyId,input.exportId);
+      if (!shape) throw new Error("Finance export status evidence is invalid");
+      const {filename,storageKey}=shape;
       if (row.status!=="succeeded"||row.mediaId!==input.exportId||!trimmed(row.bucketName,1,200)||row.storageKey!==storageKey||row.visibility!=="private"||row.lifecycleStatus!=="active"||row.filename!==filename||row.contentType!==FINANCE_FOLIO_CSV_CONTENT_TYPE||!Number.isSafeInteger(row.sizeBytes)||row.sizeBytes===null||row.sizeBytes<=0||row.retainedUntil!==row.expiresAt) throw new Error("Finance folio export status evidence is invalid");
       return {state:"ready",expiresAt:row.expiresAt,artifact:{mediaId:row.mediaId,bucketName:row.bucketName,storageKey:row.storageKey,visibility:"private",lifecycleStatus:"active",filename:row.filename,contentType:row.contentType,sizeBytes:row.sizeBytes}};
     },
@@ -157,8 +163,14 @@ export function createKmsFinanceFolioExportSearchDigest(config: { kms: MacPort; 
 }
 // prettier-ignore
 export function parseFinanceFolioExportJobPayload(value: unknown, expected: ExpectedPayload): FinanceFolioExportJobPayload {
-  const row = object(value),
-    snapshot = parseFinanceFolioExportSnapshot(row.snapshot);
+  const payload=parseFinanceExportJobPayload(value,expected);
+  if(payload.snapshot.formatVersion!==FINANCE_FOLIO_CSV_VERSION) throw new TypeError("Finance folio export job payload is invalid");
+  return {commandId:payload.commandId,organizationId:payload.organizationId,snapshot:payload.snapshot,expiresAt:payload.expiresAt};
+}
+
+// prettier-ignore
+export function parseFinanceExportJobPayload(value: unknown, expected: ExpectedPayload): FinanceExportJobPayload {
+  const row = object(value), raw=object(row.snapshot), snapshot = raw.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? parseFinanceExpenseExportSnapshot(raw) : parseFinanceFolioExportSnapshot(raw);
   if (
     Object.keys(row).length !== 4 ||
     !uuid(row.commandId) ||
@@ -169,15 +181,12 @@ export function parseFinanceFolioExportJobPayload(value: unknown, expected: Expe
     row.organizationId !== expected.organizationId ||
     !validWindow(row, snapshot, expected)
   )
-    throw new TypeError("Finance folio export job payload is invalid");
-  const payload = {
-    commandId: row.commandId,
-    organizationId: row.organizationId,
-    snapshot,
-    expiresAt: String(row.expiresAt),
-  } satisfies FinanceFolioExportJobPayload;
+    throw new TypeError("Finance export job payload is invalid");
+  const payload:FinanceExportJobPayload = snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION
+    ? {commandId:row.commandId,organizationId:row.organizationId,snapshot,expiresAt:String(row.expiresAt)}
+    : {commandId:row.commandId,organizationId:row.organizationId,snapshot,expiresAt:String(row.expiresAt)};
   if (hash(JSON.stringify(payload)) !== expected.payloadFingerprint)
-    throw new TypeError("Finance folio export job payload is invalid");
+    throw new TypeError("Finance export job payload is invalid");
   return payload;
 }
 
@@ -221,7 +230,7 @@ function validCommand(input: FinanceFolioExportCommand, filters: FinanceFolioExp
 }
 
 // prettier-ignore
-function validWindow(row: Record<string, unknown>, snapshot: FinanceFolioExportSnapshot, expected: ExpectedPayload) {
+function validWindow(row: Record<string, unknown>, snapshot: {snapshotAt:string}, expected: ExpectedPayload) {
   const accepted = instantMillis(expected.acceptedAt),
     expires = instantMillis(expected.expiresAt),
     payloadExpires = instantMillis(row.expiresAt);
@@ -292,3 +301,5 @@ function object(value: unknown): Record<string, unknown> {
     throw new TypeError("Finance folio export job payload is invalid");
   return value as Record<string, unknown>;
 }
+// prettier-ignore
+function exportShape(jobType:string,formatVersion:string,propertyId:string,exportId:string){if(jobType===FINANCE_FOLIO_EXPORT_JOB&&formatVersion===FINANCE_FOLIO_CSV_VERSION)return{filename:`pms-financials-folios-${propertyId}.csv`,storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`};if(jobType===FINANCE_EXPENSE_EXPORT_JOB&&formatVersion===FINANCE_EXPENSE_CSV_VERSION)return{filename:`pms-financials-expenses-${propertyId}.csv`,storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`};return null;}

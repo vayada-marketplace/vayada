@@ -132,7 +132,7 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await admin.query("UPDATE finance.expenses SET payment_status='paid',paid_on='2026-08-11',revision=revision+1 WHERE id=$1", [EXPENSE]);
     expect(result?.snapshot.manifest[1]).toMatchObject({ expenseId: EXPENSE, revision: 1, paymentStatus: "unpaid", paidOn: null });
     const artifact = await read.exportCsv(PROPERTY, "EUR", result!.snapshot);
-    expect(artifact).toMatchObject({ propertyId: PROPERTY, currency: "EUR", rowCount: 3 });
+    expect(artifact).toMatchObject({ propertyId: PROPERTY, currency: "EUR", rowCount: 3, auditEvidence: result!.snapshot.manifest });
     const expenseRow = artifact!.body.split("\r\n").find((line) => line.includes(EXPENSE));
     expect(expenseRow).toContain('"unpaid","",'); expect(expenseRow).toMatch(/,"1"$/);
     await expect(read.captureExport(PROPERTY, query)).resolves.toMatchObject({ snapshot: { manifest: [{ expenseId: CORRECTION }, { expenseId: SMALL }] } });

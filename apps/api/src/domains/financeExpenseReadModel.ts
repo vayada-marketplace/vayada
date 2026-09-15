@@ -40,13 +40,16 @@ export type FinanceExpensesReadResponse = FinanceExpenseEnvelope & {
   categories: Array<{ category: FinanceExpenseCategory; amount: Money }>;
   page: { items: FinanceExpense[]; nextCursor: string | null; limit: number };
 };
+export type FinanceExpenseExportArtifact = FinanceExpenseCsvArtifact & {
+  auditEvidence: FinanceExpenseExportSnapshot["manifest"];
+};
 // prettier-ignore
 export type FinanceExpenseReadModel = {
   categories(propertyId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceExpenseCategory[] }) | null>;
   expense(propertyId: string, expenseId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceExpense }) | null>;
   recurringRule(propertyId: string, ruleId: string): Promise<(FinanceExpenseEnvelope & { item: FinanceRecurringExpenseRule }) | null>;
   captureExport(propertyId: string, query: FinanceExpenseExportQuery): Promise<{ envelope: FinanceExpenseEnvelope; snapshot: FinanceExpenseExportSnapshot } | null>;
-  exportCsv(propertyId: string, currency: string, snapshot: FinanceExpenseExportSnapshot): Promise<FinanceExpenseCsvArtifact | null>;
+  exportCsv(propertyId: string, currency: string, snapshot: FinanceExpenseExportSnapshot): Promise<FinanceExpenseExportArtifact | null>;
   expenses(propertyId: string, query: FinanceExpenseQuery): Promise<FinanceExpensesReadResponse | null>; close(): Promise<void>;
 };
 export class FinanceExpenseCursorError extends TypeError {
@@ -170,7 +173,7 @@ export function createPgFinanceExpenseReadModel(config: { connectionString?: str
         const { paymentStatus: _, paidOn: __, revision: ___, ...stable } = expense(row);
         return selected.paymentStatus === "paid" ? { ...stable, revision: selected.revision, categoryName: selected.categoryName, paymentStatus: "paid", paidOn: selected.paidOn! } : { ...stable, revision: selected.revision, categoryName: selected.categoryName, paymentStatus: "unpaid", paidOn: null };
       });
-      return buildFinanceExpenseCsvArtifact({ propertyId, currency, expenses });
+      return { ...buildFinanceExpenseCsvArtifact({ propertyId, currency, expenses }), auditEvidence: snapshot.manifest };
     },
     async close() { if (ownsPool) await pool.end?.(); },
   };
