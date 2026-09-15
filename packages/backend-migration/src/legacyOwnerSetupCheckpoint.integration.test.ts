@@ -8,6 +8,8 @@ import { writeLegacyOwnerSetupCheckpoint } from "./legacyOwnerSetupCheckpoint.js
 import { lockAndCheckLegacyOwnerSetupTargets } from "./legacyOwnerSetupTargetLocks.js";
 import { inspectLegacyOwnerSetupReplay } from "./legacyOwnerSetupReplay.js";
 import { prepareLegacyOwnerSetupTransaction } from "./legacyOwnerSetupTransaction.js";
+import { prepareLegacyOwnerSetupVerifiedTargetTransaction } from "./legacyOwnerSetupVerifiedTargetTransaction.js";
+import type { LegacyOwnerSetupTargetIdentity } from "./legacyOwnerSetupTargetIdentity.js";
 import { verifyLegacyOwnerTargetAbsence } from "./legacyOwnerTargetAbsence.js";
 import { parseLegacyOwnerSetupCommand } from "./legacyOwnerSetupCommand.js";
 import { hashLegacyOwnerSetupEnvelope } from "./legacyOwnerSetupApprovals.js";
@@ -42,7 +44,7 @@ const command = () => ({
   environment: "local",
   issuedAt: "2026-09-15T01:01:00.000Z",
   expiresAt: "2026-09-15T01:15:00.000Z",
-  targetDatabaseSha256: sha,
+  targetDatabaseSha256: expected.targetDatabaseSha256,
   sourceRunId: expected.source.sourceRunId,
   sourceLedgerSha256: sha,
   owners: expected.source.owners.map((source, i) => ({
@@ -158,6 +160,250 @@ const transactionFixture = (alter?: (row: Record<string, unknown>, i: number) =>
     },
   };
 };
+
+const verifiedUrl = process.env.VAY2017_VERIFIED_TARGET_TEST_DATABASE_URL;
+describe.skipIf(!verifiedUrl)("same-client verified target transaction as restricted LOGIN", () => {
+  let admin: pg.Client, executor: pg.Client, identity: LegacyOwnerSetupTargetIdentity;
+  let fixture: ReturnType<typeof transactionFixture>;
+  const hashes = () =>
+    command().owners.map((o) => createHash("sha256").update(o.email).digest("hex"));
+  beforeAll(async () => {
+    const parsed = new URL(verifiedUrl!);
+    if (
+      !["postgres:", "postgresql:"].includes(parsed.protocol) ||
+      parsed.hostname !== "127.0.0.1" ||
+      !["56634", "56635"].includes(parsed.port) ||
+      parsed.pathname !== "/vay2017_verified_target_test" ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error("Dedicated verified target fixture required");
+    admin = new pg.Client({ connectionString: verifiedUrl });
+    await admin.connect();
+    expect(
+      (await admin.query("SELECT 1 FROM pg_namespace WHERE nspname='identity'")).rowCount,
+    ).toBe(0);
+    expect(
+      (
+        await runMigrations({
+          connectionString: verifiedUrl!,
+          migrationsDir: join(import.meta.dirname, "../migrations"),
+          environment: "local",
+        })
+      ).failed,
+    ).toBeNull();
+    await admin.query(planLegacyOwnerEmailIndex(hashes()).sql);
+    await admin.query(`CREATE ROLE vayada_migration_attestor NOLOGIN;
+      CREATE ROLE vay2017_setup_executor LOGIN;
+      CREATE SCHEMA vayada_migration_evidence AUTHORIZATION vayada_migration_attestor;
+      SET ROLE vayada_migration_attestor;
+      CREATE TABLE vayada_migration_evidence.database_attestations (
+        attestation_key text PRIMARY KEY, attestation_value text NOT NULL,
+        attested_at timestamptz NOT NULL DEFAULT now());
+      INSERT INTO vayada_migration_evidence.database_attestations VALUES
+        ('vayada.target_environment','local',now()),
+        ('vayada.target_identity_sha256',repeat('a',64),now());
+      GRANT USAGE ON SCHEMA vayada_migration_evidence TO vay2017_setup_executor;
+      GRANT SELECT ON vayada_migration_evidence.database_attestations TO vay2017_setup_executor;
+      RESET ROLE;
+      GRANT USAGE ON SCHEMA identity,platform TO vay2017_setup_executor;
+      GRANT SELECT,INSERT,UPDATE ON identity.users TO vay2017_setup_executor;
+      GRANT SELECT,UPDATE ON identity.external_identities TO vay2017_setup_executor;
+      GRANT SELECT,UPDATE ON platform.legacy_owner_approval_records TO vay2017_setup_executor;
+      GRANT SELECT ON platform.legacy_owner_approval_revocations TO vay2017_setup_executor;
+      GRANT SELECT,INSERT ON platform.legacy_owner_bootstrap_receipts TO vay2017_setup_executor`);
+    const row = (
+      await admin.query(
+        "SELECT current_database() AS name, oid::int FROM pg_database WHERE datname=current_database()",
+      )
+    ).rows[0];
+    identity = {
+      contractVersion: "legacy-owner-setup-target-identity.v1",
+      environment: "local",
+      targetIdentitySha256: sha,
+      databaseName: row.name,
+      databaseOid: row.oid,
+    };
+    expected.targetDatabaseSha256 = hashLegacyOwnerSetupValue("target-database-identity", identity);
+    fixture = transactionFixture();
+    await admin.query(
+      "INSERT INTO identity.users(id,email) VALUES($1,'approver@example.invalid')",
+      [id(90)],
+    );
+    for (const [i, authority] of ["migration_owner", "security_owner"].entries())
+      await admin.query(
+        `INSERT INTO platform.legacy_owner_approval_records
+        (approval_record_id,command_id,contract_version,environment,envelope_sha256,authority,actor_user_id,approved_at,expires_at)
+        VALUES($1,$2,'legacy-owner-internal-setup.v1','local',$3,$4,$5,$6,$7)`,
+        [
+          id(91 + i),
+          id(99),
+          hashLegacyOwnerSetupEnvelope(fixture.request.envelopePayload),
+          authority,
+          id(90),
+          command().issuedAt,
+          command().expiresAt,
+        ],
+      );
+    parsed.username = "vay2017_setup_executor";
+    executor = new pg.Client({ connectionString: parsed.toString() });
+    await executor.connect();
+  }, 120_000);
+  beforeEach(async () => {
+    await executor.query("BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'");
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await executor.query("ROLLBACK");
+  });
+  afterAll(async () => {
+    await executor?.end();
+    await admin?.end();
+    expected.targetDatabaseSha256 = sha;
+  });
+  const prepare = (
+    artifact: unknown = identity,
+    chosen = fixture,
+    context = expected,
+    clock = () => now,
+  ) =>
+    prepareLegacyOwnerSetupVerifiedTargetTransaction(
+      artifact,
+      executor,
+      chosen.request,
+      context,
+      chosen.artifacts,
+      chosen.trust,
+      policy,
+      hashes(),
+      chosen.targetArtifacts,
+      clock,
+    );
+  const counts = async () =>
+    (
+      await executor.query(`SELECT
+      (SELECT count(*)::int FROM identity.users WHERE id<> '${id(90)}') AS owners,
+      (SELECT count(*)::int FROM platform.legacy_owner_bootstrap_receipts) AS receipts`)
+    ).rows[0];
+  it("uses actual restricted login through identity, signed approvals, absence and atomic checkpoint/replay", async () => {
+    expect(
+      (
+        await executor.query(
+          "SELECT session_user=current_user AS same, rolsuper FROM pg_roles WHERE rolname=current_user",
+        )
+      ).rows[0],
+    ).toEqual({ same: true, rolsuper: false });
+    expect(await prepare()).toHaveProperty("outcome", "checkpoint_written_uncommitted");
+    expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+    expect(
+      (await executor.query("SELECT DISTINCT status FROM identity.users WHERE id<>$1", [id(90)]))
+        .rows,
+    ).toEqual([{ status: "pending" }]);
+    expect(await prepare()).toHaveProperty("outcome", "matching_receipt_found");
+    expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+    expect(
+      (await admin.query("SELECT count(*)::int AS n FROM platform.legacy_owner_bootstrap_receipts"))
+        .rows[0].n,
+    ).toBe(0);
+    await expect(
+      admin.query(
+        "BEGIN; LOCK TABLE vayada_migration_evidence.database_attestations IN ACCESS EXCLUSIVE MODE NOWAIT",
+      ),
+    ).rejects.toHaveProperty("code", "55P03");
+    await admin.query("ROLLBACK");
+  });
+  it.each(["databaseName", "databaseOid", "targetIdentitySha256", "environment"])(
+    "denies changed target %s before approval locks",
+    async (field) => {
+      const changed = {
+        ...identity,
+        [field]: field === "databaseOid" ? identity.databaseOid + 1 : "wrong",
+      };
+      const spy = vi.spyOn(executor, "query");
+      await expect(prepare(changed)).rejects.toThrow("LEGACY_OWNER_VERIFIED_TARGET_INVALID");
+      expect(spy.mock.calls.some(([sql]) => String(sql).includes("FOR UPDATE"))).toBe(false);
+      expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+    },
+  );
+  it("rejects independent digest drift rather than accepting the artifact's own hash", async () => {
+    await expect(
+      prepare(identity, fixture, { ...expected, targetDatabaseSha256: sha }),
+    ).rejects.toThrow("LEGACY_OWNER_VERIFIED_TARGET_INVALID");
+    expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+  });
+  it("denies invalid source, signature, target artifact and approval without writes", async () => {
+    for (const mode of ["source", "signature", "absence", "approval"]) {
+      const changed = transactionFixture();
+      if (mode === "source") changed.artifacts[0]!.detachedSignature = "invalid";
+      if (mode === "signature") changed.request.detachedSignature = "invalid";
+      if (mode === "absence") changed.targetArtifacts[0] += " ";
+      if (mode === "approval") {
+        const value = JSON.parse(changed.request.commandPayload);
+        value.commandId = id(98);
+        changed.request = signedRequest(value);
+      }
+      await expect(prepare(identity, changed)).rejects.toThrow(
+        "LEGACY_OWNER_VERIFIED_TARGET_INVALID",
+      );
+      expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+    }
+  });
+  it("rejects executor-writable protected attestation", async () => {
+    await admin.query(
+      "GRANT UPDATE ON vayada_migration_evidence.database_attestations TO vay2017_setup_executor",
+    );
+    try {
+      await expect(prepare()).rejects.toThrow("LEGACY_OWNER_VERIFIED_TARGET_INVALID");
+    } finally {
+      await admin.query(
+        "REVOKE UPDATE ON vayada_migration_evidence.database_attestations FROM vay2017_setup_executor",
+      );
+    }
+    expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+  });
+  it("captures submitted identity before asynchronous work", async () => {
+    const submitted = { ...identity };
+    const original = executor.query.bind(executor);
+    vi.spyOn(executor, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+      if (sql === "SAVEPOINT vay2017_verified_target") submitted.databaseOid++;
+      return original(sql, values);
+    }) as typeof executor.query);
+    expect(await prepare(submitted)).toHaveProperty("outcome", "checkpoint_written_uncommitted");
+  });
+  it("rolls back a write-time failure and rechecks identity even on exact replay", async () => {
+    await executor.query(
+      `INSERT INTO identity.users(id,email,status) VALUES('${id(1)}','new-conflict@example.invalid','suspended')`,
+    );
+    await expect(prepare()).rejects.toThrow("LEGACY_OWNER_VERIFIED_TARGET_INVALID");
+    expect(await counts()).toEqual({ owners: 1, receipts: 0 });
+    await executor.query(
+      "ROLLBACK; BEGIN; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'",
+    );
+    expect(await prepare()).toHaveProperty("outcome", "checkpoint_written_uncommitted");
+    await expect(prepare({ ...identity, databaseOid: identity.databaseOid + 1 })).rejects.toThrow(
+      "LEGACY_OWNER_VERIFIED_TARGET_INVALID",
+    );
+    expect(await counts()).toEqual({ owners: 8, receipts: 1 });
+  });
+  it("rolls back both users and receipt when evidence expires after persistence", async () => {
+    let written = false;
+    const original = executor.query.bind(executor);
+    vi.spyOn(executor, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+      const result = await original(sql, values);
+      if (sql === "RELEASE SAVEPOINT vay2017_setup_checkpoint") written = true;
+      return result;
+    }) as typeof executor.query);
+    await expect(
+      prepare(identity, fixture, expected, () => (written ? new Date(command().expiresAt) : now)),
+    ).rejects.toThrow("LEGACY_OWNER_VERIFIED_TARGET_INVALID");
+    expect(written).toBe(true);
+    expect(await counts()).toEqual({ owners: 0, receipts: 0 });
+    for (const table of ["organizations", "organization_memberships", "external_identities"])
+      expect(
+        (await admin.query(`SELECT count(*)::int AS n FROM identity.${table}`)).rows[0].n,
+      ).toBe(0);
+  });
+});
 
 // Actual storage-stage calls with synthetic input, NOT an approved executor.
 describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL", () => {
