@@ -7,6 +7,7 @@ import { planLegacyOwnerEmailIndex } from "./legacyOwnerEmailIndexPlan.js";
 import { writeLegacyOwnerSetupCheckpoint } from "./legacyOwnerSetupCheckpoint.js";
 import { lockAndCheckLegacyOwnerSetupTargets } from "./legacyOwnerSetupTargetLocks.js";
 import { inspectLegacyOwnerSetupReplay } from "./legacyOwnerSetupReplay.js";
+import { prepareLegacyOwnerSetupTransaction } from "./legacyOwnerSetupTransaction.js";
 import { parseLegacyOwnerSetupCommand } from "./legacyOwnerSetupCommand.js";
 import { hashLegacyOwnerSetupEnvelope } from "./legacyOwnerSetupApprovals.js";
 import { hashLegacyOwnerSetupValue } from "./legacyOwnerSetupReceiptHashes.js";
@@ -67,14 +68,14 @@ const policy = {
   ]),
   singleHumanDualAuthority: { actorUserId: id(90), decisionId: "synthetic-only" },
 };
-const signedRequest = () => {
-  const commandPayload = canonicalizeJson(command());
+const signedRequest = (value = command()) => {
+  const commandPayload = canonicalizeJson(value);
   const envelopePayload = canonicalizeJson({
-    contractVersion: command().contractVersion,
-    commandId: command().commandId,
+    contractVersion: value.contractVersion,
+    commandId: value.commandId,
     environment: "local",
-    issuedAt: command().issuedAt,
-    expiresAt: command().expiresAt,
+    issuedAt: value.issuedAt,
+    expiresAt: value.expiresAt,
     commandSha256: parseLegacyOwnerSetupCommand(commandPayload, expected, now).commandSha256,
     migrationApprovalRecordId: id(91),
     securityApprovalRecordId: id(92),
@@ -89,6 +90,50 @@ const signedRequest = () => {
       Buffer.from(`vayada:legacy-owner-internal-setup:v1\0envelope\0${envelopePayload}`),
       signingKeys.privateKey,
     ).toString("base64url"),
+  };
+};
+const sourceKeys = generateKeyPairSync("ed25519");
+const transactionFixture = () => {
+  const value = command();
+  const artifacts = value.owners.map((owner) => {
+    const row = {
+      contractVersion: "legacy-owner-current-source.v1",
+      environment: "local",
+      sourceRunId: value.sourceRunId,
+      sourceLedgerSha256: value.sourceLedgerSha256,
+      ownerId: owner.ownerId,
+      hotelId: owner.hotelId,
+      authDatabaseSha256: sha,
+      pmsDatabaseSha256: sha,
+      authObservedAt: owner.observedAt,
+      pmsObservedAt: owner.observedAt,
+      sourceStatus: "pending",
+      email: owner.email,
+      name: owner.name,
+      signingKeyId: "source-fixture",
+    };
+    owner.currentEvidenceSha256 = hashLegacyOwnerSetupValue("current-source-evidence", row);
+    const canonicalPayload = canonicalizeJson(row);
+    return {
+      canonicalPayload,
+      detachedSignature: sign(
+        null,
+        Buffer.from(
+          `vayada:legacy-owner-internal-setup:v1\0current-source-attestation\0${canonicalPayload}`,
+        ),
+        sourceKeys.privateKey,
+      ).toString("base64url"),
+    };
+  });
+  return {
+    request: signedRequest(value),
+    artifacts,
+    trust: {
+      environment: "local",
+      authDatabaseSha256: sha,
+      pmsDatabaseSha256: sha,
+      verificationKeys: new Map([["source-fixture", sourceKeys.publicKey]]),
+    },
   };
 };
 
@@ -190,6 +235,120 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
     (SELECT count(*)::int FROM identity.users) AS users,
     (SELECT count(*)::int FROM platform.legacy_owner_bootstrap_receipts) AS receipts`)
     ).rows[0];
+
+  const prepare = (fixture = transactionFixture(), clock = () => now) =>
+    prepareLegacyOwnerSetupTransaction(
+      client,
+      fixture.request,
+      expected,
+      fixture.artifacts,
+      fixture.trust,
+      policy,
+      scope(),
+      clock,
+    );
+  it("composes source signatures, approvals, guards and checkpoint, then replays without another write", async () => {
+    const fixture = transactionFixture();
+    await seedApprovals(fixture.request);
+    expect(await prepare(fixture)).toEqual({
+      outcome: "checkpoint_written_uncommitted",
+      commandId: id(99),
+    });
+    expect(await counts()).toEqual({ users: 9, receipts: 1 });
+    expect(await counts(observer)).toEqual({ users: 0, receipts: 0 });
+    const spy = vi.spyOn(client, "query");
+    expect(await prepare(fixture)).toMatchObject({
+      outcome: "matching_receipt_found",
+      receipt: { commandId: id(99) },
+    });
+    expect(spy.mock.calls.some(([sql]) => String(sql).includes("LOCK TABLE identity."))).toBe(
+      false,
+    );
+    expect(await counts()).toEqual({ users: 9, receipts: 1 });
+    for (const table of ["organizations", "organization_memberships", "external_identities"])
+      expect(
+        (await client.query(`SELECT count(*)::int AS n FROM identity.${table}`)).rows[0].n,
+      ).toBe(0);
+  });
+  it("rejects invalid source attestation before any database statement", async () => {
+    const fixture = transactionFixture();
+    fixture.artifacts[0]!.detachedSignature = "invalid";
+    const spy = vi.spyOn(client, "query");
+    await expect(prepare(fixture)).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it.each([
+    "missing approval",
+    "revocation",
+    "target conflict",
+    "receipt failure",
+    "post-write expiry",
+  ])("rolls back the composed operation on %s without losing earlier caller work", async (mode) => {
+    const fixture = transactionFixture();
+    if (mode === "missing approval") await configureGuard();
+    else await seedApprovals(fixture.request);
+    if (mode === "revocation")
+      await client.query(
+        "INSERT INTO platform.legacy_owner_approval_revocations VALUES($1,$2,$3,$4,now())",
+        [id(91), id(90), now, sha],
+      );
+    if (mode === "target conflict")
+      await client.query(
+        "INSERT INTO identity.users(id,email,status) VALUES($1,'conflict@example.invalid','suspended')",
+        [id(1)],
+      );
+    if (mode === "receipt failure")
+      await client.query(`CREATE FUNCTION public.transaction_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'private detail'; END $$;
+          CREATE TRIGGER transaction_fixture BEFORE INSERT ON platform.legacy_owner_bootstrap_receipts FOR EACH ROW EXECUTE FUNCTION public.transaction_fixture()`);
+    let wrote = false;
+    const original = client.query.bind(client);
+    vi.spyOn(client, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+      const result = await original(sql, values);
+      if (sql.includes("RELEASE SAVEPOINT vay2017_setup_checkpoint")) wrote = true;
+      return result;
+    }) as typeof client.query);
+    const before = await counts();
+    await expect(
+      prepare(fixture, () =>
+        mode === "post-write expiry" && wrote ? new Date(command().expiresAt) : now,
+      ),
+    ).rejects.toThrow(/^LEGACY_OWNER_SETUP_TRANSACTION_INVALID$/);
+    expect(await counts()).toEqual(before);
+    expect(await counts(observer)).toEqual({ users: 0, receipts: 0 });
+  });
+  it("captures protected evidence and scope before asynchronous database work", async () => {
+    const fixture = transactionFixture();
+    await seedApprovals(fixture.request);
+    const original = client.query.bind(client);
+    vi.spyOn(client, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+      if (sql === "SAVEPOINT vay2017_setup_transaction") {
+        fixture.request.commandPayload = "invalid";
+        fixture.request.verificationKeys.clear();
+        fixture.artifacts[0]!.canonicalPayload = "invalid";
+        fixture.trust.verificationKeys.clear();
+      }
+      return original(sql, values);
+    }) as typeof client.query);
+    expect(await prepare(fixture)).toHaveProperty("outcome", "checkpoint_written_uncommitted");
+  });
+  it("denies autocommit before preparing users", async () => {
+    await client.query("ROLLBACK");
+    await expect(prepare()).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
+    expect(await counts()).toEqual({ users: 0, receipts: 0 });
+  });
+  it("requires connection disposal when its rollback cannot be confirmed", async () => {
+    const fixture = transactionFixture();
+    await configureGuard();
+    const original = client.query.bind(client);
+    vi.spyOn(client, "query").mockImplementation((async (sql: string, values?: unknown[]) => {
+      if (sql === "ROLLBACK TO SAVEPOINT vay2017_setup_transaction")
+        throw new Error("private connection detail");
+      return original(sql, values);
+    }) as typeof client.query);
+    await expect(prepare(fixture)).rejects.toThrow(
+      /^LEGACY_OWNER_SETUP_TRANSACTION_ROLLBACK_FAILED$/,
+    );
+  });
 
   it("composes signed approval checks, target guard, checkpoint and exact receipt lookup", async () => {
     const request = signedRequest();
@@ -547,21 +706,24 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
   });
   // Last: committed synthetic state remains only in this disposable database.
   it("serializes same-command callers and returns the first committed receipt to the waiter", async () => {
-    const request = signedRequest();
-    await seedApprovals(request);
+    const fixture = transactionFixture();
+    await seedApprovals(fixture.request);
     await client.query("COMMIT; BEGIN");
     await configureGuard();
-    const first = await inspect(request);
+    expect(await prepare(fixture)).toHaveProperty("outcome", "checkpoint_written_uncommitted");
     const holder = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
     const waiter = (await observer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
     await observer.query(
       "BEGIN; SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '6s'",
     );
-    const pending = inspectLegacyOwnerSetupReplay(
+    const pending = prepareLegacyOwnerSetupTransaction(
       observer,
-      request,
+      fixture.request,
       expected,
+      fixture.artifacts,
+      fixture.trust,
       policy,
+      scope(),
       () => now,
     ).then(
       (result) => result.outcome,
@@ -580,14 +742,6 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
           { timeout: 2_000 },
         )
         .toBe(true);
-      await guard();
-      await writeLegacyOwnerSetupCheckpoint(
-        client,
-        request.commandPayload,
-        expected,
-        first.audit,
-        now,
-      );
       await client.query("COMMIT");
       expect(await pending).toBe("matching_receipt_found");
       expect(await counts()).toEqual({ users: 9, receipts: 1 });

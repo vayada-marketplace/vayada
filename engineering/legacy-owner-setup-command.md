@@ -137,3 +137,28 @@ even for a matching receipt; later historical audit access is a separate operati
 The helper rejects active receipt RLS and rechecks request expiry after reads.
 Failure rolls back its own savepoint; the caller must roll back all, or discard the
 connection if rollback failed. No runtime/CLI is wired and VAY-2017 remains open.
+
+## Uncommitted transaction composition
+
+`prepareLegacyOwnerSetupTransaction` captures protected inputs before I/O and
+verifies current-source signatures before any SQL. In one caller-owned savepoint
+it runs locked approval/replay inspection, then (only without a receipt) the
+target/index guard and atomic pending-user checkpoint. Source/request expiry is
+checked again before persistence and afterward; post-write expiry rolls back both
+users and receipt. Exact replay returns the restricted receipt without requiring
+the now-existing users to be absent. Errors contain no contacts or SQL details.
+
+This is an internal composition, not the authorized runner: it inherits the
+requirement to independently authenticate historical ledger/rows, actual target
+database identity, reviewed target-before artifacts and the eight-email scope.
+No boolean/callback can waive those missing runtime integrations. Reuse the scoped
+historical source reader in a separate read-only transaction; do not read source
+databases or call providers while target locks are held. Exact target identity and
+before-state artifact contracts still need implementation before runtime wiring.
+
+The caller owns a dedicated bounded READ COMMITTED transaction and must retain
+all locks until completion, recheck freshness immediately before committing and
+roll back the entire transaction on failure. Rollback failure requires discarding
+the connection. A checkpoint result is uncommitted; a matching receipt can also
+be visible inside the caller's own uncommitted transaction. Neither is proof of
+durability, provider preparation, hotel access or production readiness.
