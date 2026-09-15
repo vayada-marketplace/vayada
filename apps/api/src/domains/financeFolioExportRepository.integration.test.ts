@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // prettier-ignore
-import { FINANCE_FOLIO_EXPORT_TTL_MS, createPgFinanceFolioExportJobRepository, parseFinanceFolioExportJobPayload } from "./financeFolioExportRepository.js";
+import { FINANCE_FOLIO_EXPORT_TTL_MS, createKmsFinanceFolioExportSearchDigest, createPgFinanceFolioExportJobRepository, parseFinanceFolioExportJobPayload } from "./financeFolioExportRepository.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
 const SEARCH_DIGEST_KEY = "VAY-1134-test-search-digest-key!";
@@ -15,10 +15,14 @@ if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathna
 
 describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
   const admin = new pg.Client({ connectionString: URL ?? "postgresql://disabled" });
+  let searchDigestCalls = 0,
+    searchDigestFails = false;
   // prettier-ignore
-  const repository = createPgFinanceFolioExportJobRepository({ connectionString: URL ?? "postgresql://disabled", searchDigestKey: SEARCH_DIGEST_KEY });
+  const repository = createPgFinanceFolioExportJobRepository({ connectionString: URL ?? "postgresql://disabled", searchDigest: async (search) => { searchDigestCalls += 1; if (searchDigestFails) throw new Error("KMS unavailable"); return createHmac("sha256", SEARCH_DIGEST_KEY).update(search).digest("hex"); } });
   beforeAll(async () => admin.connect());
   beforeEach(async () => {
+    searchDigestCalls = 0;
+    searchDigestFails = false;
     await cleanup();
     await admin.query(`INSERT INTO identity.users(id,email,name,status) VALUES('${ACTOR}','folio-export@example.test','Folio export','active'); INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES('${ORG}','hotel_group','Export org','folio-export-org','active'),('${ORG_B}','hotel_group','Other org','folio-export-other','active'); INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES('${ORG}','${ACTOR}','active','owner','agency'),('${ORG_B}','${ACTOR}','active','owner','agency');
       INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES('${PROPERTY_A}','folio-export-a','Export A'),('${PROPERTY_B}','folio-export-b','Export B'); INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES('${ORG}','pms','pms_property','${PROPERTY_A}','owner','active'),('${ORG}','pms','pms_property','${PROPERTY_B}','owner','active'); INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES('${PROPERTY_A}','EUR'),('${PROPERTY_B}','EUR')`);
@@ -30,10 +34,34 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
     const shared = command("shared");
     const results = await Promise.all([repository.enqueue(shared), repository.enqueue(shared)]);
     expect(results.map(({ status }) => status).sort()).toEqual(["created", "replayed"]);
+    expect(searchDigestCalls).toBe(1);
     // prettier-ignore
     expect(results[0]).toMatchObject({ exportId: results[1]!.status === "conflict" ? "" : results[1]!.exportId });
     // prettier-ignore
-    await expect(repository.enqueue({ ...shared, audit: { ...shared.audit, requestId: "retry", correlationId: "retry", requestedAt: "2026-08-21T11:00:00.000Z" } })).resolves.toMatchObject({ status: "replayed" });
+    searchDigestFails = true;
+    await expect(
+      repository.enqueue({
+        ...shared,
+        audit: {
+          ...shared.audit,
+          requestId: "retry",
+          correlationId: "retry",
+          requestedAt: "2026-08-21T11:00:00.000Z",
+        },
+      }),
+    ).resolves.toMatchObject({ status: "replayed" });
+    expect(searchDigestCalls).toBe(1);
+    const currencyReplay = command("shared");
+    currencyReplay.currency =
+      currencyReplay.snapshot.currency =
+      currencyReplay.envelope.currency =
+        "USD";
+    await expect(repository.enqueue(currencyReplay)).resolves.toMatchObject({
+      status: "replayed",
+      envelope: { currency: "EUR" },
+    });
+    expect(searchDigestCalls).toBe(1);
+    searchDigestFails = false;
     const changed = command("shared");
     // prettier-ignore
     changed.filters = changed.snapshot.filters = { state: "ready", search: "changed", sort: "createdAt_desc" };
@@ -109,7 +137,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
   });
 
   // prettier-ignore
-  function command(key: string, propertyId = PROPERTY_A, manifest: Array<{ folioId: string; revisionId: string; revision: number; sourceDigest: string }> = []) { const filters = { state: "ready" as const, search: "guest@example.test", sort: "createdAt_desc" as const }; return { commandId: REVISION, idempotencyKey: `VAY-1134-${key}`, organizationId: ORG, propertyId, currency: "EUR", filters, snapshot: { formatVersion: "pms-financials-folios.v1" as const, propertyId, currency: "EUR", filters, snapshotAt: new Date(Date.now() - 60_000).toISOString(), manifest }, audit: { actorUserId: ACTOR, requestId: `request-${key}`, correlationId: `correlation-${key}`, causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z" } }; }
+  function command(key: string, propertyId = PROPERTY_A, manifest: Array<{ folioId: string; revisionId: string; revision: number; sourceDigest: string }> = []) { const filters = { state: "ready" as const, search: "guest@example.test", sort: "createdAt_desc" as const }; return { commandId: REVISION, idempotencyKey: `VAY-1134-${key}`, organizationId: ORG, propertyId, currency: "EUR", filters, snapshot: { formatVersion: "pms-financials-folios.v1" as const, propertyId, currency: "EUR", filters, snapshotAt: new Date(Date.now() - 60_000).toISOString(), manifest }, envelope: { contractVersion: "pms-financials.v1" as const, propertyId, currency: "EUR", timeZone: "Europe/Berlin", generatedAt: "2026-08-21T10:00:00.000Z", sourceFreshness: { pmsPricing: "2026-08-21T09:00:00.000Z" }, incompleteEvidence: [] }, audit: { actorUserId: ACTOR, requestId: `request-${key}`, correlationId: `correlation-${key}`, causationId: CAUSE, requestedAt: "2026-08-21T10:00:00.000Z" } }; }
   // prettier-ignore
   async function cleanup() { await admin.query(`BEGIN; SET LOCAL session_replication_role=replica; DELETE FROM platform.product_audit_events WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.jobs WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM platform.idempotency_keys WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_payment_references WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_lines WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folio_revisions WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM finance.folios WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY_A}','${PROPERTY_B}'); DELETE FROM identity.organization_resource_links WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organization_memberships WHERE organization_id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.organizations WHERE id IN ('${ORG}','${ORG_B}'); DELETE FROM identity.users WHERE id='${ACTOR}'; COMMIT`); }
 });
@@ -147,6 +175,21 @@ it("binds job payloads to durable scope, fingerprint, timestamps, and expiry", (
   const extended = { ...payload, expiresAt: "2026-08-22T10:00:00.001Z" };
   // prettier-ignore
   expect(() => parseFinanceFolioExportJobPayload(extended, { ...expected, expiresAt: extended.expiresAt, payloadFingerprint: fingerprint(extended) })).toThrow();
+});
+
+it("uses the configured KMS MAC key for search redaction", async () => {
+  const mac = Uint8Array.from({ length: 32 }, (_, index) => index);
+  const generateMac = vi.fn(async () => ({ Mac: mac }));
+  const digest = createKmsFinanceFolioExportSearchDigest({
+    kms: { generateMac },
+    keyArn: "test-key",
+  });
+  await expect(digest("Guest@example.test")).resolves.toBe(Buffer.from(mac).toString("hex"));
+  expect(generateMac).toHaveBeenCalledWith({
+    KeyId: "test-key",
+    MacAlgorithm: "HMAC_SHA_256",
+    Message: Buffer.from("finance-folio-export-search-v1\0Guest@example.test"),
+  });
 });
 
 // prettier-ignore

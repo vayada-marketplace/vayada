@@ -1,6 +1,6 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 // prettier-ignore
-import { FINANCE_FOLIO_CSV_VERSION, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
+import { FINANCE_FOLIO_CSV_VERSION, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
 import pg, { type PoolClient } from "pg";
 export const FINANCE_FOLIO_EXPORT_QUEUE = "finance.financials-exports";
 export const FINANCE_FOLIO_EXPORT_JOB = "finance.folio-csv-export.v1";
@@ -11,28 +11,30 @@ export type FinanceFolioExportAudit = { actorUserId: string; requestId: string; 
 // prettier-ignore
 export type FinanceFolioExportJobPayload = { commandId: string; organizationId: string; snapshot: FinanceFolioExportSnapshot; expiresAt: string };
 // prettier-ignore
-export type FinanceFolioExportEnqueueResult = { status: "created" | "replayed"; exportId: string } | { status: "conflict" };
+export type FinanceFolioExportEnqueueResult = { status: "created" | "replayed"; exportId: string; envelope: FinanceFolioEnvelope } | { status: "conflict" };
 // prettier-ignore
-type Command = { commandId: string; idempotencyKey: string; organizationId: string; propertyId: string; currency: string; filters: FinanceFolioExportFilters; snapshot: FinanceFolioExportSnapshot; audit: FinanceFolioExportAudit };
+export type FinanceFolioExportCommand = { commandId: string; idempotencyKey: string; organizationId: string; propertyId: string; currency: string; filters: FinanceFolioExportFilters; snapshot: FinanceFolioExportSnapshot; envelope: FinanceFolioEnvelope; audit: FinanceFolioExportAudit };
 // prettier-ignore
 type ExpectedPayload = { organizationId: string; propertyId: string; currency: string; payloadFingerprint: string; acceptedAt: string; snapshotAt: string; expiresAt: string; now: Date };
+// prettier-ignore
+type MacPort = { generateMac(input: { KeyId: string; MacAlgorithm: "HMAC_SHA_256"; Message: Uint8Array }): Promise<{ Mac?: Uint8Array }> };
 
 // prettier-ignore
-export function createPgFinanceFolioExportJobRepository(config: { connectionString?: string; pool?: pg.Pool; searchDigestKey: string }) {
+export function createPgFinanceFolioExportJobRepository(config: { connectionString?: string; pool?: pg.Pool; searchDigest(search: string): Promise<string> }) {
   if (!config.pool && !config.connectionString?.trim())
     throw new Error("Finance folio export jobs require a connection string");
-  if (Buffer.byteLength(config.searchDigestKey) < 32)
-    throw new Error("Finance folio export jobs require a search digest key");
+  if (typeof config.searchDigest !== "function")
+    throw new Error("Finance folio export jobs require a search digester");
   const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 3 });
   return {
-    async enqueue(input: Command): Promise<FinanceFolioExportEnqueueResult> {
+    async enqueue(input: FinanceFolioExportCommand): Promise<FinanceFolioExportEnqueueResult> {
       const filters = parseFinanceFolioExportFilters(input.filters);
       const snapshot = parseFinanceFolioExportSnapshot(input.snapshot);
       if (!filters || !snapshot || !validCommand(input, filters, snapshot))
         throw new TypeError("Invalid folio export command");
       const keyHash = hash(input.idempotencyKey);
       // prettier-ignore
-      const requestFingerprint = hash(JSON.stringify([input.commandId, input.organizationId, input.propertyId, input.currency, filters]));
+      const requestFingerprint = hash(JSON.stringify([input.commandId, input.organizationId, input.propertyId, filters]));
       return transaction(pool, async (client) => {
         if (!(await authorizedScope(client, input))) throw new TypeError("Invalid folio export command");
         const exportId = randomUUID();
@@ -52,8 +54,9 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
         );
         if (!inserted.rowCount) {
           const prior = (
-            await client.query<{ fingerprint: string; exportId: string }>(
-              `SELECT i.request_fingerprint_hash AS fingerprint,i.response_resource_id AS "exportId"
+            await client.query<{ fingerprint: string; exportId: string; envelope: FinanceFolioEnvelope }>(
+              `SELECT i.request_fingerprint_hash AS fingerprint,i.response_resource_id AS "exportId",
+                 j.job_metadata->'responseEnvelope' AS envelope
                FROM platform.idempotency_keys i JOIN platform.jobs j
                  ON j.id::text=i.response_resource_id AND j.property_id=i.property_id
                WHERE i.operation_scope='finance' AND i.operation=$1 AND i.key_hash=$2
@@ -67,12 +70,18 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
             )
           ).rows[0];
           return prior?.fingerprint === requestFingerprint && uuid(prior.exportId)
-            ? { status: "replayed", exportId: prior.exportId }
+            ? { status: "replayed", exportId: prior.exportId, envelope: prior.envelope }
             : { status: "conflict" };
         }
         const { acceptedAt, expiresAt } = inserted.rows[0]!;
         if (new Date(snapshot.snapshotAt).getTime() > new Date(acceptedAt).getTime())
           throw new TypeError("Invalid folio export command");
+        const redactedPayload = await redacted(
+          config.searchDigest,
+          input.currency,
+          filters,
+          snapshot,
+        );
         // prettier-ignore
         const payload: FinanceFolioExportJobPayload = { commandId: input.commandId, organizationId: input.organizationId, snapshot, expiresAt };
         const payloadFingerprint = hash(JSON.stringify(payload));
@@ -80,7 +89,7 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
         // prettier-ignore
         const lineage = { actorUserId: input.audit.actorUserId, organizationId: input.organizationId, requestId: input.audit.requestId, correlationId: input.audit.correlationId, causationId: input.audit.causationId, requestedAt: input.audit.requestedAt };
         // prettier-ignore
-        const jobMetadata = { acceptedAt, expiresAt, formatVersion: FINANCE_FOLIO_CSV_VERSION, manifestDigest: hash(JSON.stringify(snapshot.manifest)), payloadFingerprint, snapshotAt: snapshot.snapshotAt, ...lineage };
+        const jobMetadata = { acceptedAt, expiresAt, formatVersion: FINANCE_FOLIO_CSV_VERSION, manifestDigest: hash(JSON.stringify(snapshot.manifest)), payloadFingerprint, responseEnvelope: input.envelope, snapshotAt: snapshot.snapshotAt, ...lineage };
         await client.query(
           `INSERT INTO platform.jobs
             (id,job_key,queue_name,job_type,status,max_attempts,tenant_scope,property_id,
@@ -101,14 +110,29 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
              'user',$4::uuid,'finance','financials_export',$5::text,$5::uuid,$5::uuid,$6,$7,
              $8::jsonb,$9::jsonb,'financial','confidential')`,
           // prettier-ignore
-          [`finance.financials-export:${exportId}:requested`, acceptedAt, input.propertyId, input.audit.actorUserId, exportId, input.audit.correlationId, input.audit.causationId, JSON.stringify(redacted(config.searchDigestKey, input.currency, filters, snapshot)), JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt })],
+          [`finance.financials-export:${exportId}:requested`, acceptedAt, input.propertyId, input.audit.actorUserId, exportId, input.audit.correlationId, input.audit.causationId, JSON.stringify(redactedPayload), JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt })],
         );
-        return { status: "created", exportId };
+        return { status: "created", exportId, envelope: input.envelope };
       });
     },
     async close() {
       if (!config.pool) await pool.end();
     },
+  };
+}
+
+export function createKmsFinanceFolioExportSearchDigest(config: { kms: MacPort; keyArn: string }) {
+  if (!config.keyArn.trim())
+    throw new Error("Finance folio export search digest requires a KMS key");
+  return async (search: string) => {
+    const result = await config.kms.generateMac({
+      KeyId: config.keyArn,
+      MacAlgorithm: "HMAC_SHA_256",
+      Message: Buffer.from(`finance-folio-export-search-v1\0${search}`),
+    });
+    if (!result.Mac || result.Mac.byteLength !== 32)
+      throw new Error("Finance folio export search digest failed");
+    return Buffer.from(result.Mac).toString("hex");
   };
 }
 // prettier-ignore
@@ -137,7 +161,7 @@ export function parseFinanceFolioExportJobPayload(value: unknown, expected: Expe
   return payload;
 }
 
-async function authorizedScope(client: PoolClient, input: Command) {
+async function authorizedScope(client: PoolClient, input: FinanceFolioExportCommand) {
   const result = await client.query(
     `SELECT 1 FROM hotel_catalog.properties property
      JOIN identity.organizations organization ON organization.id=$1::uuid AND organization.kind='hotel_group' AND organization.status='active'
@@ -156,7 +180,7 @@ async function authorizedScope(client: PoolClient, input: Command) {
   return (result.rowCount ?? 0) > 0;
 }
 // prettier-ignore
-function validCommand(input: Command, filters: FinanceFolioExportFilters, snapshot: FinanceFolioExportSnapshot) {
+function validCommand(input: FinanceFolioExportCommand, filters: FinanceFolioExportFilters, snapshot: FinanceFolioExportSnapshot) {
   return (
     uuid(input.commandId) &&
     uuid(input.organizationId) &&
@@ -165,6 +189,8 @@ function validCommand(input: Command, filters: FinanceFolioExportFilters, snapsh
     trimmed(input.idempotencyKey, 8, 200) &&
     snapshot.propertyId === input.propertyId &&
     snapshot.currency === input.currency &&
+    input.envelope.propertyId === input.propertyId &&
+    input.envelope.currency === input.currency &&
     JSON.stringify(snapshot.filters) === JSON.stringify(filters) &&
     uuid(input.audit.actorUserId) &&
     trimmed(input.audit.requestId, 1, 200) &&
@@ -197,14 +223,16 @@ function validWindow(row: Record<string, unknown>, snapshot: FinanceFolioExportS
 }
 
 // prettier-ignore
-function redacted(key: string, currency: string, filters: FinanceFolioExportFilters, snapshot: FinanceFolioExportSnapshot) {
+async function redacted(searchDigest: (search: string) => Promise<string>, currency: string, filters: FinanceFolioExportFilters, snapshot: FinanceFolioExportSnapshot) {
   const { search, ...safe } = filters;
+  const searchHash = search ? await searchDigest(search) : undefined;
+  if (searchHash && !/^[0-9a-f]{64}$/.test(searchHash)) throw new Error("Finance folio export search digest failed");
   return {
     currency,
     filters: {
       ...safe,
       searchPresent: Boolean(search),
-      ...(search ? { searchHash: createHmac("sha256", key).update(search).digest("hex") } : {}),
+      ...(searchHash ? { searchHash } : {}),
     },
     formatVersion: FINANCE_FOLIO_CSV_VERSION,
     manifestCount: snapshot.manifest.length,
