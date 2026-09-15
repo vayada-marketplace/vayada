@@ -7,6 +7,8 @@ import type {
   RequestContext,
   UpdateStaffAccessCommand,
   UpdateStaffStatusCommand,
+  TeamRoleCreateCommand,
+  TeamRoleChangeCommand,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
 import Fastify from "fastify";
@@ -47,6 +49,11 @@ function fakes() {
   const rosterOrganizations: string[] = [];
   const accessReads: string[][] = [];
   const roleReads: string[] = [];
+  const roleWrites: (TeamRoleCreateCommand | TeamRoleChangeCommand)[] = [];
+  let roleResult: Awaited<ReturnType<StaffInvitationRoutesOptions["roles"]["create"]>> = {
+    outcome: "created",
+    roleId: invitationId,
+  };
   let result: PersistResult = { outcome: "created", invitationId };
   let updateResult: UpdateResult = { outcome: "updated", membershipId: staffMembershipId };
   let statusResult: StatusResult = {
@@ -73,6 +80,10 @@ function fakes() {
     rosterOrganizations,
     accessReads,
     roleReads,
+    roleWrites,
+    setRoleResult(value: typeof roleResult) {
+      roleResult = value;
+    },
     setResult(value: PersistResult) {
       result = value;
     },
@@ -93,6 +104,14 @@ function fakes() {
         async list(id) {
           roleReads.push(id);
           return [];
+        },
+        async create(command) {
+          roleWrites.push(command);
+          return roleResult;
+        },
+        async change(command) {
+          roleWrites.push(command);
+          return roleResult;
         },
       },
       repository: {
@@ -210,6 +229,146 @@ async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
 describe("staff invitation routes", () => {
   let app: Awaited<ReturnType<typeof testApp>> | undefined;
   afterEach(async () => app?.close());
+
+  const roleBody = {
+    name: "Custom",
+    description: "Worker role",
+    defaultPermissions: ["pms.calendar.read"],
+  };
+  it.each(["POST", "PATCH", "DELETE"] as const)(
+    "builds a tenant-bound audited role command for %s",
+    async (method) => {
+      const fake = fakes();
+      fake.setRoleResult({
+        outcome: method === "POST" ? "created" : method === "PATCH" ? "updated" : "deleted",
+        roleId: invitationId,
+      });
+      app = await testApp(fake.options);
+      const response = await app.inject({
+        method,
+        url:
+          method === "POST"
+            ? "/api/identity/staff/roles"
+            : `/api/identity/staff/roles/${invitationId}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+        payload:
+          method === "POST"
+            ? roleBody
+            : method === "PATCH"
+              ? { ...roleBody, expectedRevision: "2" }
+              : { expectedRevision: "2" },
+      });
+      expect(response.statusCode).toBe(method === "POST" ? 201 : 200);
+      expect(fake.roleWrites).toHaveLength(1);
+      expect(fake.roleWrites[0]).toMatchObject({
+        idempotencyKey: `hotel:${organizationId}:role-command`,
+        payload: { organizationId },
+        audit: { actor: { kind: "user", organizationId } },
+      });
+      if (method !== "POST")
+        expect(fake.roleWrites[0]!.payload).toMatchObject({
+          roleId: invitationId,
+          expectedRevision: "2",
+          operation: method === "PATCH" ? "update" : "delete",
+        });
+    },
+  );
+
+  it.each(["POST", "PATCH", "DELETE"] as const)(
+    "denies manager role writes for %s",
+    async (method) => {
+      const fake = fakes();
+      app = await testApp(fake.options, { roleKey: "hotel_manager" });
+      const response = await app.inject({
+        method,
+        url:
+          method === "POST"
+            ? "/api/identity/staff/roles"
+            : `/api/identity/staff/roles/${invitationId}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(403);
+      expect(fake.roleWrites).toEqual([]);
+    },
+  );
+
+  it.each([
+    { ...roleBody, organizationId: "foreign" },
+    { ...roleBody, securityClass: "account_admin" },
+    { ...roleBody, presetKey: "agency_manager" },
+    { ...roleBody, sourceRoleId: "invalid" },
+    { ...roleBody, defaultPermissions: [1] },
+    { ...roleBody, name: " " },
+  ])("rejects invalid role creation fields %j", async (payload) => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(fake.roleWrites).toEqual([]);
+  });
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized role creation %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload: roleBody,
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.roleWrites).toEqual([]);
+  });
+
+  it.each([
+    "stale_revision",
+    "role_in_use",
+    "invalid_member_overrides",
+    "name_conflict",
+    "idempotency_conflict",
+  ] as const)("returns a conflict for %s", async (reason) => {
+    const fake = fakes();
+    fake.setRoleResult({ outcome: "rejected", reason });
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/identity/staff/roles/${invitationId}`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload: { ...roleBody, expectedRevision: "1" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ code: reason });
+  });
+
+  it.each([
+    ["PATCH", roleBody],
+    ["DELETE", {}],
+    ["DELETE", { expectedRevision: "1", name: "injected" }],
+  ] as const)("requires a strict revision-bearing %s body", async (method, payload) => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method,
+      url: `/api/identity/staff/roles/${invitationId}`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(fake.roleWrites).toEqual([]);
+  });
 
   it.each(["hotel_owner", "hotel_manager"])(
     "reads only the selected organization's role catalog for %s",
