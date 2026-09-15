@@ -4,6 +4,10 @@ VAY-1510. Implementation boundary following [earning rules](affiliate-earning-se
 Finance owns this append-only calculation history, separate from existing payout
 and payment-evidence records. A journal entry never authorizes a transfer.
 
+The initial storage slice adds `0195_finance_affiliate_earning_journal.sql` only;
+the internal command described below follows separately. Storage does not certify
+the JSON evidence or authorize access; the command and trusted resolver own those checks.
+
 The canonical journal key is property + booking + exact stay item. Do not include
 creator/agreement/policy in that key: changing them must not open a second earning
 stream for the same item. Retain that full scope in each record and reject scope
