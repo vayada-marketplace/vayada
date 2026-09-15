@@ -43,3 +43,28 @@ gross reporting and expense projection do not consume these provider totals. The
 eventual integration needs an explicit gross/expense mapping and settings-evidence
 coordinator. Keep alteration Finance guards and runtime switches until that work is
 complete. Real Airbnb E2E remains SKIPPED; isolated PostgreSQL tests validate storage.
+
+## Import integration
+
+The booking worker accepts an optional internal `airbnbFinanceSettings` evidence
+port. It is not wired in server composition and cannot be supplied by a webhook
+or guest request. Its implementation must read verified durable settings evidence
+for the exact local property, connection and binding generation, provider property,
+booking, channel, revision ID and provider timestamp. No network decision or inferred
+historical setting belongs in that lookup. Missing/mismatched evidence rejects the
+transaction. A current channel settings read is not a valid implementation.
+
+When this port is provided, an authoritative accepted alteration calls the Finance
+writer after canonical dates, total, room mapping and inventory update but before
+request completion. All changes and provider-revision bookkeeping share one
+transaction. Provider ACK occurs only after commit. Database failure rolls back
+Finance with the booking, inventory and request; duplicate delivery produces no
+new snapshot. Gross revenue/payment/folio safeguards remain in place.
+
+Once a booking has provider financial history, importing a new revision without the
+port is rejected. Ordinary modification/cancellation without a supported accepted
+alteration is also rejected before mutation, preventing stale provider financials
+or fallback to gross-only accounting. These cases need explicit lifecycle support
+before activation; they are not silently acknowledged. Untracked bookings retain
+their existing path. Live activation still requires the verified evidence-port
+implementation and a reviewed cutover; this hook alone does not activate it.
