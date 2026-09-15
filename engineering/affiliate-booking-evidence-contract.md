@@ -240,3 +240,23 @@ Dates must be real ISO calendar dates; UTC timestamps use `Z` and up to three
 fractional second digits. These are transport bounds, not attribution, retention,
 monetary rounding or provider capability decisions. An adapter must explicitly
 qualify any source format outside these bounds rather than silently truncate it.
+
+## Replay identity slice — 15 September 2026
+
+`identifyAffiliateEvidenceReplay` validates the request and active server-owned
+binding before returning a SHA-256 delivery key and source-fact digest. Delivery
+identity includes organization, connection, internal/external property, reservation,
+nullable item and source event key. Structured encoding prevents delimiter ambiguity.
+The digest additionally binds contract/mapping version, revision, supersession and
+source occurrence. Equal delivery keys with different fact digests are conflicts.
+
+Object keys are sorted; UTC timestamps use millisecond ISO spelling; decimal money
+strings drop insignificant fractional zeroes without numeric conversion. Missing and
+null facts remain different. Candidate array order remains significant: the helper
+does not infer whether a provider treats reordered candidates as equivalent.
+
+Retrieval time and provenance/reference metadata are deliberately excluded from
+fact identity. Future durable intake must append and review those records even for
+equal digests; this helper does not classify provenance discrepancies as harmless.
+It neither stores/acknowledges observations nor orders revisions, projects lifecycle,
+deduplicates commissions or joins creators. It requires no retention-policy default.

@@ -664,3 +664,4 @@ export * from "./replacementPricingEvidence.js";
 export * from "./affiliateBookingDestination.js";
 
 export * from "./affiliateBookingEvidence.js";
+export * from "./affiliateEvidenceReplay.js";
