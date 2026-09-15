@@ -2202,5 +2202,19 @@
   "settings.team.section.booking.promos": "Promos",
   "settings.team.section.booking.promos.description": "Promo codes and deals",
   "settings.team.section.booking.settings": "Settings",
-  "settings.team.section.booking.settings.description": "Payments, policies and domain"
+  "settings.team.section.booking.settings.description": "Payments, policies and domain",
+  "settings.team.roleInUse": "This role is still assigned. Reassign its members and invitations before deleting it.",
+  "settings.team.conflict": "These settings changed since you opened them. Close and reopen to load the latest version.",
+  "settings.team.forbidden": "Your current access does not allow this change.",
+  "settings.team.saveUnconfirmed": "The save could not be confirmed. Retry to check the same request safely.",
+  "settings.team.viewPermissions": "View permissions",
+  "settings.team.editRole": "Edit role",
+  "settings.team.createRole": "Create role",
+  "settings.team.close": "Close",
+  "settings.team.saveRole": "Save role",
+  "settings.team.startFromRole": "Start from role",
+  "settings.team.blankRole": "Blank custom role",
+  "settings.team.roleName": "Role name",
+  "settings.team.roleDescription": "Description",
+  "settings.team.adminFullAccess": "The account admin has full account access, including billing and team management. This system role cannot be edited."
 }
