@@ -27,10 +27,23 @@ export function context(): RequestContext {
       membershipId: id(8),
       status: "active",
       roleKey: "owner",
+      propertyAccess: {
+        mode: "all",
+        roleKey: "owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [],
+      },
       workosRoleSlugs: [],
       permissions: ["marketplace.profile.manage"],
     },
     linkedResources: [
+      {
+        product: "hotel_catalog",
+        resourceType: "property",
+        resourceId: id(3),
+        status: "active",
+        relationship: "owner",
+      },
       {
         product: "marketplace",
         resourceType: "hotel_profile",
