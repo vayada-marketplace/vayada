@@ -1,4 +1,5 @@
 import {
+  parseFinanceAffiliatePercentagePolicy,
   resolveFinanceAffiliatePercentagePolicy,
   type FinanceAffiliatePercentagePolicyRecord,
 } from "./affiliatePercentagePolicy.js";
@@ -60,11 +61,71 @@ const amount = (value: unknown): value is string =>
   typeof value === "string" && /^(0|[1-9][0-9]{0,29})$/.test(value);
 const validScope = (scope: AffiliateEarningScope) =>
   scopeKeys.slice(0, 6).every((key) => reference(scope[key])) &&
+  typeof scope.currency === "string" &&
   /^[A-Z]{3}$/.test(scope.currency) &&
   Number.isInteger(scope.currencyMinorUnit) &&
   scope.currencyMinorUnit >= 0 &&
   scope.currencyMinorUnit <= 9 &&
   scope.rounding === "half_up";
+
+/** Bound and copy all persisted calculation fields before hashing, regardless of business
+ * outcome. Extra resolver fields are excluded. This does not establish trusted evidence.
+ */
+export function normalizeAffiliateEarningCalculation(
+  input: Omit<Input, "previous">,
+): Omit<Input, "previous"> | null {
+  if (!input || !input.scope || !input.evidence || !validScope(input.scope)) return null;
+  const evidence = input.evidence;
+  if (
+    !["verified", "incomplete", "conflicting"].includes(evidence.status) ||
+    !["completed", "cancelled", "no_show", "unknown"].includes(evidence.stay) ||
+    (evidence.netAccommodationMinor !== null && !amount(evidence.netAccommodationMinor)) ||
+    !Array.isArray(evidence.references) ||
+    evidence.references.length > 100 ||
+    ![...evidence.references].every(reference)
+  )
+    return null;
+  let policy: FinanceAffiliatePercentagePolicyRecord | null = null;
+  if (input.policy !== null) {
+    const supplied = input.policy;
+    if (
+      !supplied ||
+      !reference(supplied.propertyId) ||
+      !reference(supplied.policyVersionId) ||
+      !["draft", "approved"].includes(supplied.approvalStatus) ||
+      !supplied.policy
+    )
+      return null;
+    const parsed = parseFinanceAffiliatePercentagePolicy({
+      percentageRate: supplied.policy.percentageRate,
+    });
+    if (
+      !parsed ||
+      (Object.keys(parsed) as (keyof typeof parsed)[]).some(
+        (key) => supplied.policy[key] !== parsed[key],
+      )
+    )
+      return null;
+    policy = {
+      propertyId: supplied.propertyId,
+      policyVersionId: supplied.policyVersionId,
+      approvalStatus: supplied.approvalStatus,
+      policy: parsed,
+    };
+  }
+  return {
+    scope: Object.fromEntries(
+      scopeKeys.map((key) => [key, input.scope[key]]),
+    ) as AffiliateEarningScope,
+    policy,
+    evidence: {
+      status: evidence.status,
+      stay: evidence.stay,
+      netAccommodationMinor: evidence.netAccommodationMinor,
+      references: [...evidence.references],
+    },
+  };
+}
 
 /** Pure internal arithmetic over trusted, scoped evidence. Caller owns authorization,
  * attribution, evidence classification, currency support, ordering and durable deduplication.
