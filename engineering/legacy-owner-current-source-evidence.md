@@ -44,3 +44,25 @@ ledger and target artifact authentication, approved index scope, locked current
 approvals, replay, fresh target checks and final expiry checks before any write.
 Synthetic tests must cover altered bindings, status, keys/signatures, scope,
 observation freshness and output privacy. This does not enable execution.
+
+## Current-source read adapter
+
+`readLegacyOwnerCurrentSources` reads exactly eight independently approved pairs
+from separately pinned live Auth/PMS databases. Dedicated read pools must use
+authenticated TLS/resource configuration outside request control. Name/OID checks
+on each acquired client do not distinguish identically cloned databases.
+Pool connection acquisition must have its own finite timeout; elapsed-time checks
+reject late completion but cannot interrupt a hung connection attempt.
+The helper resets a leaked reader transaction, begins a fresh REPEATABLE READ,
+READ ONLY snapshot, applies bounded timeouts and a safe search path, and uses an
+empty ID projection to retain ACCESS SHARE without table-wide SELECT grants.
+It rejects RLS/inheritance/type/column-visibility drift before business reads.
+
+Only scoped ID/type/status/email/name and PMS owner-association columns are read.
+Missing/duplicate rows, restricted accounts or changed ownership reject without
+partial contacts. Observation times precede snapshot acquisition; wall-clock
+rollback/jumps and monotonic elapsed time are bounded. Both snapshots must finish
+and roll back successfully before protected in-memory observations return;
+uncertain cleanup discards the connection. No logs, signing keys, grants or DDL.
+This is not a cross-database atomic snapshot, legal ownership/email-control proof,
+signed evidence, a configured live collector or a production invocation.
