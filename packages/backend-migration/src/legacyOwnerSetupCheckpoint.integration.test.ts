@@ -8,6 +8,7 @@ import { writeLegacyOwnerSetupCheckpoint } from "./legacyOwnerSetupCheckpoint.js
 import { lockAndCheckLegacyOwnerSetupTargets } from "./legacyOwnerSetupTargetLocks.js";
 import { inspectLegacyOwnerSetupReplay } from "./legacyOwnerSetupReplay.js";
 import { prepareLegacyOwnerSetupTransaction } from "./legacyOwnerSetupTransaction.js";
+import { verifyLegacyOwnerTargetAbsence } from "./legacyOwnerTargetAbsence.js";
 import { parseLegacyOwnerSetupCommand } from "./legacyOwnerSetupCommand.js";
 import { hashLegacyOwnerSetupEnvelope } from "./legacyOwnerSetupApprovals.js";
 import { hashLegacyOwnerSetupValue } from "./legacyOwnerSetupReceiptHashes.js";
@@ -93,8 +94,28 @@ const signedRequest = (value = command()) => {
   };
 };
 const sourceKeys = generateKeyPairSync("ed25519");
-const transactionFixture = () => {
+const transactionFixture = (alter?: (row: Record<string, unknown>, i: number) => void) => {
   const value = command();
+  const emailHashes = value.owners.map((o) => createHash("sha256").update(o.email).digest("hex"));
+  const targetArtifacts = value.owners.map((owner, i) => {
+    const row = {
+      contractVersion: "legacy-owner-target-absence.v1",
+      normalizationVersion: "legacy-owner-email-index.v1",
+      environment: value.environment,
+      targetDatabaseSha256: value.targetDatabaseSha256,
+      ownerId: owner.ownerId,
+      normalizedEmailSha256: emailHashes[i],
+      emailScopeSha256: planLegacyOwnerEmailIndex(emailHashes).scopeSha256,
+      observedAt: owner.observedAt,
+      userIdPresent: false,
+      userEmailPresent: false,
+      externalUserIdPresent: false,
+      externalEmailPresent: false,
+    };
+    alter?.(row, i);
+    owner.targetBeforeSha256 = hashLegacyOwnerSetupValue("target-absence-evidence", row);
+    return canonicalizeJson(row);
+  });
   const artifacts = value.owners.map((owner) => {
     const row = {
       contractVersion: "legacy-owner-current-source.v1",
@@ -127,6 +148,7 @@ const transactionFixture = () => {
   });
   return {
     request: signedRequest(value),
+    targetArtifacts,
     artifacts,
     trust: {
       environment: "local",
@@ -245,6 +267,7 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
       fixture.trust,
       policy,
       scope(),
+      fixture.targetArtifacts,
       clock,
     );
   it("composes source signatures, approvals, guards and checkpoint, then replays without another write", async () => {
@@ -276,6 +299,67 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
     const spy = vi.spyOn(client, "query");
     await expect(prepare(fixture)).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
     expect(spy).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["contractVersion", "other"],
+    ["normalizationVersion", "other"],
+    ["environment", "production"],
+    ["targetDatabaseSha256", "b".repeat(64)],
+    ["ownerId", id(88)],
+    ["normalizedEmailSha256", sha],
+    ["emailScopeSha256", sha],
+    ["observedAt", "2026-09-15T00:59:59.999Z"],
+    ["observedAt", "2026-09-15T01:02:00.000Z"],
+    ["observedAt", "2026-09-15T01:00:00Z"],
+    ["observedAt", "not-a-date"],
+    ["userIdPresent", true],
+    ["userEmailPresent", "false"],
+    ["externalUserIdPresent", 0],
+    ["externalEmailPresent", null],
+    ["extra", false],
+  ])("rejects signed invalid target artifact %s=%s before SQL", async (field, value) => {
+    const fixture = transactionFixture((row) => {
+      row[field as string] = value;
+    });
+    const spy = vi.spyOn(client, "query");
+    await expect(prepare(fixture)).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
+    expect(spy).not.toHaveBeenCalled();
+  });
+  it.each(["missing", "extra", "duplicate", "noncanonical", "hash drift"])(
+    "rejects %s target artifacts before SQL",
+    async (mode) => {
+      const fixture = transactionFixture();
+      if (mode === "missing") fixture.targetArtifacts.pop();
+      if (mode === "extra") fixture.targetArtifacts.push(fixture.targetArtifacts[0]!);
+      if (mode === "duplicate") fixture.targetArtifacts[1] = fixture.targetArtifacts[0]!;
+      if (mode === "noncanonical") fixture.targetArtifacts[0] += " ";
+      if (mode === "hash drift")
+        fixture.targetArtifacts[0] = fixture.targetArtifacts[0]!.replace(
+          "01:00:00.000Z",
+          "01:00:01.000Z",
+        );
+      const spy = vi.spyOn(client, "query");
+      await expect(prepare(fixture)).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
+  it("denies swapped in-scope hashes using live PostgreSQL normalization before writes", async () => {
+    const hashes = scope();
+    const fixture = transactionFixture((row, i) => {
+      row.normalizedEmailSha256 = hashes[(i + 1) % 8];
+    });
+    expect(
+      verifyLegacyOwnerTargetAbsence(
+        fixture.request,
+        expected,
+        fixture.targetArtifacts,
+        hashes,
+        now,
+      ),
+    ).toHaveLength(8);
+    await seedApprovals(fixture.request);
+    await expect(prepare(fixture)).rejects.toThrow("LEGACY_OWNER_SETUP_TRANSACTION_INVALID");
+    expect(await counts()).toEqual({ users: 1, receipts: 0 });
   });
   it.each([
     "missing approval",
@@ -325,6 +409,7 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
         fixture.request.commandPayload = "invalid";
         fixture.request.verificationKeys.clear();
         fixture.artifacts[0]!.canonicalPayload = "invalid";
+        fixture.targetArtifacts[0] = "invalid";
         fixture.trust.verificationKeys.clear();
       }
       return original(sql, values);
@@ -484,7 +569,7 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
   });
   it("composes the absence guard and atomic checkpoint in one transaction", async () => {
     await configureGuard();
-    expect(await guard()).toEqual({
+    expect(await guard()).toMatchObject({
       outcome: "targets_absent_locked_requires_authorized_write",
       executable: false,
     });
@@ -724,6 +809,7 @@ describe.skipIf(!url)("atomic pending-owner checkpoint on fresh local PostgreSQL
       fixture.trust,
       policy,
       scope(),
+      fixture.targetArtifacts,
       () => now,
     ).then(
       (result) => result.outcome,
