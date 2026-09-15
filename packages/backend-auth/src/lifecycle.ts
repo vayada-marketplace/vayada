@@ -501,6 +501,8 @@ export type CreateStaffInvitePayload = {
   propertyIds: readonly string[];
   permissionOverrides: StaffPermissionOverrides;
   configurationRevision: number;
+  roleDefinitionId?: string;
+  expectedRoleRevision?: string;
   productAccess?: { pms: boolean; booking: boolean };
 };
 
@@ -510,8 +512,6 @@ export type UpdateStaffAccessPayload = Omit<
 > & {
   membershipId: string;
   expectedRevision?: string;
-  roleDefinitionId?: string;
-  expectedRoleRevision?: string;
   membershipStatus?: "active" | "suspended";
 };
 

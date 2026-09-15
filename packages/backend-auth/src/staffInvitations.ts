@@ -953,6 +953,43 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
           return { outcome: "rejected" as const, reason: "configuration_conflict" as const };
         }
 
+        if (normalized.roleDefinitionId !== undefined) {
+          const overrides =
+            inviterRow.permission_overrides === null
+              ? { grant: [], deny: [] }
+              : parseStaffPermissionOverrides(inviterRow.permission_overrides);
+          if (
+            inviterRow.role_key !== "hotel_owner" ||
+            inviterRow.access_origin !== "agency" ||
+            inviterRow.property_access_mode !== "all" ||
+            !overrides ||
+            overrides.grant.length ||
+            overrides.deny.length
+          ) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "inviter_not_authorized" as const };
+          }
+          const role = await client.query<StaffRoleDefinition>(
+            `SELECT id, name, revision::text, security_class AS "securityClass",
+                    base_role_key AS "baseRoleKey", preset_key AS "presetKey", default_permissions AS "defaultPermissions"
+             FROM identity.organization_roles WHERE organization_id = $1 AND id = $2 FOR SHARE`,
+            [normalized.organizationId, normalized.roleDefinitionId],
+          );
+          const definition = role.rows[0];
+          if (
+            !definition ||
+            definition.baseRoleKey !== normalized.roleKey ||
+            !resolveTeamRolePermissions(definition, normalized.permissionOverrides)
+          ) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "invalid_command" as const };
+          }
+          if (definition.revision !== normalized.expectedRoleRevision) {
+            await client.query("ROLLBACK");
+            return { outcome: "rejected" as const, reason: "configuration_conflict" as const };
+          }
+        }
+
         const previous = await client.query<{ id: string; status: string }>(
           `UPDATE identity.staff_invitations
            SET status = CASE WHEN expires_at <= now() THEN 'expired' ELSE 'revoked' END, updated_at = now()
@@ -967,9 +1004,9 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
              (organization_id, email, display_name, inviter_membership_id, inviter_user_id, inviter_name_snapshot,
               role_key, permission_overrides, property_access_mode, configuration_revision, command_id,
               idempotency_key_hash, request_fingerprint_hash, supersedes_invitation_id, request_id,
-              correlation_id, request_source, reason, requested_at, pms_access_enabled, booking_access_enabled)
+              correlation_id, request_source, reason, requested_at, pms_access_enabled, booking_access_enabled, role_definition_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $21, $9, $10, $11, $12,
-                   $13, $14, $15, $16, $17, $18, $19, $20)
+                   $13, $14, $15, $16, $17, $18, $19, $20, $22)
            RETURNING id`,
           [
             normalized.organizationId,
@@ -993,6 +1030,7 @@ export function createPgStaffInvitationRepository(config: RepositoryConfig) {
             normalized.productAccess?.pms ?? true,
             normalized.productAccess?.booking ?? true,
             normalized.propertyAccessMode ?? "assigned",
+            normalized.roleDefinitionId ?? null,
           ],
         );
         const invitationId = inserted.rows[0]!.id;
@@ -1076,7 +1114,14 @@ function normalize(command: CreateStaffInviteCommand) {
     (command.payload.productAccess !== undefined &&
       !validProductAccess(command.payload.productAccess)) ||
     Number.isNaN(Date.parse(command.audit.requestedAt)) ||
-    validateStaffInviteAccess(command.payload).length
+    ((command.payload.roleDefinitionId !== undefined ||
+      command.payload.expectedRoleRevision !== undefined) &&
+      (!canonicalUuid(command.payload.roleDefinitionId ?? "") ||
+        !/^[1-9][0-9]*$/.test(command.payload.expectedRoleRevision ?? ""))) ||
+    validateStaffInviteAccess(command.payload).filter(
+      (issue) =>
+        command.payload.roleDefinitionId === undefined || issue !== "missing_required_permission",
+    ).length
   ) {
     return null;
   }
@@ -1093,6 +1138,12 @@ function normalize(command: CreateStaffInviteCommand) {
     propertyIds,
     permissionOverrides,
     configurationRevision: command.payload.configurationRevision,
+    ...(command.payload.roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: command.payload.roleDefinitionId.toLowerCase(),
+          expectedRoleRevision: command.payload.expectedRoleRevision!,
+        }),
     ...(command.payload.propertyAccessMode === "all" ? { propertyAccessMode: "all" as const } : {}),
     ...(command.payload.productAccess === undefined
       ? {}
