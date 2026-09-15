@@ -252,6 +252,19 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ## Implementation stack and evidence
 
+### Product veto foundation
+
+Migration `0198_membership_product_access.sql` stores independent PMS and Booking
+flags on memberships and invitations, defaulting to enabled to preserve existing
+access. Apply this additive migration before deploying the resolver. Each hotel
+authorization resolution reads the membership flags and removes disabled-product
+permissions after member overrides, together with that product's effective
+entitlements. Subscription records are unchanged. Missing or malformed flags fail
+closed; identity management remains available when both products are disabled.
+This foundation adds no switch writer or UI. Successor commands must include
+flags in revisions, audit and invitation acceptance before exposing controls.
+The existing rejection of unsupported delegated memberships remains in place.
+
 ### Configuration read API (first backend slice)
 
 `GET /api/identity/staff/members/:membershipId/access` uses the existing

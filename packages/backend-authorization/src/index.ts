@@ -50,6 +50,7 @@ export type MembershipPropertyScope = {
   accessOrigin: string;
   assignedPropertyIds: readonly string[];
   permissionOverrides?: unknown;
+  productAccess?: { pms: unknown; booking: unknown };
 };
 
 export type PropertyAccessContext = {
@@ -125,6 +126,8 @@ type MembershipPropertyScopeRow = {
   access_origin: string;
   assigned_property_ids: string[];
   permission_overrides: unknown;
+  pms_access_enabled: boolean;
+  booking_access_enabled: boolean;
 };
 
 function resourceScopeKey(
@@ -280,6 +283,7 @@ export function createPgPropertyAccessRepository(
            membership.role_key,
            membership.access_origin,
            membership.permission_overrides,
+           membership.pms_access_enabled, membership.booking_access_enabled,
            ARRAY(
              SELECT assignment.property_id::text
              FROM identity.membership_property_assignments assignment
@@ -312,6 +316,7 @@ export function createPgPropertyAccessRepository(
             accessOrigin: row.access_origin,
             assignedPropertyIds: row.assigned_property_ids,
             permissionOverrides: row.permission_overrides,
+            productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
           }
         : null;
     },
@@ -406,7 +411,23 @@ export function createAuthorizationResolver(
       permissions = [...effectivePermissions];
     }
 
-    const entitlements = await entitlementRepository?.findEntitlementsForContext(context);
+    let entitlements = await entitlementRepository?.findEntitlementsForContext(context);
+    if (context.selectedOrganization.kind === "hotel_group") {
+      const products = membershipScope?.productAccess;
+      if (typeof products?.pms !== "boolean" || typeof products.booking !== "boolean") {
+        return { permissions: [], entitlements: [] };
+      }
+      permissions = permissions.filter(
+        (permission) =>
+          (!permission.startsWith("pms.") || products.pms) &&
+          (!permission.startsWith("booking.") || products.booking),
+      );
+      entitlements = entitlements?.filter(
+        (entitlement) =>
+          (entitlement.product !== "pms" || products.pms) &&
+          (entitlement.product !== "booking" || products.booking),
+      );
+    }
 
     return {
       permissions,
