@@ -221,6 +221,13 @@ existing append-only triggers reject update/delete/truncate; PUBLIC has no acces
 
 ### Remaining consumer and integration coverage
 
+The `legacy-historical-binding-transition.v1` envelope uses a distinct Ed25519
+domain and canonical bytes, signing command, purpose/original prepare UUID,
+environment/expiry, key and both authority IDs over the complete owner/binding
+requests, true source-activity assertion and current target before/after hashes.
+Pinned keys/environment/clock remain trusted. Signature matching alone requires
+registry authorities, revocation and locked eligibility; it authorizes no write.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
