@@ -89,10 +89,10 @@ command, not echo the envelope field. A successful signature check returns only
 Keep the existing ownership-restoration verifier unchanged and unable to accept
 setup envelopes. Admission of setup approvals to existing immutable storage,
 revocation serialization and full command validation remain separate required
-implementation steps; migration 0193 currently accepts only ownership evidence.
+implementation steps; migration 0211 currently accepts only ownership evidence.
 
-Migration 0195 admits exactly the setup version alongside ownership evidence in
-the existing registry, without changing applied 0193, command/authority uniqueness,
+Migration 0213 admits exactly the setup version alongside ownership evidence in
+the existing registry, without changing applied 0211, command/authority uniqueness,
 append-only triggers or privileges. `verifyLegacyOwnerSetupApprovals` verifies the
 setup signature first, then both exact current authority rows and absence of
 revocations. It uses a separate setup-domain envelope hash, enforces the configured
@@ -189,7 +189,7 @@ No existing read approval authorizes either writer. Real isolated rehearsals and
 production execution require their own exact write/recovery approval. This
 document and its review do not complete VAY-2017.
 
-## Internal receipt storage (0194)
+## Internal receipt storage (0212)
 
 `platform.legacy_owner_bootstrap_receipts` records one immutable success per
 command ID, with the operation version, environment, canonical sorted unique

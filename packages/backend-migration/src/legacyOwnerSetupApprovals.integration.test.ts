@@ -73,7 +73,7 @@ describe.skipIf(!url)("setup approvals on a fresh dedicated local database", () 
       environment: "local",
     });
     expect(result.failed).toBeNull();
-    expect(result.applied).toContain("0195");
+    expect(result.applied).toContain("0213");
     await client.query(
       "INSERT INTO identity.users(id,email) VALUES($1,'approval@example.invalid')",
       [id(1)],
