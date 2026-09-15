@@ -264,6 +264,20 @@ running on every API/worker instance before that migration; old validators
 would reject the expanded overrides. Existing invalid overrides must remain
 invalid rather than being silently repaired into grants.
 
+Migration `0195_booking_addon_promo_permissions.sql` copies existing
+Settings-manage role grants and explicit membership/invitation grants or denials
+to both new section pairs. Null, malformed and duplicate-containing overrides
+are preserved. Add-on catalog and promo-code GET routes then require their own
+read key; POST/PATCH/DELETE require their own manage key. General Settings and
+the other section provide no fallback. The `/settings/addons` surface continues
+to configure Booking Flow; it does not modify the add-on catalog.
+
+Pause permission/invitation configuration writes between migration and route
+activation so an older writer cannot overwrite migrated denials. Resume after
+verifying both migrated grants and denials. After migration, the rollback floor
+is the support-only revision: do not redeploy validators that reject the new
+keys. This release sequence has not been executed in a deployed environment.
+
 ### Dynamic property scope
 
 Migration `0194_staff_invitation_dynamic_property_scope.sql` permits agency staff

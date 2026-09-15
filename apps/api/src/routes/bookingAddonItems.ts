@@ -156,7 +156,7 @@ export async function registerBookingAddonItemRoutes(
 
   app.get<{ Params: AddonItemsParams }>("/hotels/:hotelId/addon-items", async (request, reply) => {
     const { hotelId } = request.params;
-    const accessError = authorize(request, hotelId);
+    const accessError = authorize(request, hotelId, "read");
     if (accessError) return sendAddonItemsError(reply, accessError);
 
     try {
@@ -882,10 +882,14 @@ function normalizeAddonCategory(value: string | null): BookingAddonItem["categor
   return "other";
 }
 
-function authorize(request: FastifyRequest, hotelId: string): BookingAddonItemsError | null {
+function authorize(
+  request: FastifyRequest,
+  hotelId: string,
+  access: "read" | "manage" = "manage",
+): BookingAddonItemsError | null {
   try {
     enforceRoutePolicy(request, {
-      permission: "booking.settings.manage",
+      permission: access === "read" ? "booking.addons.read" : "booking.addons.manage",
       entitlement: {
         product: "booking",
         key: "booking-engine",
