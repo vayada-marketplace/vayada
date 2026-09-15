@@ -58,7 +58,10 @@ export function sanitizeChannexAriResponse(input: {
   else if (Object.hasOwn(parsed, "errors")) warningReason = "root_errors";
   else if (Object.hasOwn(parsed, "warnings")) warningReason = "root_warnings";
   else if (!object(parsed.meta)) warningReason = "invalid_meta";
-  else if (!Array.isArray(parsed.meta.warnings)) warningReason = "invalid_warnings";
+  else if (!Object.hasOwn(parsed.meta, "warnings")) {
+    // Observed original Channex acceptance omits warnings on explicit Success.
+    if (parsed.meta.message !== "Success") warningReason = "invalid_warnings";
+  } else if (!Array.isArray(parsed.meta.warnings)) warningReason = "invalid_warnings";
   else if (parsed.meta.warnings.length !== 0) warningReason = "provider_warnings";
   return {
     ...base,

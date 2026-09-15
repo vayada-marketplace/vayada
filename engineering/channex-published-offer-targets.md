@@ -806,8 +806,10 @@ of unresolved ownership, room availability or activation is added here.
 ARI responses are observations, not completed delivery. Preserve HTTP status,
 a bounded safe request ID, at most100 distinct UUID task IDs from an entirely
 valid task list, and conservative warning presence. Missing/malformed tasks,
-missing/malformed/nonempty warning metadata and root errors/warnings do not
-produce clean evidence. Do not retain response messages, echoed payloads,
+malformed/nonempty warning metadata and root errors/warnings do not
+produce clean evidence. Omitted warnings require explicit `meta.message=Success`
+as observed in a retained original provider response; absent success metadata
+remains ambiguous. Explicit null/object/string warnings never mean empty warnings. Do not retain response messages, echoed payloads,
 credentials or exception text. Even a clean200 task acknowledgement does not
 release unresolved ownership or grant activation.
 
@@ -824,8 +826,12 @@ unclassified, with no backfill from later GETs or fabricated response evidence.
 
 The [official ARI response contract](https://docs.channex.io/api-v.1-documentation/ari)
 shows an empty `meta.warnings` array on clean acceptance and warns that HTTP200
-can include rejected items. Keep requiring that explicit clean shape; successful
-task/readback evidence cannot make a warning-bearing original receipt clean.
+can include rejected items. A retained September14 original response also shows
+`meta: {message: "Success"}` with warnings omitted. Accept that exact alternate
+success metadata with the same valid-task/root-error checks. Do not accept null
+or other malformed warning values, or infer success from missing metadata.
+Successful task/readback evidence cannot make a warning-bearing original receipt
+clean, and earlier classified receipts are not rewritten by this parser change.
 
 Creation and ARI share a response-body reader with the existing64KiB UTF-8 and
 five-second bounds; their evidence parsers remain separate. Original-response
