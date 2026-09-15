@@ -3,6 +3,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
+import { verifyLegacyOwnerEmailIndex } from "./legacyOwnerEmailIndexVerification.js";
 import {
   OWNER_EMAIL_INDEX_EXPRESSION as expression,
   planLegacyOwnerEmailIndex as plan,
@@ -132,5 +133,54 @@ describe.skipIf(!url)("scoped uniqueness on a fresh local PostgreSQL database", 
         )
       ).rows[0].n,
     ).toBe(2);
+  });
+  it("verifies the exact installed guard in a read-only transaction", async () => {
+    await client.query("BEGIN READ ONLY");
+    try {
+      await client.query("SET LOCAL search_path = pg_catalog");
+      await expect(verifyLegacyOwnerEmailIndex(client, hashes)).resolves.toEqual({
+        indexName: plan(hashes).indexName,
+        scopeSha256: plan(hashes).scopeSha256,
+        executable: false,
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each([
+    "missing",
+    "nonunique",
+    "expression",
+    "predicate",
+    "wrong table",
+    "include",
+    "collation",
+    "column collation",
+  ])("rejects an altered installed guard: %s", async (variant) => {
+    await client.query("BEGIN");
+    try {
+      await client.query("SET LOCAL search_path = pg_catalog");
+      const proposal = plan(hashes);
+      await client.query(`DROP INDEX identity.${proposal.indexName}`);
+      let sql = proposal.sql;
+      if (variant === "nonunique") sql = sql.replace("CREATE UNIQUE", "CREATE");
+      if (variant === "expression") sql = sql.replace(expression, "lower(email)");
+      if (variant === "predicate") sql = sql.replace(/WHERE[\s\S]+$/, "WHERE false");
+      if (variant === "include") sql = sql.replace("\nWHERE", " INCLUDE (id)\nWHERE");
+      if (variant === "collation")
+        sql = sql.replace(`((${expression}))`, `((${expression}) COLLATE \"C\")`);
+      if (variant === "wrong table") {
+        await client.query("CREATE TABLE identity.other_users (email text)");
+        sql = sql.replace("ON identity.users", "ON identity.other_users");
+      }
+      if (variant === "column collation")
+        await client.query('ALTER TABLE identity.users ALTER COLUMN email TYPE text COLLATE "C"');
+      if (variant !== "missing") await client.query(sql);
+      await expect(verifyLegacyOwnerEmailIndex(client, hashes)).rejects.toThrow(
+        "LEGACY_OWNER_EMAIL_INDEX_NOT_VERIFIED",
+      );
+    } finally {
+      await client.query("ROLLBACK");
+    }
   });
 });
