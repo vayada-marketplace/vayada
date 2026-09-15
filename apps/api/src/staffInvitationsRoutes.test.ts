@@ -34,6 +34,7 @@ type Auth = {
   organizationStatus?: RequestContext["selectedOrganization"]["status"];
   membershipStatus?: RequestContext["membership"]["status"];
   permissions?: PermissionKey[];
+  roleKey?: string;
 };
 
 function fakes() {
@@ -45,6 +46,7 @@ function fakes() {
   const deliveries: string[] = [];
   const rosterOrganizations: string[] = [];
   const accessReads: string[][] = [];
+  const roleReads: string[] = [];
   let result: PersistResult = { outcome: "created", invitationId };
   let updateResult: UpdateResult = { outcome: "updated", membershipId: staffMembershipId };
   let statusResult: StatusResult = {
@@ -70,6 +72,7 @@ function fakes() {
     deliveries,
     rosterOrganizations,
     accessReads,
+    roleReads,
     setResult(value: PersistResult) {
       result = value;
     },
@@ -86,6 +89,12 @@ function fakes() {
       revocationResult = value;
     },
     options: {
+      roles: {
+        async list(id) {
+          roleReads.push(id);
+          return [];
+        },
+      },
       repository: {
         async getAccess(org, id) {
           accessReads.push([org, id]);
@@ -175,7 +184,7 @@ async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
       membership: {
         membershipId: "membership-owner",
         status: auth.membershipStatus ?? "active",
-        roleKey: "hotel_owner",
+        roleKey: auth.roleKey ?? "hotel_owner",
         workosRoleSlugs: ["hotel_owner"],
         permissions: auth.permissions ?? ["identity.staff.manage"],
       },
@@ -201,6 +210,42 @@ async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
 describe("staff invitation routes", () => {
   let app: Awaited<ReturnType<typeof testApp>> | undefined;
   afterEach(async () => app?.close());
+
+  it.each(["hotel_owner", "hotel_manager"])(
+    "reads only the selected organization's role catalog for %s",
+    async (roleKey) => {
+      const fake = fakes();
+      app = await testApp(fake.options, { roleKey });
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/identity/staff/roles?organizationId=foreign",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ roles: [], canManageRoles: roleKey === "hotel_owner" });
+      expect(fake.roleReads).toEqual([organizationId]);
+    },
+  );
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized role catalog reads %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.roleReads).toEqual([]);
+  });
 
   it("reads saved staff configuration without product entitlement or resource requirements", async () => {
     const fake = fakes();
