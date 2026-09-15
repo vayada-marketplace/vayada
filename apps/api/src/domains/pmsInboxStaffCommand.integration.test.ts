@@ -103,6 +103,19 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox staff-command transactions", () => {
     });
   });
 
+  it("rejects a product-disabled assignee", async () => {
+    await admin.query(
+      "UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1::uuid",
+      [ASSIGNEE_MEMBERSHIP],
+    );
+    expect(
+      await commands.assign(
+        assignment("product-disabled", { assigneeMembershipId: ASSIGNEE_MEMBERSHIP }),
+      ),
+    ).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect((await state()).thread).toMatchObject({ assignedToMembershipId: null, version: "4" });
+  });
+
   it("adds and replays one canonical internal note without copying content into evidence", async () => {
     const input = note("note-once", { text: "  Guest prefers a quiet room.  " });
     const first = await commands.addNote(input);

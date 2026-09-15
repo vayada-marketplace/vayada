@@ -261,8 +261,14 @@ authorization resolution reads the membership flags and removes disabled-product
 permissions after member overrides, together with that product's effective
 entitlements. Subscription records are unchanged. Missing or malformed flags fail
 closed; identity management remains available when both products are disabled.
-This foundation adds no switch writer or UI. Successor commands must include
-flags in revisions, audit and invitation acceptance before exposing controls.
+Saved member configuration includes `productAccess: { pms, booking }`; both
+booleans participate in the revision. The combined access PATCH accepts the pair
+only with `expectedRevision` and saves it atomically with status, role, overrides
+and property assignments. Omission preserves existing flags. Audit captures the
+previous and next pair. Disabling PMS schedules Inbox assignment reconciliation;
+assignment eligibility and locked Inbox actor checks, including queued provider
+delivery, enforce the flag. No UI switch is exposed yet. Invitation acceptance
+and remaining background authorization paths require successor coverage.
 The existing rejection of unsupported delegated memberships remains in place.
 
 ### Configuration read API (first backend slice)

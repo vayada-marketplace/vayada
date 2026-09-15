@@ -296,6 +296,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       UPDATE identity.organization_memberships
       SET status = 'active', role_key = 'housekeeping', permission_overrides = NULL,
           property_access_mode = 'assigned', workos_membership_id = 'om_staff_acceptance',
+          pms_access_enabled = true, booking_access_enabled = true,
           invited_at = NULL
       WHERE id = '${staffMembership}';
       UPDATE identity.organization_memberships
@@ -474,6 +475,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(await repository.getAccess(org, staffMembership)).toEqual({
       membershipId: staffMembership,
       revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      productAccess: { pms: true, booking: true },
       roleKey: "front_desk",
       status: "active",
       propertyAccessMode: "assigned",
@@ -538,6 +540,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       ...first.payload,
       expectedRevision: access!.revision,
       membershipStatus: "suspended",
+      productAccess: { pms: false, booking: true },
     };
     const second = updateCommand();
     second.payload = { ...second.payload, expectedRevision: access!.revision };
@@ -552,6 +555,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       roleKey: winner.payload.roleKey,
       status: winner.payload.membershipStatus ?? "active",
       permissionOverrides: winner.payload.permissionOverrides,
+      productAccess: winner.payload.productAccess ?? { pms: true, booking: true },
     });
     expect(await repository.updateAccess(winner)).toMatchObject({ outcome: "idempotent_replay" });
   });
@@ -578,6 +582,63 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(sideEffects.rows[0]).toEqual({ keys: 0, audits: 0 });
   });
 
+  it("preserves product flags for legacy saves and includes them in revisions and audit", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      productAccess: { pms: false, booking: true },
+    };
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+    const saved = (await repository.getAccess(org, staffMembership))!;
+    expect(saved.productAccess).toEqual({ pms: false, booking: true });
+    const jobs = await client.query(
+      `SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1 AND job_type = 'pms.inbox.assignment.reconcile'`,
+      [edit.commandId],
+    );
+    expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "product_access_removed" } }]);
+    expect(saved.revision).not.toBe(before.revision);
+    const audit = await client.query(
+      `SELECT private_payload FROM platform.product_audit_events WHERE causation_id = $1`,
+      [edit.commandId],
+    );
+    expect(audit.rows[0].private_payload).toMatchObject({
+      previous: { productAccess: { pms: true, booking: true } },
+      next: { productAccess: { pms: false, booking: true } },
+    });
+    expect(await repository.updateAccess(updateCommand())).toMatchObject({ outcome: "updated" });
+    expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual(
+      saved.productAccess,
+    );
+    const current = (await repository.getAccess(org, staffMembership))!;
+    await client.query(
+      `UPDATE identity.organization_memberships SET booking_access_enabled = false WHERE id = $1`,
+      [staffMembership],
+    );
+    expect((await repository.getAccess(org, staffMembership))!.revision).not.toBe(current.revision);
+  });
+
+  it.each([
+    null,
+    { pms: true },
+    { pms: "true", booking: false },
+    { pms: true, booking: true, extra: true },
+  ])("rejects malformed product flags %j without changing access", async (productAccess) => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      productAccess: productAccess as never,
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "invalid_command",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+  });
+
   it("invalidates a revision after status changes and rolls back failed combined saves", async () => {
     const initial = (await repository.getAccess(org, staffMembership))!;
     await repository.updateStatus(statusCommand());
@@ -596,6 +657,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       ...edit.payload,
       expectedRevision: current.revision,
       propertyIds: [foreignProperty],
+      productAccess: { pms: false, booking: false },
     };
     expect(await repository.updateAccess(edit)).toEqual({
       outcome: "rejected",

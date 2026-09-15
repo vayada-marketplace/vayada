@@ -93,6 +93,7 @@ function fakes() {
             ? {
                 membershipId: id,
                 revision: "a".repeat(64),
+                productAccess: { pms: true, booking: true },
                 roleKey: "front_desk" as const,
                 status: "active" as const,
                 propertyAccessMode: "assigned" as const,
@@ -309,12 +310,14 @@ describe("staff invitation routes", () => {
         permissionOverrides: { grant: [], deny: [] },
         expectedRevision: "a".repeat(64),
         membershipStatus: "suspended",
+        productAccess: { pms: false, booking: true },
       },
     };
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(fake.accessCommands[0]?.payload).toMatchObject({
       expectedRevision: "a".repeat(64),
       membershipStatus: "suspended",
+      productAccess: { pms: false, booking: true },
     });
     fake.setUpdateResult({ outcome: "rejected", reason: "revision_conflict" });
     const stale = await app.inject(request);
@@ -324,6 +327,11 @@ describe("staff invitation routes", () => {
       { ...request.payload, expectedRevision: "bad" },
       { ...request.payload, expectedRevision: undefined },
       { ...request.payload, membershipStatus: "inactive" },
+      { ...request.payload, productAccess: null },
+      { ...request.payload, productAccess: { pms: true } },
+      { ...request.payload, productAccess: { pms: "false", booking: true } },
+      { ...request.payload, productAccess: { pms: true, booking: true, extra: true } },
+      { ...request.payload, membershipStatus: undefined, expectedRevision: undefined },
     ]) {
       expect((await app.inject({ ...request, payload })).statusCode).toBe(400);
     }
