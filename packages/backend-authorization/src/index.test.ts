@@ -223,6 +223,118 @@ function requirement(
 }
 
 describe("createAuthorizationResolver", () => {
+  const definition = {
+    id: "role_test",
+    organizationId: "org_test",
+    securityClass: "staff" as const,
+    baseRoleKey: "hotel_custom",
+    presetKey: null,
+    defaultPermissions: ["pms.calendar.read"],
+  };
+
+  it("resolves live organization defaults instead of legacy base-role grants", async () => {
+    const scope = propertyScope({
+      roleKey: "hotel_custom",
+      roleDefinitionId: definition.id,
+      roleDefinition: { ...definition },
+      permissionOverrides: { grant: ["pms.calendar.manage"], deny: [] },
+    });
+    const resolver = createAuthorizationResolver(
+      { findPermissionsForRole: async () => ["finance.billing.manage"] },
+      undefined,
+      propertyScopeRepository(scope),
+    );
+    const candidate = contextFor({ roleKey: "hotel_custom" });
+    expect((await resolver(candidate)).permissions).toEqual([
+      "pms.calendar.manage",
+      "pms.calendar.read",
+    ]);
+    scope.roleDefinition!.defaultPermissions = ["pms.calendar.read", "pms.inbox.read"];
+    expect((await resolver(candidate)).permissions).toEqual([
+      "pms.calendar.manage",
+      "pms.calendar.read",
+      "pms.inbox.read",
+    ]);
+    scope.productAccess = { pms: false, booking: true };
+    expect((await resolver(candidate)).permissions).toEqual([]);
+  });
+
+  it.each([
+    null,
+    { ...definition, id: "other_role" },
+    { ...definition, organizationId: "other_org" },
+    { ...definition, baseRoleKey: "hotel_manager" },
+    { ...definition, defaultPermissions: ["identity.staff.manage"] },
+    { ...definition, defaultPermissions: [] },
+  ])(
+    "audits invalid role resolution without falling back to base-role grants: %j",
+    async (roleDefinition) => {
+      const audit = vi.fn(async () => {});
+      const resolver = createAuthorizationResolver(
+        { findPermissionsForRole: async () => ["finance.billing.manage"] },
+        undefined,
+        {
+          findMembershipPropertyScope: async () =>
+            propertyScope({
+              roleKey: "hotel_custom",
+              roleDefinitionId: definition.id,
+              roleDefinition,
+              permissionOverrides: { grant: ["pms.calendar.manage"], deny: [] },
+            }),
+          recordInvalidPermissionOverride: audit,
+        },
+      );
+      await expect(resolver(contextFor({ roleKey: "hotel_custom" }))).rejects.toBeInstanceOf(
+        AuthorizationResolutionError,
+      );
+      expect(audit).toHaveBeenCalledWith(expect.anything(), ["invalid_role_definition"]);
+    },
+  );
+
+  it("reads immutable Account-admin permissions from the live legacy grant catalog", async () => {
+    const resolver = createAuthorizationResolver(
+      { findPermissionsForRole: async () => ["finance.billing.manage"] },
+      undefined,
+      propertyScopeRepository(
+        propertyScope({
+          roleDefinitionId: definition.id,
+          roleDefinition: {
+            ...definition,
+            securityClass: "account_admin",
+            baseRoleKey: "hotel_owner",
+            presetKey: "account_admin",
+            defaultPermissions: [],
+          },
+        }),
+      ),
+    );
+    expect((await resolver(hotelContext)).permissions).toEqual(["finance.billing.manage"]);
+  });
+
+  it("preserves only the live property-navigation baseline alongside role defaults", async () => {
+    const resolver = createAuthorizationResolver(
+      {
+        findPermissionsForRole: async () => [
+          "hotel_catalog.property_manifest.read",
+          "finance.billing.manage",
+          "pms.operations.manage",
+        ],
+      },
+      undefined,
+      propertyScopeRepository(
+        propertyScope({
+          roleKey: "hotel_custom",
+          roleDefinitionId: definition.id,
+          roleDefinition: definition,
+        }),
+      ),
+    );
+    expect((await resolver(contextFor({ roleKey: "hotel_custom" }))).permissions).toEqual([
+      "pms.calendar.read",
+      "hotel_catalog.property_manifest.read",
+    ]);
+  });
+
   it("preserves identity management with both products disabled", async () => {
     const resolution = await createAuthorizationResolver(
       { findPermissionsForRole: async () => ["identity.staff.manage", "pms.operations.read"] },
@@ -604,6 +716,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgPropertyAccessRepository", () => {
       DELETE FROM platform.product_audit_events WHERE organization_id = '${DB_ORGANIZATION}';
       DELETE FROM identity.membership_property_assignments WHERE membership_id = '${DB_MEMBERSHIP}';
       DELETE FROM identity.organization_memberships WHERE id = '${DB_MEMBERSHIP}';
+      DELETE FROM identity.organization_roles WHERE organization_id = '${DB_ORGANIZATION}';
       DELETE FROM identity.organization_resource_links WHERE organization_id = '${DB_ORGANIZATION}';
       DELETE FROM identity.organizations WHERE id = '${DB_ORGANIZATION}';
       DELETE FROM hotel_catalog.properties WHERE id = '${DB_PROPERTY}';
@@ -638,6 +751,8 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgPropertyAccessRepository", () => {
         roleKey: "front_desk",
         accessOrigin: "agency",
         productAccess: { pms: true, booking: true },
+        roleDefinitionId: null,
+        roleDefinition: null,
         assignedPropertyIds: [DB_PROPERTY],
         permissionOverrides: {
           grant: ["booking.analytics.read"],
@@ -666,6 +781,46 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgPropertyAccessRepository", () => {
           repository,
         )(dbContext),
       ).resolves.toMatchObject({ permissions: ["booking.analytics.read"] });
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1, $2, 'Live test role', 'staff', 'front_desk', '["pms.calendar.read","pms.calendar.manage"]');`,
+        [PROPERTY_B, DB_ORGANIZATION],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = $1, pms_access_enabled = true WHERE id = $2`,
+        [PROPERTY_B, DB_MEMBERSHIP],
+      );
+      const resolveRole = createAuthorizationResolver(
+        { findPermissionsForRole: async () => ["finance.billing.manage"] },
+        undefined,
+        repository,
+      );
+      await expect(repository.findMembershipPropertyScope(dbContext)).resolves.toMatchObject({
+        roleDefinitionId: PROPERTY_B,
+        roleDefinition: {
+          id: PROPERTY_B,
+          organizationId: DB_ORGANIZATION,
+          securityClass: "staff",
+          baseRoleKey: "front_desk",
+          presetKey: null,
+          defaultPermissions: ["pms.calendar.read", "pms.calendar.manage"],
+        },
+      });
+      await expect(resolveRole(dbContext)).resolves.toMatchObject({
+        permissions: ["booking.analytics.read", "pms.calendar.read"],
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read","pms.inbox.read"]' WHERE id = $1`,
+        [PROPERTY_B],
+      );
+      await expect(resolveRole(dbContext)).resolves.toMatchObject({
+        permissions: ["booking.analytics.read", "pms.calendar.read", "pms.inbox.read"],
+      });
+      // Reset the role reference to continue exercising the legacy rejection path.
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1`,
+        [DB_MEMBERSHIP],
+      );
       await client.query(
         `UPDATE identity.organization_memberships
          SET permission_overrides = '{"grant":["pms.reservation.cancel"],"deny":[]}'
