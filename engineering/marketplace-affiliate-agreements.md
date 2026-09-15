@@ -12,6 +12,22 @@ publication and creator participation; Booking owns destination/referral context
 PMS owns operational evidence; Finance owns commission policies and settlement.
 The contract is provider-independent and requires no PMS subscription.
 
+## Current implementation scope — 15 September 2026
+
+Current work implements the requested foundation: immutable published terms and
+same-version hotel approval/creator acceptance, preserving exact historical scope.
+Detailed pause/resume/grace-window mechanics below remain proposals, not new
+commercial defaults authorized by storing this document. Publication storage alone
+is not an accepted agreement, and matching decisions alone do not prove activation
+readiness. Keep these prerequisites separate from public enrollment and link activation.
+
+The [earning evidence join](affiliate-earning-evidence-join.md) records the current
+source gaps. Existing collaboration assent fields are mutable and must not substitute
+for independent affiliate agreement history. Diagnostic tracking validation can use
+isolated non-earning contexts; it must not require an active earning agreement to
+prove the capabilities needed before publication. Genuine readiness is still required
+before publishing or activating live earning relationships.
+
 ## Product flow
 
 1. Hotel saves a draft with a booking destination, approved percentage policy and
@@ -34,15 +50,15 @@ The contract is provider-independent and requires no PMS subscription.
 These are logical records, not a proposed additional service or migration schema.
 Reuse existing domain identities and command infrastructure where applicable.
 
-| Record | Required meaning |
-| --- | --- |
-| Program | Stable Marketplace identity bound to organization, property and affiliate offer. One non-ended agreement per program/creator; multiple offers must not be silently merged. |
-| Published terms | Immutable ID, program/property/offer IDs, source draft ID/revision, exact destination and Finance policy version IDs, explicit window, attribution policy version, publication actor/time and effective instant. |
-| Participation | Program and creator profile, pending/active/paused/ended state, revision and the hotel approval and creator acceptance records needed to activate. |
-| Acceptance | Exact terms version, accepting creator actor/profile, time and displayed terms content reference/digest. An acceptance records assent, not hotel approval or tracking proof. |
-| Hotel approval | Exact creator/program/terms version, approving hotel actor, time and authorized property scope. Publication is not blanket creator approval. |
-| Agreement history | Append-only activation, terms-change, pause, resume and end events, expected prior revision, actor, reason, server effective instant and request/idempotency reference. |
-| Link reference | Stable opaque link ID bound to agreement and property. Clicks later bind to the effective accepted terms; changing terms must not rewrite old clicks. |
+| Record            | Required meaning                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Program           | Stable Marketplace identity bound to organization, property and affiliate offer. One non-ended agreement per program/creator; multiple offers must not be silently merged.                                       |
+| Published terms   | Immutable ID, program/property/offer IDs, source draft ID/revision, exact destination and Finance policy version IDs, explicit window, attribution policy version, publication actor/time and effective instant. |
+| Participation     | Program and creator profile, pending/active/paused/ended state, revision and the hotel approval and creator acceptance records needed to activate.                                                               |
+| Acceptance        | Exact terms version, accepting creator actor/profile, time and displayed terms content reference/digest. An acceptance records assent, not hotel approval or tracking proof.                                     |
+| Hotel approval    | Exact creator/program/terms version, approving hotel actor, time and authorized property scope. Publication is not blanket creator approval.                                                                     |
+| Agreement history | Append-only activation, terms-change, pause, resume and end events, expected prior revision, actor, reason, server effective instant and request/idempotency reference.                                          |
+| Link reference    | Stable opaque link ID bound to agreement and property. Clicks later bind to the effective accepted terms; changing terms must not rewrite old clicks.                                                            |
 
 Published terms must retain the exact creator-visible conditions or immutable
 references sufficient to reproduce them. Mutable offer descriptions are not proof
