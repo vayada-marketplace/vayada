@@ -1,6 +1,7 @@
 # Durable affiliate earning calculation journal
 
 VAY-1510. Implementation boundary following [earning rules](affiliate-earning-settlement.md).
+The concrete producer requirements are in [the evidence join contract](affiliate-earning-evidence-join.md).
 Finance owns this append-only calculation history, separate from existing payout
 and payment-evidence records. A journal entry never authorizes a transfer.
 
