@@ -41,6 +41,3 @@ ALTER TABLE platform.media_objects
       OR (purpose = 'finance.expense.receipt' AND resource_product = 'finance' AND resource_type = 'expense' AND property_id IS NOT NULL)
       OR (purpose = 'finance.financials_export' AND resource_product = 'finance' AND resource_type = 'financials_export' AND property_id IS NOT NULL AND owner_organization_id IS NOT NULL AND retained_until IS NOT NULL)
     ) NOT VALID;
-
-ALTER TABLE platform.media_objects
-  VALIDATE CONSTRAINT chk_platform_media_objects_finance;

@@ -447,7 +447,8 @@ async function selectPrivateAttachmentsPastRetention(
      FROM platform.media_objects
      WHERE visibility = 'private'
        AND purpose IN ('marketplace.collaboration_chat.attachment', 'pms.messaging.attachment', 'finance.expense.receipt', 'finance.financials_export')
-       AND lifecycle_status IN ('upload_pending', 'staged', 'active', 'retained', 'delete_requested')
+       AND (lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
+         OR (purpose = 'finance.financials_export' AND lifecycle_status = 'upload_pending'))
        AND retained_until IS NOT NULL
        AND retained_until <= $1::timestamptz
        AND (purpose <> 'finance.financials_export' OR lifecycle_status <> 'upload_pending' OR NOT EXISTS (SELECT 1 FROM platform.jobs job WHERE job.id::text=source_row_id AND job.status='running' AND job.locked_at >= $1::timestamptz-interval '5 minutes'))
