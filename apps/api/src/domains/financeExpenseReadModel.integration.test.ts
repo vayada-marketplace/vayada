@@ -121,6 +121,20 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await expect(read.expenses(PROPERTY, { ...filtered, cursor: Buffer.from("{").toString("base64url") })).rejects.toBeInstanceOf(FinanceExpenseCursorError);
   });
 
+  it("captures an immutable, ordered manifest for the complete filtered export", async () => {
+    const query = { from: "2026-08-01", to: "2026-08-11", categoryId: CATEGORY, paymentStatus: "unpaid" as const, recurring: false, origin: "manual" as const, search: "Alpha", sort: "amount_desc" as const };
+    const result = await read.captureExport(PROPERTY.toUpperCase(), query);
+    expect(result).toMatchObject({ envelope: { propertyId: PROPERTY, currency: "EUR", sourceFreshness: { financeExpenses: expect.any(String) } }, snapshot: { formatVersion: "pms-financials-expenses.v1", propertyId: PROPERTY, currency: "EUR", filters: query, snapshotAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), manifest: [
+      { expenseId: CORRECTION, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+      { expenseId: EXPENSE, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+      { expenseId: SMALL, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+    ] } });
+    await admin.query("UPDATE finance.expenses SET payment_status='paid',paid_on='2026-08-11',revision=revision+1 WHERE id=$1", [EXPENSE]);
+    expect(result?.snapshot.manifest[1]).toMatchObject({ expenseId: EXPENSE, revision: 1, paymentStatus: "unpaid", paidOn: null });
+    await expect(read.captureExport(PROPERTY, query)).resolves.toMatchObject({ snapshot: { manifest: [{ expenseId: CORRECTION }, { expenseId: SMALL }] } });
+    await expect(read.captureExport(EMPTY, query)).resolves.toMatchObject({ snapshot: { manifest: [] } });
+  });
+
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM booking.nightly_revenue_evidence WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
