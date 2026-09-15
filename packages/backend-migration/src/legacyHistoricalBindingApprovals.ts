@@ -36,6 +36,7 @@ export async function lockAndVerifyLegacyHistoricalBindingApprovals(
     const ids = [envelope.migrationApprovalRecordId, envelope.securityApprovalRecordId];
     // SAVEPOINT refuses autocommit. Releasing it retains locks in the outer transaction.
     await client.query("SAVEPOINT vay2017_historical_approvals");
+    await client.query("SET LOCAL search_path = pg_catalog");
     const settings = await client.query<{ allowed: boolean }>(`SELECT
       current_setting('transaction_isolation') = 'read committed'
       AND current_setting('lock_timeout') <> '0' AND current_setting('statement_timeout') <> '0' AS allowed`);
