@@ -558,3 +558,16 @@ commands gain the same limits. Validation: 54 PostgreSQL staff tests, 12 ceiling
 unit tests, backend-auth build/typecheck and API typecheck. Independent review
 found mixed-role baseline and manager-clone compatibility gaps; both fixed with
 PostgreSQL regressions.
+
+### Manager access and invitation limits
+
+Manager access saves require a revision and check both current and proposed
+worker access before commit. Invitations/resends similarly check existing
+memberships, pending configuration and proposed permissions/products/properties.
+Acceptance rechecks the issuer's live authority and the actual recipient's
+membership. Every writer locks the organization before invitation/member rows;
+a concurrency regression verifies acceptance does not lock its invitation while
+waiting for the organization. Validation: 55 PostgreSQL staff tests, 12 ceiling
+unit tests, backend-auth build/typecheck and API typecheck. Independent review
+identified the acceptance lock inversion; fixed and confirmed. Manager role CRUD
+and privileged targets remain prohibited. Frontend integration remains pending.
