@@ -22,6 +22,7 @@ import { enforceRoutePolicy } from "./policy.js";
 type StaffInvitationRepository = Pick<
   ReturnType<typeof createPgStaffInvitationRepository>,
   | "getAccess"
+  | "prepareInvitation"
   | "getInvitation"
   | "listRoster"
   | "persist"
@@ -100,6 +101,29 @@ export async function registerStaffInvitationRoutes(
       throw error;
     }
   };
+
+  app.post<{ Body: { email?: unknown } }>(
+    "/invitations/prepare",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const email = request.body?.email;
+      if (
+        typeof email !== "string" ||
+        email.length > 320 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      )
+        return reply.status(400).send({ code: "invalid_email" });
+      const context = authorized.get(request)!;
+      reply.header("Cache-Control", "no-store");
+      const prepared = await options.repository.prepareInvitation(
+        context.selectedOrganization.organizationId,
+        email,
+      );
+      return prepared
+        ? reply.send(prepared)
+        : reply.status(409).send({ code: "invitation_pending" });
+    },
+  );
 
   app.get("/roles", { onRequest: authorize }, async (request, reply) => {
     const context = authorized.get(request);

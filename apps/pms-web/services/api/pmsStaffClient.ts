@@ -5,6 +5,9 @@ export type PmsStaffMember = {
   name: string | null;
   email: string;
   roleKey: "hotel_manager" | "front_desk" | "housekeeping" | "hotel_custom" | "external_owner";
+  roleDefinitionId?: string | null;
+  roleName?: string | null;
+  propertyAccessMode?: "all" | "assigned";
   propertyIds: string[];
   status: "active" | "pending" | "deactivated";
   lastActiveAt: string | null;
@@ -149,6 +152,15 @@ export function invitePmsStaff(
   commandKey: string,
 ): Promise<PmsInviteResult> {
   return pmsOperationsClient.post(`${teamPath}/invitations`, input, teamWriteOptions(commandKey));
+}
+export function preparePmsStaffInvitation(
+  email: string,
+): Promise<{ configurationRevision: number }> {
+  return pmsOperationsClient.post(
+    `${teamPath}/invitations/prepare`,
+    { email },
+    pmsOperationsRequestOptions,
+  );
 }
 // Capture the snapshot once. Retry this exact payload/key after an uncertain response.
 export function pmsStaffResendInput(invitation: PmsStaffInvitation): PmsStaffInviteInput {

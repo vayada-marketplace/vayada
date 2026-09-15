@@ -2237,5 +2237,6 @@
   "settings.team.sendInvitation": "Send invitation",
   "settings.team.inviteName": "Name (optional)",
   "settings.team.inviteEmail": "Email",
-  "settings.team.confirmRoleReset": "Use the new role defaults and replace this member’s existing permission overrides. Review section access before saving."
+  "settings.team.confirmRoleReset": "Use the new role defaults and replace this member’s existing permission overrides. Review section access before saving.",
+  "settings.team.invitationAlreadyPending": "An invitation is already pending for this address. Close this dialog and resend it from the team list."
 }

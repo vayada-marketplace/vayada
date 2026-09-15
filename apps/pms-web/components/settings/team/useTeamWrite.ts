@@ -28,9 +28,11 @@ export function useTeamWrite() {
       setError(
         t(
           cause instanceof ApiErrorResponse && cause.status === 409
-            ? cause.data.code === "role_in_use"
-              ? "settings.team.roleInUse"
-              : "settings.team.conflict"
+            ? cause.data.code === "invitation_pending"
+              ? "settings.team.invitationAlreadyPending"
+              : cause.data.code === "role_in_use"
+                ? "settings.team.roleInUse"
+                : "settings.team.conflict"
             : cause instanceof ApiErrorResponse && cause.status === 403
               ? "settings.team.forbidden"
               : "settings.team.saveUnconfirmed",
