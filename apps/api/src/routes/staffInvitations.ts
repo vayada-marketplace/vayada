@@ -17,7 +17,7 @@ import { enforceRoutePolicy } from "./policy.js";
 
 type StaffInvitationRepository = Pick<
   ReturnType<typeof createPgStaffInvitationRepository>,
-  "listRoster" | "persist" | "remove" | "updateAccess" | "updateStatus"
+  "getAccess" | "listRoster" | "persist" | "remove" | "updateAccess" | "updateStatus"
 >;
 type StaffInvitationDelivery = Pick<
   ReturnType<typeof createStaffInvitationDeliveryCoordinator>,
@@ -90,6 +90,26 @@ export async function registerStaffInvitationRoutes(
       return reply.status(500).send({ code: "staff_roster_failed" });
     }
   });
+
+  app.get<{ Params: { membershipId: string } }>(
+    "/members/:membershipId/access",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const context = authorized.get(request);
+      if (!context) throw new Error("Staff access authorization was not resolved");
+      reply.header("Cache-Control", "no-store");
+      try {
+        const access = await options.repository.getAccess(
+          context.selectedOrganization.organizationId,
+          request.params.membershipId,
+        );
+        if (!access) return reply.status(404).send({ code: "staff_member_not_found" });
+        return reply.send(access);
+      } catch {
+        return reply.status(500).send({ code: "staff_access_read_failed" });
+      }
+    },
+  );
 
   app.patch<{ Params: { membershipId: string }; Body: unknown }>(
     "/members/:membershipId",
