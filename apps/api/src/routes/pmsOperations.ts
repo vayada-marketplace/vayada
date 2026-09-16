@@ -444,6 +444,7 @@ export type PmsCheckOutCommand = {
   expectedVersion?: string;
   assignmentId?: string;
   inspectionResults: unknown[];
+  fulfilledAddonSelectionIds: string[];
   chargesSettled: string[];
   pendingFlags: string[];
   checkoutNotes?: string;
@@ -1136,6 +1137,7 @@ type PmsCheckOutCommandBody = {
   expectedVersion?: unknown;
   assignmentId?: unknown;
   inspectionResults?: unknown;
+  fulfilledAddonSelectionIds?: unknown;
   chargesSettled?: unknown;
   pendingFlags?: unknown;
   checkoutNotes?: unknown;
@@ -7215,6 +7217,20 @@ function toCheckOutCommand(
   if (!Array.isArray(raw.chargesSettled)) {
     return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
   }
+  const fulfilledAddonSelectionIds = raw.fulfilledAddonSelectionIds ?? [];
+  if (
+    !Array.isArray(fulfilledAddonSelectionIds) ||
+    !fulfilledAddonSelectionIds.every(
+      (selectionId): selectionId is string =>
+        typeof selectionId === "string" && isUuid(selectionId.trim()),
+    ) ||
+    new Set(fulfilledAddonSelectionIds.map((selectionId) => selectionId.trim().toLowerCase())).size !==
+      fulfilledAddonSelectionIds.length
+  ) {
+    return {
+      error: invalidBody("fulfilledAddonSelectionIds entries must be unique UUIDs."),
+    };
+  }
   if (
     !raw.chargesSettled.every(
       (chargeId): chargeId is string => typeof chargeId === "string" && isUuid(chargeId.trim()),
@@ -7234,6 +7250,9 @@ function toCheckOutCommand(
       ...metadata.value,
       assignmentId,
       inspectionResults: raw.inspectionResults,
+      fulfilledAddonSelectionIds: fulfilledAddonSelectionIds.map((selectionId) =>
+        selectionId.trim().toLowerCase(),
+      ),
       chargesSettled,
       pendingFlags: toStringArray(raw.pendingFlags),
       checkoutNotes,
