@@ -20,7 +20,10 @@ without deleting audit history or joining it onto every nightly row.
 
 - Accept only the scoped reader's full replacement for an authoritative modified
   Airbnb revision, or a cancellation replacement containing explicit provider totals. Validate the local booking's property, provider source reference,
-  currency, confirmed lifecycle and updated dates/room count/total in the same transaction.
+  currency and lifecycle in the same transaction. Full-stay replacements require
+  confirmed status and matching updated dates/room count/total. Cancellations
+  require canceled status; the supplied provider total is retained separately
+  from the canonical pre-cancellation stay and amount.
 - The caller must establish provider acceptance, channel/binding ownership, room
   mapping, revision freshness and the channel settings applicable to that revision.
   Supply a revision-bound settings evidence reference; current channel metadata alone
