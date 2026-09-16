@@ -2,6 +2,11 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
 import {
+  buildHistoricalBindingWriteIntent as build,
+  hashHistoricalBindingTargetState as targetHash,
+  type HistoricalBindingWriteEvidence,
+} from "./legacyHistoricalBindingWriteIntent.js";
+import {
   LEGACY_OWNERSHIP_ROW_TABLES,
   type LegacyOwnershipFingerprint,
 } from "./legacyOwnershipBeforeState.js";
@@ -211,5 +216,138 @@ describe("historical binding signed envelope (synthetic keys only)", () => {
       originalPrepareCommandId: id(29),
     });
     expect(() => verify(input)).toThrow("invalid_signature");
+  });
+});
+
+describe("signed historical prepare write intent (no database authority)", () => {
+  function writeFixture() {
+    const f = fixture();
+    const evidence: HistoricalBindingWriteEvidence = {
+      ...f.evidence,
+      write: {
+        claimCreatedAt: "2026-09-14T01:00:00.123456Z",
+        claimUpdatedAt: "2026-09-15T01:29:00.654321Z",
+        claimAfterSha256: "c".repeat(64),
+      },
+    };
+    evidence.targetBeforeSha256 = targetHash(
+      evidence,
+      evidence.binding.bindingExpected.claim.rowStateSha256,
+    );
+    evidence.targetAfterSha256 = targetHash(evidence, evidence.write.claimAfterSha256);
+    const input = () => {
+      f.envelope.evidenceSha256 = hash(evidence);
+      return { ...f.input(), evidence };
+    };
+    return { ...f, evidence, input };
+  }
+  it("derives the whole storage event and exact claim hashes without granting execution", () => {
+    const f = writeFixture();
+    const result = build(f.input(), "controlled-executor");
+    expect(result.executable).toBe(false);
+    expect(result.storageInput).toEqual({
+      claimBeforeSha256: sha,
+      claimAfterSha256: "c".repeat(64),
+      updatedAt: f.evidence.write.claimUpdatedAt,
+      event: {
+        command_id: id(30),
+        contract_version: f.envelope.contractVersion,
+        environment: "local",
+        event_kind: "prepare",
+        compensates_command_id: null,
+        claim_id: id(22),
+        property_id: id(4),
+        external_property_id: id(21),
+        provider: "channex",
+        claim_source: "migration",
+        claim_created_at: f.evidence.write.claimCreatedAt,
+        source_run_id: f.evidence.owner.source.sourceRunId,
+        source_active: true,
+        source_evidence_sha256: sha,
+        payload_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        target_before_sha256: f.evidence.targetBeforeSha256,
+        target_after_sha256: f.evidence.targetAfterSha256,
+        approval_envelope_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        executor_principal_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        before_state: "historical",
+        after_state: "verified_non_active",
+      },
+    });
+    expect(build(f.input(), "controlled-executor")).toEqual(result);
+    expect(
+      build(f.input(), "other-executor").storageInput.event.executor_principal_sha256,
+    ).not.toBe(result.storageInput.event.executor_principal_sha256);
+    f.evidence.write.claimUpdatedAt = "2026-09-15T01:28:00.000000Z";
+    expect(result.storageInput.updatedAt).toBe("2026-09-15T01:29:00.654321Z");
+  });
+  it.each(["claimCreatedAt", "claimUpdatedAt", "claimAfterSha256"] as const)(
+    "rejects unsigned %s substitution",
+    (field) => {
+      const f = writeFixture(),
+        input = f.input();
+      f.evidence.write[field] =
+        field === "claimAfterSha256" ? "d".repeat(64) : "2026-09-15T01:20:00.000000Z";
+      expect(() => build(input, "executor")).toThrow("evidence_mismatch");
+    },
+  );
+  it.each(["before", "after", "connection", "owner", "identity"])(
+    "rejects signed aggregate mismatch for %s",
+    (mode) => {
+      const f = writeFixture();
+      if (mode === "before") f.evidence.targetBeforeSha256 = sha;
+      if (mode === "after") f.evidence.targetAfterSha256 = sha;
+      if (mode === "connection")
+        f.evidence.binding.bindingExpected.connections[0]!.rowStateSha256 = "d".repeat(64);
+      if (mode === "owner") f.evidence.owner.target[0]!.rowStateSha256 = "d".repeat(64);
+      if (mode === "identity") f.evidence.owner.identity.externalIdentitySha256 = "d".repeat(64);
+      expect(() => build(f.input(), "executor")).toThrow("WRITE_INTENT_INVALID");
+    },
+  );
+  it.each([
+    "missing",
+    "extra",
+    "future",
+    "invalid date",
+    "noncanonical",
+    "backdated",
+    "unchanged",
+    "compensate",
+    "executor",
+  ])("rejects signed invalid write intent: %s", (mode) => {
+    const f = writeFixture();
+    if (mode === "missing") Reflect.deleteProperty(f.evidence, "write");
+    if (mode === "extra") Object.assign(f.evidence.write, { activate: true });
+    if (mode === "future") f.evidence.write.claimUpdatedAt = "2026-09-15T01:30:00.000001Z";
+    if (mode === "invalid date") f.evidence.write.claimUpdatedAt = "2026-02-30T01:00:00.000000Z";
+    if (mode === "noncanonical") f.evidence.write.claimUpdatedAt = "2026-09-15T01:20:00Z";
+    if (mode === "backdated") f.evidence.write.claimUpdatedAt = "2026-09-13T01:00:00.000000Z";
+    if (mode === "unchanged") f.evidence.write.claimAfterSha256 = sha;
+    if (mode === "compensate") {
+      f.envelope.purpose = "compensate";
+      f.envelope.originalPrepareCommandId = id(29);
+    }
+    expect(() => build(f.input(), mode === "executor" ? " " : "executor")).toThrow(
+      "WRITE_INTENT_INVALID",
+    );
+  });
+  it("canonicalizes set order and includes every target fingerprint", () => {
+    const f = writeFixture(),
+      before = f.evidence.targetBeforeSha256;
+    f.evidence.owner.target = [...f.evidence.owner.target].reverse();
+    expect(targetHash(f.evidence, sha)).toBe(before);
+    for (const row of f.evidence.owner.target) {
+      const changed = structuredClone(f.evidence);
+      changed.owner.target.find((r) => r.kind === row.kind)!.rowStateSha256 = "d".repeat(64);
+      expect(targetHash(changed, sha)).not.toBe(before);
+    }
+    expect(targetHash(f.evidence, "c".repeat(64))).toBe(f.evidence.targetAfterSha256);
+  });
+  it.each(["signature", "expired", "environment"])("rejects %s before producing input", (mode) => {
+    const f = writeFixture(),
+      input = f.input();
+    if (mode === "signature") input.detachedSignature = "A".repeat(86);
+    if (mode === "expired") input.now = new Date(f.envelope.expiresAt);
+    if (mode === "environment") Object.assign(input, { environment: "production" });
+    expect(() => build(input, "executor")).toThrow();
   });
 });

@@ -300,6 +300,33 @@ remain mandatory before any real execution.
 Compensation must also authenticate the original successful transition; a ledger
 row's existence and valid lineage alone are not authority.
 
+### Signed prepare write intent
+
+`buildHistoricalBindingWriteIntent` is an internal, prepare-only translator, not
+the executable consumer. It requires freshly signed evidence with a `write`
+object binding the original claim creation timestamp, chosen update timestamp
+(canonical UTC with six fractional digits), and complete expected after-row hash.
+Old diagnostic envelopes without this object cannot produce a write intent; do
+not modify old signatures or approval records. Generate new evidence/approvals.
+
+Before/after target hashes use domain `vayada:legacy-historical-binding-transition:v1`
+and `target-state` separators over canonical JSON containing the complete sorted
+owner fingerprint set, current identity evidence, property, claim fingerprint
+and sorted connection fingerprints. Only the claim fingerprint changes. Source
+proof and the exact write timestamps are additionally bound by the full signed
+evidence digest. The translator derives all event fields; payload hash is SHA256
+of canonical envelope bytes, and executor hash uses the same domain with the
+`executor` separator and the trusted runner principal. These are not user inputs.
+
+The result remains `executable: false`: hashes describe supplied expectations,
+not independent database observations. Current authorities, source provenance,
+owner/disposition eligibility and target evidence must still be verified under
+retained locks before receipt lookup or storage. Storage must compare actual
+full before/after row hashes and creation timestamp; signature alone does not
+prove the supplied after hash describes the chosen timestamp. Compensation is
+explicitly rejected until its original-transition authentication is composed.
+No command, provider call, access exception or production execution is wired.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
