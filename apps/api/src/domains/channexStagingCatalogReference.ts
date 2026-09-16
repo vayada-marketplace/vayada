@@ -1,13 +1,14 @@
 import type { PoolClient } from "pg";
 
-/** Only the guarded staging repair supplies this capability, under its locks. */
+/** Only the guarded staging import/repair supplies this capability, under its locks. */
 export async function resolveStagingCatalogReference(
   client: PoolClient,
   scope: {
     propertyId: string;
     connectionId: string;
     bindingGeneration: string;
-    bookingId: string;
+    bookingId: string | null;
+    bootstrapHash?: string;
     providerBookingId: string;
     revisionId: string;
     externalRoomTypeId: string;
@@ -25,7 +26,9 @@ export async function resolveStagingCatalogReference(
        AND rm.room_type_id=ref.room_type_id AND rm.external_room_type_id=ref.external_room_type_id::text AND rm.status='active'
      JOIN pms.room_types r ON r.id=ref.room_type_id AND r.property_id=ref.property_id AND r.active
      WHERE ref.property_id=$1::uuid AND ref.connection_id=$2::uuid AND ref.binding_generation=$3::uuid
-       AND ref.guest_booking_id=$4::uuid AND ref.provider_booking_id=$5::uuid AND ref.provider_revision_id=$6::uuid
+       AND (($9::text IS NULL AND ref.guest_booking_id=$4::uuid)
+         OR ($9::text IS NOT NULL AND ref.guest_booking_id IS NULL AND ref.evidence_hash=$9))
+       AND ref.provider_booking_id=$5::uuid AND ref.provider_revision_id=$6::uuid
        AND ref.external_room_type_id::text=$7 AND ref.external_rate_plan_id::text=$8
        AND NOT EXISTS(SELECT 1 FROM pms.channel_rate_plan_mappings mapping
          WHERE mapping.connection_id=c.id AND mapping.property_id=c.property_id
@@ -41,6 +44,7 @@ export async function resolveStagingCatalogReference(
         scope.revisionId,
         scope.externalRoomTypeId,
         scope.externalRatePlanId,
+        scope.bootstrapHash ?? null,
       ],
     )
   ).rows;

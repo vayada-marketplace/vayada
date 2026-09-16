@@ -3,12 +3,23 @@ import {
   seedChannexAssignmentFixture,
 } from "../jobs/channexAssignmentTestFixture.js";
 import { createPgChannexManagementPlanPort } from "../integrations/channexManagementPlans.js";
-import { createChannexManagementProvider } from "../integrations/channexManagement.js";
-import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
+import {
+  channexRequests,
+  createChannexManagementProvider,
+} from "../integrations/channexManagement.js";
+import {
+  runPmsChannexManagementWorkerOnce,
+  type ChannexManagementJob,
+} from "../jobs/pmsChannexManagementWorker.js";
+import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
+import { createPmsChannexManagementTargetState } from "../jobs/pmsChannexManagementTargetState.js";
 import pg from "pg";
 import Fastify from "fastify";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
-import { registerProviderWebhookRoutes } from "../routes/providerWebhooks.js";
+import {
+  promotePulledChannexBookingRevision,
+  registerProviderWebhookRoutes,
+} from "../routes/providerWebhooks.js";
 import { createPgProviderWebhookStore } from "../platform/providerWebhooks.js";
 import { createPgPmsChannexManagementCommandPort } from "./pmsChannexManagementCommandStore.js";
 import { listChannexAlerts } from "./channexOperationalAlerts.js";
@@ -388,5 +399,173 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
     expect(
       (await listChannexAlerts(db, P)).find((a) => a.id === alert.id)?.resolvedAt,
     ).not.toBeNull();
+  });
+  it("runs reconnection workers through durable ingestion and failed ARI readback before resolution", async () => {
+    await deliver(
+      "disconnected_channel",
+      { channel_id: "reconnected-846" },
+      "2026-09-07T00:00:00Z",
+    );
+    const alert = (await listChannexAlerts(db, P)).find(
+      (a) => a.impact.channelId === "reconnected-846",
+    )!;
+    const revision = {
+      id: "worker-reconnect-revision",
+      attributes: {
+        property_id: "provider-846",
+        booking_id: "worker-reconnect-booking",
+        status: "new",
+        arrival_date: "2026-09-10",
+        departure_date: "2026-09-12",
+        amount: "200.00",
+        currency: "EUR",
+        inserted_at: "2026-09-07T00:00:00Z",
+        rooms: [
+          {
+            room_type_id: "provider-room",
+            rate_plan_id: "provider-rate",
+            occupancy: { adults: 1, children: 0 },
+          },
+        ],
+      },
+    };
+    const receipts = createPgProviderWebhookStore({ connectionString: url! });
+    const plans = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
+        for (const revision of revisions)
+          await promotePulledChannexBookingRevision({
+            store: receipts,
+            propertyId,
+            providerPropertyId,
+            revision: revision as Record<string, unknown>,
+          });
+      },
+    });
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      targetState: createPmsChannexManagementTargetState(),
+    });
+    let active = false,
+      readbackMatches = false,
+      acked = false,
+      ariWrites = 0;
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      // Deterministic ARI plan isolates the queue/provider/completion contract from catalog setup.
+      plans: {
+        plan: async (job) =>
+          job.input.operationType === "sync_bookings"
+            ? plans.plan(job)
+            : {
+                externalPropertyId: "provider-846",
+                verifyRecovery: true,
+                recoveryChannelId: "reconnected-846",
+                requests: [
+                  channexRequests.availability([
+                    {
+                      property_id: "provider-846",
+                      room_type_id: "provider-room",
+                      date_from: "2026-09-10",
+                      date_to: "2026-09-10",
+                      availability: 0,
+                    },
+                  ]),
+                ],
+              },
+      },
+      fetch: async (input, init) => {
+        if (String(input).includes("/channels/"))
+          return Response.json({ data: { is_active: active, properties: ["provider-846"] } });
+        if (String(input).includes("/booking_revisions/"))
+          return Response.json({ data: acked ? [] : [revision] });
+        if (init?.method === "POST") {
+          ariWrites++;
+          return Response.json({ meta: { warnings: [] } });
+        }
+        return Response.json({
+          data: { "provider-room": { "2026-09-10": readbackMatches ? 0 : 1 } },
+        });
+      },
+    });
+    const run = () =>
+      runPmsChannexManagementWorkerOnce({ store, provider, workerId: "vay846-proof" });
+    const current = async () => (await listChannexAlerts(db, P)).find((a) => a.id === alert.id)!;
+    // Advance only this incident's retry clock and run booking before ARI so that
+    // the intermediate unresolved assertion does not depend on tied queue timestamps.
+    // Completion and verification are always written by the real workers.
+    const due = () =>
+      db.query(
+        "UPDATE platform.jobs SET run_after=now(),priority=CASE WHEN payload->>'operationType'='sync_bookings' THEN 100001 ELSE 100000 END WHERE payload->>'recoveryAlertId'=$1 AND status='pending'",
+        [alert.id],
+      );
+    try {
+      expect(await commands.recoverAlert!(context, P, alert.id, 0)).toMatchObject({ ok: true });
+      await due();
+      expect((await run()).outcome).toBe("dead_lettered");
+      expect((await run()).outcome).toBe("dead_lettered");
+      expect(ariWrites).toBe(0);
+      expect((await current()).resolvedAt).toBeNull();
+      active = true;
+      await Promise.all([
+        commands.recoverAlert!(context, P, alert.id, 1),
+        commands.recoverAlert!(context, P, alert.id, 1),
+      ]);
+      await due();
+      expect(
+        (
+          await db.query(
+            "SELECT count(*)::int n FROM platform.jobs WHERE payload->>'recoveryAlertId'=$1",
+            [alert.id],
+          )
+        ).rows[0].n,
+      ).toBe(4);
+      expect((await run()).outcome).toBe("retry_scheduled");
+      expect((await run()).outcome).toBe("retry_scheduled");
+      expect((await current()).resolvedAt).toBeNull();
+      expect(
+        await runChannexBookingJobs(url!, {
+          apiBaseUrl: "https://staging.channex.io",
+          apiKey: "synthetic",
+          ownsMutation: () => true,
+          limit: 1,
+          fetch: async (_input, init) => {
+            expect(init?.method).toBe("POST");
+            expect(
+              (
+                await db.query(
+                  "SELECT count(*)::int n FROM pms.channel_booking_mappings WHERE property_id=$1 AND external_revision_id=$2",
+                  [P, revision.id],
+                )
+              ).rows[0].n,
+            ).toBe(1);
+            acked = true;
+            return new Response(null, { status: 204 });
+          },
+        }),
+      ).toMatchObject({ succeeded: 1 });
+      await due();
+      expect(await run()).toMatchObject({ outcome: "succeeded", operationType: "sync_bookings" });
+      expect((await current()).resolvedAt).toBeNull();
+      readbackMatches = true;
+      expect(await run()).toMatchObject({ outcome: "succeeded", operationType: "sync_ari" });
+      const done = await current();
+      expect(done.resolvedAt).not.toBeNull();
+      expect(done.recovery).toHaveLength(2);
+      expect(done.recovery.every((job) => job.status === "succeeded" && job.verified)).toBe(true);
+      expect(
+        (
+          await db.query(
+            "SELECT count(*)::int n FROM pms.channel_booking_mappings WHERE property_id=$1 AND external_revision_id=$2",
+            [P, revision.id],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+    } finally {
+      await store.close?.();
+      await plans.close();
+      await receipts.close?.();
+    }
   });
 });

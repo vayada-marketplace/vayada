@@ -104,3 +104,44 @@ Changing the selected rate creates a new draft revision and preserves all previo
 references. Destination readiness, creator-visible published terms and accepted
 agreement creation remain separate publication work; this association alone does
 not certify a booking destination, publish terms or activate earning links.
+
+## Editing an existing hotel draft
+
+Expanded Affiliate offers in the hotel profile expose approved rate selection and
+an explicit attribution window. The editor loads the existing draft and approved
+policy history, preserving its exact current approved rate even beyond the history
+limit. Saving uses the loaded revision and a retry key bound to the exact payload;
+the booking destination reference is preserved. A successful write reloads the
+server record, and a failed reload does not leave the stale form editable.
+
+An offer without an initial draft shows setup required and cannot save. This editor
+does not invent a destination, window or rate. Destination configuration/validation
+and creator-visible publication are not implemented here. Draft terms remain
+hotel-only and separate from the existing descriptive collaboration offer fields.
+
+## Saved booking-page association
+
+Each new draft revision resolves its exact Booking destination version against the
+canonical property, authoring organization and enabled property through the Booking
+read boundary inside the offer transaction. New saves hold a shared property-row
+lock until commit so concurrent disablement cannot pass the enabled-property check.
+Missing, malformed or out-of-scope
+references return `destination_unavailable` (HTTP 409), without a draft or retry key.
+Storage failures propagate as server errors. Authorized completed retries still
+return their original result. GET adds `draft.destination`: the exact saved
+configuration with `trackingStatus: not_validated`, or null for unavailable historical
+references. No current destination is silently substituted, including beyond the
+20-version configuration history. Saving a new version preserves prior revisions.
+This configuration check is not tracking verification or permission to publish.
+
+## Initial hotel setup and destination selection
+
+The offer editor now supports a missing draft with explicit saved booking-page,
+approved commission and attribution-window selections; no values are defaulted.
+Initial setup uses expected revision zero. Existing drafts show their exact saved
+page even beyond recent history, or require a replacement if unavailable. The
+selected URL is plain text with tracking not validated; the browser never follows it.
+Changing a page appends a draft revision and cannot alter earlier terms. Missing
+configuration directs the hotel to setup above and a reload. Save/retry and failed
+reload protections also apply to initial setup. This supersedes the earlier
+existing-draft-only UI limitation and does not publish or activate an affiliate offer.

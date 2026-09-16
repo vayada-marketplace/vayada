@@ -15,6 +15,7 @@ export type PlatformMediaCleanupAction =
   | "abandoned-staging-upload"
   | "delete-replaced-public-image"
   | "delete-private-attachment-after-retention"
+  | "delete-expired-financials-export"
   | "cleanup-rollback-window-object";
 
 export type PlatformMediaCleanupCandidate = {
@@ -200,6 +201,13 @@ const MUTATIONS: Record<
     auditAction: "platform_media.cleanup.rollback_window_object_deleted",
   },
 };
+const FINANCE_EXPORT_MUTATION: Omit<PlatformMediaCleanupMutation, "deadlineOrWindow"> = {
+  action: "delete-expired-financials-export",
+  runName: "privateAttachmentRetention",
+  jobType: "platform.media.cleanup.expired-financials-export",
+  eventType: "platform_media.financials_export.deleted_after_expiry",
+  auditAction: "platform_media.cleanup.expired_financials_export_deleted",
+};
 
 export function createPgPlatformMediaCleanupStore(
   config: PgPlatformMediaCleanupStoreConfig,
@@ -285,11 +293,14 @@ async function runPlatformMediaCleanupJob(
   input: { now: Date; limit: number; context: PlatformMediaCleanupContext },
 ): Promise<PlatformMediaCleanupRunResult> {
   const candidates = await selectCandidatesForRun(store, runName, input);
-  const mutationTemplate = MUTATIONS[runName];
   const mutations: PlatformMediaCleanupMutationResult[] = [];
   const failures: PlatformMediaCleanupFailureResult[] = [];
 
   for (const candidate of candidates) {
+    const mutationTemplate =
+      runName === "privateAttachmentRetention" && candidate.purpose === "finance.financials_export"
+        ? FINANCE_EXPORT_MUTATION
+        : MUTATIONS[runName];
     const mutation = {
       ...mutationTemplate,
       deadlineOrWindow: deadlineOrWindowForCandidate(candidate, runName, input.now),
@@ -435,10 +446,12 @@ async function selectPrivateAttachmentsPastRetention(
        NULL::text AS "replacedByMediaObjectId"
      FROM platform.media_objects
      WHERE visibility = 'private'
-       AND purpose IN ('marketplace.collaboration_chat.attachment', 'pms.messaging.attachment', 'finance.expense.receipt')
-       AND lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
+       AND purpose IN ('marketplace.collaboration_chat.attachment', 'pms.messaging.attachment', 'finance.expense.receipt', 'finance.financials_export')
+       AND (lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
+         OR (purpose = 'finance.financials_export' AND lifecycle_status = 'upload_pending'))
        AND retained_until IS NOT NULL
        AND retained_until <= $1::timestamptz
+       AND (purpose <> 'finance.financials_export' OR lifecycle_status <> 'upload_pending' OR NOT EXISTS (SELECT 1 FROM platform.jobs job WHERE job.id::text=source_row_id AND job.status='running' AND job.locked_at >= $1::timestamptz-interval '5 minutes'))
      ORDER BY retained_until ASC, updated_at ASC
      LIMIT $2`,
     [now.toISOString(), limit],
@@ -671,6 +684,13 @@ function mediaCleanupEligibilitySql(
        AND media.lifecycle_status IN ('staged', 'active', 'retained', 'delete_requested')
        AND media.retained_until IS NOT NULL
        AND media.retained_until <= $2::timestamptz`;
+    case "delete-expired-financials-export":
+      return `media.visibility = 'private'
+       AND media.purpose = 'finance.financials_export'
+       AND media.lifecycle_status IN ('upload_pending', 'active', 'delete_requested')
+       AND media.retained_until IS NOT NULL
+       AND media.retained_until <= $2::timestamptz
+       AND (media.lifecycle_status <> 'upload_pending' OR NOT EXISTS (SELECT 1 FROM platform.jobs job WHERE job.id::text=media.source_row_id AND job.status='running' AND job.locked_at >= $2::timestamptz-interval '5 minutes'))`;
     case "cleanup-rollback-window-object":
       return `media.source_system = 'migration'
        AND media.storage_kind = 'vayada_managed'
