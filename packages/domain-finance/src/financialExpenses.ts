@@ -68,6 +68,53 @@ export type FinanceExpenseQuery = {
   search?: string;
   sort: FinanceExpenseSort;
 };
+export type FinanceExpenseExportQuery = Omit<FinanceExpenseQuery, "cursor" | "limit">;
+export const FINANCE_EXPENSE_CSV_VERSION = "pms-financials-expenses.v1" as const;
+export const FINANCE_EXPENSE_CSV_CONTENT_TYPE = "text/csv; charset=utf-8" as const;
+export const FINANCE_EXPENSE_CSV_COLUMNS = [
+  "property_id",
+  "expense_id",
+  "incurred_on",
+  "category_id",
+  "category_name",
+  "origin",
+  "vendor",
+  "amount",
+  "currency",
+  "payment_status",
+  "paid_on",
+  "recurring_rule_id",
+  "source_key",
+  "reverses_expense_id",
+  "revision",
+] as const;
+export type FinanceExpenseCsvItem = FinanceExpense & { categoryName: string };
+export type FinanceExpenseCsvArtifact = {
+  formatVersion: typeof FINANCE_EXPENSE_CSV_VERSION;
+  contentType: typeof FINANCE_EXPENSE_CSV_CONTENT_TYPE;
+  propertyId: string;
+  currency: string;
+  filename: string;
+  rowCount: number;
+  body: string;
+};
+export type FinanceExpenseExportSelection = Readonly<{
+  expenseId: string;
+  revision: number;
+  categoryId: string;
+  categoryRevision: number;
+  categoryName: string;
+  paymentStatus: FinanceExpensePaymentStatus;
+  paidOn: string | null;
+}>;
+export type FinanceExpenseExportSnapshot = Readonly<{
+  formatVersion: typeof FINANCE_EXPENSE_CSV_VERSION;
+  propertyId: string;
+  currency: string;
+  filters: FinanceExpenseExportQuery;
+  snapshotAt: string;
+  manifest: readonly FinanceExpenseExportSelection[];
+}>;
 export type FinanceExpenseRecurrenceWrite = {
   cadence: FinanceExpenseCadence;
   startsOn: string;
@@ -129,6 +176,132 @@ export function parseFinanceExpenseQuery(value: unknown): FinanceExpenseQuery | 
   });
 }
 
+export function parseFinanceExpenseExportQuery(value: unknown): FinanceExpenseExportQuery | null {
+  if (!recordWithKnownKeys(value, EXPORT_QUERY_KEYS)) return null;
+  const parsed = parseFinanceExpenseQuery({ ...value, limit: 1 });
+  if (!parsed) return null;
+  const { cursor: _cursor, limit: _limit, ...query } = parsed;
+  return compact({ ...query, categoryId: query.categoryId?.toLowerCase() });
+}
+
+export function parseFinanceExpenseExportSnapshot(
+  value: unknown,
+): FinanceExpenseExportSnapshot | null {
+  if (
+    !recordWithExactKeys(value, [
+      "formatVersion",
+      "propertyId",
+      "currency",
+      "filters",
+      "snapshotAt",
+      "manifest",
+    ]) ||
+    value.formatVersion !== FINANCE_EXPENSE_CSV_VERSION ||
+    !canonicalUuid(value.propertyId) ||
+    !/^[A-Z]{3}$/.test(String(value.currency)) ||
+    !canonicalInstant(value.snapshotAt) ||
+    !Array.isArray(value.manifest)
+  )
+    return null;
+  const filters = parseFinanceExpenseExportQuery(value.filters),
+    ids = new Set<string>(),
+    manifest: FinanceExpenseExportSelection[] = [];
+  if (!filters) return null;
+  for (const raw of value.manifest) {
+    if (
+      !recordWithExactKeys(raw, [
+        "expenseId",
+        "revision",
+        "categoryId",
+        "categoryRevision",
+        "categoryName",
+        "paymentStatus",
+        "paidOn",
+      ])
+    )
+      return null;
+    const paymentStatus = oneOf(raw.paymentStatus, FINANCE_EXPENSE_PAYMENT_STATUSES),
+      paidOn = raw.paidOn;
+    if (
+      !canonicalUuid(raw.expenseId) ||
+      !canonicalUuid(raw.categoryId) ||
+      !revision(raw.revision) ||
+      !revision(raw.categoryRevision) ||
+      !trimmed(raw.categoryName, 1, 120) ||
+      !paymentStatus ||
+      !(
+        (paymentStatus === "paid" && localDate(paidOn)) ||
+        (paymentStatus === "unpaid" && paidOn === null)
+      ) ||
+      ids.has(raw.expenseId)
+    )
+      return null;
+    ids.add(raw.expenseId);
+    manifest.push({
+      expenseId: raw.expenseId,
+      revision: raw.revision,
+      categoryId: raw.categoryId,
+      categoryRevision: raw.categoryRevision,
+      categoryName: raw.categoryName,
+      paymentStatus,
+      paidOn: paidOn as string | null,
+    });
+  }
+  return {
+    formatVersion: FINANCE_EXPENSE_CSV_VERSION,
+    propertyId: value.propertyId,
+    currency: String(value.currency),
+    filters,
+    snapshotAt: value.snapshotAt,
+    manifest,
+  };
+}
+
+export function buildFinanceExpenseCsvArtifact(input: {
+  propertyId: string;
+  currency: string;
+  expenses: readonly FinanceExpenseCsvItem[];
+}): FinanceExpenseCsvArtifact {
+  if (
+    !uuid(input.propertyId) ||
+    input.propertyId !== input.propertyId.toLowerCase() ||
+    !/^[A-Z]{3}$/.test(input.currency)
+  )
+    throw new TypeError("Expense CSV evidence violates the export contract");
+  const ids = new Set<string>();
+  for (const item of input.expenses) {
+    if (!validCsvItem(item, input.currency) || ids.has(item.id))
+      throw new TypeError("Expense CSV evidence violates the export contract");
+    ids.add(item.id);
+  }
+  const rows = input.expenses.map((item) => [
+    input.propertyId,
+    item.id,
+    item.incurredOn,
+    item.categoryId,
+    safeCsvText(item.categoryName),
+    item.origin,
+    safeCsvText(item.vendor),
+    item.amount.amount,
+    input.currency,
+    item.paymentStatus,
+    item.paidOn ?? "",
+    item.recurringRuleId ?? "",
+    safeCsvText(item.sourceKey ?? ""),
+    item.reversesExpenseId ?? "",
+    String(item.revision),
+  ]);
+  return {
+    formatVersion: FINANCE_EXPENSE_CSV_VERSION,
+    contentType: FINANCE_EXPENSE_CSV_CONTENT_TYPE,
+    propertyId: input.propertyId,
+    currency: input.currency,
+    filename: `pms-financials-expenses-${input.propertyId}.csv`,
+    rowCount: rows.length,
+    body: [FINANCE_EXPENSE_CSV_COLUMNS, ...rows].map(csvRow).join("\r\n") + "\r\n",
+  };
+}
+
 export function parseFinanceExpenseWrite(value: unknown): FinanceExpenseWrite | null {
   if (!recordWithKnownKeys(value, EXPENSE_WRITE_KEYS) || !hasKeys(value, EXPENSE_REQUIRED_KEYS))
     return null;
@@ -174,6 +347,7 @@ export function parseFinanceExpenseWrite(value: unknown): FinanceExpenseWrite | 
 const COMMAND_KEYS = ["commandId", "idempotencyKey", "expectedRevision"] as const;
 // prettier-ignore
 const QUERY_KEYS = ["from", "to", "cursor", "limit", "categoryId", "paymentStatus", "recurring", "origin", "search", "sort"] as const;
+const EXPORT_QUERY_KEYS = QUERY_KEYS.filter((key) => key !== "cursor" && key !== "limit");
 // prettier-ignore
 const EXPENSE_REQUIRED_KEYS = [...COMMAND_KEYS.slice(0, 2), "incurredOn", "vendor", "categoryId", "amount", "paymentStatus"];
 const EXPENSE_WRITE_KEYS = [
@@ -267,6 +441,9 @@ function uuid(value: unknown): value is string {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
   );
 }
+function canonicalUuid(value: unknown): value is string {
+  return uuid(value) && value === value.toLowerCase();
+}
 function optionalUuid(value: unknown): boolean {
   return value === undefined || uuid(value);
 }
@@ -296,6 +473,39 @@ function localDate(value: unknown): value is string {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
+function canonicalInstant(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value))
+    return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
 function compact<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, part]) => part !== undefined)) as T;
 }
+
+function validCsvItem(value: FinanceExpenseCsvItem, currency: string): boolean {
+  return (
+    uuid(value.id) &&
+    value.id === value.id.toLowerCase() &&
+    uuid(value.categoryId) &&
+    value.categoryId === value.categoryId.toLowerCase() &&
+    FINANCE_EXPENSE_ORIGINS.includes(value.origin) &&
+    localDate(value.incurredOn) &&
+    trimmed(value.categoryName, 1, 120) &&
+    trimmed(value.vendor, 1, 200) &&
+    value.amount.currency === currency &&
+    /^(?:0|[1-9]\d{0,14})\.\d{4}$/.test(value.amount.amount) &&
+    BigInt(value.amount.amount.replace(".", "")) > 0n &&
+    FINANCE_EXPENSE_PAYMENT_STATUSES.includes(value.paymentStatus) &&
+    ((value.paymentStatus === "paid" && localDate(value.paidOn)) ||
+      (value.paymentStatus === "unpaid" && value.paidOn === null)) &&
+    [value.recurringRuleId, value.reversesExpenseId].every(
+      (id) => id === null || (uuid(id) && id === id.toLowerCase()),
+    ) &&
+    (value.sourceKey === null || trimmed(value.sourceKey, 1, 250)) &&
+    revision(value.revision)
+  );
+}
+const safeCsvText = (value: string) => (/^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value);
+const csvRow = (values: readonly string[]) =>
+  values.map((value) => `"${value.replaceAll('"', '""')}"`).join(",");

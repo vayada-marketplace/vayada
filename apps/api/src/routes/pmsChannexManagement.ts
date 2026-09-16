@@ -193,8 +193,12 @@ export async function registerPmsChannexManagementRoutes(
       const ari = ["rate_error", "sync_error", "sync_warning", "disconnected_channel"].includes(
         alert.eventType,
       );
+      const scoped =
+        booking && !ari && options.capabilityModes.bookingSync === "observe_only"
+          ? options.commandPort?.recoverStagingAlert
+          : undefined;
       if (
-        (booking && options.capabilityModes.bookingSync !== "mutating") ||
+        (booking && options.capabilityModes.bookingSync !== "mutating" && !scoped) ||
         (ari && options.capabilityModes.ariSync !== "mutating")
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
@@ -204,14 +208,9 @@ export async function registerPmsChannexManagementRoutes(
         Number(request.body.round) >= 3
       )
         return reply.code(400).send({ code: "invalid_recovery_round" });
-      if (!options.commandPort?.recoverAlert)
-        return reply.code(503).send({ code: "recovery_unavailable" });
-      const result = await options.commandPort.recoverAlert(
-        context,
-        propertyId,
-        alertId,
-        Number(request.body.round),
-      );
+      const recover = scoped ?? options.commandPort?.recoverAlert;
+      if (!recover) return reply.code(503).send({ code: "recovery_unavailable" });
+      const result = await recover(context, propertyId, alertId, Number(request.body.round));
       return reply.code(result.ok ? 202 : 409).send(result);
     },
   );

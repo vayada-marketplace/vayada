@@ -5,6 +5,8 @@ import { resolveStagingCatalogReference } from "./channexStagingCatalogReference
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import {
   catalogUuid,
+  retainedRevisionScope,
+  validateRetainedRevisionRequest,
   readStagingCatalogEvidence,
   rejectCatalog,
   type StagingCatalogRequest,
@@ -24,17 +26,17 @@ export async function adoptChannexStagingCatalog(
     management.capabilityModes.bookingSync !== "observe_only" ||
     !management.apiKey ||
     !config.targetDatabaseUrl ||
-    ![
-      propertyId,
-      input.providerPropertyId,
-      input.bookingId,
-      input.revisionId,
-      input.channelId,
-    ].every(catalogUuid) ||
+    ![propertyId, input.providerPropertyId, input.bookingId, input.revisionId].every(catalogUuid) ||
+    (input.retainedRevision
+      ? !input.preImport ||
+        input.channelId !== undefined ||
+        propertyId !== retainedRevisionScope.propertyId
+      : !catalogUuid(input.channelId)) ||
     !/^VAY-\d+:[a-zA-Z0-9:_-]{1,120}$/.test(input.approvalRef) ||
     (input.applyHash !== undefined && !/^[a-f0-9]{64}$/.test(input.applyHash))
   )
     rejectCatalog("invalid_staging_catalog_scope");
+  validateRetainedRevisionRequest(input);
   const pool = new pg.Pool({
     connectionString: config.targetDatabaseUrl,
     max: 1,
@@ -65,7 +67,11 @@ export async function adoptChannexStagingCatalog(
     await client.query("ROLLBACK");
     const facts = await readStagingCatalogEvidence(input, management.apiKey!, request);
     const evidence = {
-      version: "channex-staging-catalog.v1",
+      version: input.retainedRevision
+        ? "channex-staging-retained-bootstrap.v1"
+        : input.preImport
+          ? "channex-staging-bootstrap.v1"
+          : "channex-staging-catalog.v1",
       propertyId,
       connectionId: before.id,
       bindingGeneration: before.generation,
@@ -107,9 +113,12 @@ export async function adoptChannexStagingCatalog(
         ],
       )
     ).rows;
-    if (imported.length !== 1) rejectCatalog("completed_staging_import_required");
-    const bookingId = imported[0]!.bookingId;
-    const auditKey = `channex.staging-catalog:${propertyId}:${facts.roomId}:${facts.rateId}:v1`;
+    if (!input.preImport && imported.length !== 1)
+      rejectCatalog("completed_staging_import_required");
+    const bookingId = input.preImport ? null : imported[0]!.bookingId;
+    const auditKey = input.preImport
+      ? `channex.staging-bootstrap:${propertyId}:${input.bookingId}:${input.revisionId}:v1`
+      : `channex.staging-catalog:${propertyId}:${facts.roomId}:${facts.rateId}:v1`;
     const receipt = (
       await client.query<{ hash: string; roomTypeId: string }>(
         `SELECT evidence_hash hash,room_type_id::text AS "roomTypeId" FROM pms.channex_staging_catalog_references
@@ -124,6 +133,7 @@ export async function adoptChannexStagingCatalog(
         connectionId: before.id,
         bindingGeneration: before.generation,
         bookingId,
+        bootstrapHash: input.preImport ? hash : undefined,
         providerBookingId: input.bookingId,
         revisionId: input.revisionId,
         externalRoomTypeId: facts.roomId,
@@ -135,10 +145,22 @@ export async function adoptChannexStagingCatalog(
       return {
         outcome: "replayed",
         hash,
+        revisionHash: facts.revisionHash,
         roomTypeId: receipt.roomTypeId,
         providerRateId: facts.rateId,
       };
     }
+    if (
+      input.preImport &&
+      (
+        await client.query(
+          `SELECT 1 FROM booking.guest_bookings WHERE property_id=$1::uuid AND source_system='pms' AND source_booking_id=$2
+       UNION ALL SELECT 1 FROM pms.channel_booking_mappings WHERE property_id=$1::uuid AND external_booking_id=$3`,
+          [propertyId, `channex:${propertyId}:${input.bookingId}`, input.bookingId],
+        )
+      ).rowCount
+    )
+      rejectCatalog("staging_bootstrap_booking_exists");
     const sourceId = `channex-staging:${input.providerPropertyId}:${facts.roomId}`;
     const conflict = (
       await client.query(
@@ -148,7 +170,36 @@ export async function adoptChannexStagingCatalog(
         [propertyId, facts.roomId, facts.rateId, sourceId],
       )
     ).rowCount;
-    if (conflict) rejectCatalog("staging_catalog_mapping_conflict");
+    const reusable = input.preImport
+      ? (
+          await client.query<{ id: string }>(
+            `SELECT r.id::text FROM pms.room_types r JOIN pms.channel_room_type_mappings m
+         ON m.property_id=r.property_id AND m.room_type_id=r.id
+       WHERE r.property_id=$1::uuid AND r.source_system='pms' AND r.source_room_type_id=$2 AND r.active
+         AND r.room_attributes ? 'channexStagingAdoption' AND m.connection_id=$3::uuid
+         AND m.external_room_type_id=$4 AND m.status='active'
+         AND r.name=$5 AND r.occupancy_limits=$6::jsonb
+         AND r.room_attributes->'channexStagingAdoption'->'providerRoomCount'=$7::jsonb
+         AND NOT EXISTS(SELECT 1 FROM pms.room_type_closures c WHERE c.room_type_id=r.id)
+       FOR SHARE OF r,m`,
+            [
+              propertyId,
+              sourceId,
+              before.id,
+              facts.roomId,
+              facts.roomName,
+              JSON.stringify({
+                total: facts.adults + facts.children,
+                adults: facts.adults,
+                children: facts.children,
+              }),
+              JSON.stringify(facts.providerRoomCount),
+            ],
+          )
+        ).rows
+      : [];
+    if (conflict && !(conflict === 2 && reusable.length === 1))
+      rejectCatalog("staging_catalog_mapping_conflict");
     if (!input.applyHash) {
       await client.query("ROLLBACK");
       return {
@@ -158,30 +209,33 @@ export async function adoptChannexStagingCatalog(
         operationalReadiness: "physical_units_and_calendar_required",
       };
     }
-    const roomTypeId = (
-      await client.query<{ id: string }>(
-        `INSERT INTO pms.room_types(property_id,source_system,source_room_type_id,name,occupancy_limits,room_attributes)
+    const roomTypeId =
+      reusable[0]?.id ??
+      (
+        await client.query<{ id: string }>(
+          `INSERT INTO pms.room_types(property_id,source_system,source_room_type_id,name,occupancy_limits,room_attributes)
        VALUES($1::uuid,'pms',$2,$3,$4::jsonb,$5::jsonb) RETURNING id::text`,
-        [
-          propertyId,
-          sourceId,
-          facts.roomName,
-          JSON.stringify({
-            total: facts.adults + facts.children,
-            adults: facts.adults,
-            children: facts.children,
-          }),
-          JSON.stringify({
-            channexStagingAdoption: { hash, providerRoomCount: facts.providerRoomCount },
-          }),
-        ],
-      )
-    ).rows[0]!.id;
-    await client.query(
-      `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id,status)
+          [
+            propertyId,
+            sourceId,
+            facts.roomName,
+            JSON.stringify({
+              total: facts.adults + facts.children,
+              adults: facts.adults,
+              children: facts.children,
+            }),
+            JSON.stringify({
+              channexStagingAdoption: { hash, providerRoomCount: facts.providerRoomCount },
+            }),
+          ],
+        )
+      ).rows[0]!.id;
+    if (!reusable.length)
+      await client.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id,status)
        VALUES($1::uuid,$2::uuid,$3::uuid,$4,'active')`,
-      [propertyId, before.id, roomTypeId, facts.roomId],
-    );
+        [propertyId, before.id, roomTypeId, facts.roomId],
+      );
     const audit = await client.query<{ id: string }>(
       `INSERT INTO platform.product_audit_events(audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
        target_resource_product,target_resource_type,target_resource_id,redacted_payload,retention_class,privacy_scope)

@@ -20,7 +20,10 @@ export async function appendChannexNightlyRevenueEvidence(client: PoolClient, in
     await client.query<{ roomTypeId: string; position: number }>(
       `SELECT room_type_id::text AS "roomTypeId",position
        FROM pms.operational_booking_assignments
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid ORDER BY position`,
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND NOT (source='channel' AND assignment_status='released'
+           AND assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
+         ORDER BY position`,
       [input.propertyId, input.bookingId],
     )
   ).rows;
