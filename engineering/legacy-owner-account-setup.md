@@ -93,12 +93,29 @@ window. If it instead binds an authenticated current principal, or another
 principal cannot be ruled out, stop for separately reviewed identity
 reconciliation; never create a second principal for the legacy UUID.
 
+The create adapter must close the absence-check-to-create race with ordinary
+signup. It must use a provider-supported idempotency key bound to the immutable
+intent and prove atomic uniqueness/conflict behavior for both `external_id` and
+normalized email. A preflight lookup alone is not a collision boundary. If the
+provider cannot supply those guarantees, a separately authorized reservation
+shared with signup is required and the adapter remains non-executable until it
+exists. Any collision returns to independent reconciliation; it never selects,
+updates or links the colliding principal automatically.
+
 Before dispatch, commit a durable intent bound to the exact command, owner,
 contact evidence and provider environment. A provider request must not run while
 a database transaction is held open. Immediately before dispatch, repeat the
 current target/provider/ownership/restriction/contact checks and reject if their
-observation window has expired or drifted. On success, record the exact provider
-ID and link it only after fresh identity checks and conditional local persistence.
+observation window has expired or drifted. In that same serialized transaction,
+atomically claim exactly one `pending` intent as `dispatching` before releasing
+the transaction. A canceled or already claimed intent rejects dispatch. A
+cancellation may atomically change only `pending` to `canceled`; once claimed,
+it cannot claim that dispatch was prevented and must instead preserve the
+uncertain outcome for recovery. Recovery of `dispatching` never issues another
+create: it resolves only through the original idempotency key and verified
+provider evidence. A later attempt requires a new command and intent. On
+success, record the exact provider ID and link it only after fresh identity
+checks and conditional local persistence.
 
 | Observed outcome                             | Required recovery                                                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -115,10 +132,12 @@ Invitations, verification/reset mail and other user contact need separate scope.
 
 ## Cancellation and access remain separate
 
-Cancellation blocks further dispatch and appends a receipt; it does not delete
-the user or provider identity. A later cleanup would require exact before-state,
-no-newer-use/dependency checks and separate authorization. Preserve evidence of
-partial completion, and never erase a conflict to make a rerun pass.
+Cancellation of a still-pending intent blocks further dispatch and appends a
+receipt; cancellation of a claimed intent is rejected and reported as an
+uncertain operation. Neither case deletes the user or provider identity. A later
+cleanup would require exact before-state, no-newer-use/dependency checks and
+separate authorization. Preserve evidence of partial completion, and never
+erase a conflict to make a rerun pass.
 
 Pending identity preparation must remain denied by existing product gates.
 Do not globally activate a user, organization or membership for a smoke test.
@@ -138,10 +157,12 @@ audit failure, rollback and preserved protected fixtures. Assert zero provider
 calls and no organization/membership/resource/entitlement changes.
 
 Provider intent/adapter/recovery tests come afterward: dispatch failure, timeout,
-duplicate dispatch, provider-success/local-failure, external-ID mismatch, email
-collision, pre-dispatch principal/contact drift, newer local restrictions and no
-user notifications. Test product denials after preparation; login or health
-alone is not an access test.
+duplicate dispatch, concurrent ordinary signup during initial create, atomic
+external-ID/email collision handling, pending-versus-dispatching cancellation,
+provider-success/local-failure, external-ID mismatch, email collision,
+pre-dispatch principal/contact drift, newer local restrictions and no user
+notifications. Test product denials after preparation; login or health alone is
+not an access test.
 
 No existing read approval authorizes either writer. Real isolated rehearsals and
 production execution require their own exact write/recovery approval. This
