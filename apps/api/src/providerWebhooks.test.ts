@@ -84,6 +84,38 @@ describe("target provider webhook routes", () => {
       }
     },
   );
+  it.each([
+    { propertyIds: [] as string[] },
+    { propertyIds: ["other-property"] },
+    { propertyIds: ["canonical-property"] },
+  ])("scopes alteration promotion to allowed properties %j", async ({ propertyIds }) => {
+    const store = createMemoryProviderWebhookStore({ "provider-property": "canonical-property" });
+    const app = buildApp({
+      logger: false,
+      providerWebhooks: {
+        secrets: { channex: "secret" },
+        store,
+        modes: { channex: "mutating" },
+        channexAlterationPromotionEnabled: true,
+        channexAlterationPropertyIds: propertyIds,
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/webhooks/channex",
+        headers: { "x-vayada-webhook-token": "secret" },
+        payload: { event: "alteration_request", property_id: "provider-property" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().status).toBe(
+        propertyIds.includes("canonical-property") ? "promoted" : "observed",
+      );
+      expect(store.jobs).toHaveLength(propertyIds.includes("canonical-property") ? 1 : 0);
+    } finally {
+      await app.close();
+    }
+  });
   it("requires the existing webhook secret before recording alteration notifications", async () => {
     const store = createMemoryProviderWebhookStore();
     const app = buildApp({

@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Сумма не проверена",
   "dashboard.reviewNoShow": "Проверить незаезд…",
   "checkOut.reviewNoShow": "Проверить незаезд…",
   "layout.header.signOut": "Выйти",

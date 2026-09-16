@@ -1,5 +1,10 @@
+import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
+import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
+import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
+import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
@@ -67,6 +72,9 @@ import { createPgFinanceManualExpenseRepository } from "./domains/financeManualE
 import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/financeRecurringExpenseRuleRepository.js";
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
+import { createPgFinanceRevenueAddonFacts } from "./domains/financeRevenueAddonFacts.js";
+import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel.js";
+import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -183,6 +191,10 @@ import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupR
 import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
+import {
+  createPmsAcceptedPricingReservationWorker,
+  startPmsAcceptedPricingReservationWorker,
+} from "./domains/pmsAcceptedPricingReservationWorker.js";
 import { createPgPmsInboxDeliveryStore } from "./jobs/pmsInboxDeliveryPg.js";
 import { createPgPmsInboxDeliveryReceiptPort } from "./jobs/pmsInboxDeliveryReceipts.js";
 import { relayPmsInboxDeliveryOutbox } from "./jobs/pmsInboxDeliveryOutbox.js";
@@ -425,7 +437,12 @@ const bankTransferBookings = bankTransferCodec
   ? createBankTransferBookingOperations(targetDatabaseUrl, bankTransferCodec)
   : undefined;
 
+const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
+  config,
+  connectionString: targetDatabaseUrl,
+});
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
@@ -631,6 +648,24 @@ const financeExpenseRuntime = config.financeSource === "target" ? (() => {
   const categories = createPgFinanceExpenseCategoryRepository(targetDatabaseUrl), expenses = createPgFinanceManualExpenseRepository(targetDatabaseUrl), recurring = createPgFinanceRecurringExpenseRuleRepository(targetDatabaseUrl);
   return { routes: { read, categories, expenses, recurring }, close: () => Promise.all([read.close(), propertyContext.close(), categories.close(), expenses.close(), recurring.close()]) };
 })() : undefined;
+const financeRevenueRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const rooms = createPgFinanceRevenueRoomFacts({ connectionString: targetDatabaseUrl });
+        const addOns = createPgFinanceRevenueAddonFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceRevenueReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          rooms,
+          addOns,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), rooms.close(), addOns.close()]),
+        };
+      })()
+    : undefined;
 const financeFolioRuntime =
   config.financeSource === "target" && config.financeFolioRecipientKms
     ? (() => {
@@ -895,6 +930,9 @@ const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
 });
+const bookingGuestChoiceStore = createBookingGuestChoiceStore(propertySetupOwnerPool, (client) =>
+  createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+);
 const bookingGuestPolicyRepository = createPgBookingGuestPolicyRepository({
   connectionString: targetDatabaseUrl,
   pool: propertySetupOwnerPool,
@@ -1093,13 +1131,11 @@ const bookingPublicationRuntime = (() => {
     bookingHostBase: config.bookingHostBase,
     mediaResolver: pmsRoomPublicationRuntime.mediaResolver,
     design: bookingDesignReadinessProvider,
-    guestPolicy: bookingGuestPolicyRepository,
+    guestRules: createBookingGuestChoicePublicationReader(propertySetupOwnerPool),
     rooms: pmsRoomPublicationRuntime.readModel,
-    pricing: pmsPricingReadModel,
-    recurringPricing: propertySetupPmsRuntime.recurringPricing,
+    pricing: createReplacementPricingPublicationReader(propertySetupOwnerPool),
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
-    mandatoryChargeConfirmation: bookingMandatoryChargeConfirmationEvidence,
     finance: financePaymentReadinessReadModel,
   });
 })();
@@ -1115,7 +1151,7 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
     booking: createPropertySetupBookingStateProvider({
       design: bookingDesignRepository,
       catalog: hotelCatalogStep1Repository,
-      guestPolicy: bookingGuestPolicyCurrentOwnerEvidence,
+      guestRules: { read: (scope) => bookingGuestChoiceStore.read(scope, "booking.settings.read") },
     }),
     pms: propertySetupPmsRuntime.provider,
     finance: createPropertySetupFinanceStateProvider({
@@ -1401,6 +1437,7 @@ const app = buildApp({
           channex: config.providerWebhooks.channexMode,
         },
         channexReviewMode: config.providerWebhooks.channexReviewMode,
+        ...airbnbAlterationRuntime?.webhookOptions,
         channexBookingPromotionEnabled:
           config.channexManagement.capabilityModes.bookingSync === "mutating" &&
           config.channexManagement.bookingMutationOwner === "target",
@@ -1414,6 +1451,10 @@ const app = buildApp({
     : undefined,
   bookingReservationsRepository,
   financePaymentSetup: financePaymentSetupRuntime.routes,
+  bookingGuestChoices: {
+    store: bookingGuestChoiceStore,
+    propertyAccessRepository: bookingPropertyAccessRepository,
+  },
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,
@@ -1481,6 +1522,10 @@ const app = buildApp({
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
     : undefined,
+  replacementPricing:
+    config.pmsOperationsSource === "target"
+      ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
+      : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
     ? {
         commandPort: pmsGuestPolicySetupCommands.pricing,
@@ -1582,6 +1627,7 @@ const app = buildApp({
           : {}),
       }
     : undefined,
+  financeRevenue: financeRevenueRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -1856,6 +1902,17 @@ const pmsInboxFollowUpReleaseWorker =
       })
     : undefined;
 
+const pmsAcceptedPricingReservationWorker =
+  config.apiRuntime === "next" && config.backgroundWorkersEnabled
+    ? startPmsAcceptedPricingReservationWorker({
+        worker: createPmsAcceptedPricingReservationWorker({ connectionString: targetDatabaseUrl }),
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
+app.addHook("preClose", async () => {
+  await pmsAcceptedPricingReservationWorker?.close();
+});
+
 const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
@@ -1907,6 +1964,7 @@ app.addHook("onClose", async () => {
     adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
+    financeRevenueRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -1925,6 +1983,24 @@ app.addHook("onClose", async () => {
     pmsInboxRuntime?.close(),
     ...(!platformMediaRuntime ? [hotelCatalogStep1Repository.close()] : []),
   ]);
+});
+
+const runAirbnbAlterations = () => {
+  void airbnbAlterationRuntime
+    ?.tick()
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Airbnb alteration intake/readback failed"),
+    );
+};
+const airbnbAlterationTimer = airbnbAlterationRuntime
+  ? setInterval(runAirbnbAlterations, 30_000)
+  : undefined;
+airbnbAlterationTimer?.unref();
+if (airbnbAlterationRuntime) runAirbnbAlterations();
+// Fastify executes close hooks in reverse registration order: drain before global pool closure.
+app.addHook("onClose", async () => {
+  if (airbnbAlterationTimer) clearInterval(airbnbAlterationTimer);
+  await airbnbAlterationRuntime?.close();
 });
 
 let activeChannexReviewBatch: Promise<void> | undefined;
@@ -1957,6 +2033,7 @@ const runChannexBookings = () => {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
     signal: channexBookingAbort.signal,
+    ...airbnbAlterationRuntime?.bookingWorkerOptions,
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.channexManagement.bookingMutationOwner === "target",

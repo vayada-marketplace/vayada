@@ -1,3 +1,11 @@
+import {
+  registerBookingGuestChoiceRoutes,
+  type BookingGuestChoiceRoutesOptions,
+} from "./routes/bookingGuestChoices.js";
+import {
+  registerReplacementPricingRoutes,
+  type ReplacementPricingRoutesOptions,
+} from "./routes/replacementPricing.js";
 import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
@@ -194,6 +202,7 @@ import {
 import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { registerFinanceExpenseRoutes } from "./routes/financeExpenses.js";
 import { registerFinanceFolioRoutes } from "./routes/financeFolios.js";
+import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
   registerAffiliateDashboardRoutes,
@@ -308,6 +317,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  bookingGuestChoices?: BookingGuestChoiceRoutesOptions;
   financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
   pmsConfirmationEmails?: PmsConfirmationEmails;
@@ -343,6 +353,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
+  replacementPricing?: ReplacementPricingRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
@@ -437,6 +448,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeOtaCommissionSettingsRepository?: Parameters<typeof registerOtaSettings>[1]["repository"];
   financeExpenses?: Parameters<typeof registerFinanceExpenseRoutes>[1];
   financeFolios?: Parameters<typeof registerFinanceFolioRoutes>[1];
+  financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
@@ -825,6 +837,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     customDomainRepository: options.bookingCustomDomainRepository,
     changeRequestRepository: options.bookingChangeRequestRepository,
   });
+  if (options.bookingGuestChoices)
+    app.register(registerBookingGuestChoiceRoutes, {
+      prefix: "/api/booking",
+      ...options.bookingGuestChoices,
+    });
   if (options.bookingGuestPolicy) {
     app.register(registerBookingGuestPolicyRoutes, {
       prefix: "/api/booking",
@@ -899,6 +916,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
+  if (options.replacementPricing)
+    app.register(registerReplacementPricingRoutes, {
+      prefix: "/api/pms",
+      ...options.replacementPricing,
+    });
   if (options.pmsPricing) {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",
@@ -1028,6 +1050,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.financeFolios,
       propertyAccessRepository:
         options.auth?.propertyAccessRepository ?? options.financeFolios.propertyAccessRepository,
+    });
+  }
+  if (options.financeRevenue) {
+    app.register(registerFinanceRevenueRoutes, {
+      prefix: "/api",
+      ...options.financeRevenue,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ?? options.financeRevenue.propertyAccessRepository,
     });
   }
   if (options.financeBankTransfer) {

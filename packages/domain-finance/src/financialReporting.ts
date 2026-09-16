@@ -25,6 +25,9 @@ export type FinanceReportingRatioMetric = {
   absoluteChange: string;
   percentChange: string | null;
 };
+export type FinanceReportingIncompleteEvidence = { code: string; count: number } & (
+  { amount?: FinanceReportingMoney; currency?: never } | { amount?: never; currency: string }
+);
 export type FinanceReportingEnvelope = {
   contractVersion: typeof PMS_FINANCIALS_CONTRACT_VERSION;
   propertyId: string;
@@ -32,11 +35,7 @@ export type FinanceReportingEnvelope = {
   timeZone: string;
   generatedAt: string;
   sourceFreshness: Record<string, string>;
-  incompleteEvidence: Array<{
-    code: string;
-    count: number;
-    amount?: FinanceReportingMoney;
-  }>;
+  incompleteEvidence: FinanceReportingIncompleteEvidence[];
 };
 export type FinanceDashboardResponse = FinanceReportingEnvelope & {
   cards: {

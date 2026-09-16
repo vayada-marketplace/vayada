@@ -41,10 +41,41 @@ export function readChannexAirbnbAlterationFinancialSnapshot(
 ) {
   try {
     const settings = settingsSchema.parse(channelSettings);
-    const prices = readChannexAlterationNightlyPrices(raw, expected);
     const outer = z.record(z.string(), z.unknown()).parse(raw);
     const envelope = z.record(z.string(), z.unknown()).parse(outer["data"] ?? outer);
-    const attributes = envelope["attributes"] ?? envelope;
+    const attributes = z.record(z.string(), z.unknown()).parse(envelope["attributes"] ?? envelope);
+    if (attributes["status"] === "cancelled" || attributes["status"] === "canceled") {
+      const cancellation = z
+        .object({
+          id: z.literal(expected.revisionId),
+          booking_id: z.literal(expected.providerBookingId),
+          property_id: z.literal(expected.providerPropertyId),
+          currency: z.literal(expected.currency),
+          ota_name: z.literal("Airbnb"),
+          amount: amount.nullish(),
+          ota_commission: amount.nullish(),
+        })
+        .parse({ ...attributes, id: envelope["id"] ?? attributes["id"] });
+      // A cancellation total is provider evidence, not a refund or retained room revenue.
+      // Do not retain or invent occupied nights, even if the provider repeats the old stay.
+      return {
+        revisionId: cancellation.id,
+        providerPropertyId: cancellation.property_id,
+        providerBookingId: cancellation.booking_id,
+        currency: cancellation.currency,
+        checkIn: expected.checkIn,
+        checkOut: expected.checkOut,
+        replacement: "cancellation" as const,
+        amountBasis: settings.booking_amount_settings,
+        cohostPayoutCalculations: settings.cohost_payout_calculations,
+        nightlyAllocation: "unavailable" as const,
+        providerBookingAmount: cancellation.amount ?? null,
+        otaCommission: cancellation.ota_commission ?? null,
+        rooms: [],
+        nights: [],
+      };
+    }
+    const prices = readChannexAlterationNightlyPrices(raw, expected);
     const value = financialsSchema.parse(attributes);
     const nights = prices.map((line) => {
       if (line.providerNightlyAmount === null) throw new Error();

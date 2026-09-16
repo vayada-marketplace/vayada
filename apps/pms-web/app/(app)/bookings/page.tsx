@@ -51,6 +51,7 @@ const SOURCE_ICONS: Record<string, { bg: string; letter: string; titleKey: strin
 };
 
 function getBalanceStatus(b: Booking): string {
+  if (b.amountStatus === "unverified") return "unverified";
   if (b.status === "cancelled" || b.status === "declined")
     return b.paymentStatus === "refunded" ? "refunded" : "due";
   if (b.depositRequired && b.depositAmount > 0) {
@@ -358,7 +359,9 @@ export default function ReservationsPage() {
                         {source.letter}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(b.totalAmount, b.currency)}
+                        {b.amountStatus === "unverified"
+                          ? t("bookings.detail.amountUnverified")
+                          : formatCurrency(b.totalAmount, b.currency)}
                       </span>
                       {b.depositRequired && (
                         <span
@@ -387,7 +390,9 @@ export default function ReservationsPage() {
                           ? t("bookings.balancePartial")
                           : balance === "refunded"
                             ? t("bookings.balanceRefunded")
-                            : t("bookings.balanceDue")}
+                            : b.amountStatus === "unverified"
+                              ? t("bookings.detail.amountUnverified")
+                              : t("bookings.balanceDue")}
                     </span>
                   </div>
                 </Link>
@@ -536,7 +541,9 @@ export default function ReservationsPage() {
 
                       {/* Total */}
                       <td className="px-4 py-4 text-right text-[13px] font-semibold text-gray-900">
-                        {formatCurrency(b.totalAmount, b.currency)}
+                        {b.amountStatus === "unverified"
+                          ? t("bookings.detail.amountUnverified")
+                          : formatCurrency(b.totalAmount, b.currency)}
                         {b.depositRequired && (
                           <div
                             className={`mt-1 text-[10px] font-medium ${
@@ -567,7 +574,9 @@ export default function ReservationsPage() {
                               ? t("bookings.balancePartial")
                               : balance === "refunded"
                                 ? t("bookings.balanceRefunded")
-                                : t("bookings.balanceDue")}
+                                : b.amountStatus === "unverified"
+                                  ? t("bookings.detail.amountUnverified")
+                                  : t("bookings.balanceDue")}
                         </span>
                       </td>
 

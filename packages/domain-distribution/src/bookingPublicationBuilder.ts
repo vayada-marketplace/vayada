@@ -97,6 +97,11 @@ export function createBookingPublicationBuilder(config: {
         return rejected("source_manifest_mismatch");
       }
       try {
+        // Existing publication supports one pricing currency; Finance multi-currency
+        // support alone does not establish quote conversion evidence.
+        if (finance.content.supportedCurrencies.length !== 1 ||
+            finance.content.supportedCurrencies[0] !== finance.content.defaultCurrency)
+          return rejected("public_content_incomplete");
         const bookingWeb = config.bookingWeb({
           propertyId: request.propertyId,
           slug: catalog.content.slug,
@@ -105,7 +110,13 @@ export function createBookingPublicationBuilder(config: {
         if (!validBookingWeb(bookingWeb)) return rejected("public_content_incomplete");
         const profile = buildPublicBookabilityProfileProjection(input.generatedAt, {
           hotelCatalog: catalog.content,
-          booking: sanitizeBooking(booking.content),
+          booking: sanitizeBooking({
+            ...booking.content,
+            supportedQuoteParameters: {
+              ...booking.content.supportedQuoteParameters,
+              supportedCurrencies: finance.content.supportedCurrencies,
+            },
+          }),
           pms: pms.content,
           finance: finance.content,
           bookingWeb,

@@ -8,6 +8,8 @@ import {
 } from "../jobs/bookingEmails.js";
 import { runBookingEmailDeliveryJobs } from "../jobs/bookingEmailDelivery.js";
 
+import { loadTargetBooking } from "../routes/bookingWebPublic.js";
+
 const url = process.env.TEST_DATABASE_URL;
 const property = randomUUID();
 const booking = randomUUID();
@@ -148,5 +150,119 @@ describe.skipIf(!url)("confirmation resend with target PostgreSQL", () => {
     ]);
     expect(await emails.request(property, booking, "invalid-email", actor)).toHaveProperty("error");
     expect(await emails.request(actor, booking, "wrong-property", actor)).toHaveProperty("error");
+  });
+  it("blocks unverified guest lookup, resend and already queued monetary delivery", async () => {
+    await pool.query(
+      "UPDATE booking.booking_guests SET email='guest@example.test' WHERE guest_booking_id=$1",
+      [booking],
+    );
+    const queued = await emails.request(property, booking, "before-unverified", actor);
+    expect(queued).toHaveProperty("jobId");
+    await expect(
+      loadTargetBooking(pool, property, booking, "guest@example.test"),
+    ).resolves.toHaveProperty("guestBookingId", booking);
+    await pool.query(
+      'UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || \'{"airbnbMoneyStatus":"unverified"}\'::jsonb WHERE id=$1',
+      [booking],
+    );
+    await expect(
+      loadTargetBooking(pool, property, booking, "guest@example.test"),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    const before = (
+      await pool.query("SELECT count(*)::int n FROM platform.jobs WHERE resource_id=$1", [booking])
+    ).rows[0].n;
+    expect(await emails.request(property, booking, "before-unverified", actor)).toHaveProperty(
+      "error",
+    );
+    expect(await emails.request(property, booking, "after-unverified", actor)).toHaveProperty(
+      "error",
+    );
+    expect(
+      (
+        await pool.query("SELECT count(*)::int n FROM platform.jobs WHERE resource_id=$1", [
+          booking,
+        ])
+      ).rows[0].n,
+    ).toBe(before);
+    await pool.query("UPDATE platform.jobs SET max_attempts=1 WHERE id=$1", [
+      (queued as { jobId: string }).jobId,
+    ]);
+    const send = vi.fn(async () => {});
+    expect(await runBookingEmailDeliveryJobs(url!, { send }, { pool, limit: 1 })).toEqual({
+      processed: 0,
+      failed: 1,
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(await emails.status(property, booking, (queued as { jobId: string }).jobId)).toEqual({
+      status: "dead_lettered",
+    });
+  });
+  it("holds a booking fence through send before an import can mark money unverified", async () => {
+    await pool.query(
+      "UPDATE booking.guest_bookings SET booking_metadata=booking_metadata-'airbnbMoneyStatus' WHERE id=$1",
+      [booking],
+    );
+    const queued = await emails.request(property, booking, "fenced-delivery", actor);
+    expect(queued).toHaveProperty("jobId");
+    let entered!: () => void;
+    let releaseSend!: () => void;
+    const sending = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const finishSend = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    const delivery = runBookingEmailDeliveryJobs(
+      url!,
+      {
+        send: async () => {
+          entered();
+          await finishSend;
+        },
+      },
+      { pool, limit: 1 },
+    );
+    const writer = await pool.connect();
+    let update: Promise<unknown> | undefined;
+    try {
+      await sending;
+      const pid = (await writer.query("SELECT pg_backend_pid() pid")).rows[0].pid;
+      update = writer.query(
+        'UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || \'{"airbnbMoneyStatus":"unverified"}\'::jsonb WHERE id=$1',
+        [booking],
+      );
+      let blocked = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        blocked = (await pool.query("SELECT cardinality(pg_blocking_pids($1))>0 blocked", [pid]))
+          .rows[0].blocked;
+        if (blocked) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      expect(
+        (
+          await pool.query(
+            "SELECT booking_metadata->>'airbnbMoneyStatus' status FROM booking.guest_bookings WHERE id=$1",
+            [booking],
+          )
+        ).rows[0].status,
+      ).toBeNull();
+      releaseSend();
+      expect(await delivery).toEqual({ processed: 1, failed: 0 });
+      await update;
+      expect(
+        (
+          await pool.query(
+            "SELECT booking_metadata->>'airbnbMoneyStatus' status FROM booking.guest_bookings WHERE id=$1",
+            [booking],
+          )
+        ).rows[0].status,
+      ).toBe("unverified");
+    } finally {
+      releaseSend();
+      await delivery;
+      await update;
+      writer.release();
+    }
   });
 });

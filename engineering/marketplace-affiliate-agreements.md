@@ -233,3 +233,34 @@ must verify both for the exact scope with transaction-consistent evidence and
 retain immutable proof references. No public request can supply that resolver.
 Synthetic resolver tests prove transaction behavior only. No HTTP route or live
 provider/publication path is wired.
+
+## Initial agreement activation storage
+
+Migration 0214 adds the stable agreement identity and one immutable initial activation
+record. The agreement pins the exact program, property, hotel organization, creator
+profile and participation independently from the collaboration lifecycle. Activation
+references the same attempt and terms for both the hotel approval and creator acceptance,
+and retains explicit readiness evidence and a server effective instant. Database keys
+reject a substituted creator, program, attempt, terms version or swapped assent side.
+
+This storage does not activate anything by itself. The authorized command must still
+recheck the matched assent, current cross-domain readiness and idempotency inside one
+transaction. Pause, resume, end, replacement terms, public links and click capture remain
+separate later slices. In particular, collaboration completion has no path to mutate or
+delete the agreement identity or activation history.
+
+## Initial agreement activation command
+
+The internal activation command locks the exact program, participation, attempt, terms
+and assent decisions. It authorizes either participating hotel management or the owning
+creator before retry recovery, rechecks persisted resource links and current offer/profile
+eligibility, and calls a trusted readiness port inside the transaction. The port must prove
+open enrollment plus current hotel lifecycle, commercial, destination and tracking readiness
+for the exact scope through owner-domain adapters. Its default implementation blocks, so
+missing owner-domain integration cannot create an agreement.
+
+Successful activation atomically stores the stable agreement, immutable activation evidence
+and completed idempotency receipt using a server timestamp. Same-key retries return that
+record; changed actors or payloads conflict, and competing keys cannot create a second active
+agreement. The command remains internal. Public transport, lifecycle changes and stable link
+generation are separate slices.

@@ -26,6 +26,7 @@ type BookingDashboardMetricsRow = {
   propertyFound: boolean;
   revenueAmount: string | null;
   bookingCount: string;
+  unverifiedBookingCount: string;
   roomNightCount: string | null;
   currency: string | null;
   nextArrivalDate: string | Date | null;
@@ -36,6 +37,7 @@ type BookingDashboardSourceRow = {
   source: string | null;
   revenueAmount: string | null;
   bookingCount: string;
+  unverifiedBookingCount: string;
   currency: string | null;
 };
 
@@ -44,6 +46,7 @@ type BookingDashboardSparklineRow = {
   bucketEnd: string | Date;
   revenueAmount: string | null;
   bookingCount: string;
+  unverifiedBookingCount: string;
   roomNightCount: string | null;
   currency: string | null;
 };
@@ -85,9 +88,11 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
       return result.rows[0]?.propertyId ?? null;
     },
     async getConversionFunnel(input) {
-      const result = await pool.query<{ timeZone: string | null; addonsEnabled: boolean; events: BookingFunnelEvent[] }>(
-        conversionFunnelSql(), [input.propertyId, input.windowStart, input.windowEnd],
-      );
+      const result = await pool.query<{
+        timeZone: string | null;
+        addonsEnabled: boolean;
+        events: BookingFunnelEvent[];
+      }>(conversionFunnelSql(), [input.propertyId, input.windowStart, input.windowEnd]);
       const row = result.rows[0];
       if (!row) return null;
       if (!row.timeZone) throw new Error("Booking funnel requires a canonical property timezone");
@@ -161,6 +166,7 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
             source: row.source || "direct",
             revenue: money(revenue, row.currency ?? currency),
             bookingCount: Number(row.bookingCount),
+            unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
             revenueSharePercent:
               totalRevenue > 0 ? Math.round((revenue / totalRevenue) * 1000) / 10 : 0,
           };
@@ -190,6 +196,7 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
           bucketEnd: toDateString(row.bucketEnd) ?? input.windowEnd,
           revenue: money(numeric(row.revenueAmount), row.currency ?? currency),
           bookingCount: Number(row.bookingCount),
+          unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
           avgNightlyRate: averageNightlyRate(row, row.currency ?? currency),
           pageViewCount: totalPageViews(
             pageViews.rows,
@@ -268,13 +275,15 @@ function dashboardMetricsSql(): string {
     WHERE booking.lifecycle_status IN ('confirmed', 'completed')
   )
   SELECT
-    COALESCE(SUM(booking.total_amount), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
     COUNT(*)::text AS "bookingCount",
+    COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
     COALESCE(
-      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count),
+      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'),
       0
     )::text AS "roomNightCount",
-    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id))[1] AS currency,
+    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
+      FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency,
     (
       SELECT MIN(upcoming.check_in)::text
       FROM scoped_bookings upcoming
@@ -298,9 +307,11 @@ function sourceMixSql(): string {
       NULLIF(booking.source_system, ''),
       'direct'
     ) AS source,
-    COALESCE(SUM(booking.total_amount), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
     COUNT(*)::text AS "bookingCount",
-    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id))[1] AS currency
+    COUNT(*) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
+    (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
+      FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency
   FROM booking.guest_bookings booking
   JOIN scoped_property scoped ON scoped.property_id = booking.property_id
   WHERE booking.lifecycle_status IN ('confirmed', 'completed')
@@ -311,7 +322,7 @@ function sourceMixSql(): string {
     NULLIF(booking.source_system, ''),
     'direct'
   )
-  ORDER BY SUM(booking.total_amount) DESC, source ASC`;
+  ORDER BY SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified') DESC, source ASC`;
 }
 
 function sparklineSql(): string {
@@ -329,14 +340,15 @@ function sparklineSql(): string {
   SELECT
     bucket.bucket_start::text AS "bucketStart",
     bucket.bucket_end::text AS "bucketEnd",
-    COALESCE(SUM(booking.total_amount), 0)::text AS "revenueAmount",
+    COALESCE(SUM(booking.total_amount) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'), 0)::text AS "revenueAmount",
     COUNT(booking.id)::text AS "bookingCount",
+    COUNT(booking.id) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' = 'unverified')::text AS "unverifiedBookingCount",
     COALESCE(
-      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count),
+      SUM(GREATEST(booking.check_out - booking.check_in, 1) * booking.room_count) FILTER (WHERE booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'),
       0
     )::text AS "roomNightCount",
     (array_agg(booking.currency ORDER BY booking.created_at DESC, booking.id)
-      FILTER (WHERE booking.id IS NOT NULL))[1] AS currency
+      FILTER (WHERE booking.id IS NOT NULL AND booking.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'))[1] AS currency
   FROM buckets bucket
   JOIN scoped_property scoped ON TRUE
   LEFT JOIN booking.guest_bookings booking
@@ -407,6 +419,7 @@ function toRevenueStats(
   return {
     totalRevenue: money(numeric(row.revenueAmount), currency),
     bookingCount: Number(row.bookingCount),
+    unverifiedBookingCount: Number(row.unverifiedBookingCount ?? 0),
     avgNightlyRate: averageNightlyRate(row, currency),
     pageViewCount,
   };

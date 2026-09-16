@@ -10,6 +10,7 @@ export function presentChannexAlteration(
   changes: Record<string, unknown>,
   enabled = false,
   status = "pending",
+  allowUnverifiedMoney = false,
 ) {
   if (!Object.prototype.hasOwnProperty.call(changes, "channex")) return undefined;
   const provider = object(changes["channex"]),
@@ -44,6 +45,7 @@ export function presentChannexAlteration(
   const actionable = enabled && (state === "pending" || state === "queued");
   return {
     provider: "airbnb" as const,
+    ...(enabled && allowUnverifiedMoney ? { supportsUnverifiedMoney: true } : {}),
     state,
     allowedActions: actionable ? (action ? [action] : ["accept", "decline"]) : [],
     refreshAction: enabled && state === "unknown" ? action : null,

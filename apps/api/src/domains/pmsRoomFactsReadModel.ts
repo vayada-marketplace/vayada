@@ -83,12 +83,12 @@ const ROOM_FACTS_SELECT = `SELECT
 FROM pms.room_types room_type`;
 
 export function createPgPmsRoomFactsReadModel(config: {
-  connectionString: string;
+  connectionString?: string;
   max?: number;
   pool?: PmsRoomFactsReadPool;
   now?: () => Date;
 }): PmsRoomFactsReadModel {
-  if (!config.connectionString.trim()) {
+  if (!config.pool && !config.connectionString?.trim()) {
     throw new Error("PMS room facts read model connectionString must not be empty");
   }
   const ownsPool = !config.pool;

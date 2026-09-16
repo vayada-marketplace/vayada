@@ -37,6 +37,7 @@ export type FinanceRevenueRoomGap =
   | { code: "room_revenue_missing" | "ota_commission_missing"; count: number };
 export type FinanceRevenueRoomFacts = {
   rows: FinanceRevenueRoomFact[];
+  eligibleBookings: { current: number; comparison: number };
   sourceFreshness: {
     bookingRevenueThrough: string | null;
     financeOtaCommissionAt: string | null;
@@ -63,6 +64,7 @@ type GapRow = {
   amount: string | null;
   currency: string | null;
 };
+type EligibleRow = { period: string; count: number };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function createPgFinanceRevenueRoomFacts(config: {
@@ -96,6 +98,7 @@ export function createPgFinanceRevenueRoomFacts(config: {
         const rows = await readFacts(client, values);
         return {
           rows: rows.map(fact),
+          eligibleBookings: await readEligibleBookings(client, values),
           sourceFreshness: {
             bookingRevenueThrough: rows[0]?.bookingRevenueThrough ?? null,
             financeOtaCommissionAt: instant(rows[0]?.financeOtaCommissionAt ?? null),
@@ -121,6 +124,18 @@ async function readFacts(client: Pick<Client, "query">, values: readonly unknown
 // prettier-ignore
 async function readGaps(client: Pick<Client, "query">, values: readonly unknown[]): Promise<GapRow[]> {
   return (await client.query<GapRow>(`WITH scoped AS (${SCOPED}),gaps AS (SELECT 'room_revenue_currency_mismatch'::text AS code,count(*)::int AS count,CASE WHEN count(gross_room_amount)=count(*) THEN sum(gross_room_amount)::text END AS amount,currency::text AS currency FROM scoped WHERE currency<>$2 GROUP BY currency UNION ALL SELECT 'room_revenue_missing',count(*)::int,NULL,NULL FROM scoped WHERE gross_room_amount IS NULL UNION ALL SELECT 'ota_commission_missing',count(*)::int,NULL,NULL FROM scoped WHERE currency=$2 AND channel IN ('booking_com','airbnb','expedia','agoda','other_ota') AND ("commissionSnapshotId" IS NULL OR "commissionState"<>'applied')) SELECT * FROM gaps WHERE count>0 ORDER BY code,currency NULLS FIRST`, values)).rows;
+}
+
+// Attach-rate eligibility is non-monetary and therefore independent of evidence currency.
+// prettier-ignore
+async function readEligibleBookings(client: Pick<Client, "query">, values: readonly unknown[]) {
+  const rows = (await client.query<EligibleRow>(`WITH eligible AS (SELECT guest_booking_id,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM booking.finance_nightly_revenue_evidence WHERE property_id=$1::uuid AND length($2::text)=3 AND (recognized_on BETWEEN $3::date AND $4::date OR recognized_on BETWEEN $5::date AND $6::date) GROUP BY guest_booking_id,period HAVING sum(occupied_room_nights)>0) SELECT period,count(*)::int AS count FROM eligible GROUP BY period`, values)).rows;
+  const counts = { current: 0, comparison: 0 };
+  for (const row of rows) {
+    if ((row.period !== "current" && row.period !== "comparison") || !Number.isSafeInteger(row.count) || row.count < 0) throw new Error("Finance revenue eligible booking facts are invalid");
+    counts[row.period] = row.count;
+  }
+  return counts;
 }
 
 function fact(row: FactRow): FinanceRevenueRoomFact {

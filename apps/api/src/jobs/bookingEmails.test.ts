@@ -12,6 +12,27 @@ import {
 } from "./bookingEmails.js";
 
 describe("booking lifecycle email jobs", () => {
+  it("rejects unverified booking money before serializing or queueing email", async () => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({ kind: "final_confirmation" });
+    input.booking.bookingMetadata = { airbnbMoneyStatus: "unverified" };
+    await expect(enqueueBookingLifecycleEmailJob(target, input)).rejects.toThrow(
+      "booking_amount_unverified",
+    );
+    expect(target.calls).toHaveLength(0);
+  });
+  it("suppresses transition notifications with unverified booking money", async () => {
+    const target = createTargetEmailStore({ bookingMetadata: { airbnbMoneyStatus: "unverified" } });
+    expect(
+      await enqueueBookingTransitionNotifications(target, {
+        propertyId: "f2000000-0000-0000-0000-000000000951",
+        guestBookingId: "book_bank_001",
+        occurredAt: "2026-09-01T00:00:00.000Z",
+        transition: { eventType: "guest_booking.confirmed", toStatus: "confirmed" },
+      }),
+    ).toEqual([]);
+    expect(target.calls.some((call) => call.text.includes("INSERT"))).toBe(false);
+  });
   it("includes every accommodation name in confirmation email content", async () => {
     const target = createTargetEmailStore();
     const input = bookingEmailInput({ kind: "final_confirmation" });

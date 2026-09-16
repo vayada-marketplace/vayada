@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Jumlah belum diverifikasi",
   "dashboard.reviewNoShow": "Tinjau ketidakhadiran…",
   "checkOut.reviewNoShow": "Tinjau ketidakhadiran…",
   "layout.header.signOut": "Keluar",

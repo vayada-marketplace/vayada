@@ -67,7 +67,9 @@ describe("property setup route state composition", () => {
       organizationId,
       propertyId,
       actorUserId,
-      authorizedStepIds: getActivePropertySetupStepIds(selectedTracks),
+      authorizedStepIds: getActivePropertySetupStepIds(selectedTracks).filter(
+        (stepId) => stepId !== "guest_experience",
+      ),
     });
     expect(providers.booking?.getOwnerState).toHaveBeenCalledWith(
       expect.objectContaining({

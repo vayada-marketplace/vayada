@@ -12,6 +12,7 @@ type Options = {
   pool: pg.Pool;
   provider: Pick<ReturnType<typeof createChannexRequestDecisions>, "read">;
   ownsMutation: () => boolean;
+  propertyIds?: readonly string[];
   signal?: AbortSignal;
   limit?: number;
 };
@@ -19,13 +20,24 @@ type Options = {
 /** Dormant until intake and authoritative revision application are ready. GET only. */
 export async function runChannexAlterationReadback(options: Options) {
   const counts = { refreshed: 0, deferred: 0, skipped: 0 };
+  const properties =
+    options.propertyIds === undefined
+      ? null
+      : z
+          .array(z.uuid())
+          .max(100)
+          .parse(options.propertyIds)
+          .map((id) => id.toLowerCase());
+  if (properties?.length === 0) return counts;
   const active = () => !options.signal?.aborted && options.ownsMutation();
   if (!active()) return counts;
   const candidates = await options.pool.query<{ id: string }>(
-    `SELECT id FROM booking.booking_change_requests
-     WHERE status='pending' AND request_type='date_change' AND requested_changes ? 'channex'
+    `SELECT change.id FROM booking.booking_change_requests change
+     JOIN booking.guest_bookings booking ON booking.id=change.guest_booking_id
+     WHERE change.status='pending' AND request_type='date_change' AND requested_changes ? 'channex'
        AND COALESCE(requested_changes #>> '{channex,readback,nextCheckAt}','') <= $1
-     ORDER BY COALESCE(requested_changes #>> '{channex,readback,nextCheckAt}',''),created_at,id
+       AND ($3::uuid[] IS NULL OR booking.property_id=ANY($3::uuid[]))
+     ORDER BY COALESCE(requested_changes #>> '{channex,readback,nextCheckAt}',''),change.created_at,change.id
      LIMIT $2`,
     [
       new Date().toISOString(),
@@ -35,6 +47,7 @@ export async function runChannexAlterationReadback(options: Options) {
         .min(1)
         .max(100)
         .parse(options.limit ?? 25),
+      properties,
     ],
   );
   for (const { id } of candidates.rows) {
@@ -61,11 +74,12 @@ export async function runChannexAlterationReadback(options: Options) {
          FROM booking.booking_change_requests change
          JOIN booking.guest_bookings booking ON booking.id=change.guest_booking_id
          WHERE change.id=$1 AND change.status='pending'
-           AND COALESCE(change.requested_changes #>> '{channex,readback,nextCheckAt}','') <= $2`,
-          [id, new Date().toISOString()],
+           AND COALESCE(change.requested_changes #>> '{channex,readback,nextCheckAt}','') <= $2
+           AND ($3::uuid[] IS NULL OR booking.property_id=ANY($3::uuid[]))`,
+          [id, new Date().toISOString(), properties],
         )
       ).rows[0];
-      if (!row) {
+      if (!row || (properties && !properties.includes(row.propertyId.toLowerCase()))) {
         counts.skipped++;
         continue;
       }

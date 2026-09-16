@@ -1146,3 +1146,96 @@ describe("API background worker configuration", () => {
     expect(() => loadConfig({ API_BACKGROUND_WORKERS_ENABLED: "invalid" })).toThrow();
   });
 });
+
+describe("Airbnb alteration runtime opt-in", () => {
+  const propertyId = "00000000-0000-4000-8000-000000000001";
+  const enabled = {
+    ...completeCreatorMarketplaceEnv,
+    ...completeAuthSessionEnv,
+    AIRBNB_ALTERATIONS_ENABLED: "true",
+    AIRBNB_ALTERATION_PROPERTY_IDS: propertyId,
+    PMS_OPERATIONS_SOURCE: "target",
+    API_BACKGROUND_WORKERS_ENABLED: "true",
+    PMS_CHANNEX_WORKER_ENABLED: "true",
+    PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
+    CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: "target-owned",
+    CHANNEX_WEBHOOK_INTAKE_MODE: "mutating",
+    CHANNEX_WEBHOOK_SECRET: "test-secret",
+    CHANNEX_API_BASE_URL: "https://staging.channex.io",
+    CHANNEX_API_KEY: "test-key",
+  };
+  it("stays off by default and independent of listing import", () => {
+    expect(loadConfig({}).airbnbAlterations).toBeUndefined();
+    expect(
+      loadConfig({
+        ...enabled,
+        AIRBNB_ALTERATIONS_ENABLED: "false",
+        AIRBNB_ALTERATION_PROPERTY_IDS: "bad",
+        AIRBNB_IMPORT_ENABLED: "true",
+        AIRBNB_IMPORT_CALLBACK_ORIGIN: "https://marketplace.localhost",
+      }).airbnbAlterations,
+    ).toBeUndefined();
+  });
+  it("normalizes and deduplicates an explicit property allowlist", () => {
+    const id = "ABCDEFAB-ABCD-4000-8000-ABCDEFABCDEF";
+    expect(
+      loadConfig({
+        ...enabled,
+        AIRBNB_ALTERATION_PROPERTY_IDS: ` ${propertyId},${id},${id.toLowerCase()}`,
+      }).airbnbAlterations,
+    ).toEqual({ propertyIds: [propertyId, id.toLowerCase()] });
+  });
+  it.each([
+    undefined,
+    "",
+    "not-a-uuid",
+    "00000000-0000-9000-0000-000000000001",
+    `${propertyId},`,
+    Array.from(
+      { length: 101 },
+      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    ).join(","),
+  ])("rejects invalid property scopes", (value) => {
+    expect(() => loadConfig({ ...enabled, AIRBNB_ALTERATION_PROPERTY_IDS: value })).toThrow(
+      "AIRBNB_ALTERATION_PROPERTY_IDS",
+    );
+  });
+  it.each([
+    { API_BACKGROUND_WORKERS_ENABLED: "false" },
+    { PMS_CHANNEX_WORKER_ENABLED: "false" },
+    { PMS_CHANNEX_BOOKING_SYNC_MODE: "observe_only" },
+    { CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: "legacy-owned" },
+    { CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only" },
+    { CHANNEX_WEBHOOK_SECRET: "" },
+    { CHANNEX_API_KEY: "" },
+    { CHANNEX_API_BASE_URL: "" },
+    { PMS_OPERATIONS_SOURCE: "disabled" },
+    { WORKOS_JWKS_URL: "", WORKOS_ISSUER: "", WORKOS_AUDIENCE: "", AUTH_DATABASE_URL: "" },
+    { WORKOS_CLIENT_ID: "" },
+  ])("rejects missing required runtime dependency %j", (overrides) => {
+    expect(() => loadConfig({ ...enabled, ...overrides })).toThrow();
+  });
+  it.each([
+    "http://staging.channex.io",
+    "https://evil.example",
+    "https://app.channex.io.evil.example",
+  ])("rejects unapproved provider URL %s", (url) => {
+    expect(() => loadConfig({ ...enabled, CHANNEX_API_BASE_URL: url })).toThrow(
+      "approved Channex API URL",
+    );
+  });
+  it.each([
+    "https://app.channex.io",
+    "https://staging.channex.io/",
+    "https://app.channex.io/api/v1/",
+  ])("accepts supported provider base %s", (url) => {
+    expect(loadConfig({ ...enabled, CHANNEX_API_BASE_URL: url }).airbnbAlterations).toEqual({
+      propertyIds: [propertyId],
+    });
+  });
+  it("rejects invalid enabled flag", () => {
+    expect(() => loadConfig({ AIRBNB_ALTERATIONS_ENABLED: "sometimes" })).toThrow(
+      "AIRBNB_ALTERATIONS_ENABLED",
+    );
+  });
+});

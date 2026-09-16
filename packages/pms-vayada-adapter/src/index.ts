@@ -485,8 +485,9 @@ function validateCommand(
     return validationError("Timestamps must be UTC ISO-8601 values.");
   }
 
-  // This portable single-offer adapter has no production repository. Target API
-  // handoff adopts bundles through its transactional PMS job consumer instead.
+  // This portable single-offer adapter has no production repository. Mixed-room
+  // handoff needs the consumer defined in engineering/replacement-pricing-pms-handoff.md;
+  // queue producers and database adoption guards alone do not implement it.
   const offer = isCreateCommand(command)
     ? command.bookedOffer
     : isUpdateCommand(command) ? command.changes.bookedOffer : undefined;

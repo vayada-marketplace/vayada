@@ -191,3 +191,63 @@ enter payment, PMS handoff, notification or revenue-evidence paths. Integration 
 exercise fresh scope resolution and immutable binding against PostgreSQL; they do not
 demonstrate browser/quote transport, click-history completeness, a real provider,
 production eligibility, creator attribution or Finance exclusion of future live flows.
+
+The browser transport test remains an internal test harness and is never registered by
+the API server. It accepts only the selected opaque probe, verifies the database name is
+explicitly isolated, and creates a zero-value synthetic draft plus its binding in one
+transaction. Missing, forged or scope-bearing input is rejected before any write; replay
+does not create another row, including simultaneous delivery. A fail-on-write Finance
+journal trigger proves the probe path creates no earning record. The opt-in Chromium case
+proves referrerless JSON transport while cookie and local/session storage access are
+blocked. Because the harness never calls normal checkout, it cannot reserve inventory,
+initiate payment, hand off to a PMS or notify a guest. This is a VAY-1506 implementation
+sub-slice: synthetic transport evidence only, not a production route, stable-link/click
+capture, quote round-trip, provider certification or live booking. Attribution dispatch
+and its explicit probe exclusion remain unimplemented, so this does not complete
+VAY-1506's remaining acceptance criteria.
+
+## Initial referral transport certification storage
+
+Migration 0215 adds immutable successful adapter-certification evidence for the
+`referral_round_trip` capability. Every certification is pinned through database keys
+to one real diagnostic probe-to-booking binding and to that probe's exact property,
+destination, author organization, local/sandbox environment, connection and adapter
+version. The row retains bounded evidence references, verifier actor/request and server
+completion time. It is permanently marked `capability_validation`; it cannot be stored
+as production preflight, another capability or earning evidence.
+
+Certification insertion locks and rechecks an unexpired, unrevoked probe and requires
+exactly one diagnostic booking binding; zero or multiple deliveries fail as unavailable.
+Binding insertion uses the same probe lock and prevents new second deliveries before or
+after certification. The database supplies completion time and rejects non-string, blank
+or oversized evidence references. Historical duplicate probe bindings therefore do not
+block migration, but they cannot be certified or silently collapsed into one successful
+result.
+
+This is only durable storage for the successful synthetic certification half. The internal
+Booking verifier command is its application writer: it reauthorizes current hotel scope,
+locks and rechecks the exact probe/deployment, derives the sole binding, and requires the
+bound booking to remain a zero-value diagnostic draft with no existing Finance journal.
+Binding and Finance-journal inserts take the same database lock, and each rejects the
+other record, so a new diagnostic booking cannot race into earning evidence. The verifier
+accepts evidence references only through server-owned configuration. Readiness must
+separately require a current exact production preflight for the same capability.
+Missing/conflicting run outcomes, other three capabilities, freshness, revocation-aware
+consumption and publication/activation wiring remain later slices. The table alone does
+not make a destination, publication, agreement, click or booking eligible for earnings.
+
+## Initial referral production preflight storage
+
+Migration 0218 stores immutable successful production preflight evidence for the
+`referral_round_trip` capability. It pins the exact property, destination, author
+organization, production connection and adapter version, plus a one-time correlation
+hash and bounded source references. The fixed assertion says only that a documented
+non-mutating check returned the opaque correlation without creating a booking. Database
+time replaces caller completion time, and permanent revocation preserves old evidence.
+
+This table is not readiness by itself and has no booking, creator, agreement, click,
+attribution or Finance association. Multiple historical checks are retained, while the
+same correlation cannot be replayed for any configuration. A later authorized
+verifier must create rows from real provider evidence. A later reader must define and
+enforce freshness, reject revoked or changed configuration, and require the matching
+current adapter certification before publication can consume the result.

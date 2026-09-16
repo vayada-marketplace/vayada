@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Betrag nicht bestätigt",
   "dashboard.reviewNoShow": "Nichtanreise prüfen…",
   "checkOut.reviewNoShow": "Nichtanreise prüfen…",
   "bookings.detail.canceledRefreshFailed": "Buchung storniert. Lade die Seite neu, um die Buchungsdetails zu aktualisieren.",

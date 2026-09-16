@@ -254,3 +254,15 @@ describe("target Booking reservations property scope", () => {
     expect(listQuery?.text).not.toContain("contact_event.actor_type = 'property_user'");
   });
 });
+
+it("projects the explicit money quarantine marker without filtering out reservations", async () => {
+  const { repository, queries } = createHarness();
+  await repository.listReservationsByPropertyId(
+    "00000000-0000-4000-8000-000000000001",
+    defaultFilters,
+  );
+  const list = queries.find((query) => query.text.includes('AS "totalAmount"'))!;
+  expect(list.text).toContain("booking.booking_metadata->>'airbnbMoneyStatus'='unverified'");
+  expect(list.text).toContain('END AS "amountStatus"');
+  expect(list.text).not.toContain("source_system = 'booking'");
+});

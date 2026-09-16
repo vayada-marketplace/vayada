@@ -15,6 +15,7 @@ export * from "./inventoryMaterialization.js";
 export * from "./inventoryMaterializationPlanner.js";
 export * from "./inventoryReservationLifecycle.js";
 export * from "./inventoryReservationBundle.js";
+export * from "./acceptedPricingReservation.js";
 export * from "./manualBooking.js";
 export * from "./calendarAutoOpen.js";
 
@@ -422,4 +423,7 @@ export type {
 } from "./roomOperatingEligibility.js";
 export * from "./replacementPricing.js";
 export * from "./replacementPricingConfiguration.js";
+export * from "./replacementPricingConversion.js";
+
+export * from "./replacementPricingCalculator.js";
 export * from "./affiliateCompletion.js";

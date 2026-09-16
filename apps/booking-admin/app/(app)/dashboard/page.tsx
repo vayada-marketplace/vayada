@@ -195,13 +195,14 @@ export default function DashboardPage() {
         ? t("dashboard.stats.vsLastWeek")
         : t("dashboard.stats.vsLast30Days");
 
-  const revenueDiff = stats
+  const incompleteAmounts = Boolean(stats && (stats.unverified_bookings > 0 || stats.unverified_bookings_previous > 0));
+  const revenueDiff = stats && !incompleteAmounts
     ? formatDiff(stats.revenue, stats.revenue_previous, locale, true, currency, t, vsLabel)
     : null;
   const bookingsDiff = stats
     ? formatDiff(stats.bookings, stats.bookings_previous, locale, false, "EUR", t, vsLabel)
     : null;
-  const rateDiff = stats
+  const rateDiff = stats && !incompleteAmounts
     ? formatDiff(
         stats.avg_nightly_rate,
         stats.avg_nightly_rate_previous,
@@ -244,6 +245,11 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {incompleteAmounts && (
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {t("dashboard.stats.incompleteAmounts")}
+        </p>
+      )}
       {/* Stats Cards */}
       <div
         className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 ${loading ? "opacity-60" : ""}`}

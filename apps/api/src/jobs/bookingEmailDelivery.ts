@@ -26,6 +26,7 @@ type BookingEmailPool = {
     text: string,
     values?: readonly unknown[],
   ): Promise<{ rows: T[] }>;
+  connect(): Promise<Pick<pg.PoolClient, "query" | "release">>;
   end?(): Promise<void>;
 };
 
@@ -94,7 +95,26 @@ export async function runBookingEmailDeliveryJobs(
           if (!instructions) throw new Error("Bank transfer instructions unavailable.");
           input.text += `\n\nBank transfer instructions:\n${instructions}`;
         }
-        await delivery.send(input);
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          // Fence the money decision against imports until the external send completes.
+          const booking = await client.query<{ unverified: boolean }>(
+            `SELECT booking.booking_metadata->>'airbnbMoneyStatus'='unverified' AS unverified
+             FROM platform.jobs job JOIN booking.guest_bookings booking
+               ON booking.id::text=job.resource_id AND booking.property_id=job.property_id
+             WHERE job.id=$1::uuid FOR SHARE OF booking`,
+            [job.id],
+          );
+          if (booking.rows[0]?.unverified) throw new Error("booking_amount_unverified");
+          await delivery.send(input);
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          client.release();
+        }
         if (await finishBookingEmailJob(pool, job, startedAt)) processed += 1;
       } catch {
         if (await failBookingEmailJob(pool, job, startedAt)) failed += 1;

@@ -481,7 +481,7 @@ async function setTimeouts(client: RepositoryClient): Promise<void> {
   await client.query("SET LOCAL statement_timeout = '5s'");
 }
 
-async function lockProperty(client: RepositoryClient, propertyId: string): Promise<void> {
+async function lockProperty(client: BookingGuestPolicyReadClient, propertyId: string): Promise<void> {
   await client.query(
     `SELECT pg_advisory_xact_lock(hashtext('booking.guest_policy'), hashtext($1::uuid::text))`,
     [propertyId],
@@ -714,6 +714,7 @@ export async function readCurrentBookingGuestPolicyRevision(
   );
   return result.rows[0] ? projectRevision(result.rows[0]) : null;
 }
+
 
 async function readRevision(
   client: RepositoryClient,
