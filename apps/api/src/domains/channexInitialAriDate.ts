@@ -36,13 +36,24 @@ export function selectNextChannexInitialAriDate(
 }
 
 function initialAriWindow(timeZone: unknown, now: Date) {
+  const today = channexPropertyLocalDate(timeZone, now);
+  if (!today) return unavailable;
+  const end = new Date(`${today}T00:00:00.000Z`);
+  // Calendar arithmetic intentionally avoids 24-hour additions in the hotel's zone.
+  end.setUTCDate(end.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
+  const through = end.toISOString().slice(0, 10);
+  return { kind: "window" as const, propertyLocalDate: today, through, timeZone };
+}
+
+/** Validated hotel-local calendar date only; no horizon or provider authority. */
+export function channexPropertyLocalDate(timeZone: unknown, now: Date): string | null {
   if (
     typeof timeZone !== "string" ||
     !timeZone ||
     timeZone !== timeZone.trim() ||
     !Number.isFinite(now.getTime())
   )
-    return unavailable;
+    return null;
   try {
     const parts = Object.fromEntries(
       new Intl.DateTimeFormat("en", {
@@ -56,13 +67,8 @@ function initialAriWindow(timeZone: unknown, now: Date) {
         .formatToParts(now)
         .map(({ type, value }) => [type, value]),
     );
-    const today = `${parts.year}-${parts.month}-${parts.day}`;
-    const end = new Date(`${today}T00:00:00.000Z`);
-    // Calendar arithmetic intentionally avoids 24-hour additions in the hotel's zone.
-    end.setUTCDate(end.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
-    const through = end.toISOString().slice(0, 10);
-    return { kind: "window" as const, propertyLocalDate: today, through, timeZone };
+    return `${parts.year}-${parts.month}-${parts.day}`;
   } catch {
-    return unavailable;
+    return null;
   }
 }
