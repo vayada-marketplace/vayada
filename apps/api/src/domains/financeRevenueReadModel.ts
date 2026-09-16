@@ -63,7 +63,7 @@ export function createFinanceRevenueReadModel(config: {
         typeof context.source.entityId !== "string" ||
         context.source.entityId.toLowerCase() !== propertyId ||
         !/^profile:[1-9]\d*$/.test(context.source.revision) ||
-        !canonicalZone(context.timeZone) ||
+        !isCanonicalFinanceTimeZone(context.timeZone) ||
         !utc(pricing.createdAt) ||
         !utc(pricing.updatedAt) ||
         !utc(context.updatedAt)
@@ -99,7 +99,7 @@ function uuid(value: string): string {
   if (!UUID.test(value)) throw new TypeError("Finance revenue property id is malformed");
   return value.toLowerCase();
 }
-function canonicalZone(value: unknown): value is string {
+export function isCanonicalFinanceTimeZone(value: unknown): value is string {
   if (typeof value !== "string") return false;
   try {
     const zone = getTimezone(value);
