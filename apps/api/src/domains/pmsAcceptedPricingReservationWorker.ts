@@ -20,7 +20,9 @@ type Claim = {
   attemptId: string;
   attemptsCount: number;
   maxAttempts: number;
-  propertyId: string;
+  tenantScope: string;
+  organizationId: string | null;
+  propertyId: string | null;
   resourceProduct: string;
   resourceType: string;
   resourceId: string;
@@ -120,6 +122,7 @@ async function claimNext(client: PoolClient, workerId: string): Promise<Claim | 
        FROM candidate WHERE job.id=candidate.id
        RETURNING job.id::text AS "jobId",job.attempts_count AS "attemptsCount",
          job.max_attempts AS "maxAttempts",job.property_id::text AS "propertyId",
+         job.tenant_scope AS "tenantScope",job.organization_id::text AS "organizationId",
          job.resource_product AS "resourceProduct",job.resource_type AS "resourceType",
          job.resource_id AS "resourceId",job.correlation_id AS "correlationId",
          job.job_key AS "jobKey",job.payload`,
@@ -179,14 +182,16 @@ async function finishFailure(
   if (!terminal) return;
   await client.query(
     `INSERT INTO platform.dead_letter_events
-     (source_kind,job_id,job_attempt_id,tenant_scope,property_id,resource_product,
-      resource_type,resource_id,correlation_id,reason_code,failure_summary,failure_payload)
-     SELECT 'job',$1::uuid,$2::uuid,'property',$3::uuid,$4,$5,$6,$7,$8,$9,$10::jsonb
+     (source_kind,job_id,job_attempt_id,tenant_scope,organization_id,property_id,
+      resource_product,resource_type,resource_id,correlation_id,reason_code,failure_summary,failure_payload)
+     SELECT 'job',$1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12::jsonb
      WHERE NOT EXISTS (SELECT 1 FROM platform.dead_letter_events
        WHERE source_kind='job' AND job_id=$1::uuid AND recovery_status='open')`,
     [
       claim.jobId,
       claim.attemptId,
+      claim.tenantScope,
+      claim.organizationId,
       claim.propertyId,
       claim.resourceProduct,
       claim.resourceType,
@@ -199,14 +204,16 @@ async function finishFailure(
   );
   await client.query(
     `INSERT INTO platform.product_audit_events
-     (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
+     (audit_key,product,action,occurred_at,tenant_scope,organization_id,property_id,actor_type,
       target_resource_product,target_resource_type,target_resource_id,job_id,
       correlation_id,redacted_payload,audit_metadata)
      VALUES($1,'pms','accepted_pricing_adoption_dead_lettered',clock_timestamp(),
-       'property',$2::uuid,'system',$3,$4,$5,$6::uuid,$7,$8::jsonb,$9::jsonb)
+       $2,$3::uuid,$4::uuid,'system',$5,$6,$7,$8::uuid,$9,$10::jsonb,$11::jsonb)
      ON CONFLICT(product,audit_key) DO NOTHING`,
     [
       `pms.accepted-pricing.job.${claim.jobId}.dead-letter.v1`,
+      claim.tenantScope,
+      claim.organizationId,
       claim.propertyId,
       claim.resourceProduct,
       claim.resourceType,
@@ -234,6 +241,7 @@ function parseReference(payload: unknown): AcceptedPricingReservationReference |
 
 function validEnvelope(claim: Claim, reference: AcceptedPricingReservationReference) {
   return (
+    claim.tenantScope === "property" &&
     claim.propertyId === reference.propertyId &&
     claim.resourceProduct === "booking" &&
     claim.resourceType === "guest_booking" &&
