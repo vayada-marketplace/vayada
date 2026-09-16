@@ -94,7 +94,18 @@ class FakeDatabase {
   private result(text: string, values?: readonly unknown[]) {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) return ok([]);
     if (text.includes("FROM hotel_catalog.properties property"))
-      return this.options.actorScope === false ? ok([]) : ok([{ displayName: "Front Desk" }]);
+      return this.options.actorScope === false
+        ? ok([])
+        : ok([
+            {
+              displayName: "Front Desk",
+              roleKey: "hotel_owner",
+              roleDefinitionId: null,
+              permissionOverrides: null,
+            },
+          ]);
+    if (text.includes("FROM identity.role_permission_grants"))
+      return ok([{ permissionKey: "pms.inbox.read" }, { permissionKey: "pms.inbox.reply" }]);
     if (text.includes("FROM identity.product_entitlements"))
       return this.options.entitlement === false
         ? ok([])
@@ -120,7 +131,9 @@ class FakeDatabase {
       ]);
     }
     if (text.includes("FROM pms.channel_connections"))
-      return this.options.connectionReady === false ? ok([]) : ok([{ "?column?": 1 }]);
+      return this.options.connectionReady === false
+        ? ok([])
+        : ok([{ roleKey: "hotel_owner", roleDefinitionId: null, permissionOverrides: null }]);
     if (text.includes("FROM platform.media_objects") && text.includes("FOR UPDATE")) {
       if (this.options.attachment === null) return ok([]);
       return ok([

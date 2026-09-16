@@ -1,4 +1,5 @@
 import pg from "pg";
+import { createPgStaffInvitationRepository } from "@vayada/backend-auth";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runPmsInboxAssignmentReconciliationJobs } from "./pmsInboxAssignmentReconciliation.js";
@@ -15,6 +16,7 @@ const JOB = "13736000-0000-4000-8000-000000000008";
 const FOREIGN_ORGANIZATION = "13736000-0000-4000-8000-000000000009";
 const FOREIGN_JOB = "13736000-0000-4000-8000-000000000010";
 const SECOND_JOB = "13736000-0000-4000-8000-000000000011";
+const ROLE_ADMIN = "13736000-0000-4000-8000-000000000012";
 
 describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
   const admin = new pg.Client({ connectionString: URL });
@@ -33,6 +35,95 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
     await cleanup();
     await admin.end();
   });
+
+  it("cleans up after the existing member access writer removes Inbox permissions", async () => {
+    await admin.query(`DELETE FROM platform.jobs WHERE id = $1`, [JOB]);
+    await admin.query(
+      `INSERT INTO identity.membership_property_assignments (membership_id, property_id) VALUES ($1, $2)`,
+      [MEMBERSHIP, REMOVED_PROPERTY],
+    );
+    await admin.query(
+      `INSERT INTO identity.users (id, email) VALUES ($1, 'role-admin-reconcile@example.test')`,
+      [ROLE_ADMIN],
+    );
+    await admin.query(
+      `INSERT INTO identity.organization_memberships (organization_id, user_id, status, role_key, property_access_mode, access_origin) VALUES ($1, $2, 'active', 'hotel_owner', 'all', 'agency')`,
+      [ORGANIZATION, ROLE_ADMIN],
+    );
+    const repository = createPgStaffInvitationRepository({ connectionString: URL! });
+    try {
+      const before = (await repository.getAccess(ORGANIZATION, MEMBERSHIP))!;
+      const result = await repository.updateAccess({
+        commandType: "identity.staff.access.update",
+        commandId: "remove-inbox-reconcile",
+        idempotencyKey: "remove-inbox-reconcile",
+        audit: {
+          actor: { kind: "user", userId: ROLE_ADMIN, organizationId: ORGANIZATION },
+          source: "api",
+          requestId: "remove-inbox-reconcile",
+          reason: "Remove Inbox access",
+          requestedAt: new Date().toISOString(),
+        },
+        payload: {
+          organizationId: ORGANIZATION,
+          membershipId: MEMBERSHIP,
+          roleKey: "front_desk",
+          propertyAccessMode: "assigned",
+          propertyIds: [RETAINED_PROPERTY, REMOVED_PROPERTY],
+          permissionOverrides: { grant: [], deny: ["pms.inbox.read", "pms.inbox.reply"] },
+          expectedRevision: before.revision,
+        },
+      });
+      expect(result.outcome).toBe("updated");
+      const jobs = await admin.query(
+        `SELECT job_metadata->>'reason' AS reason FROM platform.jobs WHERE organization_id = $1`,
+        [ORGANIZATION],
+      );
+      expect(jobs.rows).toEqual([{ reason: "role_permissions_changed" }]);
+      await expect(
+        runPmsInboxAssignmentReconciliationJobs(URL!, { organizationId: ORGANIZATION }),
+      ).resolves.toEqual({ processed: 1, cleared: 2 });
+    } finally {
+      await repository.close();
+    }
+  });
+
+  it.each([false, true])(
+    "rechecks role permissions before clearing a queued assignment (restored=%s)",
+    async (restored) => {
+      await admin.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox role', 'staff', 'front_desk', '[]')`,
+        [MEMBERSHIP, ORGANIZATION],
+      );
+      await admin.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = $1, property_access_mode = 'all' WHERE id = $1`,
+        [MEMBERSHIP],
+      );
+      await admin.query(
+        `UPDATE platform.jobs SET job_metadata = '{"reason":"role_permissions_changed"}' WHERE id = $1`,
+        [JOB],
+      );
+      if (restored)
+        await admin.query(
+          `UPDATE identity.organization_roles SET default_permissions = '["pms.inbox.read"]' WHERE id = $1`,
+          [MEMBERSHIP],
+        );
+      await expect(
+        runPmsInboxAssignmentReconciliationJobs(URL!, { organizationId: ORGANIZATION }),
+      ).resolves.toEqual({ processed: 1, cleared: restored ? 0 : 2 });
+      const threads = await admin.query(
+        `SELECT assigned_to_membership_id FROM pms.message_threads WHERE id = ANY($1::uuid[])`,
+        [[RETAINED_THREAD, CLEARED_THREAD]],
+      );
+      expect(threads.rows).toEqual([
+        { assigned_to_membership_id: restored ? MEMBERSHIP : null },
+        { assigned_to_membership_id: restored ? MEMBERSHIP : null },
+      ]);
+      await expect(
+        runPmsInboxAssignmentReconciliationJobs(URL!, { organizationId: ORGANIZATION }),
+      ).resolves.toEqual({ processed: 0, cleared: 0 });
+    },
+  );
 
   it("clears only assignments whose member lost property access and audits the job", async () => {
     await expect(
@@ -114,6 +205,25 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
         )
       ).rows[0]?.count,
     ).toBe(0);
+  });
+
+  it("discovers and clears assignments after PMS access is disabled", async () => {
+    await admin.query("DELETE FROM platform.jobs WHERE id = $1::uuid", [JOB]);
+    await admin.query(
+      "UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1::uuid",
+      [MEMBERSHIP],
+    );
+    expect(
+      await runPmsInboxAssignmentReconciliationJobs(URL!, {
+        workerId: "product-disabled",
+        organizationId: ORGANIZATION,
+      }),
+    ).toEqual({ processed: 1, cleared: 2 });
+    const assigned = await admin.query(
+      "SELECT count(*)::int AS count FROM pms.message_threads WHERE assigned_to_membership_id = $1::uuid",
+      [MEMBERSHIP],
+    );
+    expect(assigned.rows[0].count).toBe(0);
   });
 
   it("discovers invalid assignments even when the access-loss writer did not enqueue a job", async () => {
@@ -513,6 +623,12 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
     await admin.query("BEGIN");
     try {
       await admin.query("SET LOCAL session_replication_role = replica");
+      await admin.query("DELETE FROM platform.product_audit_events WHERE organization_id = $1", [
+        ORGANIZATION,
+      ]);
+      await admin.query("DELETE FROM platform.idempotency_keys WHERE organization_id = $1", [
+        ORGANIZATION,
+      ]);
       await admin.query(
         "DELETE FROM platform.product_audit_events WHERE property_id = ANY($1::uuid[])",
         [[RETAINED_PROPERTY, REMOVED_PROPERTY]],
@@ -559,6 +675,10 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",
         [ORGANIZATION],
       );
+      await admin.query(
+        "DELETE FROM identity.organization_roles WHERE organization_id = $1::uuid",
+        [ORGANIZATION],
+      );
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [
         [RETAINED_PROPERTY, REMOVED_PROPERTY],
       ]);
@@ -566,7 +686,9 @@ describe.skipIf(!URL)("PMS Inbox assignment reconciliation worker", () => {
       await admin.query("DELETE FROM identity.organizations WHERE id = $1::uuid", [
         FOREIGN_ORGANIZATION,
       ]);
-      await admin.query("DELETE FROM identity.users WHERE id = $1::uuid", [USER]);
+      await admin.query("DELETE FROM identity.users WHERE id = ANY($1::uuid[])", [
+        [USER, ROLE_ADMIN],
+      ]);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");

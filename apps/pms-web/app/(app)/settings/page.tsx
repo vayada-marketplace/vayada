@@ -23,6 +23,7 @@ import {
   type PmsPropertyProfileLoadStatus,
 } from "@/lib/settings/propertyDetails";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 
 // Rail items also map to anchor IDs. Localization combines the existing
 // #currency + #language anchors (both preserved as sub-targets so the global
@@ -50,6 +51,7 @@ const ANCHOR_TO_SECTION: Record<string, SectionId> = {
 };
 
 export default function SettingsPage() {
+  const access = usePmsAccess();
   const [autoOpenReloadKey, setAutoOpenReloadKey] = useState(0);
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
@@ -283,7 +285,7 @@ export default function SettingsPage() {
     }
   };
 
-  const sections = getPmsSettingsSections(true, t);
+  const sections = getPmsSettingsSections(true, t, access);
 
   if (loading) {
     return (

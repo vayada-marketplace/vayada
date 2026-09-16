@@ -46,6 +46,25 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox mark-read transaction", () => {
     await admin.end();
   });
 
+  it("allows a read-only role to mark read and rejects it after read access is removed", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox viewer', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+      [MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [MEMBERSHIP],
+    );
+    await expect(read.markRead(command("role-read"))).resolves.toMatchObject({ ok: true });
+    await admin.query(
+      `UPDATE identity.organization_roles SET default_permissions = '[]' WHERE id = $1`,
+      [MEMBERSHIP],
+    );
+    await expect(read.markRead(command("role-read"))).rejects.toThrow(
+      "PMS Inbox mark-read command failed",
+    );
+  });
+
   it("marks only inbound messages through the named boundary and replays exactly", async () => {
     const input = command("read-through-boundary");
     const first = await read.markRead(input);
@@ -327,6 +346,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox mark-read transaction", () => {
         "DELETE FROM identity.product_entitlements WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",
+        "DELETE FROM identity.organization_roles WHERE organization_id = $1::uuid",
       ])
         await admin.query(statement, [ORGANIZATION]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [

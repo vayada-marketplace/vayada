@@ -8,6 +8,8 @@ import { authService } from "@/services/auth";
 import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { pmsSetupExitPropertyId } from "@vayada/product-onboarding";
 import { useTranslation } from "@/lib/i18n";
+import { PmsAccessProvider } from "@/lib/settings/PmsAccessContext";
+import { getPmsSelfAccess, type PmsSelfAccess } from "@/services/api/pmsStaffClient";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -16,11 +18,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [setupGuardError, setSetupGuardError] = useState(false);
+  const [access, setAccess] = useState<PmsSelfAccess | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setIsAuthorized(false);
     setSetupGuardError(false);
+    setAccess(null);
     async function authorize() {
       let authorized = false;
       try {
@@ -33,6 +37,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
       if (!authorized || !authService.isHotelAdmin()) {
         router.replace(loginPathForCurrentRoute("/dashboard"));
+        return;
+      }
+      let liveAccess: PmsSelfAccess;
+      try {
+        liveAccess = await getPmsSelfAccess();
+      } catch (error) {
+        console.error("Failed to load PMS access:", error);
+        if (!cancelled) setSetupGuardError(true);
         return;
       }
 
@@ -59,6 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         window.location.replace(decision.redirectPath);
         return;
       }
+      setAccess(liveAccess);
       setIsAuthorized(true);
     }
     void authorize();
@@ -85,7 +98,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthorized) {
+  if (!isAuthorized || !access) {
     return null;
   }
 
@@ -93,27 +106,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // 100dvh (not 100vh): on iOS Safari 100vh ignores the URL bar, so the
     // shell's bottom — and any sticky footers anchored to it — sit behind
     // the browser chrome until Safari collapses it mid-scroll.
-    <div className="h-[100dvh] flex overflow-x-hidden">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
+    <PmsAccessProvider access={access}>
+      <div className="h-[100dvh] flex overflow-x-hidden">
+        {/* Mobile overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+        {/* Sidebar: hidden on mobile, shown as overlay when open */}
         <div
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-      {/* Sidebar: hidden on mobile, shown as overlay when open */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 lg:static lg:z-auto transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
-      >
-        <Sidebar onNavigate={() => setSidebarOpen(false)} />
+          className={`fixed inset-y-0 left-0 z-50 lg:static lg:z-auto transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+        >
+          <Sidebar permissions={access.permissions} onNavigate={() => setSidebarOpen(false)} />
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
+          <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
+            {children}
+          </main>
+        </div>
       </div>
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
-          {children}
-        </main>
-      </div>
-    </div>
+    </PmsAccessProvider>
   );
 }
 

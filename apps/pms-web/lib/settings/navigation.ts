@@ -9,14 +9,16 @@ import {
 } from "@heroicons/react/24/outline";
 import { HotelIcon } from "@vayada/product-onboarding";
 import type { SettingsNavSection } from "@vayada/settings-ui";
+import type { PmsSelfAccess } from "@/services/api/pmsStaffClient";
 
 export function getPmsSettingsSections(
   indexPage: boolean,
   t: (key: string) => string,
+  access?: PmsSelfAccess,
 ): SettingsNavSection[] {
   const anchorHref = (id: string) => (indexPage ? undefined : `/settings#${id}`);
 
-  return [
+  const sections = [
     {
       id: "property-details",
       label: t("settings.navigation.property"),
@@ -72,4 +74,13 @@ export function getPmsSettingsSections(
       href: anchorHref("localization"),
     },
   ];
+  if (!access) return sections;
+  const canReadSettings = access.permissions.some((permission) =>
+    ["pms.settings.read", "pms.settings.manage"].includes(permission),
+  );
+  return sections.filter((section) => {
+    if (section.id === "team") return access.permissions.includes("identity.staff.manage");
+    if (section.id === "billing") return access.roleKey === "hotel_owner";
+    return canReadSettings;
+  });
 }

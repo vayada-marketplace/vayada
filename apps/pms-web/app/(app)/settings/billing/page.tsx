@@ -18,6 +18,7 @@ import {
 import { formatBillingAmount, formatInvoiceDate } from "@/lib/settings/billing";
 import { useTranslation } from "@/lib/i18n";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   activateFixedPlanByCard,
   activateFixedPlanByInvoice,
@@ -32,6 +33,7 @@ import {
 } from "@/services/api/financeBillingClient";
 
 export default function BillingSettingsPage() {
+  const access = usePmsAccess();
   const { t } = useTranslation();
   const [billing, setBilling] = useState<BillingOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,7 +159,7 @@ export default function BillingSettingsPage() {
     <SettingsLayout
       title={t("settings.title")}
       description="Manage your property, operations, and account preferences."
-      sections={getPmsSettingsSections(false, t)}
+      sections={getPmsSettingsSections(false, t, access)}
       activeId="billing"
     >
       {error && (

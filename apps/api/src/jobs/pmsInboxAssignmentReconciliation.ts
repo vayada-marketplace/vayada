@@ -1,3 +1,8 @@
+import {
+  lockPmsInboxRolePermissions,
+  type PmsInboxRoleActor,
+} from "../domains/pmsInboxRolePermissions.js";
+
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 export type PmsInboxAssignmentReconciliationClient = {
@@ -136,6 +141,7 @@ async function discoverInvalidAssignments(
                 CASE WHEN membership.status <> 'active' OR organization.status <> 'active'
                            OR staff.status <> 'active'
                      THEN 'membership_suspended'
+                     WHEN NOT membership.pms_access_enabled THEN 'product_access_removed'
                      ELSE 'property_access_removed'
                 END AS reason,
                 md5(string_agg(thread.id::text || ':' || thread.version::text,
@@ -151,6 +157,7 @@ async function discoverInvalidAssignments(
              SELECT 1
              FROM identity.organization_resource_links resource
              WHERE membership.status = 'active' AND organization.status = 'active'
+               AND membership.pms_access_enabled
                AND staff.status = 'active'
                AND resource.organization_id = membership.organization_id
                AND resource.product = 'pms' AND resource.resource_type = 'pms_property'
@@ -344,8 +351,8 @@ async function reconcileJob(
     );
     if (lease.rowCount !== 1)
       throw new Error("PMS Inbox assignment reconciliation lost its worker lease");
-    const membership = await client.query(
-      `SELECT 1
+    const membership = await client.query<PmsInboxRoleActor>(
+      `SELECT membership.role_key AS "roleKey", membership.role_definition_id AS "roleDefinitionId", membership.permission_overrides AS "permissionOverrides"
        FROM identity.organization_memberships membership
        JOIN identity.organizations organization ON organization.id = membership.organization_id
        JOIN identity.users staff ON staff.id = membership.user_id
@@ -354,7 +361,16 @@ async function reconcileJob(
       [job.membershipId, job.organizationId],
     );
     if (membership.rowCount !== 1) throw new OrganizationScopeMismatch();
-    const assignments = await findInvalidAssignments(client, job);
+    const permissions = await lockPmsInboxRolePermissions(
+      client,
+      job.organizationId!,
+      membership.rows[0]!,
+    );
+    const assignments = await findInvalidAssignments(
+      client,
+      job,
+      permissions?.has("pms.inbox.read") === true,
+    );
     for (const assignment of assignments) await clearAssignment(client, job, assignment);
     await finishJob(client, job, assignments.length);
     await client.query("COMMIT");
@@ -370,6 +386,7 @@ async function reconcileJob(
 async function findInvalidAssignments(
   client: PmsInboxAssignmentReconciliationClient,
   job: ReconciliationJob,
+  hasInboxRead: boolean,
 ): Promise<InvalidAssignment[]> {
   const result = await client.query<InvalidAssignment>(
     `SELECT thread.id::text AS "threadId", thread.property_id::text AS "propertyId",
@@ -391,6 +408,8 @@ async function findInvalidAssignments(
           AND resource.status = 'active'
          WHERE membership.id = thread.assigned_to_membership_id
            AND membership.organization_id = $2::uuid AND membership.status = 'active'
+           AND membership.pms_access_enabled
+           AND $3::boolean
            AND (membership.property_access_mode = 'all' OR EXISTS (
              SELECT 1 FROM identity.membership_property_assignments assignment
              WHERE assignment.membership_id = membership.id
@@ -399,7 +418,7 @@ async function findInvalidAssignments(
        )
      ORDER BY thread.property_id, thread.id
      FOR UPDATE OF thread`,
-    [job.membershipId, job.organizationId],
+    [job.membershipId, job.organizationId, hasInboxRead],
   );
   return result.rows;
 }
@@ -620,11 +639,18 @@ function validJob(job: ReconciliationJob): boolean {
 
 function validReason(
   value: string | null,
-): value is "membership_removed" | "membership_suspended" | "property_access_removed" {
+): value is
+  | "membership_removed"
+  | "membership_suspended"
+  | "property_access_removed"
+  | "product_access_removed"
+  | "role_permissions_changed" {
   return (
     value === "membership_removed" ||
     value === "membership_suspended" ||
-    value === "property_access_removed"
+    value === "property_access_removed" ||
+    value === "product_access_removed" ||
+    value === "role_permissions_changed"
   );
 }
 

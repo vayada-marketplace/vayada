@@ -105,6 +105,7 @@ export const hotelStaffRoleKeys = [
   "front_desk",
   "housekeeping",
   "hotel_custom",
+  "external_owner",
 ] as const;
 
 export type HotelStaffRoleKey = (typeof hotelStaffRoleKeys)[number];
@@ -137,6 +138,10 @@ export const staffAccessPermissionKeys = [
   "booking.flow.manage",
   "booking.settings.read",
   "booking.settings.manage",
+  "booking.addons.read",
+  "booking.addons.manage",
+  "booking.promos.read",
+  "booking.promos.manage",
 ] as const satisfies readonly PermissionKey[];
 
 export type StaffAccessPermissionKey = (typeof staffAccessPermissionKeys)[number];
@@ -162,7 +167,44 @@ export const staffRoleDefaultPermissions: Readonly<
   ],
   housekeeping: ["pms.dashboard.read", "pms.calendar.read", "pms.room_status.read"],
   hotel_custom: [],
+  external_owner: [
+    "pms.dashboard.read",
+    "pms.dashboard.operations.read",
+    "pms.dashboard.finance.read",
+    "pms.calendar.read",
+    "pms.reservation.read",
+    "pms.room_status.read",
+    "pms.rooms_rates.read",
+    "pms.finance.read",
+    "booking.analytics.read",
+  ],
 };
+
+export const externalOwnerPermissionCeiling: readonly string[] = [
+  "pms.dashboard.read",
+  "pms.dashboard.operations.read",
+  "pms.dashboard.finance.read",
+  "pms.calendar.read",
+  "pms.calendar.manage",
+  "pms.reservation.read",
+  "pms.reservation.update",
+  "pms.reservation.cancel",
+  "pms.inbox.read",
+  "pms.inbox.reply",
+  "pms.room_status.read",
+  "pms.rooms_rates.read",
+  "pms.rooms_rates.manage",
+  "pms.channel_manager.read",
+  "pms.finance.read",
+  "pms.settings.read",
+  "pms.guest_contact.read",
+  "booking.analytics.read",
+  "booking.design.read",
+  "booking.design.manage",
+  "booking.flow.read",
+  "booking.flow.manage",
+  "booking.settings.read",
+];
 
 export type StaffPermissionOverrides = {
   grant: readonly StaffAccessPermissionKey[];
@@ -215,6 +257,8 @@ const requiredLowerPermissions: Partial<
   "booking.design.manage": ["booking.design.read"],
   "booking.flow.manage": ["booking.flow.read"],
   "booking.settings.manage": ["booking.settings.read"],
+  "booking.addons.manage": ["booking.addons.read"],
+  "booking.promos.manage": ["booking.promos.read"],
 };
 
 const canonicalPropertyId =
@@ -267,6 +311,15 @@ export function validateStaffPermissionOverrides(input: {
   ) {
     issues.add("forbidden_permission");
   }
+  if (
+    input.roleKey === "external_owner" &&
+    [...grant, ...deny, ...effectivePermissions].some(
+      (key) =>
+        key !== "hotel_catalog.property_manifest.read" &&
+        !externalOwnerPermissionCeiling.includes(key),
+    )
+  )
+    issues.add("forbidden_permission");
   if (!hasValidStaffPermissionHierarchy(effectivePermissions)) {
     issues.add("missing_required_permission");
   }
@@ -280,7 +333,13 @@ export function validateStaffInviteAccess(input: {
   permissionOverrides: { grant: readonly string[]; deny: readonly string[] };
 }): readonly StaffInviteAccessValidationIssue[] {
   const issues = new Set<StaffInviteAccessValidationIssue>();
-  if (input.propertyAccessMode !== "assigned") issues.add("invalid_property_access_mode");
+  if (
+    (input.roleKey === "external_owner" && input.propertyAccessMode !== "assigned") ||
+    !["assigned", "all"].includes(input.propertyAccessMode) ||
+    (input.propertyAccessMode === "all" && input.propertyIds.length !== 0)
+  ) {
+    issues.add("invalid_property_access_mode");
+  }
   if (input.propertyAccessMode === "assigned" && input.propertyIds.length === 0) {
     issues.add("missing_property_assignment");
   }
@@ -486,16 +545,24 @@ export type CreateStaffInvitePayload = {
   email: string;
   name?: string;
   roleKey: HotelStaffRoleKey;
-  propertyAccessMode: "assigned";
+  propertyAccessMode: "assigned" | "all";
   propertyIds: readonly string[];
   permissionOverrides: StaffPermissionOverrides;
   configurationRevision: number;
+  expectedInvitationId?: string;
+  roleDefinitionId?: string;
+  expectedRoleRevision?: string;
+  productAccess?: { pms: boolean; booking: boolean };
 };
 
 export type UpdateStaffAccessPayload = Omit<
   CreateStaffInvitePayload,
-  "email" | "name" | "configurationRevision"
-> & { membershipId: string };
+  "email" | "name" | "configurationRevision" | "expectedInvitationId"
+> & {
+  membershipId: string;
+  expectedRevision?: string;
+  membershipStatus?: "active" | "suspended";
+};
 
 export type UpdateStaffStatusPayload = {
   organizationId: string;
