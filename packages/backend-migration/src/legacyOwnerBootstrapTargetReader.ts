@@ -2,7 +2,10 @@ import type { AdoptionQueryClient } from "./channexAdoptionTargetRows.js";
 import type { OwnerBootstrapObservation } from "./legacyOwnerBootstrapPlan.js";
 
 type Owner = { ownerId: string; email: string };
-type TargetObservation = Pick<OwnerBootstrapObservation, "ownerId" | "target">;
+type TargetObservation = Pick<OwnerBootstrapObservation, "ownerId" | "target"> & {
+  providerUserId: string | null;
+  providerEmailMatches: boolean | null;
+};
 
 // ECMAScript trim whitespace, explicitly shared with PostgreSQL btrim.
 const trimCharacters =
@@ -26,7 +29,14 @@ SELECT w.owner_id::text AS "ownerId",
   EXISTS(SELECT 1 FROM identity.external_identities e WHERE e.provider='workos'
     AND lower(btrim(e.provider_email,$3) COLLATE "C")=w.email AND e.user_id<>w.owner_id)
     OR (SELECT count(*) FROM identity.external_identities e WHERE e.provider='workos'
-      AND e.user_id=w.owner_id AND e.provider_user_id IS NOT NULL)>1 AS "identityConflict"
+      AND e.user_id=w.owner_id AND e.provider_user_id IS NOT NULL)>1 AS "identityConflict",
+  (SELECT e.provider_user_id FROM identity.external_identities e
+    WHERE e.provider='workos' AND e.user_id=w.owner_id AND e.provider_user_id IS NOT NULL
+    ORDER BY e.provider_user_id LIMIT 1) AS "providerUserId",
+  (SELECT lower(btrim(e.provider_email,$3) COLLATE "C")=w.email
+    FROM identity.external_identities e
+    WHERE e.provider='workos' AND e.user_id=w.owner_id AND e.provider_user_id IS NOT NULL
+    ORDER BY e.provider_user_id LIMIT 1) AS "providerEmailMatches"
 FROM wanted w ORDER BY w.owner_id`;
 
 /**
@@ -69,6 +79,8 @@ export async function readLegacyOwnerBootstrapTargets(
       exactCount: number;
       restricted: boolean;
       identityConflict: boolean;
+      providerUserId: string | null;
+      providerEmailMatches: boolean | null;
     }>(sql, [ids, emails, trimCharacters]);
     if (
       rows.length !== 8 ||
@@ -83,22 +95,37 @@ export async function readLegacyOwnerBootstrapTargets(
           row.exactCount > 1 ||
           row.exactCount > row.candidateCount ||
           typeof row.restricted !== "boolean" ||
-          typeof row.identityConflict !== "boolean",
+          typeof row.identityConflict !== "boolean" ||
+          (row.providerUserId !== null && typeof row.providerUserId !== "string") ||
+          (row.providerEmailMatches !== null && typeof row.providerEmailMatches !== "boolean") ||
+          (row.providerUserId === null && row.providerEmailMatches !== null),
       )
     )
       throw new Error();
-    return rows.map((row) => ({
-      ownerId: row.ownerId,
-      target: row.identityConflict
-        ? "conflict"
-        : row.restricted
-          ? "restricted"
-          : row.candidateCount === 0
-            ? "absent"
-            : row.candidateCount === 1 && row.exactCount === 1
-              ? "exact"
-              : "conflict",
-    }));
+    return rows.map((row) => {
+      const providerUserId =
+        row.providerUserId !== null && /^user_[A-Za-z0-9]{1,128}$/.test(row.providerUserId)
+          ? row.providerUserId
+          : null;
+      const malformedProviderUserId = row.providerUserId !== null && providerUserId === null;
+      return {
+        ownerId: row.ownerId,
+        target:
+          row.identityConflict ||
+          malformedProviderUserId ||
+          (providerUserId !== null && row.providerEmailMatches !== true)
+            ? "conflict"
+            : row.restricted
+              ? "restricted"
+              : row.candidateCount === 0
+                ? "absent"
+                : row.candidateCount === 1 && row.exactCount === 1
+                  ? "exact"
+                  : "conflict",
+        providerUserId,
+        providerEmailMatches: providerUserId === null ? null : row.providerEmailMatches,
+      };
+    });
   } catch {
     // A database error can include sensitive bind parameters. Do not propagate it.
     throw new Error("OWNER_TARGET_READ_FAILED");
