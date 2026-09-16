@@ -127,3 +127,57 @@ The Finance/add-on and OTA availability owners confirmed no overlapping edits
 at this checkpoint. Real Airbnb validation remains waived; local synthetic tests
 do not resolve either provider-evidence dependency. All runtime and Finance
 activation guards remain required.
+
+## Activation design review — 2026-09-16
+
+This is a proposed successor contract, not implemented behavior or authorization
+for activation. Review of the current [Channel API](https://docs.channex.io/api-v.1-documentation/channel-api)
+and [Bookings Collection](https://docs.channex.io/api-v.1-documentation/bookings-collection)
+found current channel settings and booking revisions, but no documented API tying
+historical amount settings to each revision. This is a documentation finding, not
+proof that Channex has no private mechanism. The supplied support reply explains
+amount semantics without providing that historical guarantee. Further resolver
+scaffolding cannot supply the missing evidence.
+
+### Proposed path without historical settings evidence
+
+Keep accepting authoritative provider evidence while explicitly representing an
+unverified amount basis. Do not classify it as payout, guest-paid total, or gross
+revenue. A current settings observation may be retained as an observation, never
+as historical proof. Known and unknown classifications need explicit replay and
+successor rules; immutable historical snapshots must not be relabeled in place.
+
+This alone does **not** make acceptance ready. The current alteration writer and
+ordinary booking worker copy provider amounts into `booking.guest_bookings.total_amount`
+and, for unpaid bookings, `balance_amount`. The PMS operations read model exposes
+those fields as booking money. An unknown provider basis therefore also needs an
+explicit canonical money state and consumer behavior. Retaining an older total
+without marking it stale is not sufficient; new bookings cannot use a fabricated
+zero. This concern also applies to a verified payout amount: knowing that it is
+payout does not establish a guest receivable.
+
+Before implementing this alternative, establish these acceptance criteria across
+Booking, Finance, and the PMS display:
+
+1. Preserve raw provider totals, taxes, commission and allocated nights separately;
+   unknown basis remains visibly unverified and never enters gross revenue.
+2. Authoritative stay/occupancy changes do not silently replace guest receivables.
+   Existing and newly imported bookings expose explicit unknown/stale monetary
+   state, and PMS/API consumers do not display it as a payable balance.
+3. Snapshot validation compares identity, currency, lifecycle, dates and room scope;
+   provider-total equality is not used as proof of canonical guest money.
+4. Staff acceptance checks that the production import coordinator supports the
+   booking before sending. Linked OTA revenue can use the implemented correction
+   path; payments, folios, retained charges and unsupported revenue remain blocked.
+   Decline remains available when acceptance is blocked.
+5. Accepted-provider/import-failure recovery is visible and retryable without a
+   second provider decision. Test delayed revisions, basis changes, historical
+   replay and rollback, as well as unpaid, paid and invoiced bookings.
+6. Initial Airbnb imports and subsequent ordinary modifications use the same
+   monetary-state contract; fixing alterations alone leaves inconsistent data.
+
+A smaller first release can expose requests and Decline while keeping Accept
+unavailable. It still needs deliberate runtime composition and rollout verification;
+this document does not turn on subscriptions, workers or staff actions. Neither
+alternative removes the current payment/folio guards or constitutes a merged,
+deployed or live-provider-tested feature.
