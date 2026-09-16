@@ -1361,7 +1361,18 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       )
     ).rows;
     expect(releasedHistory[0].data.assignment_status).toBe("released");
+    providerRevision.attributes.amount = "40.00";
+    providerRevision.attributes.rooms[0]!.amount = "40.00";
+    Object.assign(providerRevision.attributes.rooms[0]!, { days: { "2026-08-04": "40.00" } });
     await nextWorkerRevision();
+    expect(
+      (
+        await admin.query(
+          "SELECT provider_booking_amount::text amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].amount,
+    ).toBe("40.0000");
     expect(
       (
         await admin.query(
