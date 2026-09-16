@@ -28,12 +28,29 @@ export async function claimChannexRoomAvailability(
   return readChannexRoomAvailability(pool, inventory, input, selection, "claim");
 }
 
+export type ChannexRoomAvailabilityClaim = Extract<
+  Awaited<ReturnType<typeof claimChannexRoomAvailability>>,
+  { kind: "availability_claimed" }
+>;
+
+/** Final atomic day, authority, request and unresolved-owner gate before POST. */
+export async function verifyChannexRoomAvailabilityDispatch(
+  pool: Pool,
+  inventory: Pick<PmsInventoryMaterializationRepository, "getCurrentInventoryDay">,
+  input: ChannexPricingJobLeaseInput,
+  selection: Readonly<{ roomTypeId: string; date: string }>,
+  claim: ChannexRoomAvailabilityClaim,
+) {
+  return readChannexRoomAvailability(pool, inventory, input, selection, "dispatch", claim);
+}
+
 async function readChannexRoomAvailability(
   pool: Pool,
   inventory: Pick<PmsInventoryMaterializationRepository, "getCurrentInventoryDay">,
   input: ChannexPricingJobLeaseInput,
   selection: Readonly<{ roomTypeId: string; date: string }>,
-  mode: "evidence" | "claim",
+  mode: "evidence" | "claim" | "dispatch",
+  expected?: ChannexRoomAvailabilityClaim,
 ) {
   const lease = { ...input },
     selected = { ...selection };
@@ -82,7 +99,43 @@ async function readChannexRoomAvailability(
         return false;
       const current = await lockRoom(currentClient, lease, selected.roomTypeId);
       guarded = isDeepStrictEqual(initial, current);
-      if (!guarded || !current || mode !== "claim") return guarded;
+      if (!guarded || !current) return false;
+      if (mode === "dispatch") {
+        guarded = Boolean(
+          expected &&
+            isDeepStrictEqual(expected.authority, current.authority) &&
+            isDeepStrictEqual(expected.mapping, current.mapping) &&
+            isDeepStrictEqual(expected.inventory, day) &&
+            (
+              await currentClient.query(
+                `SELECT id FROM pms.channex_room_availability_attempts a
+                 WHERE a.id=$1 AND a.job_attempt_id=$2 AND a.worker_id=$3
+                   AND a.property_id=$4 AND a.connection_id=$5 AND a.mapping_id=$6
+                   AND a.binding_generation=$7 AND a.external_property_id=$8
+                   AND a.external_room_type_id=$9 AND a.service_date=$10
+                   AND a.available_count=$11 AND a.request_body=$12::jsonb AND a.state='unresolved'
+                   AND NOT EXISTS (SELECT 1 FROM pms.channex_room_availability_receipts r WHERE r.attempt_id=a.id)
+                 FOR SHARE OF a NOWAIT`,
+                [
+                  expected.attemptId,
+                  expected.jobAttemptId,
+                  expected.workerId,
+                  current.authority.lease.propertyId,
+                  current.authority.connectionId,
+                  current.mapping.mappingId,
+                  current.mapping.bindingGeneration,
+                  current.authority.externalPropertyId,
+                  current.mapping.externalRoomTypeId,
+                  selected.date,
+                  day.day.availableCount,
+                  JSON.stringify(expected.request.body),
+                ],
+              )
+            ).rowCount,
+        );
+        return guarded;
+      }
+      if (mode !== "claim") return true;
       const request = {
         method: "POST" as const,
         path: "/api/v1/availability" as const,
@@ -132,6 +185,7 @@ async function readChannexRoomAvailability(
       ? { kind: "unavailable" as const, reason: "availability_reconciliation_required" }
       : snapshot;
   if (!guarded) return { kind: "unavailable" as const, reason: "consumer_authority_unavailable" };
+  if (mode === "dispatch") return { kind: "availability_dispatch_verified" as const };
   if (mode === "claim") {
     if (!claim) return { kind: "unavailable" as const, reason: "availability_claim_unavailable" };
     return {

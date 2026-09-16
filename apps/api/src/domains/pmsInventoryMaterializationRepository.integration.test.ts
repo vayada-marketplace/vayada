@@ -6,6 +6,7 @@ import {
   prepareChannexRoomAvailabilityReceiptPersistence,
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
+import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -132,6 +133,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           "getCurrentInventoryDay"
         > = f.repository,
       ) => claimChannexRoomAvailability(channelPool, inventory, lease, selection),
+      dispatch: () =>
+        prepareChannexRoomAvailabilityDispatch(channelPool, f.repository, lease, selection),
     };
   }
   it("binds canonical inventory to the leased property's current Channex room", async () => {
@@ -329,6 +332,101 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].count,
     ).toBe(0);
+  });
+  it("sends one exact current availability request and retains its receipt", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch();
+    expect(prepared.kind).toBe("prepared");
+    if (prepared.kind !== "prepared") return;
+    const taskId = randomUUID(),
+      post = vi.fn(async (_request: unknown, _signal: AbortSignal) =>
+        new Response(
+          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+          { status: 200 },
+        ),
+      );
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "retained",
+      attemptId: prepared.attemptId,
+    });
+    expect(post).toHaveBeenCalledOnce();
+    expect(post.mock.calls[0][0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/availability",
+      body: { values: [{ availability: 2, date_from: f.selection.date, date_to: f.selection.date }] },
+    });
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "dispatch_already_used",
+    });
+    expect(post).toHaveBeenCalledOnce();
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,task_ids FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ outcome: "complete_json", task_ids: [taskId] });
+  });
+  it("does not send after fresh authority becomes unavailable", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch(),
+      post = vi.fn();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.lease.jobId,
+    ]);
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_dispatch_stale",
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+  it("does not reopen an attempt that already has a receipt", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch(),
+      post = vi.fn();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    const attempt = (
+      await admin.query(
+        `SELECT job_attempt_id::text AS "jobAttemptId",worker_id AS "workerId"
+         FROM pms.channex_room_availability_attempts WHERE id=$1`,
+        [prepared.attemptId],
+      )
+    ).rows[0];
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: prepared.attemptId,
+      jobAttemptId: attempt.jobAttemptId,
+      workerId: attempt.workerId,
+      propertyId: f.propertyId,
+      connectionId: f.connectionId,
+    });
+    await persist();
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_dispatch_stale",
+    });
+    expect(post).not.toHaveBeenCalled();
+  });
+  it("retains ambiguous transport failure after invoking the sender", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    await expect(
+      prepared.dispatch(async () => {
+        throw new Error("secret transport detail");
+      }),
+    ).resolves.toMatchObject({ kind: "retained", attemptId: prepared.attemptId });
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,http_status,provider_request_id FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ outcome: "transport_error", http_status: null, provider_request_id: null });
   });
   it("writes no owner when current inventory is unavailable", async () => {
     const f = await channelInventoryFixture();
