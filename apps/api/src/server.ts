@@ -82,6 +82,8 @@ import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseRe
 import { createPgFinanceRevenueAddonFacts } from "./domains/financeRevenueAddonFacts.js";
 import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel.js";
 import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
+import { createPgFinanceDashboardFacts } from "./domains/financeDashboardFacts.js";
+import { createFinanceDashboardReadModel } from "./domains/financeDashboardReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -670,6 +672,22 @@ const financeRevenueRuntime =
         return {
           routes: { read },
           close: () => Promise.all([propertyContext.close(), rooms.close(), addOns.close()]),
+        };
+      })()
+    : undefined;
+const financeDashboardRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const facts = createPgFinanceDashboardFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceDashboardReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          facts,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), facts.close()]),
         };
       })()
     : undefined;
@@ -1676,6 +1694,7 @@ const app = buildApp({
       }
     : undefined,
   financeRevenue: financeRevenueRuntime?.routes,
+  financeDashboard: financeDashboardRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -2019,6 +2038,7 @@ app.addHook("onClose", async () => {
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
     financeRevenueRuntime?.close(),
+    financeDashboardRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
