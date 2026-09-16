@@ -596,18 +596,21 @@ class TestMultiRoomCapacity:
 
         # Book one of the two units — only 1 remains for these dates,
         # but 6 guests need 2 units → frontend will show "Sold Out".
+        base_date = date.today()
+        check_in = (base_date + timedelta(days=30)).isoformat()
+        check_out = (base_date + timedelta(days=32)).isoformat()
         await create_test_booking(
             str(hotel["id"]),
             str(room["id"]),
-            check_in="2026-09-14",
-            check_out="2026-09-16",
+            check_in=check_in,
+            check_out=check_out,
         )
 
         resp = await client.get(
             f"/api/hotels/{hotel['slug']}/rooms",
             params={
-                "check_in": "2026-09-14",
-                "check_out": "2026-09-16",
+                "check_in": check_in,
+                "check_out": check_out,
                 "adults": 6,
                 "children": 0,
             },

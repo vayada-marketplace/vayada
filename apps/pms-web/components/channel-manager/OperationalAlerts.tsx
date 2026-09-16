@@ -115,7 +115,9 @@ export function OperationalAlerts({
         const ari = !booking || disconnected;
         const pending = alert.recovery.some((job) => ["pending", "running"].includes(job.status));
         const allowed =
-          (!booking || snapshot.capabilityModes.bookingSync === "mutating") &&
+          (!booking ||
+            snapshot.capabilityModes.bookingSync === "mutating" ||
+            (alert.eventType === "non_acked_booking" && alert.stagingRecoveryAvailable === true)) &&
           (!ari || snapshot.capabilityModes.ariSync === "mutating");
         const resolved = Boolean(alert.resolvedAt);
         const automaticRetry = snapshot.sync[ari ? "ari" : "booking"].retryAfter;

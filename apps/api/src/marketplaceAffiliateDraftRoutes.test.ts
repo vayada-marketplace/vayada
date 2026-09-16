@@ -92,7 +92,10 @@ describe("hotel affiliate draft HTTP adapter", () => {
         },
         { status: "unavailable" as const, reason: "not_found" as const },
       ]) {
-        const saved = { revision: 1, draft: { id: "draft-1", terms, commission } };
+        const saved = {
+          revision: 1,
+          draft: { id: "draft-1", terms, commission, destination: null },
+        };
         read.mockResolvedValue(saved);
         const get = await app.inject({ method: "GET", url, headers });
         expect(get.statusCode).toBe(200);
@@ -185,6 +188,7 @@ describe("hotel affiliate draft HTTP adapter", () => {
       expect(save).not.toHaveBeenCalled();
       for (const code of [
         "policy_unavailable",
+        "destination_unavailable",
         "revision_conflict",
         "idempotency_conflict",
         "scope_unavailable",

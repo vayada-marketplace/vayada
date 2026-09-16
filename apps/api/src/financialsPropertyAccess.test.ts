@@ -44,6 +44,12 @@ const folio = {
   ],
   paymentRefs: [],
 };
+const folioExport = {
+  ...create,
+  tab: "folios",
+  format: "csv",
+  filters: { state: "ready", sort: "createdAt_desc" },
+};
 const routes = [
   ["GET", "expense-categories"],
   ["POST", "expense-categories", { ...create, name: "Test", color: "#123456", sortOrder: 1 }],
@@ -65,6 +71,7 @@ const routes = [
   ["PATCH", `folios/${itemId}`, { ...folio, expectedRevision: 1 }],
   ["POST", `folios/${itemId}/ready`, command],
   ["DELETE", `folios/${itemId}`, command],
+  ["POST", "exports", folioExport],
   ["GET", "ota-commission-settings"],
   [
     "PUT",
@@ -109,8 +116,13 @@ function fixture(value: State) {
   const categories = { create: vi.fn(), update: vi.fn(), archive: vi.fn() };
   const expenses = { create: vi.fn(), update: vi.fn(), archive: vi.fn() };
   const recurring = { create: vi.fn(), update: vi.fn(), disable: vi.fn() };
-  const folioRead = { list: vi.fn(async () => null), detail: vi.fn(async () => null) };
+  const folioRead = {
+    list: vi.fn(async () => null),
+    detail: vi.fn(async () => null),
+    captureReadyExport: vi.fn(async () => null),
+  };
   const folioCommands = { create: vi.fn(), correct: vi.fn(), ready: vi.fn(), archive: vi.fn() };
+  const folioExports = { enqueue: vi.fn() };
   const ota = { list: vi.fn(async () => []), setRule: vi.fn() };
   const receipt = vi.fn(async () => null),
     signPrivateDownload = vi.fn();
@@ -137,7 +149,7 @@ function fixture(value: State) {
         },
       },
     },
-    financeFolios: { repository: folioRead, commands: folioCommands },
+    financeFolios: { repository: folioRead, commands: folioCommands, exports: folioExports },
     financeOtaCommissionSettingsRepository: ota,
     auth: {
       verifier: createFakeVerifier(
@@ -184,6 +196,7 @@ function fixture(value: State) {
     recurring,
     folioRead,
     folioCommands,
+    folioExports,
     ota,
   ].flatMap(Object.values);
   return { app, ports: [...ports, receipt, signPrivateDownload], expenseRead, folioRead, ota };

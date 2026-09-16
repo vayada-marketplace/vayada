@@ -52,6 +52,7 @@ export function createPgPmsChannexManagementReadRepository(config: {
   connectionString: string;
   pool?: Pool;
   now?: () => Date;
+  stagingAlertPropertyId?: string;
 }): PmsChannexManagementReadRepository {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
@@ -65,7 +66,7 @@ export function createPgPmsChannexManagementReadRepository(config: {
         )
       ).rows;
     },
-    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId),
+    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
     async acknowledgeAlert(propertyId, alertId, userId) {
       const result = await pool.query(
         `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,

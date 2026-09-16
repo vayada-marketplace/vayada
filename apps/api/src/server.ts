@@ -1,8 +1,12 @@
+import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -62,6 +66,10 @@ import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/finance
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
+import {
+  createKmsFinanceFolioExportSearchDigest,
+  createPgFinanceFolioExportJobRepository,
+} from "./domains/financeFolioExportRepository.js";
 import { createAwsFinanceFolioKms } from "./domains/financeFolioKms.js";
 import { createPgFinanceFolioReadRepository } from "./domains/financeFolioReadRepository.js";
 import {
@@ -72,6 +80,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
+import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
@@ -101,6 +110,7 @@ import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryR
 import { createTargetPmsRoomInventoryReadPort } from "./domains/pmsRoomInventoryReadModel.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import { createPgPmsChannexManagementReadRepository } from "./domains/pmsChannexManagementReadModel.js";
+import { stagingAlertProperty } from "./domains/channexStagingAlertRecovery.js";
 import { createPgPmsChannexManagementCommandPort } from "./domains/pmsChannexManagementCommandStore.js";
 import { createPgPmsChannexIframeSessionPort } from "./domains/pmsChannexIframeSession.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
@@ -186,7 +196,11 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
-import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
+import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
+import {
+  createChannexThreadAction,
+  createChannexMessageDelivery,
+} from "./integrations/channexMessageDelivery.js";
 import { createResendPmsInboxDelivery } from "./integrations/resendPmsInboxDelivery.js";
 import { createPgChannexManagementPlanPort } from "./integrations/channexManagementPlans.js";
 import { runPmsChannexManagementWorkerOnce } from "./jobs/pmsChannexManagementWorker.js";
@@ -201,6 +215,7 @@ import {
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
+import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
   createPgPropertySetupDraftRetentionStore,
@@ -405,6 +420,7 @@ const bankTransferBookings = bankTransferCodec
   : undefined;
 
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
@@ -425,7 +441,10 @@ const pmsOperationsRepository =
     : undefined;
 
 const pmsChannexManagementRepository = pmsOperationsRepository
-  ? createPgPmsChannexManagementReadRepository({ connectionString: targetDatabaseUrl })
+  ? createPgPmsChannexManagementReadRepository({
+      connectionString: targetDatabaseUrl,
+      stagingAlertPropertyId: stagingAlertProperty(config),
+    })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
   ([capability, mode]) =>
@@ -439,9 +458,13 @@ const noShowReportingEnabled =
   (config.channexManagement.stagingNoShowEnabled ||
     (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.backgroundWorkersEnabled));
-const pmsChannexManagementCommandPort = channexCommandsMutating
-  ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
-  : undefined;
+const pmsChannexManagementCommandPort =
+  channexCommandsMutating || stagingAlertProperty(config)
+    ? createPgPmsChannexManagementCommandPort({
+        connectionString: targetDatabaseUrl,
+        stagingAlertPropertyId: stagingAlertProperty(config),
+      })
+    : undefined;
 const pmsChannexIframeSessionPort =
   config.channexManagement.capabilityModes.iframe === "mutating"
     ? createPgPmsChannexIframeSessionPort({
@@ -627,11 +650,23 @@ const financeFolioRuntime =
           recipientEncoder,
           recipientDecoder,
         });
+        const exportJobs = createPgFinanceFolioExportJobRepository({
+          connectionString: targetDatabaseUrl,
+          searchDigest: createKmsFinanceFolioExportSearchDigest({
+            kms: kms.write,
+            keyArn: config.financeFolioRecipientKms.fingerprintKeyArn,
+          }),
+        });
         return {
-          routes: { repository, commands },
+          routes: { repository, commands, exports: exportJobs },
           async close() {
             try {
-              await Promise.all([repository.close(), commands.close(), propertyContext.close()]);
+              await Promise.all([
+                repository.close(),
+                commands.close(),
+                exportJobs.close(),
+                propertyContext.close(),
+              ]);
             } finally {
               kms.close();
             }
@@ -642,6 +677,22 @@ const financeFolioRuntime =
 const financeExpenseGenerationPool =
   config.financeSource === "target"
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
+const financeFolioExportWorker =
+  config.backgroundWorkersEnabled &&
+  financeFolioRuntime &&
+  financeExpenseRuntime &&
+  config.platformMediaServing
+    ? {
+        pool: new pg.Pool({
+          connectionString: targetDatabaseUrl,
+          max: 2,
+          connectionTimeoutMillis: 5_000,
+        }),
+        writer: createS3FinanceFolioExportArtifactWriter({
+          bucketName: config.platformMediaServing.bucketName,
+        }),
+      }
     : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
@@ -771,6 +822,9 @@ const pmsInboxRuntime = pmsOperationsRepository
   ? createPmsInboxProductionRuntime({
       connectionString: targetDatabaseUrl,
       attachmentMediaAccessEnabled: Boolean(platformMediaRuntime),
+      providerMutationEnabled:
+        config.channexManagement.capabilityModes.messaging === "mutating" &&
+        Boolean(config.channexManagement.apiBaseUrl && config.channexManagement.apiKey),
     })
   : undefined;
 
@@ -1479,7 +1533,21 @@ const app = buildApp({
           : {}),
       }
     : undefined,
-  financeFolios: financeFolioRuntime?.routes,
+  financeFolios: financeFolioRuntime
+    ? {
+        ...financeFolioRuntime.routes,
+        expenseExports: financeExpenseRuntime!.routes.read,
+        ...(platformMediaRuntime
+          ? {
+              exportDownloads: {
+                read: financeFolioRuntime.routes.exports,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
+              },
+            }
+          : {}),
+      }
+    : undefined,
   pmsInboxAttachmentMedia:
     pmsInboxRuntime && platformMediaRuntime
       ? {
@@ -1562,8 +1630,16 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
-  marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
-  marketplaceAffiliatePolicyRepository: createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
+  marketplaceAffiliateAssentRepository:
+    createPgMarketplaceAffiliateAssentRepository(targetDatabaseUrl),
+  marketplaceAffiliateDraftRepository:
+    createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePolicyRepository:
+    createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
+  marketplaceAffiliateDestinationRepository:
+    createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateCompletionRepository:
+    createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1767,7 +1843,6 @@ app.addHook("onClose", async () => {
     staffInvitationRuntime?.removalJobRepository.close(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
-    financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -2121,6 +2196,45 @@ app.addHook("onClose", async () => {
   await financeExpenseGenerationPool?.end();
 });
 
+let activeFinanceFolioExports: Promise<void> | undefined;
+const runFinanceFolioExports = () => {
+  if (!financeFolioExportWorker || activeFinanceFolioExports) return;
+  activeFinanceFolioExports = runFinanceFolioExportJobs(
+    financeFolioExportWorker.pool,
+    {
+      exportReady: financeFolioRuntime!.routes.repository.exportReady,
+      exportCsv: financeExpenseRuntime!.routes.read.exportCsv,
+    },
+    financeFolioExportWorker.writer,
+  )
+    .then((result) => {
+      if (result.deadLettered > 0 || result.retryScheduled > 0)
+        app.log.warn(result, "Finance folio export processing completed with attention required");
+      else if (result.succeeded > 0) app.log.info(result, "Finance folio exports completed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Finance folio export processing failed"),
+    )
+    .finally(() => {
+      activeFinanceFolioExports = undefined;
+    });
+};
+const financeFolioExportTimer = financeFolioExportWorker
+  ? setInterval(runFinanceFolioExports, 5_000)
+  : undefined;
+financeFolioExportTimer?.unref();
+if (financeFolioExportWorker) runFinanceFolioExports();
+app.addHook("onClose", async () => {
+  if (financeFolioExportTimer) clearInterval(financeFolioExportTimer);
+  await activeFinanceFolioExports;
+  try {
+    financeFolioExportWorker?.writer.close?.();
+    await financeFolioExportWorker?.pool.end();
+  } finally {
+    await financeFolioRuntime?.close();
+  }
+});
+
 let activeRetryBatch: Promise<void> | undefined;
 let pmsPublicOfferRetryTimer: NodeJS.Timeout | undefined;
 
@@ -2277,7 +2391,18 @@ const pmsInboxDeliveryWorker =
           ...(pmsInboxChannexDelivery ? { channex: pmsInboxChannexDelivery } : {}),
           ...(pmsInboxEmailDelivery ? { resend: pmsInboxEmailDelivery } : {}),
         },
-        relay: () => relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool }),
+        relay: async () => {
+          await relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool });
+          await runPmsInboxProviderActions(
+            pmsInboxDeliveryPool,
+            pmsInboxChannexDelivery
+              ? createChannexThreadAction({
+                  apiBaseUrl: config.channexManagement.apiBaseUrl!,
+                  apiKey: config.channexManagement.apiKey!,
+                })
+              : undefined,
+          );
+        },
         warn: (details, message) => app.log.warn(details, message),
       })
     : undefined;

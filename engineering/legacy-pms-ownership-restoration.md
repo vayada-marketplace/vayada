@@ -87,6 +87,18 @@ restriction, mismatched WorkOS identity or ownership ambiguity. Revalidate
 current evidence on authorization; no session-lifetime permission cache may
 outlive revocation or a newer denial.
 
+For each resource link, the exception may excuse `suspended` only when the
+immutable source link was **active**, the source owner was **pending**, and the
+exact target link is proven to be the output of that same migration row and run
+through `combinedResourceStatus`. Bind the source link checksum and the target
+link ID, product/resource/relationship keys and complete migrated before-state.
+Source suspended/archived links, unrelated links, absent provenance, changed
+ownership and any later target restriction remain denied. Matching only a status
+or timestamp is insufficient. Do not update the stored link to active: both
+`resolveEffectivePropertyAccess` and `requirePropertyAccess`, including their SQL
+paths, must consume the same scoped disposition or deny. This is not permission
+to override all suspended links belonging to the organization.
+
 Resolve the exception only for explicitly classified PMS operations and the
 exact existing properties. Default-deny all other operations when using this
 exception, including Marketplace, Booking administration, organization/member
@@ -94,6 +106,25 @@ administration, new-property creation and Channex enablement. Shared catalog
 operations needed by PMS must be explicitly reviewed; a URL prefix alone is
 not a product authorization boundary. Collection reads must filter to the
 approved property set; individual reads and writes must enforce it again.
+
+Before wiring any entry point, define the shared server-only contract
+`legacy-pms-operation-scope.v1` alongside the authorization policy. Its explicit
+allowlist maps each reviewed operation identifier to product, action
+(collection read, individual read or write), required permission/entitlement and
+canonical property-scope enforcement. Start with no permitted identifiers;
+implementation adds concrete identifiers only with route/adapter inventory and
+denial tests. A method/path prefix or role permission is not an identifier.
+Unknown identifiers, contract versions and unclassified operations deny the
+exception; no wildcard or caller-supplied classification is allowed.
+
+Policy routes, direct-context routes, shared resource/property adapters and
+collection readers must all use that versioned contract, not independent local
+allowlists. Collection operations filter to the disposition's exact property set;
+individual reads and writes enforce the same set again at the resource boundary.
+Marketplace, Booking administration, organization/member administration,
+property creation and Channex enablement are outside this contract. A shared
+catalog operation requires its own explicit reviewed PMS identifier. Ordinary
+active-account authorization remains separate and unchanged.
 
 The implementation must cover the full resolution chain: WorkOS session and
 internal identity, organization selection, authorization resolution, route policy
@@ -204,6 +235,14 @@ original success after revocation is a receipt, not renewed eligibility.
   and subsequently restricted memberships fail without changing stored status.
 - Exercise organization selection and collection/detail/write boundaries, not
   only the property helper. Verify normal active-account behavior is unchanged.
+- Resource-link matrix: allow only the exact active-source/pending-owner
+  migration-derived suspended link; deny source-suspended/source-archived links,
+  different runs/rows/keys, missing provenance, altered before-state and later
+  restrictions. Exercise both shared property access helpers and their SQL paths.
+- Classification matrix: every enabled identifier must enforce the same scope
+  across policy/direct-context/resource/collection paths. Deny unknown identifiers
+  or versions, forged classification and all excluded product/admin/create/enable
+  operations, even when the ordinary role has the corresponding permission.
 - Same/cross-pair concurrency, stale hashes, tampered/expired/wrong-environment
   signatures, missing/revoked approvals, machine/human separation, transaction
   failure, exact replay, payload drift and rollback after subsequent state change.

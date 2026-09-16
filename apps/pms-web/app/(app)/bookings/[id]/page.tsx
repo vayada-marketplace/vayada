@@ -1,4 +1,5 @@
 "use client";
+import { AirbnbChangeRequestCard } from "@/components/bookings/AirbnbChangeRequestCard";
 
 import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
@@ -1390,6 +1391,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setDecideOpen(null);
     } catch (err) {
       setError(errMessage(err, t("bookings.detail.failedToApproveChange")));
+      if (changeRequest?.providerRequest) {
+        try { setChangeRequest(await bookingsService.getChangeRequest(id)); } catch { /* Keep the original action error visible. */ }
+      }
     } finally {
       setDecidingChange(false);
     }
@@ -1409,6 +1413,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setDecideOpen(null);
     } catch (err) {
       setError(errMessage(err, t("bookings.detail.failedToDeclineChange")));
+      if (changeRequest?.providerRequest) {
+        try { setChangeRequest(await bookingsService.getChangeRequest(id)); } catch { /* Keep the original action error visible. */ }
+      }
     } finally {
       setDecidingChange(false);
     }
@@ -1897,7 +1904,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {changeRequest && changeRequest.status === "pending" && (
+      {changeRequest?.providerRequest && (
+        <AirbnbChangeRequestCard request={changeRequest} busy={decidingChange}
+          onDecide={(action) => { if (action === "accept") void handleApproveChange(); else void handleDeclineChange(); }} />
+      )}
+      {changeRequest && !changeRequest.providerRequest && changeRequest.status === "pending" && (
         <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
           <div className="mb-3">
             <p className="text-sm font-semibold text-blue-900">
@@ -1977,7 +1988,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {changeRequest && changeRequest.status !== "pending" && (
+      {changeRequest && !changeRequest.providerRequest && changeRequest.status !== "pending" && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
           {t("bookings.detail.lastChangeRequestWas")}{" "}
           <span className="font-medium text-gray-800">
