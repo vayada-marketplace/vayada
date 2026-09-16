@@ -16,6 +16,9 @@ afterEach(async () => {
 async function setup(mutate: (c: RequestContext) => void = () => {}) {
   const repository = {
     read: vi.fn<AffiliateAssentRepository["read"]>().mockResolvedValue(null),
+    readForCollaboration: vi
+      .fn<AffiliateAssentRepository["readForCollaboration"]>()
+      .mockResolvedValue(null),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -99,6 +102,14 @@ describe("Affiliate assent HTTP read", () => {
       creatorAcceptedAt: null,
     };
     repository.read.mockResolvedValue(result);
+    repository.readForCollaboration.mockResolvedValue(result);
+    const linked = await app.inject({
+      url: "/collaborations/Existing:QA/affiliate-assent",
+      headers,
+    });
+    expect(linked.statusCode).toBe(200);
+    expect(linked.json()).toEqual(result);
+    expect(linked.headers["cache-control"]).toBe("no-store");
     const response = await app.inject({ url: path, headers });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual(result);
@@ -110,8 +121,48 @@ describe("Affiliate assent HTTP read", () => {
     expect(failed.headers["cache-control"]).toBe("no-store");
     expect((await app.inject({ method: "POST", url: path, headers })).statusCode).toBe(404);
   });
+  it("resolves opaque collaboration keys through the protected lookup", async () => {
+    const { app, repository } = await setup();
+    const source = "Existing-Collaboration:QA";
+    const url = `/collaborations/${encodeURIComponent(source)}/affiliate-assent`;
+    for (const authorization of [undefined, "Bearer invalid"]) {
+      const response = await app.inject({ url, headers: authorization ? { authorization } : {} });
+      expect(response.statusCode).toBe(401);
+      expect(response.headers["cache-control"]).toBe("no-store");
+    }
+    expect(repository.readForCollaboration).not.toHaveBeenCalled();
+    const missing = await app.inject({ url, headers });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ code: "scope_unavailable" });
+    expect(repository.readForCollaboration).toHaveBeenCalledWith(expect.any(Object), source);
+    for (const invalid of [" ", " padded ", "bad\u0001key"]) {
+      expect(
+        (
+          await app.inject({
+            url: `/collaborations/${encodeURIComponent(invalid)}/affiliate-assent`,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(422);
+    }
+    expect(
+      (await app.inject({ url: `/collaborations/${"a".repeat(101)}/affiliate-assent`, headers }))
+        .statusCode,
+    ).toBe(404);
+    expect(repository.readForCollaboration).toHaveBeenCalledTimes(1);
+    repository.readForCollaboration.mockRejectedValue(new Error("private database detail"));
+    const failed = await app.inject({ url, headers });
+    expect(failed.statusCode).toBe(500);
+    expect(failed.json()).toEqual({ code: "read_unavailable" });
+    expect(failed.headers["cache-control"]).toBe("no-store");
+    const denied = await setup((c) => {
+      c.membership.permissions = [];
+    });
+    expect((await denied.app.inject({ url, headers })).statusCode).toBe(403);
+    expect(denied.repository.readForCollaboration).not.toHaveBeenCalled();
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
-    const repository = { read: vi.fn(), close: async () => {} };
+    const repository = { read: vi.fn(), readForCollaboration: vi.fn(), close: async () => {} };
     const app = buildApp({
       logger: false,
       marketplaceAffiliateAssentRepository: repository,
