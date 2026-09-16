@@ -32,7 +32,8 @@ export async function replayPricingAcceptance(client: PoolClient, slug: unknown,
       r.id AS receipt_id, r.status AS receipt_status,
       r.request_fingerprint_hash AS receipt_fingerprint,
       r.response_status_code, r.response_resource_product, r.response_resource_type, r.response_resource_id,
-      b.id AS linked_booking_id, q.payload->'quote' AS linked_quote
+      b.id AS linked_booking_id, b.public_reference AS linked_booking_reference,
+      q.payload->'quote' AS linked_quote
     FROM platform.idempotency_keys r
     LEFT JOIN booking.pricing_quote_acceptances a ON a.command_receipt_id=r.id
       AND a.property_id=r.property_id AND a.organization_id=$3
@@ -68,6 +69,8 @@ export async function replayPricingAcceptance(client: PoolClient, slug: unknown,
     row.response_resource_id !== history.bookingId ||
     row.receipt_id !== history.commandReceiptId ||
     row.linked_booking_id !== history.bookingId ||
+    typeof row.linked_booking_reference !== "string" ||
+    !/^VAY-[A-Z0-9]{6,32}$/.test(row.linked_booking_reference) ||
     row.receipt_fingerprint !== history.fingerprint.slice(7) ||
     !isDeepStrictEqual(row.linked_quote, history.quote)
   )
@@ -81,5 +84,9 @@ export async function replayPricingAcceptance(client: PoolClient, slug: unknown,
     return unavailable();
   const current = await lockPublicPricingAuthority(client, slug);
   if (!current || !isDeepStrictEqual(current, scope)) return unavailable();
-  return { bookingId: history.bookingId, replayed: true as const };
+  return {
+    bookingId: history.bookingId,
+    bookingReference: row.linked_booking_reference as string,
+    replayed: true as const,
+  };
 }

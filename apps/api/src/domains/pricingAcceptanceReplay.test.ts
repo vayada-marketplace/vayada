@@ -18,6 +18,7 @@ const fixture = () => {
     response_resource_type: "guest_booking",
     response_resource_id: row.guest_booking_id,
     linked_booking_id: row.guest_booking_id,
+    linked_booking_reference: "VAY-TESTBOOKING",
     linked_quote: row.quote_snapshot,
   };
 };
@@ -41,6 +42,7 @@ it("replays exact historical booking after quote expiry and normalizes retry nam
   };
   expect(await replayPricingAcceptance(db, "hotel", input)).toEqual({
     bookingId: row.guest_booking_id,
+    bookingReference: row.linked_booking_reference,
     replayed: true,
   });
   expect(db.query).toHaveBeenCalledTimes(1);
@@ -64,6 +66,8 @@ it("returns no receipt only after authority and never treats incomplete or broke
     { receipt_status: "failed" },
     { receipt_fingerprint: "bad" },
     { linked_booking_id: null },
+    { linked_booking_reference: null },
+    { linked_booking_reference: "private" },
     { linked_quote: {} },
     { receipt_id: row.id },
     { organization_id: row.property_id },

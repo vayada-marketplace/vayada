@@ -57,6 +57,7 @@ const guest = {
 const fresh = {
   kind: "accepted",
   bookingId: "22222222-2222-4222-8222-222222222222",
+  bookingReference: "VAY-22222222222242228222222222222222",
   acceptanceId: "33333333-3333-4333-8333-333333333333",
   acceptedAt: "2026-09-14T12:01:01.000Z",
   checkedAt: "2026-09-14T12:01:02.000Z",
@@ -147,14 +148,20 @@ it("refuses stale, mismatched and unsupported evidence before sending", async ()
 });
 
 it("accepts an exact replay and rejects malformed or private success payloads", async () => {
-  const replay = { kind: "replayed", bookingId: fresh.bookingId, replayed: true };
+  const replay = {
+    kind: "replayed",
+    bookingId: fresh.bookingId,
+    bookingReference: fresh.bookingReference,
+    replayed: true,
+  };
   fetcher.mockResolvedValueOnce(new Response(JSON.stringify(replay)));
   await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).resolves.toEqual(replay);
   for (const invalid of [
     { ...fresh, private: true },
     { ...fresh, bookingId: "invalid" },
+    { ...fresh, bookingReference: "private" },
     { ...fresh, checkedAt: "2026-09-14T12:00:00.000Z" },
-    { kind: "replayed", bookingId: fresh.bookingId, replayed: false },
+    { ...replay, replayed: false },
   ]) {
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify(invalid)));
     await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).rejects.toThrow(
