@@ -251,3 +251,24 @@ same correlation cannot be replayed for any configuration. A later authorized
 verifier must create rows from real provider evidence. A later reader must define and
 enforce freshness, reject revoked or changed configuration, and require the matching
 current adapter certification before publication can consume the result.
+
+## Initial referral production preflight command
+
+Migration 0219 and the internal production preflight command add retry identity to the
+stored evidence and invoke a generic provider verifier. The command authorizes the hotel
+and exact saved destination before any provider call, generates the opaque correlation
+on the server, and accepts success only when the verifier returns that exact correlation
+for the configured live connection and adapter version with bounded source references.
+The verifier call has a server-owned timeout and receives an abort signal.
+
+The command serializes the same hotel retry key through the provider call, so concurrent
+retries produce one check and one immutable evidence row. A retry with changed actor,
+destination, connection or adapter is a conflict. Provider failure, mismatched evidence
+or timeout records nothing. The provider port is intentionally generic: Channex, another
+PMS adapter or a native Booking implementation supplies the same non-mutating contract.
+No provider-specific table is part of the command.
+
+This command still does not grant readiness. It creates no reservation, inventory,
+payment, creator, agreement, click, attribution or Finance record. A later reader must
+apply an explicit freshness policy and require current non-revoked production evidence,
+unchanged configuration and matching current diagnostic certification.

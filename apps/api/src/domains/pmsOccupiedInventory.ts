@@ -8,6 +8,11 @@ export type PmsOccupiedInventorySpan = Readonly<{
   checkOut: string;
 }>;
 
+export type PmsOccupiedInventoryChange = Readonly<{
+  roomTypeId: string;
+  stayDate: string;
+}>;
+
 export type PmsOccupiedInventoryClient = {
   query<Row extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -34,10 +39,12 @@ export async function reconcilePmsOccupiedInventory(
   propertyId: string,
   spans: readonly PmsOccupiedInventorySpan[],
   acceptedAt: string,
-): Promise<void> {
-  if (spans.length === 0) return;
+): Promise<readonly PmsOccupiedInventoryChange[]> {
+  const targetDays = occupiedDays(spans);
+  if (targetDays.length === 0) return [];
   await lockPmsInventoryMutationScope(client, propertyId);
   const days = await readPmsOccupiedInventory(client, propertyId, spans);
+  const changes: PmsOccupiedInventoryChange[] = [];
   for (const day of days) {
     const total = integer(day.totalCount);
     const blocked = integer(day.blockedCount);
@@ -67,7 +74,9 @@ export async function reconcilePmsOccupiedInventory(
     if (updated.rowCount !== 1) {
       throw new PmsOccupiedInventoryInvariantError("Canonical inventory changed under lock");
     }
+    changes.push({ roomTypeId: day.roomTypeId, stayDate: day.stayDate });
   }
+  return changes;
 }
 
 /** Reads canonical occupancy under row locks without repairing inventory. */

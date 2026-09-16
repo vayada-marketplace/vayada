@@ -21,6 +21,7 @@ import type {
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
+import { enqueuePmsOccupiedInventoryAriChanges } from "./pmsOccupiedInventorySideEffects.js";
 
 export function createPgPmsManualBookingCommandRepository(config: {
   connectionString: string;
@@ -92,13 +93,14 @@ export function createPgPmsManualBookingCommandRepository(config: {
           bookingReference,
           attribution,
         });
-        await config.dependencies.operations.persistOperationalFacts({
-          transaction,
-          command,
-          rooms,
-          guestBookingId,
-          acceptedAt: acceptedAt.toISOString(),
-        });
+        const occupiedChanges =
+          (await config.dependencies.operations.persistOperationalFacts({
+            transaction,
+            command,
+            rooms,
+            guestBookingId,
+            acceptedAt: acceptedAt.toISOString(),
+          })) ?? [];
         await config.dependencies.nightlyEvidence.appendExactNightlyEvidence({
           transaction,
           command,
@@ -132,17 +134,30 @@ export function createPgPmsManualBookingCommandRepository(config: {
           command.propertyId,
           acceptedAt.toISOString(),
         );
+        const inventoryKeyHash = createHash("sha256").update(command.idempotencyKey).digest("hex");
         await enqueuePmsLinkedInventorySideEffects(
           transaction,
           {
             propertyId: command.propertyId,
             operation: "manual_booking_create",
             commandId: command.commandId,
-            keyHash: createHash("sha256").update(command.idempotencyKey).digest("hex"),
+            keyHash: inventoryKeyHash,
             acceptedAt: acceptedAt.toISOString(),
             audit: command.audit,
           },
           linkedChanges,
+        );
+        await enqueuePmsOccupiedInventoryAriChanges(
+          transaction,
+          {
+            propertyId: command.propertyId,
+            reason: "manual_booking_created",
+            commandId: command.commandId,
+            keyHash: inventoryKeyHash,
+            acceptedAt: acceptedAt.toISOString(),
+            correlationId: command.audit.correlationId ?? command.audit.requestId,
+          },
+          occupiedChanges,
         );
         const result = createResult(command, accepted, paymentEvidenceId, rearrangedBookingCount);
         await config.dependencies.platform.writeEvidence({

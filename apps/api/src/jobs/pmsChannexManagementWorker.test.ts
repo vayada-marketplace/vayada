@@ -14,6 +14,61 @@ import {
 const now = new Date("2026-08-13T10:00:00.000Z");
 
 describe("PMS Channex management worker", () => {
+  it("continues retained uploads even at the retry limit without reporting success or failure", async () => {
+    const claimed = {
+      ...job(),
+      attemptNumber: 5,
+      input: { ...job().input, operationType: "sync_ari" as const },
+    };
+    const harness = store(claimed);
+    const progress = {
+      ok: false as const,
+      code: "initial_upload_retained" as const,
+      attemptId: "saved-upload",
+    };
+    expect(
+      await runPmsChannexManagementWorkerOnce({
+        store: harness.port,
+        provider: { execute: async () => progress },
+        workerId: "worker-1",
+        now,
+      }),
+    ).toMatchObject({ outcome: "continued" });
+    expect(harness.continueUpload).toHaveBeenCalledWith(claimed, progress, {
+      workerId: "worker-1",
+      now,
+    });
+    expect(harness.succeed).not.toHaveBeenCalled();
+    expect(harness.fail).not.toHaveBeenCalled();
+  });
+
+  it("continues a retained room-availability upload through the same bounded worker path", async () => {
+    const claimed = {
+      ...job(),
+      input: { ...job().input, operationType: "sync_ari" as const },
+    };
+    const harness = store(claimed);
+    const progress = {
+      ok: false as const,
+      code: "availability_upload_retained" as const,
+      attemptId: "saved-availability",
+    };
+    await expect(
+      runPmsChannexManagementWorkerOnce({
+        store: harness.port,
+        provider: { execute: async () => progress },
+        workerId: "worker-1",
+        now,
+      }),
+    ).resolves.toMatchObject({ outcome: "continued" });
+    expect(harness.continueUpload).toHaveBeenCalledWith(claimed, progress, {
+      workerId: "worker-1",
+      now,
+    });
+    expect(harness.succeed).not.toHaveBeenCalled();
+    expect(harness.fail).not.toHaveBeenCalled();
+  });
+
   it("claims provider work and persists success", async () => {
     const harness = store(job());
     const execute = vi.fn<ChannexManagementProvider["execute"]>(async (_job, input) => {
@@ -32,7 +87,7 @@ describe("PMS Channex management worker", () => {
     ).resolves.toEqual({ outcome: "succeeded", jobId: "job-1", operationType: "enable" });
     expect(execute).toHaveBeenCalledWith(
       job(),
-      expect.objectContaining({ onProgress: expect.any(Function) }),
+      expect.objectContaining({ onProgress: expect.any(Function), workerId: "worker-1" }),
     );
     expect(harness.heartbeat).toHaveBeenCalledWith(job(), { workerId: "worker-1" });
     expect(harness.succeed).toHaveBeenCalledWith(
@@ -236,11 +291,13 @@ function job(): ChannexManagementJob {
 function store(claimed: ChannexManagementJob | null) {
   const succeed = vi.fn<ChannexManagementWorkerStore["succeed"]>();
   const fail = vi.fn<ChannexManagementWorkerStore["fail"]>();
+  const continueUpload = vi.fn<ChannexManagementWorkerStore["continueUpload"]>();
   const heartbeat = vi.fn<ChannexManagementWorkerStore["heartbeat"]>();
   return {
     succeed,
     fail,
     heartbeat,
-    port: { claim: vi.fn().mockResolvedValue(claimed), heartbeat, succeed, fail },
+    continueUpload,
+    port: { claim: vi.fn().mockResolvedValue(claimed), heartbeat, succeed, fail, continueUpload },
   };
 }

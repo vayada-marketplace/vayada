@@ -1,4 +1,7 @@
-import { reservePmsQuoteInventory, reservePmsInventoryInTransaction } from "./pmsInventoryReservationLifecycleRepository.js";
+import {
+  reservePmsQuoteInventory,
+  reservePmsInventoryInTransaction,
+} from "./pmsInventoryReservationLifecycleRepository.js";
 import { createBookingHostActions } from "./bookingHostActions.js";
 import { targetBookingHostActionGuards } from "./bookingHostActionGuards.js";
 import { withPmsHostDateCredit } from "./pmsHostDateAmendment.js";
@@ -693,11 +696,32 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory reservation lifecy
     expect(JSON.stringify(held.projectionRefreshIntent)).not.toContain("quote-session");
     expect(JSON.stringify(held.projectionRefreshIntent)).not.toContain("public-offer");
     const heldPayloads = await projectionPayloads(admin, fixture.propertyId);
-    expect(heldPayloads).toHaveLength(2);
+    expect(heldPayloads).toHaveLength(3);
     for (const payload of heldPayloads) {
       expect(payload).not.toContain("quote-session");
       expect(payload).not.toContain("public-offer");
     }
+    expect(
+      (
+        await admin.query(
+          `SELECT payload FROM platform.outbox_events
+           WHERE property_id=$1 AND destination='pms.channel-manager'
+             AND event_type='pms.inventory.ari_changed'
+             AND resource_type='inventory_reservation'`,
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        payload: expect.objectContaining({
+          propertyId: fixture.propertyId,
+          roomTypeId: fixture.roomTypeId,
+          coverageFrom: "2026-08-04",
+          coverageThroughExclusive: "2026-08-06",
+          reason: "reservation_held",
+        }),
+      },
+    ]);
     await expect(readDays(admin, fixture)).resolves.toEqual([
       dayState("2026-08-04", 1, 1, 2, 1),
       dayState("2026-08-05", 1, 1, 2, 1),

@@ -6,6 +6,7 @@ import {
   PMS_INVENTORY_MATERIALIZATION_IDEMPOTENCY,
   PMS_INVENTORY_PROJECTION_REFRESH_DESTINATION,
   evaluatePmsInventoryLaunchReadiness,
+  isPmsInventoryDayConsistent,
   parsePmsOperatingCalendarPropertyProfileEvidence,
   parsePmsOperatingCalendarSourceRevision,
   planPmsInventoryMaterialization,
@@ -27,7 +28,10 @@ import {
 } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
-import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import {
+  lockPmsInventoryMutationScope,
+  PMS_INVENTORY_MUTATION_LOCK_PREFIX,
+} from "./pmsInventoryMutationLock.js";
 import {
   reconcilePmsLinkedInventory,
   type PmsLinkedInventoryDirtyRange,
@@ -35,7 +39,10 @@ import {
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 import { loadPmsOperatingCalendarConfigurationByRevision } from "./pmsOperatingCalendarReadModel.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
-import { lockPmsRoomFactsMutationScope } from "./pmsRoomFactsMutationLock.js";
+import {
+  lockPmsRoomFactsMutationScope,
+  PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE,
+} from "./pmsRoomFactsMutationLock.js";
 
 const MATERIALIZATION_OPERATION = PMS_INVENTORY_MATERIALIZATION_IDEMPOTENCY.operation;
 const MATERIALIZATION_RESOURCE_TYPE = "inventory_materialization";
@@ -59,7 +66,7 @@ export type PmsInventoryMaterializationRepositoryClient = {
     text: string,
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
-  release(): void;
+  release(discard?: boolean): void;
 };
 
 export type PmsInventoryMaterializationRepositoryPool = {
@@ -78,8 +85,30 @@ export type PmsInventoryMaterializationRepositoryConfig = Readonly<{
   roomCapacity: RoomCapacityReadPort;
 }>;
 
+export type PmsCurrentInventoryDay = Readonly<{
+  kind: "available";
+  day: PmsInventoryDaySnapshot;
+  configurationSource: PmsOperatingCalendarConfigurationSnapshot["source"];
+  propertyProfileSource: PmsOperatingCalendarConfigurationSnapshot["sourceInputs"]["propertyProfile"];
+  propertyTimeZone: PmsOperatingCalendarConfigurationSnapshot["sourceInputs"]["propertyTimeZone"];
+  materializedRevision: number;
+  sourceRoomFactsRevision: number;
+  sourceRoomUnitsRevision: number;
+}>;
+/** Internal authorization only, under owner locks. No provider IO or inventory mutation. */
+type InventoryDayGuard = (
+  client: PmsInventoryMaterializationRepositoryClient,
+  day: PmsCurrentInventoryDay,
+) => Promise<boolean>;
+
 export type PmsInventoryMaterializationRepository = PmsInventoryMaterializationPort &
-  PmsInventoryLaunchReadinessReadPort & { close(): Promise<void> };
+  PmsInventoryLaunchReadinessReadPort & {
+    getCurrentInventoryDay(
+      request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+      guard?: InventoryDayGuard,
+    ): ReturnType<typeof readCurrentInventoryDay>;
+    close(): Promise<void>;
+  };
 
 type IdempotencyRow = {
   id: string;
@@ -176,6 +205,9 @@ export function createPgPmsInventoryMaterializationRepository(
       return executeMaterialization(pool, config, normalized, acceptedAt);
     },
 
+    getCurrentInventoryDay: (request, guard) =>
+      readCurrentInventoryDay(pool, config, request, guard),
+
     async getInventoryLaunchReadiness(request) {
       const requiredCoverage = normalizeRequiredCoverage(request.requiredCoverage);
       const propertyId = normalizeUuid(request.propertyId);
@@ -217,6 +249,166 @@ export function createPgPmsInventoryMaterializationRepository(
       if (ownsPool) await pool.end();
     },
   };
+}
+
+/** Internal source snapshot only. Callers separately prove scope and delivery authority. */
+async function readCurrentInventoryDay(
+  pool: PmsInventoryMaterializationRepositoryPool,
+  config: PmsInventoryMaterializationRepositoryConfig,
+  request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+  guard?: InventoryDayGuard,
+) {
+  const propertyId = normalizeUuid(request.propertyId),
+    roomTypeId = normalizeUuid(request.roomTypeId);
+  const horizon = normalizeRequiredCoverage({ from: request.stayDate, through: request.stayDate });
+  const unavailable = (reason: string) => ({ kind: "unavailable" as const, reason });
+  if (!propertyId || !roomTypeId || !horizon) return unavailable("invalid_request");
+  const current =
+    await config.operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId);
+  if (
+    !current ||
+    current.sourceStatus !== "current" ||
+    current.configuration.propertyId !== propertyId
+  )
+    return unavailable("configuration_not_current");
+  const expectedProfileRevision = propertyProfileRevision(current.configuration);
+  if (expectedProfileRevision === null) return unavailable("configuration_not_current");
+  const client = await pool.connect();
+  let committed = false,
+    sessionLocked = false,
+    roomFactsPinned = false,
+    transactionStarted = false,
+    discard = false;
+  try {
+    // Pin inventory before creating the MVCC snapshot; a wait inside BEGIN could
+    // otherwise retain an old append-only calendar revision after a writer commits.
+    const pin = await client.query(
+      "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",
+      [PMS_INVENTORY_MUTATION_LOCK_PREFIX + propertyId],
+    );
+    if (pin.rows[0]?.locked !== true)
+      throw Object.assign(new Error("Inventory source busy"), { code: "55P03" });
+    sessionLocked = true;
+    return await config.propertyProfileEvidence.runWithPropertyProfileEvidence(
+      { propertyId, expectedProfileRevision },
+      async (profile) => {
+        if (
+          !profileEvidenceMatchesConfiguration(
+            profile,
+            current.configuration,
+            config.propertyProfileEvidence,
+          )
+        )
+          return unavailable("configuration_not_current");
+        const factsPin = await client.query(
+          "SELECT pg_try_advisory_lock(hashtext($1),hashtext($2::uuid::text)) AS locked",
+          [PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE, propertyId],
+        );
+        if (factsPin.rows[0]?.locked !== true)
+          throw Object.assign(new Error("Room facts busy"), { code: "55P03" });
+        roomFactsPinned = true;
+        await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+        transactionStarted = true;
+        await client.query("SET LOCAL statement_timeout='5s'");
+        await client.query("SET LOCAL lock_timeout='150ms'");
+        await lockPmsInventoryMutationScope(client, propertyId);
+        await lockPmsRoomFactsMutationScope(client, propertyId);
+        for (const binding of [...current.configuration.sourceInputs.roomBindings].sort((a, b) =>
+          compareCodeUnits(a.roomTypeId, b.roomTypeId),
+        ))
+          await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, binding.roomTypeId);
+        const exact = await loadLockedCurrentConfiguration(
+          client,
+          propertyId,
+          config.propertyProfileEvidence,
+        );
+        if (
+          !exact ||
+          !sameConfigurationIdentity(current.configuration, exact) ||
+          !(await roomFactsStillMatch(client, exact)) ||
+          !(await capacitiesStillMatch(config.roomCapacity, exact))
+        )
+          return unavailable("configuration_not_current");
+        const binding = exact.sourceInputs.roomBindings.find(
+          (room) => room.roomTypeId === roomTypeId,
+        );
+        if (!binding) return unavailable("room_unavailable");
+        const coverage = await lockCoverage(client, propertyId);
+        if (
+          !coverage ||
+          positiveInteger(coverage.calendarRevision) !== exact.calendarRevision ||
+          positiveInteger(coverage.materializedRevision) !== exact.calendarRevision ||
+          requireDatabaseDate(coverage.coverageFrom) > horizon.from ||
+          requireDatabaseDate(coverage.coverageThrough) < horizon.through
+        )
+          return unavailable("coverage_unavailable");
+        const days = await lockPmsInventoryDaysForMaterialization(
+          client,
+          { propertyId, horizon },
+          exact,
+        );
+        const day = days.find(
+          (item) => item.roomTypeId === roomTypeId && item.stayDate === horizon.from,
+        );
+        if (
+          !day ||
+          day.calendarRevision !== exact.calendarRevision ||
+          !isPmsInventoryDayConsistent(day, binding)
+        )
+          return unavailable("inventory_day_unavailable");
+        const result: PmsCurrentInventoryDay = {
+          kind: "available" as const,
+          day,
+          configurationSource: exact.source,
+          propertyProfileSource: exact.sourceInputs.propertyProfile,
+          propertyTimeZone: exact.sourceInputs.propertyTimeZone,
+          materializedRevision: positiveInteger(coverage.materializedRevision),
+          sourceRoomFactsRevision: binding.sourceRoomFactsRevision,
+          sourceRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+        };
+        if (guard && !(await guard(client, result)))
+          return unavailable("consumer_authority_unavailable");
+        await client.query("COMMIT");
+        committed = true;
+        return result;
+      },
+    );
+  } catch (error) {
+    if (!transactionStarted) discard = true;
+    if (error instanceof InventoryInvariantError) return unavailable("inventory_day_unavailable");
+    throw error;
+  } finally {
+    if (transactionStarted && !committed) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        discard = true;
+      }
+    }
+    if (roomFactsPinned) {
+      try {
+        const released = await client.query(
+          "SELECT pg_advisory_unlock(hashtext($1),hashtext($2::uuid::text)) AS released",
+          [PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE, propertyId],
+        );
+        if (released.rows[0]?.released !== true) discard = true;
+      } catch {
+        discard = true;
+      }
+    }
+    if (sessionLocked) {
+      try {
+        const released = await client.query(
+          "SELECT pg_advisory_unlock(hashtextextended($1,0)) AS released",
+          [PMS_INVENTORY_MUTATION_LOCK_PREFIX + propertyId],
+        );
+        if (released.rows[0]?.released !== true) discard = true;
+      } catch {
+        discard = true;
+      }
+    }
+    client.release(discard);
+  }
 }
 
 async function executeMaterialization(
@@ -623,7 +815,7 @@ async function lockCoverage(
 
 export async function lockPmsInventoryDaysForMaterialization(
   client: PmsInventoryMaterializationRepositoryClient,
-  command: PmsInventoryMaterializationCommand,
+  command: Pick<PmsInventoryMaterializationCommand, "propertyId" | "horizon">,
   configuration: PmsOperatingCalendarConfigurationSnapshot,
 ): Promise<readonly PmsInventoryDaySnapshot[]> {
   const roomTypeIds = configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId);
@@ -1184,6 +1376,43 @@ async function enqueueProjectionRefresh(
   );
   const outboxEventId = outbox.rows[0]?.outboxEventId;
   if (!outboxEventId) throw new Error("PMS inventory materialization outbox insert failed");
+  for (const roomTypeId of intent.roomTypeIds) {
+    await client.query(
+      `INSERT INTO platform.outbox_events (
+         domain_event_id, outbox_key, destination, event_type, tenant_scope,
+         organization_id, property_id, resource_product, resource_type,
+         resource_id, correlation_id, idempotency_key_hash, payload, outbox_metadata
+       ) VALUES (
+         $1::uuid, $2, 'pms.channel-manager', 'pms.inventory.ari_changed',
+         'property', NULL, $3::uuid, 'pms', 'room_type', $4, $5, $6,
+         $7::jsonb, $8::jsonb
+       ) ON CONFLICT (destination, outbox_key) DO NOTHING`,
+      [
+        eventId,
+        `pms.channel-manager.inventory.property.${command.propertyId}.room.${roomTypeId}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+        command.propertyId,
+        roomTypeId,
+        command.audit.correlationId ?? command.audit.requestId,
+        keyHash,
+        JSON.stringify({
+          propertyId: command.propertyId,
+          roomTypeId,
+          coverageFrom: intent.coverageFrom,
+          coverageThroughExclusive: new Date(
+            Date.parse(`${intent.coverageThrough}T00:00:00.000Z`) + DAY_MS,
+          )
+            .toISOString()
+            .slice(0, 10),
+          reason: intent.reason,
+          inventoryVersion: keyHash,
+        }),
+        JSON.stringify({
+          contractVersion: PMS_INVENTORY_MATERIALIZATION_CONTRACT_VERSION,
+          sourceReadRequired: true,
+        }),
+      ],
+    );
+  }
   return Object.freeze({ eventId, outboxEventId });
 }
 
