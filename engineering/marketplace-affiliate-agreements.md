@@ -233,3 +233,18 @@ must verify both for the exact scope with transaction-consistent evidence and
 retain immutable proof references. No public request can supply that resolver.
 Synthetic resolver tests prove transaction behavior only. No HTTP route or live
 provider/publication path is wired.
+
+## Initial agreement activation storage
+
+Migration 0214 adds the stable agreement identity and one immutable initial activation
+record. The agreement pins the exact program, property, hotel organization, creator
+profile and participation independently from the collaboration lifecycle. Activation
+references the same attempt and terms for both the hotel approval and creator acceptance,
+and retains explicit readiness evidence and a server effective instant. Database keys
+reject a substituted creator, program, attempt, terms version or swapped assent side.
+
+This storage does not activate anything by itself. The authorized command must still
+recheck the matched assent, current cross-domain readiness and idempotency inside one
+transaction. Pause, resume, end, replacement terms, public links and click capture remain
+separate later slices. In particular, collaboration completion has no path to mutate or
+delete the agreement identity or activation history.
