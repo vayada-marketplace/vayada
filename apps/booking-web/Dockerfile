@@ -5,7 +5,9 @@ WORKDIR /app
 
 COPY . .
 RUN npm ci
-RUN npm run build --workspace=@vayada/domain-hotels
+# Booking Web imports the browser-safe replacement-pricing export. Building the
+# Booking workspace also builds its Hotels, PMS, and Finance dependencies.
+RUN npm --workspace @vayada/domain-booking run build
 
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_BOOKING_WEB_API_URL
