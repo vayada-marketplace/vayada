@@ -6,10 +6,11 @@ affiliate attempt IDs. Resolve that boundary on the server.
 
 `GET /api/marketplace/collaborations/:collaborationId/affiliate-assent` returns
 the same model as the existing attempt read. The collaboration ID is an opaque,
-case-sensitive `source_collaboration_id`, 1–200 characters without surrounding
+case-sensitive `source_collaboration_id`, 1–100 characters without surrounding
 whitespace or control characters. Never interpret it as the canonical row ID.
 Authentication, permission, active identity, no-store and sanitized errors follow
-the existing endpoint; malformed keys return 422.
+the existing endpoint for matched routes; malformed keys return 422. Longer
+path parameters are rejected by the existing router as 404 before this handler.
 
 Resolve only the selected organization's side of the collaboration. Source keys
 are unique per source system, not globally; multiple matching collaborations
