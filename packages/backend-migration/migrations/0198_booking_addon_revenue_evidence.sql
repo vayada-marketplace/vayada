@@ -14,8 +14,6 @@ CREATE TABLE booking.addon_revenue_evidence (
   CONSTRAINT uq_booking_addon_revenue_revision UNIQUE (addon_selection_id, source_revision),
   CONSTRAINT uq_booking_addon_revenue_scope
     UNIQUE (id, property_id, guest_booking_id, addon_selection_id, currency),
-  CONSTRAINT fk_booking_addon_revenue_selection FOREIGN KEY (addon_selection_id)
-    REFERENCES booking.booking_addon_selections (id) ON DELETE RESTRICT,
   CONSTRAINT fk_booking_addon_revenue_correction FOREIGN KEY (
     corrects_evidence_id, property_id, guest_booking_id, addon_selection_id, currency
   ) REFERENCES booking.addon_revenue_evidence (
