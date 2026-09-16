@@ -502,7 +502,16 @@ export type BookingAdditionalGuestPayload = Partial<
   >
 >;
 
+export interface AirbnbChangeRequestState {
+  provider: "airbnb";
+  state: "pending" | "queued" | "unknown" | "awaiting_confirmation" | "applied" | "declined" | "withdrawn" | "unavailable";
+  allowedActions: Array<"accept" | "decline">;
+  refreshAction: "accept" | "decline" | null;
+  oldTotal: number | null; newTotal: number | null; priceDifference: number | null; currency: string | null;
+  oldAdults: number | null; oldChildren: number | null; requestedAdults: number | null; requestedChildren: number | null;
+}
 export interface BookingChangeRequest {
+  providerRequest?: AirbnbChangeRequestState;
   id: string;
   bookingId: string;
   status: "pending" | "approved" | "declined" | "cancelled";

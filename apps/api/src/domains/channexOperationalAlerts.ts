@@ -121,6 +121,7 @@ export type ChannexAlert = {
   acknowledgedAt: string | null;
   resolvedAt: string | null;
   recoveryRound: number;
+  stagingRecoveryAvailable?: boolean;
   occurrences: number;
   recovery: {
     status: string;
@@ -134,6 +135,7 @@ export type ChannexAlert = {
 export async function listChannexAlerts(
   client: Pick<pg.Pool, "query">,
   propertyId: string,
+  staging = false,
 ): Promise<ChannexAlert[]> {
   // Only successful canonical jobs carrying verified provider evidence can close an incident.
   await client.query(
@@ -149,11 +151,19 @@ export async function listChannexAlerts(
     `SELECT alert.id::text, alert.event_type AS "eventType", alert.impact,
     alert.first_occurred_at AS "firstOccurredAt",alert.last_occurred_at AS "lastOccurredAt",
     alert.acknowledged_at AS "acknowledgedAt",alert.resolved_at AS "resolvedAt",alert.recovery_round AS "recoveryRound",
+    ($2::boolean AND alert.event_type='non_acked_booking' AND alert.resolved_at IS NULL AND EXISTS(
+      SELECT 1 FROM platform.jobs j WHERE j.queue_name='pms.channex.webhooks' AND j.job_type='channex.ingest-booking'
+        AND j.job_key='alert:'||alert.id::text||':round:'||alert.recovery_round::text AND j.status='pending'
+        AND j.job_metadata#>>'{stagingAlertRecovery,alertId}'=alert.id::text
+        AND j.job_metadata#>>'{stagingImport,bindingGeneration}'=alert.binding_generation::text
+        AND j.payload->>'propertyId'=alert.property_id::text
+        AND j.job_metadata#>>'{stagingAlertRecovery,expiresAt}'>to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    )) AS "stagingRecoveryAvailable",
     (SELECT count(*)::int FROM pms.channel_operational_alert_occurrences WHERE alert_id=alert.id) AS occurrences,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('status',job.status,'verified',COALESCE(job.job_metadata->'alertRecoveryVerified','false'::jsonb),'attemptsMade',job.attempts_count,'maxAttempts',job.max_attempts,'retryAfter',CASE WHEN job.status='pending' THEN job.run_after END)) FROM platform.jobs job WHERE job.id=ANY(alert.recovery_jobs)), '[]'::jsonb) AS recovery
     FROM pms.channel_operational_alerts alert JOIN pms.channel_connections connection ON connection.id=alert.connection_id AND connection.binding_generation=alert.binding_generation
     WHERE alert.property_id=$1::uuid ORDER BY alert.resolved_at NULLS FIRST,alert.last_occurred_at DESC LIMIT 100`,
-    [propertyId],
+    [propertyId, staging],
   );
   return result.rows;
 }

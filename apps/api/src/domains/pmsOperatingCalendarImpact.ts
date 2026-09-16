@@ -773,12 +773,24 @@ async function readInventoryDays(
      FROM pms.inventory_days
      WHERE property_id = $1::uuid
        AND ($2::date IS NULL OR stay_date BETWEEN $2::date AND $3::date)
+       AND NOT (
+         NOT (room_type_id = ANY($4::uuid[]))
+         AND closure_source_revision = 1 AND status = 'closed'
+         AND available_count = 0 AND assigned_count = 0 AND blocked_count = 0
+         AND EXISTS (
+           SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id = pms.inventory_days.property_id
+             AND closure.room_type_id = pms.inventory_days.room_type_id
+             AND pms.inventory_days.stay_date >= closure.cutoff_date
+         )
+       )
      ORDER BY room_type_id::text COLLATE "C", stay_date
      FOR SHARE`,
     [
       propertyId,
       coverage ? databaseDate(coverage.coverageFrom) : null,
       coverage ? databaseDate(coverage.coverageThrough) : null,
+      expectedRoomBindings.map(({ roomTypeId }) => roomTypeId),
     ],
   );
   if (!coverage && result.rows.length > 0) {
