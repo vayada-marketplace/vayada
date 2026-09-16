@@ -1225,3 +1225,9 @@ receipt. The receipt keeps exact attempt/job/worker correlation and only bounded
 HTTP status, request ID, task IDs, parser outcome, and warning classification;
 provider text is never retained. A transport exception is stored as ambiguous
 `transport_error`. Receipt presence cannot reconcile the attempt or permit retry.
+
+Availability receipt persistence consumes and sanitizes the original response
+before opening its bounded database transaction. It accepts only the exact
+attempt/job/worker/property/connection correlation and is idempotent only for
+the same receipt ID and observation. Authority loss after provider IO cannot
+discard the evidence; conflicting receipt identity or content remains blocked.
