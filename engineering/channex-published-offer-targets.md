@@ -1058,3 +1058,21 @@ attempt. A different admitted date can obtain a fresh one-use claim once the
 history passes. Unresolved exclusion still serializes all dates of the rate.
 This supports initial closed date coverage, not overwriting a completed date,
 recovery of an old sender, activation or a cross-generation ownership transfer.
+
+
+### Next initial date selection (VAY-1545)
+
+`prepareNextChannexInitialAriDispatch` derives the next date under the existing
+current-publication/lease/target lock. Require the exact retained configuration
+and the same verified-history gate as explicit-date dispatch. Read the locked
+property timezone and database clock, walk local calendar dates from today
+through the inclusive default initial horizon, and select the earliest date
+without reconciled evidence. Never use server UTC today or job-supplied dates;
+do not skip missing prices or unsupported configurations to manufacture coverage.
+
+Selection returns no provider permission by itself. A selected date enters the
+existing fresh one-use claim/dispatch path, which repeats authority, date and
+history admission. Concurrent changes may turn preparation unavailable. An empty
+set returns only `initial_dates_reconciled` as of this read; it is not complete
+room availability, OTA readiness or activation. Missing timezones, unresolved
+history and stale configuration return unavailable without claiming an upload.

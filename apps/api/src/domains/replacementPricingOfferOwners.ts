@@ -1,8 +1,9 @@
+import { readChannexInitialAriHistory } from "./channexInitialAriHistory.js";
 import { verifyChannexStagedNightPrices } from "../integrations/channexStagedPriceReadback.js";
 import { verifyChannexMinimumStayCapability } from "../integrations/channexMinimumStayCapability.js";
 import { verifyChannexAriTaskFinish } from "../integrations/channexAriTaskReadback.js";
 import { prepareChannexAriReceiptPersistence, prepareChannexAriTransportFailurePersistence } from "./channexAriReceiptStore.js";
-import { admitChannexInitialAriDate } from "./channexInitialAriDate.js";
+import { admitChannexInitialAriDate, selectNextChannexInitialAriDate } from "./channexInitialAriDate.js";
 import { prepareChannexAdultNightPrices } from "../integrations/channexNightlyPrices.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -118,6 +119,7 @@ export async function readPublishedPricingForChannexJob(
     ariClaim: _ariClaim,
     ariRequest: _ariRequest,
     stagedAri: _stagedAri,
+    nextAriDate: _nextAriDate,
     ...evidence
   } = result;
   return evidence;
@@ -177,7 +179,7 @@ type TargetWork =
   | { kind: "ari_claim"; attemptId: string; date: string }
   | { kind: "ari_dispatch"; attemptId: string; date: string; ariAttemptId: string; jobAttemptId: string; workerId: string }
   | { kind: "retained"; attemptId: string }
-  | { kind: "configuration"; attemptId: string; observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>> }
+  | { kind: "configuration"; attemptId: string; observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>>; nextDate?: true }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
 
@@ -541,6 +543,30 @@ export async function reconcileCurrentChannexInitialAri(
     ...after.reservation,
   };
 }
+/** Select from current verified coverage, then acquire a fresh one-use dispatch. */
+export async function prepareNextChannexInitialAriDispatch(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+  selection: TargetSelection,
+  attemptId: string,
+) {
+  const lease = { ...input },
+    selected = { ...selection };
+  if (
+    typeof attemptId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
+  )
+    return { kind: "unavailable" as const, reason: "invalid_creation_attempt" };
+  const next = await withSelectedChannexTarget(pool, lease, selected, {
+    kind: "configuration",
+    attemptId,
+    nextDate: true,
+  });
+  if (next.kind !== "available") return next;
+  if (next.nextAriDate === null) return { kind: "initial_dates_reconciled" as const };
+  if (!next.nextAriDate) throw new Error("Initial ARI date missing");
+  return prepareChannexInitialAriDispatch(pool, lease, selected, attemptId, next.nextAriDate);
+}
 /** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
 export async function prepareChannexInitialAriDispatch(
   pool: Pool,
@@ -843,6 +869,7 @@ async function withPublishedChannexPricing(
           workerId: string;
         }
       | undefined;
+    let nextAriDate: string | null | undefined;
     let identification: { attemptId: string; externalRatePlanId: string } | undefined;
     let configurationIdentity: ReturnType<typeof readChannexCreatedRateIdentity> | undefined;
     if (selection) {
@@ -1167,24 +1194,8 @@ async function withPublishedChannexPricing(
                 ],
               };
               // Older dates must have service-verified completion, not a raw storage release.
-              const prior = await client.query(
-                `SELECT a.service_date::text AS date,
-                  (a.creation_attempt_id=$3 AND a.state='reconciled'
-                    AND a.reconciliation_evidence->>'schemaVersion'='1'
-                    AND a.reconciliation_evidence->>'completionBasis'='finished_task_fifo'
-                    AND a.reconciliation_evidence->>'observationsSha256' ~ '^[a-f0-9]{64}$'
-                    AND (SELECT count(*) FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)=1
-                    AND EXISTS (SELECT 1 FROM pms.channex_offer_ari_receipts r
-                      WHERE r.attempt_id=a.id AND r.id::text=a.reconciliation_evidence->>'originalReceiptId'
-                        AND r.outcome='complete_json' AND r.http_status=200 AND NOT r.has_warnings
-                        AND cardinality(r.task_ids)>0
-                        AND a.reconciliation_evidence->'taskCount'=to_jsonb(cardinality(r.task_ids)))) AS verified
-                 FROM pms.channex_offer_ari_attempts a
-                 WHERE a.external_property_id=$1 AND a.external_rate_plan_id=$2
-                   AND ($4::uuid IS NULL OR a.id<>$4::uuid)`,
-                [configurationIdentity.externalPropertyId, configurationIdentity.externalRatePlanId,
-                  attempt.id, work.kind === "ari_dispatch" ? work.ariAttemptId : null],
-              );
+              const prior = await readChannexInitialAriHistory(client, configurationIdentity,
+                attempt.id, work.kind === "ari_dispatch" ? work.ariAttemptId : null);
               if (prior.rows.some((row) => row.verified !== true))
                 return unavailable("ari_reconciliation_required");
               if (prior.rows.some((row) => row.date === work.date))
@@ -1241,6 +1252,27 @@ async function withPublishedChannexPricing(
               ariRequest = { method: "POST", path: "/api/v1/restrictions", body: request };
             }
 
+            if (work.kind === "configuration" && work.nextDate) {
+              const expected = {
+                schemaVersion: 1, attemptId: attempt.id, intentId: intent.id, version: intent.version,
+                bindingGeneration: binding.binding_generation,
+                observation: { ...configurationIdentity, mealType: plan.configuration.meal_type, configuration: plan.configuration },
+              };
+              if (!(await client.query(
+                "SELECT 1 FROM pms.channex_offer_target_intents WHERE id=$1 AND result_evidence->'configuration'=$2::jsonb",
+                [intent.id, JSON.stringify(expected)],
+              )).rowCount) return unavailable("configuration_evidence_unavailable");
+              const prior = await readChannexInitialAriHistory(client, configurationIdentity, attempt.id);
+              if (prior.rows.some((row) => row.verified !== true))
+                return unavailable("ari_reconciliation_required");
+              const location = (await client.query(
+                "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT", [lease.propertyId],
+              )).rows[0];
+              const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0].now as Date;
+              const selectedDate = selectNextChannexInitialAriDate(location?.timezone, now, prior.rows.map((row) => row.date));
+              if (selectedDate.kind !== "selected") return selectedDate;
+              nextAriDate = selectedDate.date;
+            }
             if (work.kind === "configuration" && work.observation) {
               const observed = work.observation;
               if (
@@ -1378,6 +1410,7 @@ async function withPublishedChannexPricing(
       ariClaim,
       ariRequest,
       stagedAri,
+      nextAriDate,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")
