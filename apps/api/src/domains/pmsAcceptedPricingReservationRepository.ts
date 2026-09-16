@@ -55,7 +55,7 @@ export function createPgPmsAcceptedPricingReservationPort(
       await client.query("SAVEPOINT pms_accepted_pricing_reservation");
       try {
         await lockPmsInventoryMutationScope(client, command.propertyId);
-        if (!(await ownsVayadaPms(client, command))) throw conflict();
+        if (!(await lockCurrentPmsAcceptedPricingOwner(client, command))) throw conflict();
         const receipts = await lockReceipts(client, command);
         const byType = receiptByType(command, receipts);
         if (!byType) throw conflict();
@@ -198,21 +198,24 @@ function validCommand(command: PmsAcceptedPricingReservationCommand) {
   );
 }
 
-async function ownsVayadaPms(client: PoolClient, command: PmsAcceptedPricingReservationCommand) {
+export async function lockCurrentPmsAcceptedPricingOwner(
+  client: PoolClient,
+  command: Pick<PmsAcceptedPricingReservationCommand, "organizationId" | "propertyId">,
+) {
   const owner = await client.query(
     `SELECT organization.id FROM identity.organizations organization
      JOIN hotel_catalog.properties property ON property.id=$2::uuid
+     JOIN identity.organization_resource_links link
+       ON link.organization_id=organization.id AND link.product='pms'
+       AND link.resource_type='pms_property' AND link.resource_id=property.id::text
+       AND link.status='active' AND link.relationship IN ('owner','operator')
      WHERE organization.id=$1::uuid AND organization.kind='hotel_group'
        AND organization.status='active' AND property.profile_status<>'disabled'
-       AND EXISTS(SELECT 1 FROM identity.organization_resource_links link
-         WHERE link.organization_id=organization.id AND link.product='pms'
-           AND link.resource_type='pms_property' AND link.resource_id=property.id::text
-           AND link.status='active' AND link.relationship IN ('owner','operator'))
-     FOR UPDATE OF organization`,
+     FOR UPDATE OF organization FOR SHARE OF property,link`,
     [command.organizationId, command.propertyId],
   );
   return (
-    owner.rows.length === 1 &&
+    owner.rows.length > 0 &&
     (await lockCurrentPmsPricingEntitlement(client, command.organizationId, command.propertyId))
   );
 }
