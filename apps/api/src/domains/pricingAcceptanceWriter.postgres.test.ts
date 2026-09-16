@@ -94,7 +94,9 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     mockOwners(fixture);
     vi.mocked(finishCurrentQuoteAcceptanceTime).mockResolvedValue(fixture.f.finance.validUntil!);
 
-    await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toThrow("expired");
+    await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+      code: "conflict",
+    });
     await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
       bookings: 0,
       acceptances: 0,

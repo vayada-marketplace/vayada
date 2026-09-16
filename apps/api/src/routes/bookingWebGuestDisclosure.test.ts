@@ -1,7 +1,10 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { lockCurrentQuoteGuestDisclosure } from "../domains/currentQuoteGuestDisclosure.js";
-import { writePricingAcceptance } from "../domains/pricingAcceptanceWriter.js";
+import {
+  PricingAcceptanceError,
+  writePricingAcceptance,
+} from "../domains/pricingAcceptanceWriter.js";
 import {
   createTargetBookingWebCheckoutAdapter,
   registerBookingWebPublicRoutes,
@@ -10,7 +13,17 @@ import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js"
 vi.mock("../domains/currentQuoteGuestDisclosure.js", () => ({
   lockCurrentQuoteGuestDisclosure: vi.fn(),
 }));
-vi.mock("../domains/pricingAcceptanceWriter.js", () => ({ writePricingAcceptance: vi.fn() }));
+vi.mock("../domains/pricingAcceptanceWriter.js", () => ({
+  PricingAcceptanceError: class PricingAcceptanceError extends Error {
+    constructor(
+      readonly code: "conflict" | "storage" | "unexpected",
+      _cause?: unknown,
+    ) {
+      super("Pricing acceptance failed");
+    }
+  },
+  writePricingAcceptance: vi.fn(),
+}));
 const id = "11111111-1111-4111-8111-111111111111";
 const choices = {
   defaultGuestLanguage: "en",
@@ -170,4 +183,24 @@ it("binds the path and idempotency key before invoking enabled acceptance", asyn
     expect(response.statusCode).toBe(400);
   }
   expect(writePricingAcceptance).toHaveBeenCalledOnce();
+});
+it.each([
+  ["conflict", 409],
+  ["storage", 503],
+  ["unexpected", 500],
+] as const)("maps %s acceptance failures to %i", async (code, statusCode) => {
+  vi.mocked(writePricingAcceptance).mockRejectedValue(new PricingAcceptanceError(code, null));
+  await mount(true, true);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload: {
+      version: "booking-quote-acceptance.v1",
+      requestId: "accept-1",
+      quoteId: id,
+    },
+  });
+  expect(response.statusCode).toBe(statusCode);
+  expect(response.body).not.toContain("Pricing acceptance failed");
 });

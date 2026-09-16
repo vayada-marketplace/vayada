@@ -72,13 +72,41 @@ describe("pricing acceptance writer", () => {
   });
 
   it("rolls back all staged writes when the final gate fails", async () => {
-    vi.mocked(finishPricingAcceptance).mockRejectedValue(new Error("expired"));
-    await expect(writePricingAcceptance(pool as never, input)).rejects.toThrow("expired");
+    vi.mocked(finishPricingAcceptance).mockRejectedValue(
+      new Error("Booking acceptance expired or unavailable"),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toMatchObject({
+      code: "conflict",
+    });
     expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
       "BEGIN ISOLATION LEVEL READ COMMITTED",
       "ROLLBACK",
     ]);
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("classifies PostgreSQL failures separately from quote conflicts", async () => {
+    vi.mocked(preparePricingAcceptance).mockRejectedValueOnce(
+      Object.assign(new Error("connection lost"), { code: "08006" }),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "storage" }),
+    );
+    vi.mocked(preparePricingAcceptance).mockRejectedValueOnce(
+      new Error("Booking acceptance unavailable"),
+    );
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "conflict" }),
+    );
+  });
+
+  it("classifies pool connection failures without attempting cleanup", async () => {
+    pool.connect.mockRejectedValueOnce(new Error("timeout exceeded when trying to connect"));
+    await expect(writePricingAcceptance(pool as never, input)).rejects.toEqual(
+      expect.objectContaining({ code: "storage" }),
+    );
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.release).not.toHaveBeenCalled();
   });
 
   it("returns a historical replay without staging new writes", async () => {
