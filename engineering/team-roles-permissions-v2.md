@@ -726,3 +726,23 @@ Provider-role jobs carry a membership ID, so their successor worker must read th
 latest canonical role when reconciling instead of restoring stale payload roles.
 That worker and HTTP/UI registration remain activation prerequisites. No runtime
 route calls this command yet; hosted source-session verification stays mandatory.
+
+### Provider-role reconciliation
+
+Transfer jobs are claimed with durable attempt counts and five-minute crash
+recovery leases. The reconciler holds the organization and member/user locks
+while reading canonical state and performing a bounded provider update. It ignores
+queued role values, verifies the remote user/organization binding, and never
+changes membership status. Suspended local identities and inactive provider
+memberships still receive role-only reconciliation so reactivation cannot restore
+an obsolete administrator role. Current `hotel_owner` maps to provider
+`hotel_owner`, `hotel_manager` to `hotel_admin`, and other supported staff/owner
+roles to `hotel_member`, matching existing coarse invitation roles.
+
+Provider failures retry after 30 seconds up to the job's limit, then dead-letter;
+only fixed failure codes are persisted. Missing bindings retry, mismatches are
+dead-lettered, and removed local membership jobs are canceled. The API worker
+uses the existing background-worker flag and closes its pool on shutdown. Each
+provider request has a ten-second timeout and SDK retries are disabled. Timeout
+ambiguity is handled by retrying from current database state; Vayada authorization
+remains authoritative and provider webhooks cannot restore a previous owner role.
