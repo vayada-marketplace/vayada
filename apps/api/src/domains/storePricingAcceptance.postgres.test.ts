@@ -8,6 +8,10 @@ import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
 import { replayPricingAcceptance } from "./pricingAcceptanceReplay.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import {
+  PMS_ACCEPTED_PRICING_JOB_TYPE,
+  stagePmsAcceptedPricingReservationJob,
+} from "./pricingPmsAcceptedReservationJob.js";
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 const url = process.env.TEST_DATABASE_URL;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -150,6 +154,39 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         expect(stored.inventory_reservation_bundle).toEqual(bundle);
         expect(stored.commission_terms_snapshot).toEqual(finance.commissionTermsSnapshot);
         expect(stored.accepted_at.toISOString()).toBe(result.acceptedAt);
+        const staged = await stagePmsAcceptedPricingReservationJob(client, "hotel", result);
+        expect(await stagePmsAcceptedPricingReservationJob(client, "hotel", result)).toEqual(
+          staged,
+        );
+        expect(
+          (
+            await db.query(
+              `SELECT queue_name,job_type,resource_product,resource_type,resource_id,
+                payload->>'version' AS version,payload->>'acceptanceId' AS acceptance,
+                payload->>'guestBookingId' AS booking,payload->>'propertyId' AS property
+               FROM platform.jobs WHERE id=$1`,
+              [staged.jobId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            queue_name: "pms-reservation-handoff",
+            job_type: PMS_ACCEPTED_PRICING_JOB_TYPE,
+            resource_product: "booking",
+            resource_type: "guest_booking",
+            resource_id: bookingId,
+            version: "booking.pricing-pms-handoff.v1",
+            acceptance: result.acceptanceId,
+            booking: bookingId,
+            property: propertyId,
+          },
+        ]);
+        await db.query("UPDATE platform.jobs SET resource_type='wrong_booking' WHERE id=$1", [
+          staged.jobId,
+        ]);
+        await expect(
+          stagePmsAcceptedPricingReservationJob(client, "hotel", result),
+        ).rejects.toThrow("PMS accepted-pricing job conflict");
         const { fingerprint, ...input } = f.command;
         void fingerprint;
         expect(await replayPricingAcceptance(client, "hotel", input)).toEqual({

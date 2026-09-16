@@ -7,7 +7,13 @@ import {
   createPgPmsAcceptedPricingReservationPort,
   PmsAcceptedPricingReservationConflict,
 } from "./pmsAcceptedPricingReservationRepository.js";
+import { processNextPmsAcceptedPricingReservationJob } from "./pmsAcceptedPricingReservationWorker.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
+import {
+  PMS_ACCEPTED_PRICING_JOB_TYPE,
+  PMS_ACCEPTED_PRICING_JOB_VERSION,
+  PMS_ACCEPTED_PRICING_QUEUE,
+} from "./pricingPmsAcceptedReservationJob.js";
 
 const url = process.env.TEST_DATABASE_URL;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -42,6 +48,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-wrong-organization",
     "repository-missing-acceptance",
     "repository-suspended-entitlement",
+    "worker-complete",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -53,7 +60,8 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     const acceptanceId = randomUUID(),
       commandReceiptId = randomUUID();
     const legacy = scenario.startsWith("legacy-"),
-      repository = scenario.startsWith("repository-"),
+      worker = scenario.startsWith("worker-"),
+      repository = scenario.startsWith("repository-") || worker,
       changeId = randomUUID();
     const types = [randomUUID(), randomUUID()].sort();
     const f = pricingDraftFixture((q) => {
@@ -353,27 +361,54 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         ).rows[0],
       });
       const before = await snapshot();
+      const acceptedPricingCommand = {
+        contractVersion: "pms-accepted-pricing-reservation.v1" as const,
+        acceptanceId,
+        pricingQuoteId: quote.quoteId,
+        guestBookingId: bookingId,
+        propertyId,
+        organizationId: acceptedOrg,
+        acceptedAt: "2026-09-01T00:02:00.000Z",
+        stay: { checkIn: quote.stay.checkIn, checkOut: quote.stay.checkOut },
+        inventoryReservation: acceptedBundle,
+        rooms: quote.stay.rooms.map((room, index) => ({
+          position: index + 1,
+          selectionId: room.selectionId,
+          roomTypeId: room.roomTypeId,
+          offerId: room.offerId,
+          adults: room.guests.adults,
+          childAgesAtCheckIn: room.guests.childAgesAtCheckIn,
+        })),
+      };
       const adopt = async () => {
+        if (worker) {
+          await db.query(
+            `INSERT INTO platform.jobs
+             (job_key,queue_name,job_type,tenant_scope,property_id,resource_product,
+              resource_type,resource_id,correlation_id,payload)
+             VALUES($1,$2,$3,'property',$4,'booking','guest_booking',$5,$6,$7)
+             ON CONFLICT(queue_name,job_key) DO NOTHING`,
+            [
+              `pms:pricing-acceptance:${acceptanceId}:create:v1`,
+              PMS_ACCEPTED_PRICING_QUEUE,
+              PMS_ACCEPTED_PRICING_JOB_TYPE,
+              propertyId,
+              bookingId,
+              acceptanceId,
+              {
+                version: PMS_ACCEPTED_PRICING_JOB_VERSION,
+                propertyId,
+                guestBookingId: bookingId,
+                acceptanceId,
+              },
+            ],
+          );
+          return processNextPmsAcceptedPricingReservationJob(db, "worker:test");
+        }
         if (repository)
-          return createPgPmsAcceptedPricingReservationPort(db).adoptAcceptedPricingReservation({
-            contractVersion: "pms-accepted-pricing-reservation.v1",
-            acceptanceId,
-            pricingQuoteId: quote.quoteId,
-            guestBookingId: bookingId,
-            propertyId,
-            organizationId: acceptedOrg,
-            acceptedAt: "2026-09-01T00:02:00.000Z",
-            stay: { checkIn: quote.stay.checkIn, checkOut: quote.stay.checkOut },
-            inventoryReservation: acceptedBundle,
-            rooms: quote.stay.rooms.map((room, index) => ({
-              position: index + 1,
-              selectionId: room.selectionId,
-              roomTypeId: room.roomTypeId,
-              offerId: room.offerId,
-              adults: room.guests.adults,
-              childAgesAtCheckIn: room.guests.childAgesAtCheckIn,
-            })),
-          });
+          return createPgPmsAcceptedPricingReservationPort(db).adoptAcceptedPricingReservation(
+            acceptedPricingCommand,
+          );
         if (scenario === "changed-date")
           await db.query("UPDATE booking.guest_bookings SET check_out=check_out+1 WHERE id=$1", [
             bookingId,
@@ -446,10 +481,20 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         await db.query("SET CONSTRAINTS ALL IMMEDIATE");
       };
       if (
-        ["complete", "legacy-initial", "legacy-amendment", "repository-complete"].includes(scenario)
+        [
+          "complete",
+          "legacy-initial",
+          "legacy-amendment",
+          "repository-complete",
+          "worker-complete",
+        ].includes(scenario)
       ) {
         expect(await adopt()).toEqual(
-          repository ? { outcome: "adopted", guestBookingId: bookingId, acceptanceId } : undefined,
+          worker
+            ? "adopted"
+            : repository
+              ? { outcome: "adopted", guestBookingId: bookingId, acceptanceId }
+              : undefined,
         );
         const after = await snapshot();
         expect(
@@ -467,6 +512,18 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             outbox: before.effects.outbox + 6,
           });
         } else expect(after.inventory).toEqual(before.inventory);
+        if (worker) {
+          expect(await adopt()).toBe("empty");
+          expect(
+            (
+              await db.query(
+                `SELECT status,attempts_count,job_metadata->>'outcome' AS outcome
+                 FROM platform.jobs WHERE job_key=$1`,
+                [`pms:pricing-acceptance:${acceptanceId}:create:v1`],
+              )
+            ).rows,
+          ).toEqual([{ status: "succeeded", attempts_count: 1, outcome: "adopted" }]);
+        }
         expect(
           after.blocks.every(
             (b) => b.source_assignment_id && b.source_inventory_reservation_receipt_id === null,
@@ -487,7 +544,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
-        if (repository) {
+        if (repository && !worker) {
           expect(await adopt()).toEqual({
             outcome: "replayed",
             guestBookingId: bookingId,
