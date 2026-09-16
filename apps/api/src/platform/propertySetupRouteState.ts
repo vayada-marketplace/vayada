@@ -205,7 +205,10 @@ async function readDraft(
       organizationId: input.organizationId,
       propertyId: input.propertyId,
       actorUserId: input.actorUserId,
-      authorizedStepIds: input.authorizedDraftStepIds,
+      // Guest rules are explicitly saved in their owner, never resumed from retired drafts.
+      authorizedStepIds: input.authorizedDraftStepIds.filter(
+        (stepId) => stepId !== "guest_experience",
+      ),
     });
     validateSession(session, input);
     return {

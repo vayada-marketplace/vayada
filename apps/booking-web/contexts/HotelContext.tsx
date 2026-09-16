@@ -10,6 +10,7 @@ import {
   ReactNode,
   Suspense,
 } from "react";
+import { usePathname } from "next/navigation";
 import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
@@ -132,6 +133,7 @@ export function HotelProvider({
     setSlug(resolveSlug(slugProp));
     setSlugResolved(true);
   }, [slugProp]);
+  const quoteEntry = /\/book\/?$/.test(usePathname());
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
@@ -150,13 +152,20 @@ export function HotelProvider({
       setError("No property is configured for this URL.");
       return;
     }
+    let canceled = false;
     setLoading(true);
+    setError(null);
     Promise.all([
       hotelService.getHotel(slug, locale),
-      hotelService.getRooms(slug, undefined, undefined, undefined, undefined, locale),
-      hotelService.getAddons(slug).catch(() => [] as Addon[]),
+      quoteEntry
+        ? Promise.resolve([] as RoomType[])
+        : hotelService.getRooms(slug, undefined, undefined, undefined, undefined, locale),
+      quoteEntry
+        ? Promise.resolve([] as Addon[])
+        : hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
       .then(([hotelData, roomsData, addonsData]) => {
+        if (canceled) return;
         setHotel(hotelData);
         setRooms(roomsData);
         setAddons(addonsData);
@@ -178,10 +187,14 @@ export function HotelProvider({
         }
       })
       .catch((err) => {
+        if (canceled) return;
         setError(err instanceof Error ? err.message : "Failed to load hotel data");
         setLoading(false);
       });
-  }, [locale, slug, slugResolved]);
+    return () => {
+      canceled = true;
+    };
+  }, [locale, slug, slugResolved, quoteEntry]);
 
   const refetchRooms = useCallback(
     async (

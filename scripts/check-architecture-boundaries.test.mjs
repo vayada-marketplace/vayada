@@ -450,3 +450,12 @@ function runCheck(root) {
     encoding: "utf8",
   });
 }
+
+
+test("allows the browser pricing contract but rejects deeper PMS implementation paths", () => {
+  for (const [specifier, expected] of [["@vayada/domain-pms/replacement-pricing", 0], ["@vayada/domain-pms/replacement-pricing/internal", 1]]) {
+    const root = createFixtureRoot({ "packages/domain-booking/src/terms.ts": `import { pricingObject } from "${specifier}"; export const parse = pricingObject;` });
+    try { const result = runCheck(root); assert.equal(result.status, expected, result.stderr); }
+    finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});

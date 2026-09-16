@@ -1,3 +1,7 @@
+import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
+import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
+import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
@@ -184,6 +188,10 @@ import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupR
 import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
+import {
+  createPmsAcceptedPricingReservationWorker,
+  startPmsAcceptedPricingReservationWorker,
+} from "./domains/pmsAcceptedPricingReservationWorker.js";
 import { createPgPmsInboxDeliveryStore } from "./jobs/pmsInboxDeliveryPg.js";
 import { createPgPmsInboxDeliveryReceiptPort } from "./jobs/pmsInboxDeliveryReceipts.js";
 import { relayPmsInboxDeliveryOutbox } from "./jobs/pmsInboxDeliveryOutbox.js";
@@ -426,7 +434,10 @@ const bankTransferBookings = bankTransferCodec
   ? createBankTransferBookingOperations(targetDatabaseUrl, bankTransferCodec)
   : undefined;
 
-const airbnbAlterationRuntime = createAirbnbAlterationRuntime({ config, connectionString: targetDatabaseUrl });
+const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
+  config,
+  connectionString: targetDatabaseUrl,
+});
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
@@ -898,6 +909,9 @@ const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
 const hotelCatalogCurrentOwnerEvidence = createPgHotelCatalogCurrentOwnerEvidencePorts({
   pool: propertySetupOwnerPool,
 });
+const bookingGuestChoiceStore = createBookingGuestChoiceStore(propertySetupOwnerPool, (client) =>
+  createPgBookingGuestPolicyScopeAuthorizationPort({ pool: client }),
+);
 const bookingGuestPolicyRepository = createPgBookingGuestPolicyRepository({
   connectionString: targetDatabaseUrl,
   pool: propertySetupOwnerPool,
@@ -1096,13 +1110,11 @@ const bookingPublicationRuntime = (() => {
     bookingHostBase: config.bookingHostBase,
     mediaResolver: pmsRoomPublicationRuntime.mediaResolver,
     design: bookingDesignReadinessProvider,
-    guestPolicy: bookingGuestPolicyRepository,
+    guestRules: createBookingGuestChoicePublicationReader(propertySetupOwnerPool),
     rooms: pmsRoomPublicationRuntime.readModel,
-    pricing: pmsPricingReadModel,
-    recurringPricing: propertySetupPmsRuntime.recurringPricing,
+    pricing: createReplacementPricingPublicationReader(propertySetupOwnerPool),
     operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
     inventory: pmsOperatingCalendarRuntime.inventory,
-    mandatoryChargeConfirmation: bookingMandatoryChargeConfirmationEvidence,
     finance: financePaymentReadinessReadModel,
   });
 })();
@@ -1118,7 +1130,7 @@ const propertySetupRouteStateReadPort = createPropertySetupRouteStateReadPort({
     booking: createPropertySetupBookingStateProvider({
       design: bookingDesignRepository,
       catalog: hotelCatalogStep1Repository,
-      guestPolicy: bookingGuestPolicyCurrentOwnerEvidence,
+      guestRules: { read: (scope) => bookingGuestChoiceStore.read(scope, "booking.settings.read") },
     }),
     pms: propertySetupPmsRuntime.provider,
     finance: createPropertySetupFinanceStateProvider({
@@ -1418,6 +1430,10 @@ const app = buildApp({
     : undefined,
   bookingReservationsRepository,
   financePaymentSetup: financePaymentSetupRuntime.routes,
+  bookingGuestChoices: {
+    store: bookingGuestChoiceStore,
+    propertyAccessRepository: bookingPropertyAccessRepository,
+  },
   bookingGuestPolicy: bookingGuestPolicyApplication
     ? {
         application: bookingGuestPolicyApplication,
@@ -1485,6 +1501,10 @@ const app = buildApp({
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
     : undefined,
+  replacementPricing:
+    config.pmsOperationsSource === "target"
+      ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
+      : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
     ? {
         commandPort: pmsGuestPolicySetupCommands.pricing,
@@ -1860,6 +1880,17 @@ const pmsInboxFollowUpReleaseWorker =
       })
     : undefined;
 
+const pmsAcceptedPricingReservationWorker =
+  config.apiRuntime === "next" && config.backgroundWorkersEnabled
+    ? startPmsAcceptedPricingReservationWorker({
+        worker: createPmsAcceptedPricingReservationWorker({ connectionString: targetDatabaseUrl }),
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
+app.addHook("preClose", async () => {
+  await pmsAcceptedPricingReservationWorker?.close();
+});
+
 const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
@@ -1932,11 +1963,15 @@ app.addHook("onClose", async () => {
 });
 
 const runAirbnbAlterations = () => {
-  void airbnbAlterationRuntime?.tick().catch((error: unknown) =>
-    app.log.warn({ err: error }, "Airbnb alteration intake/readback failed"));
+  void airbnbAlterationRuntime
+    ?.tick()
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Airbnb alteration intake/readback failed"),
+    );
 };
 const airbnbAlterationTimer = airbnbAlterationRuntime
-  ? setInterval(runAirbnbAlterations, 30_000) : undefined;
+  ? setInterval(runAirbnbAlterations, 30_000)
+  : undefined;
 airbnbAlterationTimer?.unref();
 if (airbnbAlterationRuntime) runAirbnbAlterations();
 // Fastify executes close hooks in reverse registration order: drain before global pool closure.

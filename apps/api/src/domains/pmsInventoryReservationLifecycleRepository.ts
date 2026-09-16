@@ -1,7 +1,10 @@
+import { lockPmsCurrentOperatingCalendar } from "./pmsCurrentOperatingCalendar.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  PMS_INVENTORY_RESERVATION_BUNDLE_VERSION,
+  parsePmsInventoryReservationBundle,
   PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
   PMS_INVENTORY_RESERVATION_LIFECYCLE_IDEMPOTENCY,
   createPmsOperatingCalendarSourceRevision,
@@ -277,6 +280,232 @@ export function createPgPmsInventoryReservationLifecycleRepository(
   };
 }
 
+/** Internal selection supplied by the authorized immutable quote owner. The callback
+ * must establish fresh quote validation or verify the caller's already-locked
+ * pre-mutation evidence on this same transaction. It cannot authorize posted or
+ * cross-transaction evidence. Existing held-inventory replay precedes the callback;
+ * Existing PMS fresh-reservation checks and held-bundle replay checks are unchanged. */
+export async function reservePmsQuoteInventory(
+  client: PmsInventoryReservationLifecycleRepositoryClient,
+  input: {
+    organizationId: string;
+    propertyId: string;
+    quoteId: string;
+    checkIn: string;
+    checkOut: string;
+    rooms: readonly { roomTypeId: string }[];
+  },
+  requireFreshQuote: () => Promise<void>,
+) {
+  const unavailable = (): never => {
+    throw new Error("Quote inventory is unavailable");
+  };
+  const { organizationId, propertyId, quoteId, checkIn, checkOut } = input;
+  if (
+    ![organizationId, propertyId, quoteId].every((id) => normalizeUuid(id) === id) ||
+    !stayDates(checkIn, checkOut) ||
+    input.rooms.length < 1 ||
+    input.rooms.length > 99
+  )
+    return unavailable();
+  const counts = new Map<string, number>();
+  for (const room of input.rooms) {
+    if (normalizeUuid(room.roomTypeId) !== room.roomTypeId) return unavailable();
+    counts.set(room.roomTypeId, (counts.get(room.roomTypeId) ?? 0) + 1);
+  }
+  const lines = [...counts].sort(([a], [b]) => a.localeCompare(b));
+  const operation = "pms.pricing_quote_inventory.reserve_bundle";
+  const keyHash = hash(quoteId),
+    fingerprint = hash(
+      stableJson({ organizationId, propertyId, quoteId, checkIn, checkOut, lines }),
+    );
+  await lockPmsInventoryMutationScope(client, propertyId);
+  const prior = await findIdempotency(client, operation, propertyId, keyHash);
+  if (prior) {
+    const bundle = parsePmsInventoryReservationBundle(prior.idempotencyMetadata);
+    if (
+      prior.status !== "completed" ||
+      prior.requestFingerprintHash !== fingerprint ||
+      !bundle ||
+      bundle.receipts.length !== lines.length
+    )
+      return unavailable();
+    for (const [index, receipt] of bundle.receipts.entries()) {
+      const status = await readReservationStatus(
+        client,
+        {
+          organizationId,
+          propertyId,
+          receipt,
+        },
+        true,
+      );
+      const [roomTypeId, roomCount] = lines[index]!;
+      if (
+        !status ||
+        status.state !== "reserved" ||
+        status.roomTypeId !== roomTypeId ||
+        status.roomCount !== roomCount ||
+        status.checkIn !== checkIn ||
+        status.checkOut !== checkOut ||
+        status.offerCorrelation.quoteSessionId !== quoteId
+      )
+        return unavailable();
+    }
+    return { bundle, replayed: true };
+  }
+  await requireFreshQuote();
+  const calendar = await lockPmsCurrentOperatingCalendar(client, propertyId);
+  if (!calendar || calendar.sourceStatus !== "current") return unavailable();
+  const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]!.now;
+  const audit: RoomFactsCommandAudit = {
+    actor: { kind: "system", service: "booking.pricing-quotes" },
+    requestId: quoteId,
+    correlationId: quoteId,
+    requestedAt: now.toISOString(),
+  };
+  await client.query("SAVEPOINT pms_pricing_quote_bundle");
+  try {
+    const claim = await reserveIdempotency(
+      client,
+      operation,
+      propertyId,
+      keyHash,
+      fingerprint,
+      audit,
+      now,
+    );
+    if (!claim) return unavailable();
+    const receipts: PmsInventoryReservationStatus["receipt"][] = [];
+    for (const [roomTypeId, roomCount] of lines) {
+      const days = await lockInventoryDays(client, propertyId, roomTypeId, checkIn, checkOut);
+      const result = await reservePmsInventoryInTransaction(client, {
+        contractVersion: PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
+        organizationId,
+        propertyId,
+        roomTypeId,
+        checkIn,
+        checkOut,
+        roomCount,
+        offerCorrelation: {
+          quoteSessionId: quoteId,
+          publicOfferKey: `pricing-quote:${quoteId}:${roomTypeId}`,
+        },
+        configurationSource: calendar.configuration.source,
+        expectedMaterializedRevision: calendar.configuration.calendarRevision,
+        inventoryWatermarks: days.map((day) => ({
+          propertyId,
+          roomTypeId,
+          stayDate: day.stayDate,
+          calendarRevision: day.calendarRevision,
+          inventoryRevision: day.inventoryRevision,
+          sourceRevisions: {
+            generated: day.generatedSourceRevision,
+            channel: day.channelSourceRevision,
+            manual: day.manualSourceRevision,
+            block: day.blockSourceRevision,
+            booking: day.bookingSourceRevision,
+          },
+        })),
+        idempotencyKey: `pricing-quote:${quoteId}:${roomTypeId}`,
+        audit,
+      });
+      if (!result.ok || result.status.state !== "reserved") return unavailable();
+      receipts.push(result.status.receipt);
+    }
+    const bundle = {
+      contractVersion: PMS_INVENTORY_RESERVATION_BUNDLE_VERSION,
+      owner: "pms" as const,
+      receipts,
+    };
+    await client.query(
+      `UPDATE platform.idempotency_keys SET status='completed',response_status_code=200,
+      response_body_hash=$2,idempotency_metadata=$3,last_seen_at=$4,completed_at=$4 WHERE id=$1`,
+      [claim.id, hash(stableJson(bundle)), bundle, now],
+    );
+    await client.query("RELEASE SAVEPOINT pms_pricing_quote_bundle");
+    return { bundle, replayed: false };
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT pms_pricing_quote_bundle");
+    await client.query("RELEASE SAVEPOINT pms_pricing_quote_bundle");
+    throw error;
+  }
+}
+
+/**
+ * Internal canonical reserve command. Caller authorizes the organization/property,
+ * owns a READ COMMITTED transaction, and MUST roll back on a failure or exception.
+ * Correlation keys are opaque: no legacy Distribution offer rows are consulted.
+ */
+export async function reservePmsInventoryInTransaction(
+  client: PmsInventoryReservationLifecycleRepositoryClient,
+  input: PmsInventoryReservationReserveCommand,
+): Promise<PmsInventoryReservationReserveResult> {
+  const command = safelyParseReserveCommand(input);
+  if (!command) return reserveFailure("inventory_invariant_violation");
+  await lockPmsInventoryMutationScope(client, command.propertyId);
+  const keyHash = hash(command.idempotencyKey);
+  const fingerprint = hash(serializePmsInventoryReservationReserveFingerprint(command));
+  const replay = await findReserveReplay(client, command, keyHash, fingerprint);
+  if (replay) return replay;
+  const current = await lockPmsCurrentOperatingCalendar(client, command.propertyId);
+  const binding = current?.configuration.sourceInputs.roomBindings.find(
+    ({ roomTypeId }) => roomTypeId === command.roomTypeId,
+  );
+  if (
+    !current ||
+    current.sourceStatus !== "current" ||
+    !binding ||
+    current.configuration.calendarRevision !== command.expectedMaterializedRevision ||
+    current.configuration.source.revision !== command.configurationSource.revision
+  )
+    return reserveFailure("configuration_not_current");
+  const eligibility = (await readPmsRoomOperatingEligibility(client, command.propertyId)).find(
+    ({ roomTypeId }) => roomTypeId === command.roomTypeId,
+  );
+  if (eligibility?.state !== "operating") return reserveFailure("configuration_not_current");
+  if (!coverageCoversCommand(await lockCoverage(client, command.propertyId), command))
+    return reserveFailure("materialization_not_current");
+  const days = await lockInventoryDays(
+    client,
+    command.propertyId,
+    command.roomTypeId,
+    command.checkIn,
+    command.checkOut,
+  );
+  const closedGate = await client.query(
+    `SELECT 1 FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2
+     AND stay_date >= $3::date AND stay_date < $4::date AND rate_gate_open IS FALSE LIMIT 1`,
+    [command.propertyId, command.roomTypeId, command.checkIn, command.checkOut],
+  );
+  if (closedGate.rows.length) return reserveFailure("inventory_unavailable");
+  const validation = validateReserveDays(command, days, binding.physicalCapacityCount);
+  if (validation) return reserveFailure(validation);
+  const clock = await client.query<{ now: Date }>("SELECT clock_timestamp() AS now");
+  const acceptedAt = clock.rows[0]!.now;
+  const idempotency = await reserveIdempotency(
+    client,
+    RESERVE_OPERATION,
+    command.propertyId,
+    keyHash,
+    fingerprint,
+    command.audit,
+    acceptedAt,
+  );
+  if (!idempotency) return reserveFailure("command_in_progress");
+  await applyBookingDelta(client, days, command.roomCount, acceptedAt);
+  const { result, eventId } = await recordReservedInventory(
+    client,
+    command,
+    fingerprint,
+    idempotency,
+    keyHash,
+    acceptedAt,
+    randomUUID,
+  );
+  return completeReserve(client, command, idempotency, keyHash, result, acceptedAt, eventId);
+}
+
 async function executeReserve(
   pool: PmsInventoryReservationLifecycleRepositoryPool,
   config: PmsInventoryReservationLifecycleRepositoryConfig,
@@ -477,62 +706,16 @@ async function executeReserve(
         }
         await client.query("RELEASE SAVEPOINT pms_inventory_reserve_mutation");
 
-        const receiptId = normalizeUuid(createReceiptId());
-        if (!receiptId)
-          throw new Error("PMS inventory reservation receipt factory returned invalid UUID");
-        const intent = projectionIntent(command, 1, "reservation_held");
-        const event = await enqueueProjectionRefresh(
-          client,
-          command.audit,
-          command.propertyId,
-          receiptId,
-          keyHash,
-          intent,
-          acceptedAt,
-        );
-        await persistReceipt(
+        const { result, eventId } = await recordReservedInventory(
           client,
           command,
-          receiptId,
           fingerprint,
-          idempotency.id,
-          event.eventId,
-          event.outboxEventId,
-          acceptedAt,
-        );
-        const linkedChanges = await reconcilePmsLinkedInventory(
-          client,
-          command.propertyId,
-          acceptedAt.toISOString(),
-        );
-        await enqueuePmsLinkedInventorySideEffects(
-          client,
-          {
-            propertyId: command.propertyId,
-            operation: "reserve",
-            commandId: command.audit.requestId,
-            keyHash,
-            acceptedAt: acceptedAt.toISOString(),
-            audit: command.audit,
-          },
-          linkedChanges,
-        );
-        const status = statusFromReserve(command, receiptId, acceptedAt);
-        const result: PmsInventoryReservationReserveResult = Object.freeze({
-          ok: true,
-          outcome: "reserved",
-          status,
-          projectionRefreshIntent: intent,
-        });
-        return finalizeReserve(
-          client,
-          command,
           idempotency,
           keyHash,
-          result,
           acceptedAt,
-          event.eventId,
+          createReceiptId,
         );
+        return finalizeReserve(client, command, idempotency, keyHash, result, acceptedAt, eventId);
       },
     );
   } catch (error) {
@@ -541,6 +724,65 @@ async function executeReserve(
   } finally {
     client.release();
   }
+}
+
+async function recordReservedInventory(
+  client: PmsInventoryReservationLifecycleRepositoryClient,
+  command: PmsInventoryReservationReserveCommand,
+  fingerprint: string,
+  idempotency: IdempotencyReservation,
+  keyHash: string,
+  acceptedAt: Date,
+  receiptIdFactory: () => string,
+) {
+  const receiptId = normalizeUuid(receiptIdFactory());
+  if (!receiptId)
+    throw new Error("PMS inventory reservation receipt factory returned invalid UUID");
+  const intent = projectionIntent(command, 1, "reservation_held");
+  const event = await enqueueProjectionRefresh(
+    client,
+    command.audit,
+    command.propertyId,
+    receiptId,
+    keyHash,
+    intent,
+    acceptedAt,
+  );
+  await persistReceipt(
+    client,
+    command,
+    receiptId,
+    fingerprint,
+    idempotency.id,
+    event.eventId,
+    event.outboxEventId,
+    acceptedAt,
+  );
+  const linkedChanges = await reconcilePmsLinkedInventory(
+    client,
+    command.propertyId,
+    acceptedAt.toISOString(),
+  );
+  await enqueuePmsLinkedInventorySideEffects(
+    client,
+    {
+      propertyId: command.propertyId,
+      operation: "reserve",
+      commandId: command.audit.requestId,
+      keyHash,
+      acceptedAt: acceptedAt.toISOString(),
+      audit: command.audit,
+    },
+    linkedChanges,
+  );
+  const status = statusFromReserve(command, receiptId, acceptedAt);
+  const result: PmsInventoryReservationReserveResult = Object.freeze({
+    ok: true,
+    outcome: "reserved",
+    status,
+    projectionRefreshIntent: intent,
+  });
+  return { result, eventId: event.eventId };
 }
 
 async function executeRelease(
@@ -1529,6 +1771,28 @@ async function finalizeReserve(
   acceptedAt: Date,
   eventId: string | null = null,
 ): Promise<PmsInventoryReservationReserveResult> {
+  const completed = await completeReserve(
+    client,
+    command,
+    idempotency,
+    keyHash,
+    result,
+    acceptedAt,
+    eventId,
+  );
+  await client.query("COMMIT");
+  return completed;
+}
+
+async function completeReserve(
+  client: PmsInventoryReservationLifecycleRepositoryClient,
+  command: PmsInventoryReservationReserveCommand,
+  idempotency: IdempotencyReservation,
+  keyHash: string,
+  result: PmsInventoryReservationReserveResult,
+  acceptedAt: Date,
+  eventId: string | null = null,
+): Promise<PmsInventoryReservationReserveResult> {
   await recordAudit(
     client,
     RESERVE_OPERATION,
@@ -1555,7 +1819,6 @@ async function finalizeReserve(
     reserveResultStatus(result),
     acceptedAt,
   );
-  await client.query("COMMIT");
   return result;
 }
 

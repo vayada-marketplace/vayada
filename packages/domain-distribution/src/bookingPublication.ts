@@ -21,7 +21,7 @@ type BookingPublicFinanceEvidence = Readonly<{
   readyPaymentMethods: readonly BookingPublicPaymentMethod[];
 }>;
 
-export type BookingPublicRate = Readonly<{
+type LegacyBookingPublicRate = Readonly<{
   ratePlanId: string;
   currency: string;
   baseNightlyAmount: string;
@@ -29,6 +29,15 @@ export type BookingPublicRate = Readonly<{
   cancellation?: string | null;
   paymentTiming: "pay_at_property" | "prepay_full";
 }>;
+
+/** Offer identity only. Amounts, eligibility and payment terms require a stay quote. */
+export type BookingPublicQuotedOffer = Readonly<{
+  ratePlanId: string;
+  currency: string;
+  pricing: Readonly<{ kind: "quote_required"; publicationRevision: number; termsRevision: string }>;
+  mealPlan: "room_only" | "breakfast" | "half_board" | "full_board" | "all_inclusive";
+}>;
+export type BookingPublicRate = LegacyBookingPublicRate | BookingPublicQuotedOffer;
 
 export type BookingPublicRoom = Readonly<{
   roomTypeId: string;
@@ -193,7 +202,7 @@ function sanitizeRooms(
     if (!validRoomFacts(room) || roomIds.has(room.roomTypeId)) return null;
     roomIds.add(room.roomTypeId);
     const rateIds = new Set<string>();
-    const rates = room.rates.flatMap((rate) => {
+    const rates = room.rates.flatMap<BookingPublicRate | null>((rate) => {
       if (
         !validRateFacts(rate) ||
         rateIds.has(rate.ratePlanId) ||
@@ -201,6 +210,22 @@ function sanitizeRooms(
         !finance.supportedCurrencies.includes(rate.currency)
       )
         return [null];
+      if ("pricing" in rate) {
+        if (!readyMethods.length) return [];
+        rateIds.add(rate.ratePlanId);
+        return [
+          {
+            ratePlanId: rate.ratePlanId,
+            currency: rate.currency,
+            pricing: {
+              kind: "quote_required" as const,
+              publicationRevision: rate.pricing.publicationRevision,
+              termsRevision: rate.pricing.termsRevision,
+            },
+            mealPlan: rate.mealPlan,
+          },
+        ];
+      }
       const method = rate.paymentTiming === "prepay_full" ? "card" : "pay_at_property";
       if (!readyMethods.includes(method)) return [];
       rateIds.add(rate.ratePlanId);
@@ -283,9 +308,28 @@ function validRoomFacts(room: BookingPublicRoom): boolean {
 }
 
 function validRateFacts(rate: BookingPublicRate): boolean {
+  if (record(rate) && "pricing" in rate) {
+    const pricing = rate.pricing;
+    return (
+      Object.keys(rate).sort().join(",") === "currency,mealPlan,pricing,ratePlanId" &&
+      /^pricing-offer\.v2:[a-f0-9]{64}$/.test(rate.ratePlanId) &&
+      record(pricing) &&
+      Object.keys(pricing).sort().join(",") === "kind,publicationRevision,termsRevision" &&
+      pricing.kind === "quote_required" &&
+      Number.isSafeInteger(pricing.publicationRevision) &&
+      pricing.publicationRevision > 0 &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        pricing.termsRevision,
+      ) &&
+      ["room_only", "breakfast", "half_board", "full_board", "all_inclusive"].includes(
+        rate.mealPlan,
+      )
+    );
+  }
   return (
     record(rate) &&
     nonEmpty(rate.ratePlanId) &&
+    !rate.ratePlanId.startsWith("pricing-offer.v2:") &&
     /^\d+\.\d{2}$/.test(rate.baseNightlyAmount) &&
     Number(rate.baseNightlyAmount) >= 0 &&
     typeof rate.refundable === "boolean" &&

@@ -6,6 +6,7 @@ import {
   PROPERTY_SETUP_DRAFT_PII_CLASSIFICATION,
   PROPERTY_SETUP_STEP_DEFINITIONS,
   getActivePropertySetupStepIds,
+  isPropertySetupBaseRevisionManifest,
   type PropertySetupBaseRevisions,
   type PropertySetupDraftPayload,
   type JsonValue,
@@ -14,6 +15,22 @@ import {
 } from "./propertySetupDraft.js";
 
 describe("property setup draft contract", () => {
+  it("accepts the guest-rule owner manifest and rejects the retired pricing bundle", () => {
+    const current = {
+      "booking.guest_experience": "guest-choices:11111111-1111-4111-8111-111111111111",
+    };
+    expect(isPropertySetupBaseRevisionManifest("guest_experience", current)).toBe(true);
+    expect(
+      isPropertySetupBaseRevisionManifest("guest_experience", {
+        ...current,
+        "pms.pricing_settings": "pricing:1",
+        "pms.rate_plans": "rates:1",
+        "pms.room_types": "rooms:1",
+        "hotel_catalog.location": "location:1",
+        "hotel_catalog.policy": "policy:1",
+      }),
+    ).toBe(false);
+  });
   it("defines the approved retention, PII posture, and nine stable steps", () => {
     expect(PROPERTY_SETUP_ACTIVE_RETENTION_DAYS).toBe(90);
     expect(PROPERTY_SETUP_COMPLETED_RETENTION_DAYS).toBe(30);
@@ -70,8 +87,7 @@ describe("property setup draft contract", () => {
       rooms: "pms.room_types|pms.room_units|pms.room_media",
       pricing: "pms.pricing_settings|pms.rate_plans|pms.rate_rules",
       calendar: "pms.operating_calendar|pms.inventory|pms.room_types|hotel_catalog.location",
-      guest_experience:
-        "booking.guest_experience|pms.pricing_settings|pms.rate_plans|pms.room_types|hotel_catalog.location|hotel_catalog.policy",
+      guest_experience: "booking.guest_experience",
       payments: "finance.payment_methods|pms.pricing_settings",
       review: "",
     });

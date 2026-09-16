@@ -38,6 +38,7 @@ type PendingNavigation = {
   navigate: () => void | Promise<void>;
   restore?: () => void;
   beforeLeaveCompleted?: boolean;
+  recheckBeforeLeaveOnRetry?: boolean;
 };
 
 type BrowserHistoryRestore = {
@@ -51,7 +52,7 @@ export type AdaptiveSetupStepRenderContext = {
   route: PropertySetupRouteReadModel;
   step: PropertySetupRouteReadModel["steps"][number];
   interfaceLocale: SupportedInterfaceLocale;
-  saveAndContinue: () => Promise<void>;
+  saveAndContinue: (options?: { recheckBeforeLeaveOnRetry?: boolean }) => Promise<void>;
   refreshRoute: () => Promise<void>;
   goToStep?: (stepId: AdaptiveSetupStepId, entityId?: string) => void;
   requestedEntityId?: string | null;
@@ -175,7 +176,10 @@ export function AdaptiveHotelSetupController({
       setNavigationPending(true);
       setRouteError(null);
       try {
-        if (!pendingNavigation.beforeLeaveCompleted) {
+        if (
+          !pendingNavigation.beforeLeaveCompleted ||
+          pendingNavigation.recheckBeforeLeaveOnRetry
+        ) {
           await beforeLeave?.();
           pendingNavigation.beforeLeaveCompleted = true;
         }
@@ -446,23 +450,28 @@ export function AdaptiveHotelSetupController({
     setStaleDraftMessage(message);
   }, []);
 
-  const saveAndContinue = useCallback(async () => {
-    if (!activeStep) return;
-    await runAfterDraftSave({
-      navigate: async () => {
-        const refreshedRoute = await loadRoute(undefined, "refresh", true);
-        if (!refreshedRoute) return;
+  const saveAndContinue = useCallback(
+    async (options?: { recheckBeforeLeaveOnRetry?: boolean }) => {
+      if (!activeStep) return;
+      await runAfterDraftSave({
+        recheckBeforeLeaveOnRetry: options?.recheckBeforeLeaveOnRetry,
+        navigate: async () => {
+          const refreshedRoute = await loadRoute(undefined, "refresh", true);
+          if (!refreshedRoute) return;
+          if (options?.recheckBeforeLeaveOnRetry) await beforeLeave?.();
 
-        const nextStep = resolveNextAdaptiveSetupStep(refreshedRoute.steps, activeStep.stepId);
-        if (!nextStep) {
-          onExit();
-          return;
-        }
+          const nextStep = resolveNextAdaptiveSetupStep(refreshedRoute.steps, activeStep.stepId);
+          if (!nextStep) {
+            onExit();
+            return;
+          }
 
-        navigateToStep(nextStep.stepId, "push");
-      },
-    });
-  }, [activeStep, loadRoute, navigateToStep, onExit, runAfterDraftSave]);
+          navigateToStep(nextStep.stepId, "push");
+        },
+      });
+    },
+    [activeStep, beforeLeave, loadRoute, navigateToStep, onExit, runAfterDraftSave],
+  );
 
   const activeCopy = activeStep ? ADAPTIVE_SETUP_STEP_COPY[activeStep.stepId] : null;
   const handleRetry = () => {

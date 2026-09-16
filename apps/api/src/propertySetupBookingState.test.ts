@@ -36,11 +36,11 @@ describe("property setup Booking owner state", () => {
     });
   });
 
-  it("consumes the exact six-key guest manifest without partial Booking state", async () => {
+  it("consumes only the confirmed guest-rule revision without pricing dependencies", async () => {
     const provider = createPropertySetupBookingStateProvider({
       design: { getCurrentDesign: vi.fn(async () => design(2)) },
       catalog: { getState: vi.fn(async () => catalog()) },
-      guestPolicy: { getCurrentGuestPolicyOwnerEvidence: vi.fn(async () => guestEvidence()) },
+      guestRules: { read: vi.fn(async () => guestEvidence()) },
     });
 
     await expect(
@@ -52,20 +52,19 @@ describe("property setup Booking owner state", () => {
         {
           stepId: "guest_experience",
           state: "complete",
-          sourceRevision: "guest-policy:3",
-          currentBaseRevisions: guestEvidence().currentBaseRevisions,
+          sourceRevision: `guest-choices:${propertyId}`,
+          currentBaseRevisions: { "booking.guest_experience": `guest-choices:${propertyId}` },
         },
       ],
     });
   });
 
   it("maps only the typed first-visit absence source to not started", async () => {
-    const absent = guestEvidence("guest-policy:absent");
-    absent.currentBaseRevisions["hotel_catalog.policy"] = `hotel_catalog.policy:${propertyId}:r0`;
+    const absent = null;
     const provider = createPropertySetupBookingStateProvider({
       design: { getCurrentDesign: vi.fn(async () => design(2)) },
       catalog: { getState: vi.fn(async () => catalog()) },
-      guestPolicy: { getCurrentGuestPolicyOwnerEvidence: vi.fn(async () => absent) },
+      guestRules: { read: vi.fn(async () => absent) },
     });
 
     await expect(
@@ -77,8 +76,8 @@ describe("property setup Booking owner state", () => {
         {
           stepId: "guest_experience",
           state: "not_started",
-          sourceRevision: "guest-policy:absent",
-          currentBaseRevisions: absent.currentBaseRevisions,
+          sourceRevision: "guest-choices:absent",
+          currentBaseRevisions: { "booking.guest_experience": "guest-choices:absent" },
         },
       ],
     });
@@ -114,25 +113,46 @@ describe("property setup Booking owner state", () => {
   });
 
   it("fails closed on a guest-policy evidence race", async () => {
-    const getCurrentGuestPolicyOwnerEvidence = vi
+    const read = vi
       .fn()
       .mockResolvedValueOnce(guestEvidence())
       .mockResolvedValueOnce({
         ...guestEvidence(),
-        currentBaseRevisions: {
-          ...guestEvidence().currentBaseRevisions,
-          "hotel_catalog.policy": "policy:8",
-        },
+        revision: actorUserId,
       });
     const guestRace = createPropertySetupBookingStateProvider({
       design: { getCurrentDesign: vi.fn(async () => design(2)) },
       catalog: { getState: vi.fn(async () => catalog()) },
-      guestPolicy: { getCurrentGuestPolicyOwnerEvidence },
+      guestRules: { read },
     });
     await expect(
       guestRace.getOwnerState(request(["booking_design", "guest_experience"])),
     ).resolves.toEqual({ outcome: "provider_failure" });
-    expect(getCurrentGuestPolicyOwnerEvidence).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+  it("authorizes guest-rule scope and rejects malformed or unavailable rules", async () => {
+    const read = vi.fn().mockResolvedValue(guestEvidence());
+    const provider = createPropertySetupBookingStateProvider({
+      design: { getCurrentDesign: vi.fn() },
+      catalog: { getState: vi.fn() },
+      guestRules: { read },
+    });
+    expect((await provider.getOwnerState(request(["guest_experience"]))).outcome).toBe("found");
+    expect(read).toHaveBeenCalledWith({ organizationId, propertyId, actorUserId });
+    for (const value of [
+      undefined,
+      { revision: "guest-policy:1", choices: guestEvidence().choices },
+      { revision: propertyId, choices: {} },
+    ]) {
+      read.mockResolvedValue(value);
+      expect(await provider.getOwnerState(request(["guest_experience"]))).toEqual({
+        outcome: "provider_failure",
+      });
+    }
+    read.mockRejectedValue(new Error("guest_choices_denied"));
+    expect(await provider.getOwnerState(request(["guest_experience"]))).toEqual({
+      outcome: "provider_failure",
+    });
   });
 });
 
@@ -147,20 +167,18 @@ function request(stepIds: ("booking_design" | "guest_experience")[]) {
   };
 }
 
-function guestEvidence(
-  revision: "guest-policy:absent" | `guest-policy:${number}` = "guest-policy:3",
-) {
+function guestEvidence() {
   return {
-    outcome: "available" as const,
-    organizationId,
-    propertyId,
-    currentBaseRevisions: {
-      "booking.guest_experience": revision,
-      "pms.pricing_settings": "pricing:4",
-      "pms.rate_plans": "rate-plans:5",
-      "pms.room_types": "room-types:6",
-      "hotel_catalog.location": `hotel_catalog.location:${propertyId}:r7`,
-      "hotel_catalog.policy": `hotel_catalog.policy:${propertyId}:r7`,
+    revision: propertyId,
+    choices: {
+      defaultGuestLanguage: "en" as const,
+      childrenEnabled: false,
+      adultAgeThreshold: null,
+      phoneRequired: true,
+      arrivalTimeEnabled: false,
+      specialRequestsEnabled: true,
+      checkInTime: "15:00",
+      checkOutTime: "11:00",
     },
   };
 }

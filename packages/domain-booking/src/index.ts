@@ -145,24 +145,25 @@ export type BookingDashboardMetricsPeriodInput = {
  * Implemented by the Booking domain; consumed by Booking API dashboard routes.
  * Must never open PMS_DATABASE_URL — see engineering/booking-pms-coupling-audit.md C04.
  */
-export type BookingDashboardMetricsReadPort = import("./conversionFunnel.js").BookingConversionFunnelReadPort & {
-  getDashboardMetrics(
-    input: BookingDashboardMetricsPeriodInput,
-  ): Promise<BookingDashboardMetricsReadModel | null>;
-  getSourceMix(
-    input: Omit<BookingDashboardMetricsPeriodInput, "previousPeriodStart" | "previousPeriodEnd">,
-  ): Promise<BookingSourceMixReadModel>;
-  getSparklines(input: {
-    propertyId: string;
-    windowStart: BookingDate;
-    windowEnd: BookingDate;
-  }): Promise<BookingSparklineReadModel>;
-  getPageViewTimeline(input: {
-    propertyId: string;
-    windowStart: BookingDate;
-    windowEnd: BookingDate;
-  }): Promise<BookingPageViewTimelineReadModel | null>;
-};
+export type BookingDashboardMetricsReadPort =
+  import("./conversionFunnel.js").BookingConversionFunnelReadPort & {
+    getDashboardMetrics(
+      input: BookingDashboardMetricsPeriodInput,
+    ): Promise<BookingDashboardMetricsReadModel | null>;
+    getSourceMix(
+      input: Omit<BookingDashboardMetricsPeriodInput, "previousPeriodStart" | "previousPeriodEnd">,
+    ): Promise<BookingSourceMixReadModel>;
+    getSparklines(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingSparklineReadModel>;
+    getPageViewTimeline(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingPageViewTimelineReadModel | null>;
+  };
 
 // ─── Booking reservations read model ────────────────────────────────────────
 // Owner: Booking/checkout read model. The HTTP route may keep legacy response
@@ -668,4 +669,7 @@ export * from "./bookingPromotions.js";
 export * from "./roomCombinationSearch.js";
 
 export * from "./replacementPricingEvidence.js";
+export * from "./publicPricingSelection.js";
+
+export * from "./storedPricingQuote.js";
 export * from "./affiliateBookingDestination.js";
