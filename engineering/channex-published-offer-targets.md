@@ -1231,3 +1231,11 @@ before opening its bounded database transaction. It accepts only the exact
 attempt/job/worker/property/connection correlation and is idempotent only for
 the same receipt ID and observation. Authority loss after provider IO cannot
 discard the evidence; conflicting receipt identity or content remains blocked.
+
+`prepareChannexRoomAvailabilityDispatch` creates a one-use in-memory sender only
+from a newly committed claim. Before POST it rereads the exact PMS day and full
+Channex authority, requires them to equal the claimed evidence, and confirms the
+same unresolved attempt still owns the exact persisted request without a receipt.
+The closure sends once, then retains either the sanitized original response or
+an ambiguous transport failure. It cannot reopen an existing attempt and is not
+wired into the runtime worker by this contract step.
