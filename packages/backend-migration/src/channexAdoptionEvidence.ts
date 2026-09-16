@@ -175,7 +175,7 @@ export async function verifyChannexAdoptionTargetEvidence(
   await assertBindingClaims(client, manifest);
 }
 
-async function readSourceLedger(client: QueryClient, runId: string): Promise<SourceLedger> {
+export async function readSourceLedger(client: QueryClient, runId: string): Promise<SourceLedger> {
   const run = await client.query<SourceLedger["run"]>(
     `SELECT run_id, environment, source_schema_revision, cutover_freeze_proof_sha256, status,
             to_char(finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS finished_at

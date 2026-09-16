@@ -9,6 +9,7 @@ try {
       "approval-ref": { type: "string" },
       "apply-hash": { type: "string" },
       "no-show": { type: "boolean" },
+      "no-show-date": { type: "string" },
       "catalog-approval-ref": { type: "string" },
     },
   });
@@ -17,6 +18,7 @@ try {
     approvalRef: values["approval-ref"] ?? "",
     applyHash: values["apply-hash"],
     noShow: values["no-show"],
+    noShowDate: values["no-show-date"],
     catalogApprovalRef: values["catalog-approval-ref"],
   });
   process.stdout.write(JSON.stringify(result) + "\n");

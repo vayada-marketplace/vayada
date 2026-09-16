@@ -15,6 +15,10 @@ export type NightlyRevenueBackfillPageInput = {
   afterGuestBookingId?: string;
   limit?: number;
 };
+export type NightlyRevenueBackfillRunInput = Omit<
+  NightlyRevenueBackfillPageInput,
+  "afterGuestBookingId"
+>;
 export type NightlyRevenueBackfillPageServices = {
   read: typeof readUncapturedNightlyRevenueCandidates;
   plan: typeof planNightlyRevenueBackfill;
@@ -91,6 +95,49 @@ export async function runNightlyRevenueBackfillPage(
   }
 }
 
+/** Runs independent committed checkpoints; retry the same run ID to replay completed pages. */
+export async function runNightlyRevenueBackfill(
+  pool: QueryPool,
+  input: NightlyRevenueBackfillRunInput,
+  dependencies: NightlyRevenueBackfillPageServices = services,
+) {
+  const pageReports: Awaited<ReturnType<typeof runNightlyRevenueBackfillPage>>[] = [];
+  const cursors = new Set<string>();
+  let afterGuestBookingId: string | undefined;
+  while (true) {
+    const page = await runNightlyRevenueBackfillPage(
+      pool,
+      { ...input, ...(afterGuestBookingId ? { afterGuestBookingId } : {}) },
+      dependencies,
+    );
+    pageReports.push(page);
+    if (!page.nextGuestBookingId) break;
+    if (cursors.has(page.nextGuestBookingId))
+      throw new Error("Nightly revenue backfill cursor did not advance");
+    cursors.add(page.nextGuestBookingId);
+    afterGuestBookingId = page.nextGuestBookingId;
+  }
+  return {
+    runId: input.runId,
+    mode: input.mode,
+    complete: true,
+    pageCount: pageReports.length,
+    committedPages: pageReports.filter(({ committed }) => committed).length,
+    candidateCount: sum(pageReports.map(({ candidateCount }) => candidateCount)),
+    lineCount: sum(pageReports.map(({ lineCount }) => lineCount)),
+    insertedRows: sum(pageReports.map(({ write }) => write?.insertedCount ?? 0)),
+    replayedPages: pageReports.filter(({ write }) => write?.outcome === "replayed").length,
+    exceptions: pageReports.flatMap(({ exceptions }) => exceptions),
+    plannedReconciliation: aggregatePlanned(
+      pageReports.flatMap(({ reconciliation }) => reconciliation),
+    ),
+    appliedReconciliation: aggregateApplied(
+      pageReports.flatMap(({ verification }) => verification?.reconciliation ?? []),
+    ),
+    pageReports,
+  };
+}
+
 function report(
   input: NightlyRevenueBackfillPageInput,
   nextGuestBookingId: string | null,
@@ -134,3 +181,66 @@ const validDate = (value: string) =>
   new Date(value).toJSON() === `${value}T00:00:00.000Z`;
 const DATE = /^\d{4}-\d{2}-\d{2}$/,
   UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type Planned = ReturnType<typeof planNightlyRevenueBackfill>["reconciliation"][number];
+type Applied = Awaited<
+  ReturnType<typeof verifyAppliedNightlyRevenueBackfillPage>
+>["reconciliation"][number];
+function aggregatePlanned(rows: Planned[]) {
+  const groups = new Map<string, Planned>();
+  for (const row of rows) {
+    const id = groupKey(row),
+      current = groups.get(id);
+    groups.set(
+      id,
+      current
+        ? {
+            ...current,
+            bookingCount: current.bookingCount + row.bookingCount,
+            evidenceRows: current.evidenceRows + row.evidenceRows,
+            occupiedRoomNights: current.occupiedRoomNights + row.occupiedRoomNights,
+            grossRoomAmount: addMoney(current.grossRoomAmount, row.grossRoomAmount),
+            missingRows: current.missingRows + row.missingRows,
+          }
+        : { ...row },
+    );
+  }
+  return ordered(groups);
+}
+function aggregateApplied(rows: Applied[]) {
+  const groups = new Map<string, Applied>();
+  for (const row of rows) {
+    const id = groupKey(row),
+      current = groups.get(id);
+    groups.set(
+      id,
+      current
+        ? {
+            ...current,
+            bookingCount: current.bookingCount + row.bookingCount,
+            roomNightCount: current.roomNightCount + row.roomNightCount,
+            revisionCount: current.revisionCount + row.revisionCount,
+            storedRows: current.storedRows + row.storedRows,
+            occupiedRoomNights: current.occupiedRoomNights + row.occupiedRoomNights,
+            grossRoomAmount: addMoney(current.grossRoomAmount, row.grossRoomAmount),
+            missingRoomNights: current.missingRoomNights + row.missingRoomNights,
+          }
+        : { ...row },
+    );
+  }
+  return ordered(groups);
+}
+const groupKey = (row: {
+  propertyId: string;
+  stayDate: string;
+  currency: string;
+  sourceKind: string;
+  evidenceQuality: string;
+}) => `${row.propertyId}:${row.stayDate}:${row.currency}:${row.sourceKind}:${row.evidenceQuality}`;
+const ordered = <T>(groups: Map<string, T>) =>
+  [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
+const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+const addMoney = (left: string, right: string) => formatMoney(money(left) + money(right));
+const money = (value: string) => BigInt(value.replace(".", ""));
+const formatMoney = (value: bigint) =>
+  `${value < 0n ? "-" : ""}${(value < 0n ? -value : value) / 10_000n}.${((value < 0n ? -value : value) % 10_000n).toString().padStart(4, "0")}`;

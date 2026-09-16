@@ -1,9 +1,11 @@
+import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
@@ -19,10 +21,12 @@ import {
   createPgStaffInvitationAcceptanceRepository,
   createPgStaffInvitationDeliveryRepository,
   createPgStaffInvitationRepository,
+  createPgTeamRoleRepository,
   createPgStaffRemovalJobRepository,
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
   createWorkOSVerifier,
+  verifyAdminTransferProof,
 } from "@vayada/backend-auth";
 import {
   createPgEntitlementRepository,
@@ -64,6 +68,10 @@ import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/finance
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
+import {
+  createKmsFinanceFolioExportSearchDigest,
+  createPgFinanceFolioExportJobRepository,
+} from "./domains/financeFolioExportRepository.js";
 import { createAwsFinanceFolioKms } from "./domains/financeFolioKms.js";
 import { createPgFinanceFolioReadRepository } from "./domains/financeFolioReadRepository.js";
 import {
@@ -74,6 +82,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
+import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
@@ -85,6 +94,10 @@ import { composePlatformMediaRuntime } from "./platform/platformMediaRuntime.js"
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import { createWorkOSStaffInvitationProvider } from "./platform/workosStaffInvitations.js";
 import { createWorkOSStaffRemovalProvider } from "./platform/workosStaffRemoval.js";
+import { startAdminRoleWorker } from "./platform/adminRoleWorker.js";
+import { createWorkOSAdminRoleProvider } from "./platform/workosAdminRoleProvider.js";
+import { createAdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
+import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import {
@@ -208,6 +221,7 @@ import {
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
+import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
   createPgPropertySetupDraftRetentionStore,
@@ -642,11 +656,23 @@ const financeFolioRuntime =
           recipientEncoder,
           recipientDecoder,
         });
+        const exportJobs = createPgFinanceFolioExportJobRepository({
+          connectionString: targetDatabaseUrl,
+          searchDigest: createKmsFinanceFolioExportSearchDigest({
+            kms: kms.write,
+            keyArn: config.financeFolioRecipientKms.fingerprintKeyArn,
+          }),
+        });
         return {
-          routes: { repository, commands },
+          routes: { repository, commands, exports: exportJobs },
           async close() {
             try {
-              await Promise.all([repository.close(), commands.close(), propertyContext.close()]);
+              await Promise.all([
+                repository.close(),
+                commands.close(),
+                exportJobs.close(),
+                propertyContext.close(),
+              ]);
             } finally {
               kms.close();
             }
@@ -657,6 +683,22 @@ const financeFolioRuntime =
 const financeExpenseGenerationPool =
   config.financeSource === "target"
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
+const financeFolioExportWorker =
+  config.backgroundWorkersEnabled &&
+  financeFolioRuntime &&
+  financeExpenseRuntime &&
+  config.platformMediaServing
+    ? {
+        pool: new pg.Pool({
+          connectionString: targetDatabaseUrl,
+          max: 2,
+          connectionTimeoutMillis: 5_000,
+        }),
+        writer: createS3FinanceFolioExportArtifactWriter({
+          bucketName: config.platformMediaServing.bucketName,
+        }),
+      }
     : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
@@ -1155,6 +1197,7 @@ const staffInvitationRuntime =
         });
         return {
           repository,
+          roles: createPgTeamRoleRepository({ connectionString: config.auth.databaseUrl }),
           deliveryRepository,
           removalJobRepository,
           delivery: createStaffInvitationDeliveryCoordinator({
@@ -1170,6 +1213,47 @@ const staffInvitationRuntime =
             }),
           }),
         };
+      })()
+    : undefined;
+
+const adminTransferPool =
+  config.auth && config.authSession && config.authSession.authFirstPartySurfaces.includes("pms-web")
+    ? new pg.Pool({ connectionString: config.auth.databaseUrl, max: 5 })
+    : undefined;
+const adminTransferRuntime =
+  adminTransferPool && config.auth && config.authSession
+    ? (() => {
+        const verifier = createWorkOSVerifier({
+          jwksUrl: config.auth.workosJwksUrl,
+          issuer: config.auth.workosIssuer,
+          audience: config.auth.workosAudience,
+        });
+        return createAdminTransferCoordinator({
+          pool: adminTransferPool,
+          reauthentication: createWorkOSAdminReauthentication({
+            apiKey: config.authSession.workosApiKey,
+            clientId: config.authSession.workosClientId,
+            callbackUrl: new URL(
+              "/auth/admin-transfer/callback",
+              config.authSession.authSurfaceOrigins["pms-web"],
+            ).toString(),
+            cookieSecret: config.authSession.authCookieSecret,
+            async verifyProof(binding, state, accessToken) {
+              const client = await adminTransferPool.connect();
+              try {
+                return await verifyAdminTransferProof(
+                  client,
+                  binding,
+                  state,
+                  accessToken,
+                  verifier,
+                );
+              } finally {
+                client.release();
+              }
+            },
+          }),
+        });
       })()
     : undefined;
 
@@ -1289,6 +1373,7 @@ const app = buildApp({
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
+          adminTransfer: adminTransferRuntime,
         }
       : undefined,
   workosWebhooks:
@@ -1497,7 +1582,21 @@ const app = buildApp({
           : {}),
       }
     : undefined,
-  financeFolios: financeFolioRuntime?.routes,
+  financeFolios: financeFolioRuntime
+    ? {
+        ...financeFolioRuntime.routes,
+        expenseExports: financeExpenseRuntime!.routes.read,
+        ...(platformMediaRuntime
+          ? {
+              exportDownloads: {
+                read: financeFolioRuntime.routes.exports,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
+              },
+            }
+          : {}),
+      }
+    : undefined,
   pmsInboxAttachmentMedia:
     pmsInboxRuntime && platformMediaRuntime
       ? {
@@ -1580,12 +1679,16 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
+  marketplaceAffiliateAssentRepository:
+    createPgMarketplaceAffiliateAssentRepository(targetDatabaseUrl),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
   marketplaceAffiliatePolicyRepository:
     createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   marketplaceAffiliateDestinationRepository:
     createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateCompletionRepository:
+    createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1714,6 +1817,18 @@ const creatorPlatformSyncWorker =
       })
     : undefined;
 
+const adminRoleWorker =
+  config.backgroundWorkersEnabled && config.auth && config.authSession
+    ? startAdminRoleWorker({
+        connectionString: config.auth.databaseUrl,
+        provider: createWorkOSAdminRoleProvider(config.authSession.workosApiKey),
+        warn: () =>
+          app.log.warn(
+            "Account-admin role reconciliation worker failed; durable lease recovery will retry",
+          ),
+      })
+    : undefined;
+
 const staffRemovalWorker =
   config.backgroundWorkersEnabled && staffInvitationRuntime
     ? startStaffRemovalWorker({
@@ -1773,6 +1888,7 @@ const bookingGuestPolicyProjectionWorker =
 
 app.addHook("onClose", async () => {
   await creatorPlatformSyncWorker?.close();
+  await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
@@ -1785,11 +1901,12 @@ app.addHook("onClose", async () => {
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),
     staffInvitationRuntime?.repository.close(),
+    staffInvitationRuntime?.roles.close(),
     staffInvitationRuntime?.deliveryRepository.close(),
     staffInvitationRuntime?.removalJobRepository.close(),
+    adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
-    financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -2141,6 +2258,45 @@ app.addHook("onClose", async () => {
   if (financeExpenseGenerationTimer) clearInterval(financeExpenseGenerationTimer);
   await activeFinanceExpenseGeneration;
   await financeExpenseGenerationPool?.end();
+});
+
+let activeFinanceFolioExports: Promise<void> | undefined;
+const runFinanceFolioExports = () => {
+  if (!financeFolioExportWorker || activeFinanceFolioExports) return;
+  activeFinanceFolioExports = runFinanceFolioExportJobs(
+    financeFolioExportWorker.pool,
+    {
+      exportReady: financeFolioRuntime!.routes.repository.exportReady,
+      exportCsv: financeExpenseRuntime!.routes.read.exportCsv,
+    },
+    financeFolioExportWorker.writer,
+  )
+    .then((result) => {
+      if (result.deadLettered > 0 || result.retryScheduled > 0)
+        app.log.warn(result, "Finance folio export processing completed with attention required");
+      else if (result.succeeded > 0) app.log.info(result, "Finance folio exports completed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Finance folio export processing failed"),
+    )
+    .finally(() => {
+      activeFinanceFolioExports = undefined;
+    });
+};
+const financeFolioExportTimer = financeFolioExportWorker
+  ? setInterval(runFinanceFolioExports, 5_000)
+  : undefined;
+financeFolioExportTimer?.unref();
+if (financeFolioExportWorker) runFinanceFolioExports();
+app.addHook("onClose", async () => {
+  if (financeFolioExportTimer) clearInterval(financeFolioExportTimer);
+  await activeFinanceFolioExports;
+  try {
+    financeFolioExportWorker?.writer.close?.();
+    await financeFolioExportWorker?.pool.end();
+  } finally {
+    await financeFolioRuntime?.close();
+  }
 });
 
 let activeRetryBatch: Promise<void> | undefined;

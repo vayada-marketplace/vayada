@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildFinanceExpenseCsvArtifact,
   FINANCE_EXPENSE_ORIGINS,
   normalizeFinanceExpenseAmount,
+  parseFinanceExpenseExportQuery,
+  parseFinanceExpenseExportSnapshot,
   parseFinanceExpenseQuery,
   parseFinanceExpenseWrite,
 } from "./financialExpenses.js";
@@ -44,6 +47,30 @@ describe("Financials expense contract", () => {
         sort: "amount_desc",
       }),
     ).toMatchObject({ limit: 50, sort: "amount_desc", origin: "recurring", recurring: true });
+  });
+
+  // prettier-ignore
+  it("parses export filters without accepting pagination", () => {
+    expect(parseFinanceExpenseExportQuery({ from: "2026-08-01", to: "2026-08-31", search: "Electricity", recurring: "false" })).toEqual({ from: "2026-08-01", to: "2026-08-31", search: "Electricity", recurring: false, sort: "incurredOn_desc" });
+    expect(parseFinanceExpenseExportQuery({ from: "2026-08-01", to: "2026-08-31", limit: 50 })).toBeNull();
+  });
+
+  // prettier-ignore
+  it("builds stable formula-safe expense CSV", () => {
+    const artifact = buildFinanceExpenseCsvArtifact({ propertyId: COMMAND.commandId, currency: "EUR", expenses: [{ id: RECEIPT_ID, categoryId: CATEGORY_ID, categoryName: "=Utilities", origin: "manual", incurredOn: "2026-08-08", vendor: "+Vendor", amount: { amount: "12.5000" as never, currency: "EUR" }, paymentStatus: "unpaid", paidOn: null, recurringRuleId: null, sourceKey: "@source", reversesExpenseId: null, revision: 2 }] });
+    expect(artifact).toMatchObject({ formatVersion: "pms-financials-expenses.v1", rowCount: 1, filename: `pms-financials-expenses-${COMMAND.commandId}.csv` });
+    for (const value of ['"\'=Utilities"', '"\'+Vendor"', '"\'@source"']) expect(artifact.body).toContain(value);
+    expect(() => buildFinanceExpenseCsvArtifact({ propertyId: "AAAAAAAA-0000-4000-8000-000000000001", currency: "EUR", expenses: [] })).toThrow();
+  });
+
+  // prettier-ignore
+  it("validates immutable expense export snapshots", () => {
+    const selected = { expenseId: RECEIPT_ID, revision: 2, categoryId: CATEGORY_ID, categoryRevision: 3, categoryName: "Utilities", paymentStatus: "unpaid", paidOn: null };
+    const snapshot = { formatVersion: "pms-financials-expenses.v1", propertyId: COMMAND.commandId, currency: "EUR", filters: { from: "2026-08-01", to: "2026-08-31", sort: "incurredOn_desc" }, snapshotAt: "2026-08-31T10:00:00.000Z", manifest: [selected] };
+    expect(parseFinanceExpenseExportSnapshot(snapshot)).toEqual(snapshot);
+    expect(parseFinanceExpenseExportSnapshot({ ...snapshot, manifest: [selected, selected] })).toBeNull();
+    expect(parseFinanceExpenseExportSnapshot({ ...snapshot, filters: { ...snapshot.filters, limit: 50 } })).toBeNull();
+    expect(parseFinanceExpenseExportSnapshot({ ...snapshot, manifest: [{ ...selected, categoryName: " Utilities" }] })).toBeNull();
   });
 
   it.each([

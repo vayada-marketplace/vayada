@@ -272,6 +272,15 @@ describe.skipIf(!databaseUrl)("affiliate draft save (PostgreSQL)", () => {
           destination: {
             destinationVersionId: id(30),
             trackingStatus: "not_validated",
+            trackingReadiness: {
+              status: "pending",
+              missing: [
+                "referral_round_trip",
+                "reservation_lifecycle",
+                "stay_completion",
+                "accommodation_revenue",
+              ],
+            },
             configuration: { bookingUrl: "https://booking.example.invalid/?hotel=42" },
           },
         },

@@ -475,7 +475,21 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
     ]);
   });
 
-  it.each(["organization", "membership", "assignment", "permission"])(
+  it("rejects a new reply after assignment to a read-only role", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox viewer', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+      [MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [MEMBERSHIP],
+    );
+    await expect(reply.reply(command("role-readonly"))).rejects.toThrow(
+      "PMS Inbox reply command failed",
+    );
+  });
+
+  it.each(["organization", "membership", "assignment", "permission", "product", "role"])(
     "holds revoked originating %s despite another active property owner",
     async (revoked) => {
       const accepted = await reply.reply(command(`revoked-${revoked}`));
@@ -490,12 +504,26 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
           "UPDATE identity.organization_memberships SET status = 'suspended' WHERE id = $1::uuid",
           [MEMBERSHIP],
         );
+      else if (revoked === "product")
+        await admin.query(
+          "UPDATE identity.organization_memberships SET pms_access_enabled = false WHERE id = $1::uuid",
+          [MEMBERSHIP],
+        );
       else if (revoked === "assignment")
         await admin.query(
           "UPDATE identity.organization_memberships SET property_access_mode = 'assigned' WHERE id = $1::uuid",
           [MEMBERSHIP],
         );
-      else
+      else if (revoked === "role") {
+        await admin.query(
+          `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Read-only Inbox', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+          [MEMBERSHIP, ORGANIZATION],
+        );
+        await admin.query(
+          `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+          [MEMBERSHIP],
+        );
+      } else
         await admin.query(
           `UPDATE identity.organization_memberships SET permission_overrides = '{"grant":[],"deny":["pms.inbox.reply"]}'::jsonb WHERE id = $1::uuid`,
           [MEMBERSHIP],
@@ -1040,6 +1068,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox manual reply command", () => {
         "DELETE FROM identity.product_entitlements WHERE organization_id = ANY($1::uuid[])",
         "DELETE FROM identity.organization_resource_links WHERE organization_id = ANY($1::uuid[])",
         "DELETE FROM identity.organization_memberships WHERE organization_id = ANY($1::uuid[])",
+        "DELETE FROM identity.organization_roles WHERE organization_id = ANY($1::uuid[])",
       ])
         await admin.query(statement, [[ORGANIZATION, OTHER_ORGANIZATION]]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [

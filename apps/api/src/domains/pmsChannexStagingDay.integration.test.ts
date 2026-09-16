@@ -41,11 +41,18 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
   const request = vi.fn<typeof fetch>(async (url) =>
     Response.json({
       data: String(url).includes("/availability?")
-        ? { [scope.roomId]: { [stagingDay.stayDate]: -1, [noShowStagingDay.stayDate]: 0 } }
+        ? {
+            [scope.roomId]: {
+              [stagingDay.stayDate]: -1,
+              [noShowStagingDay.stayDate]: 0,
+              "2026-09-15": 0,
+            },
+          }
         : {
             [scope.rateId]: {
               [stagingDay.stayDate]: { stop_sell: true },
               [noShowStagingDay.stayDate]: { stop_sell: true },
+              "2026-09-15": { stop_sell: true },
             },
           },
     }),
@@ -589,5 +596,68 @@ describe.skipIf(!databaseUrl)("bounded staging date exception", () => {
     );
     await expect(runNoShow(preview.hash)).rejects.toThrow();
     expect(await snapshot()).toEqual(occupied);
+  });
+  it("isolates the earlier no-show date and preserves both previous capacity receipts", async () => {
+    const early = (applyHash?: string) =>
+      prepareChannexStagingDay(
+        config(),
+        {
+          ...noShowInput,
+          noShowDate: "2026-09-15",
+          applyHash,
+        },
+        request,
+      );
+    const original = await run();
+    await run(original.hash);
+    const later = await runNoShow();
+    await runNoShow(later.hash);
+    const before = await snapshot();
+    const preview = await early();
+    expect(preview.stayDate).toBe("2026-09-15");
+    expect(preview.hash).not.toBe(later.hash);
+    expect(preview.hash).not.toBe(original.hash);
+    await expect(early(later.hash)).rejects.toThrow();
+    expect(await snapshot()).toEqual(before);
+    const results = await Promise.all([early(preview.hash), early(preview.hash)]);
+    expect(results.map((x) => x.outcome).sort()).toEqual(["applied", "replayed"]);
+    await importOccupancy("2026-09-15", "2026-09-16");
+    const occupied = await snapshot();
+    expect((await early(preview.hash)).outcome).toBe("replayed");
+    expect((await run(original.hash)).outcome).toBe("replayed");
+    expect((await runNoShow(later.hash)).outcome).toBe("replayed");
+    expect(await snapshot()).toEqual(occupied);
+    expect(
+      (
+        await db.query(
+          "SELECT stay_date::text,assigned_count,available_count FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 ORDER BY stay_date",
+          ids,
+        )
+      ).rows,
+    ).toEqual([
+      { stay_date: "2026-09-14", assigned_count: 0, available_count: 1 },
+      { stay_date: "2026-09-15", assigned_count: 1, available_count: 0 },
+      { stay_date: "2026-09-20", assigned_count: 0, available_count: 1 },
+    ]);
+  });
+  it("rejects arbitrary dates and date overrides outside explicit no-show mode before provider reads", async () => {
+    const before = await snapshot();
+    for (const noShowDate of ["2026-09-14", "2026-09-16", "2026-09-15T00:00:00Z", ""])
+      await expect(
+        prepareChannexStagingDay(config(), { ...noShowInput, noShowDate }, request),
+      ).rejects.toThrow();
+    await expect(
+      prepareChannexStagingDay(config(), { ...input, noShowDate: "2026-09-15" }, request),
+    ).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+    expect(await snapshot()).toEqual(before);
+    const defaultPreview = await runNoShow();
+    expect(
+      await prepareChannexStagingDay(
+        config(),
+        { ...noShowInput, noShowDate: "2026-09-20" },
+        request,
+      ),
+    ).toEqual(defaultPreview);
   });
 });

@@ -43,7 +43,7 @@ type ClaimRow = {
   email: string;
   organization_id: string;
   inviter_user_id: string;
-  role_key: "hotel_manager" | "front_desk" | "housekeeping" | "hotel_custom";
+  role_key: "hotel_manager" | "front_desk" | "housekeeping" | "hotel_custom" | "external_owner";
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -66,7 +66,7 @@ export function createPgStaffInvitationDeliveryRepository(config: RepositoryConf
               identity.external_identities provider_identity
          WHERE invitation.id = $1::uuid
            AND invitation.status = 'pending' AND invitation.delivery_state = 'ready'
-           AND invitation.role_key IN ('hotel_manager', 'front_desk', 'housekeeping', 'hotel_custom')
+           AND invitation.role_key IN ('hotel_manager', 'front_desk', 'housekeeping', 'hotel_custom', 'external_owner')
            AND organization.id = invitation.organization_id
            AND organization.kind = 'hotel_group' AND organization.status = 'active'
            AND organization.workos_org_id IS NOT NULL AND btrim(organization.workos_org_id) <> ''

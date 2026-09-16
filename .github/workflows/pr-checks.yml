@@ -182,7 +182,15 @@ jobs:
           src/marketplaceAffiliateDestinationRoutes.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
+          src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
+          src/domains/marketplaceAffiliateAssentRead.integration.test.ts
+          src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
+          src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
           src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
+          src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
+          src/domains/financeAffiliateEarningJournal.integration.test.ts
           src/domains/financeAffiliatePercentagePolicyResolver.test.ts
           src/marketplaceAffiliatePolicyRoutes.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
@@ -211,6 +219,7 @@ jobs:
           src/domains/financeExpenseReadModel.integration.test.ts
           src/domains/financeFolioCommandRepository.integration.test.ts
           src/domains/financeFolioReadRepository.integration.test.ts
+          src/domains/financeFolioExportRepository.integration.test.ts
           src/domains/financeProviderFeeEvidence.integration.test.ts
           src/domains/financeProviderFeeExpenseProjection.integration.test.ts
           src/domains/stripeProviderAccountReconciliation.integration.test.ts

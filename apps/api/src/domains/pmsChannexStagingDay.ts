@@ -28,12 +28,21 @@ export async function prepareChannexStagingDay(
     approvalRef: string;
     applyHash?: string;
     noShow?: boolean;
+    noShowDate?: string;
     catalogApprovalRef?: string;
   },
   request: typeof fetch = fetch,
 ) {
   requireState(input.noShow === undefined || typeof input.noShow === "boolean");
-  const day = input.noShow ? noShowStagingDay : stagingDay;
+  requireState(
+    input.noShowDate === undefined ||
+      (input.noShow === true &&
+        ["2026-09-15", noShowStagingDay.stayDate].includes(input.noShowDate)),
+  );
+  const day = input.noShow
+    ? { ...noShowStagingDay, stayDate: input.noShowDate ?? noShowStagingDay.stayDate }
+    : stagingDay;
+  const noShowCheckout = day.stayDate === "2026-09-15" ? "2026-09-16" : "2026-09-21";
   const auditKey = `pms.staging-day:${scope.propertyId}:${day.roomTypeId}:${day.stayDate}:v1`;
   const approvalPattern = input.noShow
     ? /^VAY-1535:[a-zA-Z0-9:_-]{1,120}$/
@@ -288,7 +297,7 @@ export async function prepareChannexStagingDay(
                 ) &&
                 a.source_booking_id === `channex:${scope.propertyId}:${a.external_booking_id}` &&
                 a.check_in === day.stayDate &&
-                a.check_out === "2026-09-21"
+                a.check_out === noShowCheckout
               : a.source_booking_id === `channex:${scope.propertyId}:${scope.bookingId}` &&
                 a.external_revision_id === scope.revisionId,
           ),

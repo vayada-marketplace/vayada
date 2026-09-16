@@ -129,7 +129,12 @@ describe("identity lifecycle command contract", () => {
 
   it.each([
     ["owner role", { roleKey: "hotel_owner" }, "invalid_role"],
-    ["broad scope", { propertyAccessMode: "all" }, "invalid_property_access_mode"],
+    [
+      "all scope with snapshot assignments",
+      { propertyAccessMode: "all" },
+      "invalid_property_access_mode",
+    ],
+    ["unknown scope", { propertyAccessMode: "unknown" }, "invalid_property_access_mode"],
     ["empty assigned scope", { propertyIds: [] }, "missing_property_assignment"],
     ["malformed property", { propertyIds: ["property_001"] }, "invalid_property_id"],
     [

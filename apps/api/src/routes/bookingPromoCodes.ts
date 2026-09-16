@@ -107,7 +107,7 @@ export async function registerBookingPromoCodeRoutes(
 
   app.get<{ Params: PromoCodesParams }>("/hotels/:hotelId/promo-codes", async (request, reply) => {
     const { hotelId } = request.params;
-    const accessError = authorize(request, hotelId);
+    const accessError = authorize(request, hotelId, "read");
     if (accessError) return sendPromoCodesError(reply, accessError);
 
     try {
@@ -693,10 +693,14 @@ function optionalRoomIds(input: Record<string, unknown>, details: string[]): str
   return ids;
 }
 
-function authorize(request: FastifyRequest, hotelId: string): BookingPromoCodesError | null {
+function authorize(
+  request: FastifyRequest,
+  hotelId: string,
+  access: "read" | "manage" = "manage",
+): BookingPromoCodesError | null {
   try {
     enforceRoutePolicy(request, {
-      permission: "booking.settings.manage",
+      permission: access === "read" ? "booking.promos.read" : "booking.promos.manage",
       entitlement: {
         product: "booking",
         key: "booking-engine",

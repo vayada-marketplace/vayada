@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  runNightlyRevenueBackfill,
   runNightlyRevenueBackfillPage,
   type NightlyRevenueBackfillPageInput,
   type NightlyRevenueBackfillPageServices,
 } from "./bookingNightlyRevenueBackfillMigration.js";
+import type { NightlyRevenueBackfillLine } from "./bookingNightlyRevenueBackfill.js";
 
 const RUN = "vay1181-0123456789abcdef01234567";
 const CURSOR = "11810000-0000-4000-8000-000000000010";
@@ -141,6 +143,90 @@ describe("nightly revenue backfill page transaction", () => {
   );
 });
 
+describe("nightly revenue backfill run", () => {
+  it("runs resumable pages and emits one aggregated reconciliation report", async () => {
+    const pool = new MultiPoolFixture();
+    const dependencies = fixture();
+    const secondCursor = "11810000-0000-4000-8000-000000000011";
+    dependencies.read = vi
+      .fn()
+      .mockResolvedValueOnce({
+        candidates: [{} as never],
+        nextGuestBookingId: CURSOR,
+        transactionId: "transaction-1",
+      })
+      .mockResolvedValueOnce({
+        candidates: [{} as never],
+        nextGuestBookingId: secondCursor,
+        transactionId: "transaction-2",
+      })
+      .mockResolvedValueOnce({ candidates: [], nextGuestBookingId: null, transactionId: null });
+    dependencies.plan = vi
+      .fn()
+      .mockReturnValueOnce(
+        planFixture(line, "10.0000", [
+          {
+            propertyId: line.propertyId,
+            guestBookingId: line.guestBookingId,
+            code: "missing_evidence",
+          },
+        ]),
+      )
+      .mockReturnValueOnce(planFixture({ ...line, guestBookingId: secondCursor }, "20.0000"))
+      .mockReturnValueOnce(planFixture(null, "0.0000"));
+    dependencies.apply = vi
+      .fn()
+      .mockResolvedValueOnce({
+        outcome: "appended",
+        requestFingerprint: "c".repeat(64),
+        bookingCount: 1,
+        insertedCount: 1,
+        sourceRevisions: { [CURSOR]: 1 },
+      })
+      .mockResolvedValueOnce({
+        outcome: "replayed",
+        requestFingerprint: "d".repeat(64),
+        bookingCount: 1,
+        insertedCount: 0,
+        sourceRevisions: { [secondCursor]: 1 },
+      });
+    dependencies.verify = vi
+      .fn()
+      .mockResolvedValueOnce(verificationFixture("10.0000"))
+      .mockResolvedValueOnce(verificationFixture("20.0000"));
+
+    const result = await runNightlyRevenueBackfill(pool as never, runInput("apply"), dependencies);
+
+    expect(result).toMatchObject({
+      complete: true,
+      pageCount: 3,
+      committedPages: 2,
+      candidateCount: 2,
+      lineCount: 2,
+      insertedRows: 1,
+      replayedPages: 1,
+    });
+    expect(result.exceptions).toEqual([
+      {
+        propertyId: line.propertyId,
+        guestBookingId: line.guestBookingId,
+        code: "missing_evidence",
+      },
+    ]);
+    expect(result.plannedReconciliation).toEqual([
+      expect.objectContaining({ bookingCount: 2, evidenceRows: 2, grossRoomAmount: "30.0000" }),
+    ]);
+    expect(result.appliedReconciliation).toEqual([
+      expect.objectContaining({ bookingCount: 2, storedRows: 2, grossRoomAmount: "30.0000" }),
+    ]);
+    expect(
+      vi.mocked(dependencies.read).mock.calls.map(([, options]) => options?.afterGuestBookingId),
+    ).toEqual([undefined, CURSOR, secondCursor]);
+    expect(pool.clients).toHaveLength(3);
+    expect(pool.clients.every(({ releasedWith }) => releasedWith[0] === false)).toBe(true);
+  });
+});
+
 class TransactionFixture {
   sql: string[] = [];
   releasedWith: boolean[] = [];
@@ -167,6 +253,14 @@ class PoolFixture {
   async connect() {
     this.connects++;
     return this.client;
+  }
+}
+class MultiPoolFixture {
+  clients: TransactionFixture[] = [];
+  async connect() {
+    const client = new TransactionFixture();
+    this.clients.push(client);
+    return client;
   }
 }
 
@@ -209,5 +303,67 @@ function fixture(): NightlyRevenueBackfillPageServices {
       revisionCount: 1,
       reconciliation: [],
     })),
+  };
+}
+
+function planFixture(
+  plannedLine: NightlyRevenueBackfillLine | null,
+  grossRoomAmount: string,
+  exceptions: Array<{ propertyId: string; guestBookingId: string; code: "missing_evidence" }> = [],
+) {
+  return {
+    fingerprint: FINGERPRINT,
+    lines: plannedLine ? [plannedLine] : [],
+    exceptions,
+    reconciliation: plannedLine
+      ? [
+          {
+            propertyId: plannedLine.propertyId,
+            stayDate: plannedLine.stayDate,
+            currency: plannedLine.currency,
+            sourceKind: plannedLine.sourceKind,
+            evidenceQuality: plannedLine.evidenceQuality,
+            bookingCount: 1,
+            evidenceRows: 1,
+            occupiedRoomNights: 1,
+            grossRoomAmount,
+            missingRows: 1,
+          },
+        ]
+      : [],
+  };
+}
+
+function runInput(mode: "dry-run" | "apply" = "dry-run") {
+  return {
+    runId: RUN,
+    mode,
+    recognizedOn: input.recognizedOn,
+    allowInferredEqualAllocation: input.allowInferredEqualAllocation,
+    limit: input.limit,
+  };
+}
+
+function verificationFixture(grossRoomAmount: string) {
+  return {
+    lineCount: 1,
+    storedRows: 1,
+    revisionCount: 1,
+    reconciliation: [
+      {
+        propertyId: line.propertyId,
+        stayDate: line.stayDate,
+        currency: line.currency,
+        sourceKind: line.sourceKind,
+        evidenceQuality: line.evidenceQuality,
+        bookingCount: 1,
+        roomNightCount: 1,
+        revisionCount: 1,
+        storedRows: 1,
+        occupiedRoomNights: 1,
+        grossRoomAmount,
+        missingRoomNights: 1,
+      },
+    ],
   };
 }
