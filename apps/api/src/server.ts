@@ -169,6 +169,10 @@ import { createPropertySetupRouteStateReadPort } from "./platform/propertySetupR
 import { runPlatformMediaCleanupJobs } from "./jobs/platformMediaCleanup.js";
 import { startPmsInboxAssignmentReconciliationWorker } from "./jobs/pmsInboxAssignmentReconciliation.js";
 import { startPmsInboxFollowUpReleaseWorker } from "./jobs/pmsInboxFollowUpRelease.js";
+import {
+  createPmsAcceptedPricingReservationWorker,
+  startPmsAcceptedPricingReservationWorker,
+} from "./domains/pmsAcceptedPricingReservationWorker.js";
 import { createPgPmsInboxDeliveryStore } from "./jobs/pmsInboxDeliveryPg.js";
 import { createPgPmsInboxDeliveryReceiptPort } from "./jobs/pmsInboxDeliveryReceipts.js";
 import { relayPmsInboxDeliveryOutbox } from "./jobs/pmsInboxDeliveryOutbox.js";
@@ -1381,9 +1385,10 @@ const app = buildApp({
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
     : undefined,
-  replacementPricing: config.pmsOperationsSource === "target"
-    ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
-    : undefined,
+  replacementPricing:
+    config.pmsOperationsSource === "target"
+      ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
+      : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
     ? {
         commandPort: pmsGuestPolicySetupCommands.pricing,
@@ -1568,8 +1573,10 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
-  marketplaceAffiliateDraftRepository: createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
-  marketplaceAffiliatePolicyRepository: createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
+  marketplaceAffiliateDraftRepository:
+    createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
+  marketplaceAffiliatePolicyRepository:
+    createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1715,6 +1722,14 @@ const pmsInboxFollowUpReleaseWorker =
       })
     : undefined;
 
+const pmsAcceptedPricingReservationWorker =
+  config.apiRuntime === "next" && config.backgroundWorkersEnabled
+    ? startPmsAcceptedPricingReservationWorker({
+        worker: createPmsAcceptedPricingReservationWorker({ connectionString: targetDatabaseUrl }),
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
+
 const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
 app.addHook("onReady", async () => {
   await bankTransferRepository?.assertConfigured();
@@ -1750,6 +1765,7 @@ app.addHook("onClose", async () => {
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
+  await pmsAcceptedPricingReservationWorker?.close();
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([

@@ -66,6 +66,41 @@ export function createPmsAcceptedPricingReservationWorker(config: {
   };
 }
 
+export function startPmsAcceptedPricingReservationWorker(config: {
+  worker: ReturnType<typeof createPmsAcceptedPricingReservationWorker>;
+  warn(error: unknown, message: string): void;
+  intervalMs?: number;
+}) {
+  let active: Promise<void> | undefined;
+  let closed = false;
+  const run = () => {
+    if (closed || active) return;
+    active = config.worker
+      .processNext()
+      .then((outcome) => {
+        if (outcome === "dead_lettered")
+          config.warn({ outcome }, "Accepted-pricing PMS adoption was dead-lettered");
+      })
+      .catch((error: unknown) =>
+        config.warn({ err: error }, "Accepted-pricing PMS adoption worker failed"),
+      )
+      .finally(() => {
+        active = undefined;
+      });
+  };
+  const timer = setInterval(run, config.intervalMs ?? 2_000);
+  timer.unref();
+  run();
+  return {
+    async close() {
+      closed = true;
+      clearInterval(timer);
+      await active;
+      await config.worker.close();
+    },
+  };
+}
+
 /** Process one locked job inside the caller's transaction. PostgreSQL's row
  * lock is the duplicate-worker lease; the wrapper above owns BEGIN/COMMIT. */
 export async function processNextPmsAcceptedPricingReservationJob(
