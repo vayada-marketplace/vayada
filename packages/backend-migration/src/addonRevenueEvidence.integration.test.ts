@@ -199,9 +199,9 @@ describe.skipIf(!connectionString)("add-on revenue evidence", () => {
           ["correction", "-10.0000", "exact", 2],
         ]),
       );
-      expect(projection.fields.map(({ name }) => name)).not.toEqual(
-        expect.arrayContaining(["addon_snapshot", "first_name", "email", "phone"]),
-      );
+      const fields = projection.fields.map(({ name }) => name);
+      for (const forbidden of ["addon_snapshot", "first_name", "email", "phone"])
+        expect(fields).not.toContain(forbidden);
       await rejects(
         () =>
           client.query("UPDATE booking.addon_revenue_evidence SET gross_amount=0 WHERE id=$1", [
