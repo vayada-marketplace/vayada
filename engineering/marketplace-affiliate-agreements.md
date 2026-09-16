@@ -248,3 +248,19 @@ recheck the matched assent, current cross-domain readiness and idempotency insid
 transaction. Pause, resume, end, replacement terms, public links and click capture remain
 separate later slices. In particular, collaboration completion has no path to mutate or
 delete the agreement identity or activation history.
+
+## Initial agreement activation command
+
+The internal activation command locks the exact program, participation, attempt, terms
+and assent decisions. It authorizes either participating hotel management or the owning
+creator before retry recovery, rechecks persisted resource links and current offer/profile
+eligibility, and calls a trusted readiness port inside the transaction. The port must prove
+open enrollment plus current hotel lifecycle, commercial, destination and tracking readiness
+for the exact scope through owner-domain adapters. Its default implementation blocks, so
+missing owner-domain integration cannot create an agreement.
+
+Successful activation atomically stores the stable agreement, immutable activation evidence
+and completed idempotency receipt using a server timestamp. Same-key retries return that
+record; changed actors or payloads conflict, and competing keys cannot create a second active
+agreement. The command remains internal. Public transport, lifecycle changes and stable link
+generation are separate slices.
