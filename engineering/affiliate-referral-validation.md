@@ -235,3 +235,19 @@ separately require a current exact production preflight for the same capability.
 Missing/conflicting run outcomes, other three capabilities, freshness, revocation-aware
 consumption and publication/activation wiring remain later slices. The table alone does
 not make a destination, publication, agreement, click or booking eligible for earnings.
+
+## Initial referral production preflight storage
+
+Migration 0218 stores immutable successful production preflight evidence for the
+`referral_round_trip` capability. It pins the exact property, destination, author
+organization, production connection and adapter version, plus a one-time correlation
+hash and bounded source references. The fixed assertion says only that a documented
+non-mutating check returned the opaque correlation without creating a booking. Database
+time replaces caller completion time, and permanent revocation preserves old evidence.
+
+This table is not readiness by itself and has no booking, creator, agreement, click,
+attribution or Finance association. Multiple historical checks are retained, while the
+same correlation cannot be replayed for any configuration. A later authorized
+verifier must create rows from real provider evidence. A later reader must define and
+enforce freshness, reject revoked or changed configuration, and require the matching
+current adapter certification before publication can consume the result.
