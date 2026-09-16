@@ -1,3 +1,4 @@
+import { prepareStagingReadiness } from "./channexStagingReadinessTestFixture.js";
 import { importChannexStagingReservation } from "../jobs/channexBookings.js";
 import {
   seedChannexAssignmentInventory,
@@ -7,7 +8,7 @@ import { persistChannexAssignments } from "./channexBookingAssignments.js";
 import { resolveStagingCatalogReference } from "./channexStagingCatalogReference.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptChannexStagingCatalog } from "./channexStagingCatalogAdoption.js";
 
 import {
@@ -61,6 +62,10 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
   afterEach(async () => {
     await db.query("BEGIN; SET LOCAL session_replication_role=replica");
     for (const table of [
+      "booking.nightly_revenue_evidence",
+      "booking.nightly_revenue_room_scopes",
+      "pms.inventory_materialization_coverage",
+      "hotel_catalog.property_locations",
       "pms.channex_staging_catalog_references",
       "pms.room_type_closures",
       "platform.product_audit_events",
@@ -83,6 +88,7 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
   const snapshot = async () => {
     const result: Record<string, unknown> = {};
     for (const table of [
+      "booking.nightly_revenue_evidence",
       "pms.room_types",
       "pms.channex_staging_catalog_references",
       "pms.rate_plans",
@@ -419,5 +425,365 @@ describe.skipIf(!databaseUrl)("staging catalog transaction", () => {
       "staging_catalog_binding_changed",
     );
     expect(await snapshot()).toEqual(before);
+  });
+  const bootstrapSnapshot = async () => {
+    const { jobs: _jobs, ...state } = await snapshot();
+    return state;
+  };
+  async function bootstrap(retainedRevision = false) {
+    // Remove the suite's imported-booking seed before exercising first import.
+    await db.query("DELETE FROM pms.channel_booking_mappings WHERE property_id=$1", [propertyId]);
+    await db.query("DELETE FROM booking.guest_bookings WHERE property_id=$1", [propertyId]);
+    await db.query("DELETE FROM platform.jobs WHERE payload->>'propertyId'=$1", [propertyId]);
+    const { data } = provider(retainedRevision);
+    const revision = data[`booking_revisions/${input.revisionId}`].attributes;
+    Object.assign(revision, {
+      arrival_date: "2026-09-14",
+      departure_date: "2026-09-15",
+      amount: "100.00",
+      ota_reservation_code: "6431849020",
+      ota_name: "BookingCom",
+    });
+    revision.rooms[0].days = { "2026-09-14": "100.00" };
+    revision.rooms[0].meta.rate_plan_code = "16385048";
+    if (!retainedRevision)
+      data[`channels/${input.channelId}`].attributes.rate_plans[0].settings.rate_plan_code =
+        "16385048";
+    const request = vi.fn<typeof fetch>(async (url, init) => {
+      const path = new URL(String(url)).pathname.replace("/api/v1/", "");
+      if (
+        init?.method !== "POST" ||
+        path === "channels/mapping_details" ||
+        path === "channels/connection_details"
+      ) {
+        if (!data[path]) throw new Error("Unexpected provider read");
+        return Response.json({ data: data[path] });
+      }
+      expect(new URL(String(url)).pathname).toBe(
+        `/api/v1/booking_revisions/${input.revisionId}/ack`,
+      );
+      return Response.json({ success: true });
+    });
+    return {
+      data,
+      request,
+      catalog: (applyHash?: string) =>
+        adoptChannexStagingCatalog(
+          config(),
+          {
+            ...input,
+            approvalRef: "VAY-2013:test",
+            channelId: retainedRevision ? undefined : input.channelId,
+            retainedRevision,
+            preImport: true,
+            applyHash,
+          },
+          request,
+        ),
+      ingest: (catalogHash?: string) =>
+        importChannexStagingReservation(
+          config(),
+          {
+            providerPropertyId: input.providerPropertyId,
+            channelBookingId: input.bookingId,
+            revision: input.revisionId,
+            approvalRef: "VAY-2013:test",
+            ...(catalogHash
+              ? {
+                  catalogHash,
+                  retainedRevision,
+                  channelId: retainedRevision ? undefined : input.channelId,
+                }
+              : {}),
+          },
+          request,
+        ),
+    };
+  }
+  it.each([false, true])(
+    "bootstraps concurrently, uses owned unpublished capacity, and imports exact OTA evidence once (retained=%s)",
+    async (retained) => {
+      const { catalog, ingest, request, data } = await bootstrap(retained);
+      expect(await ingest()).toMatchObject({
+        status: "dead_lettered",
+        failureCode: "operational_mapping_unavailable",
+      });
+      const oldJob = (
+        await db.query("SELECT * FROM platform.jobs WHERE payload->>'propertyId'=$1", [propertyId])
+      ).rows;
+      const before = await bootstrapSnapshot(),
+        preview = await catalog();
+      expect(preview.outcome).toBe("preview");
+      expect(await bootstrapSnapshot()).toEqual(before);
+      expect((await catalog()).hash).toBe(preview.hash);
+      const results = await Promise.all([catalog(preview.hash), catalog(preview.hash)]);
+      expect(results.map((r) => r.outcome).sort()).toEqual(["adopted", "replayed"]);
+      const roomTypeId = results[0].roomTypeId!;
+      expect(
+        (
+          await db.query(
+            "SELECT guest_booking_id FROM pms.channex_staging_catalog_references WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ guest_booking_id: null }]);
+      await prepareStagingReadiness(db, databaseUrl!, propertyId, roomTypeId);
+      expect(
+        (
+          await db.query(
+            "SELECT total_count,available_count FROM pms.inventory_days WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ total_count: 1, available_count: 1 }]);
+      await Promise.all([ingest(preview.hash), ingest(preview.hash)]);
+      expect(await ingest(preview.hash)).toMatchObject({ status: "succeeded" });
+      const after = await bootstrapSnapshot();
+      expect(
+        (
+          await db.query(
+            "SELECT COALESCE(sum(available_rooms) FILTER (WHERE sellable_publicly),0)::int available FROM distribution.public_room_offer_snapshots WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([{ available: 0 }]);
+      for (const table of [
+        "booking.guest_bookings",
+        "pms.channel_booking_mappings",
+        "pms.operational_booking_assignments",
+        "booking.nightly_revenue_evidence",
+        "pms.room_types",
+        "pms.channex_staging_catalog_references",
+      ])
+        expect(after[table]).toHaveLength(1);
+      expect(after["booking.nightly_revenue_evidence"]).toMatchObject([
+        {
+          currency: "GBP",
+          gross_room_amount: "100.0000",
+          source_kind: "ota",
+          evidence_quality: "exact",
+        },
+      ]);
+      expect(after["pms.operational_booking_assignments"]).toMatchObject([
+        { rate_plan_id: null, assignment_status: "pending", room_id: null },
+      ]);
+      expect(after["pms.inventory_days"]).toMatchObject([
+        { assigned_count: 1, available_count: 0 },
+      ]);
+      expect(await ingest(preview.hash)).toMatchObject({ status: "succeeded" });
+      expect(await bootstrapSnapshot()).toEqual(after);
+      expect(
+        (await db.query("SELECT * FROM platform.jobs WHERE id=$1", [oldJob[0].id])).rows,
+      ).toEqual(oldJob);
+      expect(
+        (await db.query("SELECT * FROM pms.rate_plans WHERE property_id=$1", [propertyId])).rows,
+      ).toEqual([]);
+    },
+  );
+  it.each([false, true])(
+    "rolls back the import when capacity is absent, retaining only bootstrap and failed job evidence (retained=%s)",
+    async (retained) => {
+      const { catalog, ingest, request, data } = await bootstrap(retained);
+      const preview = await catalog();
+      await catalog(preview.hash);
+      const before = await bootstrapSnapshot();
+      expect(await ingest(preview.hash)).toMatchObject({
+        status: "pending",
+        failureCode: "operational_inventory_unavailable",
+      });
+      expect(await bootstrapSnapshot()).toEqual(before);
+      expect(
+        vi.mocked(request).mock.calls.filter(([url]) => String(url).endsWith("/ack")),
+      ).toHaveLength(0);
+    },
+  );
+  it.each([false, true])(
+    "rejects changed provider/binding facts and refuses normal import reference fallback (retained=%s)",
+    async (retained) => {
+      const { catalog, ingest, request, data } = await bootstrap(retained);
+      const preview = await catalog();
+      data[`booking_revisions/${input.revisionId}`].attributes.rooms[0].days["2026-09-14"] =
+        "101.00";
+      await expect(catalog(preview.hash)).rejects.toThrow("staging_catalog_evidence_changed");
+      data[`booking_revisions/${input.revisionId}`].attributes.rooms[0].days["2026-09-14"] =
+        "100.00";
+      await db.query(
+        "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+        [propertyId],
+      );
+      await expect(catalog(preview.hash)).rejects.toThrow("staging_catalog_evidence_changed");
+      const current = await catalog();
+      await catalog(current.hash);
+      const before = await bootstrapSnapshot();
+      expect(await ingest()).toMatchObject({
+        status: "dead_lettered",
+        failureCode: "operational_mapping_unavailable",
+      });
+      expect(await bootstrapSnapshot()).toEqual(before);
+      await db.query(
+        "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+        [propertyId],
+      );
+      await expect(ingest(current.hash)).rejects.toThrow("staging_catalog_replay_conflict");
+    },
+  );
+  it.each(["exact", "name", "occupancy_limits", "room_attributes"])(
+    "reuses only compatible staging room facts: %s",
+    async (field) => {
+      const { catalog, data, request } = await bootstrap(),
+        first = await catalog();
+      const adopted = await catalog(first.hash);
+      const next = { ...input, bookingId: randomUUID(), revisionId: randomUUID(), preImport: true };
+      data[`booking_revisions/${next.revisionId}`] = structuredClone(
+        data[`booking_revisions/${input.revisionId}`],
+      );
+      data[`booking_revisions/${next.revisionId}`].id = next.revisionId;
+      data[`booking_revisions/${next.revisionId}`].attributes.booking_id = next.bookingId;
+      if (field !== "exact") {
+        const changes = {
+          name: "Changed",
+          occupancy_limits: { total: 3, adults: 3, children: 0 },
+          room_attributes: { channexStagingAdoption: { providerRoomCount: 2 } },
+        };
+        await db.query(`UPDATE pms.room_types SET ${field}=$2 WHERE id=$1`, [
+          adopted.roomTypeId,
+          changes[field as keyof typeof changes],
+        ]);
+        const before = await bootstrapSnapshot();
+        await expect(adoptChannexStagingCatalog(config(), next, request)).rejects.toThrow(
+          "staging_catalog_mapping_conflict",
+        );
+        expect(await bootstrapSnapshot()).toEqual(before);
+        return;
+      }
+      const preview = await adoptChannexStagingCatalog(config(), next, request);
+      expect(
+        await adoptChannexStagingCatalog(config(), { ...next, applyHash: preview.hash }, request),
+      ).toMatchObject({ outcome: "adopted", roomTypeId: adopted.roomTypeId });
+      expect(
+        (await db.query("SELECT id FROM pms.room_types WHERE property_id=$1", [propertyId])).rows,
+      ).toHaveLength(1);
+      expect(
+        (
+          await db.query(
+            "SELECT id FROM pms.channex_staging_catalog_references WHERE property_id=$1",
+            [propertyId],
+          )
+        ).rows,
+      ).toHaveLength(2);
+    },
+  );
+  it.each([false, true])(
+    "blocks the competing import key while catalog=%s is pending",
+    async (catalogFirst) => {
+      const { catalog, ingest, request } = await bootstrap(),
+        preview = await catalog();
+      await catalog(preview.hash);
+      const provider = request.getMockImplementation()!;
+      let reads = 0;
+      request.mockImplementation(async (url, init) => {
+        if (String(url).endsWith(input.revisionId) && ++reads === (catalogFirst ? 2 : 1))
+          return new Response(null, { status: 503 });
+        return provider(url, init);
+      });
+      expect(await ingest(catalogFirst ? preview.hash : undefined)).toMatchObject({
+        status: "pending",
+      });
+      request.mockImplementation(provider);
+      const before = (
+        await db.query("SELECT * FROM platform.jobs WHERE payload->>'propertyId'=$1", [propertyId])
+      ).rows;
+      await expect(ingest(catalogFirst ? undefined : preview.hash)).rejects.toThrow(
+        "staging_original_import_in_progress",
+      );
+      expect(
+        (
+          await db.query("SELECT * FROM platform.jobs WHERE payload->>'propertyId'=$1", [
+            propertyId,
+          ])
+        ).rows,
+      ).toEqual(before);
+    },
+  );
+  it.each(["revision", "mapping", "retained-crs", "retained-channel"])(
+    "rejects changed %s after receipt verification without partial writes",
+    async (change) => {
+      const retainedRevision = change.startsWith("retained-");
+      const { catalog, data, request } = await bootstrap(retainedRevision),
+        preview = await catalog();
+      await catalog(preview.hash);
+      let before = await bootstrapSnapshot();
+      let reads = 0;
+      const changed: typeof fetch = async (url, init) => {
+        if (String(url).endsWith(input.revisionId) && ++reads === 2) {
+          if (change === "revision")
+            data[`booking_revisions/${input.revisionId}`].attributes.rooms[0].days["2026-09-14"] =
+              "101.00";
+          else if (retainedRevision) {
+            const attributes = data[`booking_revisions/${input.revisionId}`].attributes;
+            if (change === "retained-crs") attributes.is_crs_revision = true;
+            else attributes.channel_id = input.channelId;
+          } else {
+            const rate = (
+              await db.query(
+                `INSERT INTO pms.rate_plans(property_id,room_type_id,code,name,currency)
+            SELECT property_id,room_type_id,'conflict','Conflict','EUR' FROM pms.channex_staging_catalog_references WHERE property_id=$1 RETURNING id`,
+                [propertyId],
+              )
+            ).rows[0];
+            await db.query(
+              `INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,external_room_type_id,external_rate_plan_id)
+            SELECT property_id,connection_id,room_type_id,$2,external_room_type_id,external_rate_plan_id FROM pms.channex_staging_catalog_references WHERE property_id=$1`,
+              [propertyId, rate.id],
+            );
+            before = await bootstrapSnapshot();
+          }
+        }
+        return request(url, init);
+      };
+      expect(
+        await importChannexStagingReservation(
+          config(),
+          {
+            providerPropertyId: input.providerPropertyId,
+            channelBookingId: input.bookingId,
+            revision: input.revisionId,
+            approvalRef: "VAY-2013:test",
+            catalogHash: preview.hash,
+            retainedRevision,
+            channelId: retainedRevision ? undefined : input.channelId,
+          },
+          changed,
+        ),
+      ).toMatchObject({
+        status: "dead_lettered",
+        failureCode: retainedRevision
+          ? "invalid_retained_revision_scope"
+          : change === "revision"
+            ? "staging_catalog_revision_changed"
+            : "operational_mapping_unavailable",
+      });
+      expect(await bootstrapSnapshot()).toEqual(before);
+    },
+  );
+  it("rolls back assignments, occupancy and booking when nightly evidence persistence fails", async () => {
+    const { catalog, ingest } = await bootstrap(),
+      preview = await catalog(),
+      adopted = await catalog(preview.hash);
+    await prepareStagingReadiness(db, databaseUrl!, propertyId, adopted.roomTypeId!);
+    const before = await bootstrapSnapshot();
+    await db.query(`CREATE FUNCTION pms.vay2013_reject_revenue() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.property_id='${propertyId}'::uuid THEN RAISE EXCEPTION 'synthetic revenue failure' USING ERRCODE='23514'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER vay2013_reject_revenue BEFORE INSERT ON booking.nightly_revenue_evidence FOR EACH ROW EXECUTE FUNCTION pms.vay2013_reject_revenue()`);
+    try {
+      expect(await ingest(preview.hash)).toMatchObject({
+        status: "pending",
+        failureCode: "write_unavailable",
+      });
+      expect(await bootstrapSnapshot()).toEqual(before);
+    } finally {
+      await db.query(
+        "DROP TRIGGER vay2013_reject_revenue ON booking.nightly_revenue_evidence; DROP FUNCTION pms.vay2013_reject_revenue()",
+      );
+    }
   });
 });

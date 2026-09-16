@@ -1,16 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { expect, vi } from "vitest";
 import { loadConfig } from "../config.js";
+import { retainedRevisionScope as retained } from "./channexStagingCatalogEvidence.js";
 export const databaseUrl = process.env.TEST_DATABASE_URL;
 if (databaseUrl && !new URL(databaseUrl).pathname.endsWith("_test"))
   throw new Error("Test database required");
-export const propertyId = randomUUID(),
-  roomId = randomUUID(),
-  rateId = randomUUID();
+export const propertyId = retained.propertyId,
+  roomId = retained.roomId,
+  rateId = retained.rateId;
 export const input = {
-  providerPropertyId: randomUUID(),
-  bookingId: randomUUID(),
-  revisionId: randomUUID(),
+  providerPropertyId: retained.providerPropertyId,
+  bookingId: retained.bookingId,
+  revisionId: retained.revisionId,
   channelId: randomUUID(),
   approvalRef: "VAY-1981:catalog-test",
 };
@@ -27,7 +28,7 @@ export const config = () => ({
   apiRuntime: "next" as const,
 });
 export const relation = (id: string) => ({ data: { id } });
-export function provider() {
+export function provider(retainedRevision = false) {
   const data: Record<string, any> = {
     [`booking_revisions/${input.revisionId}`]: {
       id: input.revisionId,
@@ -91,10 +92,45 @@ export function provider() {
       relationships: { property: relation(input.providerPropertyId), room_type: relation(roomId) },
     },
   };
+  if (retainedRevision) {
+    Object.assign(data[`booking_revisions/${input.revisionId}`].attributes, {
+      channel_id: null,
+      is_crs_revision: false,
+      ota_reservation_code: retained.otaBookingCode,
+    });
+    data[`booking_revisions/${input.revisionId}`].attributes.rooms[0].meta.rate_plan_code =
+      retained.otaRateCode;
+    data["channels/mapping_details"] = {
+      pricing_type: "Standard",
+      rooms: [
+        {
+          id: retained.otaRoomCode,
+          rates: [
+            {
+              id: retained.otaRateCode,
+              pricing: "Standard",
+              readonly: false,
+              parent_rate_id: "",
+              max_persons: 2,
+            },
+          ],
+        },
+      ],
+    };
+    data["channels/connection_details"] = { attributes: { currency: "GBP" } };
+    delete data[`channels/${input.channelId}`];
+  }
   const request = vi.fn<typeof fetch>(async (url, init) => {
-    expect(init?.method ?? "GET").toBe("GET");
     expect(init?.redirect).toBe("error");
     const path = new URL(String(url)).pathname.replace("/api/v1/", "");
+    expect(init?.method ?? "GET").toBe(
+      retainedRevision && path.startsWith("channels/") ? "POST" : "GET",
+    );
+    if (init?.method === "POST")
+      expect(JSON.parse(String(init.body))).toEqual({
+        channel: "BookingCom",
+        settings: { hotel_id: retained.hotelId },
+      });
     if (!data[path]) throw new Error("Unexpected provider path");
     return Response.json({ data: data[path] });
   });

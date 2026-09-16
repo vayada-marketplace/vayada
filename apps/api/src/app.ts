@@ -1,3 +1,5 @@
+import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
@@ -13,6 +15,10 @@ import {
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import type { AffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { registerMarketplaceAffiliateCompletionRoutes } from "./routes/marketplaceAffiliateCompletion.js";
+import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import { registerMarketplaceAffiliateDestinationRoutes } from "./routes/marketplaceAffiliateDestinations.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -368,8 +374,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
+  marketplaceAffiliateAssentRepository?: AffiliateAssentRepository;
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
+  marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
+  marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -594,10 +603,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceAffiliateAdminRepository,
     });
   }
+  if (options.marketplaceAffiliateCompletionRepository) {
+    app.register(registerMarketplaceAffiliateCompletionRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateCompletionRepository,
+    });
+  }
+  if (options.marketplaceAffiliateDestinationRepository) {
+    app.register(registerMarketplaceAffiliateDestinationRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateDestinationRepository,
+    });
+  }
   if (options.marketplaceAffiliatePolicyRepository) {
     app.register(registerMarketplaceAffiliatePolicyRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliatePolicyRepository,
+    });
+  }
+  if (options.marketplaceAffiliateAssentRepository) {
+    app.register(registerMarketplaceAffiliateAssentRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateAssentRepository,
     });
   }
   if (options.marketplaceAffiliateDraftRepository) {

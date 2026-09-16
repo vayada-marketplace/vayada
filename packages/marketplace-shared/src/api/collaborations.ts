@@ -8,6 +8,25 @@ export type MarketplaceCollaborationReadsContractVersion =
 
 export type MarketplaceCollaborationSide = "creator" | "hotel";
 
+export type MarketplaceAffiliateAssentRead = {
+  participationId: string;
+  attemptId: string;
+  programId: string;
+  propertyId: string;
+  offerId: string;
+  creatorProfileId: string;
+  origin: "application" | "invitation";
+  revision: number;
+  assentState: "pending" | "matched";
+  terms: {
+    id: string;
+    disclosure: string;
+    disclosureHash: string;
+  };
+  hotelApprovedAt: string | null;
+  creatorAcceptedAt: string | null;
+};
+
 export type MarketplaceCollaborationStatus =
   | "pending"
   | "negotiating"
@@ -341,6 +360,8 @@ export const marketplaceCollaborationEndpoints = {
     `/api/marketplace/collaborations/me${toCollaborationQuery(input)}`,
   collaboration: (collaborationId: string, side: MarketplaceCollaborationSide) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}?side=${side}`,
+  affiliateAssent: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-assent`,
   conversations: (
     input: {
       side?: MarketplaceCollaborationSide;
@@ -387,6 +408,16 @@ export async function getMarketplaceCollaboration(
 ): Promise<MarketplaceCollaborationRead> {
   return vayadaApiClient.get<MarketplaceCollaborationRead>(
     marketplaceCollaborationEndpoints.collaboration(collaborationId, side),
+  );
+}
+
+export async function getMarketplaceCollaborationAffiliateAssent(
+  collaborationId: string,
+  options?: RequestInit,
+): Promise<MarketplaceAffiliateAssentRead> {
+  return vayadaApiClient.get<MarketplaceAffiliateAssentRead>(
+    marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
+    options,
   );
 }
 

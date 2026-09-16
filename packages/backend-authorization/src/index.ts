@@ -83,7 +83,8 @@ export type EffectivePropertyAccess = {
 
 export type TargetPropertyResource =
   | { product: "booking"; resourceType: "booking_hotel" }
-  | { product: "pms"; resourceType: "pms_property" };
+  | { product: "pms"; resourceType: "pms_property" }
+  | { product: "marketplace"; resourceType: "hotel_profile" };
 
 export type PropertyAccessRequirement = {
   propertyId: string;

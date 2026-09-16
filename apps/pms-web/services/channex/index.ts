@@ -128,6 +128,7 @@ function identity(operationType: ChannexOperationType) {
 }
 
 export interface ChannexAlert {
+  stagingRecoveryAvailable?: boolean;
   id: string;
   eventType: string;
   impact: Record<string, string | null>;
