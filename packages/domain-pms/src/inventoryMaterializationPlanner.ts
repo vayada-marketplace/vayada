@@ -305,6 +305,17 @@ function newDay(
   };
 }
 
+/** Validate canonical owned counts without recalculating or rematerializing a day. */
+export function isPmsInventoryDayConsistent(
+  value: unknown,
+  binding: PmsOperatingCalendarRoomBinding,
+): boolean {
+  const day = parseCurrentDay(value);
+  return (
+    day !== null && day.roomTypeId === binding.roomTypeId && validCurrentInvariant(day, binding)
+  );
+}
+
 function validCurrentInvariant(
   day: PmsInventoryDaySnapshot,
   binding: PmsOperatingCalendarRoomBinding,

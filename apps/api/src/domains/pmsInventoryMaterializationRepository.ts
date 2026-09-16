@@ -6,6 +6,7 @@ import {
   PMS_INVENTORY_MATERIALIZATION_IDEMPOTENCY,
   PMS_INVENTORY_PROJECTION_REFRESH_DESTINATION,
   evaluatePmsInventoryLaunchReadiness,
+  isPmsInventoryDayConsistent,
   parsePmsOperatingCalendarPropertyProfileEvidence,
   parsePmsOperatingCalendarSourceRevision,
   planPmsInventoryMaterialization,
@@ -79,7 +80,12 @@ export type PmsInventoryMaterializationRepositoryConfig = Readonly<{
 }>;
 
 export type PmsInventoryMaterializationRepository = PmsInventoryMaterializationPort &
-  PmsInventoryLaunchReadinessReadPort & { close(): Promise<void> };
+  PmsInventoryLaunchReadinessReadPort & {
+    getCurrentInventoryDay(
+      request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+    ): ReturnType<typeof readCurrentInventoryDay>;
+    close(): Promise<void>;
+  };
 
 type IdempotencyRow = {
   id: string;
@@ -176,6 +182,8 @@ export function createPgPmsInventoryMaterializationRepository(
       return executeMaterialization(pool, config, normalized, acceptedAt);
     },
 
+    getCurrentInventoryDay: (request) => readCurrentInventoryDay(pool, config, request),
+
     async getInventoryLaunchReadiness(request) {
       const requiredCoverage = normalizeRequiredCoverage(request.requiredCoverage);
       const propertyId = normalizeUuid(request.propertyId);
@@ -217,6 +225,113 @@ export function createPgPmsInventoryMaterializationRepository(
       if (ownsPool) await pool.end();
     },
   };
+}
+
+/** Internal source snapshot only. Callers separately prove scope and delivery authority. */
+async function readCurrentInventoryDay(
+  pool: PmsInventoryMaterializationRepositoryPool,
+  config: PmsInventoryMaterializationRepositoryConfig,
+  request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+) {
+  const propertyId = normalizeUuid(request.propertyId),
+    roomTypeId = normalizeUuid(request.roomTypeId);
+  const horizon = normalizeRequiredCoverage({ from: request.stayDate, through: request.stayDate });
+  const unavailable = (reason: string) => ({ kind: "unavailable" as const, reason });
+  if (!propertyId || !roomTypeId || !horizon) return unavailable("invalid_request");
+  const current =
+    await config.operatingCalendar.getCurrentOperatingCalendarConfiguration(propertyId);
+  if (
+    !current ||
+    current.sourceStatus !== "current" ||
+    current.configuration.propertyId !== propertyId
+  )
+    return unavailable("configuration_not_current");
+  const expectedProfileRevision = propertyProfileRevision(current.configuration);
+  if (expectedProfileRevision === null) return unavailable("configuration_not_current");
+  const client = await pool.connect();
+  let committed = false;
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL statement_timeout='5s'");
+    await client.query("SET LOCAL lock_timeout='150ms'");
+    await lockPmsInventoryMutationScope(client, propertyId);
+    return await config.propertyProfileEvidence.runWithPropertyProfileEvidence(
+      { propertyId, expectedProfileRevision },
+      async (profile) => {
+        if (
+          !profileEvidenceMatchesConfiguration(
+            profile,
+            current.configuration,
+            config.propertyProfileEvidence,
+          )
+        )
+          return unavailable("configuration_not_current");
+        await lockPmsRoomFactsMutationScope(client, propertyId);
+        for (const binding of [...current.configuration.sourceInputs.roomBindings].sort((a, b) =>
+          compareCodeUnits(a.roomTypeId, b.roomTypeId),
+        ))
+          await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, binding.roomTypeId);
+        const exact = await loadLockedCurrentConfiguration(
+          client,
+          propertyId,
+          config.propertyProfileEvidence,
+        );
+        if (
+          !exact ||
+          !sameConfigurationIdentity(current.configuration, exact) ||
+          !(await roomFactsStillMatch(client, exact)) ||
+          !(await capacitiesStillMatch(config.roomCapacity, exact))
+        )
+          return unavailable("configuration_not_current");
+        const binding = exact.sourceInputs.roomBindings.find(
+          (room) => room.roomTypeId === roomTypeId,
+        );
+        if (!binding) return unavailable("room_unavailable");
+        const coverage = await lockCoverage(client, propertyId);
+        if (
+          !coverage ||
+          positiveInteger(coverage.calendarRevision) !== exact.calendarRevision ||
+          positiveInteger(coverage.materializedRevision) !== exact.calendarRevision ||
+          requireDatabaseDate(coverage.coverageFrom) > horizon.from ||
+          requireDatabaseDate(coverage.coverageThrough) < horizon.through
+        )
+          return unavailable("coverage_unavailable");
+        const days = await lockPmsInventoryDaysForMaterialization(
+          client,
+          { propertyId, horizon },
+          exact,
+        );
+        const day = days.find(
+          (item) => item.roomTypeId === roomTypeId && item.stayDate === horizon.from,
+        );
+        if (
+          !day ||
+          day.calendarRevision !== exact.calendarRevision ||
+          !isPmsInventoryDayConsistent(day, binding)
+        )
+          return unavailable("inventory_day_unavailable");
+        const result = {
+          kind: "available" as const,
+          day,
+          configurationSource: exact.source,
+          propertyProfileSource: exact.sourceInputs.propertyProfile,
+          propertyTimeZone: exact.sourceInputs.propertyTimeZone,
+          materializedRevision: positiveInteger(coverage.materializedRevision),
+          sourceRoomFactsRevision: binding.sourceRoomFactsRevision,
+          sourceRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+        };
+        await client.query("COMMIT");
+        committed = true;
+        return result;
+      },
+    );
+  } catch (error) {
+    if (error instanceof InventoryInvariantError) return unavailable("inventory_day_unavailable");
+    throw error;
+  } finally {
+    if (!committed) await rollbackQuietly(client);
+    client.release();
+  }
 }
 
 async function executeMaterialization(
@@ -623,7 +738,7 @@ async function lockCoverage(
 
 export async function lockPmsInventoryDaysForMaterialization(
   client: PmsInventoryMaterializationRepositoryClient,
-  command: PmsInventoryMaterializationCommand,
+  command: Pick<PmsInventoryMaterializationCommand, "propertyId" | "horizon">,
   configuration: PmsOperatingCalendarConfigurationSnapshot,
 ): Promise<readonly PmsInventoryDaySnapshot[]> {
   const roomTypeIds = configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId);

@@ -1139,3 +1139,27 @@ cannot establish readiness for changed inventory. Full activation must combine
 current room coverage with rate/configuration/guest/meal/channel evidence and the
 existing publication/binding/version compare-and-swap. This section defines the
 next implementation boundary; it grants no sender or activation permission.
+
+### PMS current daily inventory reader
+
+Expose an internal PMS repository reader for one property/room/date. This is
+point-in-time source evidence, not job authorization, provider identity, a send
+permit or activation. Validate the requested calendar date; do not substitute
+zero for a missing row or missing materialized coverage.
+
+Match materialization lock order: inventory mutation scope, property-profile
+evidence guard, room-facts scope, sorted physical-room-unit scopes, then current
+configuration, coverage and inventory rows. Confirm the configuration under
+those locks on the same client; calling the separate-pool calendar reader while
+holding its room-facts lock would self-block. Use the canonical inventory planner
+invariant validator and current profile/room-facts/unit/calendar evidence. Retain
+the exact day, source revision vector and configuration/coverage identity.
+
+Booking/block/manual/channel/linked fields are current canonical owner state:
+their writers advance values and revisions atomically under the inventory lock.
+They do not have a second asynchronous revision registry to compare. Legacy
+`source_freshness` JSON is not current materialized evidence and cannot replace
+these checks. Closed or linked-stop-sell days may return an explicitly verified
+zero; malformed/inconsistent data returns unavailable. Every future dispatch and
+activation consumer must recheck this point-in-time evidence in its own current
+transaction and also prove Channex authority/room ownership.
