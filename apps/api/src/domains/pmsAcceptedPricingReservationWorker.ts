@@ -79,6 +79,8 @@ export async function processNextPmsAcceptedPricingReservationJob(
     await finishFailure(client, claim, "invalid_payload", "invalid_job_payload", true);
     return "dead_lettered";
   }
+  await client.query("SAVEPOINT pms_accepted_pricing_job");
+  let outcome: "adopted" | "replayed";
   try {
     await lockPmsInventoryMutationScope(client, reference.propertyId);
     const command = await loadAcceptedPricingReservation(client, reference);
@@ -87,9 +89,11 @@ export async function processNextPmsAcceptedPricingReservationJob(
       await createPgPmsAcceptedPricingReservationPort(client).adoptAcceptedPricingReservation(
         command,
       );
-    await finishSuccess(client, claim, result.outcome);
-    return result.outcome;
+    outcome = result.outcome;
+    await client.query("RELEASE SAVEPOINT pms_accepted_pricing_job");
   } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT pms_accepted_pricing_job");
+    await client.query("RELEASE SAVEPOINT pms_accepted_pricing_job");
     const terminal = error instanceof PmsAcceptedPricingReservationConflict;
     const exhausted = claim.attemptsCount >= claim.maxAttempts;
     const reason = terminal
@@ -106,6 +110,8 @@ export async function processNextPmsAcceptedPricingReservationJob(
     );
     return terminal || exhausted ? "dead_lettered" : "deferred";
   }
+  await finishSuccess(client, claim, outcome);
+  return outcome;
 }
 
 async function claimNext(client: PoolClient, workerId: string): Promise<Claim | null> {
