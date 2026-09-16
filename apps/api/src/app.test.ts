@@ -17507,6 +17507,7 @@ describe("vayada-api", () => {
 
   it.each([
     [{ chargesSettled: [123] }, "chargesSettled entries must be UUIDs."],
+    [{ fulfilledAddonSelectionIds: null }, "fulfilledAddonSelectionIds entries must be unique UUIDs."],
     [
       { fulfilledAddonSelectionIds: ["f6855600-0000-0000-0000-000000000001", "F6855600-0000-0000-0000-000000000001"] },
       "fulfilledAddonSelectionIds entries must be unique UUIDs.",

@@ -7217,7 +7217,7 @@ function toCheckOutCommand(
   if (!Array.isArray(raw.chargesSettled)) {
     return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
   }
-  const fulfilledAddonSelectionIds = raw.fulfilledAddonSelectionIds ?? [];
+  const fulfilledAddonSelectionIds = raw.fulfilledAddonSelectionIds === undefined ? [] : raw.fulfilledAddonSelectionIds;
   if (
     !Array.isArray(fulfilledAddonSelectionIds) ||
     !fulfilledAddonSelectionIds.every(
