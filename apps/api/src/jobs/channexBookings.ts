@@ -210,7 +210,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       const current=(await client.query<{status:string}>(`SELECT lifecycle_status status FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,[guestBookingId,job.propertyId])).rows[0];
       if(!current||(current.status!=="confirmed"&&(current.status!=="canceled"||revision.status!=="canceled")))throw new ChannexAssignmentConflict("operational_booking_terminal");
       alreadyCanceled=current.status==="canceled";
-      if(financialHistory&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId}))throw new Failure("alteration_finance_reconciliation_required",false);
+      if(financialHistory&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId},true))throw new Failure("alteration_finance_reconciliation_required",false);
       if(!alterationApplied)await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
            adults=$6,children=$7,room_count=$8,currency=$9,total_amount=COALESCE($10::numeric,total_amount),
            balance_amount=CASE WHEN payment_status='unpaid' THEN COALESCE($10::numeric,balance_amount) ELSE balance_amount END,updated_at=now()

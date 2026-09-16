@@ -67,8 +67,21 @@ new snapshot. Gross revenue/payment/folio safeguards remain in place.
 Once a booking has provider financial history, importing a new revision without the
 port is rejected. Ordinary modified revisions use the existing assignment conflict
 and availability checks, then append a full provider snapshot in the same transaction.
-They bypass the generic gross-revenue importer. Existing gross revenue, payments or
-folios block this path until their separate reconciliation is supported.
+They bypass the generic provider-amount-as-gross importer. The Finance capture also
+uses `appendChannexNightlyRevenueEvidence` with unknown gross nightly amounts and
+`appendExternalNightlyRevenueEconomics`, so Booking corrections and linked Finance
+commission corrections share the transaction. Provider commission remains separate
+from the rule-based commission evidence; it is never deducted from payout again.
+
+The coordinator locks the Hotel Catalog property and location and verifies that
+the latest operating calendar uses that exact profile revision and timezone. It
+supplies this provenance to the economics writer. A stale/missing profile or timezone
+rejects the entire import. Existing revenue is eligible only when every OTA revenue
+entry has its original linked commission evidence. Missing links, manual revenue,
+existing retained charges, payments and folios remain unsupported. Corrections reuse
+the original commission rule; they never reconstruct a historical rule from today's
+configuration. Staff decision preflight remains conservative until the production
+settings resolver and this coordinator can be guaranteed before a provider send.
 
 Cancellation revisions with currency, provider/channel identity
 and verified settings append a `replacement: cancellation` snapshot. Commission is
@@ -103,8 +116,10 @@ The remaining dependencies prevent production activation:
   promotes current settings into that guarantee.
 - **Financial reconciliation.** Ordinary
   tracked modifications and cancellations, including unknown provider totals, have
-  a transactional path described above. Bookings with gross revenue/payment/folio
-  evidence remain guarded. Missing cancellation totals are stored as unknown, never
+  a transactional path described above. Bookings with revenue evidence lacking
+  linked commission history, retained charges, payments or folios remain guarded.
+  Linked OTA revenue can now be corrected through the atomic economics writer.
+  Missing cancellation totals are stored as unknown, never
   zero or a refund. Do not enable the
   feature generally until the guarded cases have an operational resolution path.
 

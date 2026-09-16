@@ -1,3 +1,4 @@
+import { appendChannexNightlyRevenueEvidence } from "./channexBookingNightlyRevenueEvidence.js";
 import { z } from "zod";
 import { appendFinanceAirbnbProviderSnapshot } from "./financeAirbnbProviderSnapshot.js";
 import type { ExternalRevenueEvidenceClient } from "./bookingExternalNightlyRevenueEvidence.js";
@@ -61,7 +62,7 @@ export async function captureChannexAlterationFinance(
       [input.propertyId, input.bookingId],
     )
   ).rows[0];
-  await appendFinanceAirbnbProviderSnapshot(client, {
+  const captured = await appendFinanceAirbnbProviderSnapshot(client, {
     propertyId: input.propertyId,
     bookingId: input.bookingId,
     previousRevisionId: current?.revisionId ?? null,
@@ -69,5 +70,25 @@ export async function captureChannexAlterationFinance(
     settingsEvidence: evidence,
     rawRevision: input.rawRevision,
     revisionScope: input.revisionScope,
+  });
+  if (captured.outcome === "replayed") return;
+  const canceled = attributes["status"] === "cancelled" || attributes["status"] === "canceled";
+  await appendChannexNightlyRevenueEvidence(client, {
+    propertyId: input.propertyId,
+    bookingId: input.bookingId,
+    providerBookingId: input.revisionScope.providerBookingId,
+    revisionId: input.revisionScope.revisionId,
+    revisionAt: input.providerRevisionAt,
+    canceled,
+    retainedCharges: [],
+    captureEconomics: true,
+    // Provider payout/guest-paid slices cannot establish gross room revenue.
+    rooms: canceled
+      ? []
+      : input.revisionScope.rooms.map(() => ({
+          checkIn: input.revisionScope.checkIn,
+          checkOut: input.revisionScope.checkOut,
+          days: null,
+        })),
   });
 }

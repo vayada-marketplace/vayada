@@ -207,7 +207,7 @@ export async function applyChannexAlterationRevision(
         assignment.roomTypeId === matches[0]!.roomTypeId,
     };
   });
-  if (await hasBookingFinancialEvidence(client, scope))
+  if (await hasBookingFinancialEvidence(client, scope, Boolean(captureFinancials)))
     throw new Error("alteration_finance_reconciliation_required");
   await assertChannexAlterationAvailability(client, {
     propertyId: scope.propertyId,

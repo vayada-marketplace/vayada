@@ -1,3 +1,6 @@
+import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
+import { captureChannexAlterationFinance } from "./channexAlterationFinance.js";
+import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -912,6 +915,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     }
     await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
     financeEnabled = true;
+    await admin.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Berlin')",
+      [propertyId],
+    );
     await admin.query("UPDATE platform.jobs SET max_attempts=10 WHERE id=$1", [jobId]);
     for (const invalid of ["missing", "wrong_binding"] as const) {
       settingsState = invalid;
@@ -955,6 +962,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         (
           await admin.query(
             "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
             [bookingId],
           )
         ).rows[0].n,
@@ -1052,6 +1075,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     }
     // Restore the untracked synthetic fixture for the existing generic lifecycle regressions.
     await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await admin.query("DELETE FROM finance.ota_commission_evidence WHERE guest_booking_id=$1", [
+      bookingId,
+    ]);
+    await admin.query("DELETE FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1", [
+      bookingId,
+    ]);
     await admin.query("DELETE FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1", [
       bookingId,
     ]);
@@ -1340,7 +1369,33 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         ).rows[0].n,
       ).toBe(snapshots);
     };
+    const originalRule = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.commission_rules(id,property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision) VALUES($1,$2,'property','pms','percentage',10,'2026-01-01','finance','airbnb',1)",
+      [originalRule, propertyId],
+    );
     await nextWorkerRevision();
+    const historicalRevision = structuredClone(providerRevision);
+    expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId }, true)).toBe(false);
+    expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId })).toBe(true);
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    try {
+      await admin.query("DELETE FROM finance.ota_commission_evidence WHERE guest_booking_id=$1", [
+        bookingId,
+      ]);
+      expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId }, true)).toBe(true);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1",
+      [propertyId],
+    );
+    await rejectTrackedRevision("nightly_revenue_evidence_conflict");
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision-1 WHERE id=$1",
+      [propertyId],
+    );
     // Ordinary modifications must roll back canonical changes when evidence is unavailable.
     providerRevision.attributes.amount = "40.00";
     settingsState = "missing";
@@ -1354,6 +1409,60 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await rejectTrackedRevision("alteration_finance_reconciliation_required");
     await admin.query("DELETE FROM finance.payments WHERE id=$1", [protectedPayment]);
     providerRevision.attributes.amount = "37.50";
+    const originalRevenue = (
+      await admin.query(
+        "SELECT id FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 ORDER BY source_revision LIMIT 1",
+        [bookingId],
+      )
+    ).rows[0].id;
+    await admin.query("BEGIN");
+    try {
+      await appendExternalNightlyRevenueEconomics(
+        admin,
+        {
+          propertyId,
+          guestBookingId: bookingId,
+          sourceKind: "ota",
+          sourceBookingReference: `channex:${propertyId}:${applied.providerBookingId}`,
+          idempotencyKey: randomUUID(),
+          lines: [
+            {
+              roomTypeId,
+              stayDate: "2026-08-04",
+              recognizedOn: "2026-08-04",
+              grossRoomAmount: "100.00",
+              occupiedRoomNights: 0,
+              economicEvent: "correction",
+              lifecycleState: "corrected",
+              evidenceQuality: "exact",
+              linePosition: 1,
+              correctsEvidenceId: originalRevenue,
+            },
+          ],
+        },
+        {
+          source: {
+            ownerDomain: "hotel_catalog",
+            entityType: "property_profile",
+            entityId: propertyId,
+            revision: "profile:1",
+          },
+          timeZone: "Europe/Berlin",
+        },
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    // A later rule must not replace the original correction chain's 10% rule.
+    await admin.query("UPDATE finance.commission_rules SET ends_at='2026-07-01' WHERE id=$1", [
+      originalRule,
+    ]);
+    await admin.query(
+      "INSERT INTO finance.commission_rules(property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision) VALUES($1,'property','pms','percentage',99,'2026-07-01','finance','airbnb',2)",
+      [propertyId],
+    );
     const releasedHistory = (
       await admin.query(
         "SELECT to_jsonb(a) AS data FROM pms.operational_booking_assignments a WHERE guest_booking_id=$1 AND position=2",
@@ -1380,7 +1489,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].count,
+    ).toBe(4);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1 AND commission_rule_id IS DISTINCT FROM $2",
+          [bookingId, originalRule],
+        )
+      ).rows[0].n,
     ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT sum(commission_amount)::text amount FROM finance.ota_commission_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].amount,
+    ).toBe("0.0000");
     Object.assign(providerRevision.attributes, { status: "cancelled", amount: "0.00" });
     Reflect.deleteProperty(providerRevision.attributes, "amount");
     const repeatedCancellationRooms = providerRevision.attributes.rooms;
@@ -1450,7 +1575,23 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].nights,
-    ).toBeNull();
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1 AND corrects_commission_evidence_id IS NOT NULL",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(4);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND gross_room_amount<>0",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(2);
     // Some cancellation revisions repeat the stay; absent totals still preserve both amounts.
     providerRevision.attributes.rooms = repeatedCancellationRooms;
     await nextWorkerRevision();
@@ -1470,6 +1611,59 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].provider_booking_amount,
     ).toBeNull();
+    const revenueCount = (
+      await admin.query(
+        "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+        [bookingId],
+      )
+    ).rows[0].n;
+    await admin.query("BEGIN");
+    try {
+      await captureChannexAlterationFinance(
+        admin,
+        {
+          ...applied.scope,
+          bookingId,
+          rawRevision: historicalRevision,
+          providerRevisionAt: historicalRevision.attributes.inserted_at.replace(/Z$/, "000Z"),
+          revisionScope: {
+            revisionId: historicalRevision.id,
+            providerPropertyId: applied.scope.providerPropertyId,
+            providerBookingId: applied.providerBookingId,
+            currency: "EUR",
+            checkIn: "2026-08-04",
+            checkOut: "2026-08-05",
+            rooms: [{ providerRoomTypeId: externalRoom, roomTypeId }],
+          },
+        },
+        async (_client, identity) => ({
+          ...identity,
+          reference: "synthetic-verified-settings",
+          booking_amount_settings: "Payout Amount",
+          cohost_payout_calculations: false,
+        }),
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(revenueCount);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_current_provider_nights WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
   });
 
   it("rejects captured active-room evidence after closure without writing inventory", async () => {
