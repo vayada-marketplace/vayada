@@ -39,7 +39,9 @@ The deferred constraint rejects a second owner, legacy alias, or deletion of the
 sole owner; provider inactivation can still revoke access without erasing ownership.
 Account deletion removes its guard through the organization foreign key cascade.
 
-The VAY-1439 stack currently overlaps main's migration numbers 0193–0197.
-Renumber and rebase the complete stack before merge; 0204 is reserved for this
-guard after the six preceding VAY-1439 migrations are assigned 0198–0203.
-Do not apply the combined branch/main migration history before that reconciliation.
+The VAY-1439 stack was rebased after main's migrations 0193–0197. Its six
+preceding migrations now use 0198–0203, with this guard at 0204. SQL contents
+are unchanged by renumbering. Databases that applied the earlier draft filenames
+must be rebuilt if disposable; any retained environment requires an explicit
+ledger reconciliation before running the new history. Do not rewrite deployed
+migration ledgers automatically.
