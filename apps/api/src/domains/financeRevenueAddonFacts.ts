@@ -20,6 +20,7 @@ export type FinanceRevenueAddonFactsPool = Pick<Client, "query"> & {
 };
 export type FinanceRevenueAddonFact = {
   period: "current" | "comparison";
+  recognizedOn: string;
   ownership: "property" | "partner";
   revenueAmount: string;
 };
@@ -122,7 +123,7 @@ export function createPgFinanceRevenueAddonFacts(config: {
 // Curated Finance-safe Booking views are the integration boundary; this adapter never reads guest PII.
 // prettier-ignore
 async function readFacts(client: Pick<Client, "query">, values: readonly unknown[]): Promise<FactRow[]> {
-  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,ownership_kind AS ownership,COALESCE(sum(${PROPERTY_REVENUE}),0)::text AS "revenueAmount" FROM reporting GROUP BY period,ownership_kind ORDER BY period,ownership_kind`, values)).rows;
+  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,recognized_on::text AS "recognizedOn",ownership_kind AS ownership,COALESCE(sum(${PROPERTY_REVENUE}),0)::text AS "revenueAmount" FROM reporting GROUP BY period,recognized_on,ownership_kind HAVING count(${PROPERTY_REVENUE})>0 ORDER BY period,recognized_on,ownership_kind`, values)).rows;
 }
 
 // Attach rate is non-monetary: intersect fulfilled add-ons with occupied bookings, independent of currency.
@@ -151,14 +152,21 @@ async function readGaps(client: Pick<Client, "query">, values: readonly unknown[
 function fact(row: FactRow): FinanceRevenueAddonFact {
   if (
     (row.period !== "current" && row.period !== "comparison") ||
+    !localDate(row.recognizedOn) ||
     (row.ownership !== "property" && row.ownership !== "partner")
   )
     throw new Error("Finance revenue add-on facts are invalid");
   return {
     period: row.period,
+    recognizedOn: row.recognizedOn,
     ownership: row.ownership,
     revenueAmount: normalizeFinanceReportingDecimal(row.revenueAmount),
   };
+}
+function localDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 function gap(row: GapRow): FinanceRevenueAddonGap {
   if (!Number.isSafeInteger(row.count) || row.count < 1)

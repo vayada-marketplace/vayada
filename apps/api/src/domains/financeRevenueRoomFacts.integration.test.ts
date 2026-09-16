@@ -68,11 +68,12 @@ describe.skipIf(!DB_URL)("PostgreSQL Finance room-revenue facts", () => {
   it("returns scoped facts, corrections, unknown attribution, and explicit evidence gaps", async () => {
     const result = await read.read({ propertyId: P.toUpperCase(), currency: "EUR", periods: periods() });
     expect(result.rows).toEqual(expect.arrayContaining([
-      { period: "current", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "90.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
-      { period: "current", channel: "booking_com", directSource: null, roomTypeId: ROOM, grossRoomAmount: "200.0000", otaCommissionAmount: "30.0000", occupiedRoomNights: 1 },
-      { period: "current", channel: "booking_com", directSource: null, roomTypeId: ROOM_TWO, grossRoomAmount: "0.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
-      { period: "current", channel: "unknown", directSource: null, roomTypeId: ROOM_TWO, grossRoomAmount: "50.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
-      { period: "comparison", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "80.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
+      { period: "current", recognizedOn: "2026-08-01", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "100.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
+      { period: "current", recognizedOn: "2026-08-02", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "-10.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 0 },
+      { period: "current", recognizedOn: "2026-08-02", channel: "booking_com", directSource: null, roomTypeId: ROOM, grossRoomAmount: "200.0000", otaCommissionAmount: "30.0000", occupiedRoomNights: 1 },
+      { period: "current", recognizedOn: "2026-08-03", channel: "booking_com", directSource: null, roomTypeId: ROOM_TWO, grossRoomAmount: "0.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
+      { period: "current", recognizedOn: "2026-08-03", channel: "unknown", directSource: null, roomTypeId: ROOM_TWO, grossRoomAmount: "50.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
+      { period: "comparison", recognizedOn: "2026-07-29", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "80.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
     ]));
     expect(result.eligibleBookings).toEqual({ current: 6, comparison: 1 });
     expect(result.sourceFreshness).toEqual({ bookingRevenueThrough: "2026-08-03", financeOtaCommissionAt: "2026-08-04T13:00:00.000Z" });

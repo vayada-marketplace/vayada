@@ -20,6 +20,7 @@ export type FinanceRevenueRoomFactsPool = Pick<Client, "query"> & {
 };
 export type FinanceRevenueRoomFact = {
   period: "current" | "comparison";
+  recognizedOn: string;
   channel: string;
   directSource: string | null;
   roomTypeId: string;
@@ -118,7 +119,7 @@ const SCOPED = `SELECT revenue.*,attribution.booking_channel AS channel,attribut
 // Curated Finance-safe Booking views are the integration boundary; this adapter never reads guest PII.
 // prettier-ignore
 async function readFacts(client: Pick<Client, "query">, values: readonly unknown[]): Promise<FactRow[]> {
-  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,channel,"directSource",room_type_id::text AS "roomTypeId",COALESCE(sum(gross_room_amount),0)::text AS "grossRoomAmount",COALESCE(sum("commissionAmount") FILTER (WHERE "commissionState"='applied'),0)::text AS "otaCommissionAmount",COALESCE(sum(occupied_room_nights),0)::int AS "occupiedRoomNights",(max(max(recognized_on)) OVER ())::text AS "bookingRevenueThrough",(max(max("commissionCreatedAt")) OVER ())::text AS "financeOtaCommissionAt" FROM reporting GROUP BY period,channel,"directSource",room_type_id ORDER BY period,channel,"directSource" NULLS FIRST,room_type_id`, values)).rows;
+  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,recognized_on::text AS "recognizedOn",channel,"directSource",room_type_id::text AS "roomTypeId",COALESCE(sum(gross_room_amount),0)::text AS "grossRoomAmount",COALESCE(sum("commissionAmount") FILTER (WHERE "commissionState"='applied'),0)::text AS "otaCommissionAmount",COALESCE(sum(occupied_room_nights),0)::int AS "occupiedRoomNights",(max(max(recognized_on)) OVER ())::text AS "bookingRevenueThrough",(max(max("commissionCreatedAt")) OVER ())::text AS "financeOtaCommissionAt" FROM reporting GROUP BY period,recognized_on,channel,"directSource",room_type_id ORDER BY period,recognized_on,channel,"directSource" NULLS FIRST,room_type_id`, values)).rows;
 }
 
 // prettier-ignore
@@ -141,6 +142,7 @@ async function readEligibleBookings(client: Pick<Client, "query">, values: reado
 function fact(row: FactRow): FinanceRevenueRoomFact {
   if (
     (row.period !== "current" && row.period !== "comparison") ||
+    !localDate(row.recognizedOn) ||
     !row.channel.trim() ||
     (row.directSource !== null && !row.directSource.trim()) ||
     !UUID.test(row.roomTypeId) ||
@@ -149,6 +151,7 @@ function fact(row: FactRow): FinanceRevenueRoomFact {
     throw new Error("Finance revenue room facts are invalid");
   return {
     period: row.period,
+    recognizedOn: row.recognizedOn,
     channel: row.channel,
     directSource: row.directSource,
     roomTypeId: row.roomTypeId.toLowerCase(),
@@ -156,6 +159,11 @@ function fact(row: FactRow): FinanceRevenueRoomFact {
     otaCommissionAmount: normalizeFinanceReportingDecimal(row.otaCommissionAmount),
     occupiedRoomNights: row.occupiedRoomNights,
   };
+}
+function localDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 function gap(row: GapRow): FinanceRevenueRoomGap {
   if (!Number.isSafeInteger(row.count) || row.count < 1)

@@ -144,9 +144,19 @@ function input(): FinanceRevenueResponseInput {
     },
     addOns: {
       rows: [
-        { period: "current", ownership: "property", revenueAmount: "20" },
-        { period: "current", ownership: "partner", revenueAmount: "5" },
-        { period: "comparison", ownership: "property", revenueAmount: "10" },
+        {
+          period: "current",
+          recognizedOn: "2026-08-01",
+          ownership: "property",
+          revenueAmount: "20",
+        },
+        { period: "current", recognizedOn: "2026-08-01", ownership: "partner", revenueAmount: "5" },
+        {
+          period: "comparison",
+          recognizedOn: "2026-07-31",
+          ownership: "property",
+          revenueAmount: "10",
+        },
       ],
       fulfilledBookings: { current: 2, comparison: 1 },
       sourceFreshness: {
@@ -159,7 +169,7 @@ function input(): FinanceRevenueResponseInput {
 }
 
 // prettier-ignore
-const room = (period: "current" | "comparison", channel: string, directSource: string | null, roomTypeId: string, grossRoomAmount: string, otaCommissionAmount: string, occupiedRoomNights: number) => ({ period, channel, directSource, roomTypeId, grossRoomAmount, otaCommissionAmount, occupiedRoomNights });
+const room = (period: "current" | "comparison", channel: string, directSource: string | null, roomTypeId: string, grossRoomAmount: string, otaCommissionAmount: string, occupiedRoomNights: number) => ({ period, recognizedOn: period === "current" ? "2026-08-01" : "2026-07-31", channel, directSource, roomTypeId, grossRoomAmount, otaCommissionAmount, occupiedRoomNights });
 const money = (amount: string) => ({ amount, currency: "EUR" });
 // prettier-ignore
 const metric = (value: string, change: string, percentChange: string | null) => ({ value: money(value), absoluteChange: money(change), percentChange });
