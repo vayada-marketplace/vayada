@@ -43,8 +43,8 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
       // Keep the shared worker suite from claiming this committed fixture before cleanup.
       await client.query(
-        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND resource_id=$1",
-        [fixture.bookingId],
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
       );
       staged();
       await releasePromise;
@@ -65,8 +65,12 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       assigned: 0,
     });
     release();
-    await expect(write).resolves.toMatchObject({ kind: "accepted", bookingId: fixture.bookingId });
-    await expect(replay).resolves.toMatchObject({ kind: "replayed", bookingId: fixture.bookingId });
+    const accepted = await write;
+    expect(accepted).toMatchObject({ kind: "accepted" });
+    await expect(replay).resolves.toMatchObject({
+      kind: "replayed",
+      bookingId: accepted.bookingId,
+    });
     const committed = await snapshot(fixture.observer, fixture);
     expect(committed).toEqual({
       bookings: 1,
@@ -79,7 +83,7 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
 
     await expect(writePricingAcceptance(fixture.pool, fixture.input)).resolves.toMatchObject({
       kind: "replayed",
-      bookingId: fixture.bookingId,
+      bookingId: accepted.bookingId,
     });
     expect(await snapshot(fixture.observer, fixture)).toEqual(committed);
     await fixture.close();
@@ -90,7 +94,9 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
     mockOwners(fixture);
     vi.mocked(finishCurrentQuoteAcceptanceTime).mockResolvedValue(fixture.f.finance.validUntil!);
 
-    await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toThrow("expired");
+    await expect(writePricingAcceptance(fixture.pool, fixture.input)).rejects.toMatchObject({
+      code: "conflict",
+    });
     await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
       bookings: 0,
       acceptances: 0,
@@ -118,7 +124,6 @@ async function setupFixture() {
   const observer = await rawPool.connect();
   const propertyId = randomUUID(),
     organizationId = randomUUID(),
-    bookingId = randomUUID(),
     roomTypeId = randomUUID();
   const now = new Date();
   let charges!: NonNullable<ReturnType<typeof calculateReplacementFixedCharges>> & {
@@ -210,15 +215,12 @@ async function setupFixture() {
   const input = {
     slug: "writer-test",
     command,
-    bookingId,
-    publicReference: `VAY-${bookingId.replaceAll("-", "").toUpperCase()}`,
   };
   return {
     pool,
     observer,
     propertyId,
     organizationId,
-    bookingId,
     roomTypeId,
     writerPids,
     f,
@@ -293,14 +295,16 @@ async function snapshot(client: PoolClient, fixture: Fixture) {
   const row = (
     await client.query(
       `SELECT
-       (SELECT count(*)::int FROM booking.guest_bookings WHERE id=$1::uuid) AS bookings,
-       (SELECT count(*)::int FROM booking.pricing_quote_acceptances WHERE guest_booking_id=$1::uuid) AS acceptances,
-       (SELECT count(*)::int FROM platform.jobs WHERE resource_id=$1::text) AS jobs,
-       (SELECT count(*)::int FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1::uuid) AS revenue,
+       (SELECT count(*)::int FROM booking.guest_bookings WHERE property_id=$1::uuid) AS bookings,
+       (SELECT count(*)::int FROM booking.pricing_quote_acceptances WHERE property_id=$1::uuid) AS acceptances,
+       (SELECT count(*)::int FROM platform.jobs WHERE property_id=$1::uuid) AS jobs,
+       (SELECT count(*)::int FROM booking.nightly_revenue_evidence revenue
+          JOIN booking.guest_bookings booking ON booking.id=revenue.guest_booking_id
+         WHERE booking.property_id=$1::uuid) AS revenue,
        available_count::int AS available,assigned_count::int AS assigned
        FROM pms.inventory_days WHERE property_id=$2 AND room_type_id=$3 AND stay_date=$4`,
       [
-        fixture.bookingId,
+        fixture.propertyId,
         fixture.propertyId,
         fixture.roomTypeId,
         fixture.f.current.quote.stay.checkIn,
