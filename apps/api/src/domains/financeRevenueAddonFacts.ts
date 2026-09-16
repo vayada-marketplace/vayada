@@ -18,6 +18,7 @@ export type FinanceRevenueAddonFactsPool = Pick<Client, "query"> & {
   connect(): Promise<Client>;
   end?(): Promise<void>;
 };
+export type FinanceRevenueAddonFactsClient = Pick<Client, "query">;
 export type FinanceRevenueAddonFact = {
   period: "current" | "comparison";
   recognizedOn: string;
@@ -44,12 +45,13 @@ export type FinanceRevenueAddonFacts = {
   };
   incompleteEvidence: FinanceRevenueAddonGap[];
 };
+export type FinanceRevenueAddonFactsInput = {
+  propertyId: string;
+  currency: string;
+  periods: FinanceReportingComparison;
+};
 export type FinanceRevenueAddonFactsReadPort = {
-  read(input: {
-    propertyId: string;
-    currency: string;
-    periods: FinanceReportingComparison;
-  }): Promise<FinanceRevenueAddonFacts>;
+  read(input: FinanceRevenueAddonFactsInput): Promise<FinanceRevenueAddonFacts>;
   close(): Promise<void>;
 };
 
@@ -85,38 +87,43 @@ export function createPgFinanceRevenueAddonFacts(config: {
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
   return {
     async read(input) {
-      const propertyId = uuid(input.propertyId);
-      if (!/^[A-Z]{3}$/.test(input.currency))
-        throw new TypeError("Finance revenue currency is malformed");
-      const current = parseFinanceRevenueQuery(input.periods.current);
-      const comparison = parseFinanceRevenueQuery(input.periods.comparison);
-      if (!current || !comparison || comparison.to >= current.from)
-        throw new TypeError("Finance revenue comparison periods are malformed");
-      return consistentRead(pool, async (client) => {
-        const values = [
-          propertyId,
-          input.currency,
-          current.from,
-          current.to,
-          comparison.from,
-          comparison.to,
-        ];
-        const rows = await readFacts(client, values);
-        const freshness = await readFreshness(client, values);
-        return {
-          rows: rows.map(fact),
-          fulfilledBookings: await readFulfilledBookings(client, values),
-          sourceFreshness: {
-            bookingAddonRevenueThrough: freshness.bookingAddonRevenueThrough,
-            bookingAddonRevenueAt: instant(freshness.bookingAddonRevenueAt),
-          },
-          incompleteEvidence: (await readGaps(client, values)).map(gap),
-        };
-      });
+      return consistentRead(pool, (client) => readFinanceRevenueAddonFacts(client, input));
     },
     async close() {
       if (ownsPool) await pool.end?.();
     },
+  };
+}
+
+export async function readFinanceRevenueAddonFacts(
+  client: FinanceRevenueAddonFactsClient,
+  input: FinanceRevenueAddonFactsInput,
+): Promise<FinanceRevenueAddonFacts> {
+  const propertyId = uuid(input.propertyId);
+  if (!/^[A-Z]{3}$/.test(input.currency))
+    throw new TypeError("Finance revenue currency is malformed");
+  const current = parseFinanceRevenueQuery(input.periods.current);
+  const comparison = parseFinanceRevenueQuery(input.periods.comparison);
+  if (!current || !comparison || comparison.to >= current.from)
+    throw new TypeError("Finance revenue comparison periods are malformed");
+  const values = [
+    propertyId,
+    input.currency,
+    current.from,
+    current.to,
+    comparison.from,
+    comparison.to,
+  ];
+  const rows = await readFacts(client, values);
+  const freshness = await readFreshness(client, values);
+  return {
+    rows: rows.map(fact),
+    fulfilledBookings: await readFulfilledBookings(client, values),
+    sourceFreshness: {
+      bookingAddonRevenueThrough: freshness.bookingAddonRevenueThrough,
+      bookingAddonRevenueAt: instant(freshness.bookingAddonRevenueAt),
+    },
+    incompleteEvidence: (await readGaps(client, values)).map(gap),
   };
 }
 

@@ -20,6 +20,7 @@ export type FinanceDashboardExpenseFactsPool = Pick<Client, "query"> & {
   connect(): Promise<Client>;
   end?(): Promise<void>;
 };
+export type FinanceDashboardExpenseFactsClient = Pick<Client, "query">;
 export type FinanceDashboardExpenseGap = {
   code: "expense_currency_mismatch" | "recurring_expense_currency_mismatch";
   count: number;
@@ -40,14 +41,15 @@ export type FinanceDashboardExpenseFacts = {
   };
   incompleteEvidence: FinanceDashboardExpenseGap[];
 };
+export type FinanceDashboardExpenseFactsInput = {
+  propertyId: string;
+  currency: string;
+  asOf: string;
+  monthToDate: FinanceReportingComparison;
+  daily: FinanceReportingRange;
+};
 export type FinanceDashboardExpenseFactsReadPort = {
-  read(input: {
-    propertyId: string;
-    currency: string;
-    asOf: string;
-    monthToDate: FinanceReportingComparison;
-    daily: FinanceReportingRange;
-  }): Promise<FinanceDashboardExpenseFacts>;
+  read(input: FinanceDashboardExpenseFactsInput): Promise<FinanceDashboardExpenseFacts>;
   close(): Promise<void>;
 };
 
@@ -79,66 +81,71 @@ export function createPgFinanceDashboardExpenseFacts(config: {
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
   return {
     async read(input) {
-      const propertyId = uuid(input.propertyId);
-      if (!/^[A-Z]{3}$/.test(input.currency) || !localDate(input.asOf))
-        throw new TypeError("Finance Dashboard expense scope is malformed");
-      const current = parseFinanceRevenueQuery(input.monthToDate.current);
-      const comparison = parseFinanceRevenueQuery(input.monthToDate.comparison);
-      const daily = parseFinanceRevenueQuery(input.daily);
-      if (
-        !current ||
-        !comparison ||
-        !daily ||
-        comparison.to >= current.from ||
-        current.to !== input.asOf ||
-        daily.to !== input.asOf ||
-        days(daily.from, daily.to) !== FINANCE_DASHBOARD_WINDOW_DAYS
-      )
-        throw new TypeError("Finance Dashboard expense periods are malformed");
-      const values = [
-        propertyId,
-        input.currency,
-        current.from,
-        current.to,
-        comparison.from,
-        comparison.to,
-        daily.from,
-        daily.to,
-        input.asOf,
-      ];
-      return consistentRead(pool, async (client) => {
-        const totals = await readTotals(client, values);
-        const dailyRows = await readDaily(client, values);
-        const upcoming = await readUpcoming(client, values);
-        const freshness = await readFreshness(client, values);
-        const ledgerGaps = await readLedgerGaps(client, values);
-        const recurringGaps = await readRecurringGaps(client, values);
-        return {
-          totals: {
-            current: normalizeFinanceReportingDecimal(totals.current),
-            comparison: normalizeFinanceReportingDecimal(totals.comparison),
-          },
-          daily: dailyRows.map((row) => ({
-            date: validDate(row.date),
-            amount: normalizeFinanceReportingDecimal(row.amount),
-          })),
-          upcoming: upcoming.map((row) => ({
-            date: validDate(row.date),
-            kind: "recurring_expense",
-            amount: normalizeFinanceReportingDecimal(row.amount),
-            predicted: true,
-          })),
-          sourceFreshness: {
-            financeExpensesAt: instant(freshness.financeExpensesAt),
-            financeRecurringExpensesAt: instant(freshness.financeRecurringExpensesAt),
-          },
-          incompleteEvidence: [...ledgerGaps, ...recurringGaps].map(gap),
-        };
-      });
+      return consistentRead(pool, (client) => readFinanceDashboardExpenseFacts(client, input));
     },
     async close() {
       if (ownsPool) await pool.end?.();
     },
+  };
+}
+
+export async function readFinanceDashboardExpenseFacts(
+  client: FinanceDashboardExpenseFactsClient,
+  input: FinanceDashboardExpenseFactsInput,
+): Promise<FinanceDashboardExpenseFacts> {
+  const propertyId = uuid(input.propertyId);
+  if (!/^[A-Z]{3}$/.test(input.currency) || !localDate(input.asOf))
+    throw new TypeError("Finance Dashboard expense scope is malformed");
+  const current = parseFinanceRevenueQuery(input.monthToDate.current);
+  const comparison = parseFinanceRevenueQuery(input.monthToDate.comparison);
+  const daily = parseFinanceRevenueQuery(input.daily);
+  if (
+    !current ||
+    !comparison ||
+    !daily ||
+    comparison.to >= current.from ||
+    current.to !== input.asOf ||
+    daily.to !== input.asOf ||
+    days(daily.from, daily.to) !== FINANCE_DASHBOARD_WINDOW_DAYS
+  )
+    throw new TypeError("Finance Dashboard expense periods are malformed");
+  const values = [
+    propertyId,
+    input.currency,
+    current.from,
+    current.to,
+    comparison.from,
+    comparison.to,
+    daily.from,
+    daily.to,
+    input.asOf,
+  ];
+  const totals = await readTotals(client, values);
+  const dailyRows = await readDaily(client, values);
+  const upcoming = await readUpcoming(client, values);
+  const freshness = await readFreshness(client, values);
+  const ledgerGaps = await readLedgerGaps(client, values);
+  const recurringGaps = await readRecurringGaps(client, values);
+  return {
+    totals: {
+      current: normalizeFinanceReportingDecimal(totals.current),
+      comparison: normalizeFinanceReportingDecimal(totals.comparison),
+    },
+    daily: dailyRows.map((row) => ({
+      date: validDate(row.date),
+      amount: normalizeFinanceReportingDecimal(row.amount),
+    })),
+    upcoming: upcoming.map((row) => ({
+      date: validDate(row.date),
+      kind: "recurring_expense",
+      amount: normalizeFinanceReportingDecimal(row.amount),
+      predicted: true,
+    })),
+    sourceFreshness: {
+      financeExpensesAt: instant(freshness.financeExpensesAt),
+      financeRecurringExpensesAt: instant(freshness.financeRecurringExpensesAt),
+    },
+    incompleteEvidence: [...ledgerGaps, ...recurringGaps].map(gap),
   };
 }
 
