@@ -135,7 +135,7 @@ describe("Affiliate assent HTTP read", () => {
     expect(missing.statusCode).toBe(404);
     expect(missing.json()).toEqual({ code: "scope_unavailable" });
     expect(repository.readForCollaboration).toHaveBeenCalledWith(expect.any(Object), source);
-    for (const invalid of [" ", " padded ", "bad\u0001key"]) {
+    for (const invalid of [" ", " padded ", "bad\u0001key", "has/slash", "has%escape"]) {
       expect(
         (
           await app.inject({

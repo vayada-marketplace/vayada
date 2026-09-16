@@ -156,7 +156,7 @@ export async function readAffiliateAssent(
 }
 
 export function validAffiliateCollaborationKey(id: string): boolean {
-  return id.length > 0 && id.length <= 100 && id.trim() === id && !/[\u0000-\u001f\u007f]/.test(id);
+  return id.length <= 100 && /^[A-Za-z0-9._~:-]+$/.test(id);
 }
 
 export async function readCollaborationAffiliateAssent(
