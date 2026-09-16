@@ -8,6 +8,10 @@ import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { storePricingAcceptance } from "./storePricingAcceptance.js";
 import { replayPricingAcceptance } from "./pricingAcceptanceReplay.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
+import {
+  PMS_ACCEPTED_PRICING_JOB_TYPE,
+  stagePmsAcceptedPricingReservationJob,
+} from "./pricingPmsAcceptedReservationJob.js";
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 const url = process.env.TEST_DATABASE_URL;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -150,6 +154,26 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         expect(stored.inventory_reservation_bundle).toEqual(bundle);
         expect(stored.commission_terms_snapshot).toEqual(finance.commissionTermsSnapshot);
         expect(stored.accepted_at.toISOString()).toBe(result.acceptedAt);
+        const staged = await stagePmsAcceptedPricingReservationJob(client, "hotel", result);
+        expect(await stagePmsAcceptedPricingReservationJob(client, "hotel", result)).toEqual(
+          staged,
+        );
+        expect(
+          (
+            await db.query(
+              `SELECT job_type,payload->>'contractVersion' AS version,
+                payload->'command'->>'acceptanceId' AS acceptance
+               FROM platform.jobs WHERE id=$1`,
+              [staged.jobId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            job_type: PMS_ACCEPTED_PRICING_JOB_TYPE,
+            version: "pms-accepted-pricing-job.v1",
+            acceptance: result.acceptanceId,
+          },
+        ]);
         const { fingerprint, ...input } = f.command;
         void fingerprint;
         expect(await replayPricingAcceptance(client, "hotel", input)).toEqual({
