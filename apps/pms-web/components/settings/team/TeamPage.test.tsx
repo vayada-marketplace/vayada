@@ -39,6 +39,7 @@ vi.mock("@/components/Modal", () => ({
 }));
 import Page from "@/app/(app)/settings/team/page";
 import MemberAccessDialog from "./MemberAccessDialog";
+import PropertyAccessMatrix from "./PropertyAccessMatrix";
 import TeamAccessFields from "./TeamAccessFields";
 import TeamActionDialog from "./TeamActionDialog";
 
@@ -62,6 +63,27 @@ it("keeps invitation creation available with an empty roster", async () => {
   });
   expect(view.root.findByType(MemberAccessDialog).props.access).toBeUndefined();
   expect(api.invite).not.toHaveBeenCalled();
+  view.unmount();
+});
+it("shows property access for an administrator-only account", async () => {
+  api.admins.mockResolvedValue({
+    actorMembershipId: "owner",
+    admins: [
+      {
+        membershipId: "owner",
+        name: "Owner",
+        email: "owner@example.test",
+        roleKey: "hotel_owner",
+        active: true,
+        revision: "a".repeat(64),
+      },
+    ],
+  });
+  let view!: ReturnType<typeof create>;
+  await act(async () => {
+    view = create(<Page />);
+  });
+  expect(view.root.findByType(PropertyAccessMatrix).props.admins).toHaveLength(1);
   view.unmount();
 });
 it("shows a load error instead of presenting missing properties as an empty scope", async () => {

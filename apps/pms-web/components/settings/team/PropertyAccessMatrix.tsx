@@ -1,13 +1,15 @@
 "use client";
 import React from "react";
 import { useTranslation } from "@/lib/i18n";
-import type { PmsStaffMember } from "@/services/api/pmsStaffClient";
+import type { PmsAccountAdmin, PmsStaffMember } from "@/services/api/pmsStaffClient";
 
 export default function PropertyAccessMatrix({
   members,
+  admins = [],
   properties,
 }: {
   members: PmsStaffMember[];
+  admins?: PmsAccountAdmin[];
   properties: { id: string; name: string }[];
 }) {
   const { t } = useTranslation();
@@ -30,6 +32,27 @@ export default function PropertyAccessMatrix({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
+            {admins.map((admin) => (
+              <tr key={admin.membershipId}>
+                <th scope="row" className="px-4 py-3 font-normal">
+                  <span className="block font-medium">{admin.name || admin.email}</span>
+                  <span className="text-xs text-gray-500">
+                    {t(
+                      admin.active ? "settings.team.accountAdmin" : "settings.team.accessSuspended",
+                    )}
+                  </span>
+                </th>
+                {properties.map((property) => (
+                  <td key={property.id} className="px-4 py-3 text-gray-600">
+                    {t(
+                      admin.active
+                        ? "settings.team.propertyAssigned"
+                        : "settings.team.propertyUnassigned",
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
             {members.map((member) => (
               <tr key={member.id}>
                 <th scope="row" className="px-4 py-3 font-normal">

@@ -483,9 +483,12 @@ export default function TeamSettingsPage() {
             }
           />
         )}
-        {!loading && !error && members.length > 0 && properties.length > 0 && (
-          <PropertyAccessMatrix members={members} properties={properties} />
-        )}
+        {!loading &&
+          !error &&
+          (admins.length > 0 || members.length > 0) &&
+          properties.length > 0 && (
+            <PropertyAccessMatrix admins={admins} members={members} properties={properties} />
+          )}
         {dialog?.kind === "member" && (
           <MemberAccessDialog
             access={dialog.access}
