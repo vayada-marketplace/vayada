@@ -1260,3 +1260,10 @@ transaction. Only unchanged PMS source evidence, provider identity, request,
 receipt and authority may perform the single unresolved-to-reconciled transition.
 The bounded evidence retains observation digests and the sanitized availability
 result. Reconciliation neither activates a channel nor grants another send.
+
+The management worker treats a persisted room-availability receipt as bounded
+partial progress, alongside a retained closed-rate receipt. Exact job attempt,
+worker, property and progress-lane correlation is required before the running
+attempt is completed and requeued with one continuation credit. Stale-lease
+recovery grants that credit once from either retained receipt lane; a receipt
+from an earlier attempt cannot credit the replacement attempt.

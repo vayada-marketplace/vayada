@@ -211,18 +211,31 @@ async function retainedUpload(
   jobId: string,
   attemptNumber: number,
   attemptId: string | null = null,
+  progressCode: ChannexManagementProviderProgress["code"] | null = null,
 ) {
   const result = await client.query(
-    `SELECT a.id FROM pms.channex_offer_ari_attempts a
-     JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
-     JOIN platform.jobs j ON j.id=ja.job_id
-     JOIN pms.channex_offer_targets t ON t.id=a.target_id AND t.property_id=j.property_id
-     WHERE j.id=$1::uuid AND ja.attempt_number=$2 AND ($3::uuid IS NULL OR a.id=$3::uuid)
+    `SELECT retained.id FROM (
+       SELECT a.id,'initial_upload_retained'::text AS progress_code
+       FROM pms.channex_offer_ari_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id AND t.property_id=j.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)=1
+       UNION ALL
+       SELECT a.id,'availability_upload_retained'::text AS progress_code
+       FROM pms.channex_room_availability_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id AND j.property_id=a.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_room_availability_receipts r WHERE r.attempt_id=a.id)=1
+     ) retained JOIN platform.jobs j ON j.id=$1::uuid
+     WHERE ($3::uuid IS NULL OR retained.id=$3::uuid)
+       AND ($5::text IS NULL OR retained.progress_code=$5::text)
        AND j.queue_name=$4 AND j.payload->>'operationType'='sync_ari'
        AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb
-       AND (SELECT count(*) FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)=1
      LIMIT 1`,
-    [jobId, attemptNumber, attemptId, PMS_CHANNEX_MANAGEMENT_QUEUE],
+    [jobId, attemptNumber, attemptId, PMS_CHANNEX_MANAGEMENT_QUEUE, progressCode],
   );
   return result.rows.length === 1;
 }
@@ -242,7 +255,13 @@ async function continueUpload(
     );
     if (
       live.rows.length !== 1 ||
-      !(await retainedUpload(client, job.jobId, job.attemptNumber, progress.attemptId))
+      !(await retainedUpload(
+        client,
+        job.jobId,
+        job.attemptNumber,
+        progress.attemptId,
+        progress.code,
+      ))
     )
       throw new Error("Current retained Channex upload required for continuation");
     const attempt = await client.query(
