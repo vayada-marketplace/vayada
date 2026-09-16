@@ -2,7 +2,14 @@ import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCa
 import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
-import { createReplacementBookingQuoteIssuer, requirePublicQuoteKey } from "./replacementBookingQuote.js";
+import {
+  PricingAcceptanceError,
+  writePricingAcceptance,
+} from "../domains/pricingAcceptanceWriter.js";
+import {
+  createReplacementBookingQuoteIssuer,
+  requirePublicQuoteKey,
+} from "./replacementBookingQuote.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
   bestBookingPromotion,
@@ -239,6 +246,7 @@ export type BookingWebCheckoutAdapter = {
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
+  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -515,19 +523,27 @@ export async function registerBookingWebPublicRoutes(
     return response;
   });
 
-  app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug/pricing-offers", async (request, reply) => {
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Robots-Tag", "noindex");
-    if (!checkoutAdapter.getPricingOffers) throw createHttpError(404, "Pricing offers unavailable.");
-    return checkoutAdapter.getPricingOffers(request.params.slug);
-  });
+  app.get<{ Params: BookingWebHotelParams }>(
+    "/hotels/:slug/pricing-offers",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getPricingOffers)
+        throw createHttpError(404, "Pricing offers unavailable.");
+      return checkoutAdapter.getPricingOffers(request.params.slug);
+    },
+  );
 
-  app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug/pricing-addons", async (request, reply) => {
-    reply.header("Cache-Control", "no-store");
-    reply.header("X-Robots-Tag", "noindex");
-    if (!checkoutAdapter.getPricingAddons) throw createHttpError(404, "Pricing extras unavailable.");
-    return checkoutAdapter.getPricingAddons(request.params.slug);
-  });
+  app.get<{ Params: BookingWebHotelParams }>(
+    "/hotels/:slug/pricing-addons",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getPricingAddons)
+        throw createHttpError(404, "Pricing extras unavailable.");
+      return checkoutAdapter.getPricingAddons(request.params.slug);
+    },
+  );
 
   app.get<{ Params: BookingWebHotelParams & { quoteId: string } }>(
     "/hotels/:slug/bookings/quotes/:quoteId/guest-disclosure",
@@ -537,6 +553,34 @@ export async function registerBookingWebPublicRoutes(
       if (!checkoutAdapter.getQuoteGuestDisclosure)
         throw createHttpError(404, "Guest rules unavailable.");
       return checkoutAdapter.getQuoteGuestDisclosure(request.params.slug, request.params.quoteId);
+    },
+  );
+
+  app.post<{
+    Params: BookingWebHotelParams & { quoteId: string };
+    Body: BookingWebCheckoutRequest;
+  }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/accept",
+    {
+      bodyLimit: 64 * 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      if (!checkoutAdapter.acceptPricingQuote)
+        throw createHttpError(404, "Quote acceptance unavailable.");
+      if (
+        body.quoteId !== request.params.quoteId ||
+        body.requestId !== request.headers["idempotency-key"]
+      )
+        throw createHttpError(400, "Invalid quote acceptance request.");
+      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
+      return response;
     },
   );
 
@@ -616,11 +660,14 @@ export async function registerBookingWebPublicRoutes(
 
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings/quote",
-    { bodyLimit: 64 * 1024, async onRequest(request, reply) {
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Robots-Tag", "noindex");
-      requirePublicQuoteKey(request);
-    } },
+    {
+      bodyLimit: 64 * 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
     async (request, reply) => {
       const body = request.body ?? {};
       const response = await checkoutAdapter.quoteBooking(
@@ -1306,6 +1353,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Keep false until replacement acceptance is ready for public checkout traffic. */
+  replacementPricingAcceptanceEnabled?: boolean;
   /** Enable only after all mixed selection consumers have passed cutover validation. */
   mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
@@ -1384,7 +1433,9 @@ export function createTargetBookingWebCheckoutAdapter(
   const pricingOffers = createPublicPricingOfferCatalog(pool);
   const pricingAddons = createPublicPricingAddonCatalog(pool);
   const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
-  const issueReplacementQuote = createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(pool, 300));
+  const issueReplacementQuote = createReplacementBookingQuoteIssuer(
+    createCurrentPricingQuoteStore(pool, 300),
+  );
 
   const editCleanupTimer = setInterval(() => {
     void releaseAbandonedBookingEdits(pool, config).catch(() =>
@@ -1830,17 +1881,48 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
+    async acceptPricingQuote(slug, request) {
+      if (!config.replacementPricingAcceptanceEnabled)
+        throw createHttpError(404, "Quote acceptance unavailable.");
+      try {
+        return await writePricingAcceptance(pool, { slug, command: request });
+      } catch (error) {
+        const statusCode =
+          error instanceof PricingAcceptanceError
+            ? error.code === "conflict"
+              ? 409
+              : error.code === "storage"
+                ? 503
+                : 500
+            : 500;
+        throw Object.assign(new Error("Quote acceptance unavailable.", { cause: error }), {
+          statusCode,
+        });
+      }
+    },
     async getPricingAddons(slug) {
       let addons;
-      try { addons = await pricingAddons.read(slug); }
-      catch (error) { throw Object.assign(new Error("Pricing extras temporarily unavailable.", { cause: error }), { statusCode: 503 }); }
+      try {
+        addons = await pricingAddons.read(slug);
+      } catch (error) {
+        throw Object.assign(
+          new Error("Pricing extras temporarily unavailable.", { cause: error }),
+          { statusCode: 503 },
+        );
+      }
       if (!addons) throw createHttpError(404, "Pricing extras unavailable.");
       return addons;
     },
     async getPricingOffers(slug) {
       let offers;
-      try { offers = await pricingOffers.read(slug); }
-      catch (error) { throw Object.assign(new Error("Pricing offers temporarily unavailable.", { cause: error }), { statusCode: 503 }); }
+      try {
+        offers = await pricingOffers.read(slug);
+      } catch (error) {
+        throw Object.assign(
+          new Error("Pricing offers temporarily unavailable.", { cause: error }),
+          { statusCode: 503 },
+        );
+      }
       if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
       return offers;
     },
@@ -4746,7 +4828,8 @@ export async function redeemTargetPromo(
       JSON.stringify({ quoteReference: quote.publicQuoteReference }),
     ],
   );
-  if (redemption.rows.length !== 1) throw createHttpError(409, "Promo redemption changed. Please refresh.");
+  if (redemption.rows.length !== 1)
+    throw createHttpError(409, "Promo redemption changed. Please refresh.");
 }
 
 export async function reverseTargetPromoRedemption(
