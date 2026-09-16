@@ -1,3 +1,4 @@
+import type { dispatchNextChannexClosedUpload } from "../domains/channexNextClosedUpload.js";
 import { readChannexResponse } from "./channexResponseBody.js";
 import type { reconcilePendingChannexUploads } from "../domains/channexPendingUploadReconciliation.js";
 import {
@@ -110,6 +111,10 @@ export function createChannexManagementProvider(config: {
   plans: ChannexManagementPlanPort;
   fetch?: typeof fetch;
   canSyncAri?: boolean;
+  dispatchClosedUpload?: (
+    lease: Parameters<typeof dispatchNextChannexClosedUpload>[1],
+    ports: Parameters<typeof dispatchNextChannexClosedUpload>[2],
+  ) => ReturnType<typeof dispatchNextChannexClosedUpload>;
   reconcileClosedUploads?: (
     lease: Parameters<typeof reconcilePendingChannexUploads>[1],
     get: Parameters<typeof reconcilePendingChannexUploads>[2],
@@ -118,6 +123,31 @@ export function createChannexManagementProvider(config: {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
   const fetcher = config.fetch ?? fetch;
+  const readClosedUpload: Parameters<typeof dispatchNextChannexClosedUpload>[2]["get"] = async (
+    path,
+    signal,
+  ) => {
+    const url = new URL(path, apiBaseUrl);
+    if (url.origin !== new URL(apiBaseUrl).origin || !url.pathname.startsWith("/api/v1/"))
+      throw new Error("Invalid Channex read scope.");
+    signal.throwIfAborted();
+    const response = await fetcher(url, {
+      method: "GET",
+      headers: { "user-api-key": apiKey },
+      signal,
+      redirect: "error",
+    });
+    if (!response.ok) throw new Error("Channex completion read unavailable.");
+    const parsed = await readChannexResponse(response, ({ body }) => {
+      try {
+        return { outcome: "complete_json", value: JSON.parse(body) as unknown };
+      } catch {
+        return { outcome: "invalid", value: null };
+      }
+    });
+    if (parsed.outcome !== "complete_json") throw new Error("Invalid Channex completion response.");
+    return parsed.value;
+  };
   const provider = {
     async execute(
       job: ChannexManagementJob,
@@ -133,37 +163,53 @@ export function createChannexManagementProvider(config: {
         try {
           const result = await config.reconcileClosedUploads(
             { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
-            async (path, signal) => {
-              const url = new URL(path, apiBaseUrl);
-              if (url.origin !== new URL(apiBaseUrl).origin || !url.pathname.startsWith("/api/v1/"))
-                throw new Error("Invalid Channex read scope.");
-              signal.throwIfAborted();
-              const response = await fetcher(url, {
-                method: "GET",
-                headers: { "user-api-key": apiKey },
-                signal,
-                redirect: "error",
-              });
-              if (!response.ok) throw new Error("Channex completion read unavailable.");
-              const parsed = await readChannexResponse(response, ({ body }) => {
-                try {
-                  return { outcome: "complete_json", value: JSON.parse(body) as unknown };
-                } catch {
-                  return { outcome: "invalid", value: null };
-                }
-              });
-              if (parsed.outcome !== "complete_json")
-                throw new Error("Invalid Channex completion response.");
-              return parsed.value;
-            },
+            readClosedUpload,
           );
           if (result.kind !== "pending_uploads_reconciled")
             return failure(
-              result.reason === "reconciliation_batch_pending" ? "provider_unavailable" : "invalid_state",
+              result.reason === "reconciliation_batch_pending"
+                ? "provider_unavailable"
+                : "invalid_state",
               new Error("Saved Channex uploads still require reconciliation."),
             );
         } catch {
           return failure("provider_unavailable", new Error("Channex completion read unavailable."));
+        }
+      }
+      if (
+        job.input.operationType === "sync_ari" &&
+        !job.input.restrictionsOnly &&
+        config.dispatchClosedUpload
+      ) {
+        if (!input?.workerId || !config.reconcileClosedUploads)
+          return failure("invalid_state", new Error("Current worker and reconciliation required."));
+        try {
+          const result = await config.dispatchClosedUpload(
+            { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
+            {
+              get: readClosedUpload,
+              post: async (request, signal) => {
+                if (request.method !== "POST" || request.path !== "/api/v1/restrictions")
+                  throw new Error("Invalid Channex upload scope.");
+                signal.throwIfAborted();
+                return fetcher(new URL(request.path, apiBaseUrl), {
+                  method: "POST",
+                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                  body: JSON.stringify(request.body),
+                  signal,
+                  redirect: "error",
+                });
+              },
+            },
+          );
+          if (result.kind === "retained")
+            return { ok: false, code: "initial_upload_retained", attemptId: result.attemptId };
+          return failure(
+            "invalid_state",
+            new Error("Initial Channex preparation does not complete full sync."),
+          );
+        } catch {
+          return failure("provider_unavailable", new Error("Initial Channex upload unavailable."));
         }
       }
       let plan: ChannexManagementActionPlan;
