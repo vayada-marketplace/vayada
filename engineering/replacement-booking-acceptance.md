@@ -340,3 +340,20 @@ gate or roll back everything. Never commit preparation alone. Incomplete receipt
 are rejected by historical replay. PostgreSQL preparation coverage exercises a real
 property-lock wait, rollback/retry and receipt rollback with mocked owner evidence;
 it does not prove full concurrent quote acceptance or real-owner integration.
+
+## Receipt completion and immutable acceptance staging
+
+`storePricingAcceptance` consumes unchanged fresh preparation, lifecycle and
+revenue results from the same retained transaction, after those stages succeed.
+It binds the scoped confirmed booking's quote/command, inventory and Finance
+snapshots, completes only the matching in-progress receipt, and appends the exact
+quote, disclosure bytes, normalized command, reservation and Finance evidence.
+It decodes the database result and verifies its linked receipt through the existing
+historical replay reader. Duplicate calls conflict rather than rewriting history.
+
+This remains staging, not permission to commit or expose success. The caller
+must finish outbox and all other blocking work, then run the combined quote/Finance
+gate; any SQL, decoder, replay or authority failure requires full rollback,
+including receipt completion. PostgreSQL tests use real storage/replay SQL and
+constraints with prior stages and authority supplied as fixtures. Complete
+orchestration, real-owner integration and winner-commit races remain required.
