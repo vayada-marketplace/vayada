@@ -57,13 +57,29 @@ Marketplace communication, event, job, or analytics payloads.
 
 ## Preference schema
 
+### `marketplace.communication_preference_sets`
+
+One row per `(user_id, organization_id)` is the aggregate control row for the
+complete preference document. It has identity user/organization foreign keys,
+an integer `revision`, the last actor, and created/updated timestamps. The tuple
+is unique. A missing row is effective revision `0` and uses the audited launch
+policy defaults.
+
+The aggregate revision is the revision returned by the API. A mutation locks
+this row and atomically advances its revision by exactly one before changing
+one or more preference values and appending audit. Value-row revisions are not
+combined or compared to derive the document revision. Hard deletion and
+user/organization scope mutation are forbidden; an opt-out remains explicit.
+
 ### `marketplace.communication_channel_preferences`
 
 One row per `(user_id, organization_id, channel)` with a UUID primary key and
 foreign keys to `identity.users` and `identity.organizations`. It stores
 `channel = email`, `state = on | off`, `source = settings |
 signed_unsubscribe | explicit_opt_in`, `policy_version`, `effective_at`, and
-created/updated timestamps. The tuple is unique.
+created/updated timestamps. It also stores `effective_revision`, the aggregate
+revision that last changed the row. The tuple is unique and is scoped by a
+foreign key to `marketplace.communication_preference_sets`.
 
 This row is the global Marketplace channel switch. `off` suppresses every
 Marketplace email for that user and organization. An absent row uses the
@@ -76,7 +92,9 @@ and identity user/organization foreign keys. It stores `topic =
 collaboration_action_required`, `channel = email`, `cadence = immediate | off`,
 the same preference source values, `consent_classification = service |
 marketing`, nullable `consent_reference`, `policy_version`, `effective_at`, and
-created/updated timestamps. The tuple is unique.
+created/updated timestamps. It also stores `effective_revision`, the aggregate
+revision that last changed the row. The tuple is unique and is scoped by a
+foreign key to `marketplace.communication_preference_sets`.
 
 `consent_reference` points to the identity-owned consent/policy evidence; it
 does not duplicate consent history. The v1 topic is `service` only after the
