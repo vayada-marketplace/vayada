@@ -29,7 +29,7 @@ it.skipIf(!url)(
       INSERT INTO identity.staff_invitations SELECT * FROM identity.organization_memberships;`);
       await client.query(
         await readFile(
-          new URL("../migrations/0200_booking_addon_promo_permissions.sql", import.meta.url),
+          new URL("../migrations/0201_booking_addon_promo_permissions.sql", import.meta.url),
           "utf8",
         ),
       );

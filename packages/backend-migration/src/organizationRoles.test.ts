@@ -26,7 +26,7 @@ it.skipIf(!url)(
       CREATE TABLE identity.staff_invitations (id INT PRIMARY KEY, organization_id UUID);`);
       await client.query(
         await readFile(
-          new URL("../migrations/0201_organization_role_definitions.sql", import.meta.url),
+          new URL("../migrations/0202_organization_role_definitions.sql", import.meta.url),
           "utf8",
         ),
       );

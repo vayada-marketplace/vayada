@@ -270,7 +270,7 @@ before each affected slice; do not treat the confirmed choices as unresolved):
 
 ### Organization role storage
 
-Migration `0201_organization_role_definitions.sql` adds tenant-owned definitions
+Migration `0202_organization_role_definitions.sql` adds tenant-owned definitions
 with names, descriptions, default permission arrays, immutable security class,
 base role key and optional preset identity. Database revisions increase on edits;
 the reserved Account admin definition cannot be updated or deleted. Composite
@@ -293,7 +293,7 @@ running on every API/worker instance before that migration; old validators
 would reject the expanded overrides. Existing invalid overrides must remain
 invalid rather than being silently repaired into grants.
 
-Migration `0200_booking_addon_promo_permissions.sql` copies existing
+Migration `0201_booking_addon_promo_permissions.sql` copies existing
 Settings-manage role grants and explicit membership/invitation grants or denials
 to both new section pairs. Null, malformed and duplicate-containing overrides
 are preserved. Add-on catalog and promo-code GET routes then require their own
@@ -309,7 +309,7 @@ keys. This release sequence has not been executed in a deployed environment.
 
 ### Dynamic property scope
 
-Migration `0199_staff_invitation_dynamic_property_scope.sql` permits agency staff
+Migration `0200_staff_invitation_dynamic_property_scope.sql` permits agency staff
 invitations with `propertyAccessMode: "all"`. Both invitation and membership
 commands require an empty `propertyIds` array for this mode and store no snapshot
 assignments. Acceptance preserves the mode; authorization uses active canonical
@@ -321,7 +321,7 @@ External-owner and delegated-staff scope ceilings remain assigned-only.
 
 ### Product veto foundation
 
-Migration `0198_membership_product_access.sql` stores independent PMS and Booking
+Migration `0199_membership_product_access.sql` stores independent PMS and Booking
 flags on memberships and invitations, defaulting to enabled to preserve existing
 access. Apply this additive migration before deploying the resolver. Each hotel
 authorization resolution reads the membership flags and removes disabled-product
@@ -429,7 +429,7 @@ on invalid definitions. NULL references keep legacy authorization. Only the
 live non-editable property-manifest baseline survives outside section defaults;
 unrelated legacy grants are excluded. Product vetoes still apply afterward.
 
-This requires migration 0201 before runtime deployment. No role references are
+This requires migration 0202 before runtime deployment. No role references are
 populated by this slice. Do not activate assignment writers until role command,
 invitation acceptance and background/Inbox authorization parity are delivered.
 Validation: 31 selected resolver and PostgreSQL tests; affected typecheck and API
@@ -588,7 +588,7 @@ unit tests, backend-auth build/typecheck and API typecheck. Independent review
 identified the acceptance lock inversion; fixed and confirmed. Manager role CRUD
 and privileged targets remain prohibited. Frontend integration remains pending.
 
-### Preset initialization (migration 0202)
+### Preset initialization (migration 0203)
 
 Existing hotel-group accounts and newly inserted accounts receive six saved roles.
 Initialization never assigns members or invitations; null references retain their
@@ -605,7 +605,7 @@ not invented to match illustrative mock counts. Existing members are unaffected
 until an explicit saved-role assignment. Validation covers all six presets through
 the runtime policy validator and checks legacy preservation and deletion behavior.
 
-### External-owner agency management (migration 0203)
+### External-owner agency management (migration 0204)
 
 Account admins can invite external owners through saved roles, read their access,
 edit assigned properties/products/permissions, and suspend/reactivate/remove them.
@@ -630,7 +630,7 @@ No real invitation was sent. Independent review's history-cleanup finding is fix
 
 ### Transfer proof storage and freshness
 
-Migration `0205_account_admin_transfer_proofs.sql` stores a five-minute intent
+Migration `0206_account_admin_transfer_proofs.sql` stores a five-minute intent
 bound to actor/target membership, organization, WorkOS user/organization, source
 browser session and a server-computed digest of the complete reviewed transfer
 (including both member revisions, role revision and former-admin configuration).
