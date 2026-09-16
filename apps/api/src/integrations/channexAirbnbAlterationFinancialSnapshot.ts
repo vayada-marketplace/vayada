@@ -52,7 +52,7 @@ export function readChannexAirbnbAlterationFinancialSnapshot(
           property_id: z.literal(expected.providerPropertyId),
           currency: z.literal(expected.currency),
           ota_name: z.literal("Airbnb"),
-          amount,
+          amount: amount.nullish(),
           ota_commission: amount.nullish(),
         })
         .parse({ ...attributes, id: envelope["id"] ?? attributes["id"] });
@@ -69,7 +69,7 @@ export function readChannexAirbnbAlterationFinancialSnapshot(
         amountBasis: settings.booking_amount_settings,
         cohostPayoutCalculations: settings.cohost_payout_calculations,
         nightlyAllocation: "unavailable" as const,
-        providerBookingAmount: cancellation.amount,
+        providerBookingAmount: cancellation.amount ?? null,
         otaCommission: cancellation.ota_commission ?? null,
         rooms: [],
         nights: [],

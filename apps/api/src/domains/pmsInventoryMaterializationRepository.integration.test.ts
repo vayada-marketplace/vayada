@@ -1382,6 +1382,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ).rows[0].count,
     ).toBe(0);
     Object.assign(providerRevision.attributes, { status: "cancelled", amount: "0.00" });
+    Reflect.deleteProperty(providerRevision.attributes, "amount");
+    const repeatedCancellationRooms = providerRevision.attributes.rooms;
     providerRevision.attributes.rooms = [];
     settingsState = "wrong_binding";
     await rejectTrackedRevision("alteration_finance_settings_unavailable");
@@ -1418,7 +1420,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0],
-    ).toEqual({ replacement: "cancellation", amount: "0.0000" });
+    ).toEqual({ replacement: "cancellation", amount: null });
+    expect(
+      (
+        await admin.query("SELECT total_amount::text FROM booking.guest_bookings WHERE id=$1", [
+          bookingId,
+        ])
+      ).rows[0].total_amount,
+    ).toBe("40.00");
     expect(
       (
         await admin.query("SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1", [
@@ -1441,6 +1450,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].nights,
+    ).toBeNull();
+    // Some cancellation revisions repeat the stay; absent totals still preserve both amounts.
+    providerRevision.attributes.rooms = repeatedCancellationRooms;
+    await nextWorkerRevision();
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "40.00", balance_amount: "40.00" });
+    expect(
+      (
+        await admin.query(
+          "SELECT provider_booking_amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].provider_booking_amount,
     ).toBeNull();
   });
 

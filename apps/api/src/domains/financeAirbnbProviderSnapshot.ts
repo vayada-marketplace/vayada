@@ -87,7 +87,7 @@ export async function appendFinanceAirbnbProviderSnapshot(
       `SELECT id, (provider_property_id=$3::uuid AND provider_booking_id=$4::uuid AND provider_channel_id=$5::uuid
       AND provider_revision_at=$7::timestamptz AND settings_evidence_ref=$8 AND currency=$9
       AND amount_basis=$10 AND cohost_payout_calculations IS NOT DISTINCT FROM $11::boolean
-      AND provider_booking_amount=$12::numeric AND ota_commission IS NOT DISTINCT FROM $13::numeric
+      AND provider_booking_amount IS NOT DISTINCT FROM $12::numeric AND ota_commission IS NOT DISTINCT FROM $13::numeric
       AND snapshot=$14::jsonb) AS matches FROM finance.airbnb_provider_snapshots
      WHERE property_id=$1 AND guest_booking_id=$2 AND provider_revision_id=$6`,
       values,

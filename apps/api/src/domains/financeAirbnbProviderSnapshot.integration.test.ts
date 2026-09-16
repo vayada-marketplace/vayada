@@ -257,5 +257,25 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     expect(
       (await pool.query("SELECT count(*)::int n FROM finance.airbnb_provider_snapshots")).rows[0].n,
     ).toBe(4);
+    const omitted = {
+      ...cancel,
+      previousRevisionId: "cancel-1",
+      providerRevisionAt: "2026-09-14T11:00:00.000001Z",
+      revisionScope: { ...cancel.revisionScope, revisionId: "cancel-2" },
+      settingsEvidence: { ...cancel.settingsEvidence, providerRevisionId: "cancel-2" },
+      rawRevision: { ...cancel.rawRevision, id: "cancel-2", amount: undefined },
+    };
+    expect((await run(omitted)).outcome).toBe("appended");
+    expect((await run(omitted)).outcome).toBe("replayed");
+    expect(
+      (
+        await pool.query(
+          "SELECT provider_booking_amount FROM finance.airbnb_current_provider_amounts",
+        )
+      ).rows[0].provider_booking_amount,
+    ).toBeNull();
+    await expect(
+      run({ ...omitted, rawRevision: { ...omitted.rawRevision, amount: "0.00" } }),
+    ).rejects.toThrow("airbnb_finance_revision_conflict");
   });
 });

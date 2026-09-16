@@ -54,7 +54,11 @@ it("replaces canceled nights without interpreting the provider total as a refund
   });
   expect(JSON.stringify(result)).not.toContain("PRIVATE GUEST");
   expect(() => read({ ...raw, status: "cancelled", booking_id: id(9) }, scope, settings)).toThrow();
-  expect(() => read({ ...raw, status: "cancelled", amount: undefined }, scope, settings)).toThrow();
+  expect(read({ ...raw, status: "cancelled", amount: undefined }, scope, settings)).toMatchObject({
+    providerBookingAmount: null,
+    nights: [],
+  });
+  expect(() => read({ ...raw, status: "cancelled", amount: "invalid" }, scope, settings)).toThrow();
 });
 
 it.each(["Payout Amount", "Total Paid Amount"] as const)(

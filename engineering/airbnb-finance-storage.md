@@ -19,7 +19,7 @@ without deleting audit history or joining it onto every nightly row.
 ## Persistence contract
 
 - Accept only the scoped reader's full replacement for an authoritative modified
-  Airbnb revision, or a cancellation replacement containing explicit provider totals. Validate the local booking's property, provider source reference,
+  Airbnb revision, or a cancellation replacement retaining explicit or unknown provider totals. Validate the local booking's property, provider source reference,
   currency and lifecycle in the same transaction. Full-stay replacements require
   confirmed status and matching updated dates/room count/total. Cancellations
   require canceled status; the supplied provider total is retained separately
@@ -70,12 +70,13 @@ and availability checks, then append a full provider snapshot in the same transa
 They bypass the generic gross-revenue importer. Existing gross revenue, payments or
 folios block this path until their separate reconciliation is supported.
 
-Cancellation revisions with an explicit amount, currency, provider/channel identity
+Cancellation revisions with currency, provider/channel identity
 and verified settings append a `replacement: cancellation` snapshot. Commission is
-stored only when supplied; missing commission remains null. Current nightly rows
+stored only when supplied; missing total and commission remain null. Current nightly rows
 become empty while historical snapshots remain immutable. The provider total is not
-interpreted as a retained charge or refund. Missing rooms are allowed; a missing or
-invalid total rejects the transaction. Inventory cancellation and provider ACK use
+interpreted as a retained charge or refund. Missing rooms and totals are allowed;
+malformed totals reject the transaction. An unknown provider total leaves the canonical
+booking amount unchanged and is explicitly null in the current provider view. Inventory cancellation and provider ACK use
 the existing transactional workflow. No cancellation amount is copied from an older
 snapshot or fabricated as zero. Untracked bookings retain their existing path.
 
@@ -100,11 +101,11 @@ The remaining dependencies prevent production activation:
   revision-specific attestation or a reviewed settings-history guarantee before
   it can return verified evidence. Do not implement a resolver that silently
   promotes current settings into that guarantee.
-- **Financial reconciliation and incomplete cancellation evidence.** Ordinary
-  tracked modifications and cancellations with explicit provider totals now have
+- **Financial reconciliation.** Ordinary
+  tracked modifications and cancellations, including unknown provider totals, have
   a transactional path described above. Bookings with gross revenue/payment/folio
-  evidence remain guarded. Cancellation payloads lacking a usable provider total
-  remain blocked; omission cannot establish zero or a refund. Do not enable the
+  evidence remain guarded. Missing cancellation totals are stored as unknown, never
+  zero or a refund. Do not enable the
   feature generally until the guarded cases have an operational resolution path.
 
 The Finance/add-on and OTA availability owners confirmed no overlapping edits
