@@ -20,7 +20,7 @@ it.skipIf(!url)("seeds account roles once without changing legacy access", async
       CREATE TABLE identity.staff_invitations (id INT PRIMARY KEY, organization_id UUID);`);
     await client.query(
       await readFile(
-        new URL("../migrations/0201_organization_role_definitions.sql", import.meta.url),
+        new URL("../migrations/0202_organization_role_definitions.sql", import.meta.url),
         "utf8",
       ),
     );
@@ -31,7 +31,7 @@ it.skipIf(!url)("seeds account roles once without changing legacy access", async
     );
     await client.query("INSERT INTO identity.staff_invitations VALUES (1, $1, NULL)", [existing]);
     await client.query(
-      await readFile(new URL("../migrations/0202_team_role_presets.sql", import.meta.url), "utf8"),
+      await readFile(new URL("../migrations/0203_team_role_presets.sql", import.meta.url), "utf8"),
     );
     await client.query(
       "INSERT INTO identity.organizations VALUES ($1, 'hotel_group'), ($2, 'creator')",

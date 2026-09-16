@@ -2,7 +2,7 @@
 
 VAY-1439 requires an exception inventory before introducing the single-admin
 invariant. Run this command against an explicitly selected database with the
-current identity schema through migration 0203:
+current identity schema through migration 0204:
 
 ```sh
 npm --workspace @vayada/backend-migration run target:account-admin:preflight
@@ -32,15 +32,15 @@ must recheck ownership transactionally. Fresh WorkOS proof remains required.
 
 ## Guard rollout
 
-Migration `0204_account_admin_guards.sql` adds explicit, permanent enrollment.
+Migration `0205_account_admin_guards.sql` adds explicit, permanent enrollment.
 It does not enroll existing accounts. A future transfer command must acquire the
 organization lock, validate current ownership, enroll, and swap roles atomically.
 The deferred constraint rejects a second owner, legacy alias, or deletion of the
 sole owner; provider inactivation can still revoke access without erasing ownership.
 Account deletion removes its guard through the organization foreign key cascade.
 
-The VAY-1439 stack was rebased after main's migrations 0193–0197. Its six
-preceding migrations now use 0198–0203, with this guard at 0204. SQL contents
+The VAY-1439 stack follows main's booking migration 0198. Its six preceding
+migrations now use 0199–0204, with this guard at 0205. SQL contents
 are unchanged by renumbering. Databases that applied the earlier draft filenames
 must be rebuilt if disposable; any retained environment requires an explicit
 ledger reconciliation before running the new history. Do not rewrite deployed

@@ -46,7 +46,7 @@ describe.skipIf(!url)("single-use admin transfer proof", () => {
     await client.query(
       await readFile(
         new URL(
-          "../../backend-migration/migrations/0205_account_admin_transfer_proofs.sql",
+          "../../backend-migration/migrations/0206_account_admin_transfer_proofs.sql",
           import.meta.url,
         ),
         "utf8",

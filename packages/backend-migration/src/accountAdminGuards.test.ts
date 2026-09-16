@@ -20,7 +20,7 @@ describe.skipIf(!url)("account-admin database guards", () => {
       CREATE TABLE identity.organization_memberships (id uuid PRIMARY KEY, organization_id uuid NOT NULL REFERENCES identity.organizations ON DELETE CASCADE, role_key text NOT NULL, status text NOT NULL);`);
     await client.query(
       await readFile(
-        new URL("../migrations/0204_account_admin_guards.sql", import.meta.url),
+        new URL("../migrations/0205_account_admin_guards.sql", import.meta.url),
         "utf8",
       ),
     );
