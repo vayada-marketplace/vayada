@@ -399,6 +399,12 @@ function successfulOperationalHandler(status = "assigned"): QueryHandler {
     if (text.includes("INSERT INTO pms.booking_checkin_records")) return ok([], 2);
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
     if (text.includes("UPDATE pms.inventory_days")) return ok([], 1);
+    if (
+      text.includes("INSERT INTO platform.domain_events") &&
+      text.includes("pms.inventory.changed")
+    )
+      return ok([{ eventId: "82000000-0000-4000-8000-000000000099" }], 1);
+    if (text.includes("INSERT INTO platform.outbox_events")) return ok([], 1);
     if (text.includes("booking_metadata->>'contractVersion'")) return ok();
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
@@ -1711,6 +1717,7 @@ describe("target PMS operations command repository", () => {
 
     await expect(repository.executeNoShowCommand(baseNoShowCommand())).resolves.toMatchObject({
       ok: true,
+      commandMeta: { sideEffects: ["ari_changed", "audit_event"] },
     });
 
     const evidence = requiredCall(client, "INSERT INTO booking.nightly_revenue_evidence");
@@ -1723,6 +1730,18 @@ describe("target PMS operations command repository", () => {
       }),
       expect.objectContaining({ occupiedRoomNights: -1 }),
     ]);
+    const inventoryUpdate = client.calls.findIndex(({ text }) =>
+      text.includes("UPDATE pms.inventory_days"),
+    );
+    const ariEvent = client.calls.findIndex(({ text }) =>
+      text.includes("INSERT INTO platform.domain_events"),
+    );
+    const ariOutbox = client.calls.findIndex(({ text }) =>
+      text.includes("INSERT INTO platform.outbox_events"),
+    );
+    expect(inventoryUpdate).toBeLessThan(ariEvent);
+    expect(ariEvent).toBeLessThan(ariOutbox);
+    expect(ariOutbox).toBeLessThan(client.calls.length - 1);
     expect(client.calls.at(-1)?.text).toBe("COMMIT");
   });
 

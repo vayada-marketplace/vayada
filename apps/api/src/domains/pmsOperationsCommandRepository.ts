@@ -96,7 +96,11 @@ import {
   ManualStayCorrectionAvailabilityError,
   ManualStayCorrectionScopeError,
 } from "./pmsManualStayCorrection.js";
-import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
+import {
+  reconcilePmsOccupiedInventory,
+  type PmsOccupiedInventoryChange,
+} from "./pmsOccupiedInventory.js";
+import { enqueuePmsOccupiedInventoryAriChanges } from "./pmsOccupiedInventorySideEffects.js";
 import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
@@ -189,6 +193,7 @@ type PmsOperationalCommandOperation =
 type PmsOperationalMutationSuccess = {
   ok: true;
   sideEffects?: PmsOperationsCommandSideEffect[];
+  inventoryChanges?: readonly PmsOccupiedInventoryChange[];
 };
 
 class PmsRoomScopeChangedError extends Error {}
@@ -1432,7 +1437,7 @@ export function createTargetPmsOperationsCommandRepository(
       return executeOperationalCommand(config, pool, now, {
         command,
         operation: "no_show_command",
-        sideEffects: ["audit_event"],
+        sideEffects: ["ari_changed", "audit_event"],
         mutate: applyNoShowCommandMutation,
       });
     },
@@ -4477,6 +4482,23 @@ async function executeOperationalCommand<TCommand extends PmsOperationalCommand>
         },
         linkedChanges,
       );
+      await enqueuePmsOccupiedInventoryAriChanges(
+        client,
+        {
+          propertyId: command.propertyId,
+          reason:
+            operation === "no_show_command"
+              ? "manual_booking_no_show"
+              : operation === "manual_cancellation_command"
+                ? "manual_booking_cancelled"
+                : "manual_booking_stay_corrected",
+          commandId: command.commandId,
+          keyHash,
+          acceptedAt,
+          correlationId: command.audit.correlationId ?? command.audit.requestId,
+        },
+        mutation.inventoryChanges ?? [],
+      );
     }
 
     await recordOperationalCommandAuditEvent(client, command, operation, commandMeta, keyHash);
@@ -5851,7 +5873,7 @@ async function applyNoShowCommandMutation(
   client: PmsOperationsCommandClient,
   command: PmsNoShowCommand,
   acceptedAt: string,
-): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+): Promise<PmsOperationalMutationSuccess | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const sources = await findAssignmentsForOperationalCommand(client, command);
   if (sources.length === 0) return reservationNotFound(command.guestBookingId);
   const expectedVersion = command.expectedVersion;
@@ -5901,15 +5923,20 @@ async function applyNoShowCommandMutation(
     ],
   );
   await appendPmsManualNoShowNightlyRevenueEvidence(client, command, acceptedAt);
-  await reconcilePmsOccupiedInventory(client, command.propertyId, sources, acceptedAt);
-  return { ok: true };
+  const inventoryChanges = await reconcilePmsOccupiedInventory(
+    client,
+    command.propertyId,
+    sources,
+    acceptedAt,
+  );
+  return { ok: true, inventoryChanges };
 }
 
 async function applyManualCancellationCommandMutation(
   client: PmsOperationsCommandClient,
   command: PmsManualCancellationCommand,
   acceptedAt: string,
-): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+): Promise<PmsOperationalMutationSuccess | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const sources = await findAssignmentsForOperationalCommand(client, command);
   if (sources.length === 0) return reservationNotFound(command.guestBookingId);
   if (
@@ -5946,8 +5973,13 @@ async function applyManualCancellationCommandMutation(
       return invalidStatusTransition(error.currentStatus, "canceled");
     throw error;
   }
-  await reconcilePmsOccupiedInventory(client, command.propertyId, sources, acceptedAt);
-  return { ok: true };
+  const inventoryChanges = await reconcilePmsOccupiedInventory(
+    client,
+    command.propertyId,
+    sources,
+    acceptedAt,
+  );
+  return { ok: true, inventoryChanges };
 }
 
 async function applyManualRefundCommandMutation(
@@ -5984,7 +6016,7 @@ async function applyManualStayCorrectionCommandMutation(
   client: PmsOperationsCommandClient,
   command: PmsManualStayCorrectionCommand,
   acceptedAt: string,
-): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+): Promise<PmsOperationalMutationSuccess | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const sources = await findAssignmentsForOperationalCommand(client, command);
   if (sources.length === 0) return reservationNotFound(command.guestBookingId);
   if (
@@ -5993,7 +6025,13 @@ async function applyManualStayCorrectionCommandMutation(
   )
     return operationalConflict("version_conflict", "Reservation stay-correction version is stale.");
   try {
-    await correctPmsManualStays(client, command, acceptedAt, nextAssignmentVersion(sources[0]!));
+    const inventoryChanges = await correctPmsManualStays(
+      client,
+      command,
+      acceptedAt,
+      nextAssignmentVersion(sources[0]!),
+    );
+    return { ok: true, inventoryChanges };
   } catch (error) {
     if (error instanceof ManualStayCorrectionAvailabilityError)
       return operationalConflict("room_unavailable", error.message);
@@ -6006,7 +6044,6 @@ async function applyManualStayCorrectionCommandMutation(
       return invalidStatusTransition(error.currentStatus, "corrected");
     throw error;
   }
-  return { ok: true };
 }
 
 async function applyManualPriceCorrectionCommandMutation(
