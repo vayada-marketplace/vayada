@@ -381,6 +381,20 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
           occupied === 0 && amount === "0.0000" && recognizedOn === "2026-08-13",
       ),
     ).toBe(true);
+    const addonEvidence = await admin.query(
+      `SELECT economic_event AS event,evidence_quality AS quality,gross_amount AS gross,
+         command_key AS "commandKey"
+       FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1::uuid`,
+      [created.guestBookingId],
+    );
+    expect(addonEvidence.rows).toEqual([
+      expect.objectContaining({
+        event: "missing_fulfillment",
+        quality: "missing",
+        gross: null,
+        commandKey: expect.stringMatching(/^pms-no-show:/),
+      }),
+    ]);
     const assignments = await admin.query(
       `SELECT DISTINCT assignment_status AS status,room_id AS room
        FROM pms.operational_booking_assignments WHERE guest_booking_id=$1::uuid`,
@@ -1015,6 +1029,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     const created = await repository.createManualBooking(
       command("cancel", "unpaid", "cash", "2026-08-20", false),
     );
+    await admin.query(
+      `INSERT INTO booking.booking_addon_selections
+         (id,property_id,guest_booking_id,service_date,quantity,total_amount,currency,
+          ownership_kind_snapshot,edit_revision)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,'2026-08-20',1,10,'EUR','property',0)`,
+      [uuid(96), propertyId, created.guestBookingId],
+    );
     const cancellation = {
       propertyId,
       guestBookingId: created.guestBookingId,
@@ -1088,6 +1109,10 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
           WHERE evidence.guest_booking_id=booking.id AND economic_event='occupancy_adjustment') AS occupancy_revision,
          (SELECT MAX(source_revision)::int FROM booking.nightly_revenue_evidence evidence
           WHERE evidence.guest_booking_id=booking.id AND economic_event='retained_charge') AS retained_revision,
+         (SELECT count(*)::int FROM booking.addon_revenue_evidence evidence
+          WHERE evidence.guest_booking_id=booking.id) AS addon_evidence_count,
+         (SELECT MAX(economic_event) FROM booking.addon_revenue_evidence evidence
+          WHERE evidence.guest_booking_id=booking.id) AS addon_event,
          (SELECT count(*)::int FROM platform.outbox_events outbox
           WHERE outbox.resource_id=booking.id::text AND outbox.outbox_key LIKE 'booking.manual-cancellation.%') AS outbox,
          (SELECT source_system FROM platform.domain_events event
@@ -1111,6 +1136,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       recognized: "2026-08-21",
       occupancy_revision: 2,
       retained_revision: 3,
+      addon_evidence_count: 1,
+      addon_event: "missing_fulfillment",
       outbox: 2,
       event_source: "booking",
       leaks_reason: false,

@@ -78,6 +78,7 @@ import {
 } from "./bookingPmsManualRefundNightlyRevenueEvidence.js";
 import {
   appendCheckoutAddonRevenueEvidence,
+  appendMissingAddonRevenueEvidence,
   BookingAddonRevenueEvidenceError,
 } from "./bookingAddonRevenueEvidence.js";
 import {
@@ -5940,6 +5941,11 @@ async function applyNoShowCommandMutation(
     ],
   );
   await appendPmsManualNoShowNightlyRevenueEvidence(client, command, acceptedAt);
+  await appendMissingAddonRevenueEvidence(client, {
+    propertyId: command.propertyId,
+    guestBookingId: command.guestBookingId,
+    commandKey: `pms-no-show:${sha256(command.idempotencyKey)}`,
+  });
   await reconcilePmsOccupiedInventory(client, command.propertyId, sources, acceptedAt);
   return { ok: true };
 }
@@ -5978,6 +5984,11 @@ async function applyManualCancellationCommandMutation(
   );
   try {
     await cancelPmsManualBooking(client, command, acceptedAt);
+    await appendMissingAddonRevenueEvidence(client, {
+      propertyId: command.propertyId,
+      guestBookingId: command.guestBookingId,
+      commandKey: `pms-cancel:${sha256(command.idempotencyKey)}`,
+    });
   } catch (error) {
     if (error instanceof ManualCancellationEvidenceError)
       return operationalInvalidBody(error.message);
