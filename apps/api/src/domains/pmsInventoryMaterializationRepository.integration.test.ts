@@ -2,6 +2,10 @@ import {
   claimChannexRoomAvailability,
   prepareChannexRoomAvailabilityEvidence,
 } from "./channexRoomAvailabilityEvidence.js";
+import {
+  prepareChannexRoomAvailabilityReceiptPersistence,
+  prepareChannexRoomAvailabilityTransportFailurePersistence,
+} from "./channexRoomAvailabilityReceiptStore.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -212,6 +216,119 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].count,
     ).toBe(1);
+  });
+  it("retains the exact sanitized response for an availability claim", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    expect(claimed.kind).toBe("availability_claimed");
+    if (claimed.kind !== "availability_claimed") return;
+    const receiptId = randomUUID(),
+      taskId = randomUUID(),
+      persist = await prepareChannexRoomAvailabilityReceiptPersistence(
+        channelPool,
+        {
+          receiptId,
+          attemptId: claimed.attemptId,
+          jobAttemptId: claimed.jobAttemptId,
+          workerId: claimed.workerId,
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+        },
+        new Response(
+          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+          { status: 200, headers: { "x-request-id": "availability.request-1" } },
+        ),
+      );
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.lease.jobId,
+    ]);
+    await admin.query(
+      "UPDATE pms.channel_connections SET connection_status='degraded' WHERE id=$1",
+      [f.connectionId],
+    );
+    await expect(persist()).resolves.toEqual({ kind: "retained", receiptId });
+    await expect(persist()).resolves.toEqual({ kind: "retained", receiptId });
+    const conflict = await prepareChannexRoomAvailabilityReceiptPersistence(
+      channelPool,
+      {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      },
+      new Response("not-json", { status: 502 }),
+    );
+    await expect(conflict()).rejects.toThrow("Channex availability receipt conflict");
+    expect(
+      (
+        await admin.query(
+          `SELECT outcome,http_status AS "httpStatus",provider_request_id AS "providerRequestId",
+             task_ids AS "taskIds",has_warnings AS "hasWarnings",warning_reason AS "warningReason"
+           FROM pms.channex_room_availability_receipts WHERE attempt_id=$1`,
+          [claimed.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      outcome: "complete_json",
+      httpStatus: 200,
+      providerRequestId: "availability.request-1",
+      taskIds: [taskId],
+      hasWarnings: false,
+      warningReason: null,
+    });
+  });
+  it("retains ambiguous transport failure without exception text", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: claimed.attemptId,
+      jobAttemptId: claimed.jobAttemptId,
+      workerId: claimed.workerId,
+      propertyId: f.propertyId,
+      connectionId: f.connectionId,
+    });
+    await persist();
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [claimed.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      outcome: "transport_error",
+      http_status: null,
+      provider_request_id: null,
+      task_ids: [],
+      has_warnings: true,
+      warning_reason: null,
+    });
+  });
+  it("rejects caller-selected availability receipt scope", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: claimed.attemptId,
+      jobAttemptId: claimed.jobAttemptId,
+      workerId: claimed.workerId,
+      propertyId: randomUUID(),
+      connectionId: f.connectionId,
+    });
+    await expect(persist()).rejects.toThrow("Channex availability receipt correlation unavailable");
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [claimed.attemptId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
   });
   it("writes no owner when current inventory is unavailable", async () => {
     const f = await channelInventoryFixture();
