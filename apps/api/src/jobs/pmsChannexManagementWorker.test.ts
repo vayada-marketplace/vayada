@@ -42,6 +42,33 @@ describe("PMS Channex management worker", () => {
     expect(harness.fail).not.toHaveBeenCalled();
   });
 
+  it("continues a retained room-availability upload through the same bounded worker path", async () => {
+    const claimed = {
+      ...job(),
+      input: { ...job().input, operationType: "sync_ari" as const },
+    };
+    const harness = store(claimed);
+    const progress = {
+      ok: false as const,
+      code: "availability_upload_retained" as const,
+      attemptId: "saved-availability",
+    };
+    await expect(
+      runPmsChannexManagementWorkerOnce({
+        store: harness.port,
+        provider: { execute: async () => progress },
+        workerId: "worker-1",
+        now,
+      }),
+    ).resolves.toMatchObject({ outcome: "continued" });
+    expect(harness.continueUpload).toHaveBeenCalledWith(claimed, progress, {
+      workerId: "worker-1",
+      now,
+    });
+    expect(harness.succeed).not.toHaveBeenCalled();
+    expect(harness.fail).not.toHaveBeenCalled();
+  });
+
   it("claims provider work and persists success", async () => {
     const harness = store(job());
     const execute = vi.fn<ChannexManagementProvider["execute"]>(async (_job, input) => {

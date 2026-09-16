@@ -8,6 +8,7 @@ import {
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -192,6 +193,38 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0];
     return { ...f, prepared, task, availability, get, reconcile, state };
+  }
+  async function availabilityContinuationFixture() {
+    const f = await availabilityReconciliationFixture();
+    const targetState = { succeed: vi.fn(), fail: vi.fn() };
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: TEST_DATABASE_URL!,
+      pool: channelPool,
+      targetState,
+      ariSyncMutating: false,
+    });
+    const job = {
+      jobId: f.lease.jobId,
+      propertyId: f.propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        operationType: "sync_ari" as const,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+      },
+    };
+    await admin.query("UPDATE platform.jobs SET max_attempts=1,payload=$2::jsonb WHERE id=$1", [
+      job.jobId,
+      JSON.stringify(job.input),
+    ]);
+    const progress = {
+      ok: false as const,
+      code: "availability_upload_retained" as const,
+      attemptId: f.prepared.attemptId,
+    };
+    return { ...f, job, progress, store, targetState };
   }
   it("binds canonical inventory to the leased property's current Channex room", async () => {
     const f = await channelInventoryFixture();
@@ -573,6 +606,99 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ),
     ).toMatchObject({ kind: "unavailable" });
     expect(get).not.toHaveBeenCalled();
+  });
+  it("credits an exactly correlated retained availability upload once", async () => {
+    const f = await availabilityContinuationFixture();
+    await f.store.continueUpload(f.job, f.progress, {
+      workerId: f.lease.workerId,
+      now: new Date(),
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT status,attempts_count,max_attempts,locked_by,finished_at FROM platform.jobs WHERE id=$1",
+          [f.job.jobId],
+        )
+      ).rows[0],
+    ).toEqual({
+      status: "pending",
+      attempts_count: 1,
+      max_attempts: 2,
+      locked_by: null,
+      finished_at: null,
+    });
+    await expect(
+      f.store.continueUpload(f.job, f.progress, {
+        workerId: f.lease.workerId,
+        now: new Date(),
+      }),
+    ).rejects.toThrow("Current retained Channex upload required");
+    expect(f.targetState.succeed).not.toHaveBeenCalled();
+    expect(f.targetState.fail).not.toHaveBeenCalled();
+  });
+  it("does not credit an availability receipt through the pricing progress lane", async () => {
+    const f = await availabilityContinuationFixture();
+    await expect(
+      f.store.continueUpload(
+        f.job,
+        { ...f.progress, code: "initial_upload_retained" },
+        { workerId: f.lease.workerId, now: new Date() },
+      ),
+    ).rejects.toThrow("Current retained Channex upload required");
+    expect(
+      (
+        await admin.query("SELECT max_attempts,status FROM platform.jobs WHERE id=$1", [
+          f.job.jobId,
+        ])
+      ).rows[0],
+    ).toEqual({ max_attempts: 1, status: "running" });
+  });
+  it("recovers a retained availability receipt after a final-attempt crash exactly once", async () => {
+    const f = await availabilityContinuationFixture();
+    const scopedPool = {
+      connect: async () => {
+        const client = await channelPool.connect();
+        return {
+          release: client.release.bind(client),
+          query: (text: string, values?: unknown[]) =>
+            text.includes("pms.enqueue_restriction_ari")
+              ? Promise.resolve({ rows: [], rowCount: 0 })
+              : client.query(
+                  text.includes('max_attempts AS "maxAttempts"')
+                    ? text.replace(
+                        "WHERE queue_name = $1",
+                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                      )
+                    : text,
+                  values,
+                ),
+        };
+      },
+      end: async () => {},
+    };
+    const recoveringStore = createPgPmsChannexManagementWorkerStore({
+      connectionString: TEST_DATABASE_URL!,
+      pool: scopedPool,
+      targetState: f.targetState,
+      ariSyncMutating: true,
+    });
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    await expect(
+      recoveringStore.claim({ workerId: "replacement", now: new Date() }),
+    ).resolves.toMatchObject({ jobId: f.job.jobId, attemptNumber: 2, maxAttempts: 2 });
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    await expect(recoveringStore.claim({ workerId: "third", now: new Date() })).resolves.toBeNull();
+    expect(
+      (
+        await admin.query("SELECT status,max_attempts FROM platform.jobs WHERE id=$1", [
+          f.job.jobId,
+        ])
+      ).rows[0],
+    ).toEqual({ status: "dead_lettered", max_attempts: 2 });
   });
   it("writes no owner when current inventory is unavailable", async () => {
     const f = await channelInventoryFixture();
