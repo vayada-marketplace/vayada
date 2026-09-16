@@ -29,7 +29,7 @@ export async function runAccountAdminPreflight(client: pg.Client) {
        ))::int AS "restrictedOwnerCount"
      FROM identity.organizations organization
      LEFT JOIN identity.organization_memberships membership ON membership.organization_id = organization.id
-       AND membership.role_key IN ('hotel_owner', 'owner', 'operator') AND membership.status IN ('active', 'suspended')
+       AND membership.role_key IN ('hotel_owner', 'owner', 'operator')
      LEFT JOIN identity.users person ON person.id = membership.user_id
      WHERE organization.kind = 'hotel_group'
      GROUP BY organization.id, organization.status ORDER BY organization.id`,

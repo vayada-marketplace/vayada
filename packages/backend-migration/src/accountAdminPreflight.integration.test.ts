@@ -18,7 +18,7 @@ describe.skipIf(!databaseUrl)("account-admin preflight (PostgreSQL)", () => {
   it("reports missing, multiple, legacy, inactive-user and restricted owners without changing them", async () => {
     const person = randomUUID();
     const suspendedPerson = randomUUID();
-    const ids: string[] = Array.from({ length: 6 }, () => randomUUID());
+    const ids: string[] = Array.from({ length: 7 }, () => randomUUID());
     await client.query("BEGIN");
     try {
       await client.query(
@@ -43,6 +43,11 @@ describe.skipIf(!databaseUrl)("account-admin preflight (PostgreSQL)", () => {
             index !== 5,
           ],
         );
+        if (index === 6)
+          await client.query(
+            "UPDATE identity.organization_memberships SET status = 'inactive' WHERE organization_id = $1",
+            [id],
+          );
         if (index === 2)
           await client.query(
             `INSERT INTO identity.organization_memberships
@@ -59,7 +64,7 @@ describe.skipIf(!databaseUrl)("account-admin preflight (PostgreSQL)", () => {
       ).rows;
       const report = await runAccountAdminPreflight(client);
       const exceptions = report.exceptions.filter((row) => ids.includes(row.organizationId));
-      expect(exceptions).toHaveLength(5);
+      expect(exceptions).toHaveLength(6);
       expect(exceptions.find((row) => row.organizationId === ids[0])).toBeUndefined();
       expect(exceptions.find((row) => row.organizationId === ids[1])?.ownerCount).toBe(0);
       expect(exceptions.find((row) => row.organizationId === ids[2])?.ownerCount).toBe(2);
@@ -76,6 +81,10 @@ describe.skipIf(!databaseUrl)("account-admin preflight (PostgreSQL)", () => {
           )
         ).rows,
       ).toEqual(before);
+      expect(exceptions.find((row) => row.organizationId === ids[6])?.ownerCount).toBe(1);
+      expect(
+        exceptions.find((row) => row.organizationId === ids[6])?.activeCanonicalOwnerCount,
+      ).toBe(0);
       expect(JSON.stringify(report)).not.toContain("@example.invalid");
     } finally {
       await client.query("ROLLBACK");

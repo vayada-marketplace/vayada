@@ -201,6 +201,22 @@ arbitrarily or silently demote existing owners. Serialize transfers on the
 organization, validate the current admin again, and change both memberships in
 one transaction under a database-enforced invariant.
 
+Enforcement rollout is explicit per organization through `account_admin_guards`.
+The additive guard migration does not enroll or change existing accounts; account
+provisioning can therefore still create an organization before its first owner.
+The transfer command must validate and enroll the account within its transaction.
+Provisioning enrollment and reviewed legacy remediation are separate rollout steps.
+Guard enrollment is permanent until account deletion. All owner-role mutations,
+including those before enrollment, serialize through an organization row-version
+write so stale repeatable-read snapshots cannot bypass concurrent enrollment.
+
+The ownership invariant counts canonical and legacy owner-role rows even when
+inactive. Provider revocation may inactivate the sole admin to deny access while
+preserving ownership; it must not be rolled back merely to keep a login active.
+Transfer separately requires active actor/target memberships and users. Historical
+inactive owners require explicit remediation before enrollment; no owner is chosen
+automatically. Ordinary user/account security suspension remains available.
+
 The transfer request includes the former admin's proposed non-admin role,
 products, property mode/assignments and overrides, with revisions for both
 memberships and any referenced role. Preview this resulting access before fresh

@@ -15,8 +15,9 @@ statement timeout. It does not migrate, normalize, demote or delete users.
 
 The JSON report includes organization IDs/statuses and exception counts, without
 names, email addresses, provider IDs or credentials. All hotel groups are
-inventoried, including inactive groups that could later be activated. Removed
-memberships are excluded; suspended owners still count as existing owners.
+inventoried, including inactive groups that could later be activated. All owner-role rows count, including inactive memberships: inactivation revokes
+access but does not choose or remove ownership. Historical owner rows require
+explicit remediation before enrollment.
 
 Exceptions are: zero/multiple current owners; no single active canonical owner
 with an active user; legacy `owner`/`operator` aliases; or canonical owners with
@@ -28,3 +29,17 @@ failed. Exceptions need explicit account-level decisions before invariant rollou
 Do not pick a winner automatically. A clear report is a point-in-time prerequisite,
 not transfer authorization: the future invariant migration and transfer command
 must recheck ownership transactionally. Fresh WorkOS proof remains required.
+
+## Guard rollout
+
+Migration `0204_account_admin_guards.sql` adds explicit, permanent enrollment.
+It does not enroll existing accounts. A future transfer command must acquire the
+organization lock, validate current ownership, enroll, and swap roles atomically.
+The deferred constraint rejects a second owner, legacy alias, or deletion of the
+sole owner; provider inactivation can still revoke access without erasing ownership.
+Account deletion removes its guard through the organization foreign key cascade.
+
+The VAY-1439 stack currently overlaps main's migration numbers 0193–0197.
+Renumber and rebase the complete stack before merge; 0204 is reserved for this
+guard after the six preceding VAY-1439 migrations are assigned 0198–0203.
+Do not apply the combined branch/main migration history before that reconciliation.
