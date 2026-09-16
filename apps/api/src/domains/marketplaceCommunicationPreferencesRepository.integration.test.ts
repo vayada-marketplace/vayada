@@ -14,6 +14,7 @@ const otherUserId = "a2022000-0000-4000-8000-000000000002";
 const organizationId = "a2022000-0000-4000-8000-000000000003";
 const otherOrganizationId = "a2022000-0000-4000-8000-000000000004";
 const acceptedAt = "2026-09-17T01:00:00.000Z";
+const updatedAt = "2026-09-17T02:00:00.000Z";
 const policyEffectiveAt = "2026-09-01T00:00:00.000Z";
 const operation = "marketplace.communication_preferences.replace";
 const auditFailureFunction = "platform.vay2022_fail_communication_preference_audit";
@@ -23,10 +24,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
   const admin = new pg.Client({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
   });
+  let repositoryTime = acceptedAt;
   const repository = createPgMarketplaceCommunicationPreferencesRepository({
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
     max: 6,
-    now: () => new Date(acceptedAt),
+    now: () => new Date(repositoryTime),
   });
 
   beforeAll(async () => {
@@ -36,6 +38,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
   beforeEach(async () => {
     await cleanup();
     await seedIdentity();
+    repositoryTime = acceptedAt;
   });
   afterAll(async () => {
     await repository.close();
@@ -94,23 +97,49 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
       ok: false,
       error: { code: "preference_conflict", currentRevision: 1 },
     });
+    repositoryTime = updatedAt;
     const updated = await repository.replaceCommunicationPreferences(
-      command("update", 1, "on", "immediate"),
+      command("update", 1, "off", "immediate"),
     );
-    expect(updated).toMatchObject({ ok: true, preferences: { revision: 2 } });
+    expect(updated).toMatchObject({
+      ok: true,
+      preferences: {
+        revision: 2,
+        email: { state: "off", effectiveAt: acceptedAt },
+        topics: { collaborationActionRequired: { cadence: "immediate", effectiveAt: updatedAt } },
+      },
+    });
+    const unchanged = await repository.replaceCommunicationPreferences(
+      command("unchanged", 2, "off", "immediate"),
+    );
+    expect(unchanged).toEqual(updated);
+    const valueRevisions = await admin.query<{
+      channelRevision: number;
+      topicRevision: number;
+    }>(
+      `SELECT channel.effective_revision AS "channelRevision",
+              topic.effective_revision AS "topicRevision"
+       FROM marketplace.communication_channel_preferences channel
+       JOIN marketplace.communication_topic_preferences topic
+         ON topic.user_id = channel.user_id
+        AND topic.organization_id = channel.organization_id
+       WHERE channel.user_id = $1::uuid AND channel.organization_id = $2::uuid`,
+      [userId, organizationId],
+    );
+    expect(valueRevisions.rows[0]).toEqual({ channelRevision: 1, topicRevision: 2 });
     await expect(repository.replaceCommunicationPreferences(stale)).resolves.toEqual(
       originalConflict,
     );
     await expect(repository.getCommunicationPreferences(scope("disabled"))).resolves.toMatchObject({
       revision: 2,
-      email: { state: "on", source: "settings" },
+      email: { state: "off", source: "settings", effectiveAt: acceptedAt },
       topics: { collaborationActionRequired: { cadence: "immediate", source: "settings" } },
     });
     await expect(sideEffectCounts()).resolves.toEqual({
       aggregate: 1,
-      audit: 3,
+      audit: 4,
       channel: 1,
-      idempotency: 3,
+      idempotency: 4,
       topic: 1,
     });
   });
