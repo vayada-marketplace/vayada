@@ -400,6 +400,7 @@ function successfulOperationalHandler(status = "assigned"): QueryHandler {
     if (text.includes("INSERT INTO pms.booking_checkin_records")) return ok([], 2);
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
     if (text.includes("UPDATE pms.inventory_days")) return ok([], 1);
+    if (text.includes("JOIN booking.booking_addon_selections selection")) return ok();
     if (text.includes("booking_metadata->>'contractVersion'")) return ok();
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);

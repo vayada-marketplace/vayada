@@ -29,6 +29,32 @@ export async function appendCheckoutAddonRevenueEvidence(
     commandKeyHash: string;
   },
 ): Promise<void> {
+  await appendAddonRevenueEvidence(transaction, {
+    ...input,
+    commandKey: `pms-checkout:${input.commandKeyHash}`,
+  });
+}
+
+export async function appendMissingAddonRevenueEvidence(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    commandKey: string;
+  },
+): Promise<void> {
+  await appendAddonRevenueEvidence(transaction, { ...input, fulfilledSelectionIds: [] });
+}
+
+async function appendAddonRevenueEvidence(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    fulfilledSelectionIds: readonly string[];
+    commandKey: string;
+  },
+): Promise<void> {
   const purchased = await transaction.query<PurchasedAddOn>(
     `SELECT selection.id::text AS "selectionId", selection.service_date::text AS "serviceDate",
        booking.check_in::text AS "checkIn", selection.quantity,
@@ -71,7 +97,7 @@ export async function appendCheckoutAddonRevenueEvidence(
         selection.partnerCommissionRate,
         isFulfilled ? "fulfillment" : "missing_fulfillment",
         isFulfilled ? (selection.serviceDate ? "exact" : "inferred") : "missing",
-        `pms-checkout:${input.commandKeyHash}:addon:${selection.selectionId}:v1`,
+        `${input.commandKey}:addon:${selection.selectionId}:v1`,
       ],
     );
   }
