@@ -315,3 +315,28 @@ run the final quote/Finance deadline check after all blocking writes. Any failur
 requires rollback of the whole transaction, including inventory and earlier draft
 writes. Lifecycle storage tests use real PostgreSQL but mock authority and PMS;
 they do not establish complete acceptance or live inventory-release integration.
+
+## Fresh command preparation and receipt reservation
+
+`preparePricingAcceptance` starts the retained READ COMMITTED transaction's
+acceptance work. It reuses the property inventory mutation lock acquired by
+`lockPublicPricingAuthority`; all cooperating replacement writers must take that
+lock before reading command receipts or quote acceptance. The subsequent statement
+observes a competing transaction's commit after the lock wait. No separate advisory
+lock namespace is needed. Durable receipt and quote-acceptance uniqueness remain
+required even with this serialization.
+
+Completed historical replay runs before current price, disclosure and Finance
+checks. A quote already accepted with another request is rejected. Fresh commands
+obtain current disclosure/revalidation, validate normalized consent, and capture
+Finance terms. For now preparation requires the implemented instant/pay-at-property
+composition and resolvable room revenue; request mode, online payment and unresolved
+discount/included-charge allocations remain unavailable.
+
+The fresh result contains an **in-progress** property-scoped receipt, not an
+accepted booking. Caller must retain all locks, stage booking/lifecycle/revenue,
+complete the receipt and immutable acceptance/outbox, then run the final deadline
+gate or roll back everything. Never commit preparation alone. Incomplete receipts
+are rejected by historical replay. PostgreSQL preparation coverage exercises a real
+property-lock wait, rollback/retry and receipt rollback with mocked owner evidence;
+it does not prove full concurrent quote acceptance or real-owner integration.
