@@ -120,20 +120,28 @@ export function createPgMarketplaceCommunicationPreferencesRepository(
         const currentRevision = current?.revision ?? 0;
         if (currentRevision !== command.request.expectedRevision) {
           const result = failed("preference_conflict", currentRevision);
-          await recordAudit(client, command, idempotencyId, result, acceptedAt);
+          await recordAudit(client, command, idempotencyId, result, false, acceptedAt);
           await completeIdempotency(client, idempotencyId, command.userId, result, acceptedAt);
           await client.query("COMMIT");
           return result;
         }
 
-        await persistPreferences(client, command, current?.id ?? null, acceptedAt);
-        const preferences = await readStoredPreferences(client, command);
+        const before = current ? await readStoredPreferences(client, command) : null;
+        if (current && !before) throw new Error("Communication preference aggregate is incomplete");
+        const changed = await persistPreferences(
+          client,
+          command,
+          current?.id ?? null,
+          before,
+          acceptedAt,
+        );
+        const preferences = changed ? await readStoredPreferences(client, command) : before;
         if (!preferences) throw new Error("Communication preference write was not readable");
         const result: ReplaceMarketplaceCommunicationPreferencesResult = {
           ok: true,
           preferences,
         };
-        await recordAudit(client, command, idempotencyId, result, acceptedAt);
+        await recordAudit(client, command, idempotencyId, result, changed, acceptedAt);
         await completeIdempotency(client, idempotencyId, command.userId, result, acceptedAt);
         await client.query("COMMIT");
         return result;
@@ -292,8 +300,19 @@ async function persistPreferences(
   client: MarketplaceCommunicationPreferencesClient,
   command: ReplaceMarketplaceCommunicationPreferencesCommand,
   preferenceSetId: string | null,
+  before: MarketplaceCommunicationPreferencesV1 | null,
   at: Date,
-): Promise<void> {
+): Promise<boolean> {
+  const channelChanged =
+    !before ||
+    before.email.state !== command.request.email.state ||
+    before.email.source !== "settings";
+  const topicChanged =
+    !before ||
+    before.topics.collaborationActionRequired.cadence !==
+      command.request.topics.collaborationActionRequired.cadence ||
+    before.topics.collaborationActionRequired.source !== "settings";
+  if (!channelChanged && !topicChanged) return false;
   const revision = command.request.expectedRevision + 1;
   const common = [
     command.userId,
@@ -320,8 +339,9 @@ async function persistPreferences(
     if (inserted.rowCount !== 1)
       throw new Error("Communication preference aggregate insert failed");
   }
-  const channel = await client.query(
-    `INSERT INTO marketplace.communication_channel_preferences (
+  if (channelChanged) {
+    const channel = await client.query(
+      `INSERT INTO marketplace.communication_channel_preferences (
        user_id, organization_id, channel, state, source, effective_revision, policy_version,
        effective_at, updated_by_user_id, created_at, updated_at
      ) VALUES ($1::uuid, $2::uuid, 'email', $5, 'settings', $6,
@@ -332,11 +352,13 @@ async function persistPreferences(
        effective_revision = EXCLUDED.effective_revision, policy_version = EXCLUDED.policy_version,
        effective_at = EXCLUDED.effective_at, updated_by_user_id = EXCLUDED.updated_by_user_id,
        updated_at = EXCLUDED.updated_at`,
-    [...common, command.request.email.state, revision],
-  );
-  if (channel.rowCount !== 1) throw new Error("Communication channel preference write failed");
-  const topic = await client.query(
-    `INSERT INTO marketplace.communication_topic_preferences (
+      [...common, command.request.email.state, revision],
+    );
+    if (channel.rowCount !== 1) throw new Error("Communication channel preference write failed");
+  }
+  if (topicChanged) {
+    const topic = await client.query(
+      `INSERT INTO marketplace.communication_topic_preferences (
        user_id, organization_id, topic, channel, cadence, source, consent_classification,
        consent_reference, effective_revision, policy_version, effective_at, updated_by_user_id,
        created_at, updated_at
@@ -350,9 +372,11 @@ async function persistPreferences(
        effective_revision = EXCLUDED.effective_revision, policy_version = EXCLUDED.policy_version,
        effective_at = EXCLUDED.effective_at, updated_by_user_id = EXCLUDED.updated_by_user_id,
        updated_at = EXCLUDED.updated_at`,
-    [...common, command.request.topics.collaborationActionRequired.cadence, revision],
-  );
-  if (topic.rowCount !== 1) throw new Error("Communication topic preference write failed");
+      [...common, command.request.topics.collaborationActionRequired.cadence, revision],
+    );
+    if (topic.rowCount !== 1) throw new Error("Communication topic preference write failed");
+  }
+  return true;
 }
 
 async function recordAudit(
@@ -360,6 +384,7 @@ async function recordAudit(
   command: ReplaceMarketplaceCommunicationPreferencesCommand,
   idempotencyId: string,
   result: ReplaceMarketplaceCommunicationPreferencesResult,
+  changed: boolean,
   at: Date,
 ): Promise<void> {
   const inserted = await client.query(
@@ -376,7 +401,9 @@ async function recordAudit(
     [
       `marketplace.communication_preferences.organization.${command.organizationId}.user.${command.userId}.idempotency.${idempotencyId}.${at.getTime()}`,
       result.ok
-        ? "marketplace.communication_preferences.updated"
+        ? changed
+          ? "marketplace.communication_preferences.updated"
+          : "marketplace.communication_preferences.unchanged"
         : "marketplace.communication_preferences.replace_rejected",
       at.toISOString(),
       command.organizationId,
@@ -388,7 +415,7 @@ async function recordAudit(
       command.audit.requestId,
       JSON.stringify(
         result.ok
-          ? { outcome: "updated", revision: result.preferences.revision }
+          ? { outcome: changed ? "updated" : "unchanged", revision: result.preferences.revision }
           : { outcome: "rejected", errorCode: result.error.code },
       ),
     ],
