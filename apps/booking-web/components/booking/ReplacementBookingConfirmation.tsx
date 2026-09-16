@@ -24,8 +24,15 @@ export default function ReplacementBookingConfirmation({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [refreshRequired, setRefreshRequired] = useState(false);
   const [result, setResult] = useState<PricingAcceptanceResult | null>(null);
-  const ready = termsAccepted && disclosure?.quoteId === quote.quoteId;
+  const supported =
+    quote.acceptanceMode === "instant" &&
+    quote.paymentMethod === "pay_at_property" &&
+    quote.dueNowMinor === "0" &&
+    quote.dueLaterMinor === quote.totalMinor;
+  const ready =
+    supported && !refreshRequired && termsAccepted && disclosure?.quoteId === quote.quoteId;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,8 +53,10 @@ export default function ReplacementBookingConfirmation({
         }),
       );
     } catch (failure) {
+      const conflict = failure instanceof ApiError && failure.status === 409;
+      setRefreshRequired(conflict);
       setError(
-        failure instanceof ApiError && failure.status === 409
+        conflict
           ? "This price is no longer available. Get a new price and review its terms again."
           : "We couldn’t confirm your booking. Your room may still have been booked, so retry with the same details.",
       );
@@ -115,7 +124,11 @@ export default function ReplacementBookingConfirmation({
           <textarea className={field} name="specialRequests" maxLength={2000} rows={4} />
         </label>
       )}
-      {!ready && <p role="status">Read and accept both the room terms and guest rules to book.</p>}
+      {!supported ? (
+        <p role="status">Online confirmation is not available for this payment option.</p>
+      ) : !ready && !refreshRequired ? (
+        <p role="status">Read and accept both the room terms and guest rules to book.</p>
+      ) : null}
       {error && <p role="alert">{error}</p>}
       <button className={button} type="submit" disabled={!ready || loading}>
         {loading ? "Confirming booking…" : "Confirm booking"}
