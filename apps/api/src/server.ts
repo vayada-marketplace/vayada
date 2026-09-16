@@ -72,6 +72,9 @@ import { createPgFinanceManualExpenseRepository } from "./domains/financeManualE
 import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/financeRecurringExpenseRuleRepository.js";
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
+import { createPgFinanceRevenueAddonFacts } from "./domains/financeRevenueAddonFacts.js";
+import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel.js";
+import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -645,6 +648,24 @@ const financeExpenseRuntime = config.financeSource === "target" ? (() => {
   const categories = createPgFinanceExpenseCategoryRepository(targetDatabaseUrl), expenses = createPgFinanceManualExpenseRepository(targetDatabaseUrl), recurring = createPgFinanceRecurringExpenseRuleRepository(targetDatabaseUrl);
   return { routes: { read, categories, expenses, recurring }, close: () => Promise.all([read.close(), propertyContext.close(), categories.close(), expenses.close(), recurring.close()]) };
 })() : undefined;
+const financeRevenueRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const rooms = createPgFinanceRevenueRoomFacts({ connectionString: targetDatabaseUrl });
+        const addOns = createPgFinanceRevenueAddonFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceRevenueReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          rooms,
+          addOns,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), rooms.close(), addOns.close()]),
+        };
+      })()
+    : undefined;
 const financeFolioRuntime =
   config.financeSource === "target" && config.financeFolioRecipientKms
     ? (() => {
@@ -1606,6 +1627,7 @@ const app = buildApp({
           : {}),
       }
     : undefined,
+  financeRevenue: financeRevenueRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -1942,6 +1964,7 @@ app.addHook("onClose", async () => {
     adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
+    financeRevenueRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
