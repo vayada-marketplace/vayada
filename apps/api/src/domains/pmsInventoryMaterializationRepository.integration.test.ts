@@ -1,3 +1,4 @@
+import { prepareChannexRoomAvailabilityEvidence } from "./channexRoomAvailabilityEvidence.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -46,6 +47,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
   });
   const repositories: PmsInventoryMaterializationRepository[] = [];
+  const channelPool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+  afterAll(() => channelPool.end());
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
@@ -57,6 +60,140 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
+  async function channelInventoryFixture() {
+    const f = await createFixture(admin, repositories, [2]);
+    const date = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await f.repository.materializeInventory(
+      materializationCommand(f, "channel-inventory", 1, date, date),
+    );
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship)
+      VALUES($1,'hotel_catalog','property',$2,'owner'),($1,'pms','pms_property',$2,'owner')`,
+      [f.organizationId, f.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')",
+      [f.organizationId],
+    );
+    await admin.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+      VALUES($1,'channex',$2,'active','enable')`,
+      [f.propertyId, f.propertyId],
+    );
+    const connectionId = (
+      await admin.query(
+        `INSERT INTO pms.channel_connections(property_id,provider,external_property_id,connection_status)
+      VALUES($1,'channex',$2,'connected') RETURNING id`,
+        [f.propertyId, f.propertyId],
+      )
+    ).rows[0].id;
+    const externalRoomTypeId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+      VALUES($1,$2,$3,$4)`,
+      [f.propertyId, connectionId, f.roomTypeId, externalRoomTypeId],
+    );
+    const jobId = randomUUID();
+    await admin.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
+      tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+      VALUES($1::uuid,$1::text,'pms.channex.management','channex.sync_ari','running',1,'inventory-worker',clock_timestamp(),
+      'property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"sync_ari"}')`,
+      [jobId, f.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'inventory-worker')",
+      [jobId],
+    );
+    const lease = { jobId, workerId: "inventory-worker", attemptNumber: 1 },
+      selection = { roomTypeId: f.roomTypeId, date };
+    return {
+      ...f,
+      connectionId,
+      externalRoomTypeId,
+      lease,
+      selection,
+      prepare: (
+        inventory: Pick<
+          PmsInventoryMaterializationRepository,
+          "getCurrentInventoryDay"
+        > = f.repository,
+      ) => prepareChannexRoomAvailabilityEvidence(channelPool, inventory, lease, selection),
+    };
+  }
+  it("binds canonical inventory to the leased property's current Channex room", async () => {
+    const f = await channelInventoryFixture();
+    expect(await f.prepare()).toMatchObject({
+      kind: "availability_prepared",
+      authority: { connectionId: f.connectionId, externalPropertyId: f.propertyId, lease: f.lease },
+      mapping: { externalRoomTypeId: f.externalRoomTypeId, bindingGeneration: expect.any(String) },
+      inventory: {
+        day: {
+          propertyId: f.propertyId,
+          roomTypeId: f.roomTypeId,
+          stayDate: f.selection.date,
+          availableCount: 2,
+        },
+      },
+    });
+  });
+  it.each(["mapping", "binding", "lease", "entitlement"])(
+    "holds availability when %s changes before the final guard",
+    async (mode) => {
+      const f = await channelInventoryFixture();
+      expect(
+        await f.prepare({
+          getCurrentInventoryDay: async (request, guard) => {
+            if (mode === "mapping")
+              await admin.query(
+                "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1",
+                [f.propertyId, randomUUID()],
+              );
+            if (mode === "binding")
+              await admin.query(
+                "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+                [f.connectionId],
+              );
+            if (mode === "lease")
+              await admin.query(
+                "UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1",
+                [f.lease.jobId],
+              );
+            if (mode === "entitlement")
+              await admin.query(
+                "UPDATE identity.product_entitlements SET expires_at=now()-interval '1 second' WHERE organization_id=$1",
+                [f.organizationId],
+              );
+            return f.repository.getCurrentInventoryDay(request, guard);
+          },
+        }),
+      ).toMatchObject({ kind: "unavailable", reason: "consumer_authority_unavailable" });
+    },
+  );
+  it.each(["foreign-room", "restrictions-only", "disabled-mapping", "expired-lease", "past-date"])(
+    "rejects %s availability preparation",
+    async (mode) => {
+      const f = await channelInventoryFixture();
+      if (mode === "foreign-room") f.selection.roomTypeId = randomUUID();
+      if (mode === "restrictions-only")
+        await admin.query(
+          `UPDATE platform.jobs SET payload=payload || '{"restrictionsOnly":true}'::jsonb WHERE id=$1`,
+          [f.lease.jobId],
+        );
+      if (mode === "disabled-mapping")
+        await admin.query(
+          "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+          [f.propertyId],
+        );
+      if (mode === "expired-lease")
+        await admin.query(
+          "UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1",
+          [f.lease.jobId],
+        );
+      if (mode === "past-date") f.selection.date = "2026-01-01";
+      expect(await f.prepare()).toMatchObject({ kind: "unavailable" });
+    },
+  );
   it("does not retain an old calendar snapshot across an inventory writer", async () => {
     const f = await dailyFixture(),
       blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -106,6 +243,47 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     } finally {
       await blocker.end();
     }
+  });
+  it("does not accept a reader that omits the transaction guard", async () => {
+    const f = await channelInventoryFixture();
+    expect(
+      await f.prepare({
+        getCurrentInventoryDay: (request) => f.repository.getCurrentInventoryDay(request),
+      }),
+    ).toMatchObject({ kind: "unavailable", reason: "consumer_authority_unavailable" });
+  });
+  it("fails promptly on a concurrent mapping lock inside the inventory guard", async () => {
+    const f = await channelInventoryFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await expect(
+        f.prepare({
+          getCurrentInventoryDay: async (request, guard) => {
+            await blocker.query("BEGIN");
+            await blocker.query(
+              "SELECT id FROM pms.channel_room_type_mappings WHERE property_id=$1 FOR UPDATE",
+              [f.propertyId],
+            );
+            return f.repository.getCurrentInventoryDay(request, guard);
+          },
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("ROLLBACK");
+      expect(await f.prepare()).toMatchObject({ kind: "availability_prepared" });
+    } finally {
+      await blocker.end();
+    }
+  });
+  it("returns no inventory evidence after a guard throws and releases its locks", async () => {
+    const f = await channelInventoryFixture(),
+      request = { propertyId: f.propertyId, roomTypeId: f.roomTypeId, stayDate: f.selection.date };
+    await expect(
+      f.repository.getCurrentInventoryDay(request, async () => {
+        throw new Error("guard failed");
+      }),
+    ).rejects.toThrow("guard failed");
+    expect(await f.prepare()).toMatchObject({ kind: "availability_prepared" });
   });
   async function dailyFixture(materialize = true) {
     const f = await createFixture(admin, repositories, [2, 1]);

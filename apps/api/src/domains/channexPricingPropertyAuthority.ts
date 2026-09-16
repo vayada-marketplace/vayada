@@ -1,8 +1,8 @@
-import type { PoolClient } from "pg";
 import {
   lockChannexPricingJobLease,
   type ChannexPricingJobLeaseInput,
   type ChannexPricingJobLease,
+  type ChannexPricingQueryClient,
 } from "../jobs/pmsChannexPricingJobLease.js";
 
 export type ChannexPricingPropertyAuthority =
@@ -25,7 +25,7 @@ export type ChannexPricingPropertyAuthority =
  * delivery must start a fresh authority/freshness check before provider dispatch.
  */
 export async function lockChannexPricingPropertyAuthority(
-  client: PoolClient,
+  client: ChannexPricingQueryClient,
   input: ChannexPricingJobLeaseInput,
 ): Promise<ChannexPricingPropertyAuthority> {
   const leaseInput = { ...input };

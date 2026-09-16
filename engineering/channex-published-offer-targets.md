@@ -1172,3 +1172,20 @@ take the inventory lock. Contention returns `55P03` for retry; do not wait insid
 an existing snapshot and accept a superseded append-only calendar. Always release
 both session pins before returning the connection to the pool; failed rollback
 or unlock discards the connection. This pin does not authorize provider IO.
+
+### Current job and room binding for availability evidence
+
+Prepare availability evidence from a server-held job lease and local room/date,
+never a caller-supplied property or provider ID. Resolve the current authorized
+property and active room mapping first. The PMS day reader then holds its owner
+locks in a SERIALIZABLE transaction and invokes a narrow internal authorization
+guard on that same client. The guard cannot supply or change inventory values.
+
+Recheck full Channex authority and the exact mapping ID, external room/property,
+connection ID, claim ID and binding generation while the inventory day is still
+locked. Use NOWAIT for reverse-order authority and mapping row locks. Recheck full
+authority again at the final boundary for wall-clock lease/entitlement expiry.
+Require a hotel-local admitted initial date. Guard rejection rolls back; neither
+captured mapping nor inventory evidence escapes a failed commit. No provider
+request or durable claim is authorized by this read: the next room-scoped
+claim/dispatch must repeat these checks and retain unresolved ownership.
