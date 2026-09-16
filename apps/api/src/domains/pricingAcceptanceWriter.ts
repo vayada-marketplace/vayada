@@ -78,7 +78,12 @@ export async function writePricingAcceptance(
       prepared.finance,
     );
     await client.query("COMMIT");
-    return { kind: "accepted" as const, ...accepted, checkedAt };
+    return {
+      kind: "accepted" as const,
+      ...accepted,
+      bookingReference: publicReference,
+      checkedAt,
+    };
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     if (error instanceof PricingAcceptanceError) throw error;

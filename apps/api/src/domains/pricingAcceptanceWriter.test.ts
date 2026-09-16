@@ -47,6 +47,7 @@ describe("pricing acceptance writer", () => {
     await expect(writePricingAcceptance(pool as never, input)).resolves.toEqual({
       kind: "accepted",
       ...accepted,
+      bookingReference: expect.stringMatching(/^VAY-[A-Z0-9]{32}$/),
       checkedAt: "checked",
     });
     expect(stagePricingBookingDraft).toHaveBeenCalledBefore(
@@ -113,11 +114,13 @@ describe("pricing acceptance writer", () => {
     vi.mocked(preparePricingAcceptance).mockResolvedValue({
       kind: "replayed",
       bookingId: "existing",
+      bookingReference: "VAY-EXISTING",
       replayed: true,
     });
     await expect(writePricingAcceptance(pool as never, input)).resolves.toEqual({
       kind: "replayed",
       bookingId: "existing",
+      bookingReference: "VAY-EXISTING",
       replayed: true,
     });
     expect(stagePricingBookingDraft).not.toHaveBeenCalled();

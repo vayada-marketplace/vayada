@@ -23,11 +23,17 @@ export type PricingAcceptanceResult =
   | Readonly<{
       kind: "accepted";
       bookingId: string;
+      bookingReference: string;
       acceptanceId: string;
       acceptedAt: string;
       checkedAt: string;
     }>
-  | Readonly<{ kind: "replayed"; bookingId: string; replayed: true }>;
+  | Readonly<{
+      kind: "replayed";
+      bookingId: string;
+      bookingReference: string;
+      replayed: true;
+    }>;
 
 const uuid = (value: unknown): value is string =>
   typeof value === "string" &&
@@ -36,6 +42,8 @@ const iso = (value: unknown): value is string =>
   typeof value === "string" &&
   Number.isFinite(Date.parse(value)) &&
   new Date(value).toISOString() === value;
+const bookingReference = (value: unknown): value is string =>
+  typeof value === "string" && /^VAY-[A-Z0-9]{6,32}$/.test(value);
 const exact = (value: unknown, keys: string[]): value is Record<string, unknown> =>
   !!value &&
   typeof value === "object" &&
@@ -45,16 +53,25 @@ const exact = (value: unknown, keys: string[]): value is Record<string, unknown>
 
 function parsePricingAcceptanceResult(value: unknown): PricingAcceptanceResult | null {
   if (
-    exact(value, ["kind", "bookingId", "replayed"]) &&
+    exact(value, ["kind", "bookingId", "bookingReference", "replayed"]) &&
     value.kind === "replayed" &&
     uuid(value.bookingId) &&
+    bookingReference(value.bookingReference) &&
     value.replayed === true
   )
     return structuredClone(value) as PricingAcceptanceResult;
   if (
-    exact(value, ["kind", "bookingId", "acceptanceId", "acceptedAt", "checkedAt"]) &&
+    exact(value, [
+      "kind",
+      "bookingId",
+      "bookingReference",
+      "acceptanceId",
+      "acceptedAt",
+      "checkedAt",
+    ]) &&
     value.kind === "accepted" &&
     uuid(value.bookingId) &&
+    bookingReference(value.bookingReference) &&
     uuid(value.acceptanceId) &&
     iso(value.acceptedAt) &&
     iso(value.checkedAt) &&

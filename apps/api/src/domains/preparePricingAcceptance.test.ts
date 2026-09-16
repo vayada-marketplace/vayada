@@ -43,10 +43,15 @@ it("reserves an incomplete receipt after validating current owners and normalize
   expect(lockPublicPricingAuthority).toHaveBeenCalledBefore(vi.mocked(replayPricingAcceptance));
 });
 it("returns completed historical replay without touching fresh pricing or receipts", async () => {
-  vi.mocked(replayPricingAcceptance).mockResolvedValue({ bookingId: f.bookingId, replayed: true });
+  vi.mocked(replayPricingAcceptance).mockResolvedValue({
+    bookingId: f.bookingId,
+    bookingReference: "VAY-HISTORICAL",
+    replayed: true,
+  });
   expect(await preparePricingAcceptance(db, "hotel", f.input)).toEqual({
     kind: "replayed",
     bookingId: f.bookingId,
+    bookingReference: "VAY-HISTORICAL",
     replayed: true,
   });
   expect(lockCurrentQuoteRevalidation).not.toHaveBeenCalled();
