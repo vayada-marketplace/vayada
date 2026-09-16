@@ -15,6 +15,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { enforceRoutePolicy } from "./policy.js";
 
 const PERMISSION = "marketplace.collaboration.write" as const;
+const INVALID_BODY_ERROR_CODES = new Set([
+  "FST_ERR_CTP_EMPTY_JSON_BODY",
+  "FST_ERR_CTP_INVALID_JSON_BODY",
+  "FST_ERR_CTP_INVALID_MEDIA_TYPE",
+]);
 
 type AuthorizedScope = {
   context: RequestContext;
@@ -42,7 +47,8 @@ export async function registerMarketplaceCommunicationPreferencesRoutes(
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
-      error.code === "FST_ERR_CTP_INVALID_JSON_BODY"
+      typeof error.code === "string" &&
+      INVALID_BODY_ERROR_CODES.has(error.code)
     )
       return invalidRequest(reply);
     return reply.send(error);
@@ -188,11 +194,13 @@ function validResult(
   }
   return (
     result.preferences.organizationId === scope.context.selectedOrganization.organizationId &&
-    (result.preferences.revision === request.expectedRevision ||
-      result.preferences.revision === request.expectedRevision + 1) &&
+    (result.preferences.revision === request.expectedRevision + 1 ||
+      (request.expectedRevision > 0 && result.preferences.revision === request.expectedRevision)) &&
     result.preferences.email.state === request.email.state &&
+    result.preferences.email.source === "settings" &&
     result.preferences.topics.collaborationActionRequired.cadence ===
-      request.topics.collaborationActionRequired.cadence
+      request.topics.collaborationActionRequired.cadence &&
+    result.preferences.topics.collaborationActionRequired.source === "settings"
   );
 }
 
