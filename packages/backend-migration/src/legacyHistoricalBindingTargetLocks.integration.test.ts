@@ -1,9 +1,28 @@
 import { join } from "node:path";
+import { generateKeyPairSync, sign } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
 import { readLegacyHistoricalBindingTargetSnapshot } from "./legacyHistoricalBindingTargetReader.js";
 import { lockLegacyHistoricalBindingTarget as lock } from "./legacyHistoricalBindingTargetLocks.js";
+import { lockLegacyHistoricalBindingOwner } from "./legacyHistoricalBindingOwnerLocks.js";
+import {
+  LEGACY_OWNERSHIP_ROW_TABLES,
+  type LegacyOwnershipFingerprint,
+} from "./legacyOwnershipBeforeState.js";
+import {
+  readLegacyOwnershipTargetRow,
+  readLegacyHistoricalBindingTargetRow,
+} from "./channexAdoptionTargetRows.js";
+import { canonicalizeJson } from "./channexAdoptionManifestCrypto.js";
+import {
+  hashLegacyHistoricalBindingApprovalEvidence,
+  type LegacyHistoricalBindingApprovalEvidence,
+} from "./legacyHistoricalBindingEnvelope.js";
+import {
+  hashLegacyHistoricalBindingEnvelope,
+  lockAndVerifyLegacyHistoricalBindingApprovals as approve,
+} from "./legacyHistoricalBindingApprovals.js";
 
 const url = process.env["VAY2017_TARGET_LOCK_TEST_DATABASE_URL"];
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -13,6 +32,38 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
   let client: pg.PoolClient;
   let other: pg.PoolClient;
   let expected: Parameters<typeof lock>[1];
+  let signed: Parameters<typeof approve>[1];
+  const clock = () => new Date("2026-09-16T01:30:00.000Z");
+  const policy = {
+    executionPrincipal: "machine:fixture-executor",
+    signingPrincipals: new Map([["fixture", "machine:fixture-signer"]]),
+    actors: new Map([
+      [
+        id(31),
+        { principal: "human:fixture", authorities: ["migration_owner", "security_owner"] as const },
+      ],
+    ]),
+    singleHumanDualAuthority: { actorUserId: id(31), decisionId: "synthetic-dual-authority" },
+  };
+  const session = () => ({
+    workosUserId: "user_binding_fixture",
+    workosOrgId: "org_binding_fixture",
+    expiresAt: Math.floor(Date.now() / 1000) + 300,
+  });
+  const prepareGuards = async (currentSession = session()) => {
+    await approve(client, signed, policy, clock);
+    await lock(client, {
+      binding: signed.evidence.binding,
+      sourceActive: signed.evidence.sourceActive,
+    });
+    return lockLegacyHistoricalBindingOwner(client, signed.evidence.owner, currentSession);
+  };
+  const revoke = () =>
+    other.query(
+      `INSERT INTO platform.legacy_owner_approval_revocations(approval_record_id,revoked_by_user_id,revoked_at,reason_sha256)
+     VALUES($1,$2,$3,$4)`,
+      [id(41), id(31), clock().toISOString(), "a".repeat(64)],
+    );
   const begin = (db = client) =>
     db.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
   const insertConnection = (db: pg.PoolClient, n = 12) =>
@@ -83,6 +134,149 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
         },
       },
     };
+    // Real parent-migrated ownership schema; no simplified replacement tables.
+    await client.query(
+      "INSERT INTO identity.users(id,email,status) VALUES($1,'binding-owner@example.test','pending')",
+      [id(31)],
+    );
+    await client.query(
+      `INSERT INTO identity.organizations(id,kind,name,slug,status,workos_org_id)
+      VALUES($1,'hotel_group','Synthetic','binding-owner','suspended','org_binding_fixture')`,
+      [id(32)],
+    );
+    await client.query(
+      `INSERT INTO identity.organization_memberships(id,user_id,organization_id,role_key,status,access_origin)
+      VALUES($1,$2,$3,'hotel_owner','pending','agency')`,
+      [id(33), id(31), id(32)],
+    );
+    await client.query(
+      `INSERT INTO hotel_catalog.property_source_links(id,property_id,source_system,source_table,source_id,relationship)
+      VALUES($1,$2,'pms','hotels',$3,'operational_input')`,
+      [id(34), id(1), id(1)],
+    );
+    for (const [n, product, type] of [
+      [35, "pms", "pms_hotel"],
+      [36, "hotel_catalog", "property"],
+      [37, "pms", "pms_property"],
+    ] as const)
+      await client.query(
+        `INSERT INTO identity.organization_resource_links(id,organization_id,product,resource_type,resource_id,relationship,status)
+        VALUES($1,$2,$3,$4,$5,'operator','suspended')`,
+        [id(n), id(32), product, type, id(1)],
+      );
+    await client.query(
+      `INSERT INTO identity.external_identities(id,user_id,provider,provider_user_id)
+      VALUES($1,$2,'workos','user_binding_fixture')`,
+      [id(38), id(31)],
+    );
+    const ownerIds = {
+      user: 31,
+      organization: 32,
+      membership: 33,
+      property: 1,
+      sourceLink: 34,
+      legacyLink: 35,
+      canonicalLink: 36,
+      pmsLink: 37,
+    };
+    const target: LegacyOwnershipFingerprint[] = [];
+    for (const [kind, table] of Object.entries(LEGACY_OWNERSHIP_ROW_TABLES))
+      target.push({
+        kind: kind as keyof typeof ownerIds,
+        table,
+        ...(await readLegacyOwnershipTargetRow(
+          client,
+          table,
+          id(ownerIds[kind as keyof typeof ownerIds]),
+        )),
+      });
+    const proof = {
+      sourceRunId: run,
+      sourceEnvironment: "local" as const,
+      sourceSchemaRevision: "synthetic-source-not-verified",
+      sourceEvidenceSha256: "a".repeat(64),
+    };
+    const identity = await readLegacyOwnershipTargetRow(
+      client,
+      "identity.external_identities",
+      id(38),
+    );
+    const evidence: LegacyHistoricalBindingApprovalEvidence = {
+      owner: {
+        source: {
+          ...proof,
+          legacyHotelId: id(1),
+          ownerUserId: id(31),
+          hotelRowOrdinal: 1,
+          userRowOrdinal: 1,
+        },
+        target,
+        identity: {
+          userId: id(31),
+          organizationId: id(32),
+          externalIdentityId: id(38),
+          externalIdentitySha256: identity.rowStateSha256,
+          workosUserId: "user_binding_fixture",
+          workosOrgId: "org_binding_fixture",
+        },
+      },
+      binding: {
+        ...expected.binding,
+        sourceRequest: {
+          ...proof,
+          snapshotIdentifierSha256: "b".repeat(64),
+          source: expected.binding.bindingExpected.source,
+        },
+      },
+      sourceActive: true,
+      targetBeforeSha256: "c".repeat(64),
+      targetAfterSha256: "d".repeat(64),
+    };
+    const envelope = {
+      contractVersion: "legacy-historical-binding-transition.v1",
+      commandId: id(40),
+      environment: "local",
+      purpose: "prepare",
+      originalPrepareCommandId: null,
+      issuedAt: "2026-09-16T01:00:00.000Z",
+      expiresAt: "2026-09-16T02:00:00.000Z",
+      evidenceSha256: hashLegacyHistoricalBindingApprovalEvidence(evidence),
+      migrationApprovalRecordId: id(41),
+      securityApprovalRecordId: id(42),
+      signingKeyId: "fixture",
+    };
+    const payload = canonicalizeJson(envelope),
+      keys = generateKeyPairSync("ed25519");
+    signed = {
+      canonicalPayload: payload,
+      detachedSignature: sign(
+        null,
+        Buffer.from(`vayada:legacy-historical-binding-transition:v1\0envelope\0${payload}`),
+        keys.privateKey,
+      ).toString("base64url"),
+      verificationKeys: new Map([["fixture", keys.publicKey]]),
+      environment: "local",
+      evidence,
+    };
+    for (const [n, authority] of [
+      [41, "migration_owner"],
+      [42, "security_owner"],
+    ] as const)
+      await client.query(
+        `INSERT INTO platform.legacy_owner_approval_records
+        (approval_record_id,command_id,contract_version,environment,envelope_sha256,authority,actor_user_id,approved_at,expires_at)
+        VALUES($1,$2,$3,'local',$4,$5,$6,$7,$8)`,
+        [
+          id(n),
+          envelope.commandId,
+          envelope.contractVersion,
+          hashLegacyHistoricalBindingEnvelope(payload),
+          authority,
+          id(31),
+          "2026-09-16T01:10:00.000Z",
+          envelope.expiresAt,
+        ],
+      );
   }, 120000);
   beforeEach(() => begin());
   afterEach(async () => {
@@ -94,6 +288,109 @@ describe.skipIf(!url)("historical prepare target locks on disposable PostgreSQL"
     other?.release();
     await pool?.end();
   });
+  it("composes signed approvals, binding and owner fences without granting access or changing rows", async () => {
+    expect(await prepareGuards()).toEqual({
+      outcome: "owner_locked_requires_source_and_disposition",
+      executable: false,
+      userStatus: "pending",
+      organizationStatus: "suspended",
+    });
+    // Inspect the executing transaction before rollback, not just committed rows.
+    for (const row of signed.evidence.owner.target)
+      expect(
+        await readLegacyOwnershipTargetRow(client, LEGACY_OWNERSHIP_ROW_TABLES[row.kind], row.id),
+      ).toEqual({ id: row.id, rowStateSha256: row.rowStateSha256 });
+    for (const [table, rows] of [
+      ["pms.channel_binding_claims", [expected.binding.bindingExpected.claim]],
+      ["pms.channel_connections", expected.binding.bindingExpected.connections],
+    ] as const)
+      for (const row of rows)
+        expect(
+          (await readLegacyHistoricalBindingTargetRow(client, table, row.id)).rowStateSha256,
+        ).toBe(row.rowStateSha256);
+    expect(
+      (await client.query("SELECT 1 FROM platform.legacy_historical_binding_transitions")).rowCount,
+    ).toBe(0);
+    await client.query("ROLLBACK");
+    const snapshot = await readLegacyHistoricalBindingTargetSnapshot(pool, {
+      propertyId: id(1),
+      externalPropertyId: id(9),
+    });
+    expect(snapshot.property).toEqual(expected.binding.property);
+    expect(snapshot.claims).toEqual([expected.binding.bindingExpected.claim]);
+    expect(snapshot.connections).toEqual(expected.binding.bindingExpected.connections);
+    for (const row of signed.evidence.owner.target)
+      expect(
+        await readLegacyOwnershipTargetRow(client, LEGACY_OWNERSHIP_ROW_TABLES[row.kind], row.id),
+      ).toEqual({ id: row.id, rowStateSha256: row.rowStateSha256 });
+    expect(
+      (await client.query("SELECT 1 FROM platform.legacy_historical_binding_transitions")).rowCount,
+    ).toBe(0);
+  });
+  it.each(["revocation", "ownership", "connection"])(
+    "combined guards retain %s fence until outer rollback",
+    async (kind) => {
+      await prepareGuards();
+      await begin(other);
+      const write = () =>
+        kind === "revocation"
+          ? revoke()
+          : kind === "ownership"
+            ? other.query(
+                "UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1",
+                [id(33)],
+              )
+            : insertConnection(other);
+      await expect(write()).rejects.toMatchObject({ code: "55P03" });
+      await other.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await begin(other);
+      await write();
+    },
+  );
+  it("owner failure still requires outer rollback to release earlier approval and binding locks", async () => {
+    await expect(prepareGuards({ ...session(), workosUserId: "wrong_owner" })).rejects.toThrow(
+      "HISTORICAL_OWNER",
+    );
+    await begin(other);
+    await expect(revoke()).rejects.toMatchObject({ code: "55P03" });
+    await other.query("ROLLBACK");
+    await begin(other);
+    await expect(insertConnection(other)).rejects.toMatchObject({ code: "55P03" });
+    await other.query("ROLLBACK");
+    await client.query("ROLLBACK");
+    await begin(other);
+    await revoke();
+    await insertConnection(other);
+  });
+  it("rechecks expiry after all guards rather than treating earlier approval as durable authority", async () => {
+    await prepareGuards();
+    await expect(
+      approve(client, signed, policy, () => new Date("2026-09-16T02:00:00.000Z")),
+    ).rejects.toThrow("APPROVALS_INVALID");
+    expect(
+      (await client.query("SELECT 1 FROM platform.legacy_historical_binding_transitions")).rowCount,
+    ).toBe(0);
+  });
+  it.each([false, true])(
+    "combined restricted-role visibility, withheld SELECT=%s",
+    async (withheld) => {
+      await client.query(`CREATE ROLE binding_combined_fixture_role;
+      GRANT USAGE ON SCHEMA identity,hotel_catalog,pms,platform TO binding_combined_fixture_role;
+      GRANT SELECT,UPDATE ON identity.users,identity.organizations,identity.organization_memberships,
+        identity.organization_resource_links,identity.external_identities,hotel_catalog.properties,
+        hotel_catalog.property_source_links,pms.channel_binding_claims,pms.channel_connections,
+        platform.legacy_owner_approval_records TO binding_combined_fixture_role;
+      GRANT SELECT ON platform.legacy_owner_approval_revocations TO binding_combined_fixture_role`);
+      if (withheld)
+        await client.query(
+          "REVOKE SELECT ON identity.external_identities FROM binding_combined_fixture_role",
+        );
+      await client.query("SET LOCAL ROLE binding_combined_fixture_role");
+      if (withheld) await expect(prepareGuards()).rejects.toThrow("HISTORICAL_OWNER");
+      else expect((await prepareGuards()).executable).toBe(false);
+    },
+  );
   it("retains exact target locks without changing history or live connection", async () => {
     expect(await lock(client, expected)).toEqual({
       outcome: "target_locked_requires_owner_and_source",
