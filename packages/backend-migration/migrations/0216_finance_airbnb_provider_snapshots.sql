@@ -12,9 +12,11 @@ CREATE TABLE finance.airbnb_provider_snapshots (
   currency CHAR(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   amount_basis TEXT NOT NULL CHECK (amount_basis IN ('Payout Amount','Total Paid Amount')),
   cohost_payout_calculations BOOLEAN,
-  provider_booking_amount NUMERIC(19,4) NOT NULL CHECK (provider_booking_amount >= 0),
+  provider_booking_amount NUMERIC(19,4) CHECK (provider_booking_amount >= 0),
   ota_commission NUMERIC(19,4) CHECK (ota_commission >= 0),
   snapshot JSONB NOT NULL CHECK (jsonb_typeof(snapshot)='object'),
+  CHECK (provider_booking_amount IS NOT NULL OR COALESCE(
+    snapshot->>'replacement'='cancellation' AND snapshot->'nights'='[]'::jsonb, FALSE)),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (property_id,guest_booking_id,provider_revision_id),
   UNIQUE (property_id,guest_booking_id,provider_revision_at),
