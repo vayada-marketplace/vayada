@@ -19,9 +19,9 @@ earning eligibility are checked separately.
 
 The endpoint deliberately returns the same 404 for missing and inaccessible
 records. The UI must not distinguish those cases. When current collaboration
-terms advertise an affiliate commission, show an unavailable state with no join
-claim. Otherwise a 404 leaves the non-affiliate collaboration unchanged. Other
-failures show a contextual retry action. Loading uses a stable skeleton.
+terms advertise an affiliate commission, show loading, unavailable and retryable
+error states with no join claim. Otherwise only a successful historical agreement
+changes the non-affiliate collaboration surface. Loading uses a stable skeleton.
 
 ## Presentation
 
