@@ -2,6 +2,8 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
+import { storeHistoricalBindingTransition as store } from "./legacyHistoricalBindingStorage.js";
+import { readLegacyHistoricalBindingTargetRow as fingerprint } from "./channexAdoptionTargetRows.js";
 
 const url = process.env["VAY2017_TRANSITION_TEST_DATABASE_URL"];
 const table = "platform.legacy_historical_binding_transitions";
@@ -53,6 +55,23 @@ describe.skipIf(!url)("historical binding transition storage", () => {
       .join(",")})`,
       Object.values(row),
     );
+  const begin = () =>
+    client.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
+  const storageInput = async (event = prepare()) => {
+    const claimBeforeSha256 = (await fingerprint(client, "pms.channel_binding_claims", id(2)))
+      .rowStateSha256;
+    const updatedAt = (await client.query("SELECT clock_timestamp()::text AS at")).rows[0]
+      .at as string;
+    await client.query("SAVEPOINT predict");
+    await client.query(
+      "UPDATE pms.channel_binding_claims SET claim_state=$1,updated_at=$2::timestamptz WHERE id=$3",
+      [event.after_state, updatedAt, id(2)],
+    );
+    const claimAfterSha256 = (await fingerprint(client, "pms.channel_binding_claims", id(2)))
+      .rowStateSha256;
+    await client.query("ROLLBACK TO SAVEPOINT predict; RELEASE SAVEPOINT predict");
+    return { event, claimBeforeSha256, claimAfterSha256, updatedAt };
+  };
   beforeAll(async () => {
     const parsed = new URL(url!);
     if (
@@ -88,13 +107,148 @@ describe.skipIf(!url)("historical binding transition storage", () => {
       [id(2), id(1), id(3)],
     );
     await client.query(
-      `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status)
-      VALUES($1,$2,'channex','disconnected')`,
-      [id(4), id(1)],
+      `INSERT INTO pms.channel_connections(id,property_id,provider,connection_status,connection_metadata)
+      VALUES($1,$2,'channex','disconnected',$3::jsonb)`,
+      [
+        id(4),
+        id(1),
+        JSON.stringify({
+          legacyExternalPropertyId: id(3),
+          migrationRunId: `vay1351-${"a".repeat(24)}`,
+        }),
+      ],
     );
   }, 120_000);
   afterAll(async () => {
     await client?.end();
+  });
+
+  it("atomically prepares, exactly replays, compensates and retains original history", async () => {
+    await begin();
+    try {
+      const input = await storageInput();
+      expect((await store(client, input)).outcome).toBe("written_pending_commit");
+      expect((await store(client, input)).outcome).toBe("recorded_receipt");
+      await expect(store(client, { ...input, updatedAt: "2020-01-01T00:00:00Z" })).rejects.toThrow(
+        "STORAGE_FAILED",
+      );
+      const undo = await storageInput(compensate(input.event));
+      expect((await store(client, undo)).outcome).toBe("written_pending_commit");
+      expect((await store(client, undo)).outcome).toBe("recorded_receipt");
+      expect((await store(client, input)).outcome).toBe("recorded_receipt");
+      expect(
+        (
+          await client.query("SELECT claim_state FROM pms.channel_binding_claims WHERE id=$1", [
+            id(2),
+          ])
+        ).rows[0].claim_state,
+      ).toBe("historical");
+      expect(
+        (
+          await client.query(`SELECT command_id FROM ${table} WHERE command_id=ANY($1::uuid[])`, [
+            [input.event.command_id, undo.event.command_id],
+          ])
+        ).rowCount,
+      ).toBe(2);
+      expect(
+        (
+          await client.query(
+            "SELECT 1 FROM platform.product_audit_events WHERE audit_key=ANY($1::text[])",
+            [[input.event, undo.event].map((e) => `legacy-historical-binding:${e.command_id}`)],
+          )
+        ).rowCount,
+      ).toBe(2);
+      expect(
+        (
+          await client.query(
+            "SELECT connection_status,external_property_id FROM pms.channel_connections",
+          )
+        ).rows,
+      ).toEqual([{ connection_status: "disconnected", external_property_id: null }]);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each(["before", "after", "receipt", "audit", "connection", "pair", "newer"])(
+    "rolls back the whole write on %s failure",
+    async (mode) => {
+      await begin();
+      try {
+        const input = await storageInput();
+        if (mode === "before") input.claimBeforeSha256 = hash("f");
+        if (mode === "after") input.claimAfterSha256 = hash("f");
+        if (mode === "receipt") input.event.payload_sha256 = "invalid";
+        if (mode === "pair") input.event.external_property_id = id(99);
+        if (mode === "newer")
+          await client.query(
+            "UPDATE pms.channel_binding_claims SET updated_at=updated_at+interval '1 microsecond' WHERE id=$1",
+            [id(2)],
+          );
+        if (mode === "connection")
+          await client.query("UPDATE pms.channel_connections SET connection_metadata='{}'::jsonb");
+        if (mode === "audit")
+          await client.query(`CREATE FUNCTION platform.fail_binding_fixture_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture audit failure'; END $$;
+        CREATE TRIGGER binding_fixture_audit BEFORE INSERT ON platform.product_audit_events FOR EACH ROW EXECUTE FUNCTION platform.fail_binding_fixture_audit()`);
+        const before = await fingerprint(client, "pms.channel_binding_claims", id(2));
+        await expect(store(client, input)).rejects.toThrow("STORAGE_FAILED");
+        expect(await fingerprint(client, "pms.channel_binding_claims", id(2))).toEqual(before);
+        expect(
+          (
+            await client.query(`SELECT 1 FROM ${table} WHERE command_id=$1`, [
+              input.event.command_id,
+            ])
+          ).rowCount,
+        ).toBe(0);
+        expect(
+          (
+            await client.query("SELECT 1 FROM platform.product_audit_events WHERE audit_key=$1", [
+              `legacy-historical-binding:${input.event.command_id}`,
+            ])
+          ).rowCount,
+        ).toBe(0);
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    },
+  );
+  it("does not persist storage success before the outer transaction commits", async () => {
+    await begin();
+    const input = await storageInput();
+    try {
+      await store(client, input);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    expect((await fingerprint(client, "pms.channel_binding_claims", id(2))).rowStateSha256).toBe(
+      input.claimBeforeSha256,
+    );
+    expect(
+      (await client.query(`SELECT 1 FROM ${table} WHERE command_id=$1`, [input.event.command_id]))
+        .rowCount,
+    ).toBe(0);
+  });
+  it("rejects an overlapping writer then replays the committed receipt without a second mutation", async () => {
+    const other = new pg.Client({ connectionString: url });
+    await other.connect();
+    await begin();
+    try {
+      const input = await storageInput();
+      await store(client, input);
+      await other.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
+      await expect(store(other, input)).rejects.toThrow("STORAGE_FAILED");
+      await other.query("ROLLBACK");
+      await client.query("COMMIT");
+      await other.query("BEGIN; SET LOCAL lock_timeout='150ms'; SET LOCAL statement_timeout='3s'");
+      expect((await store(other, input)).outcome).toBe("recorded_receipt");
+      await other.query("ROLLBACK");
+      await begin();
+      await store(client, await storageInput(compensate(input.event)));
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      await other.query("ROLLBACK");
+      await other.end();
+    }
   });
 
   it("retains prepare and exact compensation without altering the real binding", async () => {
