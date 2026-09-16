@@ -1,13 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 import type { PoolClient } from "pg";
-import { decodePricingAcceptanceHistory } from "./pricingAcceptanceHistory.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
-import { projectAcceptedPricingReservation } from "./pricingPmsAcceptedReservation.js";
+import { loadAcceptedPricingReservation } from "./pricingPmsAcceptedReservation.js";
 import type { storePricingAcceptance } from "./storePricingAcceptance.js";
 
-export const PMS_ACCEPTED_PRICING_QUEUE = "pms.accepted-pricing";
-export const PMS_ACCEPTED_PRICING_JOB_TYPE = "pms.accepted-pricing.adopt";
-export const PMS_ACCEPTED_PRICING_JOB_VERSION = "pms-accepted-pricing-job.v1";
+export const PMS_ACCEPTED_PRICING_QUEUE = "pms-reservation-handoff";
+export const PMS_ACCEPTED_PRICING_JOB_TYPE = "pms.reservation.accepted-pricing.create";
+export const PMS_ACCEPTED_PRICING_JOB_VERSION = "booking.pricing-pms-handoff.v1";
 
 export async function stagePmsAcceptedPricingReservationJob(
   client: PoolClient,
@@ -16,50 +15,38 @@ export async function stagePmsAcceptedPricingReservationJob(
 ) {
   const scope = await lockPublicPricingAuthority(client, slug);
   if (!scope || !accepted) throw new Error("PMS accepted-pricing job unavailable");
-  const row = (
-    await client.query(
-      `SELECT * FROM booking.pricing_quote_acceptances
-       WHERE id=$1::uuid AND guest_booking_id=$2::uuid AND property_id=$3::uuid
-         AND organization_id=$4::uuid`,
-      [accepted.acceptanceId, accepted.bookingId, scope.propertyId, scope.organizationId],
-    )
-  ).rows[0];
-  const iso = (value: unknown) => (value instanceof Date ? value.toISOString() : value);
-  const history =
-    row &&
-    decodePricingAcceptanceHistory(
-      {
-        ...row,
-        accepted_at: iso(row.accepted_at),
-        finance_terms_captured_at: iso(row.finance_terms_captured_at),
-      },
-      scope.propertyId,
-      scope.organizationId,
-    );
-  const command = history && projectAcceptedPricingReservation(history);
+  const command = await loadAcceptedPricingReservation(client, {
+    acceptanceId: accepted.acceptanceId,
+    guestBookingId: accepted.bookingId,
+    propertyId: scope.propertyId,
+  });
   if (
-    !history ||
     !command ||
-    history.bookingId !== accepted.bookingId ||
-    history.acceptedAt !== accepted.acceptedAt
+    command.organizationId !== scope.organizationId ||
+    command.acceptedAt !== accepted.acceptedAt
   )
     throw new Error("PMS accepted-pricing job unavailable");
-  const payload = { contractVersion: PMS_ACCEPTED_PRICING_JOB_VERSION, command };
-  const jobKey = `accepted-pricing:${history.id}`;
+  const payload = {
+    version: PMS_ACCEPTED_PRICING_JOB_VERSION,
+    propertyId: scope.propertyId,
+    guestBookingId: accepted.bookingId,
+    acceptanceId: accepted.acceptanceId,
+  };
+  const jobKey = `pms:pricing-acceptance:${accepted.acceptanceId}:create:v1`;
   const inserted = await client.query<{ jobId: string }>(
     `INSERT INTO platform.jobs
      (job_key,queue_name,job_type,status,max_attempts,tenant_scope,property_id,
       resource_product,resource_type,resource_id,correlation_id,payload)
-     VALUES($1,$2,$3,'pending',5,'property',$4::uuid,'pms',
-       'accepted_pricing_reservation',$5,$6,$7::jsonb)
+     VALUES($1,$2,$3,'pending',5,'property',$4::uuid,'booking',
+       'guest_booking',$5,$6,$7::jsonb)
      ON CONFLICT(queue_name,job_key) DO NOTHING RETURNING id::text AS "jobId"`,
     [
       jobKey,
       PMS_ACCEPTED_PRICING_QUEUE,
       PMS_ACCEPTED_PRICING_JOB_TYPE,
       scope.propertyId,
-      history.bookingId,
-      history.command.requestId,
+      accepted.bookingId,
+      command.acceptanceId,
       JSON.stringify(payload),
     ],
   );
@@ -67,8 +54,18 @@ export async function stagePmsAcceptedPricingReservationJob(
   const replay = (
     await client.query<{ jobId: string; payload: unknown }>(
       `SELECT id::text AS "jobId",payload FROM platform.jobs
-       WHERE queue_name=$1 AND job_key=$2 AND property_id=$3::uuid FOR UPDATE`,
-      [PMS_ACCEPTED_PRICING_QUEUE, jobKey, scope.propertyId],
+       WHERE queue_name=$1 AND job_key=$2 AND job_type=$3 AND tenant_scope='property'
+         AND property_id=$4::uuid AND resource_product='booking'
+         AND resource_type='guest_booking' AND resource_id=$5
+         AND correlation_id=$6 AND max_attempts=5 FOR UPDATE`,
+      [
+        PMS_ACCEPTED_PRICING_QUEUE,
+        jobKey,
+        PMS_ACCEPTED_PRICING_JOB_TYPE,
+        scope.propertyId,
+        accepted.bookingId,
+        command.acceptanceId,
+      ],
     )
   ).rows[0];
   if (!replay || !isDeepStrictEqual(replay.payload, payload))
