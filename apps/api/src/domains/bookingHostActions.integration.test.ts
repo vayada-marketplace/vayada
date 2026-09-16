@@ -101,6 +101,13 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
       `INSERT INTO booking.booking_guests (guest_booking_id,guest_role,first_name,last_name,email) VALUES ($1,'booker','Guest','Test','guest@example.test')`,
       [scope.bookingId],
     );
+    await pool.query(
+      `INSERT INTO booking.booking_addon_selections
+         (property_id,guest_booking_id,service_date,quantity,total_amount,currency,
+          ownership_kind_snapshot,edit_revision)
+       VALUES ($1::uuid,$2::uuid,'2026-09-12',1,10,'EUR','property',0)`,
+      [scope.propertyId, scope.bookingId],
+    );
     await captureDirectNightlyRevenueEvidence(
       pool,
       {
@@ -280,6 +287,23 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
         ).rows[0].nights,
       ),
     ).toBe(0);
+    expect(
+      (
+        await pool.query(
+          `SELECT gross_amount::text AS gross,economic_event AS event,evidence_quality AS quality,
+             command_key AS command
+           FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1`,
+          [scope.bookingId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        gross: null,
+        event: "missing_fulfillment",
+        quality: "missing",
+        command: expect.stringMatching(/^host-canceled:[0-9a-f]{64}:addon:.*:v1$/),
+      },
+    ]);
     clock = new Date("2026-09-07T10:00:00Z");
     expect(await actions.apply(scope, p.previewId, "cancel")).toEqual(results[0]);
   });
@@ -361,6 +385,20 @@ describe.skipIf(!url)("host actions PostgreSQL consistency", () => {
     const p = await actions.preview(scope, { action: "reject", reason: "internal" });
     await actions.apply(scope, p.previewId, "reject");
     expect(await status()).toBe("declined");
+    expect(
+      (
+        await pool.query(
+          `SELECT economic_event AS event,command_key AS command
+           FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1`,
+          [scope.bookingId],
+        )
+      ).rows,
+    ).toEqual([
+      {
+        event: "missing_fulfillment",
+        command: expect.stringMatching(/^host-declined:[0-9a-f]{64}:addon:.*:v1$/),
+      },
+    ]);
     expect(
       (
         await pool.query(
