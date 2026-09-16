@@ -38,6 +38,14 @@ export type MarketplaceCommunicationPreferencePolicy = {
   /** Effective time of the audited launch-policy decision, not the read time. */
   readonly effectiveAt: string;
 };
+/**
+ * Source-controlled launch gate approved with the initial v1 contract. Changing
+ * this policy requires a new audited legal/privacy launch decision.
+ */
+export const MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY = Object.freeze({
+  launchPolicy: "disabled",
+  effectiveAt: "2026-09-16T13:22:41.000Z",
+} as const satisfies MarketplaceCommunicationPreferencePolicy);
 export type MarketplaceCommunicationPreferenceScope = {
   readonly organizationId: string;
   readonly userId: string;
