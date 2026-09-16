@@ -70,6 +70,9 @@ this row and atomically advances its revision by exactly one before changing
 one or more preference values and appending audit. Value-row revisions are not
 combined or compared to derive the document revision. Hard deletion and
 user/organization scope mutation are forbidden; an opt-out remains explicit.
+The database rejects a value insert or update unless the control row was
+created or advanced in the same transaction, so one revision cannot identify
+multiple committed document states.
 
 ### `marketplace.communication_channel_preferences`
 
