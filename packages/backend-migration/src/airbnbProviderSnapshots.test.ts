@@ -22,7 +22,7 @@ describe.skipIf(!databaseUrl)("Airbnb provider snapshots migration", () => {
       INSERT INTO booking.guest_bookings VALUES
         ('82000000-0000-4000-8000-000000000001','82000000-0000-4000-8000-000000000002')`);
     const sql = await readFile(
-      new URL("../migrations/0193_finance_airbnb_provider_snapshots.sql", import.meta.url),
+      new URL("../migrations/0216_finance_airbnb_provider_snapshots.sql", import.meta.url),
       "utf8",
     );
     await client.query("BEGIN");
