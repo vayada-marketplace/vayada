@@ -188,3 +188,10 @@ export {
   consumeAdminTransferProof,
   type AdminTransferBinding,
 } from "./accountAdminTransferProofs.js";
+
+export {
+  parseAdminTransferRequest,
+  validateAdminTransferRequest,
+  type AdminTransferRequest,
+  type AdminTransferValidationContext,
+} from "./accountAdminTransferValidation.js";

@@ -675,3 +675,23 @@ session at callback. It must set no-store and return only the proof ID to the
 fixed Team page. Do not expose caller-supplied bindings/digests or activate this
 adapter as a standalone authentication bypass. Actual hosted WorkOS flow testing
 is pending; adapter tests use real SDK URL construction and mocked code exchange.
+
+### Reviewed transfer request
+
+The transfer request explicitly supplies target membership, both access revisions,
+and the former admin's saved role/revision, property mode and IDs, overrides and
+both product switches. Unknown/missing fields, duplicate/contradictory overrides,
+ambiguous all/assigned scope and invalid identifiers/revisions are rejected.
+The validator checks the locked current revisions, same-organization saved role,
+Staff/Housekeeping class ceilings and active canonical property scope. Former
+admins retain agency origin; External-owner or Account-admin destinations require
+a different lifecycle and are not accepted here. There is no implicit access reset.
+
+A detached, canonical request sorts set-valued arrays and normalizes UUID case.
+Its SHA-256 fingerprint includes the organization, actor, target, revisions and
+complete resulting access. Use exactly this validated request for both preview
+and transfer proof; never hash a partial browser payload or reuse a digest after
+any access/revision change. This pure validator performs no writes and does not
+establish active ownership: the transaction layer must lock/revalidate live
+organization, memberships/users, owner count and target delegation eligibility,
+then consume proof, swap complete configurations and audit atomically.
