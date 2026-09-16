@@ -383,7 +383,8 @@ the privacy/legal and Resend account-readiness gates above have evidence.
 After the decision PR is accepted, use stacked follow-ups in this order:
 
 1. Define the exact communication preference, event payload, recipient, and
-   HTTP contracts.
+   HTTP contracts in
+   [`marketplace-communication-contract.md`](marketplace-communication-contract.md).
 2. Implement preference storage/API, the signed opt-out boundary, and
    delivery-time enforcement.
 3. Add the Marketplace Web settings surface.
