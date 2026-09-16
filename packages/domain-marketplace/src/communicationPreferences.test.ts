@@ -3,6 +3,9 @@ import {
   evaluateMarketplaceCommunicationPolicy,
   parseMarketplaceCommunicationPreferences,
   parseReplaceMarketplaceCommunicationPreferences,
+  parseReplaceMarketplaceCommunicationPreferencesResult,
+  resolveMarketplaceCommunicationPreferenceDefaults,
+  serializeReplaceMarketplaceCommunicationPreferencesFingerprint,
 } from "./communicationPreferences.js";
 
 const preferences = {
@@ -133,5 +136,69 @@ describe("Marketplace communication preferences", () => {
         launchPolicy: "explicit_opt_in",
       }),
     ).toEqual({ eligible: false, reason: "consent_denied" });
+  });
+
+  it.each([
+    ["service_default_on", "on", "immediate"],
+    ["disabled", "off", "off"],
+    ["explicit_opt_in", "off", "off"],
+  ] as const)("resolves audited %s defaults", (launchPolicy, state, cadence) => {
+    expect(
+      resolveMarketplaceCommunicationPreferenceDefaults({
+        organizationId: preferences.organizationId,
+        userId: "a0000000-0000-4000-8000-000000000002",
+        policy: { launchPolicy, effectiveAt: "2026-09-01T00:00:00.000Z" },
+      }),
+    ).toMatchObject({
+      organizationId: preferences.organizationId,
+      revision: 0,
+      email: { state, source: "policy_default", effectiveAt: "2026-09-01T00:00:00.000Z" },
+      topics: { collaborationActionRequired: { cadence, source: "policy_default" } },
+    });
+  });
+
+  it("fingerprints only canonical business input", () => {
+    const command = {
+      organizationId: preferences.organizationId,
+      userId: "a0000000-0000-4000-8000-000000000002",
+      idempotencyKey: "request-key",
+      audit: {
+        actorUserId: "a0000000-0000-4000-8000-000000000002",
+        requestId: "request-1",
+        correlationId: null,
+        requestedAt: "2026-09-16T10:00:00.000Z",
+      },
+      request: {
+        contractVersion: "marketplace-communications.v1",
+        expectedRevision: 0,
+        email: { state: "off" },
+        topics: { collaborationActionRequired: { cadence: "off" } },
+      },
+    } as const;
+    expect(serializeReplaceMarketplaceCommunicationPreferencesFingerprint(command)).toBe(
+      serializeReplaceMarketplaceCommunicationPreferencesFingerprint({
+        ...command,
+        idempotencyKey: "another-key",
+        audit: { ...command.audit, requestId: "request-2" },
+      }),
+    );
+  });
+
+  it("parses only complete stored command results", () => {
+    expect(
+      parseReplaceMarketplaceCommunicationPreferencesResult({ ok: true, preferences }),
+    ).toEqual({ ok: true, preferences });
+    expect(
+      parseReplaceMarketplaceCommunicationPreferencesResult({
+        ok: false,
+        error: { code: "preference_conflict", currentRevision: 2 },
+      }),
+    ).toEqual({ ok: false, error: { code: "preference_conflict", currentRevision: 2 } });
+    expect(
+      parseReplaceMarketplaceCommunicationPreferencesResult({
+        ok: false,
+        error: { code: "preference_conflict" },
+      }),
+    ).toBeNull();
   });
 });

@@ -33,6 +33,121 @@ export type ReplaceMarketplaceCommunicationPreferencesV1 = {
   };
 };
 
+export type MarketplaceCommunicationPreferencePolicy = {
+  readonly launchPolicy: MarketplaceCommunicationLaunchPolicy;
+  /** Effective time of the audited launch-policy decision, not the read time. */
+  readonly effectiveAt: string;
+};
+export type MarketplaceCommunicationPreferenceScope = {
+  readonly organizationId: string;
+  readonly userId: string;
+  readonly policy: MarketplaceCommunicationPreferencePolicy;
+};
+export type MarketplaceCommunicationPreferenceReadPort = {
+  getCommunicationPreferences(
+    scope: MarketplaceCommunicationPreferenceScope,
+  ): Promise<MarketplaceCommunicationPreferencesV1>;
+};
+export type MarketplaceCommunicationPreferenceAudit = {
+  readonly actorUserId: string;
+  readonly requestId: string;
+  readonly correlationId: string | null;
+  readonly requestedAt: string;
+};
+export type ReplaceMarketplaceCommunicationPreferencesCommand = {
+  readonly organizationId: string;
+  readonly userId: string;
+  readonly idempotencyKey: string;
+  readonly audit: MarketplaceCommunicationPreferenceAudit;
+  readonly request: ReplaceMarketplaceCommunicationPreferencesV1;
+};
+export type ReplaceMarketplaceCommunicationPreferencesResult =
+  | { readonly ok: true; readonly preferences: MarketplaceCommunicationPreferencesV1 }
+  | {
+      readonly ok: false;
+      readonly error:
+        | { readonly code: "idempotency_conflict" | "command_in_progress" | "scope_forbidden" }
+        | { readonly code: "preference_conflict"; readonly currentRevision: number };
+    };
+export type MarketplaceCommunicationPreferenceCommandPort = {
+  replaceCommunicationPreferences(
+    command: ReplaceMarketplaceCommunicationPreferencesCommand,
+  ): Promise<ReplaceMarketplaceCommunicationPreferencesResult>;
+};
+
+export function resolveMarketplaceCommunicationPreferenceDefaults(
+  scope: MarketplaceCommunicationPreferenceScope,
+): MarketplaceCommunicationPreferencesV1 {
+  if (
+    !uuid(scope.organizationId) ||
+    !uuid(scope.userId) ||
+    !oneOf(scope.policy.launchPolicy, ["disabled", "service_default_on", "explicit_opt_in"]) ||
+    !timestamp(scope.policy.effectiveAt)
+  ) {
+    throw new TypeError("Marketplace communication preference scope is invalid");
+  }
+  const enabled = scope.policy.launchPolicy === "service_default_on";
+  return deepFreeze({
+    contractVersion: MARKETPLACE_COMMUNICATIONS_CONTRACT_VERSION,
+    organizationId: scope.organizationId,
+    revision: 0,
+    email: {
+      state: enabled ? "on" : "off",
+      source: "policy_default",
+      effectiveAt: scope.policy.effectiveAt,
+    },
+    topics: {
+      collaborationActionRequired: {
+        cadence: enabled ? "immediate" : "off",
+        source: "policy_default",
+        effectiveAt: scope.policy.effectiveAt,
+      },
+    },
+  });
+}
+
+/** Stable business fingerprint. Transport and audit metadata are deliberately excluded. */
+export function serializeReplaceMarketplaceCommunicationPreferencesFingerprint(
+  command: ReplaceMarketplaceCommunicationPreferencesCommand,
+): string {
+  const request = parseReplaceMarketplaceCommunicationPreferences(command.request);
+  if (!uuid(command.organizationId) || !uuid(command.userId) || !request) {
+    throw new TypeError("Marketplace communication preference command is invalid");
+  }
+  return JSON.stringify({
+    organizationId: command.organizationId,
+    userId: command.userId,
+    request,
+  });
+}
+
+export function parseReplaceMarketplaceCommunicationPreferencesResult(
+  value: unknown,
+): ReplaceMarketplaceCommunicationPreferencesResult | null {
+  const root = record(value);
+  if (!root || typeof root.ok !== "boolean") return null;
+  if (root.ok) {
+    const preferences = parseMarketplaceCommunicationPreferences(root.preferences);
+    return exact(root, ["ok", "preferences"]) && preferences
+      ? deepFreeze({ ok: true, preferences })
+      : null;
+  }
+  const error = record(root.error);
+  if (!exact(root, ["ok", "error"]) || !error || typeof error.code !== "string") return null;
+  if (error.code === "preference_conflict") {
+    return exact(error, ["code", "currentRevision"]) && revision(error.currentRevision)
+      ? deepFreeze({
+          ok: false,
+          error: { code: "preference_conflict", currentRevision: error.currentRevision },
+        })
+      : null;
+  }
+  return exact(error, ["code"]) &&
+    oneOf(error.code, ["idempotency_conflict", "command_in_progress", "scope_forbidden"])
+    ? deepFreeze({ ok: false, error: { code: error.code } })
+    : null;
+}
+
 export function parseMarketplaceCommunicationPreferences(
   value: unknown,
 ): MarketplaceCommunicationPreferencesV1 | null {
@@ -129,6 +244,18 @@ function exact(value: unknown, keys: readonly string[]): Record<string, unknown>
   )
     return null;
   return Object.fromEntries(keys.map((key) => [key, descriptors[key]!.value]));
+}
+function record(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return Object.getPrototypeOf(value) === Object.prototype &&
+    Reflect.ownKeys(descriptors).every(
+      (key) => typeof key === "string" && "value" in descriptors[key]!,
+    )
+    ? Object.fromEntries(
+        Reflect.ownKeys(descriptors).map((key) => [key, descriptors[String(key)]!.value]),
+      )
+    : null;
 }
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T =>
   typeof value === "string" && allowed.includes(value as T);
