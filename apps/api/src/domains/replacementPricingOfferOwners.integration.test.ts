@@ -1,3 +1,5 @@
+import { dispatchNextChannexClosedUpload } from "./channexNextClosedUpload.js";
+import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
@@ -1512,6 +1514,107 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         )
       ).rows[0].count,
     ).toBe(1);
+  });
+  it("worker reconciles today, sends tomorrow closed once, and continues without sync success", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const f = await reconciliationFixture(today),
+      foreign = await initialAriFixture();
+    await f.retain();
+    const posts: { values: { date: string; stop_sell: boolean }[] }[] = [];
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      expect(init?.redirect).toBe("error");
+      expect(init?.headers).toMatchObject({ "user-api-key": "synthetic" });
+      const path = new URL(String(url)).pathname + new URL(String(url)).search;
+      if (init?.method === "POST") {
+        expect(path).toBe("/api/v1/restrictions");
+        posts.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({
+            data: [{ type: "task", id: randomUUID() }],
+            meta: { message: "Success" },
+          }),
+        );
+      }
+      return Response.json(
+        path.includes("/properties/")
+          ? {
+              data: {
+                type: "property",
+                id: f.scope.propertyId,
+                attributes: { settings: { min_stay_type: "both" } },
+              },
+            }
+          : path.includes("/room_types/")
+            ? providerRoom(f)
+            : await f.get(path),
+      );
+    });
+    const plan = vi.fn(async () => ({ requests: [] }));
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      plans: { plan },
+      fetch: fetcher,
+      reconcileClosedUploads: (lease, get) => reconcilePendingChannexUploads(pool, lease, get),
+      dispatchClosedUpload: (lease, ports) => dispatchNextChannexClosedUpload(pool, lease, ports),
+    });
+    const state = { succeed: vi.fn(), fail: vi.fn() };
+    const job = {
+      jobId: f.input.jobId,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        operationType: "sync_ari" as const,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+      },
+    };
+    await pool.query("UPDATE platform.jobs SET max_attempts=1,payload=$2::jsonb WHERE id=$1", [
+      job.jobId,
+      JSON.stringify(job.input),
+    ]);
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      pool,
+      targetState: state,
+    });
+    expect(
+      await runPmsChannexManagementWorkerOnce({
+        store: { ...store, claim: async () => job },
+        provider,
+        workerId: f.input.workerId,
+      }),
+    ).toMatchObject({ outcome: "continued" });
+    expect(posts).toEqual([
+      {
+        values: [
+          expect.objectContaining({
+            date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+            stop_sell: true,
+          }),
+        ],
+      },
+    ]);
+    expect((await f.state()).state).toBe("reconciled");
+    expect(
+      (await pool.query("SELECT status,max_attempts FROM platform.jobs WHERE id=$1", [job.jobId]))
+        .rows[0],
+    ).toEqual({ status: "pending", max_attempts: 2 });
+    expect(
+      (
+        await pool.query(
+          "SELECT id FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1",
+          [foreign.claim.attemptId],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    expect(state.succeed).not.toHaveBeenCalled();
+    expect(state.fail).not.toHaveBeenCalled();
+    expect(plan).not.toHaveBeenCalled();
+    await provider.execute(job, { workerId: f.input.workerId });
+    expect(posts).toHaveLength(1);
   });
   it("discovers and reconciles only the leased property uploads through the worker provider", async () => {
     const f = await reconciliationFixture(),

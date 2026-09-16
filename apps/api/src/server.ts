@@ -1,3 +1,4 @@
+import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
 import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
@@ -700,6 +701,9 @@ const channexManagementProvider =
         apiKey: config.channexManagement.apiKey,
         plans: channexManagementPlans,
         canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
+        dispatchClosedUpload: channexUploadReconciliationPool
+          ? (lease, ports) => dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
+          : undefined,
         reconcileClosedUploads: channexUploadReconciliationPool
           ? (lease, get) => reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
           : undefined,

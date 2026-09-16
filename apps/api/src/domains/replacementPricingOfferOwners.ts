@@ -567,7 +567,7 @@ export async function prepareNextChannexInitialAriDispatch(
   if (!next.nextAriDate) throw new Error("Initial ARI date missing");
   return prepareChannexInitialAriDispatch(pool, lease, selected, attemptId, next.nextAriDate);
 }
-/** Internal closed staging only. No runtime adapter or recovery lookup can obtain this closure. */
+/** A fresh claim grants one closed upload; recovery cannot recreate this closure. */
 export async function prepareChannexInitialAriDispatch(
   pool: Pool,
   input: ChannexPricingJobLeaseInput,
@@ -656,7 +656,7 @@ export async function prepareChannexInitialAriDispatch(
         await persist();
         return { kind: "retained" as const, attemptId: claim.attemptId };
       } catch {
-        return { kind: "receipt_pending" as const, persist };
+        return { kind: "receipt_pending" as const, persist, attemptId: claim.attemptId };
       }
     },
   };
