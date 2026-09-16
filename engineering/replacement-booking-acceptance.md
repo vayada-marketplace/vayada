@@ -376,3 +376,10 @@ remains a separate blocker: `enqueuePmsReservationHandoff` still supplies its
 consumer to replacement evidence before composing the complete writer. Do not
 queue a legacy handoff with invented or missing offer evidence or activate public
 submission based on notification coverage alone.
+
+The handoff audit found no runnable reservation-handoff consumer in this stack or
+inspected main, and the existing bundle adoption trigger still correlates legacy
+quote-session IDs. Follow [the replacement PMS handoff contract](replacement-pricing-pms-handoff.md)
+for the receipt-binding repair, accepted-room port, transactional adoption and
+registered consumer before full acceptance activation. Enqueue-only coverage is
+not evidence of an operational PMS reservation.
