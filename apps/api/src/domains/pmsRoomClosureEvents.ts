@@ -7,7 +7,12 @@ export async function recordPmsRoomClosureEvents(
   client: DistributionBookingPublicationTransaction,
   scope: PmsRoomClosureScope,
   command: { idempotencyId: string; keyHash: string; requestId: string; correlationId?: string },
-  result: { calendarRevision: number; cutoffDate: string; phase: "publication_refresh_required" },
+  result: {
+    calendarRevision: number;
+    cutoffDate: string;
+    coverageThroughExclusive: string;
+    phase: "publication_refresh_required";
+  },
   acceptedAt: Date,
 ): Promise<{ idempotencyId: string; domainEventId: string; outboxEventId: string }> {
   const domainEventId = randomUUID(),
@@ -55,6 +60,29 @@ export async function recordPmsRoomClosureEvents(
       correlation,
       command.keyHash,
       JSON.stringify({ ...payload, reason: "room_closure" }),
+    ],
+  );
+  await client.query(
+    `INSERT INTO platform.outbox_events
+    (domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,resource_product,
+      resource_type,resource_id,correlation_id,idempotency_key_hash,payload)
+    VALUES ($1::uuid,$2,'pms.channel-manager','pms.inventory.ari_changed','property',$3::uuid,
+      'pms','room_type',$4,$5,$6,$7::jsonb)
+    ON CONFLICT (destination,outbox_key) DO NOTHING`,
+    [
+      domainEventId,
+      `pms.channel-manager.inventory:${eventKey}`,
+      scope.propertyId,
+      scope.roomTypeId,
+      correlation,
+      command.keyHash,
+      JSON.stringify({
+        propertyId: scope.propertyId,
+        roomTypeId: scope.roomTypeId,
+        coverageFrom: result.cutoffDate,
+        coverageThroughExclusive: result.coverageThroughExclusive,
+        reason: "room_closure",
+      }),
     ],
   );
   await client.query(

@@ -1283,6 +1283,20 @@ must also match; directly changing an attempt to terminal state is insufficient.
 Selection and claim do not schedule runtime work, perform provider IO, establish
 full channel readiness or activate sales.
 
+Inventory-owned changes reach this availability lane through
+`pms.inventory.ari_changed`. Reservation holds and releases, canonical inventory
+materialization, room closure, physical-capacity changes, room blocks, assignment
+transfers, host actions, and linked-inventory reconciliation retain that outbox
+intent in the same transaction as their source mutation. Inventory outbox work
+enqueues an unrestricted `channex.sync_ari` job; rule and calendar-restriction
+triggers continue to enqueue `restrictionsOnly` work.
+
+Manual-booking creation and the manual no-show, cancellation, and stay-correction
+paths still reconcile primary occupied inventory without their own primary-room
+ARI outbox intent. Their linked-room effects are covered independently. Those
+remaining owner paths require a later bounded event slice before availability
+runtime activation.
+
 The management worker treats a persisted room-availability receipt as bounded
 partial progress, alongside a retained closed-rate receipt. Exact job attempt,
 worker, property and progress-lane correlation is required before the running
