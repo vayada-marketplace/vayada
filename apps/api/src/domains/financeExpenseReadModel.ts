@@ -5,6 +5,11 @@ import {
   FINANCE_EXPENSE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
   buildFinanceExpenseCsvArtifact,
+  divideFinanceReportingDecimal,
+  financeDashboardPeriods,
+  financeReportingCountMetric,
+  financeReportingMoneyMetric,
+  normalizeFinanceReportingDecimal,
   parseFinanceExpenseExportSnapshot,
   parseFinanceExpenseExportQuery,
   parseFinanceExpenseQuery,
@@ -17,6 +22,9 @@ import {
   type FinanceExpenseExportSnapshot,
   type FinanceExpenseIncompleteEvidence,
   type FinanceExpenseQuery,
+  type FinanceReportingCountMetric,
+  type FinanceReportingMoney,
+  type FinanceReportingMoneyMetric,
   type FinanceRecurringExpenseRule,
 } from "@vayada/domain-finance";
 import { PMS_PRICING_CONTRACT_VERSION, type PmsPricingReadPort } from "@vayada/domain-pms";
@@ -27,17 +35,14 @@ type FinanceReadClient = { query<T extends QueryResultRow = QueryResultRow>(sql:
 export type FinanceReadPool = Pick<FinanceReadClient, "query"> & { connect(): Promise<FinanceReadClient>; end?(): Promise<void> };
 // prettier-ignore
 export type FinanceExpensePropertyContextReadPort = { getPropertyContext(propertyId: string): Promise<{ source: { ownerDomain: "hotel_catalog"; entityType: "property_profile"; entityId: string; revision: string }; timeZone: string | null; updatedAt: string } | null> };
-type Money = { amount: string; currency: string };
-type MoneyMetric = { value: Money; absoluteChange: Money; percentChange: string | null };
-type CountMetric = { value: number; absoluteChange: number; percentChange: string | null };
 export type FinanceExpensesReadResponse = FinanceExpenseEnvelope & {
   summary: {
-    totalMtd: MoneyMetric;
-    perOccupiedNight: MoneyMetric;
-    unpaidAmount: MoneyMetric;
-    unpaidCount: CountMetric;
+    totalMtd: FinanceReportingMoneyMetric;
+    perOccupiedNight: FinanceReportingMoneyMetric;
+    unpaidAmount: FinanceReportingMoneyMetric;
+    unpaidCount: FinanceReportingCountMetric;
   };
-  categories: Array<{ category: FinanceExpenseCategory; amount: Money }>;
+  categories: Array<{ category: FinanceExpenseCategory; amount: FinanceReportingMoney }>;
   page: { items: FinanceExpense[]; nextCursor: string | null; limit: number };
 };
 export type FinanceExpenseExportArtifact = FinanceExpenseCsvArtifact & {
@@ -141,14 +146,14 @@ export function createPgFinanceExpenseReadModel(config: { connectionString?: str
         const page = await readPage(client, meta, query, cursor);
         return { summary, categories, page, mismatches: await readMismatches(client, meta, query.from, query.to, period.currentFrom, period.currentTo, period.priorFrom, period.priorTo) };
       });
-      const current = fixed(summary.currentTotal), prior = fixed(summary.priorTotal);
+      const current = normalizeFinanceReportingDecimal(summary.currentTotal), prior = normalizeFinanceReportingDecimal(summary.priorTotal);
       const currentNights = number(summary.currentNights), priorNights = number(summary.priorNights);
-      const incompleteEvidence: FinanceExpenseIncompleteEvidence[] = mismatches.map((row) => ({ code: "expense_currency_mismatch", count: number(row.count), amount: { amount: decimal(fixed(row.amount)), currency: row.currency } }));
+      const incompleteEvidence: FinanceExpenseIncompleteEvidence[] = mismatches.map((row) => ({ code: "expense_currency_mismatch", count: number(row.count), amount: { amount: normalizeFinanceReportingDecimal(row.amount), currency: row.currency } }));
       if (summary.occupancyMismatch) incompleteEvidence.push({ code: "occupancy_currency_mismatch", count: number(summary.occupancyMismatch) });
-      const missing = Number(current !== 0n && currentNights <= 0) + Number(prior !== 0n && priorNights <= 0);
+      const missing = Number(current !== "0.0000" && currentNights <= 0) + Number(prior !== "0.0000" && priorNights <= 0);
       if (missing) incompleteEvidence.push({ code: "occupancy_unavailable", count: missing });
       return { ...base(meta, compact({ financeExpenses: summary.financeFreshAt, bookingOccupancyThrough: summary.bookingFreshThrough }), incompleteEvidence),
-        summary: { totalMtd: moneyMetric(current, prior, meta.currency), perOccupiedNight: moneyMetric(divide(current, currentNights), divide(prior, priorNights), meta.currency), unpaidAmount: moneyMetric(fixed(summary.currentUnpaid), fixed(summary.priorUnpaid), meta.currency), unpaidCount: countMetric(number(summary.currentUnpaidCount), number(summary.priorUnpaidCount)) }, categories, page };
+        summary: { totalMtd: financeReportingMoneyMetric(current, prior, meta.currency), perOccupiedNight: financeReportingMoneyMetric(divideFinanceReportingDecimal(current, Math.max(0, currentNights)), divideFinanceReportingDecimal(prior, Math.max(0, priorNights)), meta.currency), unpaidAmount: financeReportingMoneyMetric(summary.currentUnpaid, summary.priorUnpaid, meta.currency), unpaidCount: financeReportingCountMetric(number(summary.currentUnpaidCount), number(summary.priorUnpaidCount)) }, categories, page };
     },
     async captureExport(propertyId, rawQuery) {
       const query = parseFinanceExpenseExportQuery(rawQuery);
@@ -189,7 +194,7 @@ async function readSummary(pool: Pick<FinanceReadClient, "query">, meta: Meta, p
 // prettier-ignore
 async function readCategoryTotals(pool: Pick<FinanceReadClient, "query">, meta: Meta, from: string, to: string) {
   const rows = (await pool.query<CategoryRow>(`WITH events AS (${EVENTS}) SELECT ${CATEGORY_COLUMNS},sum(event.amount)::text AS amount FROM finance.expense_categories c JOIN events event ON event.category_id=c.id WHERE c.property_id=$1::uuid AND event.currency=$2 AND event.incurred_on BETWEEN $3::date AND $4::date GROUP BY c.id HAVING sum(event.amount)<>0 ORDER BY sum(event.amount) DESC,c.sort_order,c.id`, [meta.propertyId, meta.currency, from, to])).rows;
-  return rows.map((row) => ({ category: category(row), amount: { amount: decimal(fixed(row.amount!)), currency: meta.currency } }));
+  return rows.map((row) => ({ category: category(row), amount: { amount: normalizeFinanceReportingDecimal(row.amount!), currency: meta.currency } }));
 }
 
 // prettier-ignore
@@ -236,9 +241,8 @@ async function consistentRead<T>(pool: FinanceReadPool, read: (client: FinanceRe
 // prettier-ignore
 function comparisonPeriod(instant: string, timeZone: string): Period {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant)).map((part) => [part.type, part.value]));
-  const year = Number(parts.year), month = Number(parts.month), day = Number(parts.day);
-  const prior = new Date(Date.UTC(year, month - 2, 1)); const priorDay = Math.min(day, new Date(Date.UTC(year, month - 1, 0)).getUTCDate());
-  return { currentFrom: `${year}-${pad(month)}-01`, currentTo: `${year}-${pad(month)}-${pad(day)}`, priorFrom: `${prior.getUTCFullYear()}-${pad(prior.getUTCMonth() + 1)}-01`, priorTo: `${prior.getUTCFullYear()}-${pad(prior.getUTCMonth() + 1)}-${pad(priorDay)}` };
+  const monthToDate = financeDashboardPeriods(`${parts.year}-${parts.month}-${parts.day}`).monthToDate;
+  return { currentFrom: monthToDate.current.from, currentTo: monthToDate.current.to, priorFrom: monthToDate.comparison.from, priorTo: monthToDate.comparison.to };
 }
 // prettier-ignore
 function encodeCursor(propertyId: string, query: FinanceExpenseQuery, item: FinanceExpense): string { return Buffer.from(JSON.stringify({ v: 1, q: snapshot(propertyId, query), p: query.sort === "amount_desc" ? [item.incurredOn, item.id, item.amount.amount] : [item.incurredOn, item.id] })).toString("base64url"); }
@@ -272,22 +276,6 @@ function rule(row: RuleRow): FinanceRecurringExpenseRule {
   const { updatedAt: _, notes, ...item } = row;
   return notes === null ? item : { ...item, notes };
 }
-// prettier-ignore
-function moneyMetric(value: bigint, prior: bigint, currency: string): MoneyMetric { return { value: money(value, currency), absoluteChange: money(value - prior, currency), percentChange: prior === 0n ? null : decimal(roundDivide((value - prior) * 10_000n, prior)) }; }
-// prettier-ignore
-function countMetric(value: number, prior: number): CountMetric { return { value, absoluteChange: value - prior, percentChange: prior === 0 ? null : decimal(roundDivide(BigInt(value - prior) * 10_000n, BigInt(prior))) }; }
-function money(amount: bigint, currency: string): Money {
-  return { amount: decimal(amount), currency };
-}
-// prettier-ignore
-function fixed(value: string): bigint { if (!/^-?\d+(?:\.\d{1,4})?$/.test(value)) throw new Error("Finance decimal evidence is invalid"); const negative = value.startsWith("-"); const [whole, part = ""] = value.replace("-", "").split("."); const parsed = BigInt(whole!) * 10_000n + BigInt(part.padEnd(4, "0")); return negative ? -parsed : parsed; }
-// prettier-ignore
-function decimal(value: bigint): string { const sign = value < 0n ? "-" : ""; const absolute = value < 0n ? -value : value; return `${sign}${absolute / 10_000n}.${String(absolute % 10_000n).padStart(4, "0")}`; }
-function divide(value: bigint, divisor: number): bigint {
-  return divisor > 0 ? roundDivide(value, BigInt(divisor)) : 0n;
-}
-// prettier-ignore
-function roundDivide(value: bigint, divisor: bigint): bigint { const sign = value < 0n !== divisor < 0n ? -1n : 1n; const a = value < 0n ? -value : value, b = divisor < 0n ? -divisor : divisor; return sign * ((a + b / 2n) / b); }
 function number(value: number): number {
   if (!Number.isSafeInteger(value)) throw new Error("Finance integer evidence is invalid");
   return value;
@@ -315,6 +303,3 @@ function utc(value: unknown): value is string {
 function exact(value: unknown, keys: string[]): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)); }
 // prettier-ignore
 function compact(value: Record<string, string | null>): Record<string, string> { return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => entry[1] !== null)); }
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
