@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(
   fileURLToPath(
-    new URL("../migrations/0217_marketplace_communication_preferences.sql", import.meta.url),
+    new URL("../migrations/0314_marketplace_communication_preferences.sql", import.meta.url),
   ),
   "utf8",
 );
