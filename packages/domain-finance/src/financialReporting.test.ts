@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { FinanceReportingEnvelope } from "./financialReporting.js";
+
 import {
   FINANCE_DASHBOARD_WINDOW_DAYS,
   divideFinanceReportingDecimal,
@@ -14,6 +16,21 @@ import {
 } from "./financialReporting.js";
 
 describe("Financials reporting contracts", () => {
+  it("preserves currency-only incomplete evidence", () => {
+    const gap = {
+      code: "currency_mismatch",
+      count: 1,
+      currency: "USD",
+    } satisfies FinanceReportingEnvelope["incompleteEvidence"][number];
+    // @ts-expect-error One evidence item cannot declare two authoritative currencies.
+    const conflict: FinanceReportingEnvelope["incompleteEvidence"][number] = {
+      ...gap,
+      amount: { amount: "1.0000", currency: "EUR" },
+    };
+    expect(gap.currency).toBe("USD");
+    expect(conflict).toBeDefined();
+  });
+
   it("keeps the accepted dashboard window", () => {
     expect(FINANCE_DASHBOARD_WINDOW_DAYS).toBe(14);
   });
