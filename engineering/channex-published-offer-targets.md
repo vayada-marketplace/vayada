@@ -1076,3 +1076,22 @@ history admission. Concurrent changes may turn preparation unavailable. An empty
 set returns only `initial_dates_reconciled` as of this read; it is not complete
 room availability, OTA readiness or activation. Missing timezones, unresolved
 history and stale configuration return unavailable without claiming an upload.
+
+### Worker closed-upload continuation
+
+A normal `sync_ari` worker may discover identified pending targets from the leased
+property, prepare the next missing closed date, and consume its fresh one-use
+dispatch. Restriction-only jobs never enter this pricing-upload stage. Each run
+sends at most one upload; retained receipts require reconciliation on the next run.
+
+`initial_upload_retained` is partial progress, never full sync success. Under an
+unexpired current lease, the store verifies the receipt belongs to that job's
+current attempt and property, completes only that attempt, and requeues the job.
+It credits one additional allowed attempt for this durable progress while keeping
+attempt numbers monotonic and the remaining failure budget unchanged. It does
+not complete command idempotency or update target sync success. If the worker
+crashes after retaining its receipt, stale-lease recovery credits that same
+uncredited attempt before checking exhaustion; the next attempt has a new ID,
+so the old receipt cannot earn another credit. Ambiguous receipts remain held
+by reconciliation and cannot authorize another POST. Coverage of closed dates
+alone still cannot activate a target or report full sync completion.

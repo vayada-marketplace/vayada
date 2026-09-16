@@ -1,3 +1,4 @@
+import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
@@ -547,6 +548,149 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     );
     return { ...f, prepared, get, post, taskId };
   }
+  async function continuationFixture() {
+    const f = await initialDispatchFixture();
+    const progress = await f.prepared.dispatch(f);
+    if (progress.kind !== "retained") throw new Error("receipt required");
+    const state = { succeed: vi.fn(), fail: vi.fn() };
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      pool,
+      targetState: state,
+      ariSyncMutating: false,
+    });
+    const job = {
+      jobId: f.input.jobId,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        operationType: "sync_ari" as const,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+      },
+    };
+    await pool.query("UPDATE platform.jobs SET max_attempts=1,payload=$2::jsonb WHERE id=$1", [
+      job.jobId,
+      JSON.stringify(job.input),
+    ]);
+    const continued = {
+      ok: false as const,
+      code: "initial_upload_retained" as const,
+      attemptId: progress.attemptId,
+    };
+    const run = () =>
+      store.continueUpload(job, continued, { workerId: f.input.workerId, now: new Date() });
+    return { ...f, store, state, job, continued, run };
+  }
+  it("credits a retained upload once without completing the job or target", async () => {
+    const f = await continuationFixture();
+    await f.run();
+    expect(
+      (
+        await pool.query(
+          "SELECT status,attempts_count,max_attempts,locked_by,finished_at FROM platform.jobs WHERE id=$1",
+          [f.job.jobId],
+        )
+      ).rows[0],
+    ).toEqual({
+      status: "pending",
+      attempts_count: 1,
+      max_attempts: 2,
+      locked_by: null,
+      finished_at: null,
+    });
+    expect(f.state.succeed).not.toHaveBeenCalled();
+    expect(f.state.fail).not.toHaveBeenCalled();
+    await expect(f.run()).rejects.toThrow("Current retained Channex upload required");
+    expect(
+      (await pool.query("SELECT max_attempts FROM platform.jobs WHERE id=$1", [f.job.jobId]))
+        .rows[0].max_attempts,
+    ).toBe(2);
+  });
+  it.each(["expired", "wrong-worker", "foreign-upload", "restrictions-only", "finished-attempt"])(
+    "rejects continuation for %s without granting credit",
+    async (mode) => {
+      const f = await continuationFixture();
+      if (mode === "expired")
+        await pool.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+          f.job.jobId,
+        ]);
+      if (mode === "wrong-worker") f.input.workerId = "other";
+      if (mode === "foreign-upload")
+        f.continued.attemptId = (await continuationFixture()).continued.attemptId;
+      if (mode === "restrictions-only")
+        await pool.query(
+          `UPDATE platform.jobs SET payload=payload || '{"restrictionsOnly":true}'::jsonb WHERE id=$1`,
+          [f.job.jobId],
+        );
+      if (mode === "finished-attempt")
+        await pool.query(
+          "UPDATE platform.job_attempts SET status='succeeded',finished_at=now() WHERE job_id=$1",
+          [f.job.jobId],
+        );
+      await expect(f.run()).rejects.toThrow();
+      expect(
+        (
+          await pool.query("SELECT max_attempts,status FROM platform.jobs WHERE id=$1", [
+            f.job.jobId,
+          ])
+        ).rows[0],
+      ).toEqual({ max_attempts: 1, status: "running" });
+      expect(f.state.succeed).not.toHaveBeenCalled();
+    },
+  );
+  it("recovers uncredited receipts after a final-attempt crash, once", async () => {
+    const f = await continuationFixture();
+    // Scope queue discovery to this fixture; all lease/credit SQL uses real PostgreSQL.
+    const scopedPool = {
+      connect: async () => {
+        const client = await pool.connect();
+        return {
+          release: client.release.bind(client),
+          query: (text: string, values?: unknown[]) =>
+            text.includes("pms.enqueue_restriction_ari")
+              ? Promise.resolve({ rows: [], rowCount: 0 })
+              : client.query(
+                  text.includes('max_attempts AS "maxAttempts"')
+                    ? text.replace(
+                        "WHERE queue_name = $1",
+                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                      )
+                    : text,
+                  values,
+                ),
+        };
+      },
+      end: async () => {},
+    };
+    const scoped = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!,
+      pool: scopedPool,
+      targetState: f.state,
+      ariSyncMutating: true,
+    });
+    await pool.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    const recovered = await scoped.claim({ workerId: "replacement", now: new Date() });
+    expect(recovered).toMatchObject({ jobId: f.job.jobId, attemptNumber: 2, maxAttempts: 2 });
+    expect(f.state.fail).not.toHaveBeenCalled();
+    // No receipt belongs to attempt 2: the old one cannot earn another credit.
+    await pool.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    expect(await scoped.claim({ workerId: "third", now: new Date() })).toBeNull();
+    expect(
+      (await pool.query("SELECT status FROM platform.jobs WHERE id=$1", [f.job.jobId])).rows[0]
+        .status,
+    ).toBe("dead_lettered");
+    expect(
+      (await pool.query("SELECT max_attempts FROM platform.jobs WHERE id=$1", [f.job.jobId]))
+        .rows[0].max_attempts,
+    ).toBe(2);
+  });
   it("dispatches closed initial ARI once and retains an acknowledgement without releasing ownership", async () => {
     const f = await initialDispatchFixture();
     const first = f.prepared.dispatch(f);
