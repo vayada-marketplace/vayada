@@ -197,5 +197,11 @@ export {
 } from "./accountAdminTransferValidation.js";
 
 export { runAdminTransfer } from "./accountAdminTransferCommand.js";
+export {
+  prepareAdminTransferProof,
+  resolveAdminTransferSource,
+  type AdminTransferSessionSource,
+  type AdminTransferSource,
+} from "./accountAdminTransferPreparation.js";
 
 export { reconcileNextAdminRole, type AdminRoleProvider } from "./adminRoleReconciliation.js";

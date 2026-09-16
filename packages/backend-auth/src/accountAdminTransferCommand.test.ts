@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { runAdminTransfer } from "./accountAdminTransferCommand.js";
+import {
+  prepareAdminTransferProof,
+  resolveAdminTransferSource,
+} from "./accountAdminTransferPreparation.js";
 import { lockAdminTransferSnapshot } from "./accountAdminTransferSnapshot.js";
 import {
   createAdminTransferProof,
@@ -126,6 +130,58 @@ describe.skipIf(!url)("atomic administrator transfer", () => {
       )
     ).rows;
   }
+  it("resolves the live owner and prepares only the complete current transfer intent", async () => {
+    const { actorMembershipId: _, ...sessionSource } = source;
+    const resolved = await resolveAdminTransferSource(pool, sessionSource);
+    expect(resolved).toEqual(source);
+    expect(
+      await resolveAdminTransferSource(pool, { ...sessionSource, workosUserId: "foreign" }),
+    ).toBeNull();
+
+    const prepared = await prepareAdminTransferProof(pool, resolved!, request);
+    expect(prepared).toMatchObject({
+      outcome: "prepared",
+      binding: {
+        organizationId: source.organizationId,
+        actorMembershipId: source.actorMembershipId,
+        targetMembershipId: request.targetMembershipId,
+        sessionId: source.sessionId,
+      },
+    });
+    if (prepared.outcome !== "prepared") throw new Error(prepared.reason);
+    expect(prepared.state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(
+      (
+        await pool.query(
+          "SELECT request_digest, consumed_at FROM identity.account_admin_transfer_proofs WHERE id=$1",
+          [prepared.proofId],
+        )
+      ).rows[0],
+    ).toEqual({ request_digest: prepared.binding.requestDigest, consumed_at: null });
+    expect(
+      await prepareAdminTransferProof(pool, resolved!, {
+        ...request,
+        expectedTargetRevision: "0".repeat(64),
+      }),
+    ).toEqual({ outcome: "rejected", reason: "stale_transfer" });
+    const proofCount = await pool.query(
+      "SELECT id FROM identity.account_admin_transfer_proofs WHERE organization_id=$1",
+      [source.organizationId],
+    );
+    for (const invalid of [{ ...request, targetMembershipId: "bad" }, {}])
+      expect(await prepareAdminTransferProof(pool, resolved!, invalid)).toEqual({
+        outcome: "rejected",
+        reason: "invalid_transfer",
+      });
+    expect(
+      (
+        await pool.query(
+          "SELECT id FROM identity.account_admin_transfer_proofs WHERE organization_id=$1",
+          [source.organizationId],
+        )
+      ).rowCount,
+    ).toBe(proofCount.rowCount);
+  });
   it("atomically normalizes the new admin and applies explicit former-admin access", async () => {
     expect(await runAdminTransfer(pool, source, request, proofId.toUpperCase())).toEqual({
       outcome: "transferred",
