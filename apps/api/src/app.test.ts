@@ -17417,7 +17417,10 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: checkoutCase.request.method ?? "POST",
       url: checkoutCase.request.path,
-      payload: checkoutCase.request.body,
+      payload: {
+        ...checkoutCase.request.body,
+        fulfilledAddonSelectionIds: ["F6855600-0000-0000-0000-000000000001"],
+      },
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -17451,6 +17454,9 @@ describe("vayada-api", () => {
       expect.arrayContaining(["finance_reconciliation", "payout_dispatch"]),
     );
     expect(commandRepository.checkOutCommands).toHaveLength(1);
+    expect(commandRepository.checkOutCommands[0]?.fulfilledAddonSelectionIds).toEqual([
+      "f6855600-0000-0000-0000-000000000001",
+    ]);
     expect(commandRepository.auditEvents).toContain(
       "checkout_completed:f6855a00-0000-0000-0000-000000000001",
     );
@@ -17499,7 +17505,14 @@ describe("vayada-api", () => {
     ]);
   });
 
-  it("rejects malformed PMS check-out settled charge ids before dispatch", async () => {
+  it.each([
+    [{ chargesSettled: [123] }, "chargesSettled entries must be UUIDs."],
+    [{ fulfilledAddonSelectionIds: null }, "fulfilledAddonSelectionIds entries must be unique UUIDs."],
+    [
+      { fulfilledAddonSelectionIds: ["f6855600-0000-0000-0000-000000000001", "F6855600-0000-0000-0000-000000000001"] },
+      "fulfilledAddonSelectionIds entries must be unique UUIDs.",
+    ],
+  ])("rejects malformed PMS check-out input before dispatch", async (patch, message) => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
@@ -17519,7 +17532,7 @@ describe("vayada-api", () => {
       url: checkoutCase.request.path,
       payload: {
         ...checkoutCase.request.body,
-        chargesSettled: [123],
+        ...patch,
       },
       headers: {
         authorization: "Bearer valid-token",
@@ -17529,7 +17542,7 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toMatchObject({
       code: "invalid_body",
-      message: "chargesSettled entries must be UUIDs.",
+      message,
     });
     expect(commandRepository.checkOutCommands).toEqual([]);
   });

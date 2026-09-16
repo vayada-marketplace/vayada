@@ -77,6 +77,10 @@ import {
   refundPmsManualBooking,
 } from "./bookingPmsManualRefundNightlyRevenueEvidence.js";
 import {
+  appendCheckoutAddonRevenueEvidence,
+  BookingAddonRevenueEvidenceError,
+} from "./bookingAddonRevenueEvidence.js";
+import {
   ManualStayCorrectionEvidenceError,
   ManualStayCorrectionStateError,
 } from "./bookingPmsManualStayCorrection.js";
@@ -1766,6 +1770,21 @@ async function executeCheckOutCommand(
       unsettledPaidChargeIds,
     });
     await updateAssignmentsOperationalStatus(client, command, sources, "checked_out");
+    const finalCheckOut =
+      !command.assignmentId || !(await hasRemainingActiveAssignments(client, command));
+    if (!finalCheckOut && command.fulfilledAddonSelectionIds.length > 0) {
+      throw new BookingAddonRevenueEvidenceError(
+        "Add-on fulfillment is only accepted on the final reservation check-out.",
+      );
+    }
+    if (finalCheckOut) {
+      await appendCheckoutAddonRevenueEvidence(client, {
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        fulfilledSelectionIds: command.fulfilledAddonSelectionIds,
+        commandKeyHash: keyHash,
+      });
+    }
     await insertCheckOutAuditEvent(client, command, checkout, commandMeta, keyHash);
     await completeCheckOutCommandIdempotency(
       client,
@@ -1781,6 +1800,9 @@ async function executeCheckOutCommand(
     return checkOutResultForCommand(config, command, commandMeta, checkout, charges, false);
   } catch (error) {
     await rollbackQuietly(client);
+    if (error instanceof BookingAddonRevenueEvidenceError) {
+      return checkOutInvalidBody(error.message);
+    }
     if (error instanceof PmsRoomScopeChangedError) {
       return checkOutVersionConflict("Reservation room scope changed. Retry check-out.");
     }
@@ -1796,6 +1818,21 @@ async function executeCheckOutCommand(
   } finally {
     client.release();
   }
+}
+
+async function hasRemainingActiveAssignments(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+): Promise<boolean> {
+  const result = await client.query<{ remaining: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pms.operational_booking_assignments
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND assignment_status NOT IN ('checked_out','canceled','released')
+     ) AS remaining`,
+    [command.propertyId, command.guestBookingId],
+  );
+  return result.rows[0]?.remaining ?? false;
 }
 
 async function listCheckoutCharges(
@@ -4331,8 +4368,10 @@ function checkOutActorUserId(command: PmsCheckOutCommand): string | null {
 }
 
 function checkOutCommandFingerprint(command: PmsCheckOutCommand): unknown {
-  const { audit: _audit, ...fingerprint } = command;
-  return fingerprint;
+  const { audit: _audit, fulfilledAddonSelectionIds, ...fingerprint } = command;
+  return fulfilledAddonSelectionIds.length
+    ? { ...fingerprint, fulfilledAddonSelectionIds: [...fulfilledAddonSelectionIds].sort() }
+    : fingerprint;
 }
 
 async function executeOperationalCommand<TCommand extends PmsOperationalCommand>(
