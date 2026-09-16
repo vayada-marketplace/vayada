@@ -1,9 +1,10 @@
 # Replacement booking acceptance (VAY-1543)
 
-Status: implementation design and final-time prerequisite only. Authority:
+Status: durable acceptance schema and final-time prerequisite implemented; full
+acceptance writer, replay repository and public submission remain pending. Authority:
 [direct pricing consumption](direct-replacement-pricing-consumption.md).
-No public booking submission, payment execution or new migration is enabled here.
-The current price preview remains a quote, not a reservation.
+Migration 0210 adds immutable storage without enabling booking submission or payment
+execution. The current price preview remains a quote, not a reservation.
 
 ## Command and persistence decisions
 
@@ -21,7 +22,7 @@ its `sha256:` prefix removed. Never reuse the legacy checkout operation.
 Same request ID with different normalized input conflicts. Different request IDs
 must not create two bookings from one quote.
 
-A required future Booking-owned migration must introduce an append-only
+Booking-owned migration 0210 introduces the append-only
 `booking.pricing_quote_acceptances` relation with:
 
 - `id` (UUID), `property_id`, `organization_id`, `pricing_quote_id`,
@@ -127,7 +128,7 @@ The legacy `createTargetGuestBooking` converts `quote_sessions`, constructs lega
 selected-offer/policy snapshots and numeric amount projections, and performs
 lifecycle/read-model work. It is not a replacement writer and cannot safely be
 called with a fabricated old quote. Required next slices are the scoped immutable
-acceptance migration/decoder and replay repository, owner-preserving reservation/
+acceptance decoder and replay repository, owner-preserving reservation/
 promo composition, same-transaction Finance/add-on capture and replacement
 booking/lifecycle/revenue projections, then the complete orchestrator.
 
@@ -153,3 +154,29 @@ last promo use, own-mutation validity, changed-command conflict, duplicate quote
 acceptance, replay after expiry/repricing/policy edits, and rollback after each
 write stage. Test a cutoff/expiry crossed during a held DB lock, and compare exact
 accepted evidence after later owner edits. Receipt-only tests are insufficient.
+
+## Durable acceptance schema (0210)
+
+Migration0210 implements the immutable relation above. Scoped foreign keys bind
+quote/property/organization, booking/property, and the completed Booking receipt's
+property, exact acceptance operation, key hash and command fingerprint. Accepted
+receipts cannot later be expired, repurposed or deleted while referenced. The
+writer must complete its staged receipt before inserting acceptance evidence;
+both still roll back together. Unique quote, booking and receipt references reject
+duplicate acceptance. Inserts preserve the exact stored quote JSON and disclosure
+bytes/hash; update, delete and truncate are forbidden.
+
+Finance fields use existing `billing_plan_snapshot`, `commission_terms_snapshot`
+and `finance_terms_captured_at` representations, supplied explicitly with no
+fallback defaults. Empty commission objects are rejected, including for fixed
+plans; a legitimate fixed-plan snapshot retains its explicit zero/affiliate fee
+values and Finance configuration timestamp. This schema does not establish owner
+capture or verify arbitrary commission object semantics. No Finance capability ID
+is substituted for accepted billing/commission values.
+
+Schema tests use a dedicated PostgreSQL database and synthetic storage shapes to
+verify scoped references, independent uniqueness, missing/malformed envelopes,
+exact evidence retention, immutable history and transaction rollback. They do not
+establish a domain-valid PMS reservation or completed checkout. Full domain
+snapshot decoding, replay repository, owner capture and the acceptance writer
+remain required. No runtime write or public acceptance route is added by0210.
