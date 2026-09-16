@@ -3,6 +3,20 @@ import { captureChannexAlterationFinance } from "./channexAlterationFinance.js";
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import {
+  claimChannexRoomAvailability,
+  prepareChannexRoomAvailabilityEvidence,
+  reconcileCurrentChannexRoomAvailability,
+} from "./channexRoomAvailabilityEvidence.js";
+import {
+  prepareChannexRoomAvailabilityReceiptPersistence,
+  prepareChannexRoomAvailabilityTransportFailurePersistence,
+} from "./channexRoomAvailabilityReceiptStore.js";
+import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
+import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
+import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { createHash, randomUUID } from "node:crypto";
 import { runChannexBookingJobs } from "../jobs/channexBookings.js";
 import { persistChannexAssignments } from "./channexBookingAssignments.js";
@@ -59,6 +73,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
   let admin: pg.PoolClient;
   const repositories: PmsInventoryMaterializationRepository[] = [];
   const alterationBookings: string[] = [];
+  const channelPool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
 
   beforeAll(async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
@@ -89,6 +104,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.query("COMMIT");
     admin.release();
     await adminPool.end();
+    await channelPool.end();
   });
 
   it("checks Airbnb alterations against real materialization and canonical assignments", async () => {
@@ -1694,6 +1710,1202 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).toBe(0);
   });
 
+  async function channelInventoryFixture(horizonDays = 1, startAtLocalToday = false) {
+    const f = await createFixture(admin, repositories, [2]);
+    const date = startAtLocalToday
+      ? channexPropertyLocalDate("Europe/Berlin", new Date())!
+      : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const through = new Date(`${date}T00:00:00.000Z`);
+    through.setUTCDate(through.getUTCDate() + horizonDays - 1);
+    await f.repository.materializeInventory(
+      materializationCommand(f, "channel-inventory", 1, date, through.toISOString().slice(0, 10)),
+    );
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship)
+      VALUES($1,'hotel_catalog','property',$2,'owner'),($1,'pms','pms_property',$2,'owner')`,
+      [f.organizationId, f.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')",
+      [f.organizationId],
+    );
+    await admin.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source)
+      VALUES($1,'channex',$2,'active','enable')`,
+      [f.propertyId, f.propertyId],
+    );
+    const connectionId = (
+      await admin.query(
+        `INSERT INTO pms.channel_connections(property_id,provider,external_property_id,connection_status)
+      VALUES($1,'channex',$2,'connected') RETURNING id`,
+        [f.propertyId, f.propertyId],
+      )
+    ).rows[0].id;
+    const externalRoomTypeId = randomUUID();
+    await admin.query(
+      `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+      VALUES($1,$2,$3,$4)`,
+      [f.propertyId, connectionId, f.roomTypeId, externalRoomTypeId],
+    );
+    const jobId = randomUUID();
+    await admin.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
+      tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+      VALUES($1::uuid,$1::text,'pms.channex.management','channex.sync_ari','running',1,'inventory-worker',clock_timestamp(),
+      'property',$2::uuid,'pms','channex_connection',$2::text,'{"operationType":"sync_ari"}')`,
+      [jobId, f.propertyId],
+    );
+    await admin.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'inventory-worker')",
+      [jobId],
+    );
+    const lease = { jobId, workerId: "inventory-worker", attemptNumber: 1 },
+      selection = { roomTypeId: f.roomTypeId, date };
+    return {
+      ...f,
+      connectionId,
+      externalRoomTypeId,
+      lease,
+      selection,
+      prepare: (
+        inventory: Pick<
+          PmsInventoryMaterializationRepository,
+          "getCurrentInventoryDay"
+        > = f.repository,
+      ) => prepareChannexRoomAvailabilityEvidence(channelPool, inventory, lease, selection),
+      claim: (
+        inventory: Pick<
+          PmsInventoryMaterializationRepository,
+          "getCurrentInventoryDay"
+        > = f.repository,
+      ) => claimChannexRoomAvailability(channelPool, inventory, lease, selection),
+      dispatch: (
+        inventory: Pick<
+          PmsInventoryMaterializationRepository,
+          "getCurrentInventoryDay"
+        > = f.repository,
+      ) => prepareChannexRoomAvailabilityDispatch(channelPool, inventory, lease, selection),
+      next: () => prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
+    };
+  }
+  async function availabilityReconciliationFixture(startAtLocalToday = false) {
+    const f = await channelInventoryFixture(1, startAtLocalToday),
+      prepared = await f.dispatch(),
+      taskId = randomUUID();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    let request: unknown;
+    await prepared.dispatch(async (sent) => {
+      request = structuredClone(sent.body);
+      return new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+        { status: 200 },
+      );
+    });
+    if (!request) throw new Error("request unavailable");
+    const task = {
+      data: {
+        type: "task",
+        id: taskId,
+        attributes: {
+          id: taskId,
+          task: "Property.UpdateAvailability",
+          payload: request,
+          success: true,
+          errors: [],
+          received_at: "2026-09-16T00:00:00.000001",
+          executed_at: "2026-09-16T00:00:00.000002",
+          finished_at: "2026-09-16T00:00:00.000003",
+        },
+      },
+    };
+    const availability = {
+      data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+      meta: { warnings: [] },
+    };
+    const get = vi.fn(async (path: string) =>
+      path.includes("/tasks/") ? structuredClone(task) : structuredClone(availability),
+    );
+    const reconcile = (read: (path: string, signal: AbortSignal) => Promise<unknown> = get) =>
+      reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        prepared.attemptId,
+        read,
+      );
+    const state = async () =>
+      (
+        await admin.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_room_availability_attempts WHERE id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0];
+    return { ...f, prepared, task, availability, get, reconcile, state };
+  }
+  async function availabilityContinuationFixture() {
+    const f = await availabilityReconciliationFixture();
+    const targetState = { succeed: vi.fn(), fail: vi.fn() };
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: TEST_DATABASE_URL!,
+      pool: channelPool,
+      targetState,
+      ariSyncMutating: false,
+    });
+    const job = {
+      jobId: f.lease.jobId,
+      propertyId: f.propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 1,
+      input: {
+        operationType: "sync_ari" as const,
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+      },
+    };
+    await admin.query("UPDATE platform.jobs SET max_attempts=1,payload=$2::jsonb WHERE id=$1", [
+      job.jobId,
+      JSON.stringify(job.input),
+    ]);
+    const progress = {
+      ok: false as const,
+      code: "availability_upload_retained" as const,
+      attemptId: f.prepared.attemptId,
+    };
+    return { ...f, job, progress, store, targetState };
+  }
+  it("binds canonical inventory to the leased property's current Channex room", async () => {
+    const f = await channelInventoryFixture();
+    expect(await f.prepare()).toMatchObject({
+      kind: "availability_prepared",
+      authority: { connectionId: f.connectionId, externalPropertyId: f.propertyId, lease: f.lease },
+      mapping: { externalRoomTypeId: f.externalRoomTypeId, bindingGeneration: expect.any(String) },
+      inventory: {
+        day: {
+          propertyId: f.propertyId,
+          roomTypeId: f.roomTypeId,
+          stayDate: f.selection.date,
+          availableCount: 2,
+        },
+      },
+    });
+  });
+  it("claims the exact canonical count and source evidence for one provider room", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    expect(claimed).toMatchObject({
+      kind: "availability_claimed",
+      workerId: f.lease.workerId,
+      request: {
+        method: "POST",
+        path: "/api/v1/availability",
+        body: {
+          values: [
+            {
+              property_id: f.propertyId,
+              room_type_id: f.externalRoomTypeId,
+              date_from: f.selection.date,
+              date_to: f.selection.date,
+              availability: 2,
+            },
+          ],
+        },
+      },
+    });
+    const row = (
+      await admin.query(
+        `SELECT property_id::text AS "propertyId",room_type_id::text AS "roomTypeId",
+          external_property_id AS "externalPropertyId",external_room_type_id AS "externalRoomTypeId",
+          service_date::text AS date,available_count AS "availableCount",
+          inventory_evidence AS "inventoryEvidence",request_body AS "requestBody",state
+         FROM pms.channex_room_availability_attempts WHERE id=$1`,
+        [claimed.kind === "availability_claimed" ? claimed.attemptId : null],
+      )
+    ).rows[0];
+    expect(row).toMatchObject({
+      propertyId: f.propertyId,
+      roomTypeId: f.roomTypeId,
+      externalPropertyId: f.propertyId,
+      externalRoomTypeId: f.externalRoomTypeId,
+      date: f.selection.date,
+      availableCount: 2,
+      state: "unresolved",
+      inventoryEvidence: {
+        day: {
+          propertyId: f.propertyId,
+          roomTypeId: f.roomTypeId,
+          stayDate: f.selection.date,
+          availableCount: 2,
+        },
+      },
+      requestBody: claimed.kind === "availability_claimed" ? claimed.request.body : null,
+    });
+  });
+  it("does not reuse an unresolved provider-room owner", async () => {
+    const f = await channelInventoryFixture();
+    expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+    expect(await f.claim()).toEqual({
+      kind: "unavailable",
+      reason: "availability_reconciliation_required",
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+  });
+  it("retains the exact sanitized response for an availability claim", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    expect(claimed.kind).toBe("availability_claimed");
+    if (claimed.kind !== "availability_claimed") return;
+    const receiptId = randomUUID(),
+      taskId = randomUUID(),
+      persist = await prepareChannexRoomAvailabilityReceiptPersistence(
+        channelPool,
+        {
+          receiptId,
+          attemptId: claimed.attemptId,
+          jobAttemptId: claimed.jobAttemptId,
+          workerId: claimed.workerId,
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+        },
+        new Response(
+          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+          { status: 200, headers: { "x-request-id": "availability.request-1" } },
+        ),
+      );
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.lease.jobId,
+    ]);
+    await admin.query(
+      "UPDATE pms.channel_connections SET connection_status='degraded' WHERE id=$1",
+      [f.connectionId],
+    );
+    await expect(persist()).resolves.toEqual({ kind: "retained", receiptId });
+    await expect(persist()).resolves.toEqual({ kind: "retained", receiptId });
+    const conflict = await prepareChannexRoomAvailabilityReceiptPersistence(
+      channelPool,
+      {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      },
+      new Response("not-json", { status: 502 }),
+    );
+    await expect(conflict()).rejects.toThrow("Channex availability receipt conflict");
+    expect(
+      (
+        await admin.query(
+          `SELECT outcome,http_status AS "httpStatus",provider_request_id AS "providerRequestId",
+             task_ids AS "taskIds",has_warnings AS "hasWarnings",warning_reason AS "warningReason"
+           FROM pms.channex_room_availability_receipts WHERE attempt_id=$1`,
+          [claimed.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      outcome: "complete_json",
+      httpStatus: 200,
+      providerRequestId: "availability.request-1",
+      taskIds: [taskId],
+      hasWarnings: false,
+      warningReason: null,
+    });
+  });
+  it("retains ambiguous transport failure without exception text", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: claimed.attemptId,
+      jobAttemptId: claimed.jobAttemptId,
+      workerId: claimed.workerId,
+      propertyId: f.propertyId,
+      connectionId: f.connectionId,
+    });
+    await persist();
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,http_status,provider_request_id,task_ids,has_warnings,warning_reason FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [claimed.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      outcome: "transport_error",
+      http_status: null,
+      provider_request_id: null,
+      task_ids: [],
+      has_warnings: true,
+      warning_reason: null,
+    });
+  });
+  it("rejects caller-selected availability receipt scope", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: claimed.attemptId,
+      jobAttemptId: claimed.jobAttemptId,
+      workerId: claimed.workerId,
+      propertyId: randomUUID(),
+      connectionId: f.connectionId,
+    });
+    await expect(persist()).rejects.toThrow("Channex availability receipt correlation unavailable");
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [claimed.attemptId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+  it("sends one exact current availability request and retains its receipt", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch();
+    expect(prepared.kind).toBe("prepared");
+    if (prepared.kind !== "prepared") return;
+    const taskId = randomUUID(),
+      post = vi.fn(
+        async (_request: unknown, _signal: AbortSignal) =>
+          new Response(
+            JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+            { status: 200 },
+          ),
+      );
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "retained",
+      attemptId: prepared.attemptId,
+    });
+    expect(post).toHaveBeenCalledOnce();
+    expect(post.mock.calls[0][0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/availability",
+      body: {
+        values: [{ availability: 2, date_from: f.selection.date, date_to: f.selection.date }],
+      },
+    });
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "dispatch_already_used",
+    });
+    expect(post).toHaveBeenCalledOnce();
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,task_ids FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ outcome: "complete_json", task_ids: [taskId] });
+  });
+  it("does not send after fresh authority becomes unavailable", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch(),
+      post = vi.fn();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.lease.jobId,
+    ]);
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_dispatch_stale",
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect(
+      (
+        await admin.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_room_availability_attempts WHERE id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      state: "not_sent",
+      reconciliation_evidence: {
+        schemaVersion: 1,
+        reason: "pre_dispatch_verification_unavailable",
+      },
+    });
+    const released = (
+      await admin.query(
+        `SELECT job_attempt_id::text AS "jobAttemptId",worker_id AS "workerId"
+         FROM pms.channex_room_availability_attempts WHERE id=$1`,
+        [prepared.attemptId],
+      )
+    ).rows[0];
+    const lateReceipt = await prepareChannexRoomAvailabilityTransportFailurePersistence(
+      channelPool,
+      {
+        receiptId: randomUUID(),
+        attemptId: prepared.attemptId,
+        jobAttemptId: released.jobAttemptId,
+        workerId: released.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      },
+    );
+    await expect(lateReceipt()).rejects.toThrow(
+      "Channex availability receipt correlation unavailable",
+    );
+    await admin.query("UPDATE platform.jobs SET locked_at=clock_timestamp() WHERE id=$1", [
+      f.lease.jobId,
+    ]);
+    await expect(f.dispatch()).resolves.toMatchObject({
+      kind: "prepared",
+      attemptId: expect.not.stringMatching(prepared.attemptId),
+    });
+  });
+  it("releases a claim when final verification fails before POST", async () => {
+    const f = await channelInventoryFixture();
+    let reads = 0;
+    const inventory: Pick<PmsInventoryMaterializationRepository, "getCurrentInventoryDay"> = {
+      getCurrentInventoryDay(input, consume) {
+        reads++;
+        if (reads === 2) throw new Error("verification unavailable");
+        return f.repository.getCurrentInventoryDay(input, consume);
+      },
+    };
+    const prepared = await f.dispatch(inventory),
+      post = vi.fn();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_dispatch_stale",
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect(reads).toBe(2);
+    expect(
+      (
+        await admin.query("SELECT state FROM pms.channex_room_availability_attempts WHERE id=$1", [
+          prepared.attemptId,
+        ])
+      ).rows[0],
+    ).toEqual({ state: "not_sent" });
+    await expect(f.dispatch()).resolves.toMatchObject({
+      kind: "prepared",
+      attemptId: expect.not.stringMatching(prepared.attemptId),
+    });
+  });
+  it("does not reopen an attempt that already has a receipt", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch(),
+      post = vi.fn();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    const attempt = (
+      await admin.query(
+        `SELECT job_attempt_id::text AS "jobAttemptId",worker_id AS "workerId"
+         FROM pms.channex_room_availability_attempts WHERE id=$1`,
+        [prepared.attemptId],
+      )
+    ).rows[0];
+    const persist = await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+      receiptId: randomUUID(),
+      attemptId: prepared.attemptId,
+      jobAttemptId: attempt.jobAttemptId,
+      workerId: attempt.workerId,
+      propertyId: f.propertyId,
+      connectionId: f.connectionId,
+    });
+    await persist();
+    await expect(prepared.dispatch(post)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_dispatch_stale",
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect(
+      (
+        await admin.query("SELECT state FROM pms.channex_room_availability_attempts WHERE id=$1", [
+          prepared.attemptId,
+        ])
+      ).rows[0],
+    ).toEqual({ state: "unresolved" });
+    await expect(f.claim()).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_reconciliation_required",
+    });
+  });
+  it("retains ambiguous transport failure after invoking the sender", async () => {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    await expect(
+      prepared.dispatch(async () => {
+        throw new Error("secret transport detail");
+      }),
+    ).resolves.toMatchObject({ kind: "retained", attemptId: prepared.attemptId });
+    expect(
+      (
+        await admin.query(
+          "SELECT outcome,http_status,provider_request_id FROM pms.channex_room_availability_receipts WHERE attempt_id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ outcome: "transport_error", http_status: null, provider_request_id: null });
+    await expect(f.claim()).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_reconciliation_required",
+    });
+  });
+  it("reconciles exact task, readback and unchanged PMS evidence", async () => {
+    const f = await availabilityReconciliationFixture();
+    await expect(f.reconcile()).resolves.toEqual({
+      kind: "availability_reconciled",
+      attemptId: f.prepared.attemptId,
+    });
+    expect(f.get.mock.calls.map(([path]) => path)).toEqual([
+      expect.stringContaining(`/tasks/${f.task.data.id}`),
+      expect.stringContaining("/api/v1/availability?"),
+    ]);
+    expect(await f.state()).toMatchObject({
+      state: "reconciled",
+      reconciliation_evidence: {
+        schemaVersion: 1,
+        originalReceiptId: expect.any(String),
+        taskCount: 1,
+        observationsSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        inventoryEvidenceSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        availability: {
+          externalPropertyId: f.propertyId,
+          externalRoomTypeId: f.externalRoomTypeId,
+          date: f.selection.date,
+          availableCount: 2,
+        },
+      },
+    });
+    expect(
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count
+           FROM pms.channex_room_availability_reconciliation_attestations
+           WHERE attempt_id=$1`,
+          [f.prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
+    expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+  });
+  it("discovers and reconciles a retained availability write from current lease authority", async () => {
+    const f = await availabilityReconciliationFixture();
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, f.get),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+    expect(await f.state()).toMatchObject({ state: "reconciled" });
+    expect(f.get).toHaveBeenCalledTimes(2);
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, f.get),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 0 });
+    expect(f.get).toHaveBeenCalledTimes(2);
+  });
+  it("isolates pending availability writes by current job lease property", async () => {
+    const owned = await availabilityReconciliationFixture(),
+      foreign = await availabilityReconciliationFixture();
+    await expect(
+      reconcilePendingChannexRoomAvailability(
+        channelPool,
+        owned.repository,
+        { ...owned.lease, workerId: "stale-worker" },
+        owned.get,
+      ),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    expect(owned.get).not.toHaveBeenCalled();
+    await expect(
+      reconcilePendingChannexRoomAvailability(
+        channelPool,
+        owned.repository,
+        owned.lease,
+        owned.get,
+      ),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+    expect(await owned.state()).toMatchObject({ state: "reconciled" });
+    expect(await foreign.state()).toMatchObject({ state: "unresolved" });
+  });
+  it("keeps a discovered availability write unresolved when provider readback fails", async () => {
+    const f = await availabilityReconciliationFixture(),
+      get = vi.fn(async () => {
+        throw new Error("readback unavailable");
+      });
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
+    ).rejects.toThrow("readback unavailable");
+    expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+    expect(get).toHaveBeenCalledOnce();
+  });
+  it("does no provider IO for a discovered non-clean availability receipt", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim(),
+      get = vi.fn();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    await (
+      await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      })
+    )();
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
+    ).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_receipt_history_unavailable",
+    });
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("selects the earliest current covered day and creates only a fresh local claim", async () => {
+    const f = await channelInventoryFixture(2, true);
+    const prepared = await f.next();
+    expect(prepared).toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+      attemptId: expect.any(String),
+    });
+    expect(
+      (
+        await admin.query(
+          `SELECT service_date::text AS date,state,
+             (SELECT count(*)::int FROM pms.channex_room_availability_receipts receipt
+               WHERE receipt.attempt_id=attempt.id) AS receipts
+           FROM pms.channex_room_availability_attempts attempt WHERE id=$1`,
+          [prepared.kind === "prepared" ? prepared.attemptId : null],
+        )
+      ).rows[0],
+    ).toEqual({ date: f.selection.date, state: "unresolved", receipts: 0 });
+  });
+  it("skips only exact current reconciled availability evidence", async () => {
+    const f = await availabilityReconciliationFixture(true);
+    await f.reconcile();
+    await expect(
+      admin.query(
+        `UPDATE pms.channex_room_availability_reconciliation_attestations
+         SET observations_sha256=$2 WHERE attempt_id=$1`,
+        [f.prepared.attemptId, "f".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "room_availability_current",
+      from: f.selection.date,
+      through: f.selection.date,
+      roomCount: 1,
+      dayCount: 1,
+    });
+    await admin.query(
+      `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+         booking_source_revision=booking_source_revision+1,
+         inventory_revision=inventory_revision+1
+       WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+      [f.propertyId, f.roomTypeId, f.selection.date],
+    );
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+    });
+  });
+  it("does not treat an arbitrary storage-level reconciliation as current coverage", async () => {
+    const f = await availabilityReconciliationFixture(true);
+    const stored = (
+      await admin.query(
+        `SELECT receipt.id::text AS "receiptId",attempt.inventory_evidence_sha256 AS digest
+         FROM pms.channex_room_availability_attempts attempt
+         JOIN pms.channex_room_availability_receipts receipt ON receipt.attempt_id=attempt.id
+         WHERE attempt.id=$1`,
+        [f.prepared.attemptId],
+      )
+    ).rows[0];
+    await admin.query(
+      `UPDATE pms.channex_room_availability_attempts
+       SET state='reconciled',reconciliation_evidence=$2::jsonb WHERE id=$1`,
+      [
+        f.prepared.attemptId,
+        JSON.stringify({
+          schemaVersion: 1,
+          completionBasis: "finished_task_fifo",
+          originalReceiptId: stored.receiptId,
+          taskCount: 1,
+          observationsSha256: "0".repeat(64),
+          inventoryEvidenceSha256: stored.digest,
+          availability: {
+            kind: "availability_observed",
+            externalPropertyId: f.propertyId,
+            externalRoomTypeId: f.externalRoomTypeId,
+            date: f.selection.date,
+            availableCount: 2,
+          },
+        }),
+      ],
+    );
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+    });
+  });
+  it("keeps ownership unresolved when exact provider availability does not match", async () => {
+    const f = await availabilityReconciliationFixture();
+    f.availability.data[f.externalRoomTypeId]![f.selection.date] = 1;
+    await expect(f.reconcile()).rejects.toThrow("availability_readback_mismatch");
+    expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+  });
+  it.each(["binding", "inventory"])(
+    "rolls back reconciliation when current %s changes during provider reads",
+    async (mode) => {
+      const f = await availabilityReconciliationFixture();
+      const result = await f.reconcile(async (path) => {
+        if (path.includes("/tasks/")) {
+          if (mode === "binding")
+            await admin.query(
+              "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+              [f.connectionId],
+            );
+          else
+            await admin.query(
+              `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+               booking_source_revision=1,inventory_revision=inventory_revision+1
+             WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+              [f.propertyId, f.roomTypeId, f.selection.date],
+            );
+          return structuredClone(f.task);
+        }
+        return structuredClone(f.availability);
+      });
+      expect(result).toMatchObject({ kind: "unavailable" });
+      expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+    },
+  );
+  it("does no provider IO for an ambiguous original receipt", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim(),
+      get = vi.fn();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    await (
+      await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      })
+    )();
+    expect(
+      await reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        claimed.attemptId,
+        get,
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("credits an exactly correlated retained availability upload once", async () => {
+    const f = await availabilityContinuationFixture();
+    await f.store.continueUpload(f.job, f.progress, {
+      workerId: f.lease.workerId,
+      now: new Date(),
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT status,attempts_count,max_attempts,locked_by,finished_at FROM platform.jobs WHERE id=$1",
+          [f.job.jobId],
+        )
+      ).rows[0],
+    ).toEqual({
+      status: "pending",
+      attempts_count: 1,
+      max_attempts: 2,
+      locked_by: null,
+      finished_at: null,
+    });
+    await expect(
+      f.store.continueUpload(f.job, f.progress, {
+        workerId: f.lease.workerId,
+        now: new Date(),
+      }),
+    ).rejects.toThrow("Current retained Channex upload required");
+    expect(f.targetState.succeed).not.toHaveBeenCalled();
+    expect(f.targetState.fail).not.toHaveBeenCalled();
+  });
+  it("does not credit an availability receipt through the pricing progress lane", async () => {
+    const f = await availabilityContinuationFixture();
+    await expect(
+      f.store.continueUpload(
+        f.job,
+        { ...f.progress, code: "initial_upload_retained" },
+        { workerId: f.lease.workerId, now: new Date() },
+      ),
+    ).rejects.toThrow("Current retained Channex upload required");
+    expect(
+      (
+        await admin.query("SELECT max_attempts,status FROM platform.jobs WHERE id=$1", [
+          f.job.jobId,
+        ])
+      ).rows[0],
+    ).toEqual({ max_attempts: 1, status: "running" });
+  });
+  it("recovers a retained availability receipt after a final-attempt crash exactly once", async () => {
+    const f = await availabilityContinuationFixture();
+    const scopedPool = {
+      connect: async () => {
+        const client = await channelPool.connect();
+        return {
+          release: client.release.bind(client),
+          query: (text: string, values?: unknown[]) =>
+            text.includes("pms.enqueue_restriction_ari")
+              ? Promise.resolve({ rows: [], rowCount: 0 })
+              : client.query(
+                  text.includes('max_attempts AS "maxAttempts"')
+                    ? text.replace(
+                        "WHERE queue_name = $1",
+                        `WHERE id='${f.job.jobId}'::uuid AND queue_name = $1`,
+                      )
+                    : text,
+                  values,
+                ),
+        };
+      },
+      end: async () => {},
+    };
+    const recoveringStore = createPgPmsChannexManagementWorkerStore({
+      connectionString: TEST_DATABASE_URL!,
+      pool: scopedPool,
+      targetState: f.targetState,
+      ariSyncMutating: true,
+    });
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    await expect(
+      recoveringStore.claim({ workerId: "replacement", now: new Date() }),
+    ).resolves.toMatchObject({ jobId: f.job.jobId, attemptNumber: 2, maxAttempts: 2 });
+    await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+      f.job.jobId,
+    ]);
+    await expect(recoveringStore.claim({ workerId: "third", now: new Date() })).resolves.toBeNull();
+    expect(
+      (
+        await admin.query("SELECT status,max_attempts FROM platform.jobs WHERE id=$1", [
+          f.job.jobId,
+        ])
+      ).rows[0],
+    ).toEqual({ status: "dead_lettered", max_attempts: 2 });
+  });
+  it("writes no owner when current inventory is unavailable", async () => {
+    const f = await channelInventoryFixture();
+    f.selection.date = "2026-01-01";
+    expect(await f.claim()).toMatchObject({ kind: "unavailable" });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+  it.each(["mapping", "binding", "lease", "entitlement"])(
+    "holds availability when %s changes before the final guard",
+    async (mode) => {
+      const f = await channelInventoryFixture();
+      expect(
+        await f.prepare({
+          getCurrentInventoryDay: async (request, guard) => {
+            if (mode === "mapping")
+              await admin.query(
+                "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1",
+                [f.propertyId, randomUUID()],
+              );
+            if (mode === "binding")
+              await admin.query(
+                "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+                [f.connectionId],
+              );
+            if (mode === "lease")
+              await admin.query(
+                "UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1",
+                [f.lease.jobId],
+              );
+            if (mode === "entitlement")
+              await admin.query(
+                "UPDATE identity.product_entitlements SET expires_at=now()-interval '1 second' WHERE organization_id=$1",
+                [f.organizationId],
+              );
+            return f.repository.getCurrentInventoryDay(request, guard);
+          },
+        }),
+      ).toMatchObject({ kind: "unavailable", reason: "consumer_authority_unavailable" });
+    },
+  );
+  it.each([
+    "foreign-room",
+    "restrictions-only",
+    "disabled-mapping",
+    "expired-lease",
+    "past-date",
+    "degraded-connection",
+    "setup-incomplete-connection",
+    "uncanonical-property",
+  ])("rejects %s availability preparation", async (mode) => {
+    const f = await channelInventoryFixture();
+    if (mode === "foreign-room") f.selection.roomTypeId = randomUUID();
+    if (mode === "restrictions-only")
+      await admin.query(
+        `UPDATE platform.jobs SET payload=payload || '{"restrictionsOnly":true}'::jsonb WHERE id=$1`,
+        [f.lease.jobId],
+      );
+    if (mode === "disabled-mapping")
+      await admin.query(
+        "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+        [f.propertyId],
+      );
+    if (mode === "expired-lease")
+      await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+        f.lease.jobId,
+      ]);
+    if (mode === "past-date") f.selection.date = "2026-01-01";
+    if (mode === "degraded-connection" || mode === "setup-incomplete-connection")
+      await admin.query("UPDATE pms.channel_connections SET connection_status=$2 WHERE id=$1", [
+        f.connectionId,
+        mode === "degraded-connection" ? "degraded" : "setup_incomplete",
+      ]);
+    if (mode === "uncanonical-property") {
+      await admin.query("BEGIN");
+      try {
+        await admin.query(
+          "UPDATE pms.channel_binding_claims SET external_property_id=$2 WHERE property_id=$1 AND claim_state='active'",
+          [f.propertyId, ` ${f.propertyId} `],
+        );
+        await admin.query(
+          "UPDATE pms.channel_connections SET external_property_id=$2 WHERE id=$1",
+          [f.connectionId, ` ${f.propertyId} `],
+        );
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+    }
+    expect(await f.prepare()).toMatchObject({ kind: "unavailable" });
+    expect(await f.claim()).toMatchObject({ kind: "unavailable" });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+  it("does not retain an old calendar snapshot across an inventory writer", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query(
+        "SELECT pg_advisory_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      // Model the protected append-only calendar publication while the writer owns inventory.
+      await activateCalendarRevision(blocker, f, 2);
+      f.calendarState.currentRevision = 1; // The initial unlocked probe is now stale.
+      await blocker.query(
+        "SELECT pg_advisory_unlock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+        [f.propertyId],
+      );
+      expect(await f.read()).toMatchObject({
+        kind: "unavailable",
+        reason: "configuration_not_current",
+      });
+    } finally {
+      await blocker.end();
+    }
+  });
+  it("cannot snapshot old room facts while their writer owns the scope", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query(
+        "SELECT pg_advisory_lock(hashtext('pms.room_facts'),hashtext($1::uuid::text))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
+        f.roomTypeId,
+      ]);
+      await blocker.query(
+        "SELECT pg_advisory_unlock(hashtext('pms.room_facts'),hashtext($1::uuid::text))",
+        [f.propertyId],
+      );
+      expect(await f.read()).toMatchObject({
+        kind: "unavailable",
+        reason: "configuration_not_current",
+      });
+    } finally {
+      await blocker.end();
+    }
+  });
+  it("does not accept a reader that omits the transaction guard", async () => {
+    const f = await channelInventoryFixture();
+    const unguarded = {
+      getCurrentInventoryDay: (
+        request: Parameters<typeof f.repository.getCurrentInventoryDay>[0],
+      ) => f.repository.getCurrentInventoryDay(request),
+    };
+    expect(await f.prepare(unguarded)).toMatchObject({
+      kind: "unavailable",
+      reason: "consumer_authority_unavailable",
+    });
+    expect(await f.claim(unguarded)).toMatchObject({
+      kind: "unavailable",
+      reason: "consumer_authority_unavailable",
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
+  it("fails promptly on a concurrent mapping lock inside the inventory guard", async () => {
+    const f = await channelInventoryFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await expect(
+        f.prepare({
+          getCurrentInventoryDay: async (request, guard) => {
+            await blocker.query("BEGIN");
+            await blocker.query(
+              "SELECT id FROM pms.channel_room_type_mappings WHERE property_id=$1 FOR UPDATE",
+              [f.propertyId],
+            );
+            return f.repository.getCurrentInventoryDay(request, guard);
+          },
+        }),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("ROLLBACK");
+      expect(await f.prepare()).toMatchObject({ kind: "availability_prepared" });
+    } finally {
+      await blocker.end();
+    }
+  });
+  it("returns no inventory evidence after a guard throws and releases its locks", async () => {
+    const f = await channelInventoryFixture(),
+      request = { propertyId: f.propertyId, roomTypeId: f.roomTypeId, stayDate: f.selection.date };
+    await expect(
+      f.repository.getCurrentInventoryDay(request, async () => {
+        throw new Error("guard failed");
+      }),
+    ).rejects.toThrow("guard failed");
+    expect(await f.prepare()).toMatchObject({ kind: "availability_prepared" });
+  });
+  async function dailyFixture(materialize = true) {
+    const f = await createFixture(admin, repositories, [2, 1]);
+    if (materialize)
+      await f.repository.materializeInventory(
+        materializationCommand(f, "daily-reader", 1, "2026-08-04", "2026-08-06"),
+      );
+    const request = { propertyId: f.propertyId, roomTypeId: f.roomTypeId, stayDate: "2026-08-04" };
+    return { ...f, request, read: () => f.repository.getCurrentInventoryDay(request) };
+  }
+  it("reads canonical daily counts and owner revisions without modifying inventory", async () => {
+    const f = await dailyFixture();
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      materializedRevision: 1,
+      propertyTimeZone: "Europe/Berlin",
+      sourceRoomFactsRevision: 1,
+      sourceRoomUnitsRevision: 1,
+      day: { ...f.request, availableCount: 2, inventoryRevision: 1 },
+    });
+    await consumeAndOverrideFirstDay(admin, f);
+    const before = await readFirstDay(admin, f);
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      day: {
+        availableCount: 0,
+        assignedCount: 2,
+        manualSellableLimitCount: 1,
+        inventoryRevision: 3,
+        sourceRevisions: { booking: 1, manual: 1 },
+      },
+    });
+    expect(await readFirstDay(admin, f)).toEqual(before);
+  });
+  it("returns a verified zero for a linked stop-sell day", async () => {
+    const f = await dailyFixture();
+    await admin.query(
+      `UPDATE pms.inventory_days SET available_count=0,inventory_revision=inventory_revision+1,
+      linked_stop_sell=true,linked_source_revision=1 WHERE property_id=$1 AND room_type_id=$2`,
+      [f.propertyId, f.roomTypeId],
+    );
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      day: { availableCount: 0, linkedStopSell: true, linkedSourceRevision: 1 },
+    });
+  });
+  it.each([
+    "calendar",
+    "profile",
+    "capacity",
+    "room-facts",
+    "missing-day",
+    "coverage",
+    "foreign-room",
+    "foreign-property",
+    "invalid-date",
+  ])("does not manufacture availability for %s", async (mode) => {
+    const f = await dailyFixture(mode !== "missing-day");
+    if (mode === "calendar") await activateCalendarRevision(admin, f, 2);
+    if (mode === "profile") f.profileState.revision = 2;
+    if (mode === "capacity") f.capacityState.revision = 2;
+    if (mode === "room-facts")
+      await admin.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
+        f.roomTypeId,
+      ]);
+    if (mode === "coverage") f.request.stayDate = "2026-08-07";
+    if (mode === "foreign-room") f.request.roomTypeId = randomUUID();
+    if (mode === "foreign-property") f.request.propertyId = randomUUID();
+    if (mode === "invalid-date") f.request.stayDate = "2026-02-30";
+    expect(await f.read()).toMatchObject({ kind: "unavailable" });
+  });
+  it("does not read across a concurrent inventory mutation", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text), 0))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("ROLLBACK");
+      expect(await f.read()).toMatchObject({ kind: "available" });
+    } finally {
+      await blocker.end();
+    }
+  });
   it("rejects captured active-room evidence after closure without writing inventory", async () => {
     const fixture = await createFixture(admin, repositories, [2]);
     await admin.query(
@@ -1813,6 +3025,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       events: 1,
       outbox: 1,
     });
+    expect(
+      (
+        await admin.query(
+          `SELECT payload FROM platform.outbox_events
+           WHERE property_id=$1 AND destination='pms.channel-manager'
+             AND event_type='pms.inventory.ari_changed'`,
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ payload: expect.objectContaining({ reason: "full_horizon_apply" }) }]);
 
     const unchanged = await fixture.repository.materializeInventory(
       materializationCommand(fixture, "unchanged", 1, "2026-08-04", "2026-08-06"),

@@ -185,7 +185,14 @@ export function createPgPmsRoomClosureRepository(config: {
             requestId: command.requestId,
             correlationId: command.correlationId,
           },
-          phase,
+          {
+            ...phase,
+            coverageThroughExclusive: new Date(
+              Date.parse(`${state.coverageThrough}T00:00:00.000Z`) + 86_400_000,
+            )
+              .toISOString()
+              .slice(0, 10),
+          },
           at,
         );
         const closedInventoryDays = await closeRoomClosureInventory(client, scope);

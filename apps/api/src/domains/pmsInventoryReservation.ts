@@ -424,8 +424,12 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
 
     async bundleAvailabilityCredits(input) {
       const bundle = parsePmsInventoryReservationBundle(input.reservation);
-      if (!bundle || bundle.receipts.length !== input.lines.length ||
-          new Set(input.lines.map((line) => line.roomTypeId)).size !== input.lines.length) return null;
+      if (
+        !bundle ||
+        bundle.receipts.length !== input.lines.length ||
+        new Set(input.lines.map((line) => line.roomTypeId)).size !== input.lines.length
+      )
+        return null;
       const result = await input.transaction.query<ReceiptScopeRow>(
         `SELECT receipt.quote_session_id AS "quoteSessionId",receipt.room_type_id::text AS "roomTypeId",
            receipt.public_offer_key AS "publicOfferKey",receipt.check_in::text AS "checkIn",
@@ -438,17 +442,39 @@ export function createTargetPmsInventoryReservationPort(): DirectBookingInventor
            AND status.lifecycle_state='reserved'
            AND (SELECT count(*) FROM pms.inventory_reservation_receipts complete
              WHERE complete.property_id=receipt.property_id AND complete.quote_session_id=receipt.quote_session_id)=cardinality($1::uuid[])`,
-        [bundle.receipts.map((receipt) => receipt.receiptId), input.propertyId,
-          input.checkIn, input.checkOut, PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION],
+        [
+          bundle.receipts.map((receipt) => receipt.receiptId),
+          input.propertyId,
+          input.checkIn,
+          input.checkOut,
+          PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
+        ],
       );
-      if (result.rows.length !== input.lines.length ||
-          new Set(result.rows.map((row) => row.roomTypeId)).size !== input.lines.length ||
-          new Set(result.rows.map((row) => row.quoteSessionId)).size !== 1 ||
-          result.rows.some((row) => !input.lines.some((line) =>
-            line.roomTypeId === row.roomTypeId && line.publicOfferKey === row.publicOfferKey && line.roomCount === row.roomCount))) return null;
-      return new Map(result.rows.map((row) => [row.roomTypeId, {
-        checkIn: row.checkIn, checkOut: row.checkOut, roomCount: row.roomCount,
-      }]));
+      if (
+        result.rows.length !== input.lines.length ||
+        new Set(result.rows.map((row) => row.roomTypeId)).size !== input.lines.length ||
+        new Set(result.rows.map((row) => row.quoteSessionId)).size !== 1 ||
+        result.rows.some(
+          (row) =>
+            !input.lines.some(
+              (line) =>
+                line.roomTypeId === row.roomTypeId &&
+                line.publicOfferKey === row.publicOfferKey &&
+                line.roomCount === row.roomCount,
+            ),
+        )
+      )
+        return null;
+      return new Map(
+        result.rows.map((row) => [
+          row.roomTypeId,
+          {
+            checkIn: row.checkIn,
+            checkOut: row.checkOut,
+            roomCount: row.roomCount,
+          },
+        ]),
+      );
     },
 
     async selectionAvailabilityCredits(input) {
@@ -501,7 +527,10 @@ type Transaction = Parameters<DirectBookingInventoryReservationPort["reserve"]>[
 function replacementReceiptIds(reservation?: InventoryReservationReceipt): string[] {
   if (!reservation) return [];
   if (isOpaqueReceipt(reservation)) return [reservation.receiptId];
-  return parsePmsInventoryReservationBundle(reservation)?.receipts.map((receipt) => receipt.receiptId) ?? [];
+  return (
+    parsePmsInventoryReservationBundle(reservation)?.receipts.map((receipt) => receipt.receiptId) ??
+    []
+  );
 }
 
 /** Readiness-only credit after release; never adds inventory to the live offer. */
@@ -520,7 +549,12 @@ export async function releasedPmsReservationOfferKeys(
      WHERE receipt.receipt_id=ANY($1::uuid[]) AND receipt.property_id=$2::uuid
        AND receipt.receipt_owner='pms' AND receipt.contract_version=$3
        AND receipt.room_count>0 AND status.lifecycle_state='released' AND status.released_at=$4::timestamptz`,
-    [ids, propertyId, PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION, releasedAt.toISOString()],
+    [
+      ids,
+      propertyId,
+      PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
+      releasedAt.toISOString(),
+    ],
   );
   return new Set(result.rows.map((row) => row.publicOfferKey));
 }
@@ -654,6 +688,16 @@ async function persistDirectBookingReceipt(
                 jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$4,
                   'coverageThroughExclusive',$5,'reason','reservation_held')
        FROM source,event RETURNING id,domain_event_id
+     ), ari_outbox AS (
+       INSERT INTO platform.outbox_events (
+         domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,
+         resource_product,resource_type,resource_id,correlation_id,idempotency_key_hash,payload
+       ) SELECT event.id,concat('pms.channel-manager.inventory.receipt.',source.receipt_id,
+                  '.held.v1'),'pms.channel-manager','pms.inventory.ari_changed','property',
+                $1::uuid,'pms','inventory_reservation',source.receipt_id::text,$3,$8,
+                jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$4,
+                  'coverageThroughExclusive',$5,'reason','reservation_held')
+       FROM source,event RETURNING id
      ), receipt AS (
        INSERT INTO pms.inventory_reservation_receipts (
          receipt_id,contract_version,receipt_owner,organization_id,property_id,room_type_id,
@@ -663,7 +707,8 @@ async function persistDirectBookingReceipt(
        ) SELECT source.receipt_id,$10,'pms',source.organization_id,$1::uuid,$2::uuid,$4::date,$5::date,
                 $6,$3,$11,source.calendar_revision,source.calendar_revision,$9,claim.id,
                 event.id,outbox.id,$7::timestamptz
-       FROM source,claim,event,outbox RETURNING receipt_id,organization_id,property_id,room_type_id
+       FROM source,claim,event,outbox,ari_outbox
+       RETURNING receipt_id,organization_id,property_id,room_type_id
      ), watermarks AS (
        INSERT INTO pms.inventory_reservation_day_watermarks (
          receipt_id,organization_id,property_id,room_type_id,stay_date,calendar_revision,
@@ -752,11 +797,21 @@ async function releaseDirectBookingReceipt(
                 jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$5,
                   'coverageThroughExclusive',$6,'reason','reservation_released')
        FROM source,event RETURNING id,domain_event_id
+     ), ari_outbox AS (
+       INSERT INTO platform.outbox_events (
+         domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,
+         resource_product,resource_type,resource_id,correlation_id,idempotency_key_hash,payload
+       ) SELECT event.id,concat('pms.channel-manager.inventory.receipt.',source.receipt_id,
+                  '.released.v1'),'pms.channel-manager','pms.inventory.ari_changed','property',
+                $1::uuid,'pms','inventory_reservation',source.receipt_id::text,$3,$9,
+                jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$5,
+                  'coverageThroughExclusive',$6,'reason','reservation_released')
+       FROM source,event RETURNING id
      ) UPDATE pms.inventory_reservation_statuses status
        SET lifecycle_state='released',lifecycle_revision=2,release_fingerprint_hash=$11,
            release_idempotency_key_id=claim.id,release_domain_event_id=event.id,
            release_outbox_event_id=outbox.id,released_at=$8::timestamptz
-       FROM source,claim,event,outbox WHERE status.receipt_id=source.receipt_id
+       FROM source,claim,event,outbox,ari_outbox WHERE status.receipt_id=source.receipt_id
        RETURNING status.receipt_id::text AS "receiptId"`,
     [
       reservation.propertyId,

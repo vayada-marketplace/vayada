@@ -9,6 +9,10 @@ import {
 import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
+  registerChannexOfferPreviewRoutes,
+  type ChannexOfferPreviewRoutesOptions,
+} from "./routes/channexOfferPreview.js";
+import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
 } from "./routes/airbnbImports.js";
@@ -354,6 +358,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
   replacementPricing?: ReplacementPricingRoutesOptions;
+  channexOfferPreview?: ChannexOfferPreviewRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
@@ -916,6 +921,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
+  if (options.channexOfferPreview)
+    app.register(registerChannexOfferPreviewRoutes, {
+      prefix: "/api/pms",
+      ...options.channexOfferPreview,
+    });
   if (options.replacementPricing)
     app.register(registerReplacementPricingRoutes, {
       prefix: "/api/pms",

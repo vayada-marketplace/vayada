@@ -498,14 +498,14 @@ HTTP route policy enforcement, editor wiring and currency approval remain pendin
 Target PMS runtime registers these routes under
 `/api/pms/properties/:propertyId/pricing-v2` using its existing target pool:
 
-| Method/path suffix | Request | Successful response |
-| --- | --- | --- |
-| GET root | None | Current stored revision, sources and stale flag |
-| POST `/prepare` | currency, rooms | Current sources and snapshot with Finance readiness |
-| GET `/drafts/:draftId` | None | Saved draft snapshot/version/base/sources/stale flag |
-| PUT `/drafts/:draftId` | expectedDraftRevision, baseRevision, sources, snapshot | `{ revision }` |
-| POST `/charges` | draftId, expectedDraftRevision, claimedFingerprint, declaration | Immutable charge declaration |
-| POST `/publish` | expectedRevision, sources, snapshot, draft `{ id, revision }` | `{ revision, replayed }` |
+| Method/path suffix     | Request                                                         | Successful response                                  |
+| ---------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| GET root               | None                                                            | Current stored revision, sources and stale flag      |
+| POST `/prepare`        | currency, rooms                                                 | Current sources and snapshot with Finance readiness  |
+| GET `/drafts/:draftId` | None                                                            | Saved draft snapshot/version/base/sources/stale flag |
+| PUT `/drafts/:draftId` | expectedDraftRevision, baseRevision, sources, snapshot          | `{ revision }`                                       |
+| POST `/charges`        | draftId, expectedDraftRevision, claimedFingerprint, declaration | Immutable charge declaration                         |
+| POST `/publish`        | expectedRevision, sources, snapshot, draft `{ id, revision }`   | `{ revision, replayed }`                             |
 
 Charges/publication require exactly one nonblank `Idempotency-Key` header (maximum
 200 characters; comma-joined values are rejected). Body fields are exact; no request identity or requestId is accepted.
@@ -544,6 +544,75 @@ creating a declaration. Historical confirmation receipt lookup remains ahead of
 freshness checks, following current authorization, so an accepted retry survives
 later source changes without creating another declaration.
 
+## Pure room-night evaluation (VAY-1542)
+
+The calculator receives one scoped configuration, allocated guests, stay dates,
+expected configuration revision and expected terms revisions for the selected
+plan and its ancestors. These expectations come from trusted owner reads; the
+pure calculator cannot establish database freshness itself. It returns nightly
+room and meal amounts separately with source/adjustment provenance.
+
+A date RoomPrice replaces the adult-equivalent tariff and bypasses that plan's
+weekday/link adjustment. Child-band nightly supplements still apply once; they
+are a separate explicit policy. Normal weekday and linked adjustments apply to
+the whole room component including those supplements, before the selected meal.
+A linked final date price resets the room component; clearing it restores the
+parent calculation. Parents' meals never propagate to a child plan. Restrictions
+are resolved separately, including departure-day CTD. Booking promotions, taxes,
+add-ons, FX conversion and payments remain owner orchestration outside this PMS
+calculator. No runtime endpoint or provider write is activated by this module.
+
+## Nightly distribution projection (VAY-1944)
+
+`projectReplacementRoomNight(configuration, request)` uses the same evaluator as
+`calculateReplacementRoomStay`, with an explicit single calendar date instead of
+check-in/check-out. Common request fields are propertyId, roomTypeId, offerId,
+expectedRevision, expectedTermsRevisions and guests. Expected evidence must come
+from trusted owner reads. Guests are explicit hypothetical occupancy; supplied
+childAgesAtCheckIn are fixed ages for that composition, not recalculated by date.
+
+A `projected` result includes property/room/offer, configuration revision, currency,
+exact terms chain, guests and `night`: date, roomMinor (including applicable child
+supplements), mealMinor, totalMinor, price sources, restrictions and
+restrictionOfferId. Restrictions resolve independently through own/inherited
+base, season and exact-date rules. CTD refers to departure **on this date**; it is
+not tomorrow's rule. Room-night results on the stay API also expose these two
+additive restriction fields. No separate child subtotal is invented after linked
+room-component rounding.
+
+Projection returns the tariff even for minimum-stay, maximum-stay, CTA, CTD or
+stop-sell restrictions. For example EUR120/minimum3 projects EUR120 with minimum3;
+a one-night Booking request still fails, and three eligible nights total EUR360.
+Consumers must map/enforce all supported restrictions separately. Projection is
+not a Booking eligibility check, available inventory, taxes/mandatory charges,
+payment readiness, authenticated owner freshness or proof of OTA representability.
+Missing/invalid/stale configuration, guest or terms evidence, missing prices and
+overflow remain explicit unavailable results. It never erases rules, fabricates
+a longer stay, or calls a second calculator. Provider materialization remains
+VAY-1545/VAY-1528; this pure interface makes no provider writes.
+
+## Channex adult nightly candidates (VAY-1946)
+
+The API integration's `prepareChannexAdultNightPrices` consumes the PMS projection
+for one offer/date and every adult-only occupancy from one through adult capacity.
+It returns a complete `prepared` candidate set or an explicit `unavailable` result;
+one failed occupancy rejects the whole set. A local work limit of 100 candidates
+returns `candidate_limit` rather than truncating; this is not a provider limit.
+
+Each candidate retains the full projection and its occupancy, plus the inclusive
+nightly total formatted by ISO currency scale using string operations. Occupancy
+table values are room totals, per-person meals use the represented adults, and
+linked adjustments remain owned by PMS. No channel adjustment is applied here.
+
+These are internal candidates, not sendable ARI requests or a complete guest
+product. The adapter does not read published state, validate provider mappings,
+choose a primary occupancy, represent child ages, translate restriction rules,
+or establish inventory, mandatory-charge or OTA capability readiness. Runtime
+consumers must establish those gates and preserve the full evidence before
+delivery. VAY-1545 owns materialization and write/readback integration; VAY-1541,
+VAY-1530 and VAY-1528 supply publication, meal identities and restriction mapping.
+The adapter is deliberately not wired into the disabled pricing job paths yet.
+
 ## PMS browser draft client (VAY-1938)
 
 The replacement browser client binds one canonical property and uses the existing
@@ -563,21 +632,3 @@ Browser transport options use plain header records required by the existing API
 client, retaining idempotency keys through fetch. Successful null/empty responses
 are malformed; a private sentinel distinguishes the expected not_found404. The
 client itself is bundled with browser platform resolution to catch Node imports.
-
-## Pure room-night evaluation (VAY-1542)
-
-The calculator receives one scoped configuration, allocated guests, stay dates,
-expected configuration revision and expected terms revisions for the selected
-plan and its ancestors. These expectations come from trusted owner reads; the
-pure calculator cannot establish database freshness itself. It returns nightly
-room and meal amounts separately with source/adjustment provenance.
-
-A date RoomPrice replaces the adult-equivalent tariff and bypasses that plan's
-weekday/link adjustment. Child-band nightly supplements still apply once; they
-are a separate explicit policy. Normal weekday and linked adjustments apply to
-the whole room component including those supplements, before the selected meal.
-A linked final date price resets the room component; clearing it restores the
-parent calculation. Parents' meals never propagate to a child plan. Restrictions
-are resolved separately, including departure-day CTD. Booking promotions, taxes,
-add-ons, FX conversion and payments remain owner orchestration outside this PMS
-calculator. No runtime endpoint or provider write is activated by this module.
