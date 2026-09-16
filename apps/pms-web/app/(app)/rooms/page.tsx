@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import {
   PlusIcon,
@@ -20,6 +20,7 @@ import {
   type RoomType,
   type Room,
 } from "@/services/rooms";
+import { ApiErrorResponse } from "@/services/api/client";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
@@ -118,32 +119,39 @@ function formatRateRange(min: number, max: number, currency: string): string {
   return `${formatCurrency(min, currency)}–${formatCurrency(max, currency).replace(/^[^0-9]+/, "")}`;
 }
 
-const ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE =
-  "Individual room create, edit, and delete are not available on PMS next-stack yet.";
-const ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE =
-  "Room type duplicate, edit, and delete are not available on PMS next-stack yet.";
+function isDuplicateRoomNumberError(error: unknown): boolean {
+  return (
+    error instanceof ApiErrorResponse &&
+    error.status === 409 &&
+    error.data.code === "operational_label_conflict"
+  );
+}
 
 function RoomTypeCard({
   room,
   rooms,
   onRoomsChange,
   onDuplicate,
+  duplicating,
   linkedGroup,
 }: {
   room: RoomType;
   rooms: Room[];
   onRoomsChange: () => void;
-  onDuplicate: (id: string) => void;
+  onDuplicate: (id: string) => Promise<void>;
+  duplicating: boolean;
   linkedGroup?: LinkedInventoryGroup;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [addingRoom, setAddingRoom] = useState(false);
   const [newRoomNumber, setNewRoomNumber] = useState("");
+  const [newRoomNumberError, setNewRoomNumberError] = useState<string | null>(null);
   const [newRoomFloor, setNewRoomFloor] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [editingRoomNumber, setEditingRoomNumber] = useState("");
+  const [editingRoomNumberError, setEditingRoomNumberError] = useState<string | null>(null);
   const category = room.category ? room.category.toLowerCase() : getCategoryFromName(room.name);
   const categoryStyle = CATEGORY_STYLES[category] || CATEGORY_STYLES["standard"];
 
@@ -153,11 +161,18 @@ function RoomTypeCard({
   const thumbnailUrl = imageReferenceUrl(room.images?.[0]);
 
   const handleAddRoom = async () => {
-    if (!newRoomNumber.trim()) return;
+    const trimmed = newRoomNumber.trim();
+    if (!trimmed) return;
+    if (
+      rooms.some((candidate) => candidate.roomNumber.trim().toLowerCase() === trimmed.toLowerCase())
+    ) {
+      setNewRoomNumberError(t("rooms.duplicateRoomNumber"));
+      return;
+    }
     try {
       await individualRoomsService.create({
         roomTypeId: room.id,
-        roomNumber: newRoomNumber.trim(),
+        roomNumber: trimmed,
         floor: newRoomFloor.trim(),
       });
       setNewRoomNumber("");
@@ -165,6 +180,10 @@ function RoomTypeCard({
       setAddingRoom(false);
       onRoomsChange();
     } catch (err: any) {
+      if (isDuplicateRoomNumberError(err)) {
+        setNewRoomNumberError(t("rooms.duplicateRoomNumber"));
+        return;
+      }
       alert(err.message || t("rooms.failedToAddRoom"));
     }
   };
@@ -177,7 +196,7 @@ function RoomTypeCard({
     if (!confirmDelete) return;
     setConfirmDelete(null);
     try {
-      await individualRoomsService.delete(confirmDelete);
+      await individualRoomsService.delete(rooms.find((room) => room.id === confirmDelete)!);
       onRoomsChange();
     } catch (err: any) {
       alert(err.message || t("rooms.cannotDeleteRoom"));
@@ -187,11 +206,13 @@ function RoomTypeCard({
   const startRenameRoom = (roomId: string, currentNumber: string) => {
     setEditingRoomId(roomId);
     setEditingRoomNumber(currentNumber);
+    setEditingRoomNumberError(null);
   };
 
   const cancelRenameRoom = () => {
     setEditingRoomId(null);
     setEditingRoomNumber("");
+    setEditingRoomNumberError(null);
   };
 
   const saveRenameRoom = async (roomId: string, currentNumber: string) => {
@@ -200,21 +221,37 @@ function RoomTypeCard({
       cancelRenameRoom();
       return;
     }
+    if (
+      rooms.some(
+        (candidate) =>
+          candidate.id !== roomId &&
+          candidate.roomNumber.trim().toLowerCase() === trimmed.toLowerCase(),
+      )
+    ) {
+      setEditingRoomNumberError(t("rooms.duplicateRoomNumber"));
+      return;
+    }
     try {
-      await individualRoomsService.update(roomId, { roomNumber: trimmed });
+      await individualRoomsService.update(rooms.find((room) => room.id === roomId)!, {
+        roomNumber: trimmed,
+      });
       cancelRenameRoom();
       onRoomsChange();
     } catch (err: any) {
+      if (isDuplicateRoomNumberError(err)) {
+        setEditingRoomNumberError(t("rooms.duplicateRoomNumber"));
+        return;
+      }
       alert(err.message || t("rooms.failedToRenameRoom"));
     }
   };
 
   const handleStatusChange = async (roomId: string, status: string) => {
     try {
-      await individualRoomsService.update(roomId, { status });
+      await individualRoomsService.update(rooms.find((room) => room.id === roomId)!, { status });
       onRoomsChange();
-    } catch {
-      // ignore
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Room status could not be changed.");
     }
   };
 
@@ -270,15 +307,15 @@ function RoomTypeCard({
             </span>
             {linkedGroup && (
               <span
-                title={`Linked inventory: ${linkedGroup.name}`}
+                title={t("rooms.linkedInventoryNamed", { name: linkedGroup.name })}
                 className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
               >
-                Linked
+                {t("rooms.linked")}
               </span>
             )}
           </div>
           <p className="text-[12px] text-gray-400 mt-0.5 truncate">
-            {typeRooms.length} room{typeRooms.length !== 1 ? "s" : ""}
+            {typeRooms.length} {t(typeRooms.length === 1 ? "common.room" : "common.rooms")}
             {room.maxOccupancy > 0 && (
               <>
                 {" "}
@@ -323,7 +360,7 @@ function RoomTypeCard({
         {/* Count badge */}
         <span
           className={`shrink-0 w-6 h-6 rounded-full text-white text-[11px] font-bold flex items-center justify-center ${typeRooms.length > 0 ? "bg-green-500" : "bg-gray-300"}`}
-          title={`${available} available`}
+          title={t("rooms.availableCount", { count: available })}
         >
           {typeRooms.length}
         </span>
@@ -332,11 +369,12 @@ function RoomTypeCard({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onDuplicate(room.id);
+            void onDuplicate(room.id);
           }}
-          disabled
+          disabled={duplicating}
           className="flex items-center justify-center w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE}
+          title={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
+          aria-label={duplicating ? t("rooms.duplicatingRoomType") : t("rooms.duplicateRoomType")}
         >
           <DocumentDuplicateIcon className="w-3.5 h-3.5" />
         </button>
@@ -407,22 +445,42 @@ function RoomTypeCard({
                           type="text"
                           autoFocus
                           value={editingRoomNumber}
-                          onChange={(e) => setEditingRoomNumber(e.target.value)}
+                          onChange={(e) => {
+                            setEditingRoomNumber(e.target.value);
+                            setEditingRoomNumberError(null);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") saveRenameRoom(r.id, r.roomNumber);
                             else if (e.key === "Escape") cancelRenameRoom();
                           }}
-                          className="text-[13px] font-medium text-gray-800 px-2 py-1 border border-primary-300 rounded-md focus:outline-none focus:border-primary-500 min-w-0 w-40"
+                          aria-invalid={editingRoomNumberError ? true : undefined}
+                          aria-describedby={
+                            editingRoomNumberError ? `room-number-error-${r.id}` : undefined
+                          }
+                          className={`text-[13px] font-medium text-gray-800 px-2 py-1 border rounded-md focus:outline-none min-w-0 w-40 ${editingRoomNumberError ? "border-red-500 focus:border-red-500" : "border-primary-300 focus:border-primary-500"}`}
                         />
+                        {editingRoomNumberError && (
+                          <p
+                            id={`room-number-error-${r.id}`}
+                            role="alert"
+                            className="basis-full text-xs text-red-600"
+                          >
+                            {editingRoomNumberError}
+                          </p>
+                        )}
                         {r.floor && (
-                          <span className="text-gray-400 text-[11px]">Floor {r.floor}</span>
+                          <span className="text-gray-400 text-[11px]">
+                            {t("rooms.floorNumber", { floor: r.floor })}
+                          </span>
                         )}
                       </div>
                     ) : (
                       <p className="text-[13px] font-medium text-gray-800">
                         #{r.roomNumber}
                         {r.floor && (
-                          <span className="text-gray-400 ml-1.5 text-[11px]">Floor {r.floor}</span>
+                          <span className="text-gray-400 ml-1.5 text-[11px]">
+                            {t("rooms.floorNumber", { floor: r.floor })}
+                          </span>
                         )}
                       </p>
                     )}
@@ -449,8 +507,7 @@ function RoomTypeCard({
                       <select
                         value={r.status}
                         onChange={(e) => handleStatusChange(r.id, e.target.value)}
-                        disabled
-                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
+                        aria-label={t("rooms.statusLabel")}
                         className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 disabled:cursor-not-allowed ${statusStyles[r.status] || statusStyles.available}`}
                       >
                         <option value="available">{t("rooms.statusAvailable")}</option>
@@ -459,17 +516,15 @@ function RoomTypeCard({
                       </select>
                       <button
                         onClick={() => startRenameRoom(r.id, r.roomNumber)}
-                        disabled
                         className="p-1 text-gray-300 hover:text-primary-500 transition-colors disabled:cursor-not-allowed"
-                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
+                        aria-label={t("rooms.renameRoom")}
                       >
                         <PencilIcon className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleDeleteRoom(r.id)}
-                        disabled
                         className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:cursor-not-allowed"
-                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
+                        aria-label={t("rooms.deleteRoom")}
                       >
                         <svg
                           className="w-3.5 h-3.5"
@@ -500,12 +555,26 @@ function RoomTypeCard({
               <input
                 type="text"
                 value={newRoomNumber}
-                onChange={(e) => setNewRoomNumber(e.target.value)}
+                onChange={(e) => {
+                  setNewRoomNumber(e.target.value);
+                  setNewRoomNumberError(null);
+                }}
                 placeholder={t("rooms.roomNumberPlaceholder")}
-                className="flex-1 min-w-[120px] md:flex-initial md:w-32 px-2.5 py-1.5 text-[12px] border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-invalid={newRoomNumberError ? true : undefined}
+                aria-describedby={newRoomNumberError ? "new-room-number-error" : undefined}
+                className={`flex-1 min-w-[120px] md:flex-initial md:w-32 px-2.5 py-1.5 text-[12px] border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 ${newRoomNumberError ? "border-red-500" : "border-gray-200"}`}
                 autoFocus
                 onKeyDown={(e) => e.key === "Enter" && handleAddRoom()}
               />
+              {newRoomNumberError && (
+                <p
+                  id="new-room-number-error"
+                  role="alert"
+                  className="basis-full text-xs text-red-600"
+                >
+                  {newRoomNumberError}
+                </p>
+              )}
               <input
                 type="text"
                 value={newRoomFloor}
@@ -524,6 +593,7 @@ function RoomTypeCard({
                 onClick={() => {
                   setAddingRoom(false);
                   setNewRoomNumber("");
+                  setNewRoomNumberError(null);
                   setNewRoomFloor("");
                 }}
                 className="px-2 py-1.5 text-[11px] text-gray-500 hover:text-gray-700"
@@ -534,8 +604,6 @@ function RoomTypeCard({
           ) : (
             <button
               onClick={() => setAddingRoom(true)}
-              disabled
-              title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
               className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PlusIcon className="w-3.5 h-3.5" /> {t("rooms.addRoom")}
@@ -557,21 +625,46 @@ function RoomTypeCard({
   );
 }
 
+import { AirbnbImportLink } from "@/components/settings/AirbnbImportLink";
+import { PreparedHotelImportPanel } from "@vayada/product-onboarding/PreparedHotelImportPanel";
+import { sharedSetupClient } from "@/services/api/sharedHotelSetupClient";
+import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+
 export default function RoomsPage() {
   const { t } = useTranslation();
+  const [importPropertyId, setImportPropertyId] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void resolveSelectedPmsPropertyId()
+      .then((id) => {
+        if (active) setImportPropertyId(id);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [individualRooms, setIndividualRooms] = useState<Room[]>([]);
   const [linkedGroups, setLinkedGroups] = useState<LinkedInventoryGroup[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const loadRevision = useRef(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [duplicatingRoomTypeIds, setDuplicatingRoomTypeIds] = useState<Set<string>>(new Set());
 
   const loadData = () => {
+    const revision = ++loadRevision.current;
+    setRefreshing(true);
     Promise.allSettled([
       roomsService.list(),
       individualRoomsService.list(),
       linkedInventoryGroupsService.list(),
     ])
       .then(([types, indRooms, groups]) => {
+        if (revision !== loadRevision.current) return;
+        setLoadFailed([types, indRooms, groups].some((result) => result.status === "rejected"));
         if (types.status === "fulfilled") setRooms(types.value);
         else console.error(types.reason);
         if (indRooms.status === "fulfilled") setIndividualRooms(indRooms.value);
@@ -579,23 +672,37 @@ export default function RoomsPage() {
         if (groups.status === "fulfilled") setLinkedGroups(groups.value);
         else console.error(groups.reason);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (revision !== loadRevision.current) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
   };
 
   useEffect(() => {
     loadData();
+    return () => {
+      loadRevision.current++;
+    };
   }, []);
 
   const refreshRooms = () => {
-    individualRoomsService.list().then(setIndividualRooms).catch(console.error);
+    loadData();
   };
 
   const handleDuplicate = async (id: string) => {
+    setDuplicatingRoomTypeIds((current) => new Set(current).add(id));
     try {
       await roomsService.duplicate(id);
       loadData();
     } catch (err: any) {
       alert(err.message || t("rooms.failedToDuplicate"));
+    } finally {
+      setDuplicatingRoomTypeIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -620,12 +727,40 @@ export default function RoomsPage() {
           >
             <PlusIcon className="w-4 h-4" />
             <span className="hidden md:inline">{t("rooms.addRoomType")}</span>
-            <span className="md:hidden">Add</span>
+            <span className="md:hidden">{t("common.add")}</span>
           </Link>
         </div>
       </div>
 
+      {importPropertyId && (
+        <AirbnbImportLink key={importPropertyId} propertyId={importPropertyId} />
+      )}
+      {importPropertyId && (
+        <PreparedHotelImportPanel
+          key={importPropertyId}
+          client={sharedSetupClient}
+          propertyId={importPropertyId}
+          roomsOnly
+          onSaved={refreshRooms}
+        />
+      )}
       {/* Search */}
+      {loadFailed && (
+        <div
+          role="alert"
+          className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <p>{t("rooms.loadFailed")}</p>
+          <button
+            type="button"
+            onClick={refreshRooms}
+            disabled={refreshing}
+            className="mt-2 font-semibold underline disabled:opacity-50"
+          >
+            {t(refreshing ? "common.loading" : "common.retry")}
+          </button>
+        </div>
+      )}
       <div className="mb-4 md:mb-5">
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -654,7 +789,8 @@ export default function RoomsPage() {
             <div key={i} className="h-20 bg-gray-50 rounded-xl" />
           ))}
         </div>
-      ) : filteredRooms.length === 0 && rooms.length === 0 ? (
+      ) : loadFailed && rooms.length === 0 ? null : filteredRooms.length === 0 &&
+        rooms.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
           <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <svg
@@ -693,6 +829,7 @@ export default function RoomsPage() {
               rooms={individualRooms}
               onRoomsChange={refreshRooms}
               onDuplicate={handleDuplicate}
+              duplicating={duplicatingRoomTypeIds.has(room.id)}
               linkedGroup={linkedGroups?.find((group) => group.memberRoomTypeIds.includes(room.id))}
             />
           ))}

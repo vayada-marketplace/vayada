@@ -1,4 +1,15 @@
 {
+  "analyticsConsent": {
+    "settings": "Datenschutzeinstellungen",
+    "title": "Optionale Analyse",
+    "description": "Wir nutzen optionale Analysen, um Besuche und Buchungsschritte zu verstehen. Buchungen funktionieren auch ohne Analyse. Ihre Auswahl gilt nur für die Buchungsseite dieses Hotels.",
+    "enabled": "Analyse ist aktiviert.",
+    "disabled": "Analyse ist deaktiviert.",
+    "saveError": "Ihre Auswahl konnte nicht gespeichert werden. Analyse bleibt deaktiviert.",
+    "reject": "Analyse ablehnen",
+    "accept": "Analyse erlauben",
+    "close": "Aktuelle Auswahl behalten"
+  },
   "common": {
     "checkAvailability": "Verfügbarkeit prüfen",
     "bookNow": "Jetzt buchen",
@@ -32,6 +43,8 @@
     "loading": "Wird geladen...",
     "qty": "Anz",
     "perPerson": "pro Person",
+    "checkInWindow": "Check-in: {time}",
+    "checkOutWindow": "Check-out: {time}",
     "checkInFrom": "Check-in ab {time}",
     "checkOutBy": "Check-out bis {time}",
     "pricingUpdating": "Die Preise für diese Daten werden noch aktualisiert. Bitte warten Sie einen Moment und versuchen Sie es erneut."
@@ -50,6 +63,11 @@
     "payment": "Zahlung"
   },
   "home": {
+    "guestCountUnsupported": "Die Online-Suche unterstützt Ihre Gruppe von {count} Gästen nicht. Versuchen Sie es mit weniger Gästen oder kontaktieren Sie uns.",
+    "guestCountUnavailable": "Keine unserer verfügbaren Unterkünfte bietet Platz für Ihre Gruppe von {count} Gästen. Versuchen Sie es mit weniger Gästen oder anderen Reisedaten.",
+    "noAvailability": "Für diese Suche ist keine Unterkunft verfügbar. Versuchen Sie andere Reisedaten oder Suchoptionen.",
+    "availabilityError": "Wir konnten die Verfügbarkeit nicht prüfen. Bitte versuchen Sie es erneut.",
+    "noMatchingRooms": "Keine Unterkunft entspricht Ihren Filtern. Entfernen Sie einen Filter.",
     "yourStay": "Ihr Aufenthalt",
     "addPromo": "Aktionscode hinzufügen",
     "promoTitle": "Haben Sie einen Aktionscode?",
@@ -72,7 +90,7 @@
     "priceHighLow": "Preis: Absteigend",
     "upToGuests": "Bis zu {count} Gäste",
     "viewDetails": "Details ansehen",
-    "viewFullAmenities": "Alle Ausstattungen anzeigen ({count} weitere)",
+    "viewFullAmenities": "Alle Ausstattungen anzeigen ({count})",
     "showLess": "Weniger anzeigen",
     "rateOptions": "Tarifoptionen",
     "selectYourRate": "Wähle deinen Tarif",
@@ -104,19 +122,6 @@
       "checkingAvailability": "Verfügbarkeit wird geprüft",
       "availabilityUnavailable": "Die Verfügbarkeit für diese Reisedaten ist vorübergehend nicht abrufbar.",
       "availabilityUnavailableTooltip": "Verfügbarkeit derzeit nicht abrufbar"
-    },
-    "mobileView": {
-      "list": "Liste",
-      "map": "Karte"
-    },
-    "roomMap": {
-      "noLocations": "Keine Standorte verfügbar",
-      "noLocationsDesc": "Zimmertypen ohne gespeicherte Koordinaten werden weiterhin in der Liste angezeigt.",
-      "locations": "{count, plural, one {# Standort} other {# Standorte}}",
-      "perNight": "/ Nacht",
-      "view": "Ansehen →",
-      "zoomIn": "Vergrößern",
-      "zoomOut": "Verkleinern"
     }
   },
   "rooms": {
@@ -146,7 +151,11 @@
     "pricePerDay": "Preis pro Tag",
     "priceLabel": "Preis",
     "addedToTrip": "Zur Reise hinzugefügt",
-    "addToTrip": "Zur Reise hinzufügen"
+    "addToTrip": "Zur Reise hinzufügen",
+    "pricePerPersonNight": "Preis pro Person / Nacht",
+    "leadTime": "Vorlaufzeit",
+    "showPhoto": "Foto {number} anzeigen",
+    "closeDetails": "Zusatzleistungsdetails schließen"
   },
   "book": {
     "guestInformation": "Gastinformationen",
@@ -254,6 +263,7 @@
     "xenditTitle": "QRIS / E-Wallet / Banküberweisung",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay oder indonesische Banküberweisung über Xendit",
     "xenditExplanation": "Sie werden zu einer sicheren Zahlungsseite weitergeleitet, auf der Sie mit QRIS, OVO, DANA, ShopeePay, GoPay oder per Banküberweisung bezahlen können. Wir prüfen Ihre Buchung, sobald die Zahlung bestätigt wurde.",
+    "errorPaymentUnavailable": "Diese Zahlungsmethode ist nicht mehr verfügbar. Bitte lade die Seite neu und wähle eine verfügbare Zahlungsmethode.",
     "errorSoldOut": "Dieses Zimmer ist leider gerade ausgebucht. Bitte wählen Sie ein anderes Zimmer oder andere Daten.",
     "errorSameDaySoldOut": "Same-Day-Buchungen sind heute nicht mehr möglich. Bitte wählen Sie morgen oder ein anderes verfügbares Datum.",
     "errorGeneric": "Bei der Erstellung Ihrer Buchung ist etwas schiefgegangen. Bitte versuchen Sie es erneut oder wählen Sie ein anderes Zimmer.",
@@ -405,5 +415,24 @@
     "unableToLoad": "Hotel konnte nicht geladen werden",
     "tryAgainLater": "Die Hoteldaten konnten nicht abgerufen werden. Bitte versuchen Sie es später erneut.",
     "retry": "Erneut versuchen"
+  },
+  "roomSelection": {
+    "breakfastIncluded": "Frühstück inklusive",
+    "roomOnly": "Nur Übernachtung",
+    "accommodation": "Unterkunft für {count} Gäste",
+    "perRoomTerms": "Für jedes Zimmer gelten eigene Stornierungsbedingungen.",
+    "roomNumber": "Zimmer {number}",
+    "totalStay": "Gesamtpreis für {nights} Nächte",
+    "freeUntil": "Kostenlose Stornierung bis {date} ({timezone}).",
+    "afterDeadline": "Keine Erstattung nach Ablauf der Frist oder bei Nichtanreise.",
+    "termsUnavailable": "Die Stornierungsbedingungen sind nicht verfügbar.",
+    "unavailable": "Diese Unterkunftsauswahl ist nicht mehr verfügbar. Bitte suche erneut.",
+    "choose": "Diese Unterkunft wählen",
+    "selectedAccommodation": "Ausgewählte Unterkunft",
+    "partyChanged": "Ihre Gästezahl hat sich geändert. Aktualisieren Sie die Gäste pro Zimmer oder wählen Sie eine andere Unterkunft, bevor Sie den Preis prüfen.",
+    "editRequest": "Anfrage bearbeiten",
+    "allocateGuests": "Gäste pro Zimmer",
+    "allocationAdults": "Erwachsene",
+    "allocationChildren": "Kinder"
   }
 }

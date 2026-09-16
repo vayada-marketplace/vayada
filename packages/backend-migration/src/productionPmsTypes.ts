@@ -31,6 +31,8 @@ export type PmsPropertyLink = {
   relationship: string;
   status: string;
   migrationRunId: string | null;
+  migrationDisposition?: "canonical" | "private_quarantine" | null;
+  ownerStatus: string | null;
 };
 
 export type PmsTargetBooking = {
@@ -61,11 +63,23 @@ export type PmsMediaReference = {
   storageKey: string;
 };
 
+export type PmsMediaQuarantine = {
+  sourceTable: string;
+  sourceRowId: string;
+  sourceField: string;
+  sourceValueSha256: string;
+  purpose: "pms.room_type.media" | "pms.messaging.attachment";
+  reasonCode: "INVALID_HTTPS_URL" | "INVALID_STRING_ARRAY";
+};
+
 export type ProductionPmsTargetState = {
   propertyLinks: PmsPropertyLink[];
   bookings: PmsTargetBooking[];
   userIds: string[];
   media?: PmsMediaReference[];
+  mediaQuarantines?: PmsMediaQuarantine[];
+  /** All runs, conflict detection only; not authorization to reuse a media object. */
+  attachmentMediaSourceIds?: string[];
   /** @deprecated Retained for older plan fixtures; media gates use source-bound references. */
   mediaIds: string[];
   records: ExistingPmsTargetRecord[];
@@ -82,6 +96,7 @@ export type PmsBuildContext = {
   blockers: IdentityMigrationBlocker[];
   rowsByTable: Map<string, IdentitySourceRow[]>;
   propertyByHotel: Map<string, string>;
+  ownerStatusByHotel: Map<string, "active" | "suspended" | "archived">;
   hotelById: Map<string, IdentitySourceRow>;
   bookingById: Map<string, IdentitySourceRow>;
   targetBookingById: Map<string, PmsTargetBooking>;
@@ -92,6 +107,7 @@ export type PmsBuildContext = {
   userIds: Set<string>;
   mediaIds: Set<string>;
   mediaBySource: Map<string, PmsMediaReference>;
+  effectiveRoomTypeActiveById: Map<string, boolean>;
 };
 
 export type PmsRoomBuild = {

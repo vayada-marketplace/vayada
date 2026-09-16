@@ -8,17 +8,23 @@ import {
   type PropertyMediaVariantPublisher,
 } from "../platform/propertyMediaVariantPublisher.js";
 import { createPropertyMediaCommandExecutor } from "./propertyMediaCommand.js";
-import { type CommandPool, type PropertyMediaReadModelSync } from "./propertyMediaCommandStore.js";
+import {
+  readPlatformAdminPropertyHero,
+  type CommandPool,
+  type PropertyMediaReadModelSync,
+} from "./propertyMediaCommandStore.js";
 import { createPropertyMediaPublicationWorker } from "./propertyMediaPublicationWorker.js";
 
 export type {
   AssignPropertyLogoCommand,
   PropertyMediaCommandResult,
   PropertyMediaPublicationBatchResult,
+  ReplacePlatformAdminPropertyHeroCommand,
   ReplacePropertyPresentationMediaCommand,
 } from "./propertyMediaCommandEnvelope.js";
 export { propertyMediaCommandResultStatus } from "./propertyMediaCommandEnvelope.js";
 export type { PropertyMediaVariantPublisher } from "../platform/propertyMediaVariantPublisher.js";
+export type { PlatformAdminPropertyHeroRead } from "./propertyMediaCommandStore.js";
 
 export function createPgS3PropertyMediaCommandRepository(config: {
   connectionString: string;
@@ -60,6 +66,9 @@ export function createPgS3PropertyMediaCommandRepository(config: {
 
   return {
     ...commands,
+    getPlatformAdminHero(propertyId: string) {
+      return readPlatformAdminPropertyHero(pool, propertyId);
+    },
     runPublicationBatch: worker.runPublicationBatch,
     async close() {
       if (ownsPublisher) await publisher.close?.();

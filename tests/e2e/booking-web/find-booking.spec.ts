@@ -41,7 +41,7 @@ test("finds a booking from the shared footer on mobile", async ({ page }) => {
         json: {
           ...booking,
           confirmationToken,
-          confirmationTokenExpiresAt: "2026-09-02T10:00:00.000Z",
+          confirmationTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
         },
       });
     },
@@ -140,6 +140,49 @@ test("does not expose an unknown payment identifier on the guest booking review"
   await expect(page.getByText("Payment", { exact: true })).toHaveCount(0);
 });
 
+for (const status of ["pending", "confirmed"] as const) {
+  test(`aligns add-ons in the value column for a ${status} booking`, async ({ page }) => {
+    await mockBookingApis(page);
+    await page.route(
+      `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/bookings/confirmation`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            ...booking,
+            status,
+            addonIds: ["airport-transfer", "scooter-rental"],
+            addonNames: ["Airport Transfer", "Scooter Rental"],
+            addonQuantities: { "scooter-rental": 2 },
+          },
+        });
+      },
+    );
+
+    await page.goto(`/confirmation?booking=VAY-1268&token=${confirmationToken}`);
+
+    const label = page.getByText("Add-ons", { exact: true });
+    const row = label.locator("..");
+    const values = row.locator(":scope > div");
+    const items = values.locator(":scope > div");
+    await expect(row).toHaveCSS("display", "flex");
+    await expect(values).toHaveCSS("text-align", "right");
+    await expect(items).toHaveText(["Airport Transfer", /Scooter Rental.*× 2/]);
+
+    const rowBox = await row.boundingBox();
+    const labelBox = await label.boundingBox();
+    const valueBox = await values.boundingBox();
+    const itemBoxes = await items.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().toJSON()),
+    );
+    expect(rowBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
+    expect(valueBox).not.toBeNull();
+    expect(valueBox!.x).toBeGreaterThan(labelBox!.x + labelBox!.width);
+    expect(valueBox!.x + valueBox!.width).toBeCloseTo(rowBox!.x + rowBox!.width, 0);
+    expect(itemBoxes[1]!.y).toBeGreaterThan(itemBoxes[0]!.y);
+  });
+}
+
 test("keeps booking lookup failures generic", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 360 });
   await mockBookingApis(page);
@@ -208,7 +251,7 @@ test("traps focus, restores the footer trigger, and ignores a dismissed lookup",
         json: {
           ...booking,
           confirmationToken,
-          confirmationTokenExpiresAt: "2026-09-02T10:00:00.000Z",
+          confirmationTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
         },
       });
     },

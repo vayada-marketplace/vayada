@@ -1,3 +1,4 @@
+import { paymentMethodLabel } from "@vayada/locale-constants";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
 
@@ -8,8 +9,11 @@ const BOOKING_LIFECYCLE_EMAIL_JOB_TYPE_BY_KIND = {
   request_received: "email.booking-request-received",
   booking_accepted: "email.booking-accepted",
   booking_rejected: "email.booking-rejected",
+  booking_canceled: "email.booking-canceled",
+  booking_updated: "email.booking-updated",
   booking_expired: "email.booking-expired",
   host_new_booking: "email.booking-host-new-booking",
+  host_request_updated: "email.booking-host-request-updated",
   host_review_required: "email.booking-host-review-required",
 } as const;
 
@@ -26,6 +30,7 @@ export const BOOKING_LIFECYCLE_EMAIL_JOB_TYPES = Object.values(
 export type BookingNotificationRecipientRole = "guest" | "host";
 
 export type BookingLifecycleTransition = {
+  revision?: string;
   eventType: string;
   fromStatus?: string | null;
   toStatus: string;
@@ -33,6 +38,8 @@ export type BookingLifecycleTransition = {
 };
 
 export type BookingLifecycleEmailInput = {
+  guestMessage?: string;
+  resendKey?: string;
   kind: BookingLifecycleEmailKind;
   occurredAt: string;
   correlationId?: string | null;
@@ -56,10 +63,17 @@ export type BookingLifecycleEmailInput = {
     balanceAmount?: string | number | null;
     currency?: string | null;
     paymentMethod?: string | null;
+    addons?: string | null;
+    roomCount?: number;
+    accommodation?: string | null;
+    adults?: number;
+    children?: number;
+    specialRequests?: string | null;
   };
 };
 
 export type BookingTransitionNotificationInput = {
+  guestMessage?: string;
   propertyId: string;
   guestBookingId: string;
   occurredAt: string;
@@ -94,27 +108,37 @@ export async function enqueueBookingLifecycleEmailJob(
   const recipientRole = input.recipient?.role ?? "guest";
   const to = normalizeEmail(input.recipient ? input.recipient.email : input.booking.guestEmail);
 
+  if (recipientRole === "host" && !to) {
+    throw new Error("A valid host notification recipient is required.");
+  }
+
   const jobType = bookingLifecycleEmailJobType(input.kind);
   const eventType = `booking.notification.${input.kind}_requested`;
   const transition = input.transition ?? legacyTransition(input.kind);
-  const jobKey = bookingLifecycleEmailJobKey(
-    input.kind,
-    input.booking.guestBookingId,
-    recipientRole,
-    transition,
-  );
+  const jobKey =
+    input.resendKey ??
+    bookingLifecycleEmailJobKey(
+      input.kind,
+      input.booking.guestBookingId,
+      recipientRole,
+      transition,
+    );
   const keyHash = sha256(jobKey);
   const copy = emailCopy(input);
   const payload = {
+    emailProduct: "booking",
     to,
     ...copy,
     bookingReference: input.booking.bookingReference,
     paymentDeadlineAt: input.paymentDeadlineAt ?? null,
-    bankTransferDetails:
-      input.kind === "reserved_pending_payment" ? (input.bankTransferDetails ?? null) : null,
+    requiresBankTransferInstructions:
+      recipientRole === "guest" &&
+      input.booking.paymentMethod === "bank_transfer" &&
+      ["request_received", "reserved_pending_payment"].includes(input.kind),
     recipientRole,
     notificationType: input.kind,
     transition,
+    ...(input.resendKey ? { resentByUserId: input.actor?.userId } : {}),
   };
   const actorType = input.actor?.type ?? "system";
 
@@ -269,12 +293,19 @@ type BookingNotificationSnapshot = QueryResultRow & {
   currency: string;
   paymentMethod: string | null;
   bookingMetadata: unknown;
+  status: string;
+  roomCount: number;
+  accommodation: string | null;
+  adults: number;
+  children: number;
+  specialRequests: string | null;
+  addons: string | null;
 };
 
-export async function enqueueBookingTransitionNotifications(
+export async function loadBookingNotificationSnapshot(
   queryable: Queryable,
-  input: BookingTransitionNotificationInput,
-): Promise<BookingLifecycleEmailEnqueueResult[]> {
+  input: { propertyId: string; guestBookingId: string },
+) {
   const result = await queryable.query<BookingNotificationSnapshot>(
     `SELECT
        booking.property_id::text AS "propertyId",
@@ -289,12 +320,19 @@ export async function enqueueBookingTransitionNotifications(
        booking.total_amount::text AS "totalAmount",
        booking.balance_amount::text AS "balanceAmount",
        booking.currency,
-       booking.booking_metadata ->> 'paymentMethod' AS "paymentMethod",
-       booking.booking_metadata AS "bookingMetadata"
+       COALESCE(booking.booking_metadata ->> 'paymentMethod', booking.expected_payment_method) AS "paymentMethod",
+       booking.booking_metadata AS "bookingMetadata",
+       booking.booking_metadata #>> '{selectedOffer,roomName}' AS accommodation,
+       booking.lifecycle_status AS status, booking.adults, booking.children, booking.room_count AS "roomCount",
+       guest.special_requests AS "specialRequests",
+       (SELECT string_agg(item.addon_name || ' × ' || item.quantity, ', ' ORDER BY item.created_at)
+        FROM booking.booking_addon_selection_items item
+        JOIN booking.active_booking_addon_selections current_selection ON current_selection.id = item.selection_id
+        WHERE item.guest_booking_id = booking.id AND item.property_id = booking.property_id) AS addons
      FROM booking.guest_bookings booking
      JOIN hotel_catalog.properties property ON property.id = booking.property_id
      LEFT JOIN LATERAL (
-       SELECT booking_guest.first_name, booking_guest.last_name, booking_guest.email
+       SELECT booking_guest.first_name, booking_guest.last_name, booking_guest.email, booking_guest.special_requests
        FROM booking.booking_guests booking_guest
        WHERE booking_guest.guest_booking_id = booking.id
          AND booking_guest.guest_role IN ('booker', 'primary_guest')
@@ -308,9 +346,11 @@ export async function enqueueBookingTransitionNotifications(
          AND contact.channel_type = 'email'
          AND (
            contact.purpose = 'operations'
-           OR (contact.purpose = 'general' AND contact.source_system = 'booking')
+           OR (contact.purpose = 'general' AND contact.source_system IN ('platform', 'booking'))
          )
+         AND trim(contact.value) ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$'
        ORDER BY (contact.purpose = 'operations') DESC,
+                (contact.source_system = 'platform') DESC,
                 contact.updated_at DESC,
                 contact.id
        LIMIT 1
@@ -320,20 +360,67 @@ export async function enqueueBookingTransitionNotifications(
      LIMIT 1`,
     [input.propertyId, input.guestBookingId],
   );
-  const booking = result.rows[0];
+  return result.rows[0] ?? null;
+}
+
+export async function enqueueBookingTransitionNotifications(
+  queryable: Queryable,
+  input: BookingTransitionNotificationInput,
+): Promise<BookingLifecycleEmailEnqueueResult[]> {
+  const booking = await loadBookingNotificationSnapshot(queryable, input);
   if (!booking) throw new Error("Booking notification snapshot was not found.");
 
   const notifications = notificationsForTransition(input.transition, booking);
   const enqueued: BookingLifecycleEmailEnqueueResult[] = [];
   for (const notification of notifications) {
+    if (notification.role === "host" && !normalizeEmail(booking.hostEmail)) {
+      const key = bookingLifecycleEmailJobKey(
+        notification.kind,
+        booking.guestBookingId,
+        "host",
+        input.transition,
+      );
+      await queryable.query(
+        `INSERT INTO platform.product_audit_events (
+           audit_key, product, action, action_version, occurred_at,
+           tenant_scope, property_id, actor_type, actor_user_id,
+           target_resource_product, target_resource_type, target_resource_id,
+           correlation_id, causation_id, redacted_payload,
+           private_payload, audit_metadata, retention_class, privacy_scope
+         ) VALUES (
+           $1, 'booking', 'booking.notification.missing_recipient', 1, $2::timestamptz,
+           'property', $3::uuid, $4, $5::uuid,
+           'booking', 'guest_booking', $6,
+           $7, $8, $9::jsonb, '{}'::jsonb, '{}'::jsonb, 'guest_pii', 'confidential'
+         ) ON CONFLICT (product, audit_key) DO NOTHING`,
+        [
+          `booking.email.missing-recipient:${key}`,
+          input.occurredAt,
+          booking.propertyId,
+          input.actor?.type ?? "system",
+          input.actor?.userId ?? null,
+          booking.guestBookingId,
+          input.correlationId ?? null,
+          input.causationId ?? null,
+          JSON.stringify({
+            outcome: "blocked",
+            reason: "host_recipient_missing",
+            recipientRole: "host",
+            notificationType: notification.kind,
+            transition: input.transition,
+          }),
+        ],
+      );
+      continue;
+    }
     const queued = await enqueueBookingLifecycleEmailJob(queryable, {
       kind: notification.kind,
+      guestMessage: input.guestMessage,
       occurredAt: input.occurredAt,
       correlationId: input.correlationId,
       causationId: input.causationId,
       actor: input.actor,
       paymentDeadlineAt: input.paymentDeadlineAt,
-      bankTransferDetails: input.bankTransferDetails,
       source: input.source,
       recipient: {
         role: notification.role,
@@ -362,6 +449,7 @@ export function bookingLifecycleEmailJobKey(
     transition.fromStatus ?? "none",
     transition.toStatus,
     transition.reason ?? "none",
+    ...(transition.revision ? [transition.revision] : []),
   ]
     .join("-")
     .replace(/[^a-z0-9_.-]/gi, "-")
@@ -369,28 +457,11 @@ export function bookingLifecycleEmailJobKey(
   return `${bookingLifecycleEmailJobType(kind)}:booking:${guestBookingId}:transition:${transitionKey}:recipient:${recipientRole}:${kind}:v1`;
 }
 
-export function bankTransferDetailsFromPolicy(policy: unknown): unknown | null {
-  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return null;
-  const instructions = (policy as Record<string, unknown>)["bankTransferInstructions"];
-  if (typeof instructions === "string") {
-    const text = instructions.trim();
-    return text || null;
-  }
-  if (!instructions || typeof instructions !== "object" || Array.isArray(instructions)) {
-    return null;
-  }
-  return Object.keys(instructions).length > 0 ? instructions : null;
-}
-
 function emailCopy(input: BookingLifecycleEmailInput) {
   const { booking } = input;
   const name = booking.guestName?.trim() || "there";
   const property = booking.propertyName || "our property";
   if (input.kind === "reserved_pending_payment") {
-    const details =
-      typeof input.bankTransferDetails === "string"
-        ? input.bankTransferDetails
-        : JSON.stringify(input.bankTransferDetails ?? {});
     return {
       template: "booking_reserved_pending_payment",
       subject: `Your room is reserved pending payment - ${booking.bookingReference}`,
@@ -399,7 +470,6 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `We've reserved your room at ${property} while we wait for your bank transfer.`,
         `Amount due: ${money(booking.balanceAmount ?? booking.totalAmount, booking.currency)}`,
         `Payment deadline: ${input.paymentDeadlineAt ?? "as soon as possible"}`,
-        `Bank transfer details: ${details}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -425,6 +495,21 @@ function emailCopy(input: BookingLifecycleEmailInput) {
         `Hi ${name},`,
         `We've accepted your booking request for ${property}.`,
         `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        ...confirmationDetails(booking),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "booking_updated") {
+    return {
+      template: "booking_updated",
+      subject: `Booking updated - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've updated your booking at ${property}.`,
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        ...confirmationDetails(booking),
+        ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -436,6 +521,21 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `We couldn't accept your booking request for ${property}.`,
+        ...(input.guestMessage ? [`Message from us:\n${input.guestMessage}`] : []),
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "booking_canceled") {
+    const message = input.guestMessage?.replace(/\r\n?/g, "\n").trim();
+    return {
+      template: "booking_canceled",
+      subject: `Booking canceled - ${booking.bookingReference}`,
+      text: [
+        `Hi ${name},`,
+        `We've canceled your booking at ${property}.`,
+        ...(message ? [`Message from us:\n${message}`] : []),
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -447,6 +547,18 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       text: [
         `Hi ${name},`,
         `Your booking for ${property} has expired.`,
+        `Booking reference: ${booking.bookingReference}`,
+      ].join("\n\n"),
+    };
+  }
+  if (input.kind === "host_request_updated") {
+    return {
+      template: "booking_host_request_updated",
+      subject: `Booking request updated - ${booking.bookingReference}`,
+      text: [
+        `${name} updated their pending booking request.`,
+        `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
+        ...confirmationDetails(booking),
         `Booking reference: ${booking.bookingReference}`,
       ].join("\n\n"),
     };
@@ -474,17 +586,34 @@ function emailCopy(input: BookingLifecycleEmailInput) {
       `Hi ${name},`,
       `Your booking at ${property} is confirmed.`,
       `Stay: ${dateOnly(booking.checkIn)} to ${dateOnly(booking.checkOut)}`,
-      `Total: ${money(booking.totalAmount, booking.currency)}`,
+      ...confirmationDetails(booking),
       `Booking reference: ${booking.bookingReference}`,
       "We look forward to welcoming you!",
     ].join("\n\n"),
   };
 }
 
+function confirmationDetails(booking: BookingLifecycleEmailInput["booking"]): string[] {
+  return [
+    `Total: ${money(booking.totalAmount, booking.currency)}`,
+    `Balance: ${money(booking.balanceAmount, booking.currency)}`,
+    `Payment method: ${paymentMethodLabel(booking.paymentMethod)}`,
+    ...(booking.adults == null
+      ? []
+      : [`Guests: ${booking.adults} adults, ${booking.children ?? 0} children`]),
+    ...(booking.roomCount == null ? [] : [`Rooms: ${booking.roomCount}`]),
+    ...(booking.accommodation ? [`Accommodation: ${booking.accommodation}`] : []),
+    `Add-ons: ${booking.addons || "None"}`,
+    ...(booking.specialRequests ? [`Special requests: ${booking.specialRequests}`] : []),
+  ];
+}
+
 function notificationsForTransition(
   transition: BookingLifecycleTransition,
   booking: BookingNotificationSnapshot,
 ): Array<{ kind: BookingLifecycleEmailKind; role: BookingNotificationRecipientRole }> {
+  if (transition.eventType === "guest_booking.request_updated")
+    return [{ kind: "host_request_updated", role: "host" }];
   if (transition.eventType === "guest_booking.created") {
     if (transition.toStatus === "confirmed") {
       return [
@@ -543,6 +672,8 @@ function notificationsForTransition(
       },
     ];
   }
+  if (transition.eventType === "guest_booking.host_dates_updated")
+    return [{ kind: "booking_updated", role: "guest" }];
   if (["guest_booking.rejected", "guest_booking.declined"].includes(transition.eventType)) {
     return [{ kind: "booking_rejected", role: "guest" }];
   }
@@ -552,6 +683,12 @@ function notificationsForTransition(
       transition.reason === "accepted_payment_expired")
   ) {
     return [{ kind: "booking_expired", role: "guest" }];
+  }
+  if (
+    transition.eventType === "guest_booking.canceled" &&
+    transition.reason === "property_cancellation"
+  ) {
+    return [{ kind: "booking_canceled", role: "guest" }];
   }
   return [];
 }

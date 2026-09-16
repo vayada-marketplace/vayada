@@ -1,4 +1,15 @@
 {
+  "analyticsConsent": {
+    "settings": "Pilihan privasi",
+    "title": "Analitik opsional",
+    "description": "Kami menggunakan analitik opsional untuk memahami kunjungan dan langkah pemesanan. Pemesanan tetap berfungsi tanpa analitik. Pilihan Anda hanya berlaku untuk situs pemesanan hotel ini.",
+    "enabled": "Analitik aktif.",
+    "disabled": "Analitik nonaktif.",
+    "saveError": "Pilihan Anda tidak dapat disimpan. Analitik tetap nonaktif.",
+    "reject": "Tolak analitik",
+    "accept": "Izinkan analitik",
+    "close": "Pertahankan pilihan saat ini"
+  },
   "common": {
     "checkAvailability": "Cek Ketersediaan",
     "bookNow": "Pesan Sekarang",
@@ -32,6 +43,8 @@
     "loading": "Memuat...",
     "qty": "Jml",
     "perPerson": "per orang",
+    "checkInWindow": "Check-in: {time}",
+    "checkOutWindow": "Check-out: {time}",
     "checkInFrom": "Check-in mulai {time}",
     "checkOutBy": "Check-out sampai {time}",
     "pricingUpdating": "Harga untuk tanggal ini masih diperbarui. Mohon tunggu sebentar dan coba lagi."
@@ -50,6 +63,11 @@
     "payment": "Pembayaran"
   },
   "home": {
+    "guestCountUnsupported": "Pencarian online tidak mendukung grup Anda sebanyak {count} tamu. Coba kurangi jumlah tamu atau hubungi kami.",
+    "guestCountUnavailable": "Tidak ada akomodasi kami yang tersedia yang dapat menampung grup Anda sebanyak {count} tamu. Coba kurangi jumlah tamu atau pilih tanggal lain.",
+    "noAvailability": "Tidak ada akomodasi tersedia untuk pencarian ini. Coba tanggal atau opsi pencarian lain.",
+    "availabilityError": "Kami tidak dapat memeriksa ketersediaan. Silakan coba lagi.",
+    "noMatchingRooms": "Tidak ada akomodasi yang sesuai dengan filter Anda. Coba hapus filter.",
     "yourStay": "Masa Menginap Anda",
     "addPromo": "Tambah promo",
     "promoTitle": "Punya kode promo?",
@@ -72,7 +90,7 @@
     "priceHighLow": "Harga: Tinggi ke Rendah",
     "upToGuests": "Hingga {count} tamu",
     "viewDetails": "Lihat Detail",
-    "viewFullAmenities": "Lihat semua fasilitas ({count} lagi)",
+    "viewFullAmenities": "Lihat semua fasilitas ({count})",
     "showLess": "Tampilkan lebih sedikit",
     "rateOptions": "Pilihan Tarif",
     "selectYourRate": "Pilih Tarif Anda",
@@ -104,19 +122,6 @@
       "checkingAvailability": "Memeriksa ketersediaan",
       "availabilityUnavailable": "Ketersediaan untuk tanggal ini sementara tidak dapat dimuat.",
       "availabilityUnavailableTooltip": "Ketersediaan tidak dapat dimuat"
-    },
-    "mobileView": {
-      "list": "Daftar",
-      "map": "Peta"
-    },
-    "roomMap": {
-      "noLocations": "Tidak ada lokasi tersedia",
-      "noLocationsDesc": "Tipe kamar tanpa koordinat yang disimpan masih muncul di daftar.",
-      "locations": "{count, plural, one {# lokasi} other {# lokasi}}",
-      "perNight": "/ malam",
-      "view": "Lihat →",
-      "zoomIn": "Perbesar",
-      "zoomOut": "Perkecil"
     }
   },
   "rooms": {
@@ -254,6 +259,7 @@
     "xenditTitle": "QRIS / E-Wallet / Transfer Bank",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay, atau transfer bank Indonesia via Xendit",
     "xenditExplanation": "Anda akan diarahkan ke halaman pembayaran aman tempat Anda dapat membayar dengan QRIS, OVO, DANA, ShopeePay, GoPay, atau transfer bank. Kami akan meninjau pemesanan Anda setelah pembayaran dikonfirmasi.",
+    "errorPaymentUnavailable": "Metode pembayaran ini tidak lagi tersedia. Muat ulang halaman dan pilih metode pembayaran yang tersedia.",
     "errorSoldOut": "Sayangnya kamar ini baru saja terjual habis. Silakan pilih kamar lain atau tanggal yang berbeda.",
     "errorSameDaySoldOut": "Pemesanan hari yang sama tidak lagi tersedia untuk hari ini. Silakan pilih esok hari atau tanggal lain yang tersedia.",
     "errorGeneric": "Terjadi kesalahan saat membuat pemesanan Anda. Silakan coba lagi, atau pilih kamar lain.",
@@ -405,5 +411,24 @@
     "unableToLoad": "Tidak Dapat Memuat Hotel",
     "tryAgainLater": "Kami tidak dapat mengambil data hotel. Silakan coba lagi nanti.",
     "retry": "Coba Lagi"
+  },
+  "roomSelection": {
+    "breakfastIncluded": "Termasuk sarapan",
+    "roomOnly": "Kamar saja",
+    "accommodation": "Akomodasi untuk {count} tamu",
+    "perRoomTerms": "Ketentuan pembatalan berlaku untuk setiap kamar.",
+    "roomNumber": "Kamar {number}",
+    "totalStay": "Total untuk {nights} malam",
+    "freeUntil": "Pembatalan gratis hingga {date} ({timezone}).",
+    "afterDeadline": "Tidak ada pengembalian dana setelah batas waktu atau jika tidak datang.",
+    "termsUnavailable": "Ketentuan pembatalan tidak tersedia.",
+    "unavailable": "Pilihan akomodasi ini tidak lagi tersedia. Silakan cari kembali.",
+    "choose": "Pilih akomodasi ini",
+    "selectedAccommodation": "Akomodasi yang dipilih",
+    "partyChanged": "Jumlah tamu Anda telah berubah. Perbarui tamu di setiap kamar atau pilih akomodasi lain sebelum meninjau harga.",
+    "editRequest": "Edit permintaan",
+    "allocateGuests": "Tamu di setiap kamar",
+    "allocationAdults": "Dewasa",
+    "allocationChildren": "Anak-anak"
   }
 }

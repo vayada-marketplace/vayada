@@ -1,6 +1,7 @@
 import type { PmsInventoryReservationReceipt } from "./inventoryReservationLifecycle.js";
 
 export * from "./roomFacts.js";
+export * from "./roomTypeLifecycle.js";
 export * from "./roomAmenities.js";
 export * from "./roomMedia.js";
 export * from "./roomPublication.js";
@@ -13,7 +14,9 @@ export * from "./operatingCalendarImpact.js";
 export * from "./inventoryMaterialization.js";
 export * from "./inventoryMaterializationPlanner.js";
 export * from "./inventoryReservationLifecycle.js";
+export * from "./inventoryReservationBundle.js";
 export * from "./manualBooking.js";
+export * from "./calendarAutoOpen.js";
 
 export const PMS_RESERVATION_CONTRACT_VERSION = "pms-reservation.v1" as const;
 export const PMS_INVENTORY_RESERVATION_MARKER_VERSION = "pms.inventory-reservation.v1" as const;
@@ -410,3 +413,13 @@ export type RoomInventoryReadPort = {
 };
 
 export * from "./roomAssignmentOptimization.js";
+
+export * from "./physicalRoomManagement.js";
+
+export type {
+  PmsRoomOperatingEligibility,
+  PmsRoomOperatingEligibilityReadPort,
+} from "./roomOperatingEligibility.js";
+export * from "./replacementPricing.js";
+export * from "./replacementPricingConfiguration.js";
+export * from "./affiliateCompletion.js";

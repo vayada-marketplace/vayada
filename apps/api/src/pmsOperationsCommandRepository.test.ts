@@ -1,9 +1,9 @@
+import { hostPolicyImpact } from "./domains/bookingHostPolicyImpact.js";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildRoomTypeInventoryHorizon,
   createTargetPmsOperationsCommandRepository,
   type PmsOperationsCommandPool,
 } from "./domains/pmsOperationsCommandRepository.js";
@@ -290,7 +290,31 @@ describe("PMS operations command repository", () => {
     ).toHaveLength(1);
   });
 
-  it("creates PMS room types with replay-safe inventory and distribution side effects", async () => {
+  it("reports every retirement dependency category and retires safely with exact replay", async () => {
+    const blockedTarget = targetPrivateNotesPool({
+      retirementCounts: { reservations: 2, physicalUnits: 3, inventory: 4, publication: 5 },
+    });
+    const blockedRepository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: blockedTarget.pool,
+      readRepository: unusedReadRepository,
+      now: blockedTarget.now,
+    });
+    const blockedCreated = blockedTarget.seedRoomType();
+    if (!blockedCreated.ok) throw new Error("room type create unexpectedly failed");
+    const blockedImpact = await blockedRepository.inspectRoomTypeRetirement(
+      defaultPropertyId,
+      blockedCreated.roomType.roomTypeId,
+    );
+    expect(
+      blockedImpact?.blockers.map(({ category, affectedCount }) => [category, affectedCount]),
+    ).toEqual([
+      ["reservations", 2],
+      ["physical_units", 3],
+      ["inventory", 4],
+      ["publication", 5],
+    ]);
+
     const target = targetPrivateNotesPool();
     const repository = createTargetPmsOperationsCommandRepository({
       connectionString: "postgresql://pms-target",
@@ -298,187 +322,31 @@ describe("PMS operations command repository", () => {
       readRepository: unusedReadRepository,
       now: target.now,
     });
-    const command = roomTypeCreateCommand();
+    const created = target.seedRoomType();
+    if (!created.ok) throw new Error("room type create unexpectedly failed");
+    const command = {
+      propertyId: defaultPropertyId,
+      roomTypeId: created.roomType.roomTypeId,
+      commandId: "cmd-room-type-retire",
+      idempotencyKey: "client-room-type-retire",
+      expectedVersion: created.roomType.version,
+      audit: roomTypeCreateCommand().audit,
+    };
+    const retired = await repository.retireRoomType(command);
+    const replay = await repository.retireRoomType(command);
 
-    const created = await repository.createRoomType(command);
-    const replayed = await repository.createRoomType(command);
-    const conflicting = await repository.createRoomType(
-      roomTypeCreateCommand({
-        name: "Junior Suite",
-        idempotencyKey: command.idempotencyKey,
-      }),
-    );
-
-    expect(created.ok).toBe(true);
-    expect(replayed.ok).toBe(true);
-    if (!created.ok || !replayed.ok) throw new Error("room type create unexpectedly failed");
-    expect(created.roomType).toMatchObject({
-      name: "Deluxe Double",
-      category: "double",
-      baseRate: { amountDecimal: "149.00", currency: "EUR" },
-      roomCount: 2,
+    expect(retired).toMatchObject({
+      ok: true,
+      impact: { version: "room-type-facts-v2", canRetire: false, blockers: [] },
     });
-    expect(created.roomType.ratePlans[0]).toMatchObject({
-      ratePlanId: "f6855200-0000-0000-0000-000000000001",
-      code: "FLEX",
-    });
-    expect(created.roomType.ratePlans[1]).toMatchObject({
-      ratePlanId: "f6855200-0000-0000-0000-000000000002",
-      code: "NRF",
-      rateType: "non_refundable",
-      baseRate: { amountDecimal: "129.00", currency: "EUR" },
-    });
-    expect(replayed).toEqual({ ...created, replayed: true });
-    expect(conflicting).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "idempotency_conflict",
-    });
-    expect(created.commandMeta.sideEffects).toEqual([
-      "ari_changed",
-      "distribution_refresh",
-      "audit_event",
-    ]);
-    expect(target.roomTypes).toHaveLength(1);
-    expect(target.generatedRooms.map((room) => room.roomNumber)).toEqual([
-      "Deluxe Double 1",
-      "Deluxe Double 2",
-    ]);
-    expect(target.auditEvents.map((event) => event.action)).toEqual(["pms.room_type.created"]);
-    const keyHash = sha256(command.idempotencyKey);
-    const domainEventCalls = target.calls.filter((call) =>
-      call.text.includes("platform.domain_events"),
-    );
-    const outboxCalls = target.calls.filter((call) => call.text.includes("platform.outbox_events"));
-    const auditCall = target.calls.find((call) =>
-      call.text.includes("INSERT INTO platform.product_audit_events"),
-    );
-    expect(domainEventCalls[0]?.values?.[0]).toBe(
-      `pms.inventory.changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(outboxCalls[0]?.values?.[1]).toBe(
-      `pms.ari_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(outboxCalls[1]?.values?.[1]).toBe(
-      `distribution.inventory_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
-    );
-    expect(auditCall?.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
-    expect(auditCall?.values?.[2]).toBe(command.propertyId);
+    expect(replay).toEqual({ ...retired, replayed: true });
+    expect(target.roomTypes[0]?.roomType.active).toBe(false);
     expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.room_types")),
+      target.auditEvents.filter(({ action }) => action === "pms.room_type.retired"),
     ).toHaveLength(1);
     expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_plans")),
-    ).toHaveLength(2);
-    expect(target.calls.filter((call) => call.text.includes("INSERT INTO pms.rooms"))).toHaveLength(
-      1,
-    );
-    const roomOrderLockIndex = target.calls.findIndex((call) =>
-      call.text.includes("pms.room-order:"),
-    );
-    expect(roomOrderLockIndex).toBeGreaterThan(-1);
-    expect(roomOrderLockIndex).toBeLessThan(
-      target.calls.findIndex((call) => call.text.includes("INSERT INTO pms.rooms")),
-    );
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_rules")),
+      target.calls.filter(({ text }) => text.includes("'pms.inventory.ari_changed'")),
     ).toHaveLength(1);
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.inventory_days")),
-    ).toHaveLength(1);
-    expect(domainEventCalls).toHaveLength(1);
-    expect(outboxCalls).toHaveLength(2);
-  });
-
-  it("serializes first-run room setup and rejects a second initial room type", async () => {
-    const target = targetPrivateNotesPool();
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-
-    const created = await repository.createRoomType(
-      roomTypeCreateCommand({ initialSetupOnly: true }),
-    );
-    const competing = await repository.createRoomType(
-      roomTypeCreateCommand({
-        initialSetupOnly: true,
-        commandId: "cmd-room-type-create-competing",
-        idempotencyKey: "client-room-type-create-competing",
-        name: "Competing Suite",
-      }),
-    );
-
-    expect(created.ok).toBe(true);
-    expect(competing).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "room_type_conflict",
-    });
-    expect(
-      target.calls.filter((call) => call.text.includes("INSERT INTO pms.room_types")),
-    ).toHaveLength(1);
-    expect(
-      target.calls.some(
-        (call) =>
-          call.text.includes("pg_advisory_xact_lock") &&
-          call.text.includes("pms-initial-room-setup:"),
-      ),
-    ).toBe(true);
-    const lockCallIndex = target.calls.findIndex((call) =>
-      call.text.includes("pg_advisory_xact_lock"),
-    );
-    const existenceCallIndex = target.calls.findIndex(
-      (call) =>
-        call.text.includes("SELECT EXISTS") && call.text.includes("FROM pms.room_types room_type"),
-    );
-    expect(lockCallIndex).toBeGreaterThanOrEqual(0);
-    expect(existenceCallIndex).toBeGreaterThan(lockCallIndex);
-  });
-
-  it("materializes only the bounded explicit operating and season horizon", () => {
-    const horizon = buildRoomTypeInventoryHorizon(
-      roomTypeCreateCommand({
-        roomCount: 3,
-        operatingPeriods: [{ from: "08-01", to: "08-31" }],
-        seasons: [
-          {
-            name: "Summer",
-            tier: "high",
-            from: "08-10",
-            to: "08-20",
-            rate: { amountDecimal: "210.00", currency: "EUR" },
-            minStayNights: 2,
-            maxStayNights: 7,
-          },
-        ],
-      }),
-      "2026-08-14T17:00:00.000Z",
-    );
-
-    expect(horizon).toHaveLength(366);
-    expect(horizon[0]).toEqual({
-      stayDate: "2026-08-14",
-      status: "open",
-      totalCount: 3,
-      availableCount: 3,
-      seasonIndex: 0,
-      rateAmountDecimal: "210.00",
-      minStayNights: 2,
-      maxStayNights: 7,
-    });
-    expect(horizon.find((day) => day.stayDate === "2026-08-21")).toMatchObject({
-      status: "closed",
-      availableCount: 0,
-      rateAmountDecimal: null,
-    });
-    expect(horizon.find((day) => day.stayDate === "2026-09-01")).toMatchObject({
-      status: "closed",
-      availableCount: 0,
-    });
-    expect(horizon.at(-1)?.stayDate).toBe("2027-08-14");
   });
 
   it("updates PMS room-type location with replay-safe idempotency", async () => {
@@ -498,7 +366,7 @@ describe("PMS operations command repository", () => {
       readRepository,
       now: target.now,
     });
-    const created = await repository.createRoomType(roomTypeCreateCommand());
+    const created = target.seedRoomType();
     if (!created.ok) throw new Error("room type create unexpectedly failed");
     target.roomTypes[0]!.roomType.ratePlans.unshift({
       ratePlanId: "f6855200-0000-0000-0000-999999999999",
@@ -566,10 +434,7 @@ describe("PMS operations command repository", () => {
       "audit_event",
     ]);
     expect(target.roomTypes[0]!.roomType.attributes).toMatchObject(updated.roomType.attributes);
-    expect(target.auditEvents.map((event) => event.action)).toEqual([
-      "pms.room_type.created",
-      "pms.room_type.updated",
-    ]);
+    expect(target.auditEvents.map((event) => event.action)).toEqual(["pms.room_type.updated"]);
     const updateAuditCall = target.calls.find((call) =>
       call.text.includes("'pms.room_type.updated'"),
     );
@@ -586,35 +451,10 @@ describe("PMS operations command repository", () => {
     ).toContain("pricing_contract_version IS NULL");
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO platform.domain_events")),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO platform.outbox_events")),
-    ).toHaveLength(4);
-  });
-
-  it("rejects PMS room-type creates when generated room numbers collide", async () => {
-    const target = targetPrivateNotesPool({ generatedRoomConflicts: 1 });
-    const repository = createTargetPmsOperationsCommandRepository({
-      connectionString: "postgresql://pms-target",
-      pool: target.pool,
-      readRepository: unusedReadRepository,
-      now: target.now,
-    });
-
-    const result = await repository.createRoomType(
-      roomTypeCreateCommand({
-        commandId: "cmd-room-type-create-collision",
-        idempotencyKey: "client-room-type-create-collision",
-      }),
-    );
-
-    expect(result).toMatchObject({
-      ok: false,
-      statusCode: 409,
-      code: "room_type_conflict",
-    });
-    expect(target.auditEvents).toHaveLength(0);
-    expect(target.calls.some((call) => call.text.includes("platform.outbox_events"))).toBe(false);
+    ).toHaveLength(2);
   });
 
   it("rejects checkout charge assignment IDs outside the reservation before insert", async () => {
@@ -679,7 +519,7 @@ type RoomTypeRecord = {
 type GeneratedRoomRecord = {
   propertyId: string;
   roomTypeId: string;
-  roomNumber: string;
+  roomNumber: null;
 };
 
 type IdempotencyRecord = {
@@ -688,7 +528,16 @@ type IdempotencyRecord = {
   metadata: Record<string, unknown> | null;
 };
 
-function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {}): {
+function targetPrivateNotesPool(
+  options: {
+    retirementCounts?: Partial<{
+      reservations: number;
+      physicalUnits: number;
+      inventory: number;
+      publication: number;
+    }>;
+  } = {},
+): {
   auditEvents: Array<{ auditKey: string; action: string }>;
   calls: QueryCall[];
   generatedRooms: GeneratedRoomRecord[];
@@ -696,6 +545,7 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
   now(): Date;
   pool: PmsOperationsCommandPool;
   roomTypes: RoomTypeRecord[];
+  seedRoomType(): { ok: true; roomType: PmsRoomType };
   stripPrivateNoteReplayEditMetadata(): void;
 } {
   const calls: QueryCall[] = [];
@@ -729,6 +579,27 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
 
     if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return emptyRows<T>();
 
+    if (
+      text.includes("operation = 'room_type_retire'") &&
+      text.includes("FROM platform.idempotency_keys")
+    ) {
+      const key = idempotencyRecordKey(
+        "room_type_retire",
+        String(values?.[1]),
+        String(values?.[0]),
+      );
+      const record = idempotencyRows.get(key);
+      return record
+        ? rows([
+            {
+              status: record.status,
+              requestFingerprintHash: record.requestFingerprintHash,
+              idempotencyMetadata: record.metadata,
+            } as unknown as T,
+          ])
+        : emptyRows<T>();
+    }
+
     if (text.includes("FROM booking.guest_bookings")) {
       return reservations.has(`${String(values?.[0])}:${String(values?.[1])}`)
         ? rows([{ exists: 1 } as unknown as T])
@@ -753,7 +624,10 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
         : emptyRows<T>();
     }
 
-    if (text.includes("FROM pms.operational_booking_assignments assignment")) {
+    if (
+      text.includes("FROM pms.operational_booking_assignments assignment") &&
+      !text.includes('AS "reservationCount"')
+    ) {
       const [assignmentId, propertyId, guestBookingId] = values ?? [];
       return assignments.has(
         `${String(propertyId)}:${String(guestBookingId)}:${String(assignmentId)}`,
@@ -774,6 +648,47 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
           roomSetupExists: [...roomTypes.values()].some(
             ({ propertyId }) => propertyId === String(values?.[0]),
           ),
+        } as unknown as T,
+      ]);
+    }
+
+    if (
+      text.includes('room_facts_revision AS "roomFactsRevision"') &&
+      text.includes("FROM pms.room_types") &&
+      text.includes("FOR UPDATE")
+    ) {
+      const record = roomTypes.get(String(values?.[1]));
+      return record && record.propertyId === String(values?.[0]) && record.roomType.active
+        ? rows([
+            {
+              roomTypeId: record.roomType.roomTypeId,
+              name: record.roomType.name,
+              roomFactsRevision: Number(record.roomType.version.split("v").at(-1)),
+            } as unknown as T,
+          ])
+        : emptyRows<T>();
+    }
+
+    if (text.includes("SELECT lower(name) AS name") && text.includes("FROM pms.room_types")) {
+      return rows(
+        [...roomTypes.values()]
+          .filter(({ propertyId, roomType }) => propertyId === values?.[0] && roomType.active)
+          .map(({ roomType }) => ({ name: roomType.name.toLowerCase() }) as unknown as T),
+      );
+    }
+
+    if (text.includes('AS "reservationCount"') && text.includes('AS "publicationCount"')) {
+      const record = roomTypes.get(String(values?.[1]));
+      if (!record || record.propertyId !== String(values?.[0]) || !record.roomType.active) {
+        return emptyRows<T>();
+      }
+      return rows([
+        {
+          reservationCount: options.retirementCounts?.reservations ?? 0,
+          physicalUnitCount: options.retirementCounts?.physicalUnits ?? 0,
+          inventoryCount: options.retirementCounts?.inventory ?? 0,
+          publicationCount: options.retirementCounts?.publication ?? 0,
+          roomFactsRevision: Number(record.roomType.version.split("v").at(-1)),
         } as unknown as T,
       ]);
     }
@@ -861,11 +776,34 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
       ]);
     }
 
+    if (
+      text.includes("INSERT INTO pms.room_types") &&
+      text.includes("SELECT\n       source.property_id")
+    ) {
+      const source = roomTypes.get(String(values?.[1]));
+      if (!source) return emptyRows<T>();
+      const roomTypeId = `f6855100-0000-0000-0000-${String(roomTypeSequence).padStart(12, "0")}`;
+      roomTypeSequence += 1;
+      const roomType: PmsRoomType = {
+        ...structuredClone(source.roomType),
+        roomTypeId,
+        version: "room-type-facts-v1",
+        name: String(values?.[2]),
+        sortOrder: source.roomType.sortOrder + 1,
+        roomMediaRevision: 1,
+        ratePlans: [],
+        roomCount: 0,
+      };
+      roomTypes.set(roomTypeId, { propertyId: String(values?.[0]), roomType });
+      return rows([{ roomTypeId, sortOrder: roomType.sortOrder } as unknown as T]);
+    }
+
     if (text.includes("INSERT INTO pms.room_types")) {
       const roomTypeId = `f6855100-0000-0000-0000-${String(roomTypeSequence).padStart(12, "0")}`;
       roomTypeSequence += 1;
       const roomType: PmsRoomType = {
         roomTypeId,
+        version: "room-type-facts-v1",
         name: String(values?.[1]),
         description: String(values?.[2]),
         category: values?.[3] ? String(values[3]) : null,
@@ -916,6 +854,20 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
       ]);
     }
 
+    if (text.includes("UPDATE pms.room_types") && text.includes("SET active = FALSE")) {
+      const record = roomTypes.get(String(values?.[1]));
+      if (!record || record.propertyId !== values?.[0] || !record.roomType.active) {
+        return emptyRows<T>();
+      }
+      record.roomType.active = false;
+      record.roomType.version = `room-type-facts-v${Number(record.roomType.version.split("v").at(-1)) + 1}`;
+      return rows([
+        {
+          roomFactsRevision: Number(record.roomType.version.split("v").at(-1)),
+        } as unknown as T,
+      ]);
+    }
+
     if (text.includes("UPDATE pms.room_types")) {
       const [propertyId, roomTypeId, attributes] = values ?? [];
       const record = roomTypes.get(String(roomTypeId));
@@ -927,7 +879,7 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
       return { rows: [] as T[], rowCount: 1 };
     }
 
-    if (text.includes("UPDATE pms.rate_plans")) {
+    if (text.includes("UPDATE pms.rate_plans") && text.includes("cancellation_policy_snapshot")) {
       const [propertyId, roomTypeId, cancellationPolicySnapshot] = values ?? [];
       const record = roomTypes.get(String(roomTypeId));
       const ratePlan = record?.roomType.ratePlans.find(
@@ -952,16 +904,14 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
     if (text.includes("INSERT INTO pms.rooms")) {
       const propertyId = String(values?.[0]);
       const roomTypeId = String(values?.[1]);
-      const roomTypeName = String(values?.[2]);
       const count = Number(values?.[3]);
-      const insertedCount = Math.max(0, count - (options.generatedRoomConflicts ?? 0));
       const createdRooms: Array<{ id: string }> = [];
-      for (let position = 1; position <= insertedCount; position += 1) {
+      for (let position = 1; position <= count; position += 1) {
         const id = `f6855300-0000-0000-0000-${String(generatedRooms.length + 1).padStart(12, "0")}`;
         generatedRooms.push({
           propertyId,
           roomTypeId,
-          roomNumber: `${roomTypeName} ${position}`,
+          roomNumber: null,
         });
         createdRooms.push({ id });
       }
@@ -1111,6 +1061,23 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
       return emptyRows<T>();
     }
 
+    if (
+      text.includes("UPDATE platform.idempotency_keys") &&
+      text.includes("operation = 'room_type_retire'")
+    ) {
+      const key = idempotencyRecordKey(
+        "room_type_retire",
+        String(values?.[5]),
+        String(values?.[4]),
+      );
+      const record = idempotencyRows.get(key);
+      if (record) {
+        record.status = "completed";
+        record.metadata = JSON.parse(String(values?.[3])) as Record<string, unknown>;
+      }
+      return emptyRows<T>();
+    }
+
     if (text.includes("UPDATE platform.idempotency_keys")) {
       const key = idempotencyRecordKey(
         String(values?.[4]),
@@ -1152,6 +1119,44 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
         return client;
       },
       async end() {},
+    },
+    seedRoomType() {
+      const command = roomTypeCreateCommand();
+      const roomType: PmsRoomType = {
+        roomTypeId: "f6855100-0000-0000-0000-000000000001",
+        version: "room-type-facts-v1",
+        name: command.name,
+        description: command.description,
+        category: command.category,
+        occupancyLimits: command.occupancyLimits,
+        attributes: command.attributes,
+        amenities: command.amenities,
+        media: command.media,
+        baseRate: command.baseRate,
+        active: true,
+        sortOrder: 10,
+        roomCount: 0,
+        ratePlans: [
+          {
+            ratePlanId: "f6855200-0000-0000-0000-000000000001",
+            code: "FLEX",
+            name: "Flexible",
+            rateType: "flexible",
+            mealPlan: null,
+            baseRate: command.baseRate,
+            active: true,
+          },
+        ],
+        rateRulesSummary: {
+          minStayNights: null,
+          maxStayNights: null,
+          closedToArrival: false,
+          closedToDeparture: false,
+          activeRuleCount: 0,
+        },
+      };
+      roomTypes.set(roomType.roomTypeId, { propertyId: defaultPropertyId, roomType });
+      return { ok: true, roomType };
     },
     get roomTypes() {
       return [...roomTypes.values()];

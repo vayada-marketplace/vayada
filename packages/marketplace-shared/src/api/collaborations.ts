@@ -8,6 +8,25 @@ export type MarketplaceCollaborationReadsContractVersion =
 
 export type MarketplaceCollaborationSide = "creator" | "hotel";
 
+export type MarketplaceAffiliateAssentRead = {
+  participationId: string;
+  attemptId: string;
+  programId: string;
+  propertyId: string;
+  offerId: string;
+  creatorProfileId: string;
+  origin: "application" | "invitation";
+  revision: number;
+  assentState: "pending" | "matched";
+  terms: {
+    id: string;
+    disclosure: string;
+    disclosureHash: string;
+  };
+  hotelApprovedAt: string | null;
+  creatorAcceptedAt: string | null;
+};
+
 export type MarketplaceCollaborationStatus =
   | "pending"
   | "negotiating"
@@ -94,8 +113,11 @@ export type MarketplaceCollaborationRead = {
   status: MarketplaceCollaborationStatus;
   compensationType: MarketplaceCompensationType | null;
   offerTitle: string;
+  propertyTimezone?: string | null;
   hotelLocation: string | null;
   applicationMessage?: string | null;
+  selectedCompensationOptionId?: string | null;
+  cancelledBy?: MarketplaceCollaborationSide | null;
   creatorConsent?: boolean | null;
   creatorAgreedAt?: string | null;
   hotelAgreedAt?: string | null;
@@ -198,6 +220,7 @@ export type MarketplaceCollaborationLifecycleWritesContractVersion =
 export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS = [
   "create",
   "respond",
+  "edit_application",
   "update_terms",
   "approve_terms",
   "cancel",
@@ -303,6 +326,7 @@ export type RespondToMarketplaceCollaborationLifecycleWriteRequest =
   MarketplaceCollaborationLifecycleWriteBaseRequest & {
     status: "accepted" | "declined";
     responseMessage?: string;
+    expectedUpdatedAt?: string;
   };
 
 export type UpdateMarketplaceCollaborationTermsLifecycleWriteRequest =
@@ -319,6 +343,7 @@ export type ApproveMarketplaceCollaborationTermsLifecycleWriteRequest =
 export type CancelMarketplaceCollaborationLifecycleWriteRequest =
   MarketplaceCollaborationLifecycleWriteBaseRequest & {
     reason?: string;
+    pendingOnly?: boolean;
   };
 
 export type ToggleMarketplaceCollaborationDeliverableLifecycleWriteRequest =
@@ -335,6 +360,8 @@ export const marketplaceCollaborationEndpoints = {
     `/api/marketplace/collaborations/me${toCollaborationQuery(input)}`,
   collaboration: (collaborationId: string, side: MarketplaceCollaborationSide) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}?side=${side}`,
+  affiliateAssent: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/affiliate-assent`,
   conversations: (
     input: {
       side?: MarketplaceCollaborationSide;
@@ -381,6 +408,16 @@ export async function getMarketplaceCollaboration(
 ): Promise<MarketplaceCollaborationRead> {
   return vayadaApiClient.get<MarketplaceCollaborationRead>(
     marketplaceCollaborationEndpoints.collaboration(collaborationId, side),
+  );
+}
+
+export async function getMarketplaceCollaborationAffiliateAssent(
+  collaborationId: string,
+  options?: RequestInit,
+): Promise<MarketplaceAffiliateAssentRead> {
+  return vayadaApiClient.get<MarketplaceAffiliateAssentRead>(
+    marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
+    options,
   );
 }
 
@@ -445,6 +482,16 @@ export async function createMarketplaceCollaboration(
     marketplaceCollaborationEndpoints.create(),
     request,
     toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function editMarketplaceCollaborationApplication(
+  collaborationId: string,
+  request: CreateMarketplaceCollaborationLifecycleWriteRequest & { expectedUpdatedAt: string },
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return vayadaApiClient.put(
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/application`,
+    request,
   );
 }
 

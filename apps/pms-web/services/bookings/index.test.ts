@@ -84,6 +84,22 @@ describe("PMS target booking projection", () => {
     });
   });
 
+  it("keeps all selected room names and guest allocations before PMS assignment", async () => {
+    const mixed = { ...reservation, roomCount: 3, roomLines: [
+      { roomTypeId: "type-1", roomName: "Double", roomCount: 2, guests: [{ adults: 2, children: 0 }, { adults: 1, children: 1 }], rateSummary: { name: "Flexible" } },
+      { roomTypeId: "type-2", roomName: "Twin", roomCount: 1, guests: [{ adults: 2, children: 0 }], rateSummary: { name: "Non-refundable" } },
+    ] };
+    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(mixed));
+    const result = (await bookingsService.list()).bookings[0]!;
+    expect(result.roomName).toBe("2 × Double + 1 × Twin");
+    expect(result.stays).toMatchObject([
+      { position: 0, roomName: "Double", adults: 2, children: 0, ratePlanName: "Flexible", roomNumber: null },
+      { position: 1, roomName: "Double", adults: 1, children: 1 },
+      { position: 2, roomName: "Twin", adults: 2, children: 0, ratePlanName: "Non-refundable" },
+    ]);
+    expect(result.assignedRooms).toEqual([]);
+  });
+
   it("uses the booked offer and authoritative booking amounts when no PMS assignment exists", async () => {
     const result = await bookingsService.list();
 
@@ -105,7 +121,10 @@ describe("PMS target booking projection", () => {
     const detailed = {
       ...reservation,
       primaryGuest: { ...reservation.primaryGuest, specialRequests: "Quiet room" },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+      addOns: [
+        { selectionId: "selection-1", addonId: "addon-1", name: "Breakfast", quantity: 2 },
+        { selectionId: "selection-1", addonId: "addon-2", name: "Coffee", quantity: 1 },
+      ],
     };
     mocks.get.mockImplementation(async (endpoint: string) =>
       endpoint.endsWith("/room-types") ? { items: [] } : { item: detailed },
@@ -113,10 +132,33 @@ describe("PMS target booking projection", () => {
 
     await expect(bookingsService.get("booking-1")).resolves.toMatchObject({
       specialRequests: "Quiet room",
-      addonIds: ["addon-1"],
-      addonNames: ["Breakfast"],
-      addonQuantities: { "addon-1": 2 },
+      addonIds: ["addon-1", "addon-2"],
+      addonNames: ["Breakfast", "Coffee"],
+      addonQuantities: { "addon-1": 2, "addon-2": 1 },
+      addonSelections: [
+        {
+          selectionId: "selection-1",
+          addonId: "addon-1",
+          name: "Breakfast, Coffee",
+          quantity: 3,
+        },
+      ],
     });
+  });
+
+  it("submits the explicitly fulfilled add-on selections at check-out", async () => {
+    mocks.post.mockResolvedValue({});
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : { item: reservation },
+    );
+
+    await bookingsService.completeCheckOut("booking-1", [], [], undefined, ["selection-1"]);
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/pms/properties/property-1/reservations/booking-1/check-out",
+      expect.objectContaining({ fulfilledAddonSelectionIds: ["selection-1"] }),
+      expect.anything(),
+    );
   });
 
   it("defaults additive booking evidence while an older API instance rolls out", async () => {
@@ -411,7 +453,7 @@ describe("PMS target calendar projection", () => {
   });
   it("labels every expected method without using settlement state", () => {
     // prettier-ignore
-    expect((["unknown", "pay_at_property", "bank_transfer", "manual_card", "cash", "other"] as const).map(expectedPaymentMethodLabel)).toEqual(["Not specified", "Pay at Property", "Bank Transfer", "Manual Card", "Cash", "Other"]);
+    expect((["unknown", "pay_at_property", "bank_transfer", "manual_card", "cash", "other"] as const).map((method) => expectedPaymentMethodLabel(method))).toEqual(["Not specified", "Pay at Property", "Bank Transfer", "Manual Card", "Cash", "Other"]);
     // prettier-ignore
     expect([`${expectedPaymentMethodLabel("bank_transfer")}: ${bookingSettlementLabel({ balanceAmount: 100, currency: "EUR", depositRequired: false, paymentStatus: "unpaid", totalAmount: 100 })}`, `${expectedPaymentMethodLabel("manual_card")}: ${bookingSettlementLabel({ balanceAmount: 0, currency: "EUR", depositRequired: false, paymentStatus: "paid", totalAmount: 100 })}`]).toEqual(["Bank Transfer: €100 outstanding", "Manual Card: Payment recorded"]);
   });

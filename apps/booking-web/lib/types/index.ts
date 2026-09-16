@@ -24,19 +24,16 @@ export interface HotelBranding {
   faviconUrl?: string;
 }
 
+export interface HotelHeaderSettings {
+  showContactButton: boolean;
+  showReferAGuestButton: boolean;
+  showLanguageSelector: boolean;
+  showCurrencySelector: boolean;
+}
+
 export interface GuestTypeSettings {
   adultAgeThreshold: number;
   childrenEnabled: boolean;
-}
-
-export interface PointOfInterest {
-  id: string;
-  label: string;
-  travelTime: string;
-  color: string;
-  latitude: number;
-  longitude: number;
-  position: number;
 }
 
 export interface Hotel {
@@ -57,6 +54,8 @@ export interface Hotel {
   amenities: string[];
   checkInTime: string;
   checkOutTime: string;
+  checkInUntil?: string;
+  checkOutFrom?: string;
   timezone?: string;
   contact: HotelContact;
   bookingFilters: string[];
@@ -64,17 +63,49 @@ export interface Hotel {
   filterRooms?: Record<string, string[]>;
   socialLinks?: HotelSocialLinks;
   branding?: HotelBranding;
+  headerSettings?: HotelHeaderSettings;
   defaultLanguage: string;
   supportedLanguages: string[];
   guestTypeSettings?: GuestTypeSettings;
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
-  mapViewEnabled?: boolean;
-  showRoomDetailMap?: boolean;
-  pointsOfInterest?: PointOfInterest[];
 }
 
+export type RoomSelectionLine = {
+  roomTypeId: string;
+  publicOfferKey: string;
+  guests: { adults: number; children: number }[];
+};
+export type RoomSelection = {
+  contractVersion: "booking-room-selection.v1";
+  lines: RoomSelectionLine[];
+};
+export type SelectedRoomLine = RoomSelectionLine & {
+  roomName: string;
+  roomCount: number;
+  ratePlanId?: string | null;
+  rateSummary: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  totals: Record<string, string>;
+};
+export interface RoomSelectionSnapshot {
+  roomSelection?: RoomSelection;
+  roomLines?: SelectedRoomLine[];
+}
+export type RoomCombination = {
+  roomSelection: RoomSelection;
+  roomLines: SelectedRoomLine[];
+  expiresAt: string;
+  totalAmount: number;
+  checkIn: string;
+  checkOut: string;
+  adults: number;
+  children: number;
+};
+
 export interface RoomType {
+  rateMealDescriptions?: { flexible: string | null; nonrefundable: string | null };
+  combination?: RoomCombination;
   id: string;
   name: string;
   category?: string;
@@ -106,6 +137,8 @@ export interface RoomType {
   partialRefundAmountPercent?: number;
   partialRefundTiers?: { minDaysBeforeCheckIn: number; refundPercent: number }[];
   originalRate?: number | null;
+  promotion?: { name: string; discountAmount: number; discountPercent: number };
+  nonRefundablePromotion?: { name: string; discountAmount: number; discountPercent: number };
   lastMinuteDiscountPercent?: number | null;
   ratePaymentMethods?: Record<string, string[]> | null;
   rateDepositSettings?: Record<
@@ -125,7 +158,9 @@ export interface SearchParams {
   rooms: number;
 }
 
-export interface Booking {
+export interface Booking extends RoomSelectionSnapshot {
+  mealDescription?: string | null;
+  canEditRequest?: boolean;
   id: string;
   bookingReference: string;
   hotelName: string;
@@ -154,6 +189,7 @@ export interface Booking {
   addonIds?: string[];
   addonNames?: string[];
   addonQuantities?: Record<string, number>;
+  addonPackageQuantities?: Record<string, number>;
   addonDates?: Record<string, string[]>;
   currency: string;
   // 'draft' is the placeholder shape returned for the card-payment flow
@@ -188,6 +224,8 @@ export interface Addon {
   category: string;
   image: string;
   images?: string[];
+  maxQuantity?: number;
+  leadTime?: string;
   duration?: string;
   perPerson?: boolean;
   perNight?: boolean;

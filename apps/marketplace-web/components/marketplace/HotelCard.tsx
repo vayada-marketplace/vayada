@@ -22,6 +22,7 @@ import {
 } from "@/services/api/collaborations";
 import { getCurrentUserInfo } from "@/lib/utils/accessControl";
 import { getMonthAbbr, sortMonths } from "@/lib/utils/months";
+import { formatFollowersCompact } from "@/lib/utils";
 import { ROUTES } from "@/lib/constants/routes";
 
 interface HotelCardProps {
@@ -247,22 +248,24 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
             <span className="truncate">{hotel.location}</span>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-medium text-gray-500">Stay length</p>
-              <p className="mt-1 truncate text-sm font-semibold text-gray-950">
-                {hotel.minNumberOfNights || hotel.numberOfNights
-                  ? `${hotel.minNumberOfNights ?? 1}-${hotel.numberOfNights ?? hotel.minNumberOfNights} nights`
-                  : "Flexible"}
-              </p>
-            </div>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-medium text-gray-500">Board</p>
-              <p className="mt-1 truncate text-sm font-semibold text-gray-950">
-                {hotel.boardType ?? "Not set"}
-              </p>
-            </div>
+          <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+            <p className="text-[11px] font-medium text-gray-500">Stay length</p>
+            <p className="mt-1 truncate text-sm font-semibold text-gray-950">
+              {hotel.minNumberOfNights || hotel.numberOfNights
+                ? `${hotel.minNumberOfNights ?? 1}-${hotel.numberOfNights ?? hotel.minNumberOfNights} nights`
+                : "Flexible"}
+            </p>
           </div>
+
+          {hotel.collaborationOfferings?.map((offering) =>
+            offering.min_followers ? (
+              <p key={offering.id} className="mt-3 text-xs text-gray-600">
+                <span className="font-medium">{offering.collaboration_type}</span>
+                {": Minimum "}
+                {formatFollowersCompact(offering.min_followers)} followers
+              </p>
+            ) : null,
+          )}
 
           {/* Availability */}
           {hotel.availability && hotel.availability.length > 0 && (
@@ -345,6 +348,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
         creatorPlatforms={creatorPlatforms}
       />
       <CollaborationApplicationModal
+        propertyTimezone={hotel.propertyTimezone}
         key={hotel.id}
         isOpen={showApplicationModal}
         onClose={() => setShowApplicationModal(false)}

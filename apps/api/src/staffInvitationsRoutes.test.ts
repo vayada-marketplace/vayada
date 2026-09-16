@@ -7,10 +7,12 @@ import type {
   RequestContext,
   UpdateStaffAccessCommand,
   UpdateStaffStatusCommand,
+  TeamRoleCreateCommand,
+  TeamRoleChangeCommand,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
 import Fastify from "fastify";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   registerStaffInvitationRoutes,
@@ -34,6 +36,7 @@ type Auth = {
   organizationStatus?: RequestContext["selectedOrganization"]["status"];
   membershipStatus?: RequestContext["membership"]["status"];
   permissions?: PermissionKey[];
+  roleKey?: string;
 };
 
 function fakes() {
@@ -44,6 +47,13 @@ function fakes() {
   const revocationJobs: string[] = [];
   const deliveries: string[] = [];
   const rosterOrganizations: string[] = [];
+  const accessReads: string[][] = [];
+  const roleReads: string[] = [];
+  const roleWrites: (TeamRoleCreateCommand | TeamRoleChangeCommand)[] = [];
+  let roleResult: Awaited<ReturnType<StaffInvitationRoutesOptions["roles"]["create"]>> = {
+    outcome: "created",
+    roleId: invitationId,
+  };
   let result: PersistResult = { outcome: "created", invitationId };
   let updateResult: UpdateResult = { outcome: "updated", membershipId: staffMembershipId };
   let statusResult: StatusResult = {
@@ -68,6 +78,12 @@ function fakes() {
     revocationJobs,
     deliveries,
     rosterOrganizations,
+    accessReads,
+    roleReads,
+    roleWrites,
+    setRoleResult(value: typeof roleResult) {
+      roleResult = value;
+    },
     setResult(value: PersistResult) {
       result = value;
     },
@@ -84,7 +100,65 @@ function fakes() {
       revocationResult = value;
     },
     options: {
+      roles: {
+        async list(id) {
+          roleReads.push(id);
+          return [];
+        },
+        async create(command) {
+          roleWrites.push(command);
+          return roleResult;
+        },
+        async change(command) {
+          roleWrites.push(command);
+          return roleResult;
+        },
+      },
       repository: {
+        async getInvitation(org, id) {
+          accessReads.push([org, id]);
+          return id === staffMembershipId
+            ? {
+                id,
+                email: "staff@example.test",
+                name: null,
+                roleKey: "front_desk" as const,
+                propertyAccessMode: "assigned" as const,
+                propertyIds: [propertyId],
+                permissionOverrides: { grant: [], deny: [] },
+                configurationRevision: 1,
+                productAccess: { pms: true, booking: true },
+                roleDefinitionId: null,
+                roleDefinition: null,
+                deliveryState: "delivered",
+                expiresAt: null,
+              }
+            : null;
+        },
+        async getAccess(org, id) {
+          accessReads.push([org, id]);
+          return id === staffMembershipId
+            ? {
+                membershipId: id,
+                roleDefinitionId: null,
+                roleDefinition: null,
+                configuredPermissions: ["pms.inbox.read"],
+                revision: "a".repeat(64),
+                productAccess: { pms: true, booking: true },
+                roleKey: "front_desk" as const,
+                status: "active" as const,
+                propertyAccessMode: "assigned" as const,
+                propertyIds: [propertyId],
+                permissionOverrides: { grant: [], deny: ["booking.analytics.read"] },
+              }
+            : null;
+        },
+        async listAccountAdmins() {
+          return [];
+        },
+        async prepareInvitation() {
+          return { configurationRevision: 2 };
+        },
         async listRoster(id) {
           rosterOrganizations.push(id);
           return [
@@ -93,6 +167,9 @@ function fakes() {
               name: "Staff Example",
               email: "staff@example.test",
               roleKey: "front_desk" as const,
+              roleDefinitionId: null,
+              roleName: null,
+              propertyAccessMode: "assigned" as const,
               propertyIds: [propertyId],
               status: "active" as const,
               lastActiveAt: "2026-08-24T00:00:00.000Z",
@@ -158,7 +235,7 @@ async function testApp(options: StaffInvitationRoutesOptions, auth: Auth = {}) {
       membership: {
         membershipId: "membership-owner",
         status: auth.membershipStatus ?? "active",
-        roleKey: "hotel_owner",
+        roleKey: auth.roleKey ?? "hotel_owner",
         workosRoleSlugs: ["hotel_owner"],
         permissions: auth.permissions ?? ["identity.staff.manage"],
       },
@@ -185,6 +262,238 @@ describe("staff invitation routes", () => {
   let app: Awaited<ReturnType<typeof testApp>> | undefined;
   afterEach(async () => app?.close());
 
+  const roleBody = {
+    name: "Custom",
+    description: "Worker role",
+    defaultPermissions: ["pms.calendar.read"],
+  };
+  it.each(["POST", "PATCH", "DELETE"] as const)(
+    "builds a tenant-bound audited role command for %s",
+    async (method) => {
+      const fake = fakes();
+      fake.setRoleResult({
+        outcome: method === "POST" ? "created" : method === "PATCH" ? "updated" : "deleted",
+        roleId: invitationId,
+      });
+      app = await testApp(fake.options);
+      const response = await app.inject({
+        method,
+        url:
+          method === "POST"
+            ? "/api/identity/staff/roles"
+            : `/api/identity/staff/roles/${invitationId}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+        payload:
+          method === "POST"
+            ? roleBody
+            : method === "PATCH"
+              ? { ...roleBody, expectedRevision: "2" }
+              : { expectedRevision: "2" },
+      });
+      expect(response.statusCode).toBe(method === "POST" ? 201 : 200);
+      expect(fake.roleWrites).toHaveLength(1);
+      expect(fake.roleWrites[0]).toMatchObject({
+        idempotencyKey: `hotel:${organizationId}:role-command`,
+        payload: { organizationId },
+        audit: { actor: { kind: "user", organizationId } },
+      });
+      if (method !== "POST")
+        expect(fake.roleWrites[0]!.payload).toMatchObject({
+          roleId: invitationId,
+          expectedRevision: "2",
+          operation: method === "PATCH" ? "update" : "delete",
+        });
+    },
+  );
+
+  it.each(["POST", "PATCH", "DELETE"] as const)(
+    "denies manager role writes for %s",
+    async (method) => {
+      const fake = fakes();
+      app = await testApp(fake.options, { roleKey: "hotel_manager" });
+      const response = await app.inject({
+        method,
+        url:
+          method === "POST"
+            ? "/api/identity/staff/roles"
+            : `/api/identity/staff/roles/${invitationId}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(403);
+      expect(fake.roleWrites).toEqual([]);
+    },
+  );
+
+  it.each([
+    { ...roleBody, organizationId: "foreign" },
+    { ...roleBody, securityClass: "account_admin" },
+    { ...roleBody, presetKey: "agency_manager" },
+    { ...roleBody, sourceRoleId: "invalid" },
+    { ...roleBody, defaultPermissions: [1] },
+    { ...roleBody, name: " " },
+  ])("rejects invalid role creation fields %j", async (payload) => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(fake.roleWrites).toEqual([]);
+  });
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized role creation %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload: roleBody,
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.roleWrites).toEqual([]);
+  });
+
+  it.each([
+    "stale_revision",
+    "role_in_use",
+    "invalid_member_overrides",
+    "name_conflict",
+    "idempotency_conflict",
+  ] as const)("returns a conflict for %s", async (reason) => {
+    const fake = fakes();
+    fake.setRoleResult({ outcome: "rejected", reason });
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/identity/staff/roles/${invitationId}`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload: { ...roleBody, expectedRevision: "1" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ code: reason });
+  });
+
+  it.each([
+    ["PATCH", roleBody],
+    ["DELETE", {}],
+    ["DELETE", { expectedRevision: "1", name: "injected" }],
+  ] as const)("requires a strict revision-bearing %s body", async (method, payload) => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method,
+      url: `/api/identity/staff/roles/${invitationId}`,
+      headers: { authorization: "Bearer valid-token", "idempotency-key": "role-command" },
+      payload,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(fake.roleWrites).toEqual([]);
+  });
+
+  it.each(["hotel_owner", "hotel_manager"])(
+    "reads only the selected organization's role catalog for %s",
+    async (roleKey) => {
+      const fake = fakes();
+      app = await testApp(fake.options, { roleKey });
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/identity/staff/roles?organizationId=foreign",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ roles: [], canManageRoles: roleKey === "hotel_owner" });
+      expect(fake.roleReads).toEqual([organizationId]);
+    },
+  );
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized role catalog reads %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/identity/staff/roles",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.roleReads).toEqual([]);
+  });
+
+  it("reads saved staff configuration without product entitlement or resource requirements", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/identity/staff/members/${staffMembershipId}/access?organizationId=foreign`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({
+      propertyAccessMode: "assigned",
+      permissionOverrides: { grant: [], deny: ["booking.analytics.read"] },
+    });
+    expect(fake.accessReads).toEqual([[organizationId, staffMembershipId]]);
+    expect(JSON.stringify(response.json())).not.toMatch(/workos|provider|token/i);
+  });
+
+  it.each([
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)("denies unauthorized access reads %j", async (auth, status) => {
+    const fake = fakes();
+    app = await testApp(fake.options, auth as Auth);
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/identity/staff/members/${staffMembershipId}/access`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(status);
+    expect(fake.accessReads).toEqual([]);
+  });
+
+  it("hides missing targets and database errors", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const request = {
+      method: "GET" as const,
+      url: `/api/identity/staff/members/missing/access`,
+      headers: { authorization: "Bearer valid-token" },
+    };
+    const missing = await app.inject(request);
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ code: "staff_member_not_found" });
+    fake.options.repository.getAccess = async () => {
+      throw new Error("private SQL data");
+    };
+    const failed = await app.inject(request);
+    expect(failed.statusCode).toBe(500);
+    expect(failed.json()).toEqual({ code: "staff_access_read_failed" });
+  });
+
   it("creates and delivers an assigned invitation from authenticated context", async () => {
     const fake = fakes();
     app = await testApp(fake.options);
@@ -201,6 +510,77 @@ describe("staff invitation routes", () => {
     });
     expect(fake.deliveries).toEqual([invitationId]);
     expect(JSON.stringify(response.body)).not.toMatch(/provider|token|accept/i);
+  });
+
+  it("prepares invitation revisions only with management permission and a valid email", async () => {
+    const fake = fakes();
+    const prepared = vi.fn(async () => ({ configurationRevision: 2 }));
+    fake.options.repository.prepareInvitation = prepared;
+    app = await testApp(fake.options);
+    const send = (email: string, authenticated = true) =>
+      injectJson(app!, {
+        method: "POST",
+        url: "/api/identity/staff/invitations/prepare",
+        headers: authenticated ? { authorization: "Bearer valid-token" } : {},
+        payload: { email },
+      });
+    expect(await send("test@example.test")).toMatchObject({
+      statusCode: 200,
+      body: { configurationRevision: 2 },
+    });
+    expect(prepared).toHaveBeenCalledWith(organizationId, "test@example.test");
+    expect((await send("invalid")).statusCode).toBe(400);
+    expect((await send("test@example.test", false)).statusCode).toBe(401);
+    expect(prepared).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [{}, 200],
+    [{ authenticated: false }, 401],
+    [{ permissions: [] }, 403],
+    [{ actorStatus: "suspended" }, 403],
+    [{ membershipStatus: "suspended" }, 403],
+    [{ organizationStatus: "suspended" }, 403],
+    [{ organizationKind: "platform" }, 403],
+  ] as const)(
+    "scopes account-admin reads to authorized organization context %j",
+    async (auth, status) => {
+      const fake = fakes();
+      const reads = vi.fn(async () => []);
+      fake.options.repository.listAccountAdmins = reads;
+      app = await testApp(fake.options, auth as Auth);
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/identity/staff/account-admins?organizationId=foreign",
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(status);
+      if (status === 200) {
+        expect(reads).toHaveBeenCalledWith(organizationId);
+        expect(response.json()).toEqual({ admins: [], actorMembershipId: "membership-owner" });
+        expect(response.headers["cache-control"]).toBe("no-store");
+      } else expect(reads).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns the caller's live permissions without requiring staff-management access", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options, {
+      roleKey: "front_desk",
+      permissions: ["pms.calendar.read"],
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/identity/staff/self-access",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      membershipId: "membership-owner",
+      roleKey: "front_desk",
+      permissions: ["pms.calendar.read"],
+    });
+    expect(response.headers["cache-control"]).toBe("private, no-store");
   });
 
   it("lists only the authenticated organization's roster", async () => {
@@ -222,6 +602,141 @@ describe("staff invitation routes", () => {
     });
     expect(fake.rosterOrganizations).toEqual([organizationId]);
     expect(JSON.stringify(response.body)).not.toMatch(/workos|provider|token/i);
+  });
+
+  it("passes revision-checked combined changes and maps stale saves to conflict", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const request = {
+      method: "PATCH" as const,
+      url: `/api/identity/staff/members/${staffMembershipId}`,
+      headers: { authorization: "Bearer valid-token", "Idempotency-Key": "combined" },
+      payload: {
+        roleKey: "front_desk",
+        propertyIds: [propertyId],
+        permissionOverrides: { grant: [], deny: [] },
+        expectedRevision: "a".repeat(64),
+        membershipStatus: "suspended",
+        productAccess: { pms: false, booking: true },
+      },
+    };
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject({
+      expectedRevision: "a".repeat(64),
+      membershipStatus: "suspended",
+      productAccess: { pms: false, booking: true },
+    });
+    fake.setUpdateResult({ outcome: "rejected", reason: "revision_conflict" });
+    const stale = await app.inject(request);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ code: "staff_access_revision_conflict" });
+    for (const payload of [
+      { ...request.payload, expectedRevision: "bad" },
+      { ...request.payload, expectedRevision: undefined },
+      { ...request.payload, membershipStatus: "inactive" },
+      { ...request.payload, productAccess: null },
+      { ...request.payload, productAccess: { pms: true } },
+      { ...request.payload, productAccess: { pms: "false", booking: true } },
+      { ...request.payload, productAccess: { pms: true, booking: true, extra: true } },
+      { ...request.payload, membershipStatus: undefined, expectedRevision: undefined },
+    ]) {
+      expect((await app.inject({ ...request, payload })).statusCode).toBe(400);
+    }
+  });
+
+  it("reads saved invitation settings with tenant routing and no caching", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const url = `/api/identity/staff/invitations/${staffMembershipId}`;
+    expect((await app.inject({ method: "GET", url })).statusCode).toBe(401);
+    const response = await app.inject({
+      method: "GET",
+      url,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({ id: staffMembershipId, configurationRevision: 1 });
+    expect(fake.accessReads).toEqual([[organizationId, staffMembershipId]]);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/identity/staff/invitations/missing",
+          headers: { authorization: "Bearer valid-token" },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
+  it("passes invitation role references and rejects incomplete role revisions", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const payload = {
+      ...body(),
+      roleKey: "hotel_custom",
+      roleDefinitionId: staffMembershipId,
+      expectedRoleRevision: "1",
+      permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+    };
+    expect((await post(app, payload)).statusCode).toBe(201);
+    for (const patch of [
+      { roleDefinitionId: undefined },
+      { expectedRoleRevision: undefined },
+      { roleDefinitionId: null },
+      { expectedRoleRevision: "0" },
+    ]) {
+      expect((await post(app, { ...payload, ...patch })).statusCode).toBe(400);
+    }
+  });
+
+  it("requires paired saved-role revisions and defers role hierarchy to the repository", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const payload = {
+      roleKey: "hotel_custom",
+      propertyIds: [propertyId],
+      permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      roleDefinitionId: staffMembershipId,
+      expectedRoleRevision: "1",
+      expectedRevision: "a".repeat(64),
+    };
+    expect((await patchAccess(app, payload)).statusCode).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject(payload);
+    for (const patch of [
+      { roleDefinitionId: undefined },
+      { expectedRoleRevision: undefined },
+      { expectedRevision: undefined },
+      { roleDefinitionId: null },
+      { roleDefinitionId: "invalid" },
+      { expectedRoleRevision: "0" },
+      { expectedRoleRevision: 1 },
+    ])
+      expect((await patchAccess(app, { ...payload, ...patch })).statusCode).toBe(400);
+    expect(fake.accessCommands).toHaveLength(1);
+  });
+
+  it("accepts dynamic invitation scope and requires a revision for explicit member scope saves", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    const access = { ...body(), propertyAccessMode: "all", propertyIds: [] };
+    expect((await post(app, access)).statusCode).toBe(201);
+    expect(fake.commands[0]?.payload).toMatchObject({ propertyAccessMode: "all", propertyIds: [] });
+    const update = {
+      roleKey: "front_desk",
+      permissionOverrides: { grant: [], deny: [] },
+      propertyAccessMode: "all",
+      propertyIds: [],
+    };
+    expect((await patchAccess(app, update)).statusCode).toBe(400);
+    expect(
+      (await patchAccess(app, { ...update, expectedRevision: "a".repeat(64) })).statusCode,
+    ).toBe(200);
+    expect(fake.accessCommands[0]?.payload).toMatchObject({
+      propertyAccessMode: "all",
+      propertyIds: [],
+    });
+    expect((await post(app, { ...access, propertyIds: [propertyId] })).statusCode).toBe(400);
   });
 
   it("updates assigned staff access from authenticated context", async () => {
@@ -331,6 +846,24 @@ describe("staff invitation routes", () => {
       body: { code: "staff_access_scope_not_found" },
     });
     expect(fake.deliveries).toHaveLength(0);
+  });
+
+  it("passes invitation product flags and rejects malformed flags before delivery", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options);
+    expect(
+      (await post(app, { ...body(), productAccess: { pms: false, booking: true } })).statusCode,
+    ).toBe(201);
+    expect(fake.commands[0]?.payload.productAccess).toEqual({ pms: false, booking: true });
+    for (const productAccess of [
+      null,
+      { pms: true },
+      { pms: "false", booking: true },
+      { pms: true, booking: true, extra: true },
+    ]) {
+      expect((await post(app, { ...body(), productAccess })).statusCode).toBe(400);
+    }
+    expect(fake.commands).toHaveLength(1);
   });
 
   it.each([

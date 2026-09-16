@@ -36,6 +36,8 @@ export * from "./bookingGuestPolicyProjection.js";
 export * from "./manualBookingPaymentIntent.js";
 export * from "./bookingAttribution.js";
 export * from "./bookingAddonEconomics.js";
+export * from "./sameDayBookingPolicy.js";
+export * from "./roomSelection.js";
 
 export type BookingUtcDateTime = string;
 export type BookingDate = string;
@@ -137,7 +139,7 @@ export type BookingDashboardMetricsPeriodInput = {
  * Implemented by the Booking domain; consumed by Booking API dashboard routes.
  * Must never open PMS_DATABASE_URL — see engineering/booking-pms-coupling-audit.md C04.
  */
-export type BookingDashboardMetricsReadPort = {
+export type BookingDashboardMetricsReadPort = import("./conversionFunnel.js").BookingConversionFunnelReadPort & {
   getDashboardMetrics(
     input: BookingDashboardMetricsPeriodInput,
   ): Promise<BookingDashboardMetricsReadModel | null>;
@@ -171,6 +173,7 @@ export type BookingReservationReadModel = {
   bookingReference: string;
   roomTypeId: string;
   roomName: string;
+  roomLines?: Array<{ roomTypeId: string; roomName: string; roomCount: number }>;
   roomMaxOccupancy: number;
   guestFirstName: string;
   guestLastName: string;
@@ -651,3 +654,11 @@ function isRetryableFailure(error: PmsReservationError): boolean {
 
   return error.retryable;
 }
+
+export * from "./conversionFunnel.js";
+export * from "./bookingPromotions.js";
+
+export * from "./roomCombinationSearch.js";
+
+export * from "./replacementPricingEvidence.js";
+export * from "./affiliateBookingDestination.js";

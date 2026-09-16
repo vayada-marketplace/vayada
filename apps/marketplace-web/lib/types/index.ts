@@ -2,6 +2,8 @@
  * Core domain types for vayada marketplace
  */
 
+import type { MarketplaceCreatorMatchingPreferences } from "@vayada/domain-marketplace";
+
 // User types
 export type UserType = "hotel" | "creator" | "admin";
 
@@ -71,6 +73,7 @@ export interface SectionContent {
 // Hotel types
 // Hotel represents a single property/listing
 export interface Hotel {
+  propertyTimezone?: string | null;
   id: string;
   hotelProfileId: string; // Reference to the hotel profile that owns this listing
   name: string;
@@ -191,6 +194,7 @@ export interface Creator {
   profilePicture?: string | null;
   profilePictureMediaObjectId?: string | null;
   creatorType: CreatorType;
+  matchingPreferences?: MarketplaceCreatorMatchingPreferences | null;
   rating?: CreatorRating;
   status: UserStatus;
   createdAt: Date;
@@ -265,6 +269,7 @@ export interface Collaboration {
   hasRated?: boolean; // Whether the hotel has rated this completed collaboration
   whyGreatFit?: string;
   platformDeliverables?: PlatformDeliverablesItem[];
+  propertyTimezone?: string | null;
   travelDateFrom?: string | null;
   travelDateTo?: string | null;
   preferredDateFrom?: string | null;
@@ -328,6 +333,7 @@ export interface RegisterResponse {
 }
 
 export interface LoginRequest {
+  organizationId?: string;
   email: string;
   password: string;
 }

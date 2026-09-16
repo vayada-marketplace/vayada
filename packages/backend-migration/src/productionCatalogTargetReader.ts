@@ -2,9 +2,10 @@ import type pg from "pg";
 
 import type {
   ExistingCatalogDomain,
+  ExistingCatalogMediaQuarantine,
   ExistingCatalogMediaObject,
 } from "./productionCatalogPresentationPlan.js";
-import type { ExistingCatalogSourceLink } from "./productionCatalogOwnership.js";
+import type { CatalogOwnerLink, ExistingCatalogSourceLink } from "./productionCatalogOwnership.js";
 
 type QueryClient = Pick<pg.ClientBase, "query">;
 export type CatalogTargetRow = Record<string, unknown> & { updatedAt: string };
@@ -16,6 +17,7 @@ export type CatalogOwnerRevision = {
 export type ProductionCatalogTargetState = {
   properties: CatalogTargetRow[];
   sourceLinks: ExistingCatalogSourceLink[];
+  ownerLinks: CatalogOwnerLink[];
   slugs: CatalogTargetRow[];
   domains: ExistingCatalogDomain[];
   locations: CatalogTargetRow[];
@@ -25,6 +27,7 @@ export type ProductionCatalogTargetState = {
   policies: CatalogTargetRow[];
   media: CatalogTargetRow[];
   mediaObjects: ExistingCatalogMediaObject[];
+  mediaQuarantines?: ExistingCatalogMediaQuarantine[];
   ownerRevisions: CatalogOwnerRevision[];
 };
 
@@ -35,7 +38,9 @@ export async function readProductionCatalogSourceLinks(
     `SELECT property_id::text AS "propertyId", source_system AS "sourceSystem",
             source_table AS "sourceTable", source_id AS "sourceId", relationship, status,
             metadata ->> 'migrationRunId' AS "migrationRunId",
-            metadata ->> 'migrationPhase' AS "migrationPhase"
+            metadata ->> 'migrationPhase' AS "migrationPhase",
+            metadata ->> 'migrationDisposition' AS "migrationDisposition",
+            metadata ->> 'migrationDispositionReason' AS "migrationDispositionReason"
      FROM hotel_catalog.property_source_links
      WHERE source_system IN ('booking', 'pms', 'marketplace')
      ORDER BY source_system, source_table, source_id`,
@@ -60,6 +65,17 @@ export async function readProductionCatalogTargetState(
     values,
   );
   const sourceLinks = await readProductionCatalogSourceLinks(client);
+  const ownerLinks = await client.query<CatalogOwnerLink>(
+    `SELECT organization_id::text AS "organizationId", product,
+            resource_type AS "resourceType", resource_id AS "resourceId", relationship, status
+       FROM identity.organization_resource_links
+      WHERE (product, resource_type, relationship) IN (
+              ('booking', 'booking_hotel', 'owner'),
+              ('pms', 'pms_hotel', 'operator'),
+              ('marketplace', 'hotel_profile', 'owner')
+            )
+      ORDER BY product, resource_type, resource_id, relationship, organization_id`,
+  );
   const slugs = await client.query<CatalogTargetRow>(
     `SELECT id::text, property_id::text AS "propertyId", slug, locale, purpose, status,
             redirects_to_id::text AS "redirectsToId", created_at::text AS "createdAt",
@@ -110,7 +126,8 @@ export async function readProductionCatalogTargetState(
   );
   const policies = await client.query<CatalogTargetRow>(
     `SELECT property_id::text AS "propertyId", check_in_time::text AS "checkInTime",
-            check_out_time::text AS "checkOutTime", cancellation_summary AS "cancellationSummary",
+            check_out_time::text AS "checkOutTime", check_in_until::text AS "checkInUntil",
+            check_out_from::text AS "checkOutFrom", cancellation_summary AS "cancellationSummary",
             cancellation_terms_url AS "cancellationTermsUrl",
             deposit_policy_summary AS "depositPolicySummary",
             payment_policy_summary AS "paymentPolicySummary",
@@ -134,9 +151,20 @@ export async function readProductionCatalogTargetState(
      FROM platform.media_objects
      WHERE source_system IN ('booking', 'marketplace')
        AND source_table IN ('booking_hotels', 'hotel_profiles')
-       AND source_metadata ->> 'migrationRunId' = $2
+       AND source_metadata ->> 'migrationRunId' = $1::text
      ORDER BY source_system, source_table, source_row_id, purpose`,
-    [ids, sourceRunId],
+    [sourceRunId],
+  );
+  const mediaQuarantines = await client.query<ExistingCatalogMediaQuarantine>(
+    `SELECT source_system AS "sourceSystem", source_table AS "sourceTable",
+            source_row_id AS "sourceRowId", purpose, source_field AS "sourceField",
+            source_value_sha256 AS "sourceValueSha256", reason_code AS "reasonCode"
+     FROM platform.production_media_migration_quarantines
+     WHERE source_run_id = $1::text
+       AND source_system IN ('booking', 'marketplace')
+       AND purpose IN ('property.hero_image', 'property.gallery_image', 'property.logo')
+     ORDER BY source_system, source_table, source_row_id, purpose`,
+    [sourceRunId],
   );
   const ownerRevisions = await client.query<CatalogOwnerRevision>(
     `SELECT property_id::text AS "propertyId", owner_key AS "ownerKey", revision::text
@@ -147,6 +175,7 @@ export async function readProductionCatalogTargetState(
   return {
     properties: properties.rows,
     sourceLinks,
+    ownerLinks: ownerLinks.rows,
     slugs: slugs.rows,
     domains: domains.rows,
     locations: locations.rows,
@@ -156,6 +185,7 @@ export async function readProductionCatalogTargetState(
     policies: policies.rows,
     media: media.rows,
     mediaObjects: mediaObjects.rows,
+    mediaQuarantines: mediaQuarantines.rows,
     ownerRevisions: ownerRevisions.rows,
   };
 }

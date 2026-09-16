@@ -106,13 +106,13 @@ export function HotelOverviewTab({
             />
             <span>
               <span className="block font-semibold">
-                Show city and country on public Vayada surfaces
+                Show city and country on public vayada surfaces
               </span>
               <span
                 id="hotel-profile-locality-help"
                 className="mt-1 block text-xs leading-5 text-gray-600"
               >
-                Turning this off hides your locality across Vayada’s public surfaces and makes your
+                Turning this off hides your locality across vayada’s public surfaces and makes your
                 Marketplace offer private. Your street address and coordinates stay private.
               </span>
             </span>
@@ -142,10 +142,12 @@ export function HotelOverviewTab({
             <Input
               label="Website"
               required
-              type="url"
+              type="text"
+              inputMode="url"
+              aria-label="Website"
               value={editFormData.website}
               onChange={(e) => onEditFormChange({ ...editFormData, website: e.target.value })}
-              placeholder="https://example.com"
+              placeholder="name.com"
               disabled={!isEditing}
               leadingIcon={<GlobeAltIcon className="w-5 h-5 text-gray-400" />}
             />

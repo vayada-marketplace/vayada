@@ -5,6 +5,7 @@ export type {
   EntitlementStatus,
   InternalUserStatus,
   LinkedResource,
+  MembershipPropertyAccess,
   MembershipStatus,
   OrganizationKind,
   OrganizationStatus,
@@ -125,7 +126,19 @@ export {
   type RepositoryConfig,
 } from "./repository.js";
 
-export { createPgStaffInvitationRepository, type StaffRosterMember } from "./staffInvitations.js";
+export {
+  resolveTeamRolePermissions,
+  validateTeamRoleDefaults,
+  teamRolePermissionCeiling,
+  teamRolePresetBases,
+  type TeamRolePolicy,
+  type TeamRoleSecurityClass,
+} from "./teamRolePolicy.js";
+export {
+  createPgStaffInvitationRepository,
+  validProductAccess,
+  type StaffRosterMember,
+} from "./staffInvitations.js";
 export {
   createPgStaffRemovalJobRepository,
   type StaffRemovalJobClaim,
@@ -166,3 +179,30 @@ export {
   requireAuthContext,
   type BackendAuthPluginOptions,
 } from "./plugin.js";
+export { createPgTeamRoleRepository, type TeamRole } from "./teamRoles.js";
+export type { TeamRoleCreateCommand, TeamRoleChangeCommand } from "./teamRoleCreate.js";
+
+export {
+  createAdminTransferProof,
+  verifyAdminTransferProof,
+  consumeAdminTransferProof,
+  type AdminTransferBinding,
+} from "./accountAdminTransferProofs.js";
+
+export {
+  parseAdminTransferRequest,
+  validateAdminTransferRequest,
+  type AdminTransferRequest,
+  type AdminTransferValidationContext,
+} from "./accountAdminTransferValidation.js";
+
+export { runAdminTransfer } from "./accountAdminTransferCommand.js";
+export {
+  prepareAdminTransferProof,
+  resolveAdminTransferCommandSource,
+  resolveAdminTransferSource,
+  type AdminTransferSessionSource,
+  type AdminTransferSource,
+} from "./accountAdminTransferPreparation.js";
+
+export { reconcileNextAdminRole, type AdminRoleProvider } from "./adminRoleReconciliation.js";

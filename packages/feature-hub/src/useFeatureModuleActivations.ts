@@ -42,8 +42,12 @@ function publish(detail: ModuleSynchronizationDetail) {
     ...detail,
     hotelId: detail.hotelId || selectedHotelId() || "default",
   };
-  window.localStorage.setItem(storageKey(detail.hotelId), JSON.stringify(detail.activeModuleIds));
-  window.localStorage.setItem(EVENT_NAME, JSON.stringify(scopedDetail));
+  try {
+    window.localStorage.setItem(storageKey(detail.hotelId), JSON.stringify(detail.activeModuleIds));
+    window.localStorage.setItem(EVENT_NAME, JSON.stringify(scopedDetail));
+  } catch {
+    // The optional cross-tab cache must not interrupt saving or same-window synchronization.
+  }
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: scopedDetail }));
 }
 
@@ -129,6 +133,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
         setSupportedModuleIds(supported);
       }
       setActiveModuleIds(activeModuleIds);
+      if (detail?.source === "read") setLoading(false);
     };
 
     const onChange = (event: Event) => {
@@ -158,6 +163,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
         ? Array.from(new Set([...activeModuleIds, moduleId]))
         : activeModuleIds.filter((id) => id !== moduleId);
       setActiveModuleIds(next);
+      publish({ activeModuleIds: next, hotelId, source: "write", canManage, supportedModuleIds });
       try {
         await clientRef.current.update(moduleId, isActive);
         publish({ activeModuleIds: next, hotelId, source: "write", canManage, supportedModuleIds });

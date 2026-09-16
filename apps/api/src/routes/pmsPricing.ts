@@ -98,6 +98,11 @@ export async function registerPmsPricingRoutes(
           "expectedFlexibleRatePlanRevision",
           "baseAmountDecimal",
           "cancellationTerms",
+          ...(typeof request.body === "object" &&
+          request.body !== null &&
+          Object.hasOwn(request.body, "mealPlan")
+            ? ["mealPlan"]
+            : []),
         ])
       ) {
         return invalidRequest(reply, "The flexible rate plan body is invalid.");
@@ -113,6 +118,7 @@ export async function registerPmsPricingRoutes(
         expectedFlexibleRatePlanRevision: request.body["expectedFlexibleRatePlanRevision"],
         baseAmountDecimal: request.body["baseAmountDecimal"],
         cancellationTerms: request.body["cancellationTerms"],
+        ...(Object.hasOwn(request.body, "mealPlan") ? { mealPlan: request.body["mealPlan"] } : {}),
       });
       if (!command) return invalidRequest(reply, "The flexible rate plan body is invalid.");
 

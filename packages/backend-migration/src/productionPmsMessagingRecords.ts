@@ -14,9 +14,12 @@ import {
   optionalText,
   optionalUuid,
   requiredText,
+  sha256,
   uuid,
 } from "./productionBookingValues.js";
-import { jsonMap, pmsRecord } from "./productionPmsValues.js";
+import { pmsRecord } from "./productionPmsValues.js";
+import { validatePmsMessagingSource } from "./productionPmsMessagingParity.js";
+import { normalizePmsInquiries } from "./productionPmsInquiries.js";
 
 export function buildPmsMessagingRecords(context: PmsBuildContext): PmsTargetRecord[] {
   const records: PmsTargetRecord[] = [];
@@ -26,6 +29,8 @@ export function buildPmsMessagingRecords(context: PmsBuildContext): PmsTargetRec
     append(context, source, records, () => message(context, source));
   for (const source of context.rowsByTable.get("message_attachments") ?? [])
     append(context, source, records, () => attachment(context, source));
+  validatePmsMessagingSource(context, records);
+  if (!context.blockers.length) normalizePmsInquiries(context, records);
   return records;
 }
 
@@ -34,10 +39,11 @@ function thread(context: PmsBuildContext, source: IdentitySourceRow): PmsTargetR
   const id = uuid(data["id"], "id");
   const propertyId = propertyForHotel(context, data["hotel_id"]);
   const sourceName = requiredText(data["source"], "source").toLowerCase();
-  if (sourceName !== "channex") throw new Error(`message source ${sourceName} is unsupported`);
-  const status = requiredText(data["status"] ?? "open", "status").toLowerCase();
-  if (!["open", "closed", "no_reply_needed"].includes(status))
-    throw new Error(`message thread status ${status} is unsupported`);
+  if (!["channex", "direct"].includes(sourceName))
+    throw new Error(`message source ${sourceName} is unsupported`);
+  const legacyStatus = requiredText(data["status"] ?? "open", "status").toLowerCase();
+  if (!["open", "closed", "no_reply_needed"].includes(legacyStatus))
+    throw new Error(`message thread status ${legacyStatus} is unsupported`);
   const bookingId = optionalUuid(data["booking_id"], "booking_id");
   if (bookingId && targetBooking(context, bookingId).propertyId !== propertyId)
     throw new Error("message thread crosses booking property scope");
@@ -51,15 +57,31 @@ function thread(context: PmsBuildContext, source: IdentitySourceRow): PmsTargetR
       id,
       propertyId,
       guestBookingId: bookingId,
-      source: "channex",
+      source: sourceName === "direct" ? "manual" : "channex",
       sourceThreadId: requiredText(data["source_thread_id"], "source_thread_id"),
       sourceBookingId: optionalText(data["source_booking_id"], "source_booking_id"),
-      channel: optionalText(data["channel"], "channel"),
+      providerChannel: sourceName === "direct" ? null : optionalText(data["channel"], "channel"),
+      deliveryChannel: sourceName === "direct" ? "email" : "ota",
       guestDisplayName: optionalText(data["guest_name"], "guest_name"),
       guestEmail: optionalText(data["guest_email"], "guest_email")?.toLowerCase() ?? null,
-      status,
+      attentionState: legacyStatus === "open" ? "needs_attention" : "done",
+      doneAt: legacyStatus === "open" ? null : updatedAt,
+      doneReason:
+        legacyStatus === "no_reply_needed"
+          ? "legacy_no_reply_needed"
+          : legacyStatus === "closed"
+            ? "legacy_closed"
+            : null,
+      conversationContextState: bookingId ? "linked" : "unlinked",
+      inquiryArrivalDate: null,
+      inquiryDepartureDate: null,
+      inquiryAdults: null,
+      inquiryChildren: null,
       lastMessageAt: optionalIso(data["last_message_at"], "last_message_at"),
-      lastMessagePreview: optionalText(data["last_message_preview"], "last_message_preview"),
+      lastMessagePreview:
+        typeof data["last_message_preview"] === "string"
+          ? data["last_message_preview"]
+          : optionalText(data["last_message_preview"], "last_message_preview"),
       lastMessageDirection: lastDirection,
       unreadCount: nonNegativeInteger(data["unread_count"], "unread_count", 0),
       createdAt,
@@ -94,7 +116,9 @@ function message(context: PmsBuildContext, source: IdentitySourceRow): PmsTarget
       sentAt,
       receivedAt,
       readAt,
-      rawPayload: jsonMap(data["raw_payload"], "raw_payload"),
+      // Typed message fields and source checksums preserve history without copying
+      // arbitrary credentials, guest metadata, or expiring provider attachment URLs.
+      rawPayload: {},
       piiRetentionUntil: retentionDate(context, parent, receivedAt),
     }),
   ];
@@ -107,26 +131,32 @@ function attachment(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
   const message = find(context, "messages", messageId);
   const thread = find(context, "message_threads", uuid(message.data["thread_id"], "thread_id"));
   const propertyId = propertyForHotel(context, thread.data["hotel_id"]);
-  const legacyS3Key = optionalText(data["s3_key"], "s3_key");
-  const legacySourceUrl = optionalText(data["source_url"], "source_url");
-  if (!legacyS3Key && !legacySourceUrl)
-    throw new Error("message attachment has no source reference for the VAY-1055 gate");
+  const sourceKey = data["s3_key"];
+  const legacyS3Key = optionalText(
+    typeof sourceKey === "string" ? sourceKey.trim() : sourceKey,
+    "s3_key",
+  );
+  const unavailable = !legacyS3Key && unavailableAttachment(context, id, data["source_url"]);
+  // Match the media importer: a usable S3 key takes precedence over an unused URL.
+  if (!legacyS3Key && !unavailable) optionalText(data["source_url"], "source_url");
   const sourceField = legacyS3Key ? "s3_key" : "source_url";
-  const media = pmsMediaForSource(context, {
-    sourceTable: "message_attachments",
-    sourceRowId: `${id}:${sourceField}`,
-    purpose: "pms.messaging.attachment",
-    propertyId,
-    visibility: "private",
-  });
+  const media = unavailable
+    ? null
+    : pmsMediaForSource(context, {
+        sourceTable: "message_attachments",
+        sourceRowId: `${id}:${sourceField}`,
+        purpose: "pms.messaging.attachment",
+        propertyId,
+        visibility: "private",
+      });
   const createdAt = iso(data["created_at"], "created_at");
   return [
     pmsRecord(source, "message_attachments", id, createdAt, false, {
       id,
       propertyId,
       messageId,
-      platformMediaObjectId: media.mediaObjectId,
-      s3Key: media.storageKey,
+      platformMediaObjectId: media?.mediaObjectId ?? null,
+      s3Key: media?.storageKey ?? null,
       sourceUrl: null,
       filename: optionalText(data["filename"], "filename"),
       contentType: optionalText(data["content_type"], "content_type"),
@@ -135,6 +165,31 @@ function attachment(context: PmsBuildContext, source: IdentitySourceRow): PmsTar
       createdAt,
     }),
   ];
+}
+
+function unavailableAttachment(context: PmsBuildContext, id: string, value: unknown): boolean {
+  const missing = value == null || (typeof value === "string" && !value.trim());
+  const quarantined = context.target.mediaQuarantines?.some(
+    (entry) =>
+      entry.sourceTable === "message_attachments" &&
+      entry.sourceRowId === `${id}:source_url` &&
+      entry.sourceField === "source_url" &&
+      entry.purpose === "pms.messaging.attachment" &&
+      entry.reasonCode === "INVALID_HTTPS_URL" &&
+      entry.sourceValueSha256 === sha256({ value }),
+  );
+  if (!missing && !quarantined) return false;
+  // A quarantine is not permission to hide a contradictory media binding.
+  const sourceIds = [`${id}:s3_key`, `${id}:source_url`];
+  if (
+    context.target.attachmentMediaSourceIds?.some((sourceId) => sourceIds.includes(sourceId)) ||
+    context.target.media?.some(
+      (entry) =>
+        entry.sourceTable === "message_attachments" && sourceIds.includes(entry.sourceRowId),
+    )
+  )
+    throw new Error(`unavailable attachment ${id} conflicts with an existing media reference`);
+  return true;
 }
 
 function find(context: PmsBuildContext, table: string, id: string): IdentitySourceRow {

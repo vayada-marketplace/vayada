@@ -37,9 +37,10 @@ import {
 } from "@vayada/domain-finance";
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import Fastify from "fastify";
 import type { QueryResult, QueryResultRow } from "pg";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createTargetPublicHotelQuoteRepository,
@@ -52,6 +53,7 @@ import { buildApp } from "./app.js";
 import { agencyPropertyAccessRepository } from "./testAuthorization.js";
 import { loadConfig } from "./config.js";
 import { HIDDEN_GUEST_CONTACT } from "./domains/bookingGuestContactAccess.js";
+import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
 import type { PropertyPlanReadRepository } from "./domains/propertyPlanReadModel.js";
 import { pmsRoomOrderVersion } from "./domains/pmsRoomOrder.js";
 import {
@@ -105,8 +107,21 @@ import {
   type PmsOperationsReadPool,
 } from "./domains/pmsOperationsReadModel.js";
 import type { BookingAcceptanceSettingsPort } from "./domains/bookingAcceptanceSettings.js";
+import type { SameDayBookingSettingsPort } from "./domains/sameDayBookingSettings.js";
 import type { PmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignmentSettings.js";
 import type { PmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
+import type {
+  PmsInboxAssistancePort,
+  PmsInboxMarkReadPort,
+  PmsInboxProviderActionPort,
+  PmsInboxQuickReplyPort,
+  PmsInboxReadPort,
+  PmsInboxReplyPort,
+  PmsInboxStartDirectEmailPort,
+  PmsInboxStaffCommandPort,
+  PmsInboxThreadSummary,
+  PmsInboxTriagePort,
+} from "./domains/pmsInbox.js";
 import {
   type BookingReservationListFilters,
   type BookingReservationsReadRepository,
@@ -647,6 +662,10 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
     return {
       headerLogo: "https://cdn.vayada.example/alpenrose/header-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+      showContactButton: true,
+      showReferAGuestButton: false,
+      showLanguageSelector: true,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Stay above the clouds",
       heroSubtext: "An independent alpine escape.",
@@ -741,6 +760,10 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
         settings.headerLogoMediaObjectId === undefined
           ? bookingHeaderLogoMediaObjectId
           : settings.headerLogoMediaObjectId,
+      showContactButton: settings.showContactButton ?? true,
+      showReferAGuestButton: settings.showReferAGuestButton ?? false,
+      showLanguageSelector: settings.showLanguageSelector ?? true,
+      showCurrencySelector: settings.showCurrencySelector ?? true,
       heroImage: settings.heroImage ?? "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: settings.heroHeading ?? "Stay above the clouds",
       heroSubtext: settings.heroSubtext ?? "An independent alpine escape.",
@@ -1051,6 +1074,7 @@ const financeRepository: FinancePropertyReadRepository = {
 const pmsRoomTypes: PmsRoomType[] = [
   {
     roomTypeId: "f6855000-0000-0000-0000-000000000001",
+    version: "room-type-facts-v1",
     name: "Alpine Suite",
     description: "Suite with mountain view.",
     category: "suite",
@@ -1083,6 +1107,7 @@ const pmsRoomTypes: PmsRoomType[] = [
   },
   {
     roomTypeId: "f6855000-0000-0000-0000-000000000002",
+    version: "room-type-facts-v1",
     name: "Garden Room",
     description: "Quiet room facing the garden.",
     category: "double",
@@ -1752,6 +1777,7 @@ function createPmsOperationsCommandRepository(
       }
       const roomType: PmsRoomType = {
         roomTypeId: "f6855000-0000-0000-0000-000000000003",
+        version: "room-type-facts-v1",
         name: command.name,
         description: command.description,
         category: command.category,
@@ -1821,6 +1847,15 @@ function createPmsOperationsCommandRepository(
           sideEffects: ["audit_event"],
         },
       };
+    },
+    async duplicateRoomType() {
+      throw new Error("Room-type duplication is not implemented by this app-test fake.");
+    },
+    async inspectRoomTypeRetirement() {
+      throw new Error("Room-type retirement is not implemented by this app-test fake.");
+    },
+    async retireRoomType() {
+      throw new Error("Room-type retirement is not implemented by this app-test fake.");
     },
     async getOperationalTemplate(propertyId, templateKind) {
       expect(propertyId).toBe(pmsPropertyId);
@@ -2522,6 +2557,11 @@ function targetPublicHotelProfileRow(): QueryResultRow {
       supportedLocales: ["en", "de"],
     },
     bookingHeaderLogo: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
+    bookingShowContactButton: false,
+    bookingShowReferAGuestButton: true,
+    bookingShowLanguageSelector: false,
+    bookingShowCurrencySelector: true,
+    bookingReferAGuestModuleEnabled: true,
     bookingHeroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
     bookingHeroHeading: "Stay in the heart of the Alps",
     bookingHeroSubtext: "Book direct for our best available rates.",
@@ -2642,14 +2682,26 @@ function buildAuthenticatedApp(
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
     publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
+    bookingPublicationRefresh?: BookingPublicationRefreshPort;
     pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
     customDomainRepository?: BookingCustomDomainRepository;
     bookingAddonItemsRepository?: BookingAddonItemsRepository;
     bookingPromoCodesRepository?: BookingPromoCodesRepository;
-    pmsOperationsRepository?: PmsOperationsReadRepository;
+    pmsOperationsRepository?: PmsOperationsReadRepository | null;
+    pmsInboxAssistancePort?: PmsInboxAssistancePort;
+    pmsInboxReadPort?: PmsInboxReadPort;
+    pmsInboxMarkReadPort?: PmsInboxMarkReadPort;
+    pmsInboxProviderActionPort?: PmsInboxProviderActionPort;
+    pmsInboxQuickReplyPort?: PmsInboxQuickReplyPort;
+    pmsInboxReplyPort?: PmsInboxReplyPort;
+    pmsInboxSendingEnabled?: boolean;
+    pmsInboxStartDirectEmailPort?: PmsInboxStartDirectEmailPort;
+    pmsInboxTriagePort?: PmsInboxTriagePort;
+    pmsInboxStaffCommandPort?: PmsInboxStaffCommandPort;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
     pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
     bookingAcceptanceSettings?: BookingAcceptanceSettingsPort;
+    sameDayBookingSettings?: SameDayBookingSettingsPort;
     pmsRoomAssignmentSettings?: PmsRoomAssignmentSettingsPort;
     pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
     bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -2666,6 +2718,7 @@ function buildAuthenticatedApp(
     linkedBookingPropertyId?: string | null;
     propertyScope?: MembershipPropertyScope | null;
     propertyAccessRepository?: PropertyAccessRepository;
+    logger?: false | { level: string; stream: { write(line: string): void } };
   } = {},
 ): ReturnType<typeof buildApp> {
   const propertyAccessRepository =
@@ -2674,19 +2727,35 @@ function buildAuthenticatedApp(
       ? agencyPropertyAccessRepository
       : {
           async findMembershipPropertyScope() {
-            return options.propertyScope ?? null;
+            return options.propertyScope
+              ? { productAccess: { pms: true, booking: true }, ...options.propertyScope }
+              : null;
           },
         });
 
   return buildApp({
-    logger: false,
+    logger: options.logger ?? false,
     browserAllowedOrigins: options.browserAllowedOrigins,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
     bookingChangeRequestRepository: options.changeRequestRepository,
-    pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
+    pmsOperationsRepository:
+      options.pmsOperationsRepository === null
+        ? undefined
+        : (options.pmsOperationsRepository ?? pmsOperationsRepository),
     pmsCheckoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
     pmsOperationsCommandRepository: options.pmsOperationsCommandRepository,
+    pmsInboxAssistancePort: options.pmsInboxAssistancePort,
+    pmsInboxReadPort: options.pmsInboxReadPort,
+    pmsInboxMarkReadPort: options.pmsInboxMarkReadPort,
+    pmsInboxProviderActionPort: options.pmsInboxProviderActionPort,
+    pmsInboxQuickReplyPort: options.pmsInboxQuickReplyPort,
+    pmsInboxReplyPort: options.pmsInboxReplyPort,
+    pmsInboxSendingEnabled: options.pmsInboxSendingEnabled,
+    pmsInboxStartDirectEmailPort: options.pmsInboxStartDirectEmailPort,
+    pmsInboxTriagePort: options.pmsInboxTriagePort,
+    pmsInboxStaffCommandPort: options.pmsInboxStaffCommandPort,
     bookingAcceptanceSettings: options.bookingAcceptanceSettings,
+    sameDayBookingSettings: options.sameDayBookingSettings,
     pmsRoomAssignmentSettings: options.pmsRoomAssignmentSettings,
     pmsRoomAssignmentHistory: options.pmsRoomAssignmentHistory,
     bookingGuestPiiPort: options.bookingGuestPiiPort,
@@ -2700,6 +2769,7 @@ function buildAuthenticatedApp(
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     publicBookabilityPublisher: options.publicBookabilityPublisher,
+    bookingPublicationRefresh: options.bookingPublicationRefresh,
     pmsInventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
     bookingPropertyAccessRepository: propertyAccessRepository,
@@ -2720,6 +2790,10 @@ function buildAuthenticatedApp(
           return (
             options.permissions ?? [
               "booking.settings.manage",
+              "booking.addons.read",
+              "booking.addons.manage",
+              "booking.promos.read",
+              "booking.promos.manage",
               "booking.reservation.read",
               "pms.guest_contact.read",
             ]
@@ -2741,23 +2815,6 @@ function buildAuthenticatedApp(
       },
     },
   });
-}
-
-function propertyAccessFailureAfterAuthorization(): PropertyAccessRepository {
-  let reads = 0;
-  return {
-    async findMembershipPropertyScope(context) {
-      if (reads++ % 2 === 0) {
-        return {
-          mode: "all",
-          roleKey: context.membership.roleKey,
-          accessOrigin: "agency",
-          assignedPropertyIds: [],
-        };
-      }
-      throw new Error("sensitive property access failure");
-    },
-  };
 }
 
 function readContractPath(value: unknown, path: string): unknown {
@@ -3000,6 +3057,57 @@ describe("vayada-api", () => {
       expect.arrayContaining([
         expect.objectContaining({ key: "live_properties", rawValue: 0, value: "0" }),
       ]),
+    );
+  });
+
+  it.each([
+    ["", ["a", "b"]],
+    ["?booking_property_id=a", ["a"]],
+    ["?booking_property_id=unknown", []],
+    ["?property_ids=b&booking_property_id=a", []],
+    ["?property_ids=", []],
+  ])("filters both growth series and KPI cards: %s", async (query, expectedIds) => {
+    const inputs: string[][] = [];
+    app = buildPlatformAdminApp({
+      repository: {
+        async listBookings() {
+          return [];
+        },
+        async listGrowthProperties() {
+          return ["a", "b"].map((id) => ({
+            id,
+            name: id,
+            slug: id,
+            status: "live" as const,
+            lifecycleStatus: "active" as const,
+            lifecycleRevision: 1,
+            ownerAccountUserIds: [],
+            createdAt: "2026-01-01T00:00:00Z",
+          }));
+        },
+        async readGrowthTelemetry({ propertyIds }) {
+          inputs.push(propertyIds);
+          return {
+            pageViews: [{ key: "today", label: "Today", value: propertyIds.length * 10 }],
+            bookingRequests: [{ key: "today", label: "Today", value: propertyIds.length }],
+          };
+        },
+      },
+    });
+    const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
+      method: "GET",
+      url: `/api/platform/admin/growth${query}`,
+      headers: { authorization: "Bearer platform-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(inputs).toEqual([expectedIds]);
+    expect(response.body.pageViews[0]?.value).toBe(expectedIds.length * 10);
+    expect(response.body.bookingRequests[0]?.value).toBe(expectedIds.length);
+    expect(response.body.metrics.find(({ key }) => key === "page_views")?.rawValue).toBe(
+      expectedIds.length * 10,
+    );
+    expect(response.body.metrics.find(({ key }) => key === "booking_requests")?.rawValue).toBe(
+      expectedIds.length,
     );
   });
 
@@ -3292,9 +3400,7 @@ describe("vayada-api", () => {
     const body = response.json();
 
     expect(response.statusCode).toBe(200);
-    expect(response.headers["cache-control"]).toBe(
-      "public, max-age=60, stale-while-revalidate=300",
-    );
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-ai-profile-read");
     expect(body).toMatchObject({
       contractVersion: "public-bookability.v1",
@@ -4123,6 +4229,7 @@ describe("vayada-api", () => {
               accessOrigin: "agency",
               assignedPropertyIds: [],
               permissionOverrides,
+              productAccess: { pms: true, booking: true },
             };
           },
           async recordInvalidPermissionOverride(_context, issueCodes) {
@@ -4318,6 +4425,94 @@ describe("vayada-api", () => {
     expect(published).toEqual([pmsPropertyId]);
   });
 
+  it("reads and idempotently updates the canonical same-day policy through Booking Admin", async () => {
+    let enabled = true;
+    let cutoffLocalTime: string | null = "18:00";
+    let closes = 0;
+    const sameDayBookingSettings: SameDayBookingSettingsPort = {
+      async find(propertyId) {
+        expect(propertyId).toBe(pmsPropertyId);
+        return {
+          propertyId,
+          propertyTimeZone: "Europe/Vienna",
+          enabled,
+          cutoffLocalTime,
+          revision: 2,
+          updatedAt: "2026-09-01T10:00:00.000Z",
+        };
+      },
+      async update(context, propertyId, input, source) {
+        expect(context.membership.permissions).toContain("booking.settings.manage");
+        expect(context.membership.permissions).not.toContain("pms.settings.manage");
+        expect(propertyId).toBe(pmsPropertyId);
+        expect(input).toMatchObject({ commandId: "command-1", idempotencyKey: "key-1" });
+        expect(source).toBe("booking-admin");
+        enabled = input.enabled;
+        cutoffLocalTime = input.cutoffLocalTime;
+        return {
+          ok: true,
+          replayed: false,
+          channexOperationId: null,
+          settings: {
+            propertyId,
+            propertyTimeZone: "Europe/Vienna",
+            enabled,
+            cutoffLocalTime,
+            revision: 3,
+            updatedAt: "2026-09-01T10:01:00.000Z",
+          },
+        };
+      },
+      async close() {
+        closes += 1;
+      },
+    };
+    app = buildAuthenticatedApp({
+      linkedPmsPropertyId: null,
+      sameDayBookingSettings,
+    });
+
+    const read = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/same-day-booking",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const update = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/same-day-booking",
+      payload: {
+        commandId: "command-1",
+        idempotencyKey: "key-1",
+        enabled: false,
+        cutoffLocalTime: "12:30",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(read.statusCode).toBe(200);
+    expect(read.body).toMatchObject({
+      contractVersion: "same-day-booking-policy.v1",
+      propertyTimeZone: "Europe/Vienna",
+      enabled: true,
+      cutoffLocalTime: "18:00",
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.body).toMatchObject({
+      enabled: false,
+      cutoffLocalTime: "12:30",
+      revision: 3,
+      replayed: false,
+    });
+    await app.close();
+    app = null;
+    expect(closes).toBe(1);
+
+    app = buildAuthenticatedApp({ pmsOperationsRepository: null, sameDayBookingSettings });
+    await app.close();
+    app = null;
+    expect(closes).toBe(2);
+  });
+
   it("publishes Booking setup through the canonical Distribution command boundary", async () => {
     const publishedPropertyIds: string[] = [];
     const projectedPropertyIds: string[] = [];
@@ -4365,6 +4560,44 @@ describe("vayada-api", () => {
       profileStatus: "public",
       freshnessStatus: "fresh",
       missingReadiness: [],
+    });
+  });
+
+  it("refreshes the active Booking publication through the Design Studio endpoint", async () => {
+    const refreshInputs: Parameters<BookingPublicationRefreshPort["refresh"]>[0][] = [];
+    app = buildAuthenticatedApp({
+      bookingPublicationRefresh: {
+        async refresh(input) {
+          refreshInputs.push(input);
+          return {
+            operationId: "a1000000-0000-4000-8000-000000001299",
+            propertyId: input.propertyId,
+            status: "succeeded",
+            expectedActiveContentRevisionId: null,
+            resultContentRevisionId: "a1000000-0000-4000-8000-000000001300",
+            failureCode: null,
+            requestedAt: "2026-09-03T01:00:00.000Z",
+            updatedAt: "2026-09-03T01:00:01.000Z",
+            completedAt: "2026-09-03T01:00:01.000Z",
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/public-bookability",
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({ status: "succeeded", propertyId: pmsPropertyId });
+    expect(refreshInputs).toHaveLength(1);
+    expect(refreshInputs[0]).toMatchObject({
+      organizationId: "org_hotel_group",
+      propertyId: pmsPropertyId,
+      actorUserId: "user_hotel_owner",
+      idempotencyKey: expect.any(String),
     });
   });
 
@@ -4519,6 +4752,10 @@ describe("vayada-api", () => {
     expect(readResponse.body).toEqual({
       headerLogo: "https://cdn.vayada.example/alpenrose/header-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+      showContactButton: true,
+      showReferAGuestButton: false,
+      showLanguageSelector: true,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Stay above the clouds",
       heroSubtext: "An independent alpine escape.",
@@ -4532,6 +4769,10 @@ describe("vayada-api", () => {
       headers: { authorization: "Bearer valid-token" },
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+        showContactButton: false,
+        showReferAGuestButton: true,
+        showLanguageSelector: false,
+        showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
         primaryColor: "#0F766E",
         fontPairing: "grand-classic",
@@ -4541,6 +4782,10 @@ describe("vayada-api", () => {
     expect(writeResponse.body).toEqual({
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+      showContactButton: false,
+      showReferAGuestButton: true,
+      showLanguageSelector: false,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "An independent alpine escape.",
@@ -4700,6 +4945,45 @@ describe("vayada-api", () => {
   });
 
   const settingsWriteCases = [
+    {
+      name: "automatic promotions",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/last-minute",
+      payload: {
+        enabled: false,
+        stackWithPromo: false,
+        tiers: [],
+        promotions: [
+          {
+            type: "EARLY_BIRD",
+            active: true,
+            roomTypeIds: [],
+            discountPercent: 18,
+            threshold: 90,
+            freeNights: 0,
+            weekdays: [],
+            tiers: [],
+          },
+        ],
+      },
+      expected: {
+        enabled: false,
+        stackWithPromo: false,
+        tiers: [],
+        promotions: [
+          {
+            type: "EARLY_BIRD",
+            active: true,
+            roomTypeIds: [],
+            discountPercent: 18,
+            threshold: 90,
+            freeNights: 0,
+            weekdays: [],
+            tiers: [],
+          },
+        ],
+        updatedAt: "2026-06-22T10:00:00.000Z",
+      },
+    },
     {
       name: "add-on display",
       url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
@@ -5388,12 +5672,6 @@ describe("vayada-api", () => {
         500,
         "read_model_unavailable",
       ),
-      testCase(
-        "scope second-read failure",
-        { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        500,
-        "read_model_unavailable",
-      ),
       testCase("authorized malformed JSON", {}, 400, undefined, "malformed"),
     ];
     const requests = {
@@ -5681,6 +5959,36 @@ describe("vayada-api", () => {
       addonItems: [bookingAddonItem],
       propertyPlan: commissionPropertyPlan,
     });
+  });
+
+  it.each([
+    ["addon-items", "booking.addons.read"],
+    ["promo-codes", "booking.promos.read"],
+  ] as const)("separates %s View from writes and general Settings", async (path, permission) => {
+    app = buildAuthenticatedApp({ permissions: [permission] });
+    const url = `/api/booking/hotels/booking_hotel_alpenrose/${path}`;
+    const headers = { authorization: "Bearer valid-token" };
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
+    for (const method of ["POST", "PATCH", "DELETE"] as const) {
+      expect(
+        (
+          await app.inject({
+            method,
+            url: method === "POST" ? url : `${url}/target`,
+            headers,
+            ...(method === "DELETE" ? {} : { payload: {} }),
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    await app.close();
+    app = buildAuthenticatedApp({ permissions: ["booking.settings.manage"] });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+    await app.close();
+    app = buildAuthenticatedApp({
+      permissions: [path === "addon-items" ? "booking.promos.read" : "booking.addons.read"],
+    });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
   });
 
   it("returns the booking add-on item read-model not-found contract", async () => {
@@ -6962,7 +7270,7 @@ describe("vayada-api", () => {
     expect(sql).toContain("FROM booking.guest_bookings booking");
     expect(sql).toContain("hotel_catalog.property_source_links source");
     expect(sql).toContain("pms.operational_booking_assignments");
-    expect(sql).toContain("booking.booking_addon_selections");
+    expect(sql).toContain("booking.active_booking_addon_selections");
     expect(sql).toContain("finance.payments");
     expect(sql).toContain("assignment_status IN ('checked_in', 'in_house', 'checked_out')");
     expect(sql).toContain("row_number() OVER");
@@ -7039,6 +7347,10 @@ describe("vayada-api", () => {
         supportedCurrencies: ["EUR", "USD"],
         branding: {
           logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
+          showContactButton: false,
+          showReferAGuestButton: true,
+          showLanguageSelector: false,
+          showCurrencySelector: true,
           heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
           heroHeading: "Stay in the heart of the Alps",
           heroSubtext: "Book direct for our best available rates.",
@@ -7074,6 +7386,20 @@ describe("vayada-api", () => {
     expect(queries[0]?.text).toContain("hotel_catalog.property_slugs");
     expect(queries[0]?.text).toContain("booking.booking_settings");
     expect(queries[0]?.text).toContain('booking_header_logo.public_cdn_url AS "bookingHeaderLogo"');
+    expect(queries[0]?.text).toContain(
+      'booking_branding.show_contact_button AS "bookingShowContactButton"',
+    );
+    expect(queries[0]?.text).toContain("entitlement.entitlement_key = 'module:affiliates'");
+    expect(queries[0]?.text).toContain(
+      "pms_resource.organization_id = entitlement.organization_id",
+    );
+    expect(queries[0]?.text).toContain("pms_resource.product = 'pms'");
+    expect(queries[0]?.text).toContain("pms_resource.resource_type = 'pms_property'");
+    expect(queries[0]?.text).toContain(
+      "booking_resource.organization_id = entitlement.organization_id",
+    );
+    expect(queries[0]?.text).toContain("booking_resource.product = 'booking'");
+    expect(queries[0]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
     expect(queries[0]?.text).toContain("booking_branding.header_logo_media_object_id");
     expect(queries[0]?.text).toContain("media.purpose = 'booking.header_logo'");
     expect(queries[0]?.text).toContain('booking_branding.hero_image_url AS "bookingHeroImage"');
@@ -7083,6 +7409,10 @@ describe("vayada-api", () => {
     expect(queries[0]?.values).toEqual(["distribution-alpenrose"]);
     expect(serializePublicHotelProfileProjection(profile!).hotel.branding).toEqual({
       logoUrl: "https://cdn.vayada.example/hotels/distribution-alpenrose/header-logo.webp",
+      showContactButton: false,
+      showReferAGuestButton: true,
+      showLanguageSelector: false,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/hotels/distribution-alpenrose/booking.jpg",
       heroHeading: "Stay in the heart of the Alps",
       heroSubtext: "Book direct for our best available rates.",
@@ -7092,845 +7422,24 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(profile)).toEqual([]);
   });
 
-  it("reads target public quotes from distribution read models without PMS public API", async () => {
-    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
-    const pool: PublicHotelQuoteReadPool = {
-      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
-        queries.push({ text, values });
-        return {
-          rows: [
-            {
-              quoteSessionId: "f6898100-0000-0000-0000-000000000001",
-              publicQuoteReference: "quote_target_alpenrose",
-              quoteHash: "sha256:target-alpenrose",
-              requestSnapshot: {},
-              quoteStatus: "bookable",
-              unavailableReasons: [],
-              offers: [
-                {
-                  offerId: "offer_deluxe_flexible",
-                  roomTypeId: "room_deluxe",
-                  ratePlanId: "rate_flexible",
-                  name: "Deluxe Double Room",
-                  locationAddress: "Seestrasse 12, Innsbruck",
-                  latitude: 47.2692,
-                  longitude: 11.4041,
-                  availableRooms: 2,
-                  paymentOptions: ["card", "pay_at_property"],
-                  totals: {
-                    currency: "EUR",
-                    roomTotal: 540,
-                    taxesAndFees: 54,
-                    discounts: 0,
-                    grandTotal: 594,
-                  },
-                  bookingUrl:
-                    "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
-                },
-              ],
-              totals: {},
-              deepLinkUrl:
-                "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
-              priceGuarantee: "expires_at",
-              currency: "EUR",
-              sourceFreshness: {
-                sources: [
-                  {
-                    owner: "hotel_catalog",
-                    status: "fresh",
-                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  },
-                  {
-                    owner: "booking",
-                    status: "fresh",
-                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  },
-                  {
-                    owner: "pms",
-                    status: "fresh",
-                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  },
-                  {
-                    owner: "finance",
-                    status: "fresh",
-                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  },
-                  {
-                    owner: "distribution",
-                    status: "fresh",
-                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
-                  },
-                ],
-              },
-              freshnessStatus: "fresh",
-              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-              expiresAt: "2026-06-09T09:15:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: publicHotelProfileRepository,
-      pool,
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-      children: "0",
-      rooms: "1",
-      currency: "EUR",
-      locale: "en",
-    });
-
-    expect(quote).toMatchObject({
-      contractVersion: "public-bookability.v1",
-      generatedAt: "2026-06-09T09:00:00.000Z",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        checkIn: "2026-09-12",
-        checkOut: "2026-09-15",
-        adults: 2,
-        children: 0,
-        rooms: 1,
-      },
-      status: "bookable",
-      quote: {
-        quoteId: "quote_target_alpenrose",
-        offers: [
-          {
-            offerId: "offer_deluxe_flexible",
-            roomTypeId: "room_deluxe",
-            locationAddress: "Seestrasse 12, Innsbruck",
-            latitude: 47.2692,
-            longitude: 11.4041,
-            paymentOptions: ["card", "pay_at_property"],
-            totals: {
-              grandTotal: 594,
-            },
-          },
-        ],
-      },
-      freshness: {
-        status: "fresh",
-      },
-    });
-    expect(queries[0]?.text).toContain("distribution.public_quote_read_models");
-    expect(queries[0]?.text).toContain("read_model.expires_at > $11::timestamptz");
-    expect(queries[0]?.text).toContain("profile.profile_status = 'public'");
-    expect(queries[0]?.text).toContain("profile.expires_at IS NULL");
-    expect(queries[0]?.text).toContain("read_model.freshness_status = 'fresh'");
-    expect(queries[0]?.text).not.toContain("PMS_PUBLIC_API_URL");
-    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
-  });
-
-  it("builds target public quotes from offer snapshots when no quote read model exists", async () => {
-    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
-    const pool: PublicHotelQuoteReadPool = {
-      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
-        queries.push({ text, values });
-        if (queries.length === 1) {
-          return { rows: [] as unknown as T[] };
-        }
-        return {
-          rows: [
-            {
-              publicOfferKey: "rt:deluxe:flex",
-              roomTypeId: "room_deluxe",
-              ratePlanId: "rate_flexible",
-              roomSummary: {
-                name: "Deluxe Double Room",
-                locationAddress: "Seestrasse 12, Innsbruck",
-                latitude: 47.2692,
-                longitude: 11.4041,
-              },
-              rateSummary: { refundable: true },
-              occupancy: { maxAdults: 2, maxChildren: 1 },
-              publicPolicy: { cancellation: "Free cancellation" },
-              paymentOptions: ["pay_at_property"],
-              availableRooms: "2",
-              roomTotal: "540.00",
-              taxesAndFees: "54.00",
-              discounts: "0.00",
-              currency: "EUR",
-              sourceFreshness: {
-                sources: [{ owner: "pms", status: "fresh" }],
-              },
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: publicHotelProfileRepository,
-      pool,
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-      children: "0",
-      rooms: "1",
-      currency: "EUR",
-      locale: "en",
-    });
-
-    expect(quote).toMatchObject({
-      status: "bookable",
-      quote: {
-        offers: [
-          {
-            offerId: "rt:deluxe:flex",
-            roomTypeId: "room_deluxe",
-            ratePlanId: "rate_flexible",
-            name: "Deluxe Double Room",
-            locationAddress: "Seestrasse 12, Innsbruck",
-            latitude: 47.2692,
-            longitude: 11.4041,
-            availableRooms: 2,
-            paymentOptions: ["pay_at_property"],
-            totals: {
-              roomTotal: 540,
-              taxesAndFees: 54,
-              grandTotal: 594,
-            },
-          },
-        ],
-      },
-      freshness: {
-        status: "fresh",
-      },
-    });
-    expect(queries).toHaveLength(2);
-    expect(queries[0]?.text).toContain("distribution.public_quote_read_models");
-    expect(queries[1]?.text).toContain("distribution.public_room_offer_snapshots");
-    expect(queries[1]?.text).toContain(
-      "jsonb_agg(offer.payment_options ORDER BY offer.stay_date)->0",
-    );
-    expect(queries[1]?.text).not.toContain("array_agg(offer.payment_options");
-    expect(queries[1]?.text).toContain("offer.sellable_publicly = TRUE");
-    expect(queries[1]?.text).toContain("offer.availability_status IN ('available', 'limited')");
-    expect(queries[1]?.text).toContain("offer.available_rooms > 0");
-    expect(queries[1]?.text).toContain("offer.freshness_status = 'fresh'");
-    expect(queries[1]?.values).toEqual([
-      "hotel-alpenrose",
-      "2026-09-12",
-      "2026-09-15",
-      "EUR",
-      2,
-      0,
-      1,
-      3,
-      "2026-06-09T09:00:00.000Z",
-    ]);
-    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
-  });
-
-  it("does not serve a cached bookable quote when profile readiness is unavailable", async () => {
-    let queryCount = 0;
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: {
-        async findProfileBySlug() {
-          return {
-            ...seededPublicProfile,
-            hotel: {
-              ...seededPublicProfile.hotel,
-              trust: {
-                ...seededPublicProfile.hotel.trust,
-                bookabilityStatus: "unavailable",
-                reasonCodes: ["payment_disabled"],
-              },
-            },
-          };
-        },
-      },
-      pool: {
-        async query<T extends QueryResultRow>() {
-          queryCount += 1;
-          return { rows: [] as T[] };
-        },
-        async end() {},
-      },
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-    });
-
-    expect(queryCount).toBe(0);
-    expect(quote).toMatchObject({
-      status: "unavailable",
-      unavailableReasons: [{ code: "payment_disabled" }],
-    });
-  });
-
-  it("does not expose cached online payment options when only pay-at-property is ready", async () => {
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: {
-        async findProfileBySlug() {
-          return {
-            ...seededPublicProfile,
-            hotel: {
-              ...seededPublicProfile.hotel,
-              capabilities: {
-                ...seededPublicProfile.hotel.capabilities,
-                onlinePayment: false,
-                payAtProperty: true,
-              },
-            },
-          };
-        },
-      },
-      pool: {
-        async query<T extends QueryResultRow>() {
-          return {
-            rows: [
-              {
-                quoteSessionId: "f6898100-0000-0000-0000-000000000001",
-                publicQuoteReference: "quote_pay_at_property",
-                quoteHash: "sha256:pay-at-property",
-                requestSnapshot: {},
-                quoteStatus: "bookable",
-                unavailableReasons: [],
-                offers: [
-                  {
-                    offerId: "offer_deluxe",
-                    roomTypeId: "room_deluxe",
-                    name: "Deluxe Room",
-                    availableRooms: 1,
-                    paymentOptions: ["card", "pay_at_property"],
-                    totals: {
-                      currency: "EUR",
-                      roomTotal: 180,
-                      taxesAndFees: 18,
-                      discounts: 0,
-                      grandTotal: 198,
-                    },
-                  },
-                ],
-                totals: {},
-                deepLinkUrl: "https://hotel-alpenrose.booking.localhost/en/book",
-                priceGuarantee: "expires_at",
-                currency: "EUR",
-                sourceFreshness: {
-                  hotel_catalog: { status: "fresh" },
-                  booking: { status: "fresh" },
-                  pms: { status: "fresh" },
-                  finance: { status: "fresh" },
-                  distribution: { status: "fresh" },
-                },
-                freshnessStatus: "fresh",
-                dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-                generatedAt: "2026-06-09T09:00:00.000Z",
-                expiresAt: "2026-06-09T09:15:00.000Z",
-              },
-            ] as unknown as T[],
-          };
-        },
-        async end() {},
-      },
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-    });
-
-    expect(quote?.quote?.offers[0]?.paymentOptions).toEqual(["pay_at_property"]);
-  });
-
-  it.each([
-    {
-      caseName: "required source freshness is missing",
-      sourceFreshness: {},
-      paymentOptions: ["card"],
-      reasonCode: "unavailable_data",
-    },
-    {
-      caseName: "the producer supplies no valid payment method",
-      sourceFreshness: {
-        hotel_catalog: { status: "fresh" },
-        booking: { status: "fresh" },
-        pms: { status: "fresh" },
-        finance: { status: "fresh" },
-        distribution: { status: "fresh" },
-      },
-      paymentOptions: [],
-      reasonCode: "payment_disabled",
-    },
-  ])("fails cached bookable quotes closed when $caseName", async (fixture) => {
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: publicHotelProfileRepository,
-      pool: {
-        async query<T extends QueryResultRow>() {
-          return {
-            rows: [
-              {
-                quoteSessionId: "f6898100-0000-0000-0000-000000000004",
-                publicQuoteReference: "quote_fail_closed",
-                quoteHash: "sha256:fail-closed",
-                requestSnapshot: {},
-                quoteStatus: "bookable",
-                unavailableReasons: [],
-                offers: [
-                  {
-                    offerId: "offer_deluxe",
-                    roomTypeId: "room_deluxe",
-                    name: "Deluxe Room",
-                    availableRooms: 1,
-                    paymentOptions: fixture.paymentOptions,
-                    totals: {
-                      currency: "EUR",
-                      roomTotal: 180,
-                      taxesAndFees: 18,
-                      discounts: 0,
-                      grandTotal: 198,
-                    },
-                  },
-                ],
-                totals: {},
-                deepLinkUrl: "https://hotel-alpenrose.booking.localhost/en/book",
-                priceGuarantee: "expires_at",
-                currency: "EUR",
-                sourceFreshness: fixture.sourceFreshness,
-                freshnessStatus: "fresh",
-                dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-                generatedAt: "2026-06-09T09:00:00.000Z",
-                expiresAt: "2026-06-09T09:15:00.000Z",
-              },
-            ] as unknown as T[],
-          };
-        },
-        async end() {},
-      },
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-    });
-
-    expect(quote).toMatchObject({
-      status: "unavailable",
-      unavailableReasons: [{ code: fixture.reasonCode }],
-    });
-    expect(quote?.quote).toBeUndefined();
-  });
-
-  it("builds target offer fallback booking URLs from the hotel booking base URL", async () => {
-    const customDomainProfile = {
-      ...seededPublicProfile,
-      hotel: {
-        ...seededPublicProfile.hotel,
-        bookingBaseUrl: "https://book.alpenrose.example",
-      },
-    };
-    const pool: PublicHotelQuoteReadPool = {
+  it("keeps Refer a Guest disabled without an active, property-scoped module entitlement", async () => {
+    const row = targetPublicHotelProfileRow();
+    row.bookingReferAGuestModuleEnabled = false;
+    const pool: PublicHotelProfileReadPool = {
       async query<T extends QueryResultRow>() {
-        return {
-          rows: [
-            {
-              quoteSessionId: "f6898100-0000-0000-0000-000000000003",
-              publicQuoteReference: "quote_target_fallback_url",
-              quoteHash: "sha256:target-fallback-url",
-              requestSnapshot: {},
-              quoteStatus: "bookable",
-              unavailableReasons: [],
-              offers: [
-                {
-                  offerId: "offer_deluxe_flexible",
-                  roomTypeId: "room_deluxe",
-                  name: "Deluxe Double Room",
-                  availableRooms: 2,
-                  paymentOptions: ["card"],
-                  totals: {
-                    currency: "EUR",
-                    roomTotal: 540,
-                    taxesAndFees: 54,
-                    discounts: 0,
-                    grandTotal: 594,
-                  },
-                },
-              ],
-              totals: {},
-              deepLinkUrl: null,
-              priceGuarantee: "expires_at",
-              currency: "EUR",
-              sourceFreshness: {
-                hotel_catalog: { status: "fresh" },
-                booking: { status: "fresh" },
-                pms: { status: "fresh" },
-                finance: { status: "fresh" },
-                distribution: { status: "fresh" },
-              },
-              freshnessStatus: "fresh",
-              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-              expiresAt: "2026-06-09T09:15:00.000Z",
-            },
-          ] as unknown as T[],
-        };
+        return { rows: [row] as unknown as T[] };
       },
       async end() {},
     };
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: {
-        async findProfileBySlug(slug) {
-          return slug === customDomainProfile.hotel.slug ? customDomainProfile : null;
-        },
-      },
-      pool,
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-      children: "0",
-      rooms: "1",
-      currency: "EUR",
-      locale: "en",
-      referral_code: "creator-anna",
-    });
-
-    const bookingUrl = quote?.quote?.offers[0]?.bookingUrl;
-    expect(bookingUrl).toMatch(/^https:\/\/book\.alpenrose\.example\/en\/book\?/);
-    expect(bookingUrl).toContain("check_in=2026-09-12");
-    expect(bookingUrl).toContain("referral_code=creator-anna");
-    expect(bookingUrl).not.toContain("booking.localhost");
-  });
-
-  it("preserves public detail for target unavailable quote reasons", async () => {
-    const pool: PublicHotelQuoteReadPool = {
-      async query<T extends QueryResultRow>() {
-        return {
-          rows: [
-            {
-              quoteSessionId: "f6898100-0000-0000-0000-000000000002",
-              publicQuoteReference: "quote_target_unavailable_alpenrose",
-              quoteHash: "sha256:target-unavailable-alpenrose",
-              requestSnapshot: {},
-              quoteStatus: "stale",
-              unavailableReasons: [
-                {
-                  code: "stale_data",
-                  publicDetail: {
-                    sourceOwner: "pms",
-                    maximumAgeSeconds: 300,
-                  },
-                },
-              ],
-              offers: [],
-              totals: {},
-              deepLinkUrl: null,
-              priceGuarantee: "none",
-              currency: "EUR",
-              sourceFreshness: {
-                sources: [{ owner: "pms", status: "stale", reasonCode: "source_stale" }],
-              },
-              freshnessStatus: "stale",
-              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-              expiresAt: "2026-06-09T09:15:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: publicHotelProfileRepository,
-      pool,
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-      children: "0",
-      rooms: "1",
-      currency: "EUR",
-      locale: "en",
-    });
-
-    expect(quote).toMatchObject({
-      status: "stale",
-      unavailableReasons: [
-        {
-          code: "stale_data",
-          detail: '{"sourceOwner":"pms","maximumAgeSeconds":300}',
-        },
-      ],
-      freshness: {
-        status: "stale",
-      },
-    });
-    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
-  });
-
-  it("returns unavailable target public quotes when the read model query fails", async () => {
-    const pool: PublicHotelQuoteReadPool = {
-      async query<T extends QueryResultRow>() {
-        throw new Error("target database unavailable");
-      },
-      async end() {},
-    };
-    const repository = createTargetPublicHotelQuoteRepository({
-      connectionString: "postgresql://target-db",
-      profileRepository: publicHotelProfileRepository,
-      pool,
-      now: () => new Date("2026-06-09T09:00:00.000Z"),
-    });
-
-    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
-      check_in: "2026-09-12",
-      check_out: "2026-09-15",
-      adults: "2",
-      children: "0",
-      rooms: "1",
-      currency: "EUR",
-      locale: "en",
-    });
-
-    expect(quote).toMatchObject({
-      status: "unavailable",
-      unavailableReasons: [
-        {
-          code: "unavailable_data",
-          detail: "Public quote read model is not ready yet.",
-        },
-      ],
-      freshness: {
-        status: "unavailable",
-      },
-    });
-  });
-
-  it("reads target Booking Web calendar from distribution offer snapshots", async () => {
-    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
-    const pool: BookingWebCalendarReadPool = {
-      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
-        queries.push({ text, values });
-        return {
-          rows: [
-            {
-              stayDate: "2026-09-12",
-              hasAvailability: true,
-              hasUnavailableState: false,
-              sourceFreshnessValues: [
-                JSON.stringify({
-                  sources: [{ owner: "pms", status: "fresh" }],
-                }),
-              ],
-              freshnessStatuses: ["fresh"],
-              dataSources: ["pms", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-            {
-              stayDate: "2026-09-13",
-              hasAvailability: true,
-              hasUnavailableState: false,
-              sourceFreshnessValues: [
-                JSON.stringify({
-                  sources: [{ owner: "pms", status: "fresh" }],
-                }),
-              ],
-              freshnessStatuses: ["fresh"],
-              dataSources: ["pms", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-            {
-              stayDate: "2026-09-14",
-              hasAvailability: false,
-              hasUnavailableState: true,
-              sourceFreshnessValues: [
-                JSON.stringify({
-                  sources: [{ owner: "pms", status: "fresh" }],
-                }),
-              ],
-              freshnessStatuses: ["fresh"],
-              dataSources: ["pms", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetBookingWebCalendarRepository({
+    const repository = createTargetPublicHotelProfileRepository({
       connectionString: "postgresql://target-db",
       pool,
     });
 
-    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
-      start: "2026-09-12",
-      end: "2026-09-15",
-    });
+    const profile = await repository.findProfileBySlug("distribution-alpenrose");
 
-    expect(calendar).toMatchObject({
-      contractVersion: "public-bookability.v1",
-      generatedAt: "2026-06-09T09:00:00.000Z",
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        start: "2026-09-12",
-        end: "2026-09-15",
-      },
-      calendar: {
-        unavailableDates: ["2026-09-14"],
-      },
-      freshness: {
-        status: "fresh",
-      },
-      dataSources: ["pms", "distribution"],
-    });
-    expect(queries[0]?.text).toContain("distribution.public_room_offer_snapshots");
-    expect(queries[0]?.text).toContain("profile.profile_status = 'public'");
-    expect(queries[0]?.text).toContain("profile.expires_at IS NULL");
-    expect(queries[0]?.text).toContain("offer.freshness_status = 'fresh'");
-    expect(queries[0]?.values).toEqual([
-      seededPublicProfile.hotel.propertyId,
-      "hotel-alpenrose",
-      "2026-09-12",
-      "2026-09-15",
-    ]);
-    expect(findForbiddenPublicBookabilityKeys(calendar)).toEqual([]);
-  });
-
-  it("returns unavailable target Booking Web calendar when the read model query fails", async () => {
-    const pool: BookingWebCalendarReadPool = {
-      async query<T extends QueryResultRow>() {
-        throw new Error("target database unavailable");
-      },
-      async end() {},
-    };
-    const repository = createTargetBookingWebCalendarRepository({
-      connectionString: "postgresql://target-db",
-      pool,
-    });
-
-    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
-      start: "2026-09-12",
-      end: "2026-09-15",
-    });
-
-    expect(calendar).toMatchObject({
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        start: "2026-09-12",
-        end: "2026-09-15",
-      },
-      calendar: {
-        unavailableDates: ["2026-09-12", "2026-09-13", "2026-09-14"],
-      },
-      freshness: {
-        status: "unavailable",
-      },
-    });
-  });
-
-  it("treats covered but non-sellable Booking Web inventory as unavailable", async () => {
-    const pool: BookingWebCalendarReadPool = {
-      async query<T extends QueryResultRow>() {
-        return {
-          rows: [
-            {
-              stayDate: "2026-09-12",
-              hasAvailability: false,
-              hasUnavailableState: false,
-              sourceFreshnessValues: [
-                JSON.stringify({ sources: [{ owner: "pms", status: "fresh" }] }),
-              ],
-              freshnessStatuses: ["fresh"],
-              dataSources: ["pms", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetBookingWebCalendarRepository({
-      connectionString: "postgresql://target-db",
-      pool,
-    });
-
-    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
-      start: "2026-09-12",
-      end: "2026-09-13",
-    });
-
-    expect(calendar.calendar.unavailableDates).toEqual(["2026-09-12"]);
-  });
-
-  it("marks target Booking Web calendar unavailable when snapshot coverage is partial", async () => {
-    const pool: BookingWebCalendarReadPool = {
-      async query<T extends QueryResultRow>() {
-        return {
-          rows: [
-            {
-              stayDate: "2026-09-12",
-              hasAvailability: true,
-              hasUnavailableState: false,
-              sourceFreshnessValues: [
-                JSON.stringify({ sources: [{ owner: "pms", status: "fresh" }] }),
-              ],
-              freshnessStatuses: ["fresh"],
-              dataSources: ["pms", "distribution"],
-              generatedAt: "2026-06-09T09:00:00.000Z",
-            },
-          ] as unknown as T[],
-        };
-      },
-      async end() {},
-    };
-    const repository = createTargetBookingWebCalendarRepository({
-      connectionString: "postgresql://target-db",
-      pool,
-    });
-
-    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
-      start: "2026-09-12",
-      end: "2026-09-14",
-    });
-
-    expect(calendar).toMatchObject({
-      request: {
-        hotelSlug: "hotel-alpenrose",
-        start: "2026-09-12",
-        end: "2026-09-14",
-      },
-      calendar: {
-        unavailableDates: ["2026-09-13"],
-      },
-      freshness: {
-        status: "unavailable",
-      },
-    });
+    expect(profile?.hotel.capabilities.referralCodes).toBe(false);
+    expect(profile?.hotel.branding?.showReferAGuestButton).toBe(false);
   });
 
   it("looks up target custom domains through verified property-domain ownership", async () => {
@@ -8006,6 +7515,10 @@ describe("vayada-api", () => {
       hero_subtext: string | null;
       primary_color: string;
       font_pairing: string;
+      show_contact_button: boolean;
+      show_refer_a_guest_button: boolean;
+      show_language_selector: boolean;
+      show_currency_selector: boolean;
       last_minute_discount: {
         enabled: boolean;
         stackWithPromo: boolean;
@@ -8040,6 +7553,10 @@ describe("vayada-api", () => {
       hero_subtext: "An independent alpine escape.",
       primary_color: "#2563EB",
       font_pairing: "modern-minimalist",
+      show_contact_button: true,
+      show_refer_a_guest_button: false,
+      show_language_selector: true,
+      show_currency_selector: true,
       last_minute_discount: {
         enabled: false,
         stackWithPromo: false,
@@ -8199,7 +7716,7 @@ describe("vayada-api", () => {
         }
 
         if (text.includes("SET header_logo_media_object_id = CASE")) {
-          const design = JSON.parse(values?.[1] as string) as Record<string, string | null>;
+          const design = JSON.parse(values?.[1] as string) as Record<string, unknown>;
           if (
             design.headerLogoMediaObjectId &&
             design.headerLogoMediaObjectId !== bookingHeaderLogoMediaObjectId
@@ -8215,16 +7732,36 @@ describe("vayada-api", () => {
             };
           }
           if (Object.hasOwn(design, "headerLogoMediaObjectId")) {
-            state.header_logo_media_object_id = design.headerLogoMediaObjectId;
-            state.header_logo_url = design.headerLogoMediaObjectId
+            const mediaObjectId =
+              typeof design.headerLogoMediaObjectId === "string"
+                ? design.headerLogoMediaObjectId
+                : null;
+            state.header_logo_media_object_id = mediaObjectId;
+            state.header_logo_url = mediaObjectId
               ? "https://cdn.vayada.example/alpenrose/new-logo.webp"
               : null;
           }
-          if (Object.hasOwn(design, "heroImage")) state.hero_image_url = design.heroImage || null;
-          if (Object.hasOwn(design, "heroHeading")) state.hero_heading = design.heroHeading || null;
-          if (Object.hasOwn(design, "heroSubtext")) state.hero_subtext = design.heroSubtext || null;
+          if (typeof design.heroImage === "string") state.hero_image_url = design.heroImage || null;
+          if (typeof design.heroHeading === "string") {
+            state.hero_heading = design.heroHeading || null;
+          }
+          if (typeof design.heroSubtext === "string") {
+            state.hero_subtext = design.heroSubtext || null;
+          }
           if (typeof design.primaryColor === "string") state.primary_color = design.primaryColor;
           if (typeof design.fontPairing === "string") state.font_pairing = design.fontPairing;
+          if (typeof design.showContactButton === "boolean") {
+            state.show_contact_button = design.showContactButton;
+          }
+          if (typeof design.showReferAGuestButton === "boolean") {
+            state.show_refer_a_guest_button = design.showReferAGuestButton;
+          }
+          if (typeof design.showLanguageSelector === "boolean") {
+            state.show_language_selector = design.showLanguageSelector;
+          }
+          if (typeof design.showCurrencySelector === "boolean") {
+            state.show_currency_selector = design.showCurrencySelector;
+          }
         } else if (text.includes("show_addons_step = $2")) {
           state.show_addons_step = values?.[1] as boolean;
           state.group_addons_by_category = values?.[2] as boolean;
@@ -8489,6 +8026,10 @@ describe("vayada-api", () => {
       headers: { authorization: "Bearer valid-token" },
       payload: {
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+        showContactButton: false,
+        showReferAGuestButton: true,
+        showLanguageSelector: false,
+        showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
         primaryColor: "#0F766E",
         fontPairing: "grand-classic",
@@ -8498,6 +8039,10 @@ describe("vayada-api", () => {
     expect(designResponse.body).toEqual({
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+      showContactButton: false,
+      showReferAGuestButton: true,
+      showLanguageSelector: false,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "An independent alpine escape.",
@@ -8528,6 +8073,10 @@ describe("vayada-api", () => {
       "booking_hotel_alpenrose",
       JSON.stringify({
         headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+        showContactButton: false,
+        showReferAGuestButton: true,
+        showLanguageSelector: false,
+        showCurrencySelector: true,
         heroHeading: "Book the mountain directly",
         primaryColor: "#0F766E",
         fontPairing: "grand-classic",
@@ -8580,6 +8129,10 @@ describe("vayada-api", () => {
     expect(partialDesignResponse.body).toEqual({
       headerLogo: "https://cdn.vayada.example/alpenrose/new-logo.webp",
       headerLogoMediaObjectId: bookingHeaderLogoMediaObjectId,
+      showContactButton: false,
+      showReferAGuestButton: true,
+      showLanguageSelector: false,
+      showCurrencySelector: true,
       heroImage: "https://cdn.vayada.example/alpenrose/booking-hero.jpg",
       heroHeading: "Book the mountain directly",
       heroSubtext: "Come for the mountains. Stay for the quiet.",
@@ -8845,16 +8398,28 @@ describe("vayada-api", () => {
   });
 
   it.each([
-    ["canonical property id", "d3000000-0000-0000-0000-000000000682"],
+    ["canonical property id", "d3000000-0000-4000-8000-000000000682"],
     ["legacy booking-hotel id", "booking_hotel_alpenrose"],
   ])("serves and updates target booking add-on items by %s", async (_label, hotelId) => {
     const queries: { text: string; values?: unknown[] }[] = [];
-    const canonicalPropertyId = "d3000000-0000-0000-0000-000000000682";
+    const canonicalPropertyId = "d3000000-0000-4000-8000-000000000682";
     async function query<T extends QueryResultRow = QueryResultRow>(
       text: string,
       values?: unknown[],
     ): Promise<Pick<QueryResult<T>, "rows">> {
       queries.push({ text, values });
+      if (text.includes("FROM pms.property_pricing_settings"))
+        return {
+          rows: [
+            {
+              propertyId: canonicalPropertyId,
+              currency: "EUR",
+              pricingCurrencyRevision: 1,
+              createdAt: "2026-08-11T10:00:00.000Z",
+              updatedAt: "2026-08-11T10:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
       if (text.includes("WITH direct_property AS")) {
         return {
           rows: [{ propertyId: canonicalPropertyId }] as unknown as T[],
@@ -8867,7 +8432,7 @@ describe("vayada-api", () => {
         rows: [
           {
             addonItemId: "0f840001-0000-4000-8000-000000000001",
-            propertyId: "d3000000-0000-0000-0000-000000000682",
+            propertyId: "d3000000-0000-4000-8000-000000000682",
             name: "Migrated add-on",
             description: null,
             category: "food",
@@ -8900,17 +8465,23 @@ describe("vayada-api", () => {
     const items = await repository.listAddonItemsByHotelId(hotelId);
 
     expect(items).toEqual({
+      propertyCurrency: "EUR",
       addonItems: [
         {
           addonItemId: "0f840001-0000-4000-8000-000000000001",
           hotelId,
-          propertyId: "d3000000-0000-0000-0000-000000000682",
+          propertyId: "d3000000-0000-4000-8000-000000000682",
           name: "Migrated add-on",
           description: "",
           price: "45.00",
           currency: "EUR",
           category: "dining",
           imageUrl: null,
+          photos: [],
+          location: null,
+          leadTime: null,
+          maxGuests: null,
+          maxQuantity: 1,
           imageMediaObjectId: null,
           duration: null,
           pricingModel: "per_stay",
@@ -8979,11 +8550,11 @@ describe("vayada-api", () => {
   });
 
   it.each([
-    ["canonical property id", "d3000000-0000-0000-0000-000000000682"],
+    ["canonical property id", "d3000000-0000-4000-8000-000000000682"],
     ["legacy booking-hotel id", "booking_hotel_alpenrose"],
   ])("serves target booking promo codes by %s", async (_label, hotelId) => {
     const queries: { text: string; values?: unknown[] }[] = [];
-    const canonicalPropertyId = "d3000000-0000-0000-0000-000000000682";
+    const canonicalPropertyId = "d3000000-0000-4000-8000-000000000682";
     const pool: BookingPromoCodesPool = {
       async query<T extends QueryResultRow = QueryResultRow>(
         text: string,
@@ -9002,7 +8573,7 @@ describe("vayada-api", () => {
           rows: [
             {
               promoCodeId: "0f850001-0000-4000-8000-000000000001",
-              propertyId: "d3000000-0000-0000-0000-000000000682",
+              propertyId: "d3000000-0000-4000-8000-000000000682",
               code: "SUMMER20",
               discountType: "percentage",
               discountValue: "20.00",
@@ -9056,7 +8627,7 @@ describe("vayada-api", () => {
       {
         promoCodeId: "0f850001-0000-4000-8000-000000000001",
         hotelId,
-        propertyId: "d3000000-0000-0000-0000-000000000682",
+        propertyId: "d3000000-0000-4000-8000-000000000682",
         code: "SUMMER20",
         discountType: "percentage",
         discountValue: "20.00",
@@ -10716,6 +10287,134 @@ describe("vayada-api", () => {
     expect(published).toEqual([pmsPropertyId]);
   });
 
+  it("reads and idempotently updates the Booking-owned same-day policy through PMS", async () => {
+    let enabled = true;
+    let cutoffLocalTime: string | null = "18:00";
+    app = buildAuthenticatedApp({
+      permissions: ["pms.settings.read", "pms.settings.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      sameDayBookingSettings: {
+        async find(propertyId) {
+          expect(propertyId).toBe(pmsPropertyId);
+          return {
+            propertyId,
+            propertyTimeZone: "Europe/Vienna",
+            enabled,
+            cutoffLocalTime,
+            revision: 2,
+            updatedAt: "2026-08-31T10:00:00.000Z",
+          };
+        },
+        async update(_context, propertyId, input, source) {
+          expect(propertyId).toBe(pmsPropertyId);
+          expect(input).toMatchObject({ commandId: "command-1", idempotencyKey: "key-1" });
+          expect(source).toBe("pms-web");
+          enabled = input.enabled;
+          cutoffLocalTime = input.cutoffLocalTime;
+          return {
+            ok: true,
+            replayed: false,
+            channexOperationId: null,
+            settings: {
+              propertyId,
+              propertyTimeZone: "Europe/Vienna",
+              enabled,
+              cutoffLocalTime,
+              revision: 3,
+              updatedAt: "2026-08-31T10:01:00.000Z",
+            },
+          };
+        },
+      },
+    });
+
+    const read = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/same-day-booking`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const update = await injectJson(app, {
+      method: "PUT",
+      url: `/api/pms/properties/${pmsPropertyId}/same-day-booking`,
+      payload: {
+        commandId: "command-1",
+        idempotencyKey: "key-1",
+        enabled: false,
+        cutoffLocalTime: "12:30",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(read.statusCode).toBe(200);
+    expect(read.body).toMatchObject({
+      contractVersion: "same-day-booking-policy.v1",
+      propertyTimeZone: "Europe/Vienna",
+      enabled: true,
+      cutoffLocalTime: "18:00",
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.body).toMatchObject({
+      enabled: false,
+      cutoffLocalTime: "12:30",
+      revision: 3,
+      replayed: false,
+    });
+  });
+
+  it("does not run a same-day policy write without property settings permission", async () => {
+    let updates = 0;
+    app = buildAuthenticatedApp({
+      permissions: ["pms.settings.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      sameDayBookingSettings: {
+        async find() {
+          return null;
+        },
+        async update() {
+          updates += 1;
+          throw new Error("unauthorized same-day write must not run");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: `/api/pms/properties/${pmsPropertyId}/same-day-booking`,
+      payload: {
+        commandId: "command-denied",
+        idempotencyKey: "key-denied",
+        enabled: false,
+        cutoffLocalTime: "12:30",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(updates).toBe(0);
+  });
+
   it("reads Booking-owned acceptance mode for assigned front desk with explicit access", async () => {
     let readCount = 0;
     app = buildAuthenticatedApp({
@@ -11035,13 +10734,6 @@ describe("vayada-api", () => {
         statusCode: 500,
         message: "Authentication service is temporarily unavailable.",
       },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-        message: "PMS property access is unavailable.",
-      },
     ];
     const hiddenPropertyDenials = new Set<string>();
 
@@ -11165,7 +10857,7 @@ describe("vayada-api", () => {
           },
         },
         statusCode: 403,
-        code: "missing_resource_access",
+        code: "missing_permission",
       },
       {
         name: "settings read permission",
@@ -11313,13 +11005,6 @@ describe("vayada-api", () => {
         },
         statusCode: 500,
         message: "Authentication service is temporarily unavailable.",
-      },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-        message: "PMS property access is unavailable.",
       },
     ];
     const hiddenPropertyDenials = new Set<string>();
@@ -11500,7 +11185,7 @@ describe("vayada-api", () => {
       headers: {
         origin: "https://pms.localhost",
         "access-control-request-method": "GET",
-        "access-control-request-headers": "authorization,content-type,x-hotel-id",
+        "access-control-request-headers": "authorization,content-type,idempotency-key,x-hotel-id",
       },
     });
     const read = await app.inject({
@@ -11515,7 +11200,7 @@ describe("vayada-api", () => {
     expect(preflight.statusCode).toBe(204);
     expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
     expect(preflight.headers["access-control-allow-headers"]).toBe(
-      "authorization,content-type,x-hotel-id",
+      "authorization,content-type,idempotency-key,x-hotel-id",
     );
     expect(preflight.headers["access-control-allow-methods"]).toBe(
       "GET,POST,PUT,PATCH,DELETE,OPTIONS",
@@ -11999,7 +11684,7 @@ describe("vayada-api", () => {
           propertyScope: { ...assignedScope, assignedPropertyIds: [pmsPropertyId, null as never] },
         },
         statusCode: 403,
-        code: "missing_resource_access",
+        code: "missing_permission",
       },
       {
         name: "missing membership scope",
@@ -12050,13 +11735,6 @@ describe("vayada-api", () => {
         },
         statusCode: 500,
         message: "Authentication service is temporarily unavailable.",
-      },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-        message: "PMS property access is unavailable.",
       },
     ];
     const hiddenPropertyDenials = new Set<string>();
@@ -12344,6 +12022,2204 @@ describe("vayada-api", () => {
     expect(response.body).toMatchObject({
       message: "PMS messaging unread count read model is unavailable.",
     });
+    const invalidDetail = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/messaging/threads/thread_1?messageLimit=0`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(invalidDetail).toMatchObject({ statusCode: 400, body: { code: "invalid_query" } });
+  });
+
+  it("serves the protected native Inbox list and unread contract through its scoped port", async () => {
+    const calls: Array<{ operation: string; input: unknown }> = [];
+    const thread: PmsInboxThreadSummary = {
+      id: "thread_1",
+      version: 4,
+      attentionState: "needs_attention",
+      followUpAt: null,
+      assignedTo: null,
+      channel: "ota",
+      providerChannel: "booking.com",
+      guest: { displayName: "Alex Lee", email: "alex@example.com" },
+      conversationContext: {
+        state: "linked",
+        bookingId: "booking_1",
+        reference: "VAY-1",
+        stay: {
+          checkIn: "2026-09-10",
+          checkOut: "2026-09-12",
+          nights: 2,
+          adults: 2,
+          children: 0,
+          roomCount: 1,
+          roomName: "Suite",
+          roomNumber: "101",
+          status: "confirmed",
+        },
+      },
+      unreadCount: 2,
+      activityAt: "2026-09-01T10:00:00.000Z",
+      lastMessage: { preview: "Hello", at: "2026-09-01T10:00:00.000Z", hasAttachments: false },
+      replyRoute: {
+        state: "ready",
+        channel: "ota",
+        providerChannel: "booking.com",
+        reasonCode: null,
+      },
+    };
+    const port: PmsInboxReadPort = {
+      async listThreads(input) {
+        calls.push({ operation: "list", input });
+        if (input.cursor === "mismatch") {
+          return {
+            ok: false,
+            error: { code: "invalid_cursor", message: "Inbox cursor does not match its filters." },
+          };
+        }
+        if (input.cursor === "scope-mismatch") {
+          return {
+            ok: true,
+            value: {
+              propertyId: input.propertyId,
+              items: [{ propertyId: "foreign-property", thread }],
+              nextCursor: null,
+            },
+          };
+        }
+        return {
+          ok: true,
+          value: {
+            propertyId: input.propertyId,
+            items: [{ propertyId: input.propertyId, thread }],
+            nextCursor: "next",
+          },
+        };
+      },
+      async unreadCount(propertyId) {
+        calls.push({ operation: "unread", input: propertyId });
+        return { propertyId, threadCount: 1, messageCount: 2 };
+      },
+      async getThread() {
+        throw new Error("not exercised by list test");
+      },
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.guest_contact.read"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReadPort: port,
+    });
+    const headers = { authorization: "Bearer valid-token" };
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging`;
+    const list = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?attentionState=needs_attention&unread=true&channel=ota&assignee=me&search=LEE&limit=25`,
+      headers,
+    });
+    const unread = await injectJson(app, { method: "GET", url: `${base}/unread-count`, headers });
+    const invalidCursor = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?cursor=mismatch`,
+      headers,
+    });
+    const denied = await injectJson(app, { method: "GET", url: `${base}/threads` });
+    const scopeMismatch = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?cursor=scope-mismatch`,
+      headers,
+    });
+    const invalidFilter = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?search=`,
+      headers,
+    });
+    const repeatedFilter = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?search=one&search=two`,
+      headers,
+    });
+
+    for (const response of [list, unread]) {
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toMatchObject({ contractVersion: "native-guest-inbox.v2" });
+    }
+    expect(list.body).toMatchObject({ items: [{ id: "thread_1" }], nextCursor: "next" });
+    expect(unread.body).toMatchObject({ threadCount: 1, messageCount: 2 });
+    expect(invalidCursor).toMatchObject({ statusCode: 400, body: { code: "invalid_cursor" } });
+    expect(denied).toMatchObject({ statusCode: 401, body: { code: "unauthenticated" } });
+    expect(scopeMismatch).toMatchObject({
+      statusCode: 500,
+      body: { code: "read_model_unavailable" },
+    });
+    expect(JSON.stringify(scopeMismatch.body)).not.toContain("Alex Lee");
+    expect(invalidFilter).toMatchObject({ statusCode: 400, body: { code: "invalid_query" } });
+    expect(repeatedFilter).toMatchObject({ statusCode: 400, body: { code: "invalid_query" } });
+    expect(calls.map((call) => call.operation)).toEqual(["list", "unread", "list", "list"]);
+    expect(calls[0]?.input).toMatchObject({
+      propertyId: pmsPropertyId,
+      attentionState: "needs_attention",
+      unread: true,
+      channel: "ota",
+      search: "LEE",
+      canReadGuestContact: true,
+    });
+
+    await app.close();
+    app = null;
+    const logs: string[] = [];
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReadPort: port,
+      logger: { level: "info", stream: { write: (line) => logs.push(line) } },
+    });
+    const redacted = await injectJson(app, {
+      method: "GET",
+      url: `${base}/threads?search=private%20guest`,
+      headers,
+    });
+    expect(redacted.body).toMatchObject({
+      items: [{ guest: { displayName: "Alex Lee" } }],
+    });
+    expect(JSON.stringify(redacted.body)).not.toContain("alex@example.com");
+    expect(logs.join("\n")).not.toContain("private");
+  });
+
+  it("serves scoped Inbox detail with protected staff-only timeline data", async () => {
+    const calls: Array<{ operation: string; input: unknown }> = [];
+    const logs: string[] = [];
+    const thread: PmsInboxThreadSummary = {
+      id: "thread_1",
+      version: 4,
+      attentionState: "needs_attention",
+      followUpAt: null,
+      assignedTo: null,
+      channel: "ota",
+      providerChannel: "booking.com",
+      guest: { displayName: "Alex Lee", email: "alex@example.com" },
+      conversationContext: {
+        state: "linked",
+        bookingId: "booking_1",
+        reference: "VAY-1",
+        stay: {
+          checkIn: "2026-09-10",
+          checkOut: "2026-09-12",
+          nights: 2,
+          adults: 2,
+          children: 0,
+          roomCount: 1,
+          roomName: "Suite",
+          roomNumber: "101",
+          status: "confirmed",
+        },
+      },
+      unreadCount: 2,
+      activityAt: "2026-09-01T10:00:00.000Z",
+      lastMessage: { preview: "Hello", at: "2026-09-01T10:00:00.000Z", hasAttachments: true },
+      replyRoute: {
+        state: "ready",
+        channel: "ota",
+        providerChannel: "booking.com",
+        reasonCode: null,
+      },
+    };
+    const readPort: PmsInboxReadPort = {
+      async listThreads() {
+        throw new Error("not exercised");
+      },
+      async unreadCount() {
+        throw new Error("not exercised");
+      },
+      async getThread(input) {
+        calls.push({ operation: "detail", input });
+        if (input.threadId === "throws") throw new Error("alex@example.com private message");
+        if (input.threadId === "missing")
+          return { ok: false, error: { code: "thread_not_found", message: "Thread not found." } };
+        if (input.before === "bad")
+          return { ok: false, error: { code: "invalid_cursor", message: "Invalid cursor." } };
+        const propertyId = input.threadId === "foreign" ? "foreign-property" : input.propertyId;
+        const timelineThreadId = input.threadId === "foreign-thread" ? "thread_1" : input.threadId;
+        const accessPath =
+          input.threadId === "unsafe-media"
+            ? "/api/media/../public/guide.pdf"
+            : input.threadId === "encoded-unsafe-media"
+              ? "/api/media/%2e%2e/public/guide.pdf"
+              : "/api/media/objects/media_1";
+        return {
+          ok: true,
+          value: {
+            propertyId,
+            thread: { ...thread, id: input.threadId },
+            availableProviderActions: ["booking_com_no_reply_needed"],
+            timeline: [
+              {
+                propertyId,
+                threadId: timelineThreadId,
+                item: {
+                  kind: "message",
+                  message: {
+                    id: "msg_3",
+                    direction: "inbound",
+                    sender: { type: "guest", name: "Alex Lee" },
+                    text: "Hello",
+                    occurredAt: "2026-09-01T10:00:00.000Z",
+                    readAt: null,
+                    attachments: [
+                      {
+                        id: "attachment_1",
+                        availability: "available",
+                        mediaId: "media_1",
+                        filename: "guide.pdf",
+                        contentType: "application/pdf",
+                        size: 4,
+                        accessPath: accessPath as `/api/media/${string}`,
+                      },
+                      {
+                        id: "attachment_legacy",
+                        availability: "unavailable",
+                        mediaId: null,
+                        filename: null,
+                        contentType: null,
+                        size: null,
+                        accessPath: null,
+                      },
+                    ],
+                    delivery: null,
+                  },
+                },
+              },
+            ],
+            previousCursor: "older",
+          },
+        };
+      },
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReadPort: readPort,
+      logger: { level: "info", stream: { write: (line) => logs.push(line) } },
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/threads`;
+    const headers = { authorization: "Bearer valid-token" };
+    const denied = await injectJson(app, { method: "GET", url: `${base}/thread_1` });
+    const detail = await injectJson(app, {
+      method: "GET",
+      url: `${base}/thread_1?messageLimit=25`,
+      headers,
+    });
+    const missing = await injectJson(app, { method: "GET", url: `${base}/missing`, headers });
+    const invalidCursor = await injectJson(app, {
+      method: "GET",
+      url: `${base}/thread_1?before=bad`,
+      headers,
+    });
+    const foreign = await injectJson(app, { method: "GET", url: `${base}/foreign`, headers });
+    const foreignThread = await injectJson(app, {
+      method: "GET",
+      url: `${base}/foreign-thread`,
+      headers,
+    });
+    const unsafeMedia = await injectJson(app, {
+      method: "GET",
+      url: `${base}/unsafe-media`,
+      headers,
+    });
+    const encodedUnsafeMedia = await injectJson(app, {
+      method: "GET",
+      url: `${base}/encoded-unsafe-media`,
+      headers,
+    });
+    const thrown = await injectJson(app, { method: "GET", url: `${base}/throws`, headers });
+
+    expect(denied).toMatchObject({ statusCode: 401, body: { code: "unauthenticated" } });
+    expect(detail).toMatchObject({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        thread: { guest: { displayName: "Alex Lee" } },
+        timeline: [
+          {
+            kind: "message",
+            message: {
+              attachments: [
+                { availability: "available" },
+                { availability: "unavailable", accessPath: null },
+              ],
+            },
+          },
+        ],
+        previousCursor: "older",
+      },
+    });
+    expect(JSON.stringify(detail.body)).not.toContain("alex@example.com");
+    expect(missing).toMatchObject({ statusCode: 404, body: { code: "thread_not_found" } });
+    expect(invalidCursor).toMatchObject({ statusCode: 400, body: { code: "invalid_cursor" } });
+    expect(foreign).toMatchObject({ statusCode: 500, body: { code: "read_model_unavailable" } });
+    expect(JSON.stringify(foreign.body)).not.toContain("Alex Lee");
+    for (const response of [foreignThread, unsafeMedia, encodedUnsafeMedia, thrown])
+      expect(response).toMatchObject({ statusCode: 500, body: { code: "read_model_unavailable" } });
+    expect(logs.join("\n")).not.toContain("alex@example.com");
+    expect(calls).toHaveLength(8);
+    expect(calls[0]?.input).toMatchObject({ propertyId: pmsPropertyId, messageLimit: 25 });
+  });
+
+  it("forwards the protected idempotent Inbox message-boundary read command", async () => {
+    const calls: Parameters<PmsInboxMarkReadPort["markRead"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxMarkReadPort = {
+      async markRead(input) {
+        calls.push(input);
+        if (input.threadId === "missing")
+          return { ok: false, error: { code: "thread_not_found", message: "Thread not found." } };
+        if (input.idempotencyKey === "conflict")
+          return {
+            ok: false,
+            error: { code: "idempotency_conflict", message: "Idempotency conflict." },
+          };
+        if (input.readThroughMessageId === "outbound")
+          return { ok: false, error: { code: "validation_failed", message: "Invalid boundary." } };
+        return {
+          ok: true,
+          value: {
+            propertyId: input.threadId === "wrong-scope" ? "foreign-property" : input.propertyId,
+            threadId: input.threadId,
+            readThroughMessageId: input.readThroughMessageId,
+            unreadCount: 1,
+          },
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxMarkReadPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/threads`;
+    const request = (threadId: string, idempotencyKey: string, readThroughMessageId = "msg_3") =>
+      injectJson(app!, {
+        method: "POST",
+        url: `${base}/${threadId}/read`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },
+        payload: { readThroughMessageId },
+      });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: `${base}/thread_1/read`,
+      headers: { origin: "https://pms.localhost" },
+    });
+    const first = await request("thread_1", "read-through-3");
+    const replay = await request("thread_1", "read-through-3");
+    const missing = await request("missing", "missing-thread");
+    const invalid = await request("thread_1", "invalid-boundary", "outbound");
+    const conflict = await request("thread_1", "conflict");
+    const wrongScope = await request("wrong-scope", "wrong-scope");
+
+    expect(preflight).toMatchObject({ statusCode: 204 });
+    expect(preflight.headers["access-control-allow-headers"]).toContain("idempotency-key");
+    for (const response of [first, replay])
+      expect(response).toMatchObject({
+        statusCode: 200,
+        body: {
+          contractVersion: "native-guest-inbox.v2",
+          readThroughMessageId: "msg_3",
+          unreadCount: 1,
+        },
+      });
+    expect(missing).toMatchObject({ statusCode: 404, body: { code: "thread_not_found" } });
+    expect(invalid).toMatchObject({ statusCode: 400, body: { code: "validation_failed" } });
+    expect(conflict).toMatchObject({ statusCode: 409, body: { code: "idempotency_conflict" } });
+    expect(wrongScope).toMatchObject({
+      statusCode: 500,
+      body: { code: "read_model_unavailable" },
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Test server did not bind");
+    const payload = JSON.stringify({ readThroughMessageId: "msg_3" });
+    const duplicateHeaderStatus = await new Promise<number>((resolve, reject) => {
+      const duplicate = httpRequest(
+        {
+          host: "127.0.0.1",
+          port: address.port,
+          method: "POST",
+          path: `${base}/thread_1/read`,
+          headers: {
+            authorization: "Bearer valid-token",
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(payload)),
+            "idempotency-key": ["first", "second"],
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        },
+      );
+      duplicate.on("error", reject);
+      duplicate.end(payload);
+    });
+    expect(duplicateHeaderStatus).toBe(400);
+    expect(calls).toHaveLength(6);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      idempotencyKey: "read-through-3",
+      readThroughMessageId: "msg_3",
+      audit: {
+        requestId: expect.any(String),
+        correlationId: expect.any(String),
+        requestedAt: expect.any(String),
+      },
+    });
+    expect(calls[0]!.audit.correlationId).toBe(calls[0]!.audit.requestId);
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("authorizes Inbox mark-read before malformed JSON parsing or idempotency lookup", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxMarkReadPort = {
+      async markRead(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", options: {}, propertyId: pmsPropertyId, statusCode: 401 },
+      {
+        name: "missing permission",
+        options: { permissions: [] },
+        propertyId: pmsPropertyId,
+        statusCode: 403,
+      },
+      {
+        name: "missing entitlement",
+        options: { entitlements: [] },
+        propertyId: pmsPropertyId,
+        statusCode: 403,
+      },
+      {
+        name: "wrong property",
+        options: {},
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        statusCode: 403,
+      },
+    ];
+
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: ["pms.inbox.read"],
+        entitlements: [entitlement],
+        pmsInboxMarkReadPort: port,
+        ...candidate.options,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${candidate.propertyId}/messaging/threads/thread_1/read`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.statusCode);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read"],
+      entitlements: [entitlement],
+    });
+    const invalid = await injectJson(app, {
+      method: "POST",
+      url: `/api/pms/properties/${pmsPropertyId}/messaging/threads/thread_1/read`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { readThroughMessageId: "msg_3" },
+    });
+    expect(invalid).toMatchObject({ statusCode: 400, body: { code: "validation_failed" } });
+  });
+
+  it("accepts protected Inbox triage transitions and validates adapter results", async () => {
+    const calls: Parameters<PmsInboxTriagePort["transition"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxTriagePort = {
+      async transition(input) {
+        calls.push(input);
+        if (input.threadId === "missing")
+          return { ok: false, error: { code: "thread_not_found", message: "Thread not found." } };
+        if (input.idempotencyKey === "version")
+          return {
+            ok: false,
+            error: {
+              code: "thread_version_conflict",
+              message: "The conversation changed.",
+              currentVersion: 9,
+            },
+          };
+        if (input.idempotencyKey === "conflict")
+          return {
+            ok: false,
+            error: { code: "idempotency_conflict", message: "Idempotency conflict." },
+          };
+        const attentionState =
+          input.action === "done"
+            ? "done"
+            : input.action === "follow_up"
+              ? "follow_up"
+              : "needs_attention";
+        return {
+          ok: true,
+          value: {
+            propertyId: input.propertyId,
+            threadId: input.threadId === "wrong-scope" ? "foreign-thread" : input.threadId,
+            attentionState,
+            followUpAt: input.action === "follow_up" ? input.followUpAt : null,
+            threadVersion: input.expectedThreadVersion + 1,
+          },
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxTriagePort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/threads`;
+    const request = (
+      action: "done" | "follow-up" | "reopen",
+      body: Record<string, unknown>,
+      idempotencyKey = `triage-${action}`,
+      threadId = "thread_1",
+    ) =>
+      injectJson(app!, {
+        method: "POST",
+        url: `${base}/${threadId}/${action}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },
+        payload: body,
+      });
+    const followUpAt = "2027-09-03T09:00:00.000Z";
+
+    for (const action of ["done", "follow-up", "reopen"] as const) {
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: `${base}/thread_1/${action}`,
+        headers: { origin: "https://pms.localhost" },
+      });
+      expect(preflight.statusCode, action).toBe(204);
+    }
+    const done = await request("done", { expectedThreadVersion: 4 });
+    const followUp = await request("follow-up", { expectedThreadVersion: 5, followUpAt });
+    const reopened = await request("reopen", { expectedThreadVersion: 6 });
+    expect(done).toMatchObject({
+      statusCode: 200,
+      body: { attentionState: "done", followUpAt: null, threadVersion: 5 },
+    });
+    expect(followUp).toMatchObject({
+      statusCode: 200,
+      body: { attentionState: "follow_up", followUpAt, threadVersion: 6 },
+    });
+    expect(reopened).toMatchObject({
+      statusCode: 200,
+      body: { attentionState: "needs_attention", followUpAt: null, threadVersion: 7 },
+    });
+    expect(await request("done", { expectedThreadVersion: 4 }, "missing", "missing")).toMatchObject(
+      { statusCode: 404, body: { code: "thread_not_found" } },
+    );
+    expect(await request("done", { expectedThreadVersion: 4 }, "version")).toMatchObject({
+      statusCode: 409,
+      body: { code: "thread_version_conflict", details: { currentVersion: 9 } },
+    });
+    expect(await request("done", { expectedThreadVersion: 4 }, "conflict")).toMatchObject({
+      statusCode: 409,
+      body: { code: "idempotency_conflict" },
+    });
+    expect(
+      await request("done", { expectedThreadVersion: 4 }, "wrong-scope", "wrong-scope"),
+    ).toMatchObject({ statusCode: 500, body: { code: "read_model_unavailable" } });
+
+    const dispatched = calls.length;
+    for (const invalid of [
+      request("done", { expectedThreadVersion: 4, followUpAt }),
+      request("follow-up", { expectedThreadVersion: 4 }),
+      request("follow-up", { expectedThreadVersion: 4, followUpAt: "tomorrow" }),
+      request("reopen", { expectedThreadVersion: 0 }),
+      request("done", { expectedThreadVersion: 4 }, ""),
+    ])
+      await expect(invalid).resolves.toMatchObject({
+        statusCode: 400,
+        body: { code: "validation_failed" },
+      });
+    expect(calls).toHaveLength(dispatched);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      threadId: "thread_1",
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      action: "done",
+      idempotencyKey: "triage-done",
+      expectedThreadVersion: 4,
+      followUpAt: null,
+      audit: {
+        requestId: expect.any(String),
+        correlationId: expect.any(String),
+        requestedAt: expect.any(String),
+      },
+    });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("authorizes Inbox triage before parsing malformed JSON or idempotency", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxTriagePort = {
+      async transition(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", options: {}, propertyId: pmsPropertyId, statusCode: 401 },
+      {
+        name: "missing reply permission",
+        options: { permissions: ["pms.inbox.read"] as PermissionKey[] },
+        propertyId: pmsPropertyId,
+        statusCode: 403,
+      },
+      {
+        name: "missing read permission",
+        options: { permissions: ["pms.inbox.reply"] as PermissionKey[] },
+        propertyId: pmsPropertyId,
+        statusCode: 403,
+      },
+      {
+        name: "missing entitlement",
+        options: { entitlements: [] },
+        propertyId: pmsPropertyId,
+        statusCode: 403,
+      },
+      {
+        name: "wrong property",
+        options: {},
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        statusCode: 403,
+      },
+    ];
+
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [entitlement],
+        pmsInboxTriagePort: port,
+        ...candidate.options,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${candidate.propertyId}/messaging/threads/thread_1/done`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.statusCode);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("accepts protected Inbox quick-reply reads, commands, and previews", async () => {
+    const quickReplyId = "13734000-0000-4000-8000-000000000001";
+    const threadId = "13734000-0000-4000-8000-000000000002";
+    const now = "2026-09-03T10:00:00.000Z";
+    const lists: Parameters<PmsInboxQuickReplyPort["list"]>[0][] = [];
+    const creates: Parameters<PmsInboxQuickReplyPort["create"]>[0][] = [];
+    const updates: Parameters<PmsInboxQuickReplyPort["update"]>[0][] = [];
+    const archives: Parameters<PmsInboxQuickReplyPort["archive"]>[0][] = [];
+    const previews: Parameters<PmsInboxQuickReplyPort["preview"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    type QuickReplyError = Extract<
+      Awaited<ReturnType<PmsInboxQuickReplyPort["create"]>>,
+      { ok: false }
+    >["error"];
+    const failures: Readonly<Record<string, QuickReplyError>> = {
+      missing: { code: "quick_reply_not_found", message: "Quick reply not found." },
+      thread: { code: "thread_not_found", message: "Thread not found." },
+      version: {
+        code: "quick_reply_version_conflict",
+        message: "Quick reply changed.",
+        currentVersion: 9,
+      },
+      name: { code: "quick_reply_name_conflict", message: "Name already exists." },
+      conflict: { code: "idempotency_conflict", message: "Idempotency conflict." },
+      invalid: { code: "validation_failed", message: "Quick reply is invalid." },
+    };
+    const errorFor = (key: string): QuickReplyError | undefined => failures[key];
+    const item = (
+      propertyId = pmsPropertyId,
+      version = 1,
+      fields: { name?: string; text?: string; approvedVariables?: readonly string[] } = {},
+    ) =>
+      Object.assign(
+        {
+          propertyId,
+          id: quickReplyId,
+          name: fields.name ?? "Room ready",
+          text: fields.text ?? "Your room {{room_number}} is ready.",
+          approvedVariables: fields.approvedVariables ?? ["room_number"],
+          version,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { createdByMembershipId: "must-not-leak" },
+      );
+    const port: PmsInboxQuickReplyPort = {
+      async list(input) {
+        lists.push(input);
+        return [item()];
+      },
+      async create(input) {
+        creates.push(input);
+        const error = errorFor(input.idempotencyKey);
+        if (error) return { ok: false, error };
+        return {
+          ok: true,
+          value: {
+            propertyId:
+              input.idempotencyKey === "bad-result" ? "foreign-property" : input.propertyId,
+            quickReply: item(input.propertyId, 1, input),
+          },
+        };
+      },
+      async update(input) {
+        updates.push(input);
+        const error = errorFor(input.idempotencyKey);
+        if (error) return { ok: false, error };
+        return {
+          ok: true,
+          value: {
+            propertyId: input.propertyId,
+            quickReply: item(input.propertyId, input.expectedVersion + 1, input),
+          },
+        };
+      },
+      async archive(input) {
+        archives.push(input);
+        const error = errorFor(input.idempotencyKey);
+        if (error) return { ok: false, error };
+        return {
+          ok: true,
+          value: Object.assign(
+            {
+              propertyId: input.propertyId,
+              quickReplyId: input.quickReplyId,
+              version: input.expectedVersion + 1,
+              archivedAt: now,
+            },
+            { providerPayload: "must-not-leak", contractVersion: "must-not-override" },
+          ),
+        };
+      },
+      async preview(input) {
+        previews.push(input);
+        const error = errorFor(input.idempotencyKey);
+        if (error) return { ok: false, error };
+        return {
+          ok: true,
+          value: Object.assign(
+            {
+              propertyId: input.propertyId,
+              quickReplyId: input.quickReplyId,
+              threadId: input.threadId,
+              renderedText: "Your room {{room_number}} is ready.",
+              unresolvedVariables: ["room_number"],
+              composerUseAllowed: false,
+            },
+            { bookingContext: "must-not-leak", contractVersion: "must-not-override" },
+          ),
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxQuickReplyPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/quick-replies`;
+    const post = (path: string, key: string, payload: unknown) =>
+      injectJson(app!, {
+        method: "POST",
+        url: `${base}${path}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": key },
+        payload: payload as never,
+      });
+
+    for (const path of [
+      "",
+      `/${quickReplyId}/update`,
+      `/${quickReplyId}/archive`,
+      `/${quickReplyId}/preview`,
+    ])
+      await expect(
+        app.inject({
+          method: "OPTIONS",
+          url: `${base}${path}`,
+          headers: { origin: "https://pms.localhost" },
+        }),
+      ).resolves.toMatchObject({ statusCode: 204 });
+
+    const listed = await injectJson(app, {
+      method: "GET",
+      url: base,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(listed).toEqual({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        items: [
+          {
+            id: quickReplyId,
+            name: "Room ready",
+            text: "Your room {{room_number}} is ready.",
+            approvedVariables: ["room_number"],
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+    });
+    const created = await post("", "create", {
+      name: "  Welcome  ",
+      text: "  Welcome {{guest_name}}.  ",
+      approvedVariables: ["guest_name"],
+    });
+    expect(created).toMatchObject({
+      statusCode: 201,
+      body: { quickReply: { name: "Welcome", text: "Welcome {{guest_name}}.", version: 1 } },
+    });
+    const updated = await post(`/${quickReplyId}/update`, "update", {
+      expectedVersion: 1,
+      name: "Arrival",
+      text: "Arrival is {{arrival_date}}.",
+      approvedVariables: ["arrival_date"],
+    });
+    expect(updated).toMatchObject({ statusCode: 200, body: { quickReply: { version: 2 } } });
+    const archived = await post(`/${quickReplyId}/archive`, "archive", { expectedVersion: 2 });
+    expect(archived).toEqual({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        quickReplyId,
+        version: 3,
+        archivedAt: now,
+      },
+    });
+    const previewed = await post(`/${quickReplyId}/preview`, "preview", { threadId });
+    expect(previewed).toEqual({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        quickReplyId,
+        threadId,
+        renderedText: "Your room {{room_number}} is ready.",
+        unresolvedVariables: ["room_number"],
+        composerUseAllowed: false,
+      },
+    });
+
+    for (const [key, statusCode, code] of [
+      ["missing", 404, "quick_reply_not_found"],
+      ["thread", 404, "thread_not_found"],
+      ["version", 409, "quick_reply_version_conflict"],
+      ["name", 409, "quick_reply_name_conflict"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["invalid", 400, "validation_failed"],
+    ] as const)
+      await expect(post(`/${quickReplyId}/preview`, key, { threadId })).resolves.toMatchObject({
+        statusCode,
+        body: { code },
+      });
+    await expect(post("", "bad-result", { name: "Welcome", text: "Hello" })).resolves.toMatchObject(
+      { statusCode: 500, body: { code: "read_model_unavailable" } },
+    );
+
+    const dispatchCount = creates.length + updates.length + archives.length + previews.length;
+    for (const request of [
+      post("", "bad", { name: "", text: "Hello" }),
+      post("", "bad", { name: "Hello", text: "Hello", approvedVariables: ["Bad-Name"] }),
+      post(`/${quickReplyId}/update`, "bad", {
+        expectedVersion: 0,
+        name: "Hello",
+        text: "Hello",
+      }),
+      post(`/${quickReplyId}/archive`, "bad", { expectedVersion: 1, extra: true }),
+      post(`/${quickReplyId}/preview`, "bad", { threadId: "not-a-uuid" }),
+    ])
+      await expect(request).resolves.toMatchObject({
+        statusCode: 400,
+        body: { code: "validation_failed" },
+      });
+    expect(creates.length + updates.length + archives.length + previews.length).toBe(dispatchCount);
+    expect(lists).toEqual([{ propertyId: pmsPropertyId }]);
+    expect(creates[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      idempotencyKey: "create",
+      name: "Welcome",
+      text: "Welcome {{guest_name}}.",
+      approvedVariables: ["guest_name"],
+      audit: { requestId: expect.any(String), correlationId: expect.any(String) },
+    });
+    expect(previews[0]).toMatchObject({ quickReplyId, threadId, idempotencyKey: "preview" });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("authorizes every quick-reply operation before reading its body", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxQuickReplyPort = {
+      async list(input) {
+        dispatches.push(input);
+        return [];
+      },
+      async create(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+      async update(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+      async archive(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+      async preview(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], status: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], status: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], status: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [] as ProductEntitlement[],
+        status: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        status: 403,
+      },
+    ] as const;
+    for (const [index, candidate] of cases.entries()) {
+      app = buildAuthenticatedApp({
+        permissions: [...candidate.permissions] as PermissionKey[],
+        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+        pmsInboxQuickReplyPort: port,
+      });
+      const response = await app.inject({
+        method: index === 0 ? "GET" : "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/quick-replies${index === 0 ? "" : "/13734000-0000-4000-8000-000000000001/preview"}`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: index === 0 ? undefined : "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.status);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("returns protected, human-reviewed Inbox assistance without leaking port fields", async () => {
+    const threadId = "13735000-0000-4000-8000-000000000001";
+    const throughMessageId = "13735000-0000-4000-8000-000000000002";
+    const calls: Parameters<PmsInboxAssistancePort["assist"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxAssistancePort = {
+      async assist(input) {
+        calls.push(input);
+        if (input.idempotencyKey === "unavailable")
+          return {
+            ok: false,
+            error: {
+              code: "assistance_unavailable",
+              message: "Assistance is temporarily unavailable.",
+            },
+          };
+        if (input.idempotencyKey === "missing")
+          return { ok: false, error: { code: "thread_not_found", message: "Missing." } };
+        if (input.idempotencyKey === "conflict")
+          return { ok: false, error: { code: "idempotency_conflict", message: "Conflict." } };
+        if (input.idempotencyKey === "invalid")
+          return { ok: false, error: { code: "validation_failed", message: "Invalid." } };
+        return {
+          ok: true,
+          value: Object.assign(
+            {
+              propertyId: input.propertyId,
+              threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
+              kind: input.kind,
+              assistedText: `Assisted ${input.kind}`,
+              attribution: "ai_assisted" as const,
+              reviewRequired: true as const,
+              basedThroughMessageId:
+                input.kind === "summarize" || input.kind === "draft_reply"
+                  ? input.throughMessageId
+                  : null,
+            },
+            { provider: "must-not-leak", prompt: "must-not-leak" },
+          ),
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxAssistancePort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads/${threadId}/assist`;
+    const post = (key: string, payload: unknown) =>
+      injectJson(app!, {
+        method: "POST",
+        url,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": key },
+        payload: payload as never,
+      });
+
+    await expect(
+      app.inject({ method: "OPTIONS", url, headers: { origin: "https://pms.localhost" } }),
+    ).resolves.toMatchObject({ statusCode: 204 });
+
+    for (const [key, payload, boundary] of [
+      [
+        "translate-message",
+        { kind: "translate_message", sourceText: "Bonjour", targetLanguage: "en-GB" },
+        null,
+      ],
+      [
+        "translate-draft",
+        { kind: "translate_draft", sourceText: "Thank you", targetLanguage: "de" },
+        null,
+      ],
+      ["summarize", { kind: "summarize", throughMessageId }, throughMessageId],
+      ["draft", { kind: "draft_reply", throughMessageId }, throughMessageId],
+    ] as const) {
+      const response = await post(key, payload);
+      expect(response).toEqual({
+        statusCode: 200,
+        body: {
+          contractVersion: "native-guest-inbox.v2",
+          propertyId: pmsPropertyId,
+          threadId,
+          kind: payload.kind,
+          assistedText: `Assisted ${payload.kind}`,
+          attribution: "ai_assisted",
+          reviewRequired: true,
+          basedThroughMessageId: boundary,
+        },
+      });
+    }
+
+    for (const [key, statusCode, code] of [
+      ["unavailable", 503, "assistance_unavailable"],
+      ["missing", 404, "thread_not_found"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["invalid", 400, "validation_failed"],
+      ["bad-result", 500, "read_model_unavailable"],
+    ] as const)
+      await expect(post(key, { kind: "summarize", throughMessageId })).resolves.toMatchObject({
+        statusCode,
+        body: { code },
+      });
+
+    const dispatchCount = calls.length;
+    for (const payload of [
+      { kind: "translate_message", sourceText: "", targetLanguage: "en" },
+      { kind: "translate_draft", sourceText: "Hello", targetLanguage: "not a locale" },
+      { kind: "summarize", throughMessageId: "not-a-uuid" },
+      { kind: "draft_reply", throughMessageId, extra: true },
+      { kind: "autonomous_send", throughMessageId },
+    ])
+      await expect(post("invalid-body", payload)).resolves.toMatchObject({
+        statusCode: 400,
+        body: { code: "validation_failed" },
+      });
+    expect(calls).toHaveLength(dispatchCount);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      threadId,
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      idempotencyKey: "translate-message",
+      audit: { requestId: expect.any(String), correlationId: expect.any(String) },
+    });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+    });
+    await expect(
+      post("missing-port", { kind: "summarize", throughMessageId }),
+    ).resolves.toMatchObject({ statusCode: 503, body: { code: "assistance_unavailable" } });
+  });
+
+  it("authorizes Inbox assistance before reading its body", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxAssistancePort = {
+      async assist(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], status: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], status: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], status: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [] as ProductEntitlement[],
+        status: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        status: 403,
+      },
+    ] as const;
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: [...candidate.permissions] as PermissionKey[],
+        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+        pmsInboxAssistancePort: port,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13735000-0000-4000-8000-000000000001/assist`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.status);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("lists direct-booking candidates behind Inbox read and reply permissions", async () => {
+    const bookingId = "13736100-0000-4000-8000-000000000000";
+    const calls: string[] = [];
+    const port: PmsInboxReadPort = {
+      async listThreads() {
+        throw new Error("not exercised");
+      },
+      async getThread() {
+        throw new Error("not exercised");
+      },
+      async unreadCount() {
+        throw new Error("not exercised");
+      },
+      async listDirectBookings(propertyId) {
+        calls.push(propertyId);
+        return {
+          propertyId,
+          items: [
+            {
+              propertyId,
+              guestBookingId: bookingId,
+              bookingReference: "VAY-DIRECT",
+              source: "direct_booking",
+              status: "confirmed",
+              primaryGuest: { displayName: "Grace Hopper" },
+              stay: { checkIn: "2026-10-01", checkOut: "2026-10-03" },
+            },
+          ],
+        };
+      },
+    };
+    const url = `/api/pms/properties/${pmsPropertyId}/messaging/direct-bookings`;
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReadPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    await expect(
+      app.inject({ method: "OPTIONS", url, headers: { origin: "https://pms.localhost" } }),
+    ).resolves.toMatchObject({ statusCode: 204 });
+    await expect(
+      injectJson(app, {
+        method: "GET",
+        url,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+    ).resolves.toMatchObject({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        items: [
+          {
+            guestBookingId: bookingId,
+            bookingReference: "VAY-DIRECT",
+            source: "direct_booking",
+          },
+        ],
+      },
+    });
+    expect(calls).toEqual([pmsPropertyId]);
+
+    await app.close();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReadPort: port,
+    });
+    await expect(
+      injectJson(app, {
+        method: "GET",
+        url,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+    ).resolves.toMatchObject({ statusCode: 403, body: { code: "missing_permission" } });
+    expect(calls).toEqual([pmsPropertyId]);
+  });
+
+  it("creates or returns a protected direct-email Inbox thread", async () => {
+    const bookingId = "13736100-0000-4000-8000-000000000001";
+    const threadId = "13736100-0000-4000-8000-000000000002";
+    const calls: Parameters<PmsInboxStartDirectEmailPort["start"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxStartDirectEmailPort = {
+      async start(input) {
+        calls.push(input);
+        if (input.idempotencyKey === "ineligible")
+          return {
+            ok: false,
+            error: { code: "direct_email_not_allowed", message: "Unavailable." },
+          };
+        if (input.idempotencyKey === "conflict")
+          return { ok: false, error: { code: "idempotency_conflict", message: "Conflict." } };
+        if (input.idempotencyKey === "invalid")
+          return { ok: false, error: { code: "validation_failed", message: "Invalid." } };
+        return {
+          ok: true,
+          value: {
+            propertyId: input.propertyId,
+            bookingId: input.bookingId,
+            created: input.idempotencyKey !== "existing",
+            thread: Object.assign(
+              {
+                id: input.idempotencyKey === "bad-result" ? "foreign-thread" : threadId,
+                source: "manual" as const,
+                sourceThreadId: `direct-email:${input.bookingId}:v1`,
+                attentionState: "needs_attention" as const,
+                channel: "email" as const,
+                version: 1,
+                activityAt: "2026-09-03T11:00:00.000Z",
+                replyRoute: {
+                  state: "ready" as const,
+                  channel: "email" as const,
+                  providerChannel: null,
+                  reasonCode: null,
+                },
+              },
+              { guestEmail: "must-not-leak@example.test" },
+            ),
+          },
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxStartDirectEmailPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+      pmsInboxSendingEnabled: false,
+    });
+    const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads`;
+    const post = (key?: string, body: unknown = { bookingId }) =>
+      injectJson(app!, {
+        method: "POST",
+        url,
+        headers: {
+          authorization: "Bearer valid-token",
+          ...(key ? { "idempotency-key": key } : {}),
+        },
+        payload: body as never,
+      });
+
+    await expect(
+      app.inject({ method: "OPTIONS", url, headers: { origin: "https://pms.localhost" } }),
+    ).resolves.toMatchObject({ statusCode: 204 });
+    const created = await post("created");
+    expect(created).toMatchObject({
+      statusCode: 201,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        bookingId,
+        created: true,
+        thread: { id: threadId, source: "manual", channel: "email", version: 1 },
+      },
+    });
+    expect(JSON.stringify(created.body)).not.toContain("must-not-leak");
+    await expect(post("existing")).resolves.toMatchObject({
+      statusCode: 200,
+      body: { created: false },
+    });
+    for (const [key, statusCode, code] of [
+      ["ineligible", 400, "direct_email_not_allowed"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["invalid", 400, "validation_failed"],
+      ["bad-result", 500, "read_model_unavailable"],
+    ] as const)
+      await expect(post(key)).resolves.toMatchObject({ statusCode, body: { code } });
+    const beforeInvalid = calls.length;
+    await expect(post()).resolves.toMatchObject({ statusCode: 400 });
+    await expect(post("extra", { bookingId, channel: "email" })).resolves.toMatchObject({
+      statusCode: 400,
+      body: { code: "validation_failed" },
+    });
+    expect(calls).toHaveLength(beforeInvalid);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      bookingId,
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      idempotencyKey: "created",
+    });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+    });
+    await expect(post("missing-port")).resolves.toMatchObject({
+      statusCode: 500,
+      body: { code: "read_model_unavailable" },
+    });
+  });
+
+  it("authorizes direct-email thread creation before reading its body", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxStartDirectEmailPort = {
+      async start(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], status: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], status: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], status: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [] as ProductEntitlement[],
+        status: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        status: 403,
+      },
+    ] as const;
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: [...candidate.permissions] as PermissionKey[],
+        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+        pmsInboxStartDirectEmailPort: port,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.status);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("accepts the protected Booking.com no-reply-needed provider action", async () => {
+    const threadId = "13736000-0000-4000-8000-000000000001";
+    const jobId = "13736000-0000-4000-8000-000000000002";
+    const calls: Parameters<PmsInboxProviderActionPort["noReplyNeeded"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxProviderActionPort = {
+      async noReplyNeeded(input) {
+        calls.push(input);
+        if (input.idempotencyKey === "missing")
+          return { ok: false, error: { code: "thread_not_found", message: "Missing." } };
+        if (input.idempotencyKey === "unavailable")
+          return {
+            ok: false,
+            error: { code: "provider_action_unavailable", message: "Unavailable." },
+          };
+        if (input.idempotencyKey === "conflict")
+          return { ok: false, error: { code: "idempotency_conflict", message: "Conflict." } };
+        if (input.idempotencyKey === "invalid")
+          return { ok: false, error: { code: "validation_failed", message: "Invalid." } };
+        return {
+          ok: true,
+          value: Object.assign(
+            {
+              propertyId: input.propertyId,
+              threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
+              action: input.action ?? "booking_com_no_reply_needed",
+              jobId,
+              acceptedAt: "2026-09-03T11:00:00.000Z",
+              attentionStateChanged: false as const,
+            },
+            { providerIdempotencyReference: "must-not-leak", sourceThreadId: "must-not-leak" },
+          ),
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxProviderActionPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads/${threadId}/provider-actions/no-reply-needed`;
+    const post = (key?: string, payload: unknown = { expectedVersion: 4 }, closure = false) =>
+      injectJson(app!, {
+        method: "POST",
+        url: closure ? url.replace("no-reply-needed", "close") : url,
+        headers: {
+          authorization: "Bearer valid-token",
+          ...(key ? { "idempotency-key": key } : {}),
+        },
+        ...(payload === undefined ? {} : { payload: payload as never }),
+      });
+
+    await expect(
+      app.inject({ method: "OPTIONS", url, headers: { origin: "https://pms.localhost" } }),
+    ).resolves.toMatchObject({ statusCode: 204 });
+    await expect(post("accepted")).resolves.toEqual({
+      statusCode: 202,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        propertyId: pmsPropertyId,
+        threadId,
+        action: "booking_com_no_reply_needed",
+        jobId,
+        acceptedAt: "2026-09-03T11:00:00.000Z",
+        attentionStateChanged: false,
+      },
+    });
+    for (const [key, statusCode, code] of [
+      ["missing", 404, "thread_not_found"],
+      ["unavailable", 409, "provider_action_unavailable"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["invalid", 400, "validation_failed"],
+      ["bad-result", 500, "read_model_unavailable"],
+    ] as const)
+      await expect(post(key)).resolves.toMatchObject({ statusCode, body: { code } });
+
+    await expect(post("closure", { expectedVersion: 4 }, true)).resolves.toMatchObject({
+      statusCode: 202,
+      body: { action: "channex_close" },
+    });
+    const beforeInvalid = calls.length;
+    await expect(post()).resolves.toMatchObject({
+      statusCode: 400,
+      body: { code: "validation_failed" },
+    });
+    await expect(post("unexpected-body", { action: "send" })).resolves.toMatchObject({
+      statusCode: 400,
+      body: { code: "validation_failed" },
+    });
+    expect(calls).toHaveLength(beforeInvalid);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      threadId,
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      idempotencyKey: "accepted",
+      audit: { requestId: expect.any(String), correlationId: expect.any(String) },
+    });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+    });
+    await expect(post("missing-port")).resolves.toMatchObject({
+      statusCode: 500,
+      body: { code: "read_model_unavailable" },
+    });
+  });
+
+  it("authorizes Inbox provider actions before reading their body", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxProviderActionPort = {
+      async noReplyNeeded(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], status: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], status: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], status: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [] as ProductEntitlement[],
+        status: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        status: 403,
+      },
+    ] as const;
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: [...candidate.permissions] as PermissionKey[],
+        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+        pmsInboxProviderActionPort: port,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/no-reply-needed`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.status);
+      const closure = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "idempotency-key": "closure",
+        },
+        payload: { expectedVersion: 4 },
+      });
+      expect(closure.statusCode, candidate.name).toBe(candidate.status);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("accepts protected Inbox assignment and internal-note commands", async () => {
+    const assignee = "13733000-0000-4000-8000-000000000001";
+    const noteId = "13733000-0000-4000-8000-000000000002";
+    const assignments: Parameters<PmsInboxStaffCommandPort["assign"]>[0][] = [];
+    const notes: Parameters<PmsInboxStaffCommandPort["addNote"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const failures = (key: string) => {
+      if (key === "missing")
+        return {
+          ok: false as const,
+          error: { code: "thread_not_found" as const, message: "Missing." },
+        };
+      if (key === "version")
+        return {
+          ok: false as const,
+          error: {
+            code: "thread_version_conflict" as const,
+            message: "Changed.",
+            currentVersion: 9,
+          },
+        };
+      if (key === "conflict")
+        return {
+          ok: false as const,
+          error: { code: "idempotency_conflict" as const, message: "Conflict." },
+        };
+      if (key === "ineligible")
+        return {
+          ok: false as const,
+          error: { code: "validation_failed" as const, message: "Assignee unavailable." },
+        };
+      return null;
+    };
+    const port: PmsInboxStaffCommandPort = {
+      async assign(input) {
+        assignments.push(input);
+        const failed = failures(input.idempotencyKey);
+        if (failed) return failed;
+        return Object.assign(
+          {
+            ok: true as const,
+            value: {
+              propertyId: input.propertyId,
+              threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
+              assignedTo:
+                input.assigneeMembershipId === null
+                  ? null
+                  : Object.assign(
+                      { membershipId: input.assigneeMembershipId, displayName: "Night Manager" },
+                      { propertyAccessMode: "assigned" },
+                    ),
+              threadVersion: input.expectedThreadVersion + 1,
+            },
+          },
+          { internalScope: "must-not-leak" },
+        );
+      },
+      async addNote(input) {
+        notes.push(input);
+        const failed = failures(input.idempotencyKey);
+        if (failed) return failed;
+        return Object.assign(
+          {
+            ok: true as const,
+            value: {
+              propertyId: input.propertyId,
+              threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
+              note: Object.assign(
+                {
+                  id: noteId,
+                  author: Object.assign(
+                    {
+                      membershipId: input.actorMembershipId,
+                      displayName: "Hotel Owner",
+                    },
+                    { email: "private@example.test" },
+                  ),
+                  text: input.text,
+                  occurredAt: "2026-09-03T09:00:00.000Z",
+                },
+                { providerPayload: "must-not-leak" },
+              ),
+              threadVersion: input.expectedThreadVersion + 1,
+            },
+          },
+          { internalScope: "must-not-leak" },
+        );
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxStaffCommandPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/threads/thread_1`;
+    const post = (path: "assignment" | "notes", key: string, payload: unknown) =>
+      injectJson(app!, {
+        method: "POST",
+        url: `${base}/${path}`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": key },
+        payload: payload as never,
+      });
+
+    for (const path of ["assignment", "notes"] as const)
+      await expect(
+        app.inject({
+          method: "OPTIONS",
+          url: `${base}/${path}`,
+          headers: { origin: "https://pms.localhost" },
+        }),
+      ).resolves.toMatchObject({ statusCode: 204 });
+    const assigned = await post("assignment", "assign", {
+      expectedThreadVersion: 4,
+      assigneeMembershipId: assignee,
+    });
+    expect(assigned).toMatchObject({
+      statusCode: 200,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        assignedTo: { membershipId: assignee, displayName: "Night Manager" },
+        threadVersion: 5,
+      },
+    });
+    expect(assigned.body).toEqual({
+      contractVersion: "native-guest-inbox.v2",
+      propertyId: pmsPropertyId,
+      threadId: "thread_1",
+      assignedTo: { membershipId: assignee, displayName: "Night Manager" },
+      threadVersion: 5,
+    });
+    await expect(
+      post("assignment", "clear", { expectedThreadVersion: 5, assigneeMembershipId: null }),
+    ).resolves.toMatchObject({ statusCode: 200, body: { assignedTo: null, threadVersion: 6 } });
+    const noted = await post("notes", "note", {
+      expectedThreadVersion: 6,
+      text: "  Prepare late arrival.  ",
+    });
+    expect(noted).toMatchObject({
+      statusCode: 201,
+      body: {
+        note: {
+          id: noteId,
+          author: { membershipId: "membership_hotel_owner", displayName: "Hotel Owner" },
+          text: "Prepare late arrival.",
+        },
+        threadVersion: 7,
+      },
+    });
+    expect(noted.body).toEqual({
+      contractVersion: "native-guest-inbox.v2",
+      propertyId: pmsPropertyId,
+      threadId: "thread_1",
+      note: {
+        id: noteId,
+        author: { membershipId: "membership_hotel_owner", displayName: "Hotel Owner" },
+        text: "Prepare late arrival.",
+        occurredAt: "2026-09-03T09:00:00.000Z",
+      },
+      threadVersion: 7,
+    });
+    for (const [key, statusCode, code] of [
+      ["missing", 404, "thread_not_found"],
+      ["version", 409, "thread_version_conflict"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["ineligible", 400, "validation_failed"],
+    ] as const)
+      await expect(
+        post("assignment", key, { expectedThreadVersion: 4, assigneeMembershipId: assignee }),
+      ).resolves.toMatchObject({ statusCode, body: { code } });
+    await expect(
+      post("notes", "bad-result", { expectedThreadVersion: 4, text: "Internal" }),
+    ).resolves.toMatchObject({ statusCode: 500, body: { code: "read_model_unavailable" } });
+
+    const dispatchCount = assignments.length + notes.length;
+    for (const request of [
+      post("assignment", "bad", { expectedThreadVersion: 4 }),
+      post("assignment", "bad", { expectedThreadVersion: 4, assigneeMembershipId: "invalid" }),
+      post("notes", "bad", { expectedThreadVersion: 0, text: "Note" }),
+      post("notes", "bad", { expectedThreadVersion: 4, text: " " }),
+      post("notes", "bad", { expectedThreadVersion: 4, text: "Note", extra: true }),
+    ])
+      await expect(request).resolves.toMatchObject({
+        statusCode: 400,
+        body: { code: "validation_failed" },
+      });
+    expect(assignments.length + notes.length).toBe(dispatchCount);
+    expect(assignments[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      threadId: "thread_1",
+      organizationId: "org_hotel_group",
+      actorUserId: "user_hotel_owner",
+      actorMembershipId: "membership_hotel_owner",
+      assigneeMembershipId: assignee,
+      expectedThreadVersion: 4,
+      idempotencyKey: "assign",
+      audit: { requestId: expect.any(String), correlationId: expect.any(String) },
+    });
+    expect(notes[0]).toMatchObject({ text: "Prepare late arrival.", expectedThreadVersion: 6 });
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("authorizes Inbox staff commands before parsing content or idempotency", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxStaffCommandPort = {
+      async assign(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+      async addNote(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], status: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], status: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], status: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [] as ProductEntitlement[],
+        status: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        status: 403,
+      },
+    ] as const;
+    for (const [index, candidate] of cases.entries()) {
+      app = buildAuthenticatedApp({
+        permissions: [...candidate.permissions] as PermissionKey[],
+        entitlements: "entitlements" in candidate ? [...candidate.entitlements] : [entitlement],
+        pmsInboxStaffCommandPort: port,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/thread_1/${index % 2 ? "notes" : "assignment"}`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.status);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
+  });
+
+  it("pauses Inbox sends and provider actions before command persistence, but keeps reads", async () => {
+    const dispatch = vi.fn(async () => {
+      throw new Error("must not dispatch");
+    });
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxSendingEnabled: false,
+      pmsInboxReplyPort: { reply: dispatch },
+      pmsInboxProviderActionPort: { noReplyNeeded: dispatch },
+      pmsInboxReadPort: {
+        listThreads: dispatch,
+        getThread: dispatch,
+        unreadCount: async (propertyId) => ({ propertyId, threadCount: 0, messageCount: 0 }),
+      },
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging`;
+    for (const [path, payload] of [
+      ["messages", { expectedThreadVersion: 4, text: "Test", attachmentMediaIds: [] }],
+      ["provider-actions/no-reply-needed", { expectedVersion: 4 }],
+    ] as const) {
+      for (const authorization of [undefined, "Bearer invalid-token", "Bearer valid-token"]) {
+        const response = await injectJson(app, {
+          method: "POST",
+          url: `${base}/threads/thread_1/${path}`,
+          headers: { ...(authorization ? { authorization } : {}), "idempotency-key": "same-key" },
+          payload,
+        });
+        expect(response.statusCode).toBe(authorization === "Bearer valid-token" ? 503 : 401);
+        if (response.statusCode === 503)
+          expect(response.body).toMatchObject({ code: "inbox_sending_paused" });
+      }
+    }
+    const read = await injectJson(app, {
+      method: "GET",
+      url: `${base}/unread-count`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("accepts protected Inbox manual replies and maps command outcomes", async () => {
+    const mediaId = "77777777-7777-4777-8777-777777777777";
+    const calls: Parameters<PmsInboxReplyPort["reply"]>[0][] = [];
+    const close = vi.fn(async () => undefined);
+    const port: PmsInboxReplyPort = {
+      async reply(input) {
+        calls.push(input);
+        const failures: Record<
+          string,
+          Extract<Awaited<ReturnType<PmsInboxReplyPort["reply"]>>, { ok: false }>["error"]
+        > = {
+          missing: { code: "thread_not_found", message: "Thread not found." },
+          version: {
+            code: "thread_version_conflict",
+            message: "The conversation changed.",
+            currentVersion: 9,
+          },
+          conflict: { code: "idempotency_conflict", message: "Idempotency conflict." },
+          oversized: { code: "attachment_too_large", message: "Attachment is too large." },
+          unsupported: {
+            code: "unsupported_attachment_type",
+            message: "Attachment type is unsupported.",
+          },
+          invalid: { code: "validation_failed", message: "Attachment is unavailable." },
+        };
+        const error = failures[input.idempotencyKey];
+        if (error) return { ok: false, error };
+        return {
+          ok: true,
+          value: {
+            propertyId: input.threadId === "wrong-scope" ? "foreign-property" : input.propertyId,
+            threadId: input.threadId,
+            messageId: "55555555-5555-4555-8555-555555555555",
+            threadVersion: input.expectedThreadVersion + 1,
+            delivery:
+              input.threadId === "held"
+                ? {
+                    state: "held" as const,
+                    channel: null,
+                    reasonCode: "channel_connection_inactive",
+                    providerAcknowledgedAt: null,
+                  }
+                : {
+                    state: "queued" as const,
+                    channel: "ota" as const,
+                    reasonCode: null,
+                    providerAcknowledgedAt: null,
+                  },
+            acceptedAt:
+              input.threadId === "bad-result" ? "not-an-instant" : "2026-09-03T00:00:00.000Z",
+          },
+        };
+      },
+      close,
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.inbox.read", "pms.inbox.reply"],
+      entitlements: [{ product: "pms", key: "property-management", status: "active" }],
+      pmsInboxReplyPort: port,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+    const base = `/api/pms/properties/${pmsPropertyId}/messaging/threads`;
+    const request = (
+      threadId: string,
+      idempotencyKey: string,
+      payload: unknown = {
+        expectedThreadVersion: 4,
+        text: "  Your room is ready.  ",
+        attachmentMediaIds: [mediaId],
+      },
+    ) =>
+      injectJson(app!, {
+        method: "POST",
+        url: `${base}/${threadId}/messages`,
+        headers: { authorization: "Bearer valid-token", "idempotency-key": idempotencyKey },
+        payload: payload as never,
+      });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: `${base}/thread_1/messages`,
+      headers: { origin: "https://pms.localhost" },
+    });
+    const queued = await request("thread_1", "send-1");
+    const held = await request("held", "send-held", {
+      expectedThreadVersion: 7,
+      attachmentMediaIds: [mediaId],
+    });
+    expect(preflight).toMatchObject({ statusCode: 204 });
+    expect(preflight.headers["access-control-allow-headers"]).toContain("idempotency-key");
+    expect(queued).toMatchObject({
+      statusCode: 202,
+      body: {
+        contractVersion: "native-guest-inbox.v2",
+        threadVersion: 5,
+        delivery: { state: "queued", channel: "ota", reasonCode: null },
+      },
+    });
+    expect(held).toMatchObject({
+      statusCode: 202,
+      body: { threadVersion: 8, delivery: { state: "held", channel: null } },
+    });
+
+    const outcomes = [
+      ["missing", 404, "thread_not_found"],
+      ["version", 409, "thread_version_conflict"],
+      ["conflict", 409, "idempotency_conflict"],
+      ["oversized", 413, "attachment_too_large"],
+      ["unsupported", 415, "unsupported_attachment_type"],
+      ["invalid", 400, "validation_failed"],
+    ] as const;
+    for (const [key, statusCode, code] of outcomes) {
+      const response = await request("thread_1", key);
+      expect(response).toMatchObject({ statusCode, body: { code } });
+      if (key === "version")
+        expect(response.body).toMatchObject({ details: { currentVersion: 9 } });
+    }
+    for (const threadId of ["wrong-scope", "bad-result"]) {
+      const response = await request(threadId, `send-${threadId}`);
+      expect(response).toMatchObject({ statusCode: 500, body: { code: "read_model_unavailable" } });
+    }
+
+    const invalidPayloads = [
+      {},
+      { expectedThreadVersion: 0, text: "Hello" },
+      { expectedThreadVersion: 4, text: " " },
+      { expectedThreadVersion: 4, attachmentMediaIds: ["not-a-uuid"] },
+      { expectedThreadVersion: 4, attachmentMediaIds: [mediaId, mediaId] },
+      { expectedThreadVersion: 4, text: "Hello", unexpected: true },
+    ];
+    const dispatchedBeforeInvalidPayloads = calls.length;
+    for (const payload of invalidPayloads) {
+      const response = await request("thread_1", "invalid-payload", payload);
+      expect(response).toMatchObject({ statusCode: 400, body: { code: "validation_failed" } });
+    }
+    expect(calls).toHaveLength(dispatchedBeforeInvalidPayloads);
+    expect(calls[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      threadId: "thread_1",
+      idempotencyKey: "send-1",
+      expectedThreadVersion: 4,
+      text: "Your room is ready.",
+      attachmentMediaIds: [mediaId],
+      audit: { requestId: expect.any(String), correlationId: expect.any(String) },
+    });
+
+    await app.close();
+    app = null;
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("authorizes Inbox replies before parsing content or dispatching idempotency", async () => {
+    const dispatches: unknown[] = [];
+    const port: PmsInboxReplyPort = {
+      async reply(input) {
+        dispatches.push(input);
+        throw new Error("must not dispatch");
+      },
+    };
+    const entitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+    };
+    const cases: Array<{
+      name: string;
+      permissions: PermissionKey[];
+      entitlements?: ProductEntitlement[];
+      propertyId?: string;
+      statusCode: number;
+    }> = [
+      { name: "missing auth", permissions: ["pms.inbox.read", "pms.inbox.reply"], statusCode: 401 },
+      { name: "missing read", permissions: ["pms.inbox.reply"], statusCode: 403 },
+      { name: "missing reply", permissions: ["pms.inbox.read"], statusCode: 403 },
+      {
+        name: "missing entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [],
+        statusCode: 403,
+      },
+      {
+        name: "inactive entitlement",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        entitlements: [{ ...entitlement, status: "suspended" as const }],
+        statusCode: 403,
+      },
+      {
+        name: "wrong property",
+        permissions: ["pms.inbox.read", "pms.inbox.reply"],
+        propertyId: "f6853000-0000-0000-0000-000000000099",
+        statusCode: 403,
+      },
+    ];
+    for (const candidate of cases) {
+      app = buildAuthenticatedApp({
+        permissions: candidate.permissions,
+        entitlements: candidate.entitlements ?? [entitlement],
+        pmsInboxReplyPort: port,
+        pmsInboxSendingEnabled: false,
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${candidate.propertyId ?? pmsPropertyId}/messaging/threads/thread_1/messages`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "content-type": "application/json",
+          "idempotency-key": "private-key",
+        },
+        payload: "{",
+      });
+      expect(response.statusCode, candidate.name).toBe(candidate.statusCode);
+      await app.close();
+      app = null;
+    }
+    expect(dispatches).toHaveLength(0);
   });
 
   it("fails closed across the PMS inbox read denial matrix", async () => {
@@ -12505,13 +14381,6 @@ describe("vayada-api", () => {
         },
         statusCode: 500,
         message: "Authentication service is temporarily unavailable.",
-      },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-        message: "PMS property access is unavailable.",
       },
     ];
     const hiddenPropertyDenials = new Set<string>();
@@ -12820,12 +14689,6 @@ describe("vayada-api", () => {
         },
         statusCode: 500,
       },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-      },
     ];
     const hiddenPropertyDenials: unknown[] = [];
 
@@ -12883,145 +14746,164 @@ describe("vayada-api", () => {
     expect(new Set(hiddenPropertyDenials.map((body) => JSON.stringify(body))).size).toBe(1);
   });
 
-  it("creates a PMS room type through the target property-scoped route", async () => {
-    const commandRepository = createPmsOperationsCommandRepository();
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-          resource: {
+  it.each([undefined, "Free until 7 days before", "Custom cancellation terms"])(
+    "creates a PMS room type through the target property-scoped route with policy %s",
+    async (cancellationPolicy) => {
+      const commandRepository = createPmsOperationsCommandRepository();
+      app = buildAuthenticatedApp({
+        permissions: ["pms.operations.manage"],
+        entitlements: [
+          {
             product: "pms",
-            resourceType: "pms_property",
-            resourceId: pmsPropertyId,
+            key: "property-management",
+            status: "active",
+            resource: {
+              product: "pms",
+              resourceType: "pms_property",
+              resourceId: pmsPropertyId,
+            },
           },
-        },
-      ],
-      pmsOperationsCommandRepository: commandRepository,
-    });
+        ],
+        pmsOperationsCommandRepository: commandRepository,
+      });
 
-    for (const bathroomType of [null, "", "ensuite"]) {
-      const invalid = await injectJson(app, {
+      for (const bathroomType of [null, "", "ensuite"]) {
+        const invalid = await injectJson(app, {
+          method: "POST",
+          url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+          payload: {
+            commandId: "cmd-room-type-invalid-bathroom",
+            idempotencyKey: "room-type-invalid-bathroom",
+            name: "Invalid Bathroom Suite",
+            bathroomType,
+            baseRate: "240.00",
+            operatingPeriods: [{ from: "01-01", to: "12-31" }],
+            seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31" }],
+          },
+          headers: { authorization: "Bearer valid-token" },
+        });
+        expect(invalid.statusCode).toBe(400);
+      }
+      expect(commandRepository.roomTypeCreates).toHaveLength(0);
+
+      const response = await injectJson(app, {
         method: "POST",
         url: `/api/pms/properties/${pmsPropertyId}/room-types`,
         payload: {
-          commandId: "cmd-room-type-invalid-bathroom",
-          idempotencyKey: "room-type-invalid-bathroom",
-          name: "Invalid Bathroom Suite",
-          bathroomType,
-          baseRate: "240.00",
+          commandId: "cmd-room-type-create-001",
+          idempotencyKey: "room-type-create-001",
+          initialSetupOnly: true,
+          ...(cancellationPolicy ? { cancellationPolicy } : {}),
+          name: "Loft Suite",
+          category: "suite",
+          description: "Top-floor suite.",
+          maxAdults: 2,
+          maxChildren: 2,
+          maxOccupancy: 4,
+          bedType: "1 King Bed",
+          bedrooms: 1,
+          bathrooms: 1,
+          bathroomType: "private",
+          size: 32,
+          baseRate: 0,
+          currency: "eur",
           operatingPeriods: [{ from: "01-01", to: "12-31" }],
-          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31" }],
+          seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
+          nonRefundableEnabled: true,
+          nonRefundableRate: 216,
+          amenities: ["wifi", "terrace"],
+          images: [
+            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+            "https://cdn.vayada.example/loft-balcony.jpg",
+          ],
+          totalRooms: 3,
+          sortOrder: 7,
         },
-        headers: { authorization: "Bearer valid-token" },
+        headers: {
+          authorization: "Bearer valid-token",
+          "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
+        },
       });
-      expect(invalid.statusCode).toBe(400);
-    }
-    expect(commandRepository.roomTypeCreates).toHaveLength(0);
+      const body = response.body as PmsRoomTypeCommandResponse;
 
-    const response = await injectJson(app, {
-      method: "POST",
-      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
-      payload: {
-        commandId: "cmd-room-type-create-001",
-        idempotencyKey: "room-type-create-001",
+      expect(response.statusCode).toBe(200);
+      expect(body).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        propertyId: pmsPropertyId,
+        item: {
+          name: "Loft Suite",
+          category: "suite",
+          baseRate: { amountDecimal: "240.00", currency: "EUR" },
+          ratePlans: [
+            { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
+            { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
+          ],
+          media: [
+            { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+            { url: "https://cdn.vayada.example/loft-balcony.jpg" },
+          ],
+          roomCount: 3,
+        },
+        commandMeta: {
+          commandId: "cmd-room-type-create-001",
+          idempotencyKey: "room-type-create-001",
+          sideEffects: ["ari_changed", "audit_event"],
+        },
+      });
+      if (cancellationPolicy === "Custom cancellation terms") {
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).not.toHaveProperty(
+          "freeCancellationDeadlineDays",
+        );
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy?.text).toBe(
+          cancellationPolicy,
+        );
+      } else {
+        expect(commandRepository.roomTypeCreates[0]?.flexibleCancellationPolicy).toMatchObject({
+          type: "free_until_days_before_arrival",
+          freeCancellationDeadlineDays: 7,
+          afterDeadlinePenalty: "full_booking_amount",
+          noShowPenalty: "full_booking_amount",
+        });
+      }
+      expect(commandRepository.roomTypeCreates).toHaveLength(1);
+      expect(commandRepository.roomTypeCreates[0]).toMatchObject({
+        propertyId: pmsPropertyId,
         initialSetupOnly: true,
         name: "Loft Suite",
-        category: "suite",
-        description: "Top-floor suite.",
-        maxAdults: 2,
-        maxChildren: 2,
-        maxOccupancy: 4,
-        bedType: "1 King Bed",
-        bedrooms: 1,
-        bathrooms: 1,
-        bathroomType: "private",
-        size: 32,
-        baseRate: 0,
-        currency: "eur",
-        operatingPeriods: [{ from: "01-01", to: "12-31" }],
-        seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
-        nonRefundableEnabled: true,
-        nonRefundableRate: 216,
-        amenities: ["wifi", "terrace"],
-        images: [
-          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-          "https://cdn.vayada.example/loft-balcony.jpg",
-        ],
-        totalRooms: 3,
-        sortOrder: 7,
-      },
-      headers: {
-        authorization: "Bearer valid-token",
-        "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
-      },
-    });
-    const body = response.body as PmsRoomTypeCommandResponse;
-
-    expect(response.statusCode).toBe(200);
-    expect(body).toMatchObject({
-      contractVersion: "pms-operations.v1",
-      propertyId: pmsPropertyId,
-      item: {
-        name: "Loft Suite",
-        category: "suite",
         baseRate: { amountDecimal: "240.00", currency: "EUR" },
-        ratePlans: [
-          { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
-          { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
-        ],
-        media: [
-          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
-          { url: "https://cdn.vayada.example/loft-balcony.jpg" },
-        ],
+        nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
+        attributes: {
+          bedType: "1 King Bed",
+          bedrooms: 1,
+          bathrooms: 1,
+          bathroomType: "private",
+          size: 32,
+        },
         roomCount: 3,
-      },
-      commandMeta: {
-        commandId: "cmd-room-type-create-001",
-        idempotencyKey: "room-type-create-001",
-        sideEffects: ["ari_changed", "audit_event"],
-      },
-    });
-    expect(commandRepository.roomTypeCreates).toHaveLength(1);
-    expect(commandRepository.roomTypeCreates[0]).toMatchObject({
-      propertyId: pmsPropertyId,
-      initialSetupOnly: true,
-      name: "Loft Suite",
-      baseRate: { amountDecimal: "240.00", currency: "EUR" },
-      nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
-      attributes: {
-        bedType: "1 King Bed",
-        bedrooms: 1,
-        bathrooms: 1,
-        bathroomType: "private",
-        size: 32,
-      },
-      roomCount: 3,
-      operatingPeriods: [{ from: "01-01", to: "12-31" }],
-      seasons: [
-        {
-          from: "01-01",
-          to: "12-31",
-          rate: { amountDecimal: "240.00", currency: "EUR" },
-          minStayNights: 1,
+        operatingPeriods: [{ from: "01-01", to: "12-31" }],
+        seasons: [
+          {
+            from: "01-01",
+            to: "12-31",
+            rate: { amountDecimal: "240.00", currency: "EUR" },
+            minStayNights: 1,
+          },
+        ],
+        audit: {
+          actor: {
+            kind: "user",
+            userId: "user_hotel_owner",
+          },
         },
-      ],
-      audit: {
-        actor: {
-          kind: "user",
-          userId: "user_hotel_owner",
-        },
-      },
-    });
-    expect(commandRepository.outboxEnqueues).toEqual([
-      "ari_changed:f6855000-0000-0000-0000-000000000003",
-    ]);
-    expect(commandRepository.auditEvents).toEqual([
-      "room_type_created:f6855000-0000-0000-0000-000000000003",
-    ]);
-  });
+      });
+      expect(commandRepository.outboxEnqueues).toEqual([
+        "ari_changed:f6855000-0000-0000-0000-000000000003",
+      ]);
+      expect(commandRepository.auditEvents).toEqual([
+        "room_type_created:f6855000-0000-0000-0000-000000000003",
+      ]);
+    },
+  );
 
   it("defaults omitted bathroom facts for room-type create clients", async () => {
     const commandRepository = createPmsOperationsCommandRepository();
@@ -14420,12 +16302,6 @@ describe("vayada-api", () => {
         },
         statusCode: 500,
       },
-      {
-        name: "route property storage failure",
-        appOptions: { propertyAccessRepository: propertyAccessFailureAfterAuthorization() },
-        statusCode: 500,
-        code: "read_model_unavailable",
-      },
     ];
     const hiddenPropertyDenials: unknown[] = [];
 
@@ -14654,14 +16530,6 @@ describe("vayada-api", () => {
           },
         },
         statusCode: 500,
-      },
-      {
-        name: "property scope repository failure",
-        appOptions: {
-          propertyAccessRepository: propertyAccessFailureAfterAuthorization(),
-        },
-        statusCode: 500,
-        code: "read_model_unavailable",
       },
     ];
     const denialBodies = new Map<string, unknown>();
@@ -15549,7 +17417,10 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: checkoutCase.request.method ?? "POST",
       url: checkoutCase.request.path,
-      payload: checkoutCase.request.body,
+      payload: {
+        ...checkoutCase.request.body,
+        fulfilledAddonSelectionIds: ["F6855600-0000-0000-0000-000000000001"],
+      },
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -15583,6 +17454,9 @@ describe("vayada-api", () => {
       expect.arrayContaining(["finance_reconciliation", "payout_dispatch"]),
     );
     expect(commandRepository.checkOutCommands).toHaveLength(1);
+    expect(commandRepository.checkOutCommands[0]?.fulfilledAddonSelectionIds).toEqual([
+      "f6855600-0000-0000-0000-000000000001",
+    ]);
     expect(commandRepository.auditEvents).toContain(
       "checkout_completed:f6855a00-0000-0000-0000-000000000001",
     );
@@ -15631,7 +17505,14 @@ describe("vayada-api", () => {
     ]);
   });
 
-  it("rejects malformed PMS check-out settled charge ids before dispatch", async () => {
+  it.each([
+    [{ chargesSettled: [123] }, "chargesSettled entries must be UUIDs."],
+    [{ fulfilledAddonSelectionIds: null }, "fulfilledAddonSelectionIds entries must be unique UUIDs."],
+    [
+      { fulfilledAddonSelectionIds: ["f6855600-0000-0000-0000-000000000001", "F6855600-0000-0000-0000-000000000001"] },
+      "fulfilledAddonSelectionIds entries must be unique UUIDs.",
+    ],
+  ])("rejects malformed PMS check-out input before dispatch", async (patch, message) => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
@@ -15651,7 +17532,7 @@ describe("vayada-api", () => {
       url: checkoutCase.request.path,
       payload: {
         ...checkoutCase.request.body,
-        chargesSettled: [123],
+        ...patch,
       },
       headers: {
         authorization: "Bearer valid-token",
@@ -15661,7 +17542,7 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toMatchObject({
       code: "invalid_body",
-      message: "chargesSettled entries must be UUIDs.",
+      message,
     });
     expect(commandRepository.checkOutCommands).toEqual([]);
   });

@@ -1,5 +1,13 @@
 "use client";
 
+import { BankTransferValidationError } from "@vayada/product-onboarding/bankTransferDestination";
+
+import {
+  saveBankTransferDestination,
+  type SavedBankTransferDestination,
+  type BankTransferSaveAttempt,
+} from "@vayada/product-onboarding/bankTransferDestination";
+import { apiClient, omitHotelContext } from "@/services/api/client";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import {
@@ -23,7 +31,6 @@ import {
 } from "@/services/api/financeSubscriptionsClient";
 import {
   CalendarDaysIcon,
-  BellIcon,
   CreditCardIcon,
   BanknotesIcon,
   GlobeAltIcon,
@@ -31,10 +38,6 @@ import {
   ChatBubbleLeftIcon,
   EnvelopeIcon,
   MapPinIcon,
-  PlusIcon,
-  TrashIcon,
-  ArrowUpIcon,
-  ArrowDownIcon,
   ArrowTopRightOnSquareIcon,
 } from "@heroicons/react/24/outline";
 import { HotelIcon } from "@vayada/product-onboarding";
@@ -43,17 +46,21 @@ import {
   type BookingAcceptanceMode,
   type PropertySettings,
   type PropertySettingsUpdate,
+  type SameDayBookingSettings,
 } from "@/services/settings";
 import { ToggleSwitch, FeedbackAlert, SaveButton } from "@/components/ui";
 import { CountrySelect } from "@/components/settings/CountrySelect";
+import LocalizationTab from "@/components/booking-flow/LocalizationTab";
+import { useLocalizationSettingsTab } from "@/components/booking-flow/useBookingFlowSettingsTabs";
+import { getBookingLocalizationSettings } from "@/services/api/bookingLocalizationSettingsClient";
+import { getSelectedBookingHotelId } from "@/services/api/bookingHotelScope";
 import {
   SettingsLayout,
   SettingsSection,
   SettingsCard,
   type SettingsNavSection,
 } from "@vayada/settings-ui";
-import { LocationMapPreview } from "@/components/settings/LocationMapPreview";
-import { PoiSearchInput } from "@/components/settings/PoiSearchInput";
+import { SameDayBookingCard } from "@/components/settings/SameDayBookingCard";
 import { useTranslation } from "@/lib/i18n";
 import {
   buildSettingsSectionUrl,
@@ -73,23 +80,14 @@ import {
 //   the hotel pays Vayada; payments = how the hotel collects from guests).
 type Section = SettingsSectionId;
 
-const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
-const PROPERTY_MAP_CENTERING_UNAVAILABLE =
-  "Automatic property map centering is not available on next-api yet.";
-const BILLING_SETTINGS_UNAVAILABLE = "Billing settings are not available on next-api yet.";
-const STRIPE_DASHBOARD_ERROR =
-  "Couldn't open your Stripe Dashboard right now. Please try again in a moment.";
-const STRIPE_NOT_CONNECTED =
-  "Your Stripe account isn't connected. Connect Stripe in your payment settings to access the dashboard.";
+const BILLING_SETTINGS_UNAVAILABLE = "admin.billingSettingsAreNotAvailableOnNextApiYet";
+const STRIPE_DASHBOARD_ERROR = "admin.couldnTOpenYourStripeDashboardRightNowPleaseTry";
+const STRIPE_NOT_CONNECTED = "admin.yourStripeAccountIsnTConnectedConnectStripeInYour";
 
 function readBookingHotelId(settings: PropertySettings): string {
   if (settings.id?.trim()) return settings.id.trim();
   if (typeof window === "undefined") return "";
   return localStorage.getItem("selectedHotelId")?.trim() ?? "";
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function isFinanceStripeReady(response: FinancePaymentSettingsResponse): boolean {
@@ -104,15 +102,15 @@ function isFinanceStripeReady(response: FinancePaymentSettingsResponse): boolean
   );
 }
 
-function formatBillingAmount(amountMinor: number): string {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "EUR" }).format(
+function formatBillingAmount(amountMinor: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" }).format(
     amountMinor / 100,
   );
 }
 
-function formatBillingDate(value: string | null): string {
+function formatBillingDate(value: string | null, locale: string): string {
   return value
-    ? new Date(value).toLocaleDateString(undefined, {
+    ? new Date(value).toLocaleDateString(locale, {
         day: "numeric",
         month: "long",
         year: "numeric",
@@ -142,14 +140,6 @@ function paymentPolicyNumber(policy: unknown, key: string, fallback: number): nu
       : undefined;
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
-
-const hasValidCoordinatePair = (latitude: number, longitude: number) =>
-  Number.isFinite(latitude) &&
-  Number.isFinite(longitude) &&
-  latitude >= -90 &&
-  latitude <= 90 &&
-  longitude >= -180 &&
-  longitude <= 180;
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: "",
@@ -187,12 +177,8 @@ const DEFAULT_SETTINGS: PropertySettings = {
   payout_account_number: "",
   payout_bank_name: "",
   payout_swift: "",
-  refer_a_guest_enabled: false,
-  map_view_enabled: false,
   terms_text: "",
   cancellation_policy_text: "",
-  show_room_detail_map: false,
-  points_of_interest: [],
 };
 
 type TargetSettingsUpdate =
@@ -223,12 +209,6 @@ function buildTargetSettingsUpdate(
   }
 
   if (section === "booking") {
-    if (settings.map_view_enabled || settings.refer_a_guest_enabled) {
-      return {
-        ok: false,
-        message: "Map view and refer-a-guest settings are not available on next-api yet.",
-      };
-    }
     return {
       ok: true,
       data: {
@@ -245,17 +225,11 @@ function buildTargetSettingsUpdate(
     };
   }
 
-  if (section === "location") {
-    return { ok: false, message: "Location map settings are not available on next-api yet." };
-  }
-  if (section === "notifications") {
-    return { ok: false, message: "Notification settings are not available on next-api yet." };
-  }
-  return { ok: false, message: "This settings section is not saved by property settings." };
+  return { ok: false, message: "admin.thisSettingsSectionIsNotSavedByPropertySettings" };
 }
 
 export default function SettingsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [activeSection, setActiveSection] = useState<Section>("property");
   const selectSection = useCallback((section: Section) => {
     setActiveSection(section);
@@ -277,9 +251,42 @@ export default function SettingsPage() {
   const [acceptanceLoading, setAcceptanceLoading] = useState(true);
   const [acceptanceSaving, setAcceptanceSaving] = useState(false);
   const [acceptanceError, setAcceptanceError] = useState("");
+  const [sameDaySettings, setSameDaySettings] = useState<SameDayBookingSettings | null>(null);
+  const [sameDayLoading, setSameDayLoading] = useState(true);
+  const [sameDaySaving, setSameDaySaving] = useState(false);
+  const [sameDayError, setSameDayError] = useState("");
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
   );
+  const [localizationLoading, setLocalizationLoading] = useState(true);
+  const [localizationLoadError, setLocalizationLoadError] = useState("");
+  const [canonicalDefaultCurrency, setCanonicalDefaultCurrency] = useState<string | null>(null);
+  const localizationLoadVersion = useRef(0);
+  const getBookingHotelIdForLocalization = useCallback(() => {
+    const hotelId = readBookingHotelId(settings);
+    if (!hotelId) throw new Error(t("admin.bookingHotelIdIsRequired"));
+    return hotelId;
+  }, [settings, t]);
+  const {
+    defaultCurrency,
+    setDefaultCurrency,
+    defaultLanguage,
+    setDefaultLanguage,
+    supportedCurrencies,
+    setSupportedCurrencies,
+    supportedLanguages,
+    setSupportedLanguages,
+    savingCurrencyLang,
+    applyLocalizationSettings,
+    handleSaveCurrencyLang,
+  } = useLocalizationSettingsTab({
+    getBookingHotelIdForSave: getBookingHotelIdForLocalization,
+    showFeedback: (type, message) => setFeedback({ type, message }),
+  });
+  const saveLocalizationSettings = async () => {
+    const saved = await handleSaveCurrencyLang();
+    if (saved) setCanonicalDefaultCurrency(saved.defaultCurrency);
+  };
 
   // Stripe Connect / Payments
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
@@ -304,8 +311,9 @@ export default function SettingsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const bankSaveAttempt = useRef<BankTransferSaveAttempt>({});
+  const [bankDestination, setBankDestination] = useState<SavedBankTransferDestination | null>(null);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
-  const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
   const [billingPropertyId, setBillingPropertyId] = useState<string | null>(null);
   const [financePlanStatus, setFinancePlanStatus] = useState<FinancePlanStatus | null>(null);
   const [billingPlanLoading, setBillingPlanLoading] = useState(true);
@@ -323,12 +331,12 @@ export default function SettingsPage() {
       setSettings(data);
       return data;
     } catch {
-      setFeedback({ type: "error", message: t("settings.feedback.loadError") });
+      setFeedback({ type: "error", message: "settings.feedback.loadError" });
       return null;
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, []);
 
   const loadBookingAcceptance = useCallback(async (hotelId: string) => {
     setAcceptanceLoading(true);
@@ -337,12 +345,49 @@ export default function SettingsPage() {
     try {
       const result = await settingsService.getBookingAcceptance(hotelId);
       setAcceptanceMode(result.acceptanceMode);
-    } catch (error) {
-      setAcceptanceError(errorMessage(error, "Booking acceptance settings failed to load."));
+    } catch {
+      setAcceptanceError("admin.bookingAcceptanceSettingsFailedToLoad");
     } finally {
       setAcceptanceLoading(false);
     }
   }, []);
+
+  const loadSameDayBooking = useCallback(async (hotelId: string) => {
+    setSameDayLoading(true);
+    setSameDaySettings(null);
+    setSameDayError("");
+    try {
+      setSameDaySettings(await settingsService.getSameDayBooking(hotelId));
+    } catch {
+      setSameDayError("admin.sameDayBookingSettingsFailedToLoad");
+    } finally {
+      setSameDayLoading(false);
+    }
+  }, []);
+
+  const loadLocalizationSettings = useCallback(
+    async (hotelId: string) => {
+      if (hotelId !== getSelectedBookingHotelId()) return;
+      const loadVersion = ++localizationLoadVersion.current;
+      const isCurrentLoad = () =>
+        loadVersion === localizationLoadVersion.current && hotelId === getSelectedBookingHotelId();
+      setLocalizationLoading(true);
+      setLocalizationLoadError("");
+      setCanonicalDefaultCurrency(null);
+      try {
+        const localization = await getBookingLocalizationSettings({ hotelId });
+        if (!isCurrentLoad()) return;
+        applyLocalizationSettings(localization);
+        setCanonicalDefaultCurrency(localization.defaultCurrency);
+      } catch {
+        if (!isCurrentLoad()) return;
+        setLocalizationLoadError("admin.localizationSettingsFailedToLoad");
+      } finally {
+        if (isCurrentLoad()) setLocalizationLoading(false);
+      }
+    },
+    [applyLocalizationSettings],
+  );
 
   const applyFinancePaymentSettings = useCallback((res: FinancePaymentSettingsResponse) => {
     const ps = res.paymentSettings;
@@ -372,17 +417,20 @@ export default function SettingsPage() {
         "paypalPaymentWindowHours",
         24,
       ),
-      payout_bank_name: paymentPolicyText(ps.depositPolicy, "bankName"),
-      payout_account_holder: paymentPolicyText(ps.depositPolicy, "accountHolder"),
+      payout_bank_name: "",
+      payout_account_holder: "",
+      payout_iban: "",
       payout_account_type: "account_number",
-      payout_account_number: paymentPolicyText(ps.depositPolicy, "accountNumber"),
-      payout_swift: paymentPolicyText(ps.depositPolicy, "bicSwift"),
+      payout_account_number: "",
+      payout_swift: "",
     }));
+    setBankDestination(res.bankDestination ?? null);
     setPaymentSettingsLoaded(true);
   }, []);
 
   useEffect(() => {
     const paymentSettingsVersion = ++paymentSettingsLoadVersion.current;
+    const selectedHotelId = getSelectedBookingHotelId();
     const stripeReturn = new URLSearchParams(window.location.search).get("stripe");
     if (stripeReturn === "return" || stripeReturn === "refresh") {
       setStripeAccountCreationBlocked(true);
@@ -392,23 +440,41 @@ export default function SettingsPage() {
     setAcceptanceLoading(true);
     setAcceptanceMode(null);
     setAcceptanceError("");
+    setSameDayLoading(true);
+    setSameDaySettings(null);
+    setSameDayError("");
+    if (selectedHotelId) void loadLocalizationSettings(selectedHotelId);
     const propertyPromise = fetchSettings();
     propertyPromise
       .then(async (property) => {
         if (!property) {
           setBillingPlanLoading(false);
           setAcceptanceLoading(false);
-          setAcceptanceError("Select a hotel before loading booking acceptance settings.");
+          setAcceptanceError("admin.selectAHotelBeforeLoadingBookingAcceptanceSettings");
+          setSameDayLoading(false);
+          setSameDayError("admin.selectAHotelBeforeLoadingSameDayBookingSettings");
+          if (!selectedHotelId) {
+            setLocalizationLoading(false);
+            setLocalizationLoadError("admin.selectAHotelBeforeLoadingLocalizationSettings");
+          }
           return null;
         }
         const hotelId = readBookingHotelId(property);
         if (!hotelId) {
           setBillingPlanLoading(false);
           setAcceptanceLoading(false);
-          setAcceptanceError("Select a hotel before loading booking acceptance settings.");
+          setAcceptanceError("admin.selectAHotelBeforeLoadingBookingAcceptanceSettings");
+          setSameDayLoading(false);
+          setSameDayError("admin.selectAHotelBeforeLoadingSameDayBookingSettings");
+          if (!selectedHotelId) {
+            setLocalizationLoading(false);
+            setLocalizationLoadError("admin.selectAHotelBeforeLoadingLocalizationSettings");
+          }
           return null;
         }
         void loadBookingAcceptance(hotelId);
+        void loadSameDayBooking(hotelId);
+        if (hotelId !== selectedHotelId) void loadLocalizationSettings(hotelId);
         const propertyLink = await getBookingHotelPropertyLink({ hotelId });
         setBillingPropertyId(propertyLink.propertyId);
         const billingReturn =
@@ -432,15 +498,15 @@ export default function SettingsPage() {
               }
               setBillingPlanConfirmation(
                 plan.planStatus.plan === "fixed"
-                  ? "Fixed Plan is active."
-                  : "Payment received. Your Fixed Plan is still being confirmed.",
+                  ? "admin.fixedPlanIsActive"
+                  : "admin.paymentReceivedYourFixedPlanIsStillBeingConfirmed",
               );
             } else if (billingReturn === "canceled") {
-              setBillingPlanError("Payment failed. Please try again or use a different card.");
+              setBillingPlanError("admin.paymentFailedPleaseTryAgainOrUseADifferentCard");
             }
             setFinancePlanStatus(plan.planStatus);
-          } catch (error) {
-            setBillingPlanError(errorMessage(error, "Billing plan failed to load."));
+          } catch {
+            setBillingPlanError("admin.billingPlanFailedToLoad");
           } finally {
             setBillingPlanLoading(false);
           }
@@ -456,13 +522,19 @@ export default function SettingsPage() {
         }
         applyFinancePaymentSettings(paymentSettings);
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (paymentSettingsVersion !== paymentSettingsLoadVersion.current) return;
         setPaymentSettingsLoaded(false);
         setBillingPlanLoading(false);
-        setPaymentError(errorMessage(err, "Payment settings failed to load."));
+        setPaymentError("admin.paymentSettingsFailedToLoad");
       });
-  }, [applyFinancePaymentSettings, fetchSettings, loadBookingAcceptance]);
+  }, [
+    applyFinancePaymentSettings,
+    fetchSettings,
+    loadBookingAcceptance,
+    loadLocalizationSettings,
+    loadSameDayBooking,
+  ]);
 
   const refreshStripeOnboarding = useCallback(
     async (
@@ -513,16 +585,16 @@ export default function SettingsPage() {
         }
         if (isFinanceStripeReady(paymentSettings)) {
           setStripeAccountCreationBlocked(false);
-          setPaymentSuccess("Stripe is connected.");
+          setPaymentSuccess("admin.stripeIsConnected");
         } else {
-          setPaymentError("Stripe setup is still pending. Complete onboarding or check again.");
+          setPaymentError("admin.stripeSetupIsStillPendingCompleteOnboardingOrCheckAgain");
         }
         return "settled";
       } catch (error) {
         if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
           return "aborted";
         }
-        setPaymentError("Couldn't refresh Stripe status. Check again in a moment.");
+        setPaymentError("admin.couldnTRefreshStripeStatusCheckAgainInAMoment");
         return "settled";
       } finally {
         if (stripeRefreshAbort.current === controller) {
@@ -566,7 +638,7 @@ export default function SettingsPage() {
   const handleAcceptanceToggle = async () => {
     const hotelId = readBookingHotelId(settings);
     if (!hotelId || !acceptanceMode) {
-      setAcceptanceError("Load the current booking acceptance setting before changing it.");
+      setAcceptanceError("admin.loadTheCurrentBookingAcceptanceSettingBeforeChangingIt");
       return;
     }
 
@@ -578,9 +650,9 @@ export default function SettingsPage() {
         hotelId,
       );
       setAcceptanceMode(saved.acceptanceMode);
-      setFeedback({ type: "success", message: "Booking acceptance settings saved." });
-    } catch (error) {
-      setAcceptanceError(errorMessage(error, "Booking acceptance settings could not be saved."));
+      setFeedback({ type: "success", message: "admin.bookingAcceptanceSettingsSaved" });
+    } catch {
+      setAcceptanceError("admin.bookingAcceptanceSettingsCouldNotBeSaved");
     } finally {
       setAcceptanceSaving(false);
     }
@@ -591,11 +663,37 @@ export default function SettingsPage() {
     if (hotelId) void loadBookingAcceptance(hotelId);
   };
 
+  const saveSameDayBooking = async (enabled: boolean, cutoffLocalTime: string | null) => {
+    const hotelId = readBookingHotelId(settings);
+    if (!hotelId || !sameDaySettings) {
+      setSameDayError("admin.loadTheCurrentSameDayBookingSettingBeforeChangingIt");
+      return;
+    }
+    setSameDaySaving(true);
+    setSameDayError("");
+    setFeedback(null);
+    try {
+      setSameDaySettings(
+        await settingsService.updateSameDayBooking(enabled, cutoffLocalTime, hotelId),
+      );
+      setFeedback({ type: "success", message: "admin.sameDayBookingSettingsSaved" });
+    } catch {
+      setSameDayError("admin.sameDayBookingSettingsCouldNotBeSaved");
+    } finally {
+      setSameDaySaving(false);
+    }
+  };
+
+  const retrySameDayBooking = () => {
+    const hotelId = readBookingHotelId(settings);
+    if (hotelId) void loadSameDayBooking(hotelId);
+  };
+
   const handleCreateStripeAccount = async () => {
     if (!connectEmail) return;
     const stripeTab = window.open("about:blank", "vayada-stripe-connect");
     if (!stripeTab) {
-      setPaymentError("Allow pop-ups to continue to Stripe setup.");
+      setPaymentError("admin.allowPopUpsToContinueToStripeSetup");
       return;
     }
     stripeTab.opener = null;
@@ -605,7 +703,7 @@ export default function SettingsPage() {
       const hotelId = readBookingHotelId(settings);
       if (!hotelId) {
         stripeTab.close();
-        setPaymentError("Select a hotel before creating a Stripe account.");
+        setPaymentError("admin.selectAHotelBeforeCreatingAStripeAccount");
         return;
       }
       let onboardingPropertyId = "";
@@ -633,16 +731,14 @@ export default function SettingsPage() {
       stripeTab.location.assign(result.onboardingUrl);
       if (!trackingFlowId) {
         setStripeAccountCreationBlocked(true);
-        setPaymentError(
-          "Stripe setup opened, but automatic status tracking is unavailable. Check Stripe status when you return.",
-        );
+        setPaymentError("admin.stripeSetupOpenedButAutomaticStatusTrackingIsUnavailableCheck");
       }
     } catch (err: unknown) {
       stripeTab.close();
       const msg =
         err instanceof TypeError
-          ? t("settings.billing.errorPaymentServerUnreachable")
-          : t("settings.billing.errorAccountCreate");
+          ? "settings.billing.errorPaymentServerUnreachable"
+          : "settings.billing.errorAccountCreate";
       setPaymentError(msg);
     } finally {
       setCreatingAccount(false);
@@ -657,7 +753,7 @@ export default function SettingsPage() {
     if (!stripeTab) {
       stripeOnboardingLinkPending.current = false;
       setIssuingStripeOnboardingLink(false);
-      setPaymentError("Allow pop-ups to continue to Stripe setup.");
+      setPaymentError("admin.allowPopUpsToContinueToStripeSetup");
       return;
     }
     stripeTab.opener = null;
@@ -665,7 +761,7 @@ export default function SettingsPage() {
       const hotelId = readBookingHotelId(settings);
       if (!hotelId || !stripeAccountId) {
         stripeTab.close();
-        setPaymentError("Select a hotel and create a Stripe account before onboarding.");
+        setPaymentError("admin.selectAHotelAndCreateAStripeAccountBeforeOnboarding");
         return;
       }
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
@@ -681,13 +777,11 @@ export default function SettingsPage() {
       stripeTab.location.assign(link.onboardingUrl);
       if (!trackingFlowId) {
         setStripeAccountCreationBlocked(true);
-        setPaymentError(
-          "Stripe setup opened, but automatic status tracking is unavailable. Check Stripe status when you return.",
-        );
+        setPaymentError("admin.stripeSetupOpenedButAutomaticStatusTrackingIsUnavailableCheck");
       }
     } catch {
       stripeTab.close();
-      setPaymentError(t("settings.billing.errorOnboardingLink"));
+      setPaymentError("settings.billing.errorOnboardingLink");
     } finally {
       stripeOnboardingLinkPending.current = false;
       setIssuingStripeOnboardingLink(false);
@@ -736,19 +830,55 @@ export default function SettingsPage() {
     };
     try {
       if (!paymentSettingsLoaded) {
-        fail("Payment settings did not load. Refresh before saving payments.");
+        fail("admin.paymentSettingsDidNotLoadRefreshBeforeSavingPayments");
         return null;
       }
-      if (paymentProvider === "xendit" || paymentProvider === "vayada") {
-        fail(`${paymentProvider === "xendit" ? "Xendit" : "vayada Payments"} is coming soon.`);
+      if (
+        localizationLoading ||
+        localizationLoadError ||
+        savingCurrencyLang ||
+        !canonicalDefaultCurrency
+      ) {
+        fail("admin.localizationSettingsDidNotLoadRetryLocalizationBeforeSavingPayments");
+        return null;
+      }
+      if (
+        settings.online_card_payment &&
+        (paymentProvider === "xendit" || paymentProvider === "vayada")
+      ) {
+        fail("settings.billing.comingSoon");
         return null;
       }
       const hotelId = readBookingHotelId(settings);
       if (!hotelId) {
-        fail("Select a hotel before saving payment settings.");
+        fail("admin.selectAHotelBeforeSavingPaymentSettings");
         return null;
       }
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      const destination = await saveBankTransferDestination(
+        {
+          get: (path) => apiClient.get(path, omitHotelContext),
+          put: (path, body) => apiClient.put(path, body, omitHotelContext),
+        },
+        {
+          propertyId: propertyLink.propertyId,
+          enabled: settings.bank_transfer ?? false,
+          saved: bankDestination,
+          attempt: bankSaveAttempt.current,
+          details: {
+            accountHolder: settings.payout_account_holder ?? "",
+            accountType: settings.payout_account_type ?? "iban",
+            accountNumber:
+              (settings.payout_account_type === "account_number"
+                ? settings.payout_account_number
+                : settings.payout_iban) ?? "",
+            bankName: settings.payout_bank_name ?? "",
+            bicSwift: settings.payout_swift ?? "",
+            instructions: "",
+          },
+        },
+      );
+      setBankDestination(destination ?? null);
       await updateFinancePaymentSettings({
         propertyId: propertyLink.propertyId,
         body: buildFinancePaymentSettingsBody({
@@ -766,16 +896,28 @@ export default function SettingsPage() {
           payoutBankName: settings.payout_bank_name,
           payoutSwift: settings.payout_swift,
           paymentProvider,
-          defaultCurrency: settings.default_currency,
+          defaultCurrency: canonicalDefaultCurrency,
           commandPrefix: `settings-payment-settings-${hotelId}`,
         }),
       });
-      const message = t("settings.billing.paymentSettingsSaved");
+      setSettings((previous) => ({
+        ...previous,
+        payout_account_holder: "",
+        payout_account_number: "",
+        payout_iban: "",
+        payout_bank_name: "",
+        payout_swift: "",
+      }));
+      const message = "settings.billing.paymentSettingsSaved";
       setPaymentSuccess(message);
       if (showPageFeedback) setFeedback({ type: "success", message });
       return propertyLink.propertyId;
-    } catch {
-      fail(t("settings.billing.errorPaymentSaveFailed"));
+    } catch (error) {
+      fail(
+        error instanceof BankTransferValidationError
+          ? "admin.enterTheCompleteBankDetailsOrLeaveAllFieldsEmpty"
+          : "settings.billing.errorPaymentSaveFailed",
+      );
       return null;
     } finally {
       setSavingPayment(false);
@@ -805,29 +947,14 @@ export default function SettingsPage() {
       return;
     }
 
-    const pois = settings.points_of_interest || [];
-    const invalidPoi = pois.find(
-      (poi) =>
-        !poi.label.trim() ||
-        !poi.travelTime.trim() ||
-        !hasValidCoordinatePair(poi.latitude, poi.longitude),
-    );
-    if (invalidPoi) {
-      setFeedback({
-        type: "error",
-        message: "Every point of interest needs a label, travel time, latitude, and longitude.",
-      });
-      selectSection("location");
-      return;
-    }
     try {
       setSaving(true);
       setFeedback(null);
       const data = await settingsService.updatePropertySettings(targetSettingsUpdate.data);
       setSettings(data);
-      setFeedback({ type: "success", message: t("settings.feedback.saveSuccess") });
-    } catch (err: unknown) {
-      setFeedback({ type: "error", message: errorMessage(err, t("settings.feedback.saveError")) });
+      setFeedback({ type: "success", message: "settings.feedback.saveSuccess" });
+    } catch {
+      setFeedback({ type: "error", message: "settings.feedback.saveError" });
     } finally {
       setSaving(false);
     }
@@ -842,11 +969,9 @@ export default function SettingsPage() {
         propertyId: billingPropertyId,
       });
       window.location.assign(result.checkout.checkoutUrl);
-    } catch (error) {
+    } catch {
       setBillingPlanModal(null);
-      setBillingPlanError(
-        errorMessage(error, "Payment failed. Please try again or use a different card."),
-      );
+      setBillingPlanError("admin.paymentFailedPleaseTryAgainOrUseADifferentCard");
     } finally {
       setBillingPlanAction(null);
     }
@@ -859,8 +984,8 @@ export default function SettingsPage() {
       setBillingPlanError("");
       const result = await openFinanceCustomerPortal({ propertyId: billingPropertyId });
       window.location.assign(result.customerPortal.portalUrl);
-    } catch (error) {
-      setBillingPlanError(errorMessage(error, "Stripe billing could not be opened."));
+    } catch {
+      setBillingPlanError("admin.stripeBillingCouldNotBeOpened");
     } finally {
       setBillingPlanAction(null);
     }
@@ -875,11 +1000,13 @@ export default function SettingsPage() {
       setFinancePlanStatus(result.planStatus);
       setBillingPlanModal(null);
       setBillingPlanConfirmation(
-        `Your Fixed Plan remains active through ${formatBillingDate(result.planStatus.currentPeriodEnd)}.`,
+        t("admin.yourFixedPlanRemainsActiveThroughDate", {
+          date: formatBillingDate(result.planStatus.currentPeriodEnd, locale),
+        }),
       );
-    } catch (error) {
+    } catch {
       setBillingPlanModal(null);
-      setBillingPlanError(errorMessage(error, "The plan change could not be scheduled."));
+      setBillingPlanError("admin.thePlanChangeCouldNotBeScheduled");
     } finally {
       setBillingPlanAction(null);
     }
@@ -889,76 +1016,12 @@ export default function SettingsPage() {
     setSettings({ ...settings, [key]: value });
   };
 
-  const updatePois = (pois: NonNullable<PropertySettings["points_of_interest"]>) => {
-    updateSetting(
-      "points_of_interest",
-      pois.map((poi, position) => ({ ...poi, position })),
-    );
-  };
-
-  const addPoi = () => {
-    const pois = settings.points_of_interest || [];
-    if (pois.length >= 10) {
-      setFeedback({ type: "error", message: "Maximum 10 points of interest." });
-      return;
-    }
-    const used = new Set(pois.map((poi) => poi.color));
-    const color = POI_COLORS.find((candidate) => !used.has(candidate)) || POI_COLORS[0];
-    const id =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `poi-${Date.now()}`;
-    const newPoi = {
-      id,
-      label: "",
-      travelTime: "",
-      color,
-      latitude: NaN,
-      longitude: NaN,
-      position: pois.length,
-    };
-    updatePois([...pois, newPoi]);
-    setSelectedPoiId(id);
-  };
-
-  const patchPoi = (
-    id: string,
-    patch: Partial<NonNullable<PropertySettings["points_of_interest"]>[number]>,
-  ) => {
-    updatePois(
-      (settings.points_of_interest || []).map((poi) =>
-        poi.id === id ? { ...poi, ...patch } : poi,
-      ),
-    );
-  };
-
-  const deletePoi = (id: string) => {
-    updatePois((settings.points_of_interest || []).filter((poi) => poi.id !== id));
-    if (selectedPoiId === id) setSelectedPoiId(null);
-  };
-
-  const movePoi = (id: string, direction: -1 | 1) => {
-    const pois = [...(settings.points_of_interest || [])];
-    const index = pois.findIndex((poi) => poi.id === id);
-    const next = index + direction;
-    if (index < 0 || next < 0 || next >= pois.length) return;
-    [pois[index], pois[next]] = [pois[next], pois[index]];
-    updatePois(pois);
-  };
-
   const sections: SettingsNavSection[] = [
     { id: "property", label: t("settings.tabs.property"), icon: HotelIcon },
     { id: "booking", label: t("settings.tabs.booking"), icon: CalendarDaysIcon },
-    { id: "location", label: "Location map", icon: MapPinIcon },
-    {
-      id: "notifications",
-      label: t("settings.tabs.notifications"),
-      icon: BellIcon,
-    },
-    // TODO i18n: add settings.tabs.payments to messages/*.json.
-    // Hardcoded English until then.
+    { id: "localization", label: t("bookingFlow.tabs.localization"), icon: GlobeAltIcon },
     { id: "billing", label: t("settings.tabs.billing"), icon: CreditCardIcon },
-    { id: "payments", label: "Payments", icon: BanknotesIcon },
+    { id: "payments", label: t("admin.payments"), icon: BanknotesIcon },
   ];
 
   return (
@@ -971,18 +1034,23 @@ export default function SettingsPage() {
     >
       {stripeDashboardToast && (
         <div className="fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))]" role="alert">
-          <FeedbackAlert type="error" message={stripeDashboardToast} />
+          <FeedbackAlert type="error" message={t(stripeDashboardToast)} />
         </div>
       )}
 
       {/* Feedback banner */}
       {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
+        <div role={feedback.type === "error" ? "alert" : "status"} aria-live="polite">
+          <FeedbackAlert type={feedback.type} message={t(feedback.message)} className="mb-4" />
+        </div>
       )}
 
       {/* Property tab */}
       {activeSection === "property" && (
         <div className="mt-5 space-y-4">
+          <a href="/settings/location" className="block rounded-lg border border-gray-200 bg-white p-4 text-sm font-medium text-blue-700">
+            Location &amp; surroundings <span className="ml-2 font-normal text-gray-500">Address, nearby places and guest preview</span>
+          </a>
           {loading ? (
             <div className="flex items-center justify-center py-10">
               <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
@@ -1174,58 +1242,47 @@ export default function SettingsPage() {
                 enabled={acceptanceMode === "instant"}
                 disabled={acceptanceSaving || Boolean(acceptanceError)}
                 onChange={() => void handleAcceptanceToggle()}
-                label="Accept bookings instantly"
-                description="Confirm card and pay-at-property bookings immediately. Bank transfers always require manual review."
+                label={t("admin.acceptBookingsInstantly")}
+                description={t("admin.confirmCardAndPayAtPropertyBookingsImmediatelyBankTransfers")}
               />
             ) : acceptanceLoading ? (
               <div className="py-3" role="status">
-                <p className="text-[13px] font-semibold text-gray-900">Accept bookings instantly</p>
-                <p className="text-[13px] text-gray-500">Loading current setting…</p>
+                <p className="text-[13px] font-semibold text-gray-900">
+                  {t("admin.acceptBookingsInstantly")}
+                </p>
+                <p className="text-[13px] text-gray-500">{t("admin.loadingCurrentSetting")}</p>
               </div>
             ) : null}
             <p className="border-t border-gray-100 pt-3 text-[12px] text-gray-500">
-              This setting is shared between PMS and Booking Engine.
+              {t("admin.thisSettingIsSharedBetweenPMSAndBookingEngine")}
             </p>
             {acceptanceSaving && (
               <p className="mt-2 text-[12px] text-gray-500" role="status">
-                Saving…
+                {t("admin.saving")}
               </p>
             )}
             {acceptanceError && (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3" role="alert">
-                <p className="text-[12px] text-red-700">{acceptanceError}</p>
+                <p className="text-[12px] text-red-700">{t(acceptanceError)}</p>
                 <button
                   type="button"
                   onClick={retryBookingAcceptance}
                   className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-medium text-gray-700 hover:border-gray-400"
                 >
-                  Retry
+                  {t("auth.chooseProperty.retry")}
                 </button>
               </div>
             )}
           </div>
 
-          {/* Map View */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <ToggleSwitch
-              enabled={settings.map_view_enabled ?? false}
-              onChange={() => updateSetting("map_view_enabled", !settings.map_view_enabled)}
-              label={t("settings.booking.mapViewLabel")}
-              description={t("settings.booking.mapViewDesc")}
-            />
-          </div>
-
-          {/* Refer a Guest */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <ToggleSwitch
-              enabled={settings.refer_a_guest_enabled ?? false}
-              onChange={() =>
-                updateSetting("refer_a_guest_enabled", !settings.refer_a_guest_enabled)
-              }
-              label={t("settings.booking.referAGuest")}
-              description={t("settings.booking.referAGuestDesc")}
-            />
-          </div>
+          <SameDayBookingCard
+            settings={sameDaySettings}
+            loading={sameDayLoading}
+            saving={sameDaySaving}
+            loadError={t(sameDayError)}
+            onSave={(enabled, cutoffLocalTime) => void saveSameDayBooking(enabled, cutoffLocalTime)}
+            onRetry={retrySameDayBooking}
+          />
 
           {/* Booking Policies */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
@@ -1272,266 +1329,50 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Location map tab */}
-      {activeSection === "location" && (
-        <div className="mt-5 space-y-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <ToggleSwitch
-              enabled={settings.show_room_detail_map ?? false}
-              onChange={() => updateSetting("show_room_detail_map", !settings.show_room_detail_map)}
-              label="Show location map on room detail"
-              description="Guests see the property and nearby points of interest before selecting a rate."
-            />
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">Points of interest</h2>
-                <p className="text-[13px] text-gray-500 mt-0.5">Up to 10 map pins per property.</p>
+      {activeSection === "localization" && (
+        <SettingsSection
+          id="localization"
+          title={t("bookingFlow.tabs.localization")}
+          description={t("admin.chooseTheCurrenciesAndLanguagesAvailableOnYourBookingPage")}
+        >
+          {localizationLoading ? (
+            <SettingsCard>
+              <p className="text-sm text-gray-500" role="status">
+                {t("admin.loadingLocalizationSettings")}
+              </p>
+            </SettingsCard>
+          ) : localizationLoadError ? (
+            <SettingsCard>
+              <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
+                <p className="text-sm text-red-700">{t(localizationLoadError)}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const hotelId = readBookingHotelId(settings);
+                    if (hotelId) void loadLocalizationSettings(hotelId);
+                  }}
+                  disabled={!readBookingHotelId(settings)}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50"
+                >
+                  {t("auth.chooseProperty.retry")}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={addPoi}
-                disabled={(settings.points_of_interest || []).length >= 10}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add point of interest
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-              <div className="space-y-3">
-                {(settings.points_of_interest || []).length === 0 && (
-                  <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-[13px] text-gray-500">
-                    No points of interest yet.
-                  </div>
-                )}
-                {(settings.points_of_interest || []).map((poi, index) => (
-                  <div
-                    key={poi.id}
-                    className={`rounded-lg border p-3 ${
-                      selectedPoiId === poi.id
-                        ? "border-primary-300 bg-primary-50/40"
-                        : "border-gray-200"
-                    }`}
-                    onClick={() => setSelectedPoiId(poi.id)}
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-4 w-4 rounded-full border border-white shadow-sm"
-                          style={{ backgroundColor: poi.color }}
-                        />
-                        <span className="text-[13px] font-semibold text-gray-900">
-                          Point {index + 1}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            movePoi(poi.id, -1);
-                          }}
-                          disabled={index === 0}
-                          className="rounded-md p-1.5 text-gray-500 hover:bg-white disabled:opacity-40"
-                          aria-label="Move point up"
-                        >
-                          <ArrowUpIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            movePoi(poi.id, 1);
-                          }}
-                          disabled={index === (settings.points_of_interest || []).length - 1}
-                          className="rounded-md p-1.5 text-gray-500 hover:bg-white disabled:opacity-40"
-                          aria-label="Move point down"
-                        >
-                          <ArrowDownIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            deletePoi(poi.id);
-                          }}
-                          className="rounded-md p-1.5 text-red-500 hover:bg-red-50"
-                          aria-label="Delete point"
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="block text-[13px] font-medium text-gray-700">
-                        Label
-                        <input
-                          type="text"
-                          value={poi.label}
-                          onChange={(event) => patchPoi(poi.id, { label: event.target.value })}
-                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          placeholder="Kuta Beach"
-                        />
-                      </label>
-                      <label className="block text-[13px] font-medium text-gray-700">
-                        Travel time
-                        <input
-                          type="text"
-                          value={poi.travelTime}
-                          onChange={(event) => patchPoi(poi.id, { travelTime: event.target.value })}
-                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          placeholder="3 min walk"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="mt-3">
-                      <label className="block text-[13px] font-medium text-gray-700 mb-1">
-                        Search location
-                      </label>
-                      <PoiSearchInput
-                        onSelect={(latitude, longitude, name) => {
-                          patchPoi(poi.id, {
-                            latitude,
-                            longitude,
-                            ...(!poi.label.trim() ? { label: name } : {}),
-                          });
-                          setSelectedPoiId(poi.id);
-                        }}
-                      />
-                      {Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude) && (
-                        <p className="mt-1 text-[11px] text-gray-400">
-                          Placed at {poi.latitude.toFixed(5)}, {poi.longitude.toFixed(5)}
-                          {" · "}
-                          <button
-                            type="button"
-                            className="text-primary-600 hover:underline"
-                            onClick={() => setSelectedPoiId(poi.id)}
-                          >
-                            click map to reposition
-                          </button>
-                        </p>
-                      )}
-                      {(!Number.isFinite(poi.latitude) || !Number.isFinite(poi.longitude)) && (
-                        <p className="mt-1 text-[11px] text-amber-600">
-                          Not placed yet — search above or{" "}
-                          <button
-                            type="button"
-                            className="underline"
-                            onClick={() => setSelectedPoiId(poi.id)}
-                          >
-                            click the map
-                          </button>
-                          .
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {POI_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => patchPoi(poi.id, { color })}
-                          className={`h-7 w-7 rounded-full border-2 ${
-                            poi.color === color ? "border-gray-900" : "border-white"
-                          } shadow-sm`}
-                          style={{ backgroundColor: color }}
-                          aria-label={`Use pin color ${color}`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="lg:sticky lg:top-5 lg:self-start space-y-2">
-                {(settings.points_of_interest || []).length === 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                    {PROPERTY_MAP_CENTERING_UNAVAILABLE}
-                  </div>
-                )}
-                <LocationMapPreview
-                  propertyName={settings.property_name}
-                  property={null}
-                  pois={(settings.points_of_interest || []).filter(
-                    (poi) => Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude),
-                  )}
-                  selectedPoiId={selectedPoiId}
-                  onPlacePoi={
-                    selectedPoiId
-                      ? (latitude, longitude) => patchPoi(selectedPoiId, { latitude, longitude })
-                      : undefined
-                  }
-                  onMovePoi={(id, latitude, longitude) => patchPoi(id, { latitude, longitude })}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving}>
-              {t("common.save")}
-            </SaveButton>
-          </div>
-        </div>
-      )}
-
-      {/* Notifications tab */}
-      {activeSection === "notifications" && (
-        <div className="mt-5 space-y-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <EnvelopeIcon className="w-4 h-4 text-gray-700" />
-              <h2 className="text-sm font-semibold text-gray-900">
-                {t("settings.notifications.title")}
-              </h2>
-            </div>
-            <p className="text-[13px] text-gray-500 mb-4">{t("settings.notifications.subtitle")}</p>
-
-            <ToggleSwitch
-              enabled={settings.email_notifications}
-              onChange={() => updateSetting("email_notifications", !settings.email_notifications)}
-              label={t("settings.notifications.emailNotifications")}
-              description={t("settings.notifications.emailNotificationsDesc")}
+            </SettingsCard>
+          ) : (
+            <LocalizationTab
+              defaultCurrency={defaultCurrency}
+              setDefaultCurrency={setDefaultCurrency}
+              defaultLanguage={defaultLanguage}
+              setDefaultLanguage={setDefaultLanguage}
+              supportedCurrencies={supportedCurrencies}
+              setSupportedCurrencies={setSupportedCurrencies}
+              supportedLanguages={supportedLanguages}
+              setSupportedLanguages={setSupportedLanguages}
+              onSave={saveLocalizationSettings}
+              saving={savingCurrencyLang}
             />
-
-            <div className="border-t border-gray-200 my-2" />
-
-            <ToggleSwitch
-              enabled={settings.new_booking_alerts}
-              onChange={() => updateSetting("new_booking_alerts", !settings.new_booking_alerts)}
-              label={t("settings.notifications.newBookingAlerts")}
-              description={t("settings.notifications.newBookingAlertsDesc")}
-            />
-
-            <ToggleSwitch
-              enabled={settings.ota_booking_alerts}
-              onChange={() => updateSetting("ota_booking_alerts", !settings.ota_booking_alerts)}
-              label={t("settings.notifications.otaBookingAlerts")}
-              description={t("settings.notifications.otaBookingAlertsDesc")}
-            />
-
-            <ToggleSwitch
-              enabled={settings.payment_alerts}
-              onChange={() => updateSetting("payment_alerts", !settings.payment_alerts)}
-              label={t("settings.notifications.paymentAlerts")}
-              description={t("settings.notifications.paymentAlertsDesc")}
-            />
-          </div>
-
-          {/* Save button */}
-          <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving}>
-              {t("common.save")}
-            </SaveButton>
-          </div>
-        </div>
+          )}
+        </SettingsSection>
       )}
 
       {/* Billing tab */}
@@ -1583,7 +1424,7 @@ export default function SettingsPage() {
                   disabled={billingPlanLoading || billingPlanAction !== null}
                   className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
-                  Switch to Commission Plan
+                  {t("admin.switchToCommissionPlan")}
                 </button>
               )}
             </div>
@@ -1606,15 +1447,17 @@ export default function SettingsPage() {
                   </span>
                 )}
               </div>
-              <p className="text-[12px] text-gray-500 mb-3">Fixed fee based on active rooms</p>
+              <p className="text-[12px] text-gray-500 mb-3">
+                {t("admin.fixedFeeBasedOnActiveRooms")}
+              </p>
               <div className="bg-gray-50 rounded-xl p-4 text-center mb-4">
                 <span className="text-3xl font-bold text-gray-900">
-                  {formatBillingAmount(financePlanStatus?.amountMinor ?? 3_000)}
+                  {formatBillingAmount(financePlanStatus?.amountMinor ?? 3_000, locale)}
                 </span>
-                <p className="text-[11px] text-gray-400 mt-1">every 30 days</p>
+                <p className="text-[11px] text-gray-400 mt-1">{t("admin.every30Days")}</p>
                 <p className="text-[10px] text-gray-400 mt-0.5">
-                  €30 for the first active room + €5 per additional room ·{" "}
-                  {financePlanStatus?.activeRoomCount ?? 0} active rooms
+                  {t("admin.30ForTheFirstActiveRoom5PerAdditionalRoom")}{" "}
+                  {financePlanStatus?.activeRoomCount ?? 0} {t("admin.activeRooms")}
                 </p>
               </div>
               {financePlanStatus?.plan !== "fixed" && (
@@ -1628,13 +1471,16 @@ export default function SettingsPage() {
                   }
                   className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
-                  {financePlanStatus?.checkoutPending ? "Resume payment" : "Switch to Fixed Plan"}
+                  {financePlanStatus?.checkoutPending
+                    ? t("admin.resumePayment")
+                    : t("admin.switchToFixedPlan")}
                 </button>
               )}
               {financePlanStatus?.plan === "fixed" && (
                 <div className="space-y-2">
                   <p className="text-center text-[11px] text-gray-500">
-                    Next billing date: {formatBillingDate(financePlanStatus.nextBillingDate)}
+                    {t("admin.nextBillingDate")}
+                    {formatBillingDate(financePlanStatus.nextBillingDate, locale)}
                   </p>
                   <button
                     onClick={manageFixedPlanBilling}
@@ -1643,7 +1489,9 @@ export default function SettingsPage() {
                     }
                     className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                   >
-                    {billingPlanAction === "portal" ? "Opening billing…" : "Manage billing"}
+                    {billingPlanAction === "portal"
+                      ? t("admin.openingBilling")
+                      : t("admin.manageBilling")}
                   </button>
                 </div>
               )}
@@ -1652,7 +1500,7 @@ export default function SettingsPage() {
 
           {billingPlanLoading && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 text-[13px] text-gray-500">
-              Loading your current billing plan…
+              {t("admin.loadingYourCurrentBillingPlan")}
             </div>
           )}
           {billingPlanError && (
@@ -1660,12 +1508,12 @@ export default function SettingsPage() {
               role="alert"
               className="rounded-lg border border-red-200 bg-red-50 p-4 text-[13px] text-red-800"
             >
-              {billingPlanError}
+              {t(billingPlanError)}
             </div>
           )}
           {billingPlanConfirmation && (
             <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-[13px] text-green-800">
-              {billingPlanConfirmation}
+              {t(billingPlanConfirmation)}
             </div>
           )}
           {financePlanStatus?.status === "past_due" && (
@@ -1673,16 +1521,15 @@ export default function SettingsPage() {
               role="alert"
               className="rounded-lg border border-red-200 bg-red-50 p-4 text-[13px] text-red-800"
             >
-              Your renewal payment is past due. Stripe will retry it automatically; use Manage
-              billing to update your card.
+              {t("admin.yourRenewalPaymentIsPastDueStripeWillRetryIt")}
             </div>
           )}
           {financePlanStatus?.cancelAtPeriodEnd && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-[13px] text-amber-800">
-                Your Fixed Plan is paid through{" "}
-                <strong>{formatBillingDate(financePlanStatus.currentPeriodEnd)}</strong>. Commission
-                will apply to bookings created after that date.
+                {t("admin.yourFixedPlanIsPaidThroughDateCommissionWillApply", {
+                  date: formatBillingDate(financePlanStatus.currentPeriodEnd, locale),
+                })}
               </p>
             </div>
           )}
@@ -1700,13 +1547,17 @@ export default function SettingsPage() {
                   className="text-base font-semibold text-gray-900"
                 >
                   {billingPlanModal === "fixed"
-                    ? "Switch to Fixed Plan"
-                    : "Switch to Commission Plan"}
+                    ? t("admin.switchToFixedPlan")
+                    : t("admin.switchToCommissionPlan")}
                 </h2>
                 <p className="mt-3 text-[13px] leading-5 text-gray-600">
                   {billingPlanModal === "fixed"
-                    ? `You're switching to the Fixed Plan at ${formatBillingAmount(financePlanStatus.amountMinor)}/month. Your first payment will be charged today. Future payments will be charged every 30 days. Any bookings created before today will still settle under your current commission terms.`
-                    : `You're switching back to the Commission Plan. Your current Fixed Plan is paid through ${formatBillingDate(financePlanStatus.currentPeriodEnd)}. Commission will apply to all bookings created after that date.`}
+                    ? t("admin.youReSwitchingToTheFixedPlanAtAmountMonth", {
+                        amount: formatBillingAmount(financePlanStatus.amountMinor, locale),
+                      })
+                    : t("admin.youReSwitchingBackToTheCommissionPlanYourCurrent", {
+                        date: formatBillingDate(financePlanStatus.currentPeriodEnd, locale),
+                      })}
                 </p>
                 <div className="mt-6 flex justify-end gap-2">
                   <button
@@ -1714,7 +1565,7 @@ export default function SettingsPage() {
                     disabled={billingPlanAction !== null}
                     className="rounded-lg border border-gray-300 px-4 py-2 text-[12px] font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                   >
-                    Cancel
+                    {t("settings.totp.cancel")}
                   </button>
                   <button
                     onClick={
@@ -1725,11 +1576,11 @@ export default function SettingsPage() {
                   >
                     {billingPlanModal === "fixed"
                       ? billingPlanAction === "checkout"
-                        ? "Opening payment…"
-                        : "Continue to payment"
+                        ? t("admin.openingPayment")
+                        : t("admin.continueToPayment")
                       : billingPlanAction === "commission"
-                        ? "Scheduling…"
-                        : "Switch to Commission Plan"}
+                        ? t("admin.scheduling")
+                        : t("admin.switchToCommissionPlan")}
                   </button>
                 </div>
               </div>
@@ -1907,15 +1758,14 @@ export default function SettingsPage() {
                   </svg>
                   <span className="text-[13px] font-semibold text-gray-900">PayPal</span>
                   <p className="text-[11px] text-gray-500 mt-1 mb-3">
-                    Guests send payment manually to your PayPal email. Confirm it in PMS once
-                    received.
+                    {t("admin.guestsSendPaymentManuallyToYourPayPalEmailConfirmIt")}
                   </p>
                 </button>
                 {settings.paypal_enabled && (
                   <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
                     <div>
                       <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                        PayPal email
+                        {t("admin.paypalEmail")}
                       </label>
                       <input
                         type="email"
@@ -1927,7 +1777,7 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                        Payment window (hours)
+                        {t("admin.paymentWindowHours")}
                       </label>
                       <input
                         type="number"
@@ -1943,7 +1793,7 @@ export default function SettingsPage() {
                         className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
                       />
                       <p className="mt-1 text-[10px] text-gray-500">
-                        Guests are asked to pay within this window. Confirm receipt manually in PMS.
+                        {t("admin.guestsAreAskedToPayWithinThisWindowConfirmReceipt")}
                       </p>
                     </div>
                   </div>
@@ -2219,15 +2069,21 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Payout Details */}
-          {(settings.pay_at_property_enabled || settings.bank_transfer) && (
+          {settings.bank_transfer && bankDestination?.maskedAccount && (
+            <p className="text-sm text-gray-600">
+              {t("admin.savedAccount")} {bankDestination.maskedAccount}{" "}
+              {t("admin.leaveBankFieldsEmptyToKeepItOrEnterComplete")}
+            </p>
+          )}
+          {/* Direct-transfer details */}
+          {settings.bank_transfer && (
             <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
               <div>
                 <h2 className="text-sm font-semibold text-gray-900">
-                  {t("settings.billing.payoutDetails")}
+                  {t("admin.directGuestBankTransfers")}
                 </h2>
                 <p className="text-[12px] text-gray-500 mt-0.5">
-                  {t("settings.billing.payoutDetailsDesc")}
+                  {t("admin.guestsReceiveTheseBankDetailsAfterSubmittingABankTransfer")}
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2347,20 +2203,19 @@ export default function SettingsPage() {
       {activeSection === "payments" && (
         <SettingsSection
           id="payments"
-          title="Payments"
-          description="How your hotel collects payments from guests."
+          title={t("admin.payments")}
+          description={t("admin.howYourHotelCollectsPaymentsFromGuests")}
         >
           {!stripeAccountId &&
           (stripeAccountCreationBlocked || !paymentSettingsLoaded) &&
           paymentError ? (
             <SettingsCard>
-              <FeedbackAlert type="error" message={paymentError} className="mb-3" />
+              <FeedbackAlert type="error" message={t(paymentError)} className="mb-3" />
               <span className="mb-3 inline-flex rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-medium text-yellow-700">
                 {t("settings.billing.pendingOnboarding")}
               </span>
               <p className="mb-3 text-sm text-gray-700">
-                Stripe account status couldn&apos;t be confirmed. Check the existing account before
-                starting setup again.
+                {t("admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting")}
               </p>
               <button
                 type="button"
@@ -2368,21 +2223,20 @@ export default function SettingsPage() {
                 disabled={refreshingStripe || !billingPropertyId}
                 className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
-                {refreshingStripe ? "Checking Stripe..." : "Check Stripe status"}
+                {refreshingStripe ? t("admin.checkingStripe") : t("admin.checkStripeStatus")}
               </button>
             </SettingsCard>
           ) : !settings.online_card_payment ? (
             <SettingsCard>
               <p className="text-sm text-gray-700">
-                Enable <strong>Online card payment</strong> in{" "}
+                {t("admin.enableOnlineCardPaymentInBillingPaymentMethodsFirstTo")}{" "}
                 <button
                   type="button"
                   onClick={() => selectSection("billing")}
                   className="text-primary-600 hover:underline"
                 >
-                  Billing &rarr; Payment methods
-                </button>{" "}
-                first to set up your payment provider.
+                  {t("admin.billingPaymentMethods")}
+                </button>
               </p>
             </SettingsCard>
           ) : (
@@ -2396,10 +2250,10 @@ export default function SettingsPage() {
                 </p>
 
                 {paymentError && (
-                  <FeedbackAlert type="error" message={paymentError} className="mb-3" />
+                  <FeedbackAlert type="error" message={t(paymentError)} className="mb-3" />
                 )}
                 {paymentSuccess && (
-                  <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
+                  <FeedbackAlert type="success" message={t(paymentSuccess)} className="mb-3" />
                 )}
 
                 {/* Provider selector */}
@@ -2515,9 +2369,11 @@ export default function SettingsPage() {
                 {paymentProvider === "vayada" ? (
                   <div className="space-y-3">
                     <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                      <p className="text-[13px] text-amber-900 font-medium">Coming soon</p>
+                      <p className="text-[13px] text-amber-900 font-medium">
+                        {t("admin.comingSoon")}
+                      </p>
                       <p className="text-[12px] text-amber-800 mt-1">
-                        vayada Payments is not available in target checkout yet.
+                        {t("admin.vayadaPaymentsIsNotAvailableInTargetCheckoutYet")}
                       </p>
                     </div>
                   </div>
@@ -2602,7 +2458,7 @@ export default function SettingsPage() {
                             className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
                           >
                             {issuingStripeOnboardingLink
-                              ? "Opening Stripe..."
+                              ? t("admin.openingStripe")
                               : t("settings.billing.completeOnboarding")}
                           </button>
                           <button
@@ -2611,7 +2467,9 @@ export default function SettingsPage() {
                             disabled={refreshingStripe}
                             className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
                           >
-                            {refreshingStripe ? "Checking Stripe..." : "Check Stripe status"}
+                            {refreshingStripe
+                              ? t("admin.checkingStripe")
+                              : t("admin.checkStripeStatus")}
                           </button>
                         </div>
                       </div>
@@ -2624,11 +2482,12 @@ export default function SettingsPage() {
                         className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-[13px] font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
-                        {openingStripeDashboard ? "Opening Stripe..." : "View Stripe Dashboard"}
+                        {openingStripeDashboard
+                          ? t("admin.openingStripe")
+                          : t("admin.viewStripeDashboard")}
                       </button>
                       <p className="mt-2 text-[12px] text-gray-500">
-                        Check your payouts, balance, and payment history, or update your bank
-                        account.
+                        {t("admin.checkYourPayoutsBalanceAndPaymentHistoryOrUpdateYour")}
                       </p>
                     </div>
                     <div className="flex justify-end pt-2">
@@ -2640,8 +2499,7 @@ export default function SettingsPage() {
                 ) : stripeAccountCreationBlocked || !paymentSettingsLoaded ? (
                   <div className="space-y-3">
                     <p className="text-[13px] text-gray-600">
-                      Stripe account status couldn&apos;t be confirmed. Check the existing account
-                      before starting setup again.
+                      {t("admin.stripeAccountStatusCouldnTBeConfirmedCheckTheExisting")}
                     </p>
                     <button
                       type="button"
@@ -2649,7 +2507,7 @@ export default function SettingsPage() {
                       disabled={refreshingStripe || !billingPropertyId}
                       className="px-4 py-2 text-[13px] font-medium border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
-                      {refreshingStripe ? "Checking Stripe..." : "Check Stripe status"}
+                      {refreshingStripe ? t("admin.checkingStripe") : t("admin.checkStripeStatus")}
                     </button>
                   </div>
                 ) : (

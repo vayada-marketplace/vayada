@@ -17,6 +17,9 @@ const CATEGORY = "12130000-0000-4000-8000-000000000004";
 const SECOND_CATEGORY = "12130000-0000-4000-8000-000000000005";
 const OTHER_CATEGORY = "12130000-0000-4000-8000-000000000006";
 const RULE = "12130000-0000-4000-8000-000000000007";
+const OTHER_BOOKING = "12130000-0000-4000-8000-000000000020";
+const OTHER_ROOM = "12130000-0000-4000-8000-000000000021";
+const OTHER_NIGHT = "12130000-0000-4000-8000-000000000022";
 const EXPENSE = "12130000-0000-4000-8000-000000000010";
 const RECURRING = "12130000-0000-4000-8000-000000000011";
 const SMALL = "12130000-0000-4000-8000-000000000012";
@@ -43,7 +46,7 @@ const propertyContext = {
 describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
   const admin = new pg.Client({ connectionString: URL ?? "postgresql://disabled" });
   const pricing = createPgPmsPricingReadModel({ connectionString: URL ?? "postgresql://disabled" });
-  const read = createPgFinanceExpenseReadModel({ connectionString: URL, pricing, propertyContext, now: () => new Date("2026-08-11T10:00:00.000Z") });
+  const read = createPgFinanceExpenseReadModel({ connectionString: URL ?? "postgresql://disabled", pricing, propertyContext, now: () => new Date("2026-08-11T10:00:00.000Z") });
   beforeAll(async () => {
     await admin.connect(); await cleanup();
     await admin.query(`INSERT INTO hotel_catalog.properties (id,public_id,display_name) VALUES
@@ -54,6 +57,9 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
         ('${CATEGORY}','${PROPERTY}','Operations','#123456',1),('${SECOND_CATEGORY}','${PROPERTY}','Utilities','#654321',2),('${OTHER_CATEGORY}','${OTHER}','Other','#111111',1);
       INSERT INTO finance.recurring_expense_rules (id,property_id,category_id,cadence,starts_on,next_due_on,ends_on,vendor,amount,currency,payment_status,notes) VALUES
         ('${RULE}','${PROPERTY}','${SECOND_CATEGORY}','monthly','2026-08-01','2026-09-01','2026-12-01','Recurring vendor',10,'EUR','paid','Monthly service');
+      INSERT INTO booking.guest_bookings (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,check_in,check_out,currency,booking_channel,direct_booking_source) VALUES
+        ('${OTHER_BOOKING}','${OTHER}','expense-other-reversal','pms','expense-other-reversal','canceled','2026-07-31','2026-08-01','USD','direct','booking_engine');
+      INSERT INTO booking.nightly_revenue_room_scopes (property_id,room_type_id) VALUES ('${OTHER}','${OTHER_ROOM}');
       INSERT INTO finance.expenses (id,property_id,category_id,origin,entry_kind,incurred_on,paid_on,vendor,amount,currency,payment_status,recurring_rule_id,source_key,reverses_expense_id) VALUES
         ('12130000-0000-4000-8000-000000000008','${PROPERTY}','${CATEGORY}','manual','expense','2026-07-05','2026-07-05','Prior Alpha',20,'EUR','paid',NULL,NULL,NULL),
         ('${EXPENSE}','${PROPERTY}','${CATEGORY}','manual','expense','2026-08-10',NULL,'Alpha vendor',30,'EUR','unpaid',NULL,NULL,NULL),
@@ -75,7 +81,10 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-07-06','2026-07-06','EUR',20,1,'room_night','completed','direct','exact',1,'read-prior-2'),
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-08-10','2026-08-10','USD',10,1,'room_night','confirmed','direct','exact',1,'read-wrong-currency'),
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-07-20','2026-07-20','USD',10,1,'room_night','confirmed','direct','exact',1,'read-gap-wrong-currency');
-      SET session_replication_role=origin;`);
+      SET session_replication_role=origin;
+      INSERT INTO booking.nightly_revenue_evidence (id,property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,command_key,corrects_evidence_id) VALUES
+        ('${OTHER_NIGHT}','${OTHER}','${OTHER_BOOKING}','${OTHER_ROOM}','2026-07-31','2026-07-31','USD',500,1,'room_night','completed','direct','exact',1,'other-base',NULL),
+        ('12130000-0000-4000-8000-000000000023','${OTHER}','${OTHER_BOOKING}','${OTHER_ROOM}','2026-07-31','2026-08-10','USD',-500,-1,'room_night_reversal','canceled','direct','exact',2,'other-reversal','${OTHER_NIGHT}');`);
   });
   afterAll(async () => { await read.close(); await pricing.close(); await cleanup(); await admin.end(); });
 
@@ -94,9 +103,9 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await expect(read.expenses(OTHER, query({ limit: 10 }))).resolves.toMatchObject({ incompleteEvidence: [{ code: "occupancy_unavailable", count: 1 }] });
     const future = await read.expenses(PROPERTY, query({ from: "2027-01-01", to: "2027-01-31", limit: 10 })); expect(future?.incompleteEvidence.some(({ amount }) => amount?.currency === "GBP")).toBe(false);
     await expect(read.expenses(EMPTY, query({ limit: 10 }))).resolves.toMatchObject({ summary: { totalMtd: { value: { amount: "0.0000" }, percentChange: null } }, categories: [], page: { items: [], nextCursor: null }, incompleteEvidence: [], sourceFreshness: { pmsPricing: expect.any(String), hotelCatalog: expect.any(String) } });
-    const wrongTenant = createPgFinanceExpenseReadModel({ connectionString: URL, pricing, propertyContext: { async getPropertyContext() { const context = (await propertyContext.getPropertyContext(PROPERTY))!; return { ...context, source: { ...context.source, entityId: OTHER } }; } } });
+    const wrongTenant = createPgFinanceExpenseReadModel({ connectionString: URL ?? "postgresql://disabled", pricing, propertyContext: { async getPropertyContext() { const context = (await propertyContext.getPropertyContext(PROPERTY))!; return { ...context, source: { ...context.source, entityId: OTHER } }; } } });
     await expect(wrongTenant.categories(PROPERTY)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError); await wrongTenant.close();
-    const localBoundary = createPgFinanceExpenseReadModel({ connectionString: URL, pricing, propertyContext, now: () => new Date("2026-08-01T01:00:00.000Z") });
+    const localBoundary = createPgFinanceExpenseReadModel({ connectionString: URL ?? "postgresql://disabled", pricing, propertyContext, now: () => new Date("2026-08-01T01:00:00.000Z") });
     await expect(localBoundary.expenses(PROPERTY, query({ limit: 10 }))).resolves.toMatchObject({ summary: { totalMtd: { value: { amount: "100.0000" } } } }); await localBoundary.close();
   });
 
@@ -121,9 +130,30 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await expect(read.expenses(PROPERTY, { ...filtered, cursor: Buffer.from("{").toString("base64url") })).rejects.toBeInstanceOf(FinanceExpenseCursorError);
   });
 
+  it("captures and materializes an immutable filtered export after settlement", async () => {
+    const query = { from: "2026-08-01", to: "2026-08-11", categoryId: CATEGORY, paymentStatus: "unpaid" as const, recurring: false, origin: "manual" as const, search: "Alpha", sort: "amount_desc" as const };
+    const result = await read.captureExport(PROPERTY.toUpperCase(), query);
+    expect(result).toMatchObject({ envelope: { propertyId: PROPERTY, currency: "EUR", sourceFreshness: { financeExpenses: expect.any(String) } }, snapshot: { formatVersion: "pms-financials-expenses.v1", propertyId: PROPERTY, currency: "EUR", filters: query, snapshotAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), manifest: [
+      { expenseId: CORRECTION, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+      { expenseId: EXPENSE, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+      { expenseId: SMALL, revision: 1, categoryId: CATEGORY, categoryRevision: 1, categoryName: "Operations", paymentStatus: "unpaid", paidOn: null },
+    ] } });
+    await admin.query("UPDATE finance.expenses SET payment_status='paid',paid_on='2026-08-11',revision=revision+1 WHERE id=$1", [EXPENSE]);
+    expect(result?.snapshot.manifest[1]).toMatchObject({ expenseId: EXPENSE, revision: 1, paymentStatus: "unpaid", paidOn: null });
+    const artifact = await read.exportCsv(PROPERTY, "EUR", result!.snapshot);
+    expect(artifact).toMatchObject({ propertyId: PROPERTY, currency: "EUR", rowCount: 3, auditEvidence: result!.snapshot.manifest });
+    const expenseRow = artifact!.body.split("\r\n").find((line) => line.includes(EXPENSE));
+    expect(expenseRow).toContain('"unpaid","",'); expect(expenseRow).toMatch(/,"1"$/);
+    await expect(read.captureExport(PROPERTY, query)).resolves.toMatchObject({ snapshot: { manifest: [{ expenseId: CORRECTION }, { expenseId: SMALL }] } });
+    await expect(read.captureExport(EMPTY, query)).resolves.toMatchObject({ snapshot: { manifest: [] } });
+    await expect(read.exportCsv(OTHER, "EUR", result!.snapshot)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError);
+    await expect(read.exportCsv(PROPERTY, "USD", result!.snapshot)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError);
+  });
+
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM booking.nightly_revenue_evidence WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
+      DELETE FROM booking.nightly_revenue_room_scopes WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM booking.guest_bookings WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM finance.expenses WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM finance.recurring_expense_rules WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM finance.expense_categories WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM hotel_catalog.property_locations WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); COMMIT`);

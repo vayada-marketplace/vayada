@@ -51,6 +51,11 @@ type SessionRow = {
 type MediaObjectRow = { record: PlatformMediaObjectRecord };
 type PropertyTargetRow = { propertyId: string };
 type CollaborationTargetRow = { collaborationId: string; propertyId: string };
+type AdminMediaTargetRow = {
+  resourceId: string;
+  ownerOrganizationId: string;
+  propertyId?: string;
+};
 
 const supportedPurposes = new Set([
   "identity.user.profile_image",
@@ -63,6 +68,7 @@ const supportedPurposes = new Set([
   "marketplace.offer.media",
   "marketplace.collaboration_chat.attachment",
   "pms.room_type.media",
+  "pms.messaging.attachment",
   "finance.expense.receipt",
 ]);
 const propertyMediaPurposes = new Set([
@@ -129,7 +135,8 @@ export function createPgPlatformMediaRepository(
         requestedVisibility,
         effectiveVisibility: isAutoApproved ? "public" : "private",
         actorUserId: input.context.actor.internalUserId,
-        ownerOrganizationId: input.context.selectedOrganization.organizationId,
+        ownerOrganizationId: input.ownerOrganizationId,
+        platformAdmin: input.platformAdmin ? true : undefined,
         resource: input.request.resource,
         target: input.target,
         files,
@@ -311,6 +318,16 @@ async function resolveTarget(
   queryable: Queryable,
   input: Parameters<PlatformMediaTargetResolver["resolveTarget"]>[0],
 ): ReturnType<PlatformMediaTargetResolver["resolveTarget"]> {
+  if (
+    input.context.selectedOrganization?.kind === "platform" &&
+    [
+      "property.hero_image",
+      "marketplace.offer.media",
+      "marketplace.creator.profile_image",
+    ].includes(input.request.purpose)
+  ) {
+    return resolvePlatformAdminMediaTarget(queryable, input);
+  }
   if (input.request.purpose === "marketplace.collaboration_chat.attachment") {
     const targetResourceId = input.request.resource.targetResourceId?.trim();
     if (!targetResourceId) {
@@ -349,6 +366,37 @@ async function resolveTarget(
         resourceType: "collaboration",
         resourceId: collaboration.collaborationId,
         propertyId: collaboration.propertyId,
+      },
+    };
+  }
+
+  if (input.request.purpose === "pms.messaging.attachment") {
+    const propertyId = input.request.resource.resourceId.trim();
+    const threadId = input.request.resource.targetResourceId?.trim() ?? "";
+    if (
+      input.request.resource.product !== "pms" ||
+      input.request.resource.resourceType !== "pms_property" ||
+      !CANONICAL_UUID.test(propertyId) ||
+      !CANONICAL_UUID.test(threadId) ||
+      input.request.resource.propertyId !== propertyId
+    ) {
+      return propertyMediaTargetForbidden();
+    }
+    const result = await queryable.query<PropertyTargetRow>(
+      `SELECT thread.property_id::text AS "propertyId"
+       FROM pms.message_threads thread
+       WHERE thread.id = $1::uuid AND thread.property_id = $2::uuid
+       LIMIT 1`,
+      [threadId, propertyId],
+    );
+    if (result.rows.length !== 1) return propertyMediaTargetForbidden();
+    return {
+      ok: true,
+      target: {
+        resourceProduct: "pms",
+        resourceType: "message_thread",
+        resourceId: threadId,
+        propertyId,
       },
     };
   }
@@ -446,6 +494,122 @@ async function resolveTarget(
   return propertyMediaTargetForbidden();
 }
 
+async function resolvePlatformAdminMediaTarget(
+  queryable: Queryable,
+  input: Parameters<PlatformMediaTargetResolver["resolveTarget"]>[0],
+): ReturnType<PlatformMediaTargetResolver["resolveTarget"]> {
+  const resourceId = input.request.resource.resourceId;
+  if (!CANONICAL_UUID.test(resourceId)) return platformAdminMediaTargetNotFound();
+
+  let result: Pick<QueryResult<AdminMediaTargetRow>, "rows">;
+  if (input.request.purpose === "marketplace.creator.profile_image") {
+    result = await queryable.query<AdminMediaTargetRow>(
+      `SELECT profile.id::text AS "resourceId",
+              profile.organization_id::text AS "ownerOrganizationId"
+         FROM marketplace.creator_profiles profile
+         JOIN identity.organization_memberships membership
+           ON membership.organization_id = profile.organization_id
+          AND membership.user_id = $1::uuid
+          AND membership.status = 'active'
+         JOIN identity.organizations organization
+           ON organization.id = profile.organization_id
+          AND organization.kind = 'creator_workspace'
+          AND organization.status = 'active'
+        WHERE profile.profile_status <> 'archived'
+        FOR SHARE OF profile, membership, organization`,
+      [resourceId],
+    );
+  } else if (input.request.purpose === "marketplace.offer.media") {
+    result = await queryable.query<AdminMediaTargetRow>(
+      `SELECT offer.id::text AS "resourceId",
+              offer.organization_id::text AS "ownerOrganizationId",
+              offer.property_id::text AS "propertyId"
+         FROM marketplace.marketplace_offers offer
+         JOIN identity.organizations organization
+           ON organization.id = offer.organization_id
+          AND organization.kind = 'hotel_group'
+          AND organization.status = 'active'
+        WHERE offer.id = $1::uuid
+          AND offer.offer_status <> 'archived'
+        FOR SHARE OF offer, organization`,
+      [resourceId],
+    );
+  } else {
+    result = await queryable.query<AdminMediaTargetRow>(
+      `SELECT property.id::text AS "resourceId",
+              owner.organization_id::text AS "ownerOrganizationId",
+              property.id::text AS "propertyId"
+         FROM hotel_catalog.properties property
+         JOIN identity.organization_resource_links owner
+           ON owner.product = 'hotel_catalog'
+          AND owner.resource_type = 'property'
+          AND owner.resource_id = property.id::text
+          AND owner.relationship = 'owner'
+          AND owner.status = 'active'
+         JOIN identity.organizations organization
+           ON organization.id = owner.organization_id
+          AND organization.kind = 'hotel_group'
+          AND organization.status = 'active'
+        WHERE property.id = $1::uuid
+          AND property.lifecycle_status <> 'retired'
+        FOR SHARE OF property, owner, organization`,
+      [resourceId],
+    );
+  }
+
+  const target = result.rows.length === 1 ? result.rows[0] : undefined;
+  if (!target) return platformAdminMediaTargetNotFound();
+  return {
+    ok: true,
+    target: {
+      resourceProduct: input.policy.targetResourceProduct,
+      resourceType: input.policy.targetResourceType,
+      resourceId: target.resourceId,
+      propertyId: target.propertyId,
+    },
+    ownerOrganizationId: target.ownerOrganizationId,
+  };
+}
+
+function platformAdminMediaTargetNotFound() {
+  return {
+    ok: false as const,
+    statusCode: 404 as const,
+    code: "media_target_not_found",
+    message: "The requested admin media target is unavailable.",
+  };
+}
+
+async function assertPlatformAdminMediaTargetCurrent(
+  client: Queryable,
+  session: PlatformMediaSessionRecord,
+): Promise<void> {
+  if (!session.platformAdmin) return;
+  const resolved = await resolvePlatformAdminMediaTarget(client, {
+    context: { selectedOrganization: { kind: "platform" } } as never,
+    request: {
+      purpose: session.purpose,
+      visibility: session.requestedVisibility,
+      resource: session.resource,
+      files: [],
+    },
+    policy: {
+      targetResourceProduct: session.target.resourceProduct,
+      targetResourceType: session.target.resourceType,
+    } as never,
+  });
+  if (
+    !resolved.ok ||
+    resolved.ownerOrganizationId !== session.ownerOrganizationId ||
+    resolved.target.resourceProduct !== session.target.resourceProduct ||
+    resolved.target.resourceType !== session.target.resourceType ||
+    resolved.target.resourceId !== session.target.resourceId ||
+    resolved.target.propertyId !== session.target.propertyId
+  ) {
+    throw new PlatformMediaTargetInvalidError();
+  }
+}
+
 function propertyMediaTargetForbidden() {
   return {
     ok: false as const,
@@ -536,6 +700,7 @@ async function completeUploadSession(
     ) {
       throw new Error("Persistent platform media session has an invalid visibility state");
     }
+    await assertPlatformAdminMediaTargetCurrent(client, session);
     await lockCurrentRoomTarget(client, session);
 
     const files = bindCompletionFilesToSession(session, input.files);
@@ -717,7 +882,8 @@ function mediaObjectFor(
     originalFilename: file.sessionFile.filename,
     retainedUntil:
       session.purpose === "marketplace.collaboration_chat.attachment" ||
-      session.purpose === "finance.expense.receipt"
+      session.purpose === "finance.expense.receipt" ||
+      session.purpose === "pms.messaging.attachment"
         ? new Date(Date.parse(now) + 60 * 60 * 1000).toISOString()
         : null,
     variants,
@@ -794,7 +960,8 @@ async function insertMediaObject(
   const sourceMetadata = {
     requestedVisibility: mediaObject.requestedVisibility,
     ...(mediaObject.purpose === "marketplace.collaboration_chat.attachment" ||
-    mediaObject.purpose === "finance.expense.receipt"
+    mediaObject.purpose === "finance.expense.receipt" ||
+    mediaObject.purpose === "pms.messaging.attachment"
       ? { attachmentState: "orphan" }
       : {}),
   };
@@ -810,7 +977,8 @@ async function insertMediaObject(
         $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb,
         $19,
         CASE
-          WHEN $5 IN ('marketplace.collaboration_chat.attachment', 'finance.expense.receipt')
+          WHEN $5 IN ('marketplace.collaboration_chat.attachment', 'finance.expense.receipt',
+                      'pms.messaging.attachment')
             THEN $21::timestamptz + interval '1 hour'
           ELSE NULL
         END,

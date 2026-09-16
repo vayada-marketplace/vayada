@@ -11,7 +11,6 @@ npm run e2e                       # all specs
 npm run e2e:landing
 npm run e2e:booking-web
 npm run e2e:booking-public-canary
-npm run e2e:affiliate-dashboard
 npm run e2e:booking-admin
 npm run e2e:marketplace-web
 npm run e2e:pms-web
@@ -26,7 +25,6 @@ By default local tests expect the apps to already be running through portless:
 
 - `https://landing.localhost`
 - `https://hotel-alpenrose.booking.localhost`
-- `https://affiliate.localhost`
 - `https://admin.booking.localhost`
 - `https://marketplace.localhost`
 - `https://pms.localhost`
@@ -77,6 +75,16 @@ synthetic property. Recovery creates a fresh temporary admin, retires the proper
 recovery admin. It reuses the signed run identity, so rerunning the same recovery also cleans up an
 admin left by an interrupted recovery.
 
+The workflow restores the headless Chromium runtime used by this project from a
+runner OS, architecture, and exact Playwright-version cache key. It still
+installs the required Linux packages and launches the restored browser before
+the smoke starts. Cache restore and save are capped at 3 minutes each,
+installation and launch at 10 minutes, and setup failures report the install
+plan and disk usage. Cache-service failures produce warnings and fall back to
+the verified local download instead of blocking the product test. The browser
+is saved immediately after setup even if the product smoke later fails, and the
+smoke receives its own 25-minute timeout.
+
 Cleanup runs even after a failed assertion. It cancels or withdraws every
 synthetic booking, changes the synthetic property to the non-checkout `other`
 payment method and waits until public quotes disappear, then deletes the
@@ -87,6 +95,21 @@ unbookable and inventory is restored. A cleanup failure fails the workflow.
 Real card payments are intentionally outside this command. Stripe coverage must
 use a separate test-mode-only environment and test payment methods; do not add a
 live Stripe key or card-capable payment method to this workflow.
+
+The next-stack Playwright project disables traces, automatic screenshots, and
+video because its browser and API flows handle live smoke credentials. Secret
+form values use a non-value-bearing Playwright step, and the workflow inspects
+the completed HTML report and test-results payload for the configured smoke
+password and WorkOS key before allowing upload. Non-secret step names, errors,
+and explicit acceptance screenshots remain available. Evidence is retained for
+7 days.
+
+Retention changes only affect new artifacts. Existing
+`next-stack-smoke-evidence` artifacts created before VAY-1302 are not rewritten;
+delete them from the repository's Actions artifacts page or with the GitHub
+Actions Artifacts API. Rotate `NEXT_STACK_SMOKE_PASSWORD` after removing those
+artifacts, and rotate the WorkOS key too if inspection ever finds it in retained
+evidence.
 
 ## Deployed Booking Public Canary
 
@@ -121,7 +144,6 @@ Plain-port server mode uses:
 
 - `http://127.0.0.1:3006` for landing
 - `http://hotel-alpenrose.booking.localhost:3002` for booking-web
-- `http://127.0.0.1:3005` for affiliate-dashboard
 - `http://127.0.0.1:3003` for booking-admin
 - `http://127.0.0.1:3000` for marketplace-web
 - `http://127.0.0.1:3004` for pms-web
@@ -132,7 +154,6 @@ Override URLs when needed:
 ```bash
 E2E_LANDING_BASE_URL=http://localhost:3006 npm run e2e:landing
 E2E_BOOKING_BASE_URL=http://hotel-alpenrose.localhost:3002 npm run e2e:booking-web
-E2E_AFFILIATE_BASE_URL=http://localhost:3005 npm run e2e:affiliate-dashboard
 E2E_BOOKING_ADMIN_BASE_URL=http://localhost:3003 npm run e2e:booking-admin
 E2E_MARKETPLACE_BASE_URL=http://localhost:3000 npm run e2e:marketplace-web
 E2E_PMS_BASE_URL=http://localhost:3004 npm run e2e:pms-web
@@ -167,7 +188,7 @@ All network calls are mocked via `mockBookingApis`. No seeded backend is require
 
 ## Auth App Smokes
 
-The smoke tests for `affiliate-dashboard`, `booking-admin`, `pms-web`, and
+The smoke tests for `booking-admin`, `pms-web`, and
 `vayada-admin` navigate to `/login` and verify the custom password login shell
 renders without errors. Marketplace smoke covers its custom auth routes
 separately.
@@ -198,7 +219,7 @@ npm --workspace vayada-api run test -- src/authSession.test.ts
 
 ## First-Party Auth Regressions
 
-`tests/e2e/first-party-auth` is the focused regression suite for the five
+`tests/e2e/first-party-auth` is the focused regression suite for the four
 migrated browser surfaces. It covers password login, signup and recovery where
 available, session refresh, CSRF, logout, app-local Google callback state,
 Marketplace signup-to-onboarding, cross-app handoff, stale-cookie cleanup, and
@@ -243,14 +264,13 @@ video so provider credentials and session material are not retained in test
 artifacts.
 
 WorkOS must register `<origin returned by portless get>/auth/oauth/google/callback`
-for the active worktree. For a canonical root checkout, the five exact callback
+for the active worktree. For a canonical root checkout, the four exact callback
 URIs are:
 
 ```text
 https://marketplace.localhost/auth/oauth/google/callback
 https://admin.booking.localhost/auth/oauth/google/callback
 https://pms.localhost/auth/oauth/google/callback
-https://affiliate.localhost/auth/oauth/google/callback
 https://admin.localhost/auth/oauth/google/callback
 ```
 

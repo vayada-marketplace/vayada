@@ -6,6 +6,8 @@ import {
   type ProductionPmsMigrationServices,
 } from "./productionPmsMigration.js";
 import type { ProductionPmsPlan } from "./productionPmsTypes.js";
+import { writeProductionPmsRecords } from "./productionPmsWriter.js";
+import { writeProductionMigrationProvenance } from "./productionBookingWriter.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
 
@@ -50,6 +52,9 @@ describe("production PMS migration transaction", () => {
     expect(report.applied).toBe(true);
     expect(client.sql[1]).toContain("lock_timeout");
     expect(client.sql[2]).toContain("LOCK TABLE pms.linked_inventory_groups");
+    expect(client.sql[2]!.indexOf("pms.channel_binding_claims")).toBeLessThan(
+      client.sql[2]!.indexOf("pms.channel_connections"),
+    );
     expect(client.sql.at(-1)).toBe("COMMIT");
   });
 
@@ -61,6 +66,104 @@ describe("production PMS migration transaction", () => {
       runProductionPmsTransaction(client as never, { sourceRunId: RUN, mode: "apply" }, services),
     ).rejects.toThrow("applied 0 of 1");
     expect(client.sql.at(-1)).toBe("ROLLBACK");
+  });
+
+  it("rolls back all writes when the post-write Inbox consistency check blocks", async () => {
+    const client = new TransactionFixture();
+    const services = serviceFixture();
+    let builds = 0;
+    services.buildPlan = vi.fn(() =>
+      ++builds === 3
+        ? {
+            ...plan(false),
+            blockers: [
+              {
+                code: "INBOX_TARGET_THREAD_SUMMARY_MISMATCH",
+                source: "pms.message_threads",
+                sourceId: "thread",
+                message: "target unreadCount disagrees",
+              },
+            ],
+          }
+        : plan(true),
+    );
+    const report = await runProductionPmsTransaction(
+      client as never,
+      { sourceRunId: RUN, mode: "apply" },
+      services,
+    );
+    expect(report.applied).toBe(false);
+    expect(report.blockers).toEqual([
+      {
+        code: "INBOX_TARGET_THREAD_SUMMARY_MISMATCH",
+        source: "pms.message_threads",
+        sourceId: "thread",
+        message: "target unreadCount disagrees",
+      },
+    ]);
+    expect(services.writeRecords).toHaveBeenCalledOnce();
+    expect(services.writeProvenance).toHaveBeenCalledOnce();
+    expect(client.sql.at(-1)).toBe("ROLLBACK");
+    expect(client.sql).not.toContain("COMMIT");
+  });
+
+  it.each(["checksum", "writes"])(
+    "still rejects post-write %s drift without blockers",
+    async (field) => {
+      const client = new TransactionFixture();
+      const services = serviceFixture();
+      let builds = 0;
+      services.buildPlan = vi.fn(() =>
+        ++builds === 3
+          ? {
+              ...plan(false),
+              ...(field === "checksum" ? { checksum: "changed" } : { writes: plan(true).writes }),
+            }
+          : plan(true),
+      );
+      await expect(
+        runProductionPmsTransaction(client as never, { sourceRunId: RUN, mode: "apply" }, services),
+      ).rejects.toThrow("Post-write PMS verification does not match the migration plan");
+      expect(client.sql.at(-1)).toBe("ROLLBACK");
+      expect(client.sql).not.toContain("COMMIT");
+    },
+  );
+
+  it.each(["records", "provenance"])("rolls back when a later %s batch fails", async (layer) => {
+    const sql: string[] = [];
+    let batches = 0;
+    const client = {
+      async query(statement: string, values?: unknown[]) {
+        sql.push(statement);
+        if (!statement.startsWith("INSERT INTO")) return { rows: [], rowCount: 0 };
+        if (++batches === 2) throw new Error("later batch failed");
+        return { rowCount: JSON.parse(String(values?.[0])).length };
+      },
+    };
+    const services = serviceFixture();
+    const planned = plan(true);
+    if (layer === "records") {
+      planned.writes = Array.from({ length: 1_001 }, (_, index) => ({
+        ...planned.writes[0]!,
+        targetId: `room-${index}`,
+        row: { id: `room-${index}` },
+      }));
+      services.writeRecords = writeProductionPmsRecords;
+    } else {
+      planned.provenance = Array.from({ length: 1_001 }, (_, index) => ({
+        ...planned.provenance[0]!,
+        targetId: `room-${index}`,
+      }));
+      services.writeProvenance = writeProductionMigrationProvenance;
+    }
+    services.buildPlan = vi.fn(() => planned);
+    await expect(
+      runProductionPmsTransaction(client as never, { sourceRunId: RUN, mode: "apply" }, services),
+    ).rejects.toThrow("later batch failed");
+    expect(batches).toBe(2);
+    expect(sql.at(-1)).toBe("ROLLBACK");
+    expect(sql).not.toContain("COMMIT");
+    if (layer === "records") expect(services.writeProvenance).not.toHaveBeenCalled();
   });
 
   it("never writes a blocked apply plan", async () => {

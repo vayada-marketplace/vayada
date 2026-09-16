@@ -2,6 +2,7 @@ import {
   bookingAddonMediaFor,
   bookingHeaderLogoMediaFor,
   bookingHeroMediaFor,
+  ownerStatusFor,
   propertyFor,
 } from "./productionBookingContext.js";
 import type { IdentitySourceRow } from "./productionIdentityDisposition.js";
@@ -28,6 +29,8 @@ export function buildBookingCatalogRecords(context: BookingBuildContext): Bookin
     try {
       if (row.sourceDatabase === "booking" && row.sourceTable === "booking_hotels")
         return [settings(context, row)];
+      if (row.sourceDatabase === "pms" && row.sourceTable === "hotels")
+        return [sameDayPolicy(context, row)];
       if (row.sourceDatabase === "booking" && row.sourceTable === "booking_addons")
         return [addon(context, row)];
       if (row.sourceDatabase === "booking" && row.sourceTable === "booking_promo_codes")
@@ -47,16 +50,53 @@ export function buildBookingCatalogRecords(context: BookingBuildContext): Bookin
   });
 }
 
+function sameDayPolicy(
+  context: BookingBuildContext,
+  source: IdentitySourceRow,
+): BookingTargetRecord {
+  const data = source.data;
+  const propertyId = propertyFor(context, "pms", "hotels", data["id"]);
+  const ownerStatus = ownerStatusFor(context, "pms", "hotels", data["id"]);
+  const timestampBasis = data["updated_at"] ? "updated_at" : "created_at";
+  const updatedAt = iso(data[timestampBasis], timestampBasis);
+  const sourceCutoff = data["same_day_booking_cutoff_time"];
+  const cutoffLocalTime =
+    sourceCutoff === null || sourceCutoff === ""
+      ? null
+      : requiredText(sourceCutoff ?? "18:00", "same_day_booking_cutoff_time");
+  if (cutoffLocalTime !== null && !/^(?:[01]\d|2[0-3]):(?:00|30)$/.test(cutoffLocalTime))
+    throw new Error("same_day_booking_cutoff_time must be HH:mm on a 30-minute boundary");
+  return record(source, "booking", "same_day_booking_policies", propertyId, updatedAt, true, {
+    propertyId,
+    enabled:
+      ownerStatus === "active" &&
+      bool(data["same_day_bookings_enabled"], "same_day_bookings_enabled", true),
+    cutoffLocalTime,
+    revision: 1,
+    sourceFreshness: {
+      migrationRunId: context.sourceRunId,
+      sourceUpdatedAt: updatedAt,
+      timestampBasis,
+      ownerStatus,
+    },
+    updatedAt,
+  });
+}
+
 function settings(context: BookingBuildContext, source: IdentitySourceRow): BookingTargetRecord {
   const data = source.data;
   const propertyId = propertyFor(context, "booking", "booking_hotels", data["id"]);
+  const ownerStatus = ownerStatusFor(context, "booking", "booking_hotels", data["id"]);
+  const ownerActive = ownerStatus === "active";
   const updatedAt = iso(data["updated_at"], "updated_at");
   const primaryColor = String(data["branding_primary_color"] ?? "").trim();
-  const headerLogoMediaObjectId = bookingHeaderLogoMediaFor(context, source, propertyId);
-  const heroImageUrl = bookingHeroMediaFor(context, source, propertyId);
+  const headerLogoMediaObjectId = ownerActive
+    ? bookingHeaderLogoMediaFor(context, source, propertyId)
+    : null;
+  const heroImageUrl = ownerActive ? bookingHeroMediaFor(context, source, propertyId) : null;
   return record(source, "booking", "booking_settings", propertyId, updatedAt, true, {
     propertyId,
-    showAddonsStep: bool(data["show_addons_step"], "show_addons_step", true),
+    showAddonsStep: ownerActive && bool(data["show_addons_step"], "show_addons_step", true),
     groupAddonsByCategory: bool(data["group_addons_by_category"], "group_addons_by_category", true),
     specialRequestsEnabled: bool(
       data["special_requests_enabled"],
@@ -76,12 +116,17 @@ function settings(context: BookingBuildContext, source: IdentitySourceRow): Book
     bookingFilters: optionalArray(data["booking_filters"]),
     customFilters: optionalObject(data["custom_filters"]),
     filterRooms: optionalObject(data["filter_rooms"]),
-    sourceFreshness: { migrationRunId: context.sourceRunId, sourceUpdatedAt: updatedAt },
+    sourceFreshness: {
+      migrationRunId: context.sourceRunId,
+      sourceUpdatedAt: updatedAt,
+      ownerStatus,
+    },
     headerLogoMediaObjectId,
     heroImageUrl,
     primaryColor: primaryColorValue(primaryColor),
     fontPairing: fontPairing(data["branding_font_pairing"]),
-    acceptanceMode: bool(data["instant_book"], "instant_book", false) ? "instant" : "request",
+    acceptanceMode:
+      ownerActive && bool(data["instant_book"], "instant_book", false) ? "instant" : "request",
     updatedAt,
   });
 }
@@ -90,7 +135,9 @@ function addon(context: BookingBuildContext, source: IdentitySourceRow): Booking
   const data = source.data;
   const id = uuid(data["id"], "id");
   const propertyId = propertyFor(context, "booking", "booking_hotels", data["hotel_id"]);
-  const media = bookingAddonMediaFor(context, source, propertyId);
+  const ownerStatus = ownerStatusFor(context, "booking", "booking_hotels", data["hotel_id"]);
+  const ownerActive = ownerStatus === "active";
+  const media = ownerActive ? bookingAddonMediaFor(context, source, propertyId) : null;
   const updatedAt = iso(data["updated_at"], "updated_at");
   return record(source, "booking", "addon_definitions", id, updatedAt, true, {
     id,
@@ -103,14 +150,15 @@ function addon(context: BookingBuildContext, source: IdentitySourceRow): Booking
     pricingModel: bool(data["per_person"], "per_person", false) ? "per_guest" : "per_stay",
     priceAmount: money(data["price"], "price", "0.00"),
     currency: currency(data["currency"] ?? "EUR"),
-    publicVisible: true,
-    status: "active",
+    publicVisible: ownerActive,
+    status: ownerActive ? "active" : "disabled",
     metadata: {
       migrationRunId: context.sourceRunId,
       imageUrl: media?.publicUrl ?? null,
       mediaObjectId: media?.mediaObjectId ?? null,
       duration: optionalText(data["duration"], "duration"),
       sortOrder: integer(data["sort_order"], "sort_order", 0),
+      ownerStatus,
     },
     createdAt: iso(data["created_at"], "created_at"),
     updatedAt,
@@ -121,9 +169,12 @@ function promo(context: BookingBuildContext, source: IdentitySourceRow): Booking
   const data = source.data;
   const id = uuid(data["id"], "id");
   const propertyId = propertyFor(context, "booking", "booking_hotels", data["hotel_id"]);
+  const ownerStatus = ownerStatusFor(context, "booking", "booking_hotels", data["hotel_id"]);
   const updatedAt = iso(data["updated_at"], "updated_at");
   const type = requiredText(data["discount_type"], "discount_type").toLowerCase();
   if (type !== "percentage" && type !== "fixed") throw new Error("discount_type is unsupported");
+  const sourceActive = bool(data["is_active"], "is_active", true);
+  const retainedActive = ownerStatus === "active" && sourceActive;
   return record(source, "booking", "promo_definitions", id, updatedAt, true, {
     id,
     propertyId,
@@ -134,15 +185,15 @@ function promo(context: BookingBuildContext, source: IdentitySourceRow): Booking
     discountValue: money(data["discount_value"], "discount_value"),
     validFrom: optionalDate(data["valid_from"], "valid_from"),
     validUntil: optionalDate(data["valid_until"], "valid_until"),
-    isActive: bool(data["is_active"], "is_active", true),
-    maxUses: integer(data["max_uses"], "max_uses", 1),
+    isActive: retainedActive,
+    maxUses: integer(data["max_uses"], "max_uses", 999),
     currentUses: integer(data["current_uses"] ?? data["use_count"], "current_uses", 0),
-    status: bool(data["is_active"], "is_active", true) ? "active" : "retired",
+    status: retainedActive ? "active" : "retired",
     minBookingValue: data["min_booking_value"] ?? null,
     applicableRoomIds: data["applicable_room_ids"] ?? null,
     stayDateFrom: optionalDate(data["stay_date_from"], "stay_date_from"),
     stayDateUntil: optionalDate(data["stay_date_until"], "stay_date_until"),
-    metadata: { migrationRunId: context.sourceRunId },
+    metadata: { migrationRunId: context.sourceRunId, legacyIsActive: sourceActive, ownerStatus },
     createdAt: iso(data["created_at"], "created_at"),
     updatedAt,
   });
@@ -153,7 +204,6 @@ function auditEvent(context: BookingBuildContext, source: IdentitySourceRow): Bo
   const id = uuid(data["id"], "id");
   const slug = requiredText(data["hotel_slug"], "hotel_slug").toLowerCase();
   const propertyId = context.propertyBySlug.get(slug);
-  if (!propertyId) throw new Error("hotel_slug has no unique active target property");
   const metadata = optionalObject(data["metadata"]);
   const occurredAt = iso(data["created_at"], "created_at");
   const sessionId = optionalText(data["session_id"], "session_id");
@@ -163,8 +213,8 @@ function auditEvent(context: BookingBuildContext, source: IdentitySourceRow): Bo
     product: "booking",
     action: `booking.funnel.${requiredText(data["event_type"], "event_type")}`,
     occurredAt,
-    tenantScope: "property",
-    propertyId,
+    tenantScope: propertyId ? "property" : "migration",
+    propertyId: propertyId ?? null,
     actorType: "migration",
     targetResourceProduct: "booking",
     targetResourceType: "booking_funnel_session",
@@ -172,7 +222,12 @@ function auditEvent(context: BookingBuildContext, source: IdentitySourceRow): Bo
     correlationId: sessionId,
     redactedPayload: redactPrivate(metadata),
     privatePayload: metadata,
-    auditMetadata: { migrationRunId: context.sourceRunId, sourceTable: "booking_events" },
+    auditMetadata: {
+      migrationRunId: context.sourceRunId,
+      sourceTable: "booking_events",
+      propertyResolution: propertyId ? "catalog_slug" : "unmapped_historical",
+      legacyHotelSlugSha256: sha256(slug),
+    },
     retentionClass: "guest_pii",
     privacyScope: "restricted",
     aiVisible: false,
@@ -215,6 +270,7 @@ function fontPairing(value: unknown): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-");
   const mapped: Record<string, string> = {
+    "high-end-serif": "high-end-serif",
     "modern-minimalist": "modern-minimalist",
     "inter-inter": "modern-minimalist",
     "inter-merriweather": "modern-minimalist",

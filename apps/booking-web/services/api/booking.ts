@@ -1,4 +1,5 @@
-import { Booking } from "@/lib/types";
+import { trackEvent } from "./tracking";
+import { Booking, RoomSelection, RoomSelectionSnapshot } from "@/lib/types";
 import { bookingWebPublic } from "./client";
 
 export interface BookingRequestResponse {
@@ -26,6 +27,8 @@ export interface BookingLookupResponse extends Booking {
 }
 
 export type BookingCreateRequest = {
+  roomSelection?: RoomSelection;
+  currency?: string;
   roomTypeId: string;
   guestFirstName: string;
   guestLastName: string;
@@ -45,6 +48,7 @@ export type BookingCreateRequest = {
   rateType?: string;
   addonIds?: string[];
   addonQuantities?: Record<string, number>;
+  addonPackageQuantities?: Record<string, number>;
   addonDates?: Record<string, string[]>;
   promoCode?: string;
   quoteId?: string;
@@ -52,7 +56,9 @@ export type BookingCreateRequest = {
   balanceAmount?: number;
 };
 
-export interface BookingQuote {
+export interface BookingQuote extends RoomSelectionSnapshot {
+  promotion?: { name: string; discountAmount: number; discountPercent: number } | null;
+  promotionDiscount?: number;
   quoteId?: string;
   expiresAt?: string;
   roomTypeId: string;
@@ -108,6 +114,7 @@ export interface PaymentSettings {
 }
 
 export interface BookingStatus {
+  canEditRequest?: boolean;
   status: string;
   paymentStatus: string | null;
   hostResponseDeadline: string | null;
@@ -129,16 +136,28 @@ export const bookingService = {
     data: BookingCreateRequest,
     idempotencyKey?: string,
   ): Promise<BookingRequestResponse> {
-    return bookingWebPublic.post(
+    const result = await bookingWebPublic.post<BookingRequestResponse>(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
       data,
       idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
     );
+    if (result.booking.id && result.booking.status !== "draft" && !result.authorizationExpired) {
+      const paymentMethod = data.paymentMethod ?? result.paymentMethod;
+      if (paymentMethod === "card" && result.authorizationComplete) {
+        trackEvent(slug, "payment_authorized", { paymentMethod });
+      }
+      if (paymentMethod !== "card" || result.authorizationComplete) {
+        trackEvent(slug, "booking_completed", { paymentMethod });
+      }
+    }
+    return result;
   },
 
   async quote(
     slug: string,
     data: {
+      roomSelection?: RoomSelection;
+      currency?: string;
       roomTypeId: string;
       guestFirstName: string;
       guestLastName: string;
@@ -158,6 +177,7 @@ export const bookingService = {
       rateType?: string;
       addonIds?: string[];
       addonQuantities?: Record<string, number>;
+      addonPackageQuantities?: Record<string, number>;
       addonDates?: Record<string, string[]>;
       promoCode?: string;
     },
@@ -180,11 +200,16 @@ export const bookingService = {
     handle: string,
     idempotencyKey?: string,
   ): Promise<Booking> {
-    return bookingWebPublic.post(
+    const booking = await bookingWebPublic.post<Booking>(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
       undefined,
       idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
     );
+    if (booking.id && booking.status !== "draft") {
+      trackEvent(slug, "payment_authorized", { paymentMethod: "card" });
+      trackEvent(slug, "booking_completed", { paymentMethod: "card" });
+    }
+    return booking;
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {

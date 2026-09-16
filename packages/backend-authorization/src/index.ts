@@ -3,6 +3,7 @@ import pg from "pg";
 import type {
   EntitlementStatus,
   LinkedResource,
+  MembershipPropertyAccess,
   OrganizationKind,
   PermissionKey,
   ResourceRelationship,
@@ -10,11 +11,13 @@ import type {
   RequestContext,
   ResourceType,
   Product,
+  TeamRolePolicy,
 } from "@vayada/backend-auth";
 import {
   AuthorizationResolutionError,
   parseStaffPermissionOverrides,
   validateStaffPermissionOverrides,
+  resolveTeamRolePermissions,
 } from "@vayada/backend-auth";
 
 export type RolePermissionRepository = {
@@ -33,6 +36,7 @@ export type EntitlementRepository = {
 export type AuthorizationResolution = {
   permissions: PermissionKey[];
   entitlements?: ProductEntitlement[];
+  propertyAccess?: MembershipPropertyAccess;
 };
 
 export type AuthorizationResolver = (context: RequestContext) => Promise<AuthorizationResolution>;
@@ -48,6 +52,9 @@ export type MembershipPropertyScope = {
   accessOrigin: string;
   assignedPropertyIds: readonly string[];
   permissionOverrides?: unknown;
+  productAccess?: { pms: unknown; booking: unknown };
+  roleDefinitionId?: string | null;
+  roleDefinition?: (TeamRolePolicy & { id: string; organizationId: string }) | null;
 };
 
 export type PropertyAccessContext = {
@@ -56,7 +63,10 @@ export type PropertyAccessContext = {
     RequestContext["selectedOrganization"],
     "organizationId" | "kind" | "status"
   >;
-  membership: Pick<RequestContext["membership"], "membershipId" | "roleKey" | "status">;
+  membership: Pick<
+    RequestContext["membership"],
+    "membershipId" | "roleKey" | "status" | "propertyAccess"
+  >;
   linkedResources: RequestContext["linkedResources"];
 };
 
@@ -78,7 +88,8 @@ export type EffectivePropertyAccess = {
 
 export type TargetPropertyResource =
   | { product: "booking"; resourceType: "booking_hotel" }
-  | { product: "pms"; resourceType: "pms_property" };
+  | { product: "pms"; resourceType: "pms_property" }
+  | { product: "marketplace"; resourceType: "hotel_profile" };
 
 export type PropertyAccessRequirement = {
   propertyId: string;
@@ -119,6 +130,15 @@ type MembershipPropertyScopeRow = {
   access_origin: string;
   assigned_property_ids: string[];
   permission_overrides: unknown;
+  pms_access_enabled: boolean;
+  booking_access_enabled: boolean;
+  role_definition_id: string | null;
+  definition_id: string | null;
+  definition_organization_id: string | null;
+  security_class: TeamRolePolicy["securityClass"];
+  base_role_key: string;
+  preset_key: string | null;
+  default_permissions: unknown;
 };
 
 function resourceScopeKey(
@@ -274,6 +294,11 @@ export function createPgPropertyAccessRepository(
            membership.role_key,
            membership.access_origin,
            membership.permission_overrides,
+           membership.pms_access_enabled, membership.booking_access_enabled,
+           membership.role_definition_id, definition.id AS definition_id,
+           definition.organization_id AS definition_organization_id,
+           definition.security_class, definition.base_role_key,
+           definition.preset_key, definition.default_permissions,
            ARRAY(
              SELECT assignment.property_id::text
              FROM identity.membership_property_assignments assignment
@@ -285,6 +310,9 @@ export function createPgPropertyAccessRepository(
            ON organization.id = membership.organization_id
          JOIN identity.users actor
            ON actor.id = membership.user_id AND actor.status = 'active'
+         LEFT JOIN identity.organization_roles definition
+           ON definition.id = membership.role_definition_id
+           AND definition.organization_id = membership.organization_id
          WHERE membership.id = $1
            AND membership.user_id = $2
            AND membership.organization_id = $3
@@ -306,6 +334,19 @@ export function createPgPropertyAccessRepository(
             accessOrigin: row.access_origin,
             assignedPropertyIds: row.assigned_property_ids,
             permissionOverrides: row.permission_overrides,
+            productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
+            roleDefinitionId: row.role_definition_id,
+            roleDefinition:
+              row.definition_id === null
+                ? null
+                : {
+                    id: row.definition_id,
+                    organizationId: row.definition_organization_id!,
+                    securityClass: row.security_class,
+                    baseRoleKey: row.base_role_key,
+                    presetKey: row.preset_key,
+                    defaultPermissions: row.default_permissions,
+                  },
           }
         : null;
     },
@@ -349,12 +390,19 @@ export function createAuthorizationResolver(
 ): AuthorizationResolver {
   return async (context) => {
     let membershipScope: MembershipPropertyScope | undefined;
+    let propertyAccess: MembershipPropertyAccess | undefined;
     if (context.selectedOrganization.kind === "hotel_group") {
       const scope = await propertyAccessRepository?.findMembershipPropertyScope(context);
-      if (!isAgencyMembershipScope(context, scope)) {
+      if (!isAgencyMembershipScope(context, scope) || !hasValidAssignedPropertyIds(scope)) {
         return { permissions: [], entitlements: [] };
       }
       membershipScope = scope;
+      propertyAccess = {
+        mode: scope.mode,
+        roleKey: scope.roleKey,
+        accessOrigin: scope.accessOrigin,
+        assignedPropertyIds: [...scope.assignedPropertyIds],
+      };
     }
 
     const rolePermissions = await rolePermissionRepository.findPermissionsForRole(
@@ -363,7 +411,32 @@ export function createAuthorizationResolver(
     );
     let permissions = rolePermissions;
     const permissionOverrides = membershipScope?.permissionOverrides;
-    if (permissionOverrides !== null && permissionOverrides !== undefined) {
+    if (membershipScope?.roleDefinitionId != null) {
+      const definition = membershipScope.roleDefinition;
+      const resolved =
+        definition &&
+        definition.id === membershipScope.roleDefinitionId &&
+        definition.organizationId === context.selectedOrganization.organizationId &&
+        definition.baseRoleKey === context.membership.roleKey
+          ? resolveTeamRolePermissions(definition, permissionOverrides, rolePermissions)
+          : null;
+      if (!resolved) {
+        return rejectInvalidPermissionConfiguration(propertyAccessRepository, context, [
+          "invalid_role_definition",
+        ]);
+      }
+      // Property navigation is a non-editable baseline, outside section controls.
+      permissions = [
+        ...new Set([
+          ...resolved,
+          // New external-owner presets need property navigation without changing legacy grants.
+          ...(definition?.securityClass === "external_owner"
+            ? ["hotel_catalog.property_manifest.read" as const]
+            : []),
+          ...rolePermissions.filter((key) => key === "hotel_catalog.property_manifest.read"),
+        ]),
+      ];
+    } else if (permissionOverrides !== null && permissionOverrides !== undefined) {
       const overrides = parseStaffPermissionOverrides(permissionOverrides);
       const issueCodes = overrides
         ? validateStaffPermissionOverrides({
@@ -373,15 +446,7 @@ export function createAuthorizationResolver(
           })
         : ["malformed_permission_override"];
       if (!overrides || issueCodes.length) {
-        if (!propertyAccessRepository?.recordInvalidPermissionOverride) {
-          throw new Error("Permission override audit sink is unavailable");
-        }
-        try {
-          await propertyAccessRepository.recordInvalidPermissionOverride(context, issueCodes);
-        } catch {
-          throw new Error("Permission override audit is unavailable");
-        }
-        throw new AuthorizationResolutionError();
+        return rejectInvalidPermissionConfiguration(propertyAccessRepository, context, issueCodes);
       }
       const effectivePermissions = new Set<PermissionKey>(rolePermissions);
       for (const permission of overrides.grant) {
@@ -393,25 +458,70 @@ export function createAuthorizationResolver(
       permissions = [...effectivePermissions];
     }
 
-    const entitlements = await entitlementRepository?.findEntitlementsForContext(context);
+    let entitlements = await entitlementRepository?.findEntitlementsForContext(context);
+    if (context.selectedOrganization.kind === "hotel_group") {
+      const products = membershipScope?.productAccess;
+      if (typeof products?.pms !== "boolean" || typeof products.booking !== "boolean") {
+        return { permissions: [], entitlements: [] };
+      }
+      permissions = permissions.filter(
+        (permission) =>
+          (!permission.startsWith("pms.") || products.pms) &&
+          (!permission.startsWith("booking.") || products.booking),
+      );
+      entitlements = entitlements?.filter(
+        (entitlement) =>
+          (entitlement.product !== "pms" || products.pms) &&
+          (entitlement.product !== "booking" || products.booking),
+      );
+    }
 
     return {
       permissions,
       entitlements,
+      ...(propertyAccess ? { propertyAccess } : {}),
     };
   };
+}
+
+async function rejectInvalidPermissionConfiguration(
+  repository: PropertyAccessRepository | undefined,
+  context: RequestContext,
+  issueCodes: readonly string[],
+): Promise<never> {
+  if (!repository?.recordInvalidPermissionOverride) {
+    throw new Error("Permission override audit sink is unavailable");
+  }
+  try {
+    await repository.recordInvalidPermissionOverride(context, issueCodes);
+  } catch {
+    throw new Error("Permission override audit is unavailable");
+  }
+  throw new AuthorizationResolutionError();
 }
 
 function isAgencyMembershipScope(
   context: PropertyAccessContext,
   scope: MembershipPropertyScope | null | undefined,
-): scope is MembershipPropertyScope & { mode: "all" | "assigned" } {
+): scope is MembershipPropertyScope & {
+  mode: "all" | "assigned";
+  accessOrigin: "agency";
+} {
   return (
     scope != null &&
     scope.roleKey === context.membership.roleKey &&
     scope.accessOrigin === "agency" &&
     (scope.mode === "all" || scope.mode === "assigned") &&
     (scope.roleKey !== "external_owner" || scope.mode === "assigned")
+  );
+}
+
+function hasValidAssignedPropertyIds(
+  scope: Pick<MembershipPropertyScope, "assignedPropertyIds">,
+): boolean {
+  return (
+    Array.isArray(scope.assignedPropertyIds) &&
+    scope.assignedPropertyIds.every((propertyId) => typeof propertyId === "string")
   );
 }
 
@@ -447,14 +557,12 @@ export async function resolveEffectivePropertyAccess(
     return null;
   }
 
-  const scope = await repository.findMembershipPropertyScope(context);
+  const scope =
+    context.membership.propertyAccess === undefined
+      ? await repository.findMembershipPropertyScope(context)
+      : context.membership.propertyAccess;
   if (!isAgencyMembershipScope(context, scope)) return null;
-  if (
-    !Array.isArray(scope.assignedPropertyIds) ||
-    scope.assignedPropertyIds.some((propertyId) => typeof propertyId !== "string")
-  ) {
-    return null;
-  }
+  if (!hasValidAssignedPropertyIds(scope)) return null;
 
   const canonicalPropertyIds = new Set(
     context.linkedResources

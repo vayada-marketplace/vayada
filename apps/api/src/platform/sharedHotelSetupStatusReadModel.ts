@@ -255,8 +255,8 @@ export function createPgSharedHotelSetupStatusRepository(config: {
   };
 }
 
-async function loadPropertyProfile(
-  pool: SharedHotelSetupStatusPool,
+export async function loadPropertyProfile(
+  pool: Pick<SharedHotelSetupStatusPool, "query">,
   organizationId: string,
   propertyId: string,
 ): Promise<SharedPropertyProfile | null> {
@@ -268,7 +268,7 @@ async function loadPropertyProfile(
   return row ? toSharedPropertyProfile(row) : null;
 }
 
-async function loadPublicPropertyProfile(
+export async function loadPublicPropertyProfile(
   queryable: SharedHotelSetupQueryClient,
   organizationId: string,
   propertyId: string,
@@ -1883,14 +1883,11 @@ function adaptiveHotelSetupFactsSql(): string {
       COALESCE(
         payment.payments_enabled
         AND (
-          (
-            'pay_at_property' = ANY(payment.accepted_methods)
-            AND payment.accepted_methods && ARRAY['cash', 'manual_card']::text[]
-          )
+          'pay_at_property' = ANY(payment.accepted_methods)
           OR (
             'bank_transfer' = ANY(payment.accepted_methods)
-            AND NULLIF(BTRIM(payment.deposit_policy ->> 'bankTransferInstructions'), '')
-              IS NOT NULL
+            AND EXISTS (SELECT 1 FROM finance.bank_transfer_destinations destination
+              WHERE destination.property_id=payment.property_id AND destination.enabled)
           )
           OR (
             'paypal' = ANY(payment.accepted_methods)

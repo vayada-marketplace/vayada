@@ -323,6 +323,30 @@ describe("PMS pricing routes", () => {
     expect(ports.planCalls).toHaveLength(1);
   });
 
+  it("accepts explicit meals and rejects unsupported values before delegation", async () => {
+    const ports = fakePorts();
+    app = await testApp(ports);
+    for (const mealPlan of ["breakfast", "room_only", null, "half_board", ""]) {
+      const response = await injectJson(app, {
+        method: "PUT",
+        url: `/properties/${propertyId}/room-types/${roomTypeId}/flexible-rate-plan`,
+        headers: headers("meal-" + String(mealPlan)),
+        payload: {
+          expectedRoomFactsRevision: 2,
+          expectedPricingCurrencyRevision: 1,
+          expectedFlexibleRatePlanRevision: 0,
+          baseAmountDecimal: "120.00",
+          cancellationTerms: cancellationTerms(),
+          mealPlan,
+        },
+      });
+      expect(response.statusCode).toBe(
+        mealPlan === "breakfast" || mealPlan === "room_only" ? 201 : 400,
+      );
+    }
+    expect(ports.planCalls.map((command) => command.mealPlan)).toEqual(["breakfast", "room_only"]);
+  });
+
   it("serves narrow source evidence and rejects escaped port scope", async () => {
     const ports = fakePorts();
     app = await testApp(ports);

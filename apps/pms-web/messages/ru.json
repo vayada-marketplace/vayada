@@ -1,11 +1,13 @@
 {
+  "dashboard.reviewNoShow": "Проверить незаезд…",
+  "checkOut.reviewNoShow": "Проверить незаезд…",
   "layout.header.signOut": "Выйти",
   "layout.header.noProperties": "Нет объектов",
   "layout.header.user": "Пользователь",
   "layout.header.language": "Язык",
   "layout.header.currency": "Валюта",
   "layout.sidebar.propertyManagerDescription": "Операции и инвентарь",
-  "layout.sidebar.creatorMarketplace": "Маркетплейс Vayada",
+  "layout.sidebar.creatorMarketplace": "Маркетплейс vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Авторы и коллаборации",
   "layout.sidebar.bookingEngineDescription": "Прямые бронирования и доход",
   "common.save": "Сохранить",
@@ -616,5 +618,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "Заезды • {date}",
+  "dashboard.departuresOn": "Выезды • {date}",
+  "dashboard.noArrivalsOnDate": "Нет заездов на эту дату",
+  "dashboard.noDeparturesOnDate": "Нет выездов на эту дату",
+  "dashboard.previousDay": "Предыдущий день",
+  "dashboard.nextDay": "Следующий день"
 }

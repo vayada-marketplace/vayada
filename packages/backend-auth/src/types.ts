@@ -58,6 +58,10 @@ export type PermissionKey =
   | "hotel_catalog.products.manage"
   | "booking.settings.manage"
   | "booking.settings.read"
+  | "booking.addons.read"
+  | "booking.addons.manage"
+  | "booking.promos.read"
+  | "booking.promos.manage"
   | "booking.analytics.read"
   | "booking.design.read"
   | "booking.design.manage"
@@ -125,6 +129,13 @@ export type SelectedOrganization = {
   status: OrganizationStatus;
 };
 
+export type MembershipPropertyAccess = {
+  mode: "all" | "assigned";
+  roleKey: string;
+  accessOrigin: "agency";
+  assignedPropertyIds: readonly string[];
+};
+
 export type ActiveMembership = {
   membershipId: string;
   status: MembershipStatus;
@@ -133,6 +144,7 @@ export type ActiveMembership = {
   workosRoleSlugs: string[];
   // Populated by backend-authorization after this package resolves identity.
   permissions: PermissionKey[];
+  propertyAccess?: MembershipPropertyAccess;
 };
 
 export type LinkedResource = {

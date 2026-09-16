@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { trackEvent } from "@/services/api/tracking";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,9 +12,12 @@ import StepIndicator from "@/components/booking/StepIndicator";
 import AddonDetailModal from "@/components/booking/AddonDetailModal";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { ADDON_CATEGORIES } from "@/lib/constants/addons";
-import { useHotel, useAddons } from "@/contexts/HotelContext";
+import { useHotel, useAddons, useSlug, useRooms } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { calculateNights, ensureMinOneNight } from "@/lib/utils";
+import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
+import SelectionUnavailable from "@/components/booking/SelectionUnavailable";
+import { usePricing } from "@/lib/hooks/usePricing";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 
 export default function AddonsPageClient() {
@@ -21,7 +25,10 @@ export default function AddonsPageClient() {
   const searchParams = useSearchParams();
   const t = useTranslations("addons");
   const tc = useTranslations("common");
+  const tr = useTranslations("roomSelection");
+  const { refetchRooms, loading: roomsInitialLoading, roomsLoading } = useRooms();
   const { hotel } = useHotel();
+  const { slug } = useSlug();
   const { addons } = useAddons();
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const [activeCategory, setActiveCategory] = useState("all");
@@ -29,6 +36,7 @@ export default function AddonsPageClient() {
   const [selections, setSelections] = useState<Record<string, number>>({});
   // selectedDates[id] = ISO dates the guest wants the perNight addon on
   const [selectedDates, setSelectedDates] = useState<Record<string, string[]>>({});
+  const [packages, setPackages] = useState<Record<string, number>>({});
   const [detailIndex, setDetailIndex] = useState<number | null>(null);
   const { steps: STEPS, currentStep } = useBookingSteps("addons");
 
@@ -40,6 +48,13 @@ export default function AddonsPageClient() {
   );
   const adultsParam = parseInt(searchParams.get("adults") || "2");
   const nights = calculateNights(checkIn, checkOut);
+  const childrenParam = Number(searchParams.get("children") || "0");
+  const roomId = searchParams.get("room") || "";
+  const roomsParam = Number(searchParams.get("rooms") || "1");
+  useEffect(() => {
+    if (roomId.startsWith("selection-") && checkIn && checkOut)
+      void refetchRooms(checkIn, checkOut, adultsParam, childrenParam, roomsParam);
+  }, [roomId, checkIn, checkOut, adultsParam, childrenParam, roomsParam, refetchRooms]);
 
   // Generate array of stay dates (each night of the stay)
   const stayDates = (() => {
@@ -61,14 +76,32 @@ export default function AddonsPageClient() {
     activeCategory === "all" ? addons : addons.filter((a) => a.category === activeCategory);
 
   const selectedIds = Object.keys(selections);
+  const { room, selectedRoomLines, quoteReady, promoError } = usePricing({
+    roomId,
+    checkIn,
+    checkOut,
+    adults: adultsParam,
+    children: childrenParam,
+    roomsParam,
+    rateType: searchParams.get("rateType") || "flexible",
+    selectedAddonIds: selectedIds,
+    addonQuantities: selections,
+    addonPackageQuantities: packages,
+    addonDates: selectedDates,
+    promoCode: searchParams.get("promoCode") || "",
+  });
 
   // What dimension is the count selector for? perPerson → people (max=adults),
   // per-booking-only → items (cap at 10). Per-day-only addons don't get a count
   // selector at all — the day toggles below are the dimension.
-  const getCountMax = (addon: { perPerson?: boolean; perNight?: boolean }) => {
+  const getCountMax = (addon: {
+    perPerson?: boolean;
+    perNight?: boolean;
+    maxQuantity?: number;
+  }) => {
     if (addon.perPerson) return Math.max(1, adultsParam);
     if (addon.perNight) return 1; // count is fixed; day toggles drive the dimension
-    return 10;
+    return addon.maxQuantity ?? 1;
   };
   const getCountDefault = (addon: { perPerson?: boolean; perNight?: boolean }) => {
     if (addon.perPerson) return Math.max(1, adultsParam); // default to "all guests opt in"
@@ -81,14 +114,14 @@ export default function AddonsPageClient() {
   // per-booking-only). Mirrors the backend pricing in
   // pms-backend/services/booking_service._compute_addon_total.
   const computeMultiplier = (
-    addon: { perPerson?: boolean; perNight?: boolean },
+    addon: { id: string; perPerson?: boolean; perNight?: boolean },
     count: number,
     dates: string[],
   ) => {
     const people = addon.perPerson ? count : 1;
     const days = addon.perNight ? Math.max(1, dates.length) : 1;
     const items = !addon.perPerson && !addon.perNight ? count : 1;
-    return people * days * items;
+    return people * days * items * (packages[addon.id] ?? 1);
   };
 
   const toggleAddon = (id: string) => {
@@ -96,6 +129,11 @@ export default function AddonsPageClient() {
       if (prev[id] !== undefined) {
         const next = { ...prev };
         delete next[id];
+        setPackages((previous) => {
+          const next = { ...previous };
+          delete next[id];
+          return next;
+        });
         setSelectedDates((pd) => {
           const nd = { ...pd };
           delete nd[id];
@@ -132,6 +170,14 @@ export default function AddonsPageClient() {
     setSelections((prev) => ({ ...prev, [id]: clamped }));
   };
 
+  if (roomId.startsWith("selection-") && !room)
+    return (
+      <SelectionUnavailable
+        loading={roomsInitialLoading || roomsLoading}
+        search={searchParams.toString()}
+      />
+    );
+
   return (
     <div className="min-h-screen bg-white">
       <HeroSection
@@ -151,6 +197,25 @@ export default function AddonsPageClient() {
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
 
+        {room?.combination && selectedRoomLines && (
+          <section className="mb-8 rounded-2xl border border-gray-200 bg-white p-6">
+            <h2 className="mb-4 text-xl font-heading">
+              {tr("accommodation", { count: adultsParam + childrenParam })}
+            </h2>
+            <RoomSelectionSummary
+              lines={selectedRoomLines}
+              currency={room.currency}
+              checkIn={checkIn}
+              timezone={hotel.timezone}
+              beforeDiscounts
+            />
+            {promoError && (
+              <p role="alert" className="mt-3 text-sm text-red-700">
+                {promoError}
+              </p>
+            )}
+          </section>
+        )}
         {/* Category Filters */}
         <div className="flex items-center gap-2 mb-8 flex-wrap">
           {availableCategories.map((cat) => (
@@ -284,6 +349,37 @@ export default function AddonsPageClient() {
                       </button>
                     )}
                   </div>
+                  {isAdded &&
+                    (addon.perPerson || addon.perNight) &&
+                    (addon.maxQuantity ?? 1) > 1 && (
+                      <label
+                        className="mt-3 flex items-center justify-between text-sm"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {tc("qty")}
+                        <input
+                          type="number"
+                          min={1}
+                          max={addon.maxQuantity}
+                          step={1}
+                          aria-label={`${addon.name} quantity`}
+                          value={packages[addon.id] ?? 1}
+                          onChange={(e) =>
+                            setPackages((previous) => ({
+                              ...previous,
+                              [addon.id]: Math.max(
+                                1,
+                                Math.min(
+                                  addon.maxQuantity ?? 1,
+                                  Math.trunc(Number(e.target.value)) || 1,
+                                ),
+                              ),
+                            }))
+                          }
+                          className="w-20 rounded-lg border border-gray-300 px-3 py-1"
+                        />
+                      </label>
+                    )}
                   {/* Date toggles for perNight addons. Independent of the
                       people-count stepper above for combined per-day/per-person
                       addons (e.g. Scooter Rental). */}
@@ -358,6 +454,8 @@ export default function AddonsPageClient() {
                   const dates = selectedDates[addon.id] ?? [];
                   const computedPrice = addon.price * computeMultiplier(addon, count, dates);
                   const detailParts: string[] = [];
+                  if ((packages[addon.id] ?? 1) > 1)
+                    detailParts.push(`${tc("qty")}: ${packages[addon.id]}`);
                   if (addon.perPerson) {
                     detailParts.push(`${count} / ${adultsParam} ${tc("guests").toLowerCase()}`);
                   }
@@ -463,8 +561,16 @@ export default function AddonsPageClient() {
             {t("backToRooms")}
           </button>
           <button
+            disabled={Boolean(room?.combination && !quoteReady)}
             onClick={() => {
+              if (room?.combination && !quoteReady) return;
               const params = new URLSearchParams(searchParams.toString());
+              const packageEntries = selectedIds
+                .filter((id) => (packages[id] ?? 1) > 1)
+                .map((id) => `${id}:${packages[id]}`)
+                .join(",");
+              if (packageEntries) params.set("addonPackages", packageEntries);
+              else params.delete("addonPackages");
               if (selectedIds.length > 0) {
                 // For perPerson/per-booking addons, encode the count after a colon.
                 // For perNight-only addons, the count is implicit (= dates.length)
@@ -503,6 +609,7 @@ export default function AddonsPageClient() {
                 params.delete("addons");
                 params.delete("addonDates");
               }
+              if (addons.length > 0) trackEvent(slug, "addons_step_passed");
               router.push(`/book?${params.toString()}`);
             }}
             className="px-8 py-2.5 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm"

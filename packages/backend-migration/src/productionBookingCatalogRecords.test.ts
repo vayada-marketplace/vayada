@@ -43,8 +43,8 @@ describe("production Booking catalog records", () => {
         discount_type: "percentage",
         discount_value: "10",
         is_active: true,
-        max_uses: 20,
-        current_uses: 2,
+        max_uses: null,
+        use_count: 2,
         created_at: "2026-08-01T00:00:00Z",
         updated_at: "2026-08-29T12:00:00Z",
       }),
@@ -65,7 +65,86 @@ describe("production Booking catalog records", () => {
     });
     expect(records[1]!.row).toMatchObject({ pricingModel: "per_guest", priceAmount: "12.50" });
     expect(JSON.stringify(records[1]!.row)).not.toContain("http");
-    expect(records[2]!.row).toMatchObject({ code: "SUMMER", discountValue: "10.00" });
+    expect(records[2]!.row).toMatchObject({
+      code: "SUMMER",
+      discountValue: "10.00",
+      maxUses: 999,
+      currentUses: 2,
+      minBookingValue: null,
+      applicableRoomIds: null,
+      stayDateFrom: null,
+      stayDateUntil: null,
+    });
+  });
+
+  it("preserves quarantined-owner history without reviving Booking sales state", () => {
+    const links = propertyLinks().map((link) => ({ ...link, ownerStatus: "archived" }));
+    const rows = [
+      row("booking_hotels", {
+        id: HOTEL,
+        updated_at: "2026-08-29T12:00:00Z",
+        instant_book: true,
+        show_addons_step: true,
+        hero_image: SOURCE_IMAGE,
+      }),
+      pmsRow("hotels", {
+        id: HOTEL,
+        updated_at: "2026-08-29T12:00:00Z",
+        same_day_bookings_enabled: true,
+        same_day_booking_cutoff_time: "18:00",
+      }),
+      row("booking_addons", {
+        id: ADDON,
+        hotel_id: HOTEL,
+        name: "Breakfast",
+        image: SOURCE_IMAGE,
+        price: "12.50",
+        currency: "EUR",
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-29T12:00:00Z",
+      }),
+      row("booking_promo_codes", {
+        id: PROMO,
+        hotel_id: HOTEL,
+        code: "summer",
+        discount_type: "percentage",
+        discount_value: "10",
+        is_active: true,
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-29T12:00:00Z",
+      }),
+    ];
+    const context = createProductionBookingContext({
+      ...input(rows),
+      target: { propertyLinks: links, propertySlugs: [], records: [], provenance: [] },
+    });
+    const records = buildBookingCatalogRecords(context);
+
+    expect(context.blockers).toEqual([]);
+    expect(records.find((record) => record.targetTable === "booking_settings")?.row).toMatchObject({
+      showAddonsStep: false,
+      acceptanceMode: "request",
+      headerLogoMediaObjectId: null,
+      heroImageUrl: null,
+      sourceFreshness: { ownerStatus: "archived" },
+    });
+    expect(
+      records.find((record) => record.targetTable === "same_day_booking_policies")?.row,
+    ).toMatchObject({ enabled: false, sourceFreshness: { ownerStatus: "archived" } });
+    expect(records.find((record) => record.targetTable === "addon_definitions")?.row).toMatchObject(
+      {
+        publicVisible: false,
+        status: "disabled",
+        metadata: { imageUrl: null, mediaObjectId: null, ownerStatus: "archived" },
+      },
+    );
+    expect(records.find((record) => record.targetTable === "promo_definitions")?.row).toMatchObject(
+      {
+        isActive: false,
+        status: "retired",
+        metadata: { legacyIsActive: true, ownerStatus: "archived" },
+      },
+    );
   });
 
   it("stores funnel metadata privately and redacts the audit projection", () => {
@@ -103,6 +182,91 @@ describe("production Booking catalog records", () => {
     });
     expect(audit["aiVisible"]).toBe(false);
   });
+
+  it("keeps unmapped old funnel events private and migration-scoped", () => {
+    const context = createProductionBookingContext(
+      input([
+        row("booking_events", {
+          id: EVENT,
+          hotel_slug: "removed-hotel",
+          event_type: "page_viewed",
+          metadata: { page: "home" },
+          created_at: "2026-08-29T12:00:00Z",
+        }),
+      ]),
+    );
+    const audit = buildBookingCatalogRecords(context)[0]!.row;
+
+    expect(context.blockers).toEqual([]);
+    expect(audit).toMatchObject({
+      tenantScope: "migration",
+      propertyId: null,
+      privacyScope: "restricted",
+      aiVisible: false,
+      auditMetadata: {
+        propertyResolution: "unmapped_historical",
+        legacyHotelSlugSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    expect(JSON.stringify(audit)).not.toContain("removed-hotel");
+  });
+
+  it("uses the only available PMS freshness timestamp and accepts the target font value", () => {
+    const context = createProductionBookingContext(
+      input([
+        pmsRow("hotels", {
+          id: HOTEL,
+          created_at: "2026-08-01T00:00:00Z",
+          same_day_bookings_enabled: true,
+        }),
+        row("booking_hotels", {
+          id: HOTEL,
+          updated_at: "2026-08-29T12:00:00Z",
+          branding_font_pairing: "high-end-serif",
+        }),
+      ]),
+    );
+    const records = buildBookingCatalogRecords(context);
+
+    expect(context.blockers).toEqual([]);
+    expect(records[0]).toMatchObject({
+      sourceUpdatedAt: "2026-08-01T00:00:00.000Z",
+      row: {
+        sourceFreshness: { timestampBasis: "created_at" },
+        updatedAt: "2026-08-01T00:00:00.000Z",
+      },
+    });
+    expect(records[1]!.row["fontPairing"]).toBe("high-end-serif");
+  });
+
+  it.each([
+    [true, "18:00", true, "18:00"],
+    [false, "12:30", false, "12:30"],
+    [true, null, true, null],
+    [undefined, undefined, true, "18:00"],
+  ] as const)(
+    "preserves the effective legacy same-day policy",
+    (legacyEnabled, legacyCutoff, enabled, cutoffLocalTime) => {
+      const context = createProductionBookingContext(
+        input([
+          pmsRow("hotels", {
+            id: HOTEL,
+            updated_at: "2026-08-29T12:00:00Z",
+            same_day_bookings_enabled: legacyEnabled,
+            same_day_booking_cutoff_time: legacyCutoff,
+          }),
+        ]),
+      );
+
+      expect(buildBookingCatalogRecords(context)[0]).toMatchObject({
+        targetProduct: "booking",
+        targetTable: "same_day_booking_policies",
+        targetId: PROPERTY,
+        row: { propertyId: PROPERTY, enabled, cutoffLocalTime, revision: 1 },
+      });
+      expect(context.blockers).toEqual([]);
+    },
+  );
 
   it("requires an approved VAY-1055 object for add-on images", () => {
     const addon = row("booking_addons", {
@@ -298,6 +462,9 @@ describe("production Booking catalog records", () => {
 function row(sourceTable: string, data: Record<string, unknown>): IdentitySourceRow {
   return { sourceDatabase: "booking", sourceTable, rowOrdinal: 1, data };
 }
+function pmsRow(sourceTable: string, data: Record<string, unknown>): IdentitySourceRow {
+  return { sourceDatabase: "pms", sourceTable, rowOrdinal: 1, data };
+}
 function propertyLinks() {
   return [
     {
@@ -307,6 +474,16 @@ function propertyLinks() {
       propertyId: PROPERTY,
       relationship: "canonical_input",
       status: "active",
+      ownerStatus: "active",
+    },
+    {
+      sourceSystem: "pms",
+      sourceTable: "hotels",
+      sourceId: HOTEL,
+      propertyId: PROPERTY,
+      relationship: "operational_input",
+      status: "active",
+      ownerStatus: "active",
     },
   ];
 }

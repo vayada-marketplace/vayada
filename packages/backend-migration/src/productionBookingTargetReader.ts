@@ -23,6 +23,12 @@ const TABLES: Record<
     freshness: "updated_at",
     id: "property_id",
   },
+  same_day_booking_policies: {
+    product: "booking",
+    table: "booking.same_day_booking_policies",
+    freshness: "updated_at",
+    id: "property_id",
+  },
   addon_definitions: {
     product: "booking",
     table: "booking.addon_definitions",
@@ -84,8 +90,20 @@ export async function readProductionBookingOwnership(
 }> {
   const links = await client.query<BookingPropertyLink>(
     `SELECT source_system AS "sourceSystem", source_table AS "sourceTable",
-            source_id AS "sourceId", property_id::text AS "propertyId", relationship, status
-     FROM hotel_catalog.property_source_links
+            source_id AS "sourceId", property_id::text AS "propertyId", relationship, status,
+            CASE WHEN ownership.link_count = 1 THEN ownership.owner_status
+                 WHEN ownership.link_count > 1 THEN 'ambiguous' END AS "ownerStatus"
+     FROM hotel_catalog.property_source_links source_link
+     LEFT JOIN LATERAL (
+       SELECT count(*)::int AS link_count, min(owner.status) AS owner_status
+       FROM identity.organization_resource_links owner
+       WHERE owner.product = source_link.source_system
+         AND owner.resource_type = CASE source_link.source_system
+           WHEN 'booking' THEN 'booking_hotel' WHEN 'pms' THEN 'pms_hotel' END
+         AND owner.resource_id = source_link.source_id
+         AND owner.relationship = CASE source_link.source_system
+           WHEN 'booking' THEN 'owner' WHEN 'pms' THEN 'operator' END
+     ) ownership ON TRUE
      WHERE (
        (source_system = 'booking' AND source_table = 'booking_hotels')
        OR (source_system = 'pms' AND source_table = 'hotels')
@@ -95,10 +113,18 @@ export async function readProductionBookingOwnership(
     [sourceRunId],
   );
   const slugs = await client.query<BookingPropertySlug>(
-    `SELECT slug, property_id::text AS "propertyId", purpose, status
-     FROM hotel_catalog.property_slugs
-     WHERE status = 'active'
-     ORDER BY slug, property_id`,
+    `SELECT source.slug, source.property_id::text AS "propertyId",
+            source.purpose, source.status,
+            target.property_id::text AS "redirectTargetPropertyId",
+            target.purpose AS "redirectTargetPurpose",
+            target.status AS "redirectTargetStatus"
+     FROM hotel_catalog.property_slugs source
+     LEFT JOIN hotel_catalog.property_slugs target ON target.id = source.redirects_to_id
+     WHERE (source.purpose = 'canonical' AND source.status = 'active')
+        OR (source.purpose = 'redirect' AND source.status = 'redirected'
+            AND target.purpose = 'canonical' AND target.status = 'active'
+            AND target.property_id = source.property_id)
+     ORDER BY source.slug, source.property_id`,
   );
   const media = await client.query<BookingMediaReference>(
     `SELECT media.id::text AS "mediaObjectId", media.property_id::text AS "propertyId",

@@ -1,3 +1,4 @@
+import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import {
@@ -272,7 +273,14 @@ async function previewLocked(
           await rollbackQuietly(client);
           return previewFailure({ code: "calendar_revision_conflict", currentRevision });
         }
-        const factsBeforeLocks = await readRoomFacts(config.roomEvidence, command.propertyId);
+        const operatingIds = new Set(
+          (await readPmsRoomOperatingEligibility(client, command.propertyId))
+            .filter((room) => room.state === "operating")
+            .map((room) => room.roomTypeId),
+        );
+        const factsBeforeLocks = (
+          await readRoomFacts(config.roomEvidence, command.propertyId)
+        ).filter((room) => operatingIds.has(room.roomTypeId));
         const activeIds = factsBeforeLocks
           .filter(({ lifecycle }) => lifecycle === "active")
           .map(({ roomTypeId }) => roomTypeId);
@@ -285,7 +293,7 @@ async function previewLocked(
           await lockPmsPhysicalRoomUnitMutationScope(client, command.propertyId, roomTypeId);
         }
         const facts = (await readRoomFacts(config.roomEvidence, command.propertyId)).filter(
-          ({ lifecycle }) => lifecycle === "active",
+          ({ lifecycle, roomTypeId }) => lifecycle === "active" && operatingIds.has(roomTypeId),
         );
         if (facts.length === 0) {
           await rollbackQuietly(client);
@@ -765,12 +773,24 @@ async function readInventoryDays(
      FROM pms.inventory_days
      WHERE property_id = $1::uuid
        AND ($2::date IS NULL OR stay_date BETWEEN $2::date AND $3::date)
+       AND NOT (
+         NOT (room_type_id = ANY($4::uuid[]))
+         AND closure_source_revision = 1 AND status = 'closed'
+         AND available_count = 0 AND assigned_count = 0 AND blocked_count = 0
+         AND EXISTS (
+           SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id = pms.inventory_days.property_id
+             AND closure.room_type_id = pms.inventory_days.room_type_id
+             AND pms.inventory_days.stay_date >= closure.cutoff_date
+         )
+       )
      ORDER BY room_type_id::text COLLATE "C", stay_date
      FOR SHARE`,
     [
       propertyId,
       coverage ? databaseDate(coverage.coverageFrom) : null,
       coverage ? databaseDate(coverage.coverageThrough) : null,
+      expectedRoomBindings.map(({ roomTypeId }) => roomTypeId),
     ],
   );
   if (!coverage && result.rows.length > 0) {
@@ -817,7 +837,6 @@ async function readInventoryDays(
       !coverageFrom ||
       !coverageThrough ||
       coverageDayCount < 1 ||
-      coverageDayCount > 366 ||
       roomTypeCount !== expectedRooms.size ||
       expected !== roomTypeCount * coverageDayCount ||
       expected !== materialized ||
@@ -902,7 +921,7 @@ async function readActiveReservations(
             receipt.room_count AS "roomCount",
             status.lifecycle_state AS "lifecycleState",
             status.lifecycle_revision AS "lifecycleRevision"
-     FROM pms.inventory_reservation_receipts receipt
+     FROM pms.active_inventory_reservation_receipts receipt
      JOIN pms.inventory_reservation_statuses status
        ON status.receipt_id = receipt.receipt_id
       AND status.organization_id = receipt.organization_id

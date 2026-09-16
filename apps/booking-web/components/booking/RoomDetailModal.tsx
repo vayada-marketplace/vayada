@@ -4,9 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
-import type { PointOfInterest } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import LocationMap from "@/components/booking/LocationMap";
+import RoomCombinationCard from "./RoomCombinationCard";
 import {
   getFlexibleNightlyRates,
   getFreeCancellationDays,
@@ -16,7 +15,7 @@ import {
 } from "@/lib/constants/booking";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
 
-const AMENITIES_PREVIEW_COUNT = 6;
+const AMENITIES_PREVIEW_COUNT = 8;
 
 interface RoomDetailModalProps {
   room: RoomType;
@@ -31,11 +30,10 @@ interface RoomDetailModalProps {
   soldOut?: boolean;
   checkInTime?: string;
   checkOutTime?: string;
+  checkInUntil?: string;
+  checkOutFrom?: string;
   checkIn: string;
   hotelTimezone?: string;
-  propertyName: string;
-  showLocationMap?: boolean;
-  pointsOfInterest?: PointOfInterest[];
   selectRateDisabled?: boolean;
   selectRatePending?: boolean;
 }
@@ -53,11 +51,10 @@ export default function RoomDetailModal({
   soldOut = false,
   checkInTime,
   checkOutTime,
+  checkInUntil,
+  checkOutFrom,
   checkIn,
   hotelTimezone,
-  propertyName,
-  showLocationMap = false,
-  pointsOfInterest = [],
   selectRateDisabled = false,
   selectRatePending = false,
 }: RoomDetailModalProps) {
@@ -85,7 +82,6 @@ export default function RoomDetailModal({
   const t = useTranslations("home");
 
   const hasMultipleImages = room.images.length > 1;
-  const hasRoomCoordinates = Number.isFinite(room.latitude) && Number.isFinite(room.longitude);
   const goPrevImage = () => setImgIndex((i) => (i - 1 + room.images.length) % room.images.length);
   const goNextImage = () => setImgIndex((i) => (i + 1) % room.images.length);
   const handleTouchStart = (e: React.TouchEvent) => setTouchStartX(e.touches[0].clientX);
@@ -116,19 +112,31 @@ export default function RoomDetailModal({
     }
   }, [open]);
 
+  const closeFromHistory = useRef(onClose);
+  useEffect(() => {
+    closeFromHistory.current = onClose;
+  }, [onClose]);
+
   // Map browser back button to closing the modal instead of leaving the page
   useEffect(() => {
     if (!open) return;
     let closedByPop = false;
-    window.history.pushState({ vayRoomModal: true }, "");
+    // Defer the history entry so React Strict Mode can replay setup without navigating back.
+    let pushed = false;
+    const pushTimer = window.setTimeout(() => {
+      window.history.pushState({ ...window.history.state, vayRoomModal: true }, "");
+      pushed = true;
+    }, 0);
     const onPop = () => {
       closedByPop = true;
-      onClose();
+      closeFromHistory.current();
     };
     window.addEventListener("popstate", onPop);
     return () => {
+      window.clearTimeout(pushTimer);
       window.removeEventListener("popstate", onPop);
       if (
+        pushed &&
         !navigatingAwayRef.current &&
         !closedByPop &&
         typeof window !== "undefined" &&
@@ -137,7 +145,7 @@ export default function RoomDetailModal({
         window.history.back();
       }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -145,23 +153,39 @@ export default function RoomDetailModal({
     convertAndRound(rate, room.currency),
   );
   const flexibleFromNightly = flexibleNightlies.length > 0 ? Math.min(...flexibleNightlies) : 0;
-  const flexibleTotal = flexibleNightlies.reduce((sum, rate) => sum + rate, 0);
+  const flexiblePromotionAmount = convertAndRound(
+    room.promotion?.discountAmount ?? 0,
+    room.currency,
+  );
+  const flexibleTotal =
+    flexibleNightlies.reduce((sum, rate) => sum + rate, 0) - flexiblePromotionAmount;
   const flexibleVaries = hasVariableNightlyRates(flexibleNightlies);
   const nonRefundableNightlies = getNonRefundableNightlyRates(room, nights).map((rate) =>
     convertAndRound(rate, room.currency),
   );
   const nonRefundableFromNightly =
     nonRefundableNightlies.length > 0 ? Math.min(...nonRefundableNightlies) : 0;
-  const nonRefundableTotal = nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0);
+  const nonRefundablePromotionAmount = convertAndRound(
+    room.nonRefundablePromotion?.discountAmount ?? 0,
+    room.currency,
+  );
+  const nonRefundableTotal =
+    nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0) - nonRefundablePromotionAmount;
   const nonRefundableVaries = hasVariableNightlyRates(nonRefundableNightlies);
   const discount =
     flexibleTotal > 0 ? Math.round((1 - nonRefundableTotal / flexibleTotal) * 100) : 0;
-  const flexibleNightlyLabel = flexibleVaries
-    ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
-    : formatPrice(flexibleFromNightly, selectedCurrency);
-  const nonRefundableNightlyLabel = nonRefundableVaries
-    ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
-    : formatPrice(nonRefundableFromNightly, selectedCurrency);
+  const flexibleNightlyLabel =
+    flexiblePromotionAmount > 0
+      ? formatPrice(flexibleTotal / nights, selectedCurrency)
+      : flexibleVaries
+        ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
+        : formatPrice(flexibleFromNightly, selectedCurrency);
+  const nonRefundableNightlyLabel =
+    nonRefundablePromotionAmount > 0
+      ? formatPrice(nonRefundableTotal / nights, selectedCurrency)
+      : nonRefundableVaries
+        ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
+        : formatPrice(nonRefundableFromNightly, selectedCurrency);
   const handleSelectRate = () => {
     if (soldOut || selectRateDisabled) return;
     navigatingAwayRef.current = true;
@@ -175,12 +199,23 @@ export default function RoomDetailModal({
   const visibleAmenities = showAllAmenities
     ? room.amenities
     : room.amenities.slice(0, AMENITIES_PREVIEW_COUNT);
-  const remainingAmenities = Math.max(room.amenities.length - AMENITIES_PREVIEW_COUNT, 0);
   const amenitiesId = `room-amenities-${room.id}`;
 
   // Rate option buttons — shared between mobile scroll body and desktop sticky footer
   const rateOptionsJsx = (
     <div className="space-y-3">
+      {(selectedRate === "nonrefundable" ? room.nonRefundablePromotion : room.promotion) && (
+        <p className="text-sm text-emerald-700">
+          {(selectedRate === "nonrefundable" ? room.nonRefundablePromotion : room.promotion)?.name}:
+          −
+          {formatPrice(
+            selectedRate === "nonrefundable"
+              ? nonRefundablePromotionAmount
+              : flexiblePromotionAmount,
+            selectedCurrency,
+          )}
+        </p>
+      )}
       {/* Flexible Rate */}
       {showFlexibleRate && (
         <button
@@ -353,6 +388,9 @@ export default function RoomDetailModal({
           </button>
         </div>
 
+        {room.combination ? <div className="overflow-y-auto p-4"><RoomCombinationCard room={room} nights={nights} timezone={hotelTimezone}
+          titleId={`room-detail-title-${room.id}`} disabled={selectRateDisabled} pending={selectRatePending}
+          onSelect={() => onSelectRate("flexible")} /></div> : <>
         {/* VAY-444: on mobile the entire content scrolls as one flow; on desktop keep two-column layout */}
         <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
@@ -525,13 +563,25 @@ export default function RoomDetailModal({
                     />
                   </svg>
                   <span className="flex flex-wrap gap-x-3 gap-y-0.5">
-                    {checkInTime && <span>{tc("checkInFrom", { time: checkInTime })}</span>}
+                    {checkInTime && (
+                      <span>
+                        {tc(checkInUntil ? "checkInWindow" : "checkInFrom", {
+                          time: checkInUntil ? `${checkInTime}–${checkInUntil}` : checkInTime,
+                        })}
+                      </span>
+                    )}
                     {checkInTime && checkOutTime && (
                       <span className="text-gray-300" aria-hidden>
                         ·
                       </span>
                     )}
-                    {checkOutTime && <span>{tc("checkOutBy", { time: checkOutTime })}</span>}
+                    {checkOutTime && (
+                      <span>
+                        {tc(checkOutFrom ? "checkOutWindow" : "checkOutBy", {
+                          time: checkOutFrom ? `${checkOutFrom}–${checkOutTime}` : checkOutTime,
+                        })}
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
@@ -564,7 +614,7 @@ export default function RoomDetailModal({
                       </span>
                     ))}
                   </div>
-                  {remainingAmenities > 0 && (
+                  {room.amenities.length > AMENITIES_PREVIEW_COUNT && (
                     <button
                       type="button"
                       onClick={() => setShowAllAmenities((expanded) => !expanded)}
@@ -574,7 +624,7 @@ export default function RoomDetailModal({
                     >
                       {showAllAmenities
                         ? t("showLess")
-                        : t("viewFullAmenities", { count: remainingAmenities })}
+                        : t("viewFullAmenities", { count: room.amenities.length })}
                       <svg
                         className={`w-4 h-4 transition-transform ${showAllAmenities ? "rotate-180" : ""}`}
                         fill="none"
@@ -590,19 +640,6 @@ export default function RoomDetailModal({
                       </svg>
                     </button>
                   )}
-                </div>
-              )}
-
-              {showLocationMap && hasRoomCoordinates && (
-                <div className="mb-4 border-t border-gray-100 pt-4">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                    Location
-                  </p>
-                  <LocationMap
-                    propertyName={propertyName}
-                    property={{ latitude: room.latitude!, longitude: room.longitude! }}
-                    pois={pointsOfInterest}
-                  />
                 </div>
               )}
 
@@ -752,6 +789,7 @@ export default function RoomDetailModal({
             </p>
           )}
         </div>
+        </>}
       </div>
     </div>
   );

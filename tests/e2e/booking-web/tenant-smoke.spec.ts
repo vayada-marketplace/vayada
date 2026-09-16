@@ -1,9 +1,58 @@
 import { expect, test, type Page } from "@playwright/test";
 import publicBookabilityCases from "../../../engineering/fixtures/public-bookability/cases.json";
-import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
+import { mockBookingApis, publicOffers, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-web tenant smoke", () => {
+  test("shows canonical breakfast pricing when an older cheaper flexible offer comes first", async ({
+    page,
+  }) => {
+    await mockBookingApis(page);
+    const canonical = {
+      ...publicOffers.quote.offers[0],
+      offerId: "alpine-suite:onb15-flex-canonical",
+      ratePlanId: "canonical",
+      totals: { ...publicOffers.quote.offers[0].totals, roomTotal: 360, grandTotal: 360 },
+    };
+    const legacy = {
+      ...canonical,
+      offerId: "alpine-suite:flex",
+      ratePlanId: "legacy",
+      mealPlan: null,
+      totals: { ...canonical.totals, roomTotal: 300, grandTotal: 300 },
+    };
+    await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, (route) =>
+      route.fulfill({
+        json: { ...publicOffers, quote: { ...publicOffers.quote, offers: [legacy, canonical] } },
+      }),
+    );
+    await page.goto("/");
+    const rate = page
+      .locator('[data-rate-type="flexible"]')
+      .filter({ hasText: "Breakfast included" });
+    await expect(rate).toBeVisible();
+    await expect(rate).toContainText("€120");
+    await expect(rate).not.toContainText("€100");
+    await page.getByRole("button", { name: /Select This Rate/i }).click();
+    await expect(page).toHaveURL(/rateType=flexible/);
+  });
+
+  for (const width of [1280, 390]) {
+    test(`hides retired public enrolment while preserving referral cookies at ${width}px`, async ({
+      page,
+      context,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await mockBookingApis(page, { headerSettings: { showReferAGuestButton: true } });
+      await page.goto("/?ref=RETAINED-REFERRAL");
+      await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+      await expect(page.locator("nav").getByRole("button", { name: /refer/i })).toHaveCount(0);
+      expect((await context.cookies()).find((cookie) => cookie.name === "ref")?.value).toBe(
+        "RETAINED-REFERRAL",
+      );
+    });
+  }
+
   test("renders the seeded tenant from the request host", async ({ page, baseURL }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
@@ -20,6 +69,12 @@ test.describe("booking-web tenant smoke", () => {
     await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
     await expect(page.getByText("Alpine Suite")).toBeVisible();
+    await expect(
+      page.locator("[data-rate-type]").filter({ hasText: "Breakfast included" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-rate-type="flexible"]').filter({ hasText: "Room only" }).first(),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
     const nav = page.locator("nav");
     await nav.getByRole("button", { name: "Contact", exact: true }).click();
@@ -119,6 +174,10 @@ test.describe("booking-web tenant smoke", () => {
       await expect(modal.getByText("Minibar", { exact: true })).toBeVisible();
       await expect(modal).toBeVisible();
 
+      await modal.getByRole("button", { name: "Show less" }).tap();
+      await expect(modal.locator('[id^="room-amenities-"] > span')).toHaveCount(8);
+      await expect(modal).toBeVisible();
+
       await modal.getByRole("button", { name: /Non-Refundable Rate/i }).tap();
       await expect(modal).toBeVisible();
 
@@ -132,6 +191,10 @@ test.describe("booking-web tenant smoke", () => {
       await expect(modal).toBeHidden();
 
       await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
+      await expect(modal).toBeVisible();
+      await page.goBack();
+      await expect(modal).toBeHidden();
       await page.getByRole("button", { name: "View Details", exact: true }).first().tap();
       await modal.getByRole("button", { name: /Non-Refundable Rate/i }).tap();
       await modal.getByRole("button", { name: /Select This Rate/i }).tap();
@@ -154,13 +217,51 @@ test.describe("booking-web tenant smoke", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await expect(logo).toBeVisible();
     expect((await logo.boundingBox())?.height).toBeLessThanOrEqual(32);
+    await expect(nav.getByTestId("mobile-contact-button")).toBeVisible();
     await expect(nav.getByRole("button", { name: "Refer", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "EN", exact: true })).toBeVisible();
     await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
     expect((await nav.boundingBox())?.height).toBe(64);
   });
 
-  test("previews six room amenities before expanding the full list", async ({ page }) => {
+  test("honors the published booking header controls", async ({ page }) => {
+    await mockBookingApis(page, {
+      headerSettings: {
+        showContactButton: false,
+        showReferAGuestButton: false,
+        showLanguageSelector: false,
+        showCurrencySelector: true,
+      },
+    });
+
+    await page.goto("/");
+    const nav = page.locator("nav");
+    await expect(nav.getByRole("button", { name: "Contact" })).toHaveCount(0);
+    await expect(nav.getByTestId("mobile-contact-button")).toHaveCount(0);
+    await expect(nav.getByRole("button", { name: /Refer/ })).toHaveCount(0);
+    await expect(nav.getByRole("button", { name: "EN", exact: true })).toHaveCount(0);
+    await expect(nav.getByRole("button", { name: "EUR", exact: true })).toBeVisible();
+  });
+
+  test("auto-hides language and currency when each has one option", async ({ page }) => {
+    await mockBookingApis(page, {
+      headerSettings: {
+        showContactButton: true,
+        showReferAGuestButton: false,
+        showLanguageSelector: true,
+        showCurrencySelector: true,
+      },
+      supportedLocales: ["en"],
+      supportedCurrencies: ["EUR"],
+    });
+
+    await page.goto("/");
+    const nav = page.locator("nav");
+    await expect(nav.getByRole("button", { name: "EN", exact: true })).toHaveCount(0);
+    await expect(nav.getByRole("button", { name: "EUR", exact: true })).toHaveCount(0);
+  });
+
+  test("previews eight room amenities before expanding the full list", async ({ page }) => {
     await mockBookingApis(page);
     await page.setViewportSize({ width: 800, height: 900 });
     await page.goto("/");
@@ -175,6 +276,8 @@ test.describe("booking-web tenant smoke", () => {
       "Balcony",
       "Kitchen",
       "Non-smoking",
+      "Safe",
+      "Coffee machine",
     ]);
     expect(
       (
@@ -183,7 +286,7 @@ test.describe("booking-web tenant smoke", () => {
     ).toHaveLength(2);
     await expect(dialog.getByText("Minibar", { exact: true })).toHaveCount(0);
 
-    const expand = dialog.getByRole("button", { name: "View Full Amenities (2 more)" });
+    const expand = dialog.getByRole("button", { name: "View Full Amenities (10)" });
     await expect(expand).toHaveAttribute("aria-expanded", "false");
     await expand.click();
     await expect(dialog.getByText("Minibar", { exact: true })).toBeVisible();
@@ -216,6 +319,19 @@ test.describe("booking-web tenant smoke", () => {
     await expect(dialog.getByRole("button", { name: /Amenities|Show less/i })).toHaveCount(0);
   });
 
+  test("shows exactly eight amenities without a toggle on desktop and mobile", async ({ page }) => {
+    const amenities = ["Wi-Fi", "Balcony", "Kitchen", "Safe", "Desk", "Shower", "TV", "Fan"];
+    await mockBookingApis(page, { gardenAmenities: amenities });
+    await page.goto("/");
+    await page.getByRole("button", { name: "View Details", exact: true }).nth(1).click();
+    const dialog = page.getByRole("dialog", { name: "Garden Room" });
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(dialog.locator('[id^="room-amenities-"] > span')).toHaveText(amenities);
+      await expect(dialog.getByRole("button", { name: /Amenities|Show less/i })).toHaveCount(0);
+    }
+  });
+
   test("hides reviewed-empty room amenities", async ({ page }) => {
     await mockBookingApis(page, { gardenAmenities: [] });
     await page.goto("/");
@@ -223,6 +339,7 @@ test.describe("booking-web tenant smoke", () => {
 
     const dialog = page.getByRole("dialog", { name: "Garden Room" });
     await expect(dialog.locator('[id^="room-amenities-"]')).toHaveCount(0);
+    await expect(dialog.getByText(/Amenities|Show less/i)).toHaveCount(0);
   });
 
   test("hides children in the guest selector when the target profile disables them", async ({

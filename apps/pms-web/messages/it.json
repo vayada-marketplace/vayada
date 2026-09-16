@@ -1,11 +1,13 @@
 {
+  "dashboard.reviewNoShow": "Esamina mancata presentazione…",
+  "checkOut.reviewNoShow": "Esamina mancata presentazione…",
   "layout.header.signOut": "Esci",
   "layout.header.noProperties": "Nessuna struttura",
   "layout.header.user": "Utente",
   "layout.header.language": "Lingua",
   "layout.header.currency": "Valuta",
   "layout.sidebar.propertyManagerDescription": "Operazioni e Inventario",
-  "layout.sidebar.creatorMarketplace": "Mercato Vayada",
+  "layout.sidebar.creatorMarketplace": "Mercato vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Creator e collaborazioni",
   "layout.sidebar.bookingEngineDescription": "Prenotazioni dirette e ricavi",
   "common.save": "Salva",
@@ -616,5 +618,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "Arrivi • {date}",
+  "dashboard.departuresOn": "Partenze • {date}",
+  "dashboard.noArrivalsOnDate": "Nessun arrivo in questa data",
+  "dashboard.noDeparturesOnDate": "Nessuna partenza in questa data",
+  "dashboard.previousDay": "Giorno precedente",
+  "dashboard.nextDay": "Giorno successivo"
 }

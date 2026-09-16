@@ -1,7 +1,7 @@
 import pg from "pg";
 
-import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
 import { applyPmsChannexManagementProgress } from "../jobs/pmsChannexManagementTargetState.js";
+import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
 import {
   channexRequests,
   type ChannexManagementActionPlan,
@@ -13,7 +13,7 @@ type Pool = {
     text: string,
     values?: unknown[],
   ): Promise<{ rows: T[] }>;
-  connect(): Promise<Pick<Pool, "query"> & { release(): void }>;
+  connect(): Promise<Pick<Pool, "query"> & { release(error?: Error | boolean): void }>;
   end(): Promise<void>;
 };
 type PropertyRow = {
@@ -27,37 +27,6 @@ type PropertyRow = {
   latitude: number | null;
   longitude: number | null;
   timezone: string | null;
-};
-type RoomRow = {
-  roomTypeId: string;
-  name: string;
-  currency: string;
-  countOfRooms: number;
-  adults: number;
-  children: number;
-};
-type RateRow = {
-  roomTypeId: string;
-  roomTypeName: string;
-  ratePlanId: string;
-  name: string;
-  currency: string;
-  sellMode: "per_room" | "per_person";
-  baseRate: number;
-  channel: string;
-  channelLabel: string;
-  markupPercent: number;
-  defaultOccupancy: number;
-  externalRoomTypeId: string | null;
-};
-type AriRow = {
-  stayDate: string | Date;
-  available: number;
-  externalRoomTypeId: string;
-  externalRatePlanId: string;
-  rate: number;
-  channel: string;
-  markupPercent: number;
 };
 type BindingRow = {
   externalPropertyId: string | null;
@@ -74,22 +43,75 @@ export type ChannexBookingRevisionHandoff = (input: {
 export function createPgChannexManagementPlanPort(config: {
   connectionString: string;
   bookingRevisionHandoff: ChannexBookingRevisionHandoff;
+  stagingMealsPropertyId?: string;
   pool?: Pool;
+  now?: () => Date;
 }): ChannexManagementPlanPort & { close(): Promise<void> } {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
+  async function preparePlan(planPool: Pool, job: ChannexManagementJob) {
+    const result = await plan(
+      planPool,
+      config.bookingRevisionHandoff,
+      job,
+      config.now?.() ?? new Date(),
+    );
+    if (
+      config.stagingMealsPropertyId === job.propertyId &&
+      job.input.operationType === "provision" &&
+      job.input.mealRatePlanId
+    ) {
+      const meals =
+        result.meals?.filter((meal) => meal.externalRatePlanId && meal.externalRoomTypeId) ?? [];
+      if (!meals.length)
+        throw new Error("Staging meal reconciliation requires an existing mapped rate");
+      return { ...result, requests: [], meals };
+    }
+    return result;
+  }
   return {
-    plan: (job) => plan(pool, config.bookingRevisionHandoff, job),
+    async withPropertyLock(job, work) {
+      const client = await pool.connect();
+      let locked = false;
+      try {
+        const result = await client.query<{ locked: boolean }>(
+          "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+          [`channex.management:${job.propertyId}`],
+        );
+        locked = result.rows[0]?.locked === true;
+        if (!locked)
+          throw new Error("Another Channex operation is running for this property. Retry shortly.");
+        const lockedPool: Pool = {
+          query: client.query.bind(client),
+          connect: async () => ({ query: client.query.bind(client), release() {} }),
+          end: async () => {},
+        };
+        return await work(() => preparePlan(lockedPool, job));
+      } finally {
+        try {
+          if (locked)
+            await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+              `channex.management:${job.propertyId}`,
+            ]);
+        } catch (error) {
+          client.release(true);
+          throw error;
+        }
+        client.release();
+      }
+    },
+    plan: (job) => preparePlan(pool, job),
     async close() {
       await pool.end();
     },
   };
 }
 
-async function plan(
+async function basePlan(
   pool: Pool,
   handoff: ChannexBookingRevisionHandoff,
   job: ChannexManagementJob,
+  now: Date,
 ): Promise<ChannexManagementActionPlan> {
   const binding = await connectionBinding(pool, job.propertyId);
   const externalPropertyId = activeExternalPropertyId(binding);
@@ -108,11 +130,53 @@ async function plan(
       : { requests: [] };
   }
   if (!externalPropertyId) throw new Error("Channex connection is not enabled");
+  if (job.input.operationType === "update_inventory_rules") {
+    const state = await pool.query<{
+      rules: import("@vayada/domain-pms-channex").ChannexInventoryRule[];
+    }>(
+      `SELECT connection_metadata -> 'inventoryRules' -> 'rules' AS rules
+       FROM pms.channel_connections WHERE property_id = $1::uuid AND provider = 'channex'`,
+      [job.propertyId],
+    );
+    const mappings = await pool.query<{ id: string; externalId: string }>(
+      `SELECT mapping.room_type_id::text AS id, mapping.external_room_type_id AS "externalId"
+       FROM pms.channel_room_type_mappings mapping JOIN pms.channel_connections connection
+         ON connection.id = mapping.connection_id AND connection.property_id = mapping.property_id
+         AND connection.provider = 'channex'
+       JOIN pms.room_types room ON room.id = mapping.room_type_id AND room.property_id = mapping.property_id
+       WHERE mapping.property_id = $1::uuid AND mapping.status = 'active' AND room.active
+         AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closure
+           WHERE closure.property_id=room.property_id AND closure.room_type_id=room.id)`,
+      [job.propertyId],
+    );
+    if (!state.rows[0]?.rules) throw new Error("Desired inventory rules are missing");
+    return {
+      requests: [],
+      externalPropertyId,
+      inventoryRules: {
+        propertyId: job.propertyId,
+        externalPropertyId,
+        rules: state.rows[0].rules,
+        roomMappings: Object.fromEntries(mappings.rows.map((row) => [row.id, row.externalId])),
+      },
+    };
+  }
   if (job.input.operationType === "provision") {
     return provisioningPlan(pool, job, externalPropertyId);
   }
   if (job.input.operationType === "sync_ari" || job.input.operationType === "update_markups") {
-    return ariPlan(pool, job, externalPropertyId);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const result = await ariPlan(client, job, externalPropertyId, now);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   if (job.input.operationType === "sync_bookings") {
     return {
@@ -167,6 +231,7 @@ async function enablePlan(
           latitude: property.latitude,
           longitude: property.longitude,
           timezone: property.timezone,
+          settings: { min_stay_type: "arrival" },
         }),
       ),
     ],
@@ -179,177 +244,22 @@ async function provisioningPlan(
   job: ChannexManagementJob,
   externalPropertyId: string,
 ): Promise<ChannexManagementActionPlan> {
-  const [rooms, rates] = await Promise.all([
-    pool.query<RoomRow>(
-      `SELECT room.id::text AS "roomTypeId", room.name, room.currency,
-         count(unit.id)::integer AS "countOfRooms",
-         COALESCE((room.occupancy_limits ->> 'maxAdults')::integer, 2) AS adults,
-         COALESCE((room.occupancy_limits ->> 'maxChildren')::integer, 0) AS children
-       FROM pms.room_types room LEFT JOIN pms.rooms unit
-         ON unit.room_type_id = room.id AND unit.status <> 'retired'
-       LEFT JOIN pms.channel_connections connection
-         ON connection.property_id = room.property_id AND connection.provider = 'channex'
-       LEFT JOIN pms.channel_room_type_mappings mapping
-         ON mapping.connection_id = connection.id AND mapping.room_type_id = room.id
-       WHERE room.property_id = $1::uuid AND room.active
-         AND (mapping.id IS NULL OR mapping.status <> 'active')
-       GROUP BY room.id ORDER BY room.sort_order, room.name`,
-      [job.propertyId],
-    ),
-    pool.query<RateRow>(
-      `SELECT plan.room_type_id::text AS "roomTypeId", room.name AS "roomTypeName",
-         plan.id::text AS "ratePlanId",
-         plan.name, plan.currency, 'per_room' AS "sellMode", plan.base_rate_amount::float8 AS "baseRate",
-         channel.key AS channel, channel.label AS "channelLabel", 0::float8 AS "markupPercent",
-         LEAST(2, GREATEST(1, COALESCE((room.occupancy_limits ->> 'maxAdults')::integer, 2))) AS "defaultOccupancy",
-         room_mapping.external_room_type_id AS "externalRoomTypeId"
-       FROM pms.rate_plans plan
-       JOIN pms.room_types room ON room.id = plan.room_type_id
-       CROSS JOIN (VALUES ('direct', 'Standard'), ('booking_com', 'BDC Standard'),
-         ('airbnb', 'Airbnb Standard')) AS channel(key, label)
-       LEFT JOIN pms.channel_connections connection
-         ON connection.property_id = plan.property_id AND connection.provider = 'channex'
-       LEFT JOIN pms.channel_rate_plan_mappings mapping
-         ON mapping.connection_id = connection.id AND mapping.rate_plan_id = plan.id
-           AND mapping.channel = channel.key
-       LEFT JOIN pms.channel_room_type_mappings room_mapping
-         ON room_mapping.connection_id = connection.id AND room_mapping.room_type_id = plan.room_type_id
-           AND room_mapping.status = 'active'
-       WHERE plan.property_id = $1::uuid AND plan.active
-         AND (mapping.id IS NULL OR mapping.status <> 'active')
-       ORDER BY plan.name, channel.key`,
-      [job.propertyId],
-    ),
-  ]);
-  const roomIds = new Set(rooms.rows.map(({ roomTypeId }) => roomTypeId));
-  const plannedRates = rates.rows.map((rate) => ({
-    ...rate,
-    providerTitle: providerRateTitle(rate),
-  }));
-  return {
-    externalPropertyId,
-    requests: [
-      ...rooms.rows.flatMap((room) => {
-        const title = providerTitle(room.name, room.roomTypeId);
-        return [
-          channexRequests.listRoomTypes(externalPropertyId, [
-            { roomTypeId: room.roomTypeId, roomTypeName: title },
-          ]),
-          channexRequests.createRoomType({
-            roomTypeId: room.roomTypeId,
-            roomTypeName: title,
-            roomType: {
-              property_id: externalPropertyId,
-              title,
-              count_of_rooms: Math.max(1, room.countOfRooms),
-              occ_adults: Math.max(1, room.adults),
-              occ_children: Math.max(0, room.children),
-              occ_infants: 0,
-              default_occupancy: Math.min(2, Math.max(1, room.adults)),
-              room_kind: "room",
-            },
-          }),
-        ];
-      }),
-      ...plannedRates
-        .filter(
-          ({ roomTypeId, externalRoomTypeId }) =>
-            roomIds.has(roomTypeId) || Boolean(externalRoomTypeId),
-        )
-        .flatMap((rate) => [
-          channexRequests.listRatePlans(externalPropertyId, [
-            {
-              roomTypeId: rate.roomTypeId,
-              ratePlanId: rate.ratePlanId,
-              ratePlanName: rate.name,
-              providerTitle: rate.providerTitle,
-              channel: rate.channel,
-              sellMode: rate.sellMode,
-              markupPercent: rate.markupPercent,
-              externalRoomTypeId: rate.externalRoomTypeId ?? undefined,
-            },
-          ]),
-          channexRequests.createRatePlan({
-            ...rate,
-            ratePlanName: rate.name,
-            externalRoomTypeId: rate.externalRoomTypeId ?? undefined,
-            ratePlan: {
-              property_id: externalPropertyId,
-              title: rate.providerTitle,
-              sell_mode: rate.sellMode,
-              rate_mode: "manual",
-              currency: rate.currency,
-              options: [
-                { occupancy: rate.defaultOccupancy, is_primary: true, rate: rate.baseRate },
-              ],
-              meal_type: "room_only",
-            },
-          }),
-        ]),
-      channexRequests.listChannels(externalPropertyId),
-    ],
-    checkpoint: checkpoint(pool, job),
-  };
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+  );
 }
 
 async function ariPlan(
-  pool: Pool,
+  pool: Pick<Pool, "query">,
   job: ChannexManagementJob,
   externalPropertyId: string,
+  now: Date,
 ): Promise<ChannexManagementActionPlan> {
-  const result = await pool.query<AriRow>(
-    `SELECT inventory.stay_date AS "stayDate", inventory.available_count AS available,
-       room_mapping.external_room_type_id AS "externalRoomTypeId",
-       rate_mapping.external_rate_plan_id AS "externalRatePlanId",
-       plan.base_rate_amount::float8 AS rate, rate_mapping.channel,
-       rate_mapping.markup_percent::float8 AS "markupPercent"
-     FROM pms.inventory_days inventory
-     JOIN pms.channel_connections connection
-       ON connection.property_id = inventory.property_id AND connection.provider = 'channex'
-     JOIN pms.channel_room_type_mappings room_mapping
-       ON room_mapping.connection_id = connection.id AND room_mapping.room_type_id = inventory.room_type_id
-     JOIN pms.channel_rate_plan_mappings rate_mapping
-       ON rate_mapping.connection_id = connection.id AND rate_mapping.room_type_id = inventory.room_type_id
-     JOIN pms.rate_plans plan ON plan.id = rate_mapping.rate_plan_id
-     WHERE inventory.property_id = $1::uuid AND inventory.stay_date BETWEEN current_date AND current_date + 365
-       AND room_mapping.status = 'active' AND rate_mapping.status = 'active'
-     ORDER BY inventory.stay_date`,
-    [job.propertyId],
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
   );
-  const overrides = new Map(
-    (job.input.markups ?? []).map((item) => [item.channel, item.markupPercent]),
-  );
-  const availability = [
-    ...new Map(
-      result.rows.map((row) => [
-        `${row.externalRoomTypeId}:${date(row.stayDate)}`,
-        {
-          property_id: externalPropertyId,
-          room_type_id: row.externalRoomTypeId,
-          date_from: date(row.stayDate),
-          date_to: date(row.stayDate),
-          availability: row.available,
-        },
-      ]),
-    ).values(),
-  ];
-  return {
-    externalPropertyId,
-    requests: [
-      channexRequests.availability(availability),
-      channexRequests.restrictions(
-        result.rows.map((row) => ({
-          property_id: externalPropertyId,
-          rate_plan_id: row.externalRatePlanId,
-          date_from: date(row.stayDate),
-          date_to: date(row.stayDate),
-          rate: roundCurrency(
-            row.rate * (1 + (overrides.get(row.channel) ?? row.markupPercent) / 100),
-          ),
-        })),
-      ),
-    ],
-  };
 }
 
 function checkpoint(pool: Pool, job: ChannexManagementJob) {
@@ -373,13 +283,6 @@ function providerTitle(title: string, identity: string) {
   return `${Array.from(title)
     .slice(0, Math.max(0, 255 - marker.length))
     .join("")}${marker}`;
-}
-
-function providerRateTitle(rate: RateRow) {
-  return providerTitle(
-    `${rate.roomTypeName} - ${rate.name} - ${rate.channelLabel}`,
-    `${rate.roomTypeId}:${rate.channel}:${rate.ratePlanId}`,
-  );
 }
 
 async function connectionBinding(pool: Pool, propertyId: string): Promise<BindingRow | null> {
@@ -413,13 +316,88 @@ function compact(value: Record<string, unknown>) {
   );
 }
 
-function date(value: string | Date) {
-  return value instanceof Date ? value.toISOString().slice(0, 10) : value;
-}
-function roundCurrency(value: number) {
-  return Math.round(value * 100) / 100;
-}
 function required(value: string) {
   if (!value.trim()) throw new Error("Channex connectionString must not be empty");
   return value;
+}
+
+async function plan(
+  pool: Pool,
+  handoff: ChannexBookingRevisionHandoff,
+  job: ChannexManagementJob,
+  now: Date,
+): Promise<ChannexManagementActionPlan> {
+  const result = await basePlan(pool, handoff, job, now);
+  if (!job.input.recoveryAlertId) return result;
+  const alert = (
+    await pool.query<{
+      eventType: string;
+      channelId: string | null;
+      impact: Record<string, string | null>;
+    }>(
+      `SELECT alert.event_type AS "eventType",alert.impact->>'channelId' AS "channelId",alert.impact FROM pms.channel_operational_alerts alert JOIN pms.channel_connections connection ON connection.id=alert.connection_id AND connection.binding_generation=alert.binding_generation WHERE alert.id=$1::uuid AND alert.property_id=$2::uuid AND connection.external_property_id=$3`,
+      [job.input.recoveryAlertId, job.propertyId, result.externalPropertyId],
+    )
+  ).rows[0];
+  if (!alert) throw new Error("Alert connection is no longer owned by this property");
+  if (alert.eventType === "disconnected_channel" && !alert.channelId)
+    throw new Error("Channel identity is unknown; contact support");
+  result.verifyRecovery = true;
+  result.recoveryScopeCovered =
+    alert.eventType === "disconnected_channel" || coversAlertScope(result, alert.impact);
+  if (alert.channelId) result.recoveryChannelId = alert.channelId;
+  if (result.bookingRevisionHandoff) {
+    const ingest = result.bookingRevisionHandoff;
+    result.bookingRevisionHandoff = async (revisions) => {
+      // Keep exact revision identities across attempts after acknowledged feed entries disappear.
+      const ids = revisions
+        .map((value) => String((value as { id?: unknown })?.id ?? ""))
+        .filter(Boolean);
+      await pool.query(
+        `UPDATE platform.jobs SET job_metadata=job_metadata || jsonb_build_object('recoveryRevisionIds',(SELECT COALESCE(jsonb_agg(DISTINCT entries.value),'[]'::jsonb) FROM jsonb_array_elements_text(COALESCE(job_metadata->'recoveryRevisionIds','[]'::jsonb)||$2::jsonb) AS entries(value))) WHERE id=$1::uuid`,
+        [job.jobId, JSON.stringify(ids)],
+      );
+      await ingest(revisions);
+      const pending = (
+        await pool.query<{ pending: boolean }>(
+          `SELECT EXISTS(SELECT 1 FROM jsonb_array_elements_text(COALESCE(parent.job_metadata->'recoveryRevisionIds','[]'::jsonb)) AS expected(revision_id) WHERE NOT EXISTS(SELECT 1 FROM platform.jobs child WHERE child.job_type='channex.ingest-booking' AND child.payload->>'propertyId'=$2 AND child.payload->>'providerPropertyId'=$3 AND child.payload->>'revision'=expected.revision_id AND child.status='succeeded')) AS pending FROM platform.jobs parent WHERE parent.id=$1::uuid`,
+          [job.jobId, job.propertyId, result.externalPropertyId],
+        )
+      ).rows[0];
+      if (!pending || pending.pending)
+        throw new Error(
+          "Booking revisions are still processing. Recovery will retry automatically.",
+        );
+    };
+  }
+  return result;
+}
+
+export function coversAlertScope(
+  plan: ChannexManagementActionPlan,
+  impact: Record<string, string | null>,
+): boolean {
+  const from = impact.dateFrom,
+    to = impact.dateTo;
+  if (!from || !to || (!impact.roomTypeId && !impact.ratePlanId)) return false;
+  const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+  if (!Number.isInteger(days) || days < 0 || days > 365) return false;
+  for (let offset = 0; offset <= days; offset++) {
+    const date = new Date(Date.parse(from) + offset * 86_400_000).toISOString().slice(0, 10);
+    for (const [field, id, path] of [
+      ["room_type_id", impact.roomTypeId, "/api/v1/availability"],
+      ["rate_plan_id", impact.ratePlanId, "/api/v1/restrictions"],
+    ] as const) {
+      if (!id) continue;
+      const covered = plan.requests.some(
+        (request) =>
+          request.path === path &&
+          ((request.body as { values?: Array<Record<string, unknown>> })?.values ?? []).some(
+            (value) => value[field] === id && value.date_from === date && value.date_to === date,
+          ),
+      );
+      if (!covered) return false;
+    }
+  }
+  return true;
 }

@@ -28,6 +28,7 @@ export * from "./propertySetupDraftRequestSafety.js";
 export * from "./propertySetupDraftReset.js";
 export * from "./propertySetupRoute.js";
 export * from "./propertyProfile.js";
+export * from "./propertyNearby.js";
 export * from "./publicPropertyProfile.js";
 
 // ---------------------------------------------------------------------------
@@ -281,3 +282,12 @@ export function hotelCatalogIdempotencyKey(
   }
   return `${commandType}:property:${propertyId}:${trimmedSuffix}`;
 }
+
+export type {
+  PlatformMarketplaceAccount,
+  PlatformMarketplaceAccountsResponse,
+} from "./platformMarketplaceActivation.js";
+
+export * from "./nearbyView.js";
+
+export * from "./preparedHotelImport.js";

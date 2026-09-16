@@ -9,10 +9,12 @@ import {
   readProductionPmsTargetState,
 } from "./productionPmsTargetReader.js";
 import { writeProductionPmsRecords } from "./productionPmsWriter.js";
+import type { PmsTargetRecord } from "./productionPmsTypes.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const URL = process.env["TEST_DATABASE_URL"];
 const RUN = "vay1351-0123456789abcdef01234567";
+const OWNER_ORGANIZATION = "13560000-0000-4000-8000-000000000080";
 const PROPERTY = "13560000-0000-4000-8000-000000000081";
 const HOTEL = "13560000-0000-4000-8000-000000000082";
 const ROOM_TYPE = "13560000-0000-4000-8000-000000000083";
@@ -24,6 +26,7 @@ const EXTERNAL_ROOM = "13560000-0000-4000-8000-000000000088";
 const EXTERNAL_RATE = "13560000-0000-4000-8000-000000000089";
 const EXTERNAL_BOOKING = "13560000-0000-4000-8000-000000000090";
 const ATTACHMENT = "13560000-0000-4000-8000-000000000104";
+const UNAVAILABLE_ATTACHMENT = "13560000-0000-4000-8000-000000000109";
 const ATTACHMENT_MEDIA = "13560000-0000-4000-8000-000000000105";
 const ROOM_MEDIA = "13560000-0000-4000-8000-000000000106";
 const ROOM_SOURCE_IMAGE = "https://legacy-media-test.s3.amazonaws.com/rooms/double.jpg";
@@ -38,20 +41,218 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
   });
   afterAll(async () => client.end());
 
-  it("writes and verifies a complete inert PMS migration flow", async () => {
+  it("rolls back an earlier inventory batch when a later batch violates a constraint", async () => {
     await client.query("BEGIN");
     try {
       await seedPrerequisites(client);
       const prerequisites = await readProductionPmsPrerequisites(client, RUN);
-      const source = sourceRows();
       const plan = buildProductionPmsPlan({
         sourceRunId: RUN,
-        snapshotAt: "2026-08-30T00:00:00Z",
-        completedAt: "2026-08-30T00:00:00Z",
+        snapshotAt: "2026-09-04T00:00:00Z",
+        completedAt: "2026-09-04T00:00:00Z",
+        rows: sourceRows(),
+        target: { ...prerequisites, records: [], provenance: [] },
+      });
+      expect(plan.blockers).toEqual([]);
+      await writeProductionPmsRecords(
+        client,
+        plan.writes.filter((record) => record.targetTable !== "inventory_days"),
+      );
+      const template = plan.writes.find((record) => record.targetTable === "inventory_days")!;
+      const records = Array.from({ length: 501 }, (_, index) => {
+        const stayDate = new Date(Date.UTC(2030, 0, 1 + index)).toISOString().slice(0, 10);
+        return {
+          ...template,
+          targetId: `${PROPERTY}:${ROOM_TYPE}:${stayDate}`,
+          row: { ...template.row, stayDate, totalCount: index === 500 ? -1 : 1 },
+        };
+      });
+      let inventoryStatements = 0;
+      const boundedClient = {
+        query(sql: string, values?: unknown[]) {
+          inventoryStatements += 1;
+          return client.query(sql, values);
+        },
+      };
+      await expect(
+        writeProductionPmsRecords(boundedClient as never, records),
+      ).rejects.toMatchObject({ code: "23514" });
+      expect(inventoryStatements).toBe(2);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    const stored = await client.query(
+      "SELECT count(*)::int AS count FROM pms.inventory_days WHERE property_id=$1",
+      [PROPERTY],
+    );
+    expect(stored.rows[0].count).toBe(0);
+  });
+
+  it("blocks missing attachment references when a prior-run media import exists", async () => {
+    await client.query("BEGIN");
+    try {
+      await seedPrerequisites(client);
+      await client.query(
+        `UPDATE platform.media_objects SET source_metadata = source_metadata || '{"migrationRunId":"prior-run"}'::jsonb WHERE id = $1`,
+        [ATTACHMENT_MEDIA],
+      );
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      expect(prerequisites.media?.some((media) => media.mediaObjectId === ATTACHMENT_MEDIA)).toBe(
+        false,
+      );
+      const source = sourceRows();
+      source.find(
+        (row) => row.sourceTable === "message_attachments" && row.data["id"] === ATTACHMENT,
+      )!.data["s3_key"] = null;
+      const plan = buildProductionPmsPlan({
+        sourceRunId: RUN,
+        snapshotAt: "2026-09-04T00:00:00Z",
+        completedAt: "2026-09-04T00:00:00Z",
+        rows: source,
+        target: { ...prerequisites, records: [], provenance: [] },
+      });
+      expect(plan.blockers).toContainEqual(
+        expect.objectContaining({
+          sourceId: ATTACHMENT,
+          message: expect.stringContaining("conflicts with"),
+        }),
+      );
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("writes and verifies a complete inert PMS migration flow", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      // CI shares this database with other integration fixtures. Prove no new work,
+      // without assuming their durable jobs/events have been removed.
+      const initialWork = await client.query(`SELECT
+        (SELECT count(*)::int FROM platform.outbox_events) AS outbox_count,
+        (SELECT count(*)::int FROM platform.jobs) AS job_count,
+        (SELECT count(*)::int FROM platform.domain_events) AS domain_count`);
+      await seedPrerequisites(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const source = sourceRows();
+      const webhook = source.find((row) => row.sourceTable === "channex_webhook_events")!;
+      const inquiryThread = source.find((row) => row.sourceTable === "message_threads")!;
+      const previewThreadId = "13560000-0000-4000-8000-000000000110";
+      const previewMessageId = "13560000-0000-4000-8000-000000000111";
+      const previewBody = " 🏨e\u0301".repeat(100);
+      source.push({
+        ...inquiryThread,
+        rowOrdinal: source.length + 1,
+        data: {
+          ...inquiryThread.data,
+          id: previewThreadId,
+          source_thread_id: "preview-thread",
+          channel: "airbnb",
+          booking_id: null,
+          source_booking_id: null,
+          last_message_preview: [...previewBody].slice(0, 200).join(""),
+        },
+      });
+      const previewMessage = source.find((row) => row.sourceTable === "messages")!;
+      source.push({
+        ...previewMessage,
+        rowOrdinal: source.length + 1,
+        data: {
+          ...previewMessage.data,
+          id: previewMessageId,
+          thread_id: previewThreadId,
+          source_message_id: "preview-message",
+          body: previewBody,
+          raw_payload: {
+            sender: "guest",
+            message: previewBody,
+            property_id: EXTERNAL_PROPERTY,
+            provider_inquiry_id: "explicit-inquiry",
+            inquiry: {
+              arrival_date: "2026-09-01",
+              departure_date: "2026-09-03",
+              adults: 2,
+              children: 0,
+            },
+          },
+        },
+      });
+      Object.assign(inquiryThread.data, {
+        channel: "airbnb",
+        booking_id: null,
+        source_booking_id: null,
+        status: "closed",
+        unread_count: 0,
+        last_message_preview: "inquiry",
+        last_message_direction: "outbound",
+      });
+      Object.assign(source.find((row) => row.sourceTable === "messages")!.data, {
+        body: "inquiry",
+        direction: "outbound",
+        raw_payload: {
+          sender: "system",
+          message: "inquiry",
+          meta: {
+            live_feed_event_id: "historical-inquiry",
+            booking_details: {
+              property_id: EXTERNAL_PROPERTY,
+              arrival_date: "2026-09-01",
+              departure_date: "2026-09-03",
+              adults: 2,
+              children: 0,
+            },
+          },
+        },
+      });
+      for (const [index, propertyId] of [EXTERNAL_PROPERTY, null, "unknown-property"].entries())
+        source.push({
+          ...webhook,
+          rowOrdinal: source.length + 1,
+          data: {
+            ...webhook.data,
+            id: `13560000-0000-4000-8000-000000000${197 + index}`,
+            event_type: "message",
+            property_id: propertyId,
+            received_at: "2020-01-01T00:00:00Z",
+            payload: {
+              body: "private text",
+              token: "secret",
+              attachments: [{ url: "https://provider.example/private" }],
+            },
+          },
+        });
+      const historicalMapping = source.find(
+        (row) => row.sourceTable === "channex_booking_mappings",
+      )!;
+      source.push({
+        ...historicalMapping,
+        rowOrdinal: source.length + 1,
+        data: {
+          ...historicalMapping.data,
+          id: "13560000-0000-4000-8000-000000000091",
+          channex_room_index: 1,
+        },
+      });
+      const roomType = source.find((row) => row.sourceTable === "room_types")!;
+      for (const suffix of [107, 108])
+        source.push({
+          ...roomType,
+          rowOrdinal: source.length + 1,
+          data: {
+            ...roomType.data,
+            id: `13560000-0000-4000-8000-000000000${suffix}`,
+            name: `Batch room ${suffix}`,
+            images: [],
+          },
+        });
+      const plan = buildProductionPmsPlan({
+        sourceRunId: RUN,
+        snapshotAt: "2026-09-04T00:00:00Z",
+        completedAt: "2026-09-04T00:00:00Z",
         rows: source,
         target: { ...prerequisites, records: [], provenance: [] },
       });
       expect(plan.blockers).toEqual([]);
+      expect(plan.provenance.length).toBeGreaterThan(1_000);
       const expectedCounts = Object.fromEntries(
         [...new Set(plan.writes.map((row) => row.targetTable))].map((table) => [
           table,
@@ -63,11 +264,51 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
         plan.provenance.length,
       );
 
+      const receipts = await client.query(
+        `SELECT property_id, tenant_scope, delivery_status, failure_reason, raw_payload,
+                payload_retention_until::text, normalized_domain_event_id
+           FROM platform.external_webhook_events
+          WHERE provider = 'channex' AND event_type = 'message'
+            AND id = ANY($1::uuid[]) ORDER BY id`,
+        [
+          plan.records
+            .filter(
+              (record) =>
+                record.targetTable === "external_webhook_events" &&
+                record.row["eventType"] === "message",
+            )
+            .map((record) => record.targetId),
+        ],
+      );
+      expect(receipts.rows).toHaveLength(3);
+      expect(receipts.rows[0]).toMatchObject({
+        property_id: PROPERTY,
+        tenant_scope: "property",
+        delivery_status: "observed",
+        failure_reason: null,
+      });
+      for (const receipt of receipts.rows) {
+        expect(receipt.raw_payload).toEqual({});
+        expect(new Date(receipt.payload_retention_until).toISOString()).toBe(
+          "2020-01-31T00:00:00.000Z",
+        );
+        expect(receipt.normalized_domain_event_id).toBeNull();
+      }
+      for (const receipt of receipts.rows.slice(1))
+        expect(receipt).toMatchObject({
+          property_id: null,
+          tenant_scope: "migration",
+          delivery_status: "failed",
+          failure_reason: "legacy_message_ownership_unresolved",
+        });
+      // Expiry must not make a deterministic migration rerun conflict with its own receipt.
+      await client.query("SELECT platform.purge_expired_channex_message_webhook_receipts()");
+
       const target = await readProductionPmsTargetState(client, plan.records, prerequisites);
       const verified = buildProductionPmsPlan({
         sourceRunId: RUN,
-        snapshotAt: "2026-08-30T00:00:00Z",
-        completedAt: "2026-08-30T00:00:00Z",
+        snapshotAt: "2026-09-04T00:00:00Z",
+        completedAt: "2026-09-04T00:00:00Z",
         rows: source,
         target,
       });
@@ -75,23 +316,101 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       expect(verified.writes).toEqual([]);
       expect(verified.checksum).toBe(plan.checksum);
 
+      const preview = await client.query(
+        `SELECT thread.last_message_preview, char_length(thread.last_message_preview) AS length,
+                message.body, thread.last_message_preview = left(message.body, 280) AS matches_target,
+                thread.conversation_context_state, thread.source_booking_id, thread.guest_booking_id,
+                thread.inquiry_arrival_date::text, thread.inquiry_departure_date::text,
+                thread.inquiry_adults, thread.inquiry_children, thread.unread_count,
+                message.direction, message.sender_type, message.read_at
+           FROM pms.message_threads thread JOIN pms.messages message ON message.thread_id = thread.id
+          WHERE thread.id = $1 AND message.id = $2`,
+        [previewThreadId, previewMessageId],
+      );
+      expect(preview.rows).toEqual([
+        {
+          last_message_preview: [...previewBody].slice(0, 280).join(""),
+          length: 280,
+          body: previewBody,
+          matches_target: true,
+          conversation_context_state: "inquiry",
+          source_booking_id: "explicit-inquiry",
+          guest_booking_id: null,
+          inquiry_arrival_date: "2026-09-01",
+          inquiry_departure_date: "2026-09-03",
+          inquiry_adults: 2,
+          inquiry_children: 0,
+          unread_count: 1,
+          direction: "inbound",
+          sender_type: "guest",
+          read_at: null,
+        },
+      ]);
+
+      const inquiry = await client.query(
+        `SELECT thread.attention_state, thread.unread_count, thread.last_message_direction,
+                thread.guest_booking_id, message.direction, message.sender_type, message.read_at,
+                thread.conversation_context_state, thread.source_booking_id,
+                thread.inquiry_arrival_date::text, thread.inquiry_departure_date::text,
+                thread.inquiry_adults, thread.inquiry_children
+           FROM pms.message_threads thread JOIN pms.messages message ON message.thread_id = thread.id
+          WHERE thread.id = $1`,
+        [inquiryThread.data["id"]],
+      );
+      expect(inquiry.rows).toEqual([
+        {
+          attention_state: "done",
+          unread_count: 1,
+          last_message_direction: "inbound",
+          guest_booking_id: null,
+          conversation_context_state: "inquiry",
+          source_booking_id: "historical-inquiry",
+          inquiry_arrival_date: "2026-09-01",
+          inquiry_departure_date: "2026-09-03",
+          inquiry_adults: 2,
+          inquiry_children: 0,
+          direction: "inbound",
+          sender_type: "system",
+          read_at: null,
+        },
+      ]);
+
+      const unavailable = await client.query(
+        `SELECT property_id, platform_media_object_id, s3_key, source_url, filename
+           FROM pms.message_attachments WHERE id = $1`,
+        [UNAVAILABLE_ATTACHMENT],
+      );
+      expect(unavailable.rows).toEqual([
+        {
+          property_id: PROPERTY,
+          platform_media_object_id: null,
+          s3_key: null,
+          source_url: null,
+          filename: "missing-file.pdf",
+        },
+      ]);
+
       const stored = await client.query(
         `SELECT
            (SELECT count(*)::int FROM pms.inventory_days WHERE property_id = $1) AS inventory,
            (SELECT count(*)::int FROM pms.operational_booking_assignments WHERE guest_booking_id = $2) AS assignments,
            (SELECT count(*)::int FROM pms.channel_booking_mappings WHERE guest_booking_id = $2) AS mappings,
+           (SELECT count(*)::int FROM pms.channel_booking_mappings
+             WHERE guest_booking_id = $2 AND assignment_id IS NULL AND sync_status = 'ignored') AS ignored_mappings,
            (SELECT count(*)::int FROM pms.room_type_media WHERE room_type_id = $3) AS room_media,
            (SELECT media_snapshot FROM pms.room_types WHERE id = $3) AS media_snapshot,
-           (SELECT delivery_status FROM platform.external_webhook_events WHERE provider = 'channex' LIMIT 1) AS webhook_status,
-           (SELECT normalized_domain_event_id FROM platform.external_webhook_events WHERE provider = 'channex' LIMIT 1) AS domain_event,
+           (SELECT delivery_status FROM platform.external_webhook_events WHERE id = $4) AS webhook_status,
+           (SELECT normalized_domain_event_id FROM platform.external_webhook_events WHERE id = $4) AS domain_event,
            (SELECT count(*)::int FROM platform.outbox_events) AS outbox_count,
-           (SELECT count(*)::int FROM platform.jobs) AS job_count`,
-        [PROPERTY, BOOKING, ROOM_TYPE],
+           (SELECT count(*)::int FROM platform.jobs) AS job_count,
+           (SELECT count(*)::int FROM platform.domain_events) AS domain_count`,
+        [PROPERTY, BOOKING, ROOM_TYPE, webhook.data["id"]],
       );
       expect(stored.rows[0]).toMatchObject({
-        inventory: 366,
+        inventory: 1_098,
         assignments: 1,
-        mappings: 1,
+        mappings: 2,
+        ignored_mappings: 1,
         room_media: 1,
         media_snapshot: [
           {
@@ -104,9 +423,134 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
         ],
         webhook_status: "observed",
         domain_event: null,
-        outbox_count: 0,
-        job_count: 0,
+        ...initialWork.rows[0],
       });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  it("audits actual target Inbox summaries including target-only and manual messages", async () => {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    try {
+      await seedPrerequisites(client);
+      const prerequisites = await readProductionPmsPrerequisites(client, RUN);
+      const plan = buildProductionPmsPlan({
+        sourceRunId: RUN,
+        snapshotAt: "2026-09-04T00:00:00Z",
+        completedAt: "2026-09-04T00:00:00Z",
+        rows: sourceRows(),
+        target: { ...prerequisites, records: [], provenance: [] },
+      });
+      expect(plan.blockers).toEqual([]);
+      const messaging = plan.records.filter((row) =>
+        ["message_threads", "messages", "message_attachments"].includes(row.targetTable),
+      );
+      await writeProductionPmsRecords(client, messaging);
+      const thread = messaging.find((row) => row.targetTable === "message_threads")!;
+      const message = messaging.find((row) => row.targetTable === "messages")!;
+      const check = async () =>
+        (await readProductionPmsTargetState(client, messaging, prerequisites)).blockers!.filter(
+          (blocker) => blocker.code === "INBOX_TARGET_THREAD_SUMMARY_MISMATCH",
+        );
+      expect(await check()).toEqual([]);
+      for (const [field, assignment] of [
+        ["unreadCount", "unread_count = 0"],
+        ["lastMessageAt", "last_message_at = NULL"],
+        ["lastMessageDirection", "last_message_direction = 'outbound'"],
+        ["lastMessagePreview", "last_message_preview = 'private stale text'"],
+      ]) {
+        await client.query("SAVEPOINT inbox_summary");
+        await client.query(`UPDATE pms.message_threads SET ${assignment} WHERE id = $1`, [
+          thread.targetId,
+        ]);
+        expect(await check()).toEqual([
+          {
+            code: "INBOX_TARGET_THREAD_SUMMARY_MISMATCH",
+            source: "pms.message_threads",
+            sourceId: thread.targetId,
+            message: `Property ${PROPERTY}: target ${field} disagrees with retained messages`,
+          },
+        ]);
+        await client.query("ROLLBACK TO SAVEPOINT inbox_summary");
+      }
+      // A target-only message with equal sent_at and a larger UUID wins the target tie-break.
+      const extraId = "13560000-0000-4000-8000-000000000999";
+      const body = " 🏨e\u0301".repeat(160);
+      await client.query(
+        `INSERT INTO pms.messages
+        (id, property_id, thread_id, source_message_id, direction, sender_type, body, sent_at)
+        SELECT $1, property_id, thread_id, 'target-only', 'outbound', 'property_user', $2, sent_at
+        FROM pms.messages WHERE id = $3`,
+        [extraId, body, message.targetId],
+      );
+      expect((await check()).map((blocker) => blocker.message)).toEqual([
+        `Property ${PROPERTY}: target lastMessageDirection disagrees with retained messages`,
+        `Property ${PROPERTY}: target lastMessagePreview disagrees with retained messages`,
+      ]);
+      await client.query(
+        `UPDATE pms.message_threads SET last_message_direction = 'outbound',
+        last_message_preview = LEFT($2, 280) WHERE id = $1`,
+        [thread.targetId, body],
+      );
+      expect(await check()).toEqual([]);
+      // A 500-character preview requires retained manual-command acceptance evidence.
+      await client.query(
+        `UPDATE pms.message_threads SET last_message_preview = LEFT($2, 500)
+        WHERE id = $1`,
+        [thread.targetId, body],
+      );
+      expect(await check()).toHaveLength(1);
+      const key = await client.query(
+        `INSERT INTO platform.idempotency_keys
+        (operation_scope, operation, key_hash, request_fingerprint_hash, tenant_scope, property_id, expires_at)
+        VALUES ('pms', 'pms.inbox.reply', $1, $1, 'property', $2, now() + interval '1 day') RETURNING id`,
+        ["a".repeat(64), PROPERTY],
+      );
+      await client.query(`UPDATE pms.messages SET accepted_idempotency_key_id = $2 WHERE id = $1`, [
+        extraId,
+        key.rows[0].id,
+      ]);
+      expect(await check()).toEqual([]);
+      await client.query("UPDATE pms.messages SET body = '' WHERE id = $1", [extraId]);
+      await client.query(
+        "UPDATE pms.message_threads SET last_message_preview = NULL WHERE id = $1",
+        [thread.targetId],
+      );
+      expect(await check()).toEqual([]);
+      // Recorded reads change the actual unread count; outbound null read_at never adds unread.
+      await client.query("UPDATE pms.messages SET read_at = now() WHERE id = $1", [
+        message.targetId,
+      ]);
+      expect((await check()).map((blocker) => blocker.message)).toEqual([
+        `Property ${PROPERTY}: target unreadCount disagrees with retained messages`,
+      ]);
+      await client.query("UPDATE pms.message_threads SET unread_count = 0 WHERE id = $1", [
+        thread.targetId,
+      ]);
+      expect(await check()).toEqual([]);
+      // Unrelated threads are excluded. Once a candidate, an empty thread needs null/zero caches.
+      const emptyId = "13560000-0000-4000-8000-000000000998";
+      await client.query(
+        `INSERT INTO pms.message_threads (id, property_id, source, source_thread_id, unread_count, delivery_channel)
+        VALUES ($1, $2, 'channex', 'empty-target', 1, 'ota')`,
+        [emptyId, PROPERTY],
+      );
+      expect(await check()).toEqual([]);
+      messaging.push({
+        ...thread,
+        targetId: emptyId,
+        row: { ...thread.row, id: emptyId, sourceThreadId: "empty-target" },
+      });
+      expect(await check()).toHaveLength(1);
+      await client.query("UPDATE pms.message_threads SET unread_count = 0 WHERE id = $1", [
+        emptyId,
+      ]);
+      expect(await check()).toEqual([]);
+      await client.query("UPDATE pms.message_threads SET last_message_preview = '' WHERE id = $1", [
+        emptyId,
+      ]);
+      expect(await check()).toHaveLength(1);
     } finally {
       await client.query("ROLLBACK");
     }
@@ -204,9 +648,86 @@ describe.skipIf(!URL)("production PMS writers (PostgreSQL)", () => {
       await client.query("ROLLBACK");
     }
   });
+
+  it("writes a historical Channex claim before an inert connection", async () => {
+    const propertyId = "13560000-0000-4000-8000-000000000381";
+    const connectionId = "13560000-0000-4000-8000-000000000382";
+    await client.query("BEGIN");
+    try {
+      await client.query(
+        `INSERT INTO hotel_catalog.properties(id, public_id, display_name)
+         VALUES ($1, 'pms-historical-claim', 'PMS Historical Claim')`,
+        [propertyId],
+      );
+      const records: PmsTargetRecord[] = [
+        writerRecord("channel_connections", connectionId, {
+          id: connectionId,
+          propertyId,
+          provider: "channex",
+          connectionStatus: "disconnected",
+          externalPropertyId: null,
+          capabilities: [],
+          messagingAppInstalled: false,
+          lastBookingSyncAt: null,
+          lastAriSyncAt: null,
+          lastMessageSyncAt: null,
+          connectionMetadata: {
+            migrationRunId: RUN,
+            legacyExternalPropertyId: "legacy-historical-property",
+          },
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-08-30T00:00:00Z",
+        }),
+        writerRecord("channel_binding_claims", `${propertyId}:channex`, {
+          propertyId,
+          provider: "channex",
+          externalPropertyId: "legacy-historical-property",
+          claimState: "historical",
+          claimSource: "migration",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-08-30T00:00:00Z",
+        }),
+      ];
+
+      expect(await writeProductionPmsRecords(client, records)).toEqual({
+        channel_binding_claims: 1,
+        channel_connections: 1,
+      });
+      await expect(
+        client.query(
+          `SELECT claim.claim_state AS "claimState", claim.external_property_id AS "claimExternal",
+                  connection.connection_status AS "connectionStatus",
+                  connection.external_property_id AS "connectionExternal",
+                  connection.capabilities, connection.messaging_app_installed AS "messagingInstalled"
+             FROM pms.channel_binding_claims claim
+             JOIN pms.channel_connections connection USING (property_id, provider)
+            WHERE claim.property_id = $1`,
+          [propertyId],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            claimState: "historical",
+            claimExternal: "legacy-historical-property",
+            connectionStatus: "disconnected",
+            connectionExternal: null,
+            capabilities: [],
+            messagingInstalled: false,
+          },
+        ],
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
 });
 
 async function seedPrerequisites(client: pg.Client): Promise<void> {
+  await client.query(
+    `INSERT INTO identity.organizations(id, kind, name, slug)
+     VALUES ($1, 'hotel_group', 'PMS migration integration', 'pms-migration-integration')`,
+    [OWNER_ORGANIZATION],
+  );
   await client.query(
     `INSERT INTO hotel_catalog.properties(id, public_id, display_name)
        VALUES ($1, 'pms-integration', 'PMS Integration')`,
@@ -249,6 +770,12 @@ async function seedPrerequisites(client: pg.Client): Promise<void> {
        (property_id, source_system, source_table, source_id, relationship, metadata)
        VALUES ($1, 'pms', 'hotels', $2, 'operational_input', $3::jsonb)`,
     [PROPERTY, HOTEL, JSON.stringify({ migrationRunId: RUN })],
+  );
+  await client.query(
+    `INSERT INTO identity.organization_resource_links
+       (organization_id, product, resource_type, resource_id, relationship, status)
+     VALUES ($1, 'pms', 'pms_hotel', $2, 'operator', 'active')`,
+    [OWNER_ORGANIZATION, HOTEL],
   );
   await client.query(
     `INSERT INTO booking.guest_bookings
@@ -489,6 +1016,9 @@ function messageRows(): IdentitySourceRow[] {
       source_thread_id: "thread-ext",
       booking_id: BOOKING,
       status: "open",
+      last_message_at: "2026-08-28T00:00:00Z",
+      last_message_preview: "Hello",
+      last_message_direction: "inbound",
       unread_count: 1,
       created_at: "2026-08-20T00:00:00Z",
       updated_at: "2026-08-28T00:00:00Z",
@@ -510,9 +1040,34 @@ function messageRows(): IdentitySourceRow[] {
       filename: "file.pdf",
       created_at: "2026-08-28T00:00:02Z",
     }),
+    row("message_attachments", {
+      id: UNAVAILABLE_ATTACHMENT,
+      message_id: message,
+      filename: "missing-file.pdf",
+      created_at: "2026-08-28T00:00:03Z",
+    }),
   ];
 }
 
 function row(sourceTable: string, data: Record<string, unknown>): IdentitySourceRow {
   return { sourceDatabase: "pms", sourceTable, rowOrdinal: 1, data };
+}
+
+function writerRecord(
+  targetTable: string,
+  targetId: string,
+  data: Record<string, unknown>,
+): PmsTargetRecord {
+  return {
+    targetProduct: "pms",
+    targetTable,
+    targetId,
+    sourceDatabase: "pms",
+    sourceTable: "channex_connections",
+    sourceId: CONNECTION,
+    sourceChecksum: "a".repeat(64),
+    sourceUpdatedAt: "2026-08-30T00:00:00Z",
+    mutable: targetTable !== "channel_binding_claims",
+    row: data,
+  };
 }

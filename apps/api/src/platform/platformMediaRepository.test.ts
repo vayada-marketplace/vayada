@@ -332,6 +332,45 @@ describe("PostgreSQL platform media repository", () => {
     });
   });
 
+  it("persists Inbox uploads as bounded staged thread-scoped orphans", async () => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    await createSession(repository, "marketplace.collaboration_chat.attachment");
+    database.updateSession({
+      purpose: "pms.messaging.attachment",
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: PROPERTY_ID,
+        propertyId: PROPERTY_ID,
+        targetResourceId: ROOM_TYPE_ID,
+      },
+      target: {
+        resourceProduct: "pms",
+        resourceType: "message_thread",
+        resourceId: ROOM_TYPE_ID,
+        propertyId: PROPERTY_ID,
+      },
+    });
+    const completed = await repository.completeUploadSession(completionInput(database.session!));
+
+    expect(completed.mediaObjects[0]).toMatchObject({
+      purpose: "pms.messaging.attachment",
+      resourceProduct: "pms",
+      resourceType: "message_thread",
+      resourceId: ROOM_TYPE_ID,
+      lifecycleStatus: "staged",
+      retainedUntil: "2026-07-16T13:01:00.000Z",
+      variants: [expect.objectContaining({ variantName: "provider_original" })],
+    });
+    const objectInsert = database.clientQueries.find(({ text }) =>
+      text.includes("INSERT INTO platform.media_objects"),
+    );
+    expect(JSON.parse(String(objectInsert?.values?.[17]))).toMatchObject({
+      attachmentState: "orphan",
+    });
+  });
+
   it("resolves a chat target only when the source resource belongs to the collaboration", async () => {
     const query = vi.fn(async () => ({
       rows: [{ collaborationId: "collaboration-target-001", propertyId: PROPERTY_ID }],
@@ -376,6 +415,66 @@ describe("PostgreSQL platform media repository", () => {
     ]);
   });
 
+  it("resolves Inbox attachment uploads only to a thread in the canonical PMS property", async () => {
+    const threadId = "33333333-3333-4333-8333-333333333333";
+    const query = vi.fn(async () => ({ rows: [{ propertyId: PROPERTY_ID }] }));
+    const repository = createPgPlatformMediaRepository({
+      connectionString: "postgresql://target.test/vayada",
+      publicCdnBaseUrl: "https://cdn.example.com",
+      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
+    });
+    const input = {
+      request: {
+        purpose: "pms.messaging.attachment" as const,
+        visibility: "private" as const,
+        resource: {
+          product: "pms" as const,
+          resourceType: "pms_property" as const,
+          resourceId: PROPERTY_ID,
+          propertyId: PROPERTY_ID,
+          targetResourceId: threadId,
+        },
+        files: [],
+      },
+      policy: { targetResourceProduct: "pms", targetResourceType: "message_thread" } as never,
+      context: {} as never,
+    };
+
+    await expect(repository.resolveTarget(input)).resolves.toEqual({
+      ok: true,
+      target: {
+        resourceProduct: "pms",
+        resourceType: "message_thread",
+        resourceId: threadId,
+        propertyId: PROPERTY_ID,
+      },
+    });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("pms.message_threads"), [
+      threadId,
+      PROPERTY_ID,
+    ]);
+
+    for (const resource of [
+      { ...input.request.resource, resourceType: "pms_hotel" as const },
+      { ...input.request.resource, propertyId: undefined },
+      { ...input.request.resource, propertyId: ROOM_TYPE_ID },
+      { ...input.request.resource, targetResourceId: "opaque-thread" },
+    ]) {
+      const calls = query.mock.calls.length;
+      await expect(
+        repository.resolveTarget({ ...input, request: { ...input.request, resource } }),
+      ).resolves.toMatchObject({ ok: false, statusCode: 403, code: "media_target_forbidden" });
+      expect(query).toHaveBeenCalledTimes(calls);
+    }
+
+    query.mockResolvedValueOnce({ rows: [] });
+    await expect(repository.resolveTarget(input)).resolves.toMatchObject({
+      ok: false,
+      statusCode: 403,
+      code: "media_target_forbidden",
+    });
+  });
+
   it("resolves an add-on upload to the Booking hotel's canonical property", async () => {
     const query = vi.fn(async () => ({ rows: [{ propertyId: PROPERTY_ID }] }));
     const repository = createPgPlatformMediaRepository({
@@ -414,6 +513,150 @@ describe("PostgreSQL platform media repository", () => {
     expect(query).toHaveBeenCalledWith(expect.stringContaining("property_source_links"), [
       "booking_hotel_alpenrose",
     ]);
+  });
+
+  it.each([
+    [
+      "marketplace.creator.profile_image",
+      "marketplace",
+      "creator_profile",
+      { resourceId: ROOM_TYPE_ID, ownerOrganizationId: "org-creator" },
+      "marketplace.creator_profiles",
+      "profile.profile_status <> 'archived'",
+    ],
+    [
+      "marketplace.offer.media",
+      "marketplace",
+      "marketplace_offer",
+      { resourceId: PROPERTY_ID, ownerOrganizationId: "org-hotel", propertyId: ROOM_TYPE_ID },
+      "marketplace.marketplace_offers",
+      "offer.offer_status <> 'archived'",
+    ],
+    [
+      "property.hero_image",
+      "hotel_catalog",
+      "property",
+      { resourceId: PROPERTY_ID, ownerOrganizationId: "org-hotel", propertyId: PROPERTY_ID },
+      "identity.organization_resource_links",
+      "property.lifecycle_status <> 'retired'",
+    ],
+  ] as const)(
+    "resolves exact Platform Admin %s ownership",
+    async (purpose, product, resourceType, row, table, predicate) => {
+      const query = vi.fn(async (_sql: string, _values?: readonly unknown[]) => ({ rows: [row] }));
+      const repository = createPgPlatformMediaRepository({
+        connectionString: "postgresql://target.test/vayada",
+        publicCdnBaseUrl: "https://cdn.example.com",
+        pool: { query, connect: vi.fn(), end: vi.fn() } as never,
+      });
+
+      await expect(
+        repository.resolveTarget({
+          request: {
+            purpose,
+            visibility: purpose === "marketplace.creator.profile_image" ? "public" : "private",
+            resource: { product, resourceType, resourceId: PROPERTY_ID },
+            files: [],
+          },
+          policy: {
+            targetResourceProduct: product,
+            targetResourceType: resourceType,
+          } as never,
+          context: { selectedOrganization: { kind: "platform" } } as never,
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        target: {
+          resourceProduct: product,
+          resourceType,
+          resourceId: row.resourceId,
+          propertyId: "propertyId" in row ? row.propertyId : undefined,
+        },
+        ownerOrganizationId: row.ownerOrganizationId,
+      });
+      expect(query).toHaveBeenCalledWith(expect.stringContaining("$1::uuid"), [PROPERTY_ID]);
+      const sql = String(query.mock.calls[0]?.[0]);
+      expect(sql).toContain(table);
+      expect(sql).toContain(predicate);
+      expect(sql).toContain("organization.status = 'active'");
+      if (purpose === "marketplace.creator.profile_image") {
+        expect(sql).toContain("membership.user_id = $1::uuid");
+        expect(sql).toContain("membership.status = 'active'");
+      }
+      if (purpose === "property.hero_image") expect(sql).toContain("owner.relationship = 'owner'");
+    },
+  );
+
+  it("rejects ambiguous Platform Admin property ownership", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        { resourceId: PROPERTY_ID, ownerOrganizationId: "org-one", propertyId: PROPERTY_ID },
+        { resourceId: PROPERTY_ID, ownerOrganizationId: "org-two", propertyId: PROPERTY_ID },
+      ],
+    }));
+    const repository = createPgPlatformMediaRepository({
+      connectionString: "postgresql://target.test/vayada",
+      publicCdnBaseUrl: "https://cdn.example.com",
+      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
+    });
+
+    await expect(
+      repository.resolveTarget({
+        request: {
+          purpose: "property.hero_image",
+          visibility: "private",
+          resource: {
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId: PROPERTY_ID,
+          },
+          files: [],
+        },
+        policy: {
+          targetResourceProduct: "hotel_catalog",
+          targetResourceType: "property",
+        } as never,
+        context: { selectedOrganization: { kind: "platform" } } as never,
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode: 404, code: "media_target_not_found" });
+  });
+
+  it.each([
+    ["missing", []],
+    [
+      "ambiguous",
+      [
+        { resourceId: PROPERTY_ID, ownerOrganizationId: "org-one" },
+        { resourceId: ROOM_TYPE_ID, ownerOrganizationId: "org-two" },
+      ],
+    ],
+  ])("rejects %s Platform Admin creator ownership", async (_case, rows) => {
+    const query = vi.fn(async () => ({ rows }));
+    const repository = createPgPlatformMediaRepository({
+      connectionString: "postgresql://target.test/vayada",
+      publicCdnBaseUrl: "https://cdn.example.com",
+      pool: { query, connect: vi.fn(), end: vi.fn() } as never,
+    });
+
+    await expect(
+      repository.resolveTarget({
+        request: {
+          purpose: "marketplace.creator.profile_image",
+          visibility: "public",
+          resource: {
+            product: "marketplace",
+            resourceType: "creator_profile",
+            resourceId: PROPERTY_ID,
+          },
+          files: [],
+        },
+        policy: {
+          targetResourceProduct: "marketplace",
+          targetResourceType: "creator_profile",
+        } as never,
+        context: { selectedOrganization: { kind: "platform" } } as never,
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode: 404, code: "media_target_not_found" });
   });
 
   it("creates and finalizes persistent Booking add-on media", async () => {
@@ -690,6 +933,19 @@ describe("PostgreSQL platform media repository", () => {
       uploadSession: { status: "completed" },
     });
   });
+
+  it("rejects Platform Admin finalize when target ownership changed before completion", async () => {
+    const database = createFakeDatabase();
+    const repository = repositoryFor(database.pool);
+    const session = await createSession(repository, "marketplace.offer.media");
+    database.updateSession({ platformAdmin: true });
+    database.setAdminTargetExists(false);
+
+    await expect(repository.completeUploadSession(completionInput(session))).rejects.toBeInstanceOf(
+      PlatformMediaTargetInvalidError,
+    );
+    expect(database.mediaRowCount).toBe(0);
+  });
 });
 
 function repositoryFor(pool: ReturnType<typeof createFakeDatabase>["pool"]) {
@@ -794,6 +1050,7 @@ async function createSession(
       autoApprovePublicOnFinalize: isProfile || isRoomMedia || isBookingAddon ? true : undefined,
       privateOnly: (isPropertyMedia && !isRoomMedia) || isChat,
     } as never,
+    ownerOrganizationId: "00000000-0000-4000-8000-000000000002",
     target: {
       resourceProduct: isProfile
         ? "platform"
@@ -855,6 +1112,7 @@ function completionInput(session: PlatformMediaSessionRecord) {
   const isPrivate = session.effectiveVisibility === "private";
   const isChat = session.purpose === "marketplace.collaboration_chat.attachment";
   const isFinance = session.purpose === "finance.expense.receipt";
+  const isInbox = session.purpose === "pms.messaging.attachment";
   const isBookingAddon = session.purpose === "booking.addon.image";
   const isPropertyMedia = [
     "property.hero_image",
@@ -865,7 +1123,11 @@ function completionInput(session: PlatformMediaSessionRecord) {
   const variantNames =
     isPropertyMedia || isBookingAddon
       ? PROPERTY_MEDIA_PUBLIC_VARIANTS
-      : [isChat || isFinance ? ("provider_original" as const) : ("original_safe" as const)];
+      : [
+          isChat || isFinance || isInbox
+            ? ("provider_original" as const)
+            : ("original_safe" as const),
+        ];
   return {
     session,
     files: [
@@ -969,6 +1231,7 @@ function createFakeDatabase(failAuditAction?: string) {
   let committed = emptyDatabaseState();
   let transaction: FakeDatabaseState | null = null;
   let roomTargetExists = true;
+  let adminTargetExists = true;
   let roomMediaCount = 0;
   let commitMode: "normal" | "apply_then_throw" | "throw_before_apply" = "normal";
   const queries: QueryCall[] = [];
@@ -989,6 +1252,7 @@ function createFakeDatabase(failAuditAction?: string) {
       failAuditActions,
       roomTargetExists,
       roomMediaCount,
+      adminTargetExists,
     );
   });
 
@@ -1026,6 +1290,7 @@ function createFakeDatabase(failAuditAction?: string) {
       failAuditActions,
       roomTargetExists,
       roomMediaCount,
+      adminTargetExists,
     );
   });
 
@@ -1042,6 +1307,9 @@ function createFakeDatabase(failAuditAction?: string) {
     failAuditActions,
     setRoomTargetExists(value: boolean) {
       roomTargetExists = value;
+    },
+    setAdminTargetExists(value: boolean) {
+      adminTargetExists = value;
     },
     setRoomMediaCount(value: number) {
       roomMediaCount = value;
@@ -1083,8 +1351,22 @@ function executeFakeQuery(
   failAuditActions: ReadonlySet<string>,
   roomTargetExists: boolean,
   roomMediaCount: number,
+  adminTargetExists: boolean,
 ) {
-  if (
+  if (text.includes('AS "ownerOrganizationId"') && text.includes("FOR SHARE OF")) {
+    const session = state.session;
+    return adminTargetExists && session
+      ? {
+          rows: [
+            {
+              resourceId: session.target.resourceId,
+              ownerOrganizationId: session.ownerOrganizationId,
+              propertyId: session.target.propertyId,
+            },
+          ],
+        }
+      : { rows: [] };
+  } else if (
     text.includes("INSERT INTO platform.product_audit_events") &&
     failAuditActions.has(String(values?.[1]))
   ) {

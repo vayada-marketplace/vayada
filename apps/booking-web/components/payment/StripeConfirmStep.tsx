@@ -1,5 +1,7 @@
 "use client";
+import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
+import { trackEvent } from "@/services/api/tracking";
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -27,6 +29,7 @@ interface StripeConfirmStepProps {
   addons: Addon[];
   selectedAddonIds: string[];
   addonQuantities: Record<string, number>;
+  addonPackageQuantities?: Record<string, number>;
   addonDates?: Record<string, string[]>;
   grandTotal: number;
   // For the VAY-388 card flow this is the draft preview (status='draft',
@@ -62,6 +65,7 @@ export default function StripeConfirmStep({
   addons,
   selectedAddonIds,
   addonQuantities,
+  addonPackageQuantities = {},
   addonDates,
   grandTotal,
   booking,
@@ -100,7 +104,7 @@ export default function StripeConfirmStep({
       const confirmationUrl = new URL(`${localePrefix}/confirmation`, window.location.origin);
       confirmationUrl.searchParams.set("booking", booking.bookingReference);
       if (confirmationToken) confirmationUrl.searchParams.set("token", confirmationToken);
-      const { error: stripeError } = await stripe.confirmPayment({
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: { return_url: confirmationUrl.toString() },
         redirect: "if_required",
@@ -111,6 +115,10 @@ export default function StripeConfirmStep({
         confirmationStarted.current = false;
         setSubmitting(false);
         return;
+      }
+
+      if (paymentIntent && ["succeeded", "requires_capture"].includes(paymentIntent.status)) {
+        trackEvent(slug, "payment_authorized", { paymentMethod: "card" });
       }
 
       // VAY-388: pass the draft id so the backend materializes the real
@@ -160,14 +168,24 @@ export default function StripeConfirmStep({
           <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">
-                {roomsParam > 1 ? `${roomsParam}× ` : ""}
+                {!booking.roomSelection && roomsParam > 1 ? `${roomsParam}× ` : ""}
                 {roomName}
               </span>
               <span className="font-semibold text-gray-900">
                 {formatPrice(roomTotal, selectedCurrency)}
               </span>
             </div>
-            <p className="text-xs text-gray-500 text-right">{roomRateBreakdown}</p>
+            {booking.roomLines ? (
+              <RoomSelectionSummary
+                lines={booking.roomLines}
+                currency={booking.currency}
+                checkIn={checkIn}
+                timezone={hotel.timezone}
+                beforeDiscounts
+              />
+            ) : (
+              <p className="text-xs text-gray-500 text-right">{roomRateBreakdown}</p>
+            )}
             {addons
               .filter((a) => selectedAddonIds.includes(a.id))
               .map((addon) => {
@@ -177,14 +195,22 @@ export default function StripeConfirmStep({
                   ? Math.max(1, Math.min(count ?? Math.max(1, adults), Math.max(1, adults)))
                   : 1;
                 const days = addon.perNight
-                  ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+                  ? Math.max(
+                      1,
+                      Math.min(
+                        dates?.length ?? (addon.perPerson ? nights : (count ?? nights)),
+                        nights,
+                      ),
+                    )
                   : 1;
                 const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1;
                 const linePrice = convertAndRound(
-                  addon.price * people * days * items,
+                  addon.price * people * days * items * (addonPackageQuantities[addon.id] ?? 1),
                   addon.currency,
                 );
                 const parts: string[] = [];
+                if ((addonPackageQuantities[addon.id] ?? 1) > 1)
+                  parts.push(`×${addonPackageQuantities[addon.id]}`);
                 if (addon.perPerson && people < adults) parts.push(`${people}/${adults}`);
                 if (addon.perNight && days < nights) parts.push(`${days}/${nights}`);
                 if (!addon.perPerson && !addon.perNight && items > 1) parts.push(`×${items}`);

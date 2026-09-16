@@ -43,6 +43,13 @@ export type PmsInventoryMaterializationPlannerInput = Readonly<{
   configuration: PmsOperatingCalendarConfigurationSnapshot;
   horizon: PmsInventoryRequiredCoverage;
   currentDays: readonly PmsInventoryDaySnapshot[];
+  /** Immutable calendar that owns the stored materialization coverage. */
+  previousConfiguration?: PmsOperatingCalendarConfigurationSnapshot;
+  generatedSellableLimitOverrides?: readonly Readonly<{
+    roomTypeId: string;
+    stayDate: string;
+    count: number;
+  }>[];
 }>;
 
 export type PmsInventoryMaterializationPlanError =
@@ -85,12 +92,30 @@ export function planPmsInventoryMaterialization(
   ) {
     return failure({ code: "configuration_scope_mismatch" });
   }
+  const previous =
+    input.previousConfiguration === undefined
+      ? undefined
+      : parseConfiguration(input.previousConfiguration);
+  if (
+    input.previousConfiguration !== undefined &&
+    (!previous ||
+      previous.propertyId !== configuration.propertyId ||
+      previous.calendarRevision >= configuration.calendarRevision)
+  ) {
+    return failure({ code: "configuration_scope_mismatch" });
+  }
   const dates = horizonDates(input.horizon);
   if (!dates) return failure({ code: "horizon_invalid" });
 
   const bindings = configuration.sourceInputs.roomBindings;
   const bindingByRoom = new Map(bindings.map((binding) => [binding.roomTypeId, binding]));
   const expectedDates = new Set(dates);
+  const generatedOverrides = parseGeneratedOverrides(
+    input.generatedSellableLimitOverrides ?? [],
+    bindingByRoom,
+    expectedDates,
+  );
+  if (!generatedOverrides) return failure({ code: "invalid_input" });
 
   const currentByKey = new Map<string, PmsInventoryDaySnapshot>();
   const countByDate = new Map<string, number>();
@@ -120,10 +145,19 @@ export function planPmsInventoryMaterialization(
     countByDate.set(current.stayDate, (countByDate.get(current.stayDate) ?? 0) + 1);
   }
 
+  // A newly introduced room has no historical days. Partial rows for a new
+  // room, or absent rows for a previously configured room, still fail closed.
+  const roomsWithDays = new Set(input.currentDays.map((day) => day.roomTypeId));
+  const previousRooms = new Set(previous?.sourceInputs.roomBindings.map((b) => b.roomTypeId));
+  const newEmptyRoomCount = previous
+    ? bindings.filter((b) => !previousRooms.has(b.roomTypeId) && !roomsWithDays.has(b.roomTypeId))
+        .length
+    : 0;
+  const historicalRoomCount = bindings.length - newEmptyRoomCount;
   let missingSuffix = false;
   for (const stayDate of dates) {
     const count = countByDate.get(stayDate) ?? 0;
-    if (count !== 0 && count !== bindings.length) {
+    if (count !== 0 && count !== historicalRoomCount) {
       return failure({ code: "current_day_coverage_gap", stayDate });
     }
     if (count === 0) missingSuffix = true;
@@ -136,9 +170,12 @@ export function planPmsInventoryMaterialization(
   for (const binding of bindings) {
     for (const stayDate of dates) {
       const current = currentByKey.get(dayKey(binding.roomTypeId, stayDate));
+      const generatedSellableLimitCount =
+        generatedOverrides.get(dayKey(binding.roomTypeId, stayDate)) ??
+        binding.startingSellableLimitCount;
       const planned = current
-        ? planExistingDay(configuration, binding, stayDate, current)
-        : newDay(configuration, binding, stayDate);
+        ? planExistingDay(configuration, binding, stayDate, current, generatedSellableLimitCount)
+        : newDay(configuration, binding, stayDate, generatedSellableLimitCount);
       if ("error" in planned) return failure(planned.error);
       days.push(planned.day);
       if (!current || planned.changed) changedDays.push(planned.day);
@@ -151,7 +188,7 @@ export function planPmsInventoryMaterialization(
   const outcome =
     input.currentDays.length === 0
       ? "applied"
-      : changedExisting
+      : changedExisting || newEmptyRoomCount > 0
         ? "rematerialized"
         : missingSuffix
           ? "extended"
@@ -181,6 +218,7 @@ function planExistingDay(
   binding: PmsOperatingCalendarRoomBinding,
   stayDate: string,
   current: PmsInventoryDaySnapshot,
+  generatedSellableLimitCount: number,
 ): Readonly<
   | { day: PmsInventoryDaySnapshot; changed: boolean }
   | { error: PmsInventoryMaterializationPlanError }
@@ -196,7 +234,7 @@ function planExistingDay(
   const effectiveSellableLimitCount =
     current.manualSellableLimitCount ??
     current.channelSellableLimitCount ??
-    binding.startingSellableLimitCount;
+    generatedSellableLimitCount;
   if (effectiveSellableLimitCount > binding.physicalCapacityCount) {
     return { error: { code: "inventory_invariant_violation", ...errorKey } };
   }
@@ -208,7 +246,7 @@ function planExistingDay(
     current.calendarRevision !== configuration.calendarRevision ||
     current.sourceRevisions.generated !== configuration.calendarRevision ||
     current.operatingStatus !== operatingStatus ||
-    current.generatedSellableLimitCount !== binding.startingSellableLimitCount ||
+    current.generatedSellableLimitCount !== generatedSellableLimitCount ||
     current.effectiveSellableLimitCount !== effectiveSellableLimitCount ||
     current.availableCount !== availableCount;
   if (!changed) return { day: current, changed: false };
@@ -223,7 +261,7 @@ function planExistingDay(
       inventoryRevision: current.inventoryRevision + 1,
       sourceRevisions: { ...current.sourceRevisions, generated: configuration.calendarRevision },
       operatingStatus,
-      generatedSellableLimitCount: binding.startingSellableLimitCount,
+      generatedSellableLimitCount,
       effectiveSellableLimitCount,
       availableCount,
     }),
@@ -234,6 +272,7 @@ function newDay(
   configuration: PmsOperatingCalendarConfigurationSnapshot,
   binding: PmsOperatingCalendarRoomBinding,
   stayDate: string,
+  generatedSellableLimitCount: number,
 ): Readonly<{ day: PmsInventoryDaySnapshot; changed: true }> {
   const operatingStatus = operatingStatusFor(configuration.schedule, stayDate);
   return {
@@ -253,15 +292,15 @@ function newDay(
       },
       operatingStatus,
       physicalCapacityCount: binding.physicalCapacityCount,
-      generatedSellableLimitCount: binding.startingSellableLimitCount,
+      generatedSellableLimitCount,
       channelSellableLimitCount: null,
       manualSellableLimitCount: null,
-      effectiveSellableLimitCount: binding.startingSellableLimitCount,
+      effectiveSellableLimitCount: generatedSellableLimitCount,
       assignedCount: 0,
       blockedCount: 0,
       linkedStopSell: false,
       linkedSourceRevision: 0,
-      availableCount: operatingStatus === "open" ? binding.startingSellableLimitCount : 0,
+      availableCount: operatingStatus === "open" ? generatedSellableLimitCount : 0,
     }),
   };
 }
@@ -371,6 +410,9 @@ function safeConfigurationShape(
 }
 
 function validInputShape(value: unknown): value is PmsInventoryMaterializationPlannerInput {
+  const optionalKeys = ["generatedSellableLimitOverrides", "previousConfiguration"].filter(
+    (key) => value !== null && typeof value === "object" && Object.hasOwn(value, key),
+  );
   return (
     dataRecord(value, [
       "propertyId",
@@ -378,11 +420,37 @@ function validInputShape(value: unknown): value is PmsInventoryMaterializationPl
       "configuration",
       "horizon",
       "currentDays",
+      ...optionalKeys,
     ]) &&
     dataRecord(value.configurationSource, ["ownerDomain", "entityType", "entityId", "revision"]) &&
     dataRecord(value.horizon, ["from", "through"]) &&
-    denseArray(value.currentDays)
+    denseArray(value.currentDays) &&
+    (value.generatedSellableLimitOverrides === undefined ||
+      denseArray(value.generatedSellableLimitOverrides))
   );
+}
+
+function parseGeneratedOverrides(
+  values: readonly Readonly<{ roomTypeId: string; stayDate: string; count: number }>[],
+  bindings: ReadonlyMap<string, PmsOperatingCalendarRoomBinding>,
+  dates: ReadonlySet<string>,
+): Map<string, number> | null {
+  const parsed = new Map<string, number>();
+  for (const value of values) {
+    if (!dataRecord(value, ["roomTypeId", "stayDate", "count"])) return null;
+    const binding = bindings.get(value.roomTypeId);
+    const key = dayKey(value.roomTypeId, value.stayDate);
+    if (
+      !binding ||
+      !dates.has(value.stayDate) ||
+      !count(value.count, 0, binding.physicalCapacityCount) ||
+      parsed.has(key)
+    ) {
+      return null;
+    }
+    parsed.set(key, value.count);
+  }
+  return parsed;
 }
 
 function operatingStatusFor(schedule: PmsOperatingSchedule, stayDate: string): "open" | "closed" {

@@ -8,6 +8,7 @@ import {
   buildMarketplaceCollaborationLifecycleIdempotencyKey,
   cancelMarketplaceCollaboration,
   createMarketplaceCollaboration,
+  editMarketplaceCollaborationApplication,
   getMarketplaceCollaboration,
   getMarketplaceConversationPage,
   getMarketplaceMessages,
@@ -107,6 +108,7 @@ export interface UpdateCollaborationTermsRequest {
 }
 
 export interface CollaborationResponseRequest {
+  expectedUpdatedAt?: string;
   status: "accepted" | "declined";
   response_message?: string;
 }
@@ -154,6 +156,8 @@ export interface CollaborationWriteOptions {
 
 // Backend collaboration response (snake_case)
 export interface CollaborationResponse {
+  selectedCompensationOptionId?: string | null;
+  cancelledBy?: "creator" | "hotel" | null;
   id: string;
   initiator_type: "creator" | "hotel";
   is_initiator: boolean;
@@ -189,6 +193,7 @@ export interface CollaborationResponse {
   hotel_id: string;
   hotel_name: string;
   hotel_picture?: string | null;
+  propertyTimezone?: string | null;
   hotel_location?: string | null;
   hotel_website?: string | null;
   hotel_about?: string | null;
@@ -253,6 +258,8 @@ export interface CollaborationResponse {
 }
 
 export type DetailedCollaboration = Collaboration & {
+  selectedCompensationOptionId?: string | null;
+  cancelledBy?: "creator" | "hotel" | null;
   hotel?: Hotel;
   creator?: Creator;
   listingId?: string;
@@ -460,6 +467,22 @@ export const collaborationService = {
     return transformCollaborationResponse(toLegacyCollaborationResponse(response.collaboration));
   },
 
+  editApplication: async (
+    collaborationId: string,
+    data: CreateCreatorCollaborationRequest,
+    expectedUpdatedAt: string,
+    options: CollaborationWriteOptions,
+  ): Promise<DetailedCollaboration> => {
+    const response = await editMarketplaceCollaborationApplication(collaborationId, {
+      ...toTargetCreateCollaborationRequest(
+        data,
+        resolveLifecycleWriteIdempotencyKey("edit_application", collaborationId, options),
+      ),
+      expectedUpdatedAt,
+    });
+    return transformCollaborationResponse(toLegacyCollaborationResponse(response.collaboration));
+  },
+
   /**
    * Get all conversations for the current user
    */
@@ -580,6 +603,7 @@ export const collaborationService = {
       idempotencyKey,
       status: data.status,
       responseMessage: data.response_message,
+      expectedUpdatedAt: data.expectedUpdatedAt,
     });
     return toLegacyCollaborationResponse(response.collaboration);
   },
@@ -590,11 +614,13 @@ export const collaborationService = {
   cancelCollaboration: async (
     collaborationId: string,
     reason?: string,
+    pendingOnly = false,
   ): Promise<CollaborationResponse> => {
     const idempotencyKey = buildLifecycleWriteIdempotencyKey("cancel", collaborationId);
     const response = await cancelMarketplaceCollaboration(collaborationId, {
       idempotencyKey,
       reason,
+      pendingOnly,
     });
     return toLegacyCollaborationResponse(response.collaboration);
   },
@@ -890,7 +916,10 @@ export function transformCollaborationResponse(
     preferredDateTo: response.preferred_date_to,
     preferredMonths: response.preferred_months,
     whyGreatFit: response.why_great_fit,
+    selectedCompensationOptionId: response.selectedCompensationOptionId,
+    cancelledBy: response.cancelledBy,
     platformDeliverables: response.platform_deliverables,
+    propertyTimezone: response.propertyTimezone,
     hotelLocation: response.hotel_location,
     hotelWebsite: response.hotel_website,
     hotelAbout: response.hotel_about,
@@ -992,6 +1021,7 @@ function toLegacyCollaborationResponse(
     hotel_id: collaboration.hotelProfileId,
     hotel_name: collaboration.hotel.displayName,
     hotel_picture: collaboration.hotel.avatarUrl,
+    propertyTimezone: collaboration.propertyTimezone,
     hotel_location: collaboration.hotelLocation,
     listing_id: collaboration.offerId,
     listing_name: collaboration.offerTitle,
@@ -1009,18 +1039,22 @@ function toLegacyCollaborationResponse(
     preferred_date_to: collaboration.terms.preferredDateTo,
     preferred_months: collaboration.terms.preferredMonths,
     why_great_fit: collaboration.applicationMessage ?? null,
-    platform_deliverables: collaboration.deliverables.map((deliverable) => ({
-      platform: deliverable.platform,
-      deliverables: [
-        {
+    selectedCompensationOptionId: collaboration.selectedCompensationOptionId,
+    cancelledBy: collaboration.cancelledBy,
+    platform_deliverables: Array.from(
+      new Set(collaboration.deliverables.map((item) => item.platform)),
+    ).map((platform) => ({
+      platform,
+      deliverables: collaboration.deliverables
+        .filter((item) => item.platform === platform)
+        .map((deliverable) => ({
           id: deliverable.deliverableId,
           type: deliverable.type,
           quantity: deliverable.quantity,
           status: deliverable.status,
           completed: deliverable.status === "completed",
           completed_at: deliverable.completedAt,
-        },
-      ],
+        })),
     })),
     hotel_agreed_at: collaboration.hotelAgreedAt ?? null,
     creator_agreed_at: collaboration.creatorAgreedAt ?? null,

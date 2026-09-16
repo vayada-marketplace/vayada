@@ -6,6 +6,7 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import type { FinanceSubscriptionService } from "@vayada/domain-finance";
+import type { PropertyAccessRepository } from "@vayada/backend-authorization";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
@@ -70,9 +71,33 @@ describe("Finance subscription route authorization", () => {
       headers: { authorization: "Bearer valid-token" },
       payload: { commandId: "command-commission", idempotencyKey: "commission-1" },
     });
+    const billing = await fixture.app.inject({
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/billing`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const paymentMethod = await fixture.app.inject({
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-method`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        commandId: "command-payment",
+        idempotencyKey: "payment-1",
+        paymentMethod: "bank_transfer",
+      },
+    });
+    const cardActivation = await fixture.app.inject({
+      method: "POST",
+      url: `/api/finance/properties/${propertyId}/fixed-plan/card`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "command-card", idempotencyKey: "card-1" },
+    });
     expect(read.statusCode).toBe(200);
     expect(write.statusCode).toBe(201);
     expect(selectCommission.statusCode).toBe(201);
+    expect(billing.statusCode).toBe(200);
+    expect(paymentMethod.statusCode).toBe(200);
+    expect(cardActivation.statusCode).toBe(200);
     expect(fixture.service.createFixedPlanCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         propertyId,
@@ -83,16 +108,53 @@ describe("Finance subscription route authorization", () => {
     expect(fixture.service.selectCommissionPlan).toHaveBeenCalledWith(
       expect.objectContaining({ propertyId, organizationId }),
     );
+    expect(fixture.service.activateFixedPlanByCard).toHaveBeenCalledWith(
+      expect.objectContaining({ propertyId, organizationId }),
+    );
+  });
+
+  it("denies unassigned subscription reads and checkout before calling Finance", async () => {
+    const fixture = createApp({
+      permissions: ["pms.finance.read", "booking.settings.manage"],
+      propertyAccessRepository: {
+        findMembershipPropertyScope: async () => ({
+          mode: "assigned",
+          roleKey: "finance_manager",
+          accessOrigin: "agency",
+          assignedPropertyIds: [],
+        }),
+      },
+    });
+    apps.push(fixture.app);
+    for (const route of ["plan-status", "billing"]) {
+      const response = await fixture.app.inject({
+        url: `/api/finance/properties/${propertyId}/${route}`,
+        headers: { authorization: "Bearer valid-token" },
+      });
+      expect(response.statusCode).toBe(403);
+    }
+    expect(fixture.service.getPlanStatus).not.toHaveBeenCalled();
+    expect(fixture.service.getBillingOverview).not.toHaveBeenCalled();
+    const checkout = await fixture.app.inject({
+      method: "POST",
+      url: `/api/finance/properties/${propertyId}/fixed-plan/checkout`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { commandId: "command-1", idempotencyKey: "checkout-1" },
+    });
+    expect(checkout.statusCode).toBe(403);
+    expect(fixture.service.createFixedPlanCheckout).not.toHaveBeenCalled();
   });
 });
 
 function createApp(options: {
+  propertyAccessRepository?: PropertyAccessRepository;
   permissions?: PermissionKey[];
   entitlements?: ProductEntitlement[];
   linked?: boolean;
 }) {
   const service = {
     getPlanStatus: vi.fn(async () => planStatus()),
+    getBillingOverview: vi.fn(async () => billingOverview()),
     selectCommissionPlan: vi.fn(async () => ({
       ok: true as const,
       status: "created" as const,
@@ -109,8 +171,29 @@ function createApp(options: {
         activeRoomCount: 1,
       },
     })),
+    activateFixedPlanByInvoice: vi.fn(async () => ({
+      ok: true as const,
+      status: "updated" as const,
+      value: { ...billingOverview(), planStatus: { ...planStatus(), plan: "fixed" as const } },
+    })),
+    activateFixedPlanByCard: vi.fn(async () => ({
+      ok: true as const,
+      status: "updated" as const,
+      value: { ...billingOverview(), planStatus: { ...planStatus(), plan: "fixed" as const } },
+    })),
     openCustomerPortal: vi.fn(),
     scheduleCommissionPlan: vi.fn(),
+    switchToCommissionNow: vi.fn(),
+    updateBillingDetails: vi.fn(async () => ({
+      ok: true as const,
+      status: "updated" as const,
+      value: billingOverview(),
+    })),
+    updatePaymentMethod: vi.fn(async () => ({
+      ok: true as const,
+      status: "updated" as const,
+      value: { ...billingOverview(), paymentMethod: "bank_transfer" as const },
+    })),
     close: vi.fn(),
   } satisfies FinanceSubscriptionService;
   const app = buildApp({
@@ -119,7 +202,7 @@ function createApp(options: {
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options.linked !== false),
-      propertyAccessRepository: agencyPropertyAccessRepository,
+      propertyAccessRepository: options.propertyAccessRepository ?? agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["pms.finance.read"];
@@ -167,6 +250,15 @@ function identityRepository(linked: boolean): IdentityRepository {
     async findLinkedResources() {
       return linked
         ? [
+            ...[
+              { product: "hotel_catalog", resourceType: "property" },
+              { product: "pms", resourceType: "pms_property" },
+            ].map((resource) => ({
+              ...resource,
+              resourceId: propertyId,
+              relationship: "finance_manager",
+              status: "active" as const,
+            })),
             {
               product: "pms",
               resourceType: "property",
@@ -197,6 +289,7 @@ function planStatus() {
     currency: "EUR" as const,
     activeRoomCount: 1,
     amountMinor: 3_000,
+    fixedPlanAvailable: true,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     nextBillingDate: null,
@@ -205,5 +298,16 @@ function planStatus() {
     customerPortalAvailable: false,
     activatedAt: null,
     updatedAt: "2026-08-11T12:00:00.000Z",
+  };
+}
+
+function billingOverview() {
+  return {
+    propertyId,
+    planStatus: planStatus(),
+    paymentMethod: "card" as const,
+    savedCard: null,
+    billingDetails: { companyName: "", billingEmail: "", taxId: null },
+    invoices: [],
   };
 }

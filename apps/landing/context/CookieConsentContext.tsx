@@ -1,15 +1,16 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { consentService } from "@/services/api/consent";
 
-// Cookie consent categories
-export interface CookieConsent {
-  necessary: boolean; // Always true, cannot be disabled
-  functional: boolean;
-  analytics: boolean;
-  marketing: boolean;
-}
+import {
+  analyticsWasWithdrawn,
+  rememberAnalyticsWithdrawal,
+  stopCloudflareAnalytics,
+  syncCloudflareAnalytics,
+} from "@/lib/cloudflareAnalytics";
+
+import { CookieConsent, readConsent } from "@vayada/marketplace-shared/consent/preferences";
+export type { CookieConsent } from "@vayada/marketplace-shared/consent/preferences";
 
 // Context value type
 interface CookieConsentContextType {
@@ -26,25 +27,7 @@ interface CookieConsentContextType {
   closeSettings: () => void;
 }
 
-const VISITOR_ID_KEY = "vayada_visitor_id";
 const CONSENT_KEY = "vayada_cookie_consent";
-
-// Generate a unique visitor ID
-function generateVisitorId(): string {
-  return "v_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
-}
-
-// Get or create visitor ID
-function getVisitorId(): string {
-  if (typeof window === "undefined") return "";
-
-  let visitorId = localStorage.getItem(VISITOR_ID_KEY);
-  if (!visitorId) {
-    visitorId = generateVisitorId();
-    localStorage.setItem(VISITOR_ID_KEY, visitorId);
-  }
-  return visitorId;
-}
 
 const CookieConsentContext = createContext<CookieConsentContextType | undefined>(undefined);
 
@@ -54,77 +37,66 @@ export function CookieConsentProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showBanner, setShowBanner] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [storageError, setStorageError] = useState(false);
 
-  // Load consent from localStorage on mount
+  // Landing consent is local to this browser. Account-level privacy settings
+  // live in the authenticated application.
   useEffect(() => {
-    const loadConsent = async () => {
+    const loadConsent = () => {
+      let parsed: CookieConsent | null = null;
       try {
-        // Check localStorage first
-        const storedConsent = localStorage.getItem(CONSENT_KEY);
-        if (storedConsent) {
-          const parsed = JSON.parse(storedConsent) as CookieConsent;
-          setConsent(parsed);
-          setHasConsented(true);
-          setShowBanner(false);
-        } else {
-          // No stored consent, show banner
-          setShowBanner(true);
-        }
-
-        // Try to sync with backend
-        const visitorId = getVisitorId();
-        if (visitorId) {
-          try {
-            const backendConsent = await consentService.getCookieConsent(visitorId);
-            if (backendConsent) {
-              const consentData: CookieConsent = {
-                necessary: backendConsent.necessary,
-                functional: backendConsent.functional,
-                analytics: backendConsent.analytics,
-                marketing: backendConsent.marketing,
-              };
-              setConsent(consentData);
-              setHasConsented(true);
-              setShowBanner(false);
-              localStorage.setItem(CONSENT_KEY, JSON.stringify(consentData));
-            }
-          } catch {
-            // Backend not available, use localStorage
-          }
-        }
-      } catch (error) {
-        console.error("Error loading cookie consent:", error);
-      } finally {
-        setIsLoading(false);
-      }
+        parsed = readConsent(JSON.parse(localStorage.getItem(CONSENT_KEY) ?? "null"));
+        if (parsed && analyticsWasWithdrawn()) parsed = { ...parsed, analytics: false };
+      } catch {}
+      setConsent(parsed);
+      setHasConsented(Boolean(parsed));
+      setShowBanner(!parsed);
+      setIsLoading(false);
+      syncCloudflareAnalytics();
     };
-
     loadConsent();
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage) return;
+      if (event.key !== CONSENT_KEY && event.key !== null) return;
+      // Observe each withdrawal even if another tab has already accepted again.
+      let next: CookieConsent | null = null;
+      try {
+        next = readConsent(JSON.parse(event.newValue ?? "null"));
+      } catch {}
+      if (!next?.analytics) stopCloudflareAnalytics();
+      loadConsent();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // Save consent to localStorage and backend
+  // Save consent locally so the public site never depends on an account API.
   const saveConsent = useCallback(async (newConsent: CookieConsent) => {
     // Always ensure necessary is true
     const finalConsent = { ...newConsent, necessary: true };
 
-    // Save to localStorage
-    localStorage.setItem(CONSENT_KEY, JSON.stringify(finalConsent));
+    if (!finalConsent.analytics) {
+      stopCloudflareAnalytics();
+      rememberAnalyticsWithdrawal(true);
+    }
+    try {
+      localStorage.setItem(CONSENT_KEY, JSON.stringify(finalConsent));
+      if (finalConsent.analytics) rememberAnalyticsWithdrawal(false);
+      setStorageError(false);
+    } catch {
+      stopCloudflareAnalytics();
+      rememberAnalyticsWithdrawal(true);
+      try {
+        localStorage.removeItem(CONSENT_KEY);
+      } catch {}
+      setStorageError(true);
+      return;
+    }
+    syncCloudflareAnalytics();
     setConsent(finalConsent);
     setHasConsented(true);
     setShowBanner(false);
     setShowSettings(false);
-
-    // Save to backend
-    try {
-      const visitorId = getVisitorId();
-      await consentService.saveCookieConsent({
-        visitor_id: visitorId,
-        ...finalConsent,
-      });
-    } catch (error) {
-      console.error("Error saving cookie consent to backend:", error);
-      // Don't throw - localStorage save is enough for functionality
-    }
   }, []);
 
   const acceptAll = useCallback(async () => {
@@ -187,6 +159,14 @@ export function CookieConsentProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      {storageError && (
+        <p
+          role="alert"
+          className="fixed top-3 left-3 right-3 z-[60] rounded border bg-white p-3 text-sm text-red-700"
+        >
+          We couldn’t save your cookie choice. Analytics is off. Please try again.
+        </p>
+      )}
     </CookieConsentContext.Provider>
   );
 }

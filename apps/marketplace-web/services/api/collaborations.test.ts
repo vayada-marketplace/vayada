@@ -28,7 +28,10 @@ vi.mock("@vayada/marketplace-shared/api/platformMedia", () => ({
   uploadPlatformMedia: mocks.uploadPlatformMedia,
 }));
 
-import { toLegacyCollaborationType } from "@vayada/marketplace-shared/api/collaborations";
+import {
+  marketplaceCollaborationEndpoints,
+  toLegacyCollaborationType,
+} from "@vayada/marketplace-shared/api/collaborations";
 import {
   collaborationService,
   filterConversations,
@@ -57,6 +60,14 @@ describe("toLegacyCollaborationType", () => {
     expect(toLegacyCollaborationType(null, true, "12.5")).toBe("Affiliate");
     expect(toLegacyCollaborationType("free_stay", true, null)).toBe("Free Stay");
     expect(toLegacyCollaborationType(null, true, null)).toBeNull();
+  });
+});
+
+describe("affiliate agreement endpoint", () => {
+  it("encodes an opaque collaboration ID into one target API path segment", () => {
+    expect(marketplaceCollaborationEndpoints.affiliateAssent("Existing:QA")).toBe(
+      "/api/marketplace/collaborations/Existing%3AQA/affiliate-assent",
+    );
   });
 });
 

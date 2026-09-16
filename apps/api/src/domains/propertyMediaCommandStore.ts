@@ -22,7 +22,7 @@ import {
   PUBLICATION_TERMINAL_RECONCILIATION_MS,
   PUBLICATION_TERMINAL_RECONCILIATION_PASSES,
   ROLE_BY_MEDIA_TYPE,
-  assignmentResponse,
+  commandAssignmentResponse,
   canonicalJson,
   isRecord,
   isUuid,
@@ -49,6 +49,7 @@ import {
   type PublicationCommand,
   type PublicationJobPayload,
   type PublicationJobRow,
+  type PlatformAdminPropertyRow,
   type PropertyMediaCommandResult,
   type PropertyRow,
   type ReadyMedia,
@@ -68,6 +69,12 @@ export type PropertyMediaReadModelSync = (
   client: Queryable,
   input: { propertyId: string },
 ) => Promise<void>;
+
+export type PlatformAdminPropertyHeroRead = {
+  propertyId: string;
+  profileRevision: number;
+  hero: { mediaObjectId: string; url: string } | null;
+};
 type CanonicalPrivatePropertyVariant = Parameters<
   typeof assertCanonicalPrivatePropertyVariants
 >[0]["variants"][number];
@@ -963,7 +970,12 @@ export async function finalizePublication(
     const after = await loadAssignments(client, claim.payload.command.propertyId);
     const result: PropertyMediaCommandResult = {
       ok: true,
-      response: assignmentResponse("updated", completedProfileRevision, after),
+      response: commandAssignmentResponse(
+        "updated",
+        completedProfileRevision,
+        after,
+        claim.payload.command,
+      ),
     };
     await recordFinalAudit(client, {
       command: claim.payload.command,
@@ -1280,8 +1292,11 @@ export async function readCompletedResult(
 
 export async function lockProperty(
   client: Queryable,
-  command: Pick<InternalCommand, "organizationId" | "propertyId">,
+  command: Pick<InternalCommand, "organizationId" | "propertyId" | "platformAdminHero">,
 ): Promise<PropertyRow | null> {
+  if (command.platformAdminHero) {
+    return lockPlatformAdminProperty(client, command.propertyId, command.organizationId);
+  }
   const result = await client.query<PropertyRow>(
     `SELECT property.profile_revision AS "profileRevision"
      FROM hotel_catalog.properties property
@@ -1302,6 +1317,103 @@ export async function lockProperty(
     [command.organizationId, command.propertyId],
   );
   return result.rows[0] ?? null;
+}
+
+export async function lockPlatformAdminProperty(
+  client: Queryable,
+  propertyId: string,
+  expectedOwnerOrganizationId?: string,
+): Promise<PlatformAdminPropertyRow | null> {
+  const result = await client.query<PlatformAdminPropertyRow>(
+    `SELECT property.profile_revision AS "profileRevision",
+            owner.organization_id::text AS "ownerOrganizationId"
+     FROM hotel_catalog.properties property
+     JOIN identity.organization_resource_links owner
+       ON owner.product = 'hotel_catalog'
+      AND owner.resource_type = 'property'
+      AND owner.resource_id = property.id::text
+      AND owner.relationship = 'owner'
+      AND owner.status = 'active'
+     JOIN identity.organizations organization
+       ON organization.id = owner.organization_id
+      AND organization.kind = 'hotel_group'
+      AND organization.status = 'active'
+     WHERE property.id = $1::uuid
+       AND property.lifecycle_status <> 'retired'
+     ORDER BY owner.organization_id
+     FOR UPDATE OF property
+     FOR SHARE OF owner, organization`,
+    [propertyId],
+  );
+  const property = result.rows.length === 1 ? result.rows[0] : undefined;
+  return property &&
+    (!expectedOwnerOrganizationId ||
+      property.ownerOrganizationId === expectedOwnerOrganizationId.toLowerCase())
+    ? property
+    : null;
+}
+
+export async function readPlatformAdminPropertyHero(
+  pool: CommandPool,
+  propertyId: string,
+): Promise<PlatformAdminPropertyHeroRead | null> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<{
+      propertyId: string;
+      profileRevision: string | number;
+      mediaObjectId: string | null;
+      url: string | null;
+    }>(
+      `SELECT property.id::text AS "propertyId",
+              property.profile_revision AS "profileRevision",
+              media_object.id::text AS "mediaObjectId",
+              variant.public_cdn_url AS url
+       FROM hotel_catalog.properties property
+       JOIN identity.organization_resource_links owner
+         ON owner.product = 'hotel_catalog'
+        AND owner.resource_type = 'property'
+        AND owner.resource_id = property.id::text
+        AND owner.relationship = 'owner'
+        AND owner.status = 'active'
+       JOIN identity.organizations organization
+         ON organization.id = owner.organization_id
+        AND organization.kind = 'hotel_group'
+        AND organization.status = 'active'
+       LEFT JOIN hotel_catalog.property_media assignment
+         ON assignment.property_id = property.id
+        AND assignment.media_type = 'hero_image'
+        AND assignment.source_system = 'platform'
+        AND assignment.public_approved = TRUE
+       LEFT JOIN platform.media_objects media_object
+         ON media_object.id = assignment.platform_media_object_id
+        AND media_object.owner_organization_id = owner.organization_id
+        AND media_object.property_id = property.id
+        AND media_object.purpose = 'property.hero_image'
+        AND media_object.visibility = 'public'
+        AND media_object.public_approved = TRUE
+        AND media_object.lifecycle_status = 'active'
+        AND media_object.storage_kind = 'vayada_managed'
+       LEFT JOIN platform.media_variants variant
+         ON variant.media_object_id = media_object.id
+        AND variant.variant_name = 'original_safe'
+        AND variant.visibility = 'public'
+       WHERE property.id = $1::uuid
+         AND property.lifecycle_status <> 'retired'
+       ORDER BY owner.organization_id, assignment.id, variant.id`,
+      [propertyId],
+    );
+    const row = result.rows.length === 1 ? result.rows[0] : undefined;
+    if (!row) return null;
+    return {
+      propertyId: row.propertyId,
+      profileRevision: positiveInteger(row.profileRevision),
+      hero:
+        row.mediaObjectId && row.url ? { mediaObjectId: row.mediaObjectId, url: row.url } : null,
+    };
+  } finally {
+    client.release();
+  }
 }
 
 export async function resolveMedia(
@@ -1379,6 +1491,12 @@ export async function resolveMedia(
   const byId = new Map(result.rows.map((row) => [row.mediaObjectId, row]));
   const unreadable = requestedIds.filter((id) => !byId.has(id));
   if (unreadable.length) return mediaFailure("media_not_found", unreadable);
+  if (command.platformAdminHero) {
+    const cover = command.assignments.find(({ role }) => role === "cover");
+    if (cover && byId.get(cover.mediaObjectId)?.purpose !== "property.hero_image") {
+      return mediaFailure("media_not_found", [cover.mediaObjectId]);
+    }
+  }
   const ready = requestedIds.map((id) => toReadyMedia(byId.get(id)!, serving));
   const notReady = ready.flatMap((media, index) => (media ? [] : [requestedIds[index]!]));
   if (notReady.length) return mediaFailure("media_not_ready", notReady);
@@ -1625,7 +1743,7 @@ export async function stageAssignments(
   command: PublicationCommand,
   publicationJobId: string,
 ): Promise<void> {
-  const affectedTypes = command.operation === "logo" ? ["logo"] : ["hero_image", "gallery_image"];
+  const affectedTypes = affectedMediaTypes(command);
   await client.query(
     `DELETE FROM hotel_catalog.property_media
      WHERE property_id = $1::uuid
@@ -1689,7 +1807,7 @@ export async function replaceAssignments(
   command: PublicationCommand,
   readyMedia: readonly ReadyMedia[],
 ): Promise<void> {
-  const affectedTypes = command.operation === "logo" ? ["logo"] : ["hero_image", "gallery_image"];
+  const affectedTypes = affectedMediaTypes(command);
   await client.query(
     `DELETE FROM hotel_catalog.property_media
      WHERE property_id = $1::uuid
@@ -1724,6 +1842,11 @@ export async function replaceAssignments(
      )`,
     [command.propertyId, JSON.stringify(payload)],
   );
+}
+
+function affectedMediaTypes(command: PublicationCommand): string[] {
+  if (command.operation === "logo") return ["logo"];
+  return command.platformAdminHero ? ["hero_image"] : ["hero_image", "gallery_image"];
 }
 
 export async function loadAssignments(

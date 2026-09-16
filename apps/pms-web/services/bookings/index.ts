@@ -3,6 +3,15 @@ import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsProper
 import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { CheckinStepType } from "@/services/settings";
 
+export type NoShowReport = {
+  eligible: boolean;
+  reason: string | null;
+  localNoShow: boolean;
+  status: "not_reported" | "pending" | "submitted" | "action_required";
+  retryable: boolean;
+  waivedFees: boolean | null;
+};
+
 export const HIDDEN_GUEST_CONTACT = "Hidden until you accept";
 
 export interface AssignedRoom {
@@ -35,6 +44,7 @@ export interface BookingStay {
 }
 
 export interface Booking {
+  mealDescription?: string | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -104,6 +114,12 @@ export interface Booking {
   addonTotal: number;
   addonQuantities: Record<string, number>;
   addonDates: Record<string, string[]>;
+  addonSelections?: Array<{
+    selectionId: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;
   guestWithdrawn: boolean;
@@ -297,7 +313,12 @@ type PmsOperationalReservation = {
     countryCodeRaw?: string | null;
     countryCodeReviewRequired?: boolean;
   };
-  addOns?: Array<{ addonId: string; name: string; quantity: number }>;
+  addOns?: Array<{
+    selectionId?: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   assignments: Array<{
     assignmentId?: string | null;
     roomTypeId: string;
@@ -315,7 +336,15 @@ type PmsOperationalReservation = {
   }>;
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
+  mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
+  roomLines?: Array<{
+    roomTypeId: string;
+    roomName: string;
+    roomCount: number;
+    guests: Array<{ adults: number; children: number }>;
+    rateSummary: Record<string, unknown>;
+  }>;
   roomCount?: number;
   pricing?: { totalAmount: PmsOperationsMoney; balanceAmount: PmsOperationsMoney };
   payment?: {
@@ -484,7 +513,16 @@ export type BookingAdditionalGuestPayload = Partial<
   >
 >;
 
+export interface AirbnbChangeRequestState {
+  provider: "airbnb";
+  state: "pending" | "queued" | "unknown" | "awaiting_confirmation" | "applied" | "declined" | "withdrawn" | "unavailable";
+  allowedActions: Array<"accept" | "decline">;
+  refreshAction: "accept" | "decline" | null;
+  oldTotal: number | null; newTotal: number | null; priceDifference: number | null; currency: string | null;
+  oldAdults: number | null; oldChildren: number | null; requestedAdults: number | null; requestedChildren: number | null;
+}
 export interface BookingChangeRequest {
+  providerRequest?: AirbnbChangeRequestState;
   id: string;
   bookingId: string;
   status: "pending" | "approved" | "declined" | "cancelled";
@@ -555,6 +593,24 @@ export interface CheckoutRecord {
 }
 
 export const bookingsService = {
+  resendConfirmation: async (id: string, idempotencyKey: string) => {
+    const endpoint = await reservationEndpoint(id, "/confirmation-email");
+    const { jobId } = await pmsOperationsClient.post<{ jobId: string }>(
+      endpoint,
+      { idempotencyKey },
+      pmsOperationsRequestOptions,
+    );
+    for (let attempt = 0; attempt < 150; attempt++) {
+      const { status } = await pmsOperationsClient.get<{ status: string }>(
+        `${endpoint}/${encodeURIComponent(jobId)}`,
+        pmsOperationsRequestOptions,
+      );
+      if (status === "succeeded") return true;
+      if (!["pending", "running"].includes(status)) return false;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error("Email delivery is still processing. Retry to check the same request.");
+  },
   list: async (params?: BookingListParams) => {
     return pmsOperationsBookingsReadService.list(params);
   },
@@ -688,6 +744,7 @@ export const bookingsService = {
     inspectionResults: CheckoutInspectionResult[],
     pendingFlags: CheckoutInspectionResult[],
     checkoutNotes?: string,
+    fulfilledAddonSelectionIds: string[] = [],
   ) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
       await reservationEndpoint(id, "/check-out"),
@@ -697,6 +754,7 @@ export const bookingsService = {
         pendingFlags: pendingFlags.map((flag) => flag.stepId),
         chargesSettled: [],
         checkoutNotes,
+        fulfilledAddonSelectionIds,
       },
       pmsOperationsRequestOptions,
     );
@@ -940,8 +998,44 @@ export const bookingsService = {
     );
   },
 
-  cancelWithReason: (_id: string, _reason: string) =>
-    unsupportedPmsNextStackFeature<Booking>("Booking cancellation"),
+  previewHostAction: async (id: string, request: HostBookingActionRequest) =>
+    pmsOperationsClient.post<HostBookingActionPreview>(
+      await reservationEndpoint(id, "/host-actions/preview"),
+      request,
+      pmsOperationsRequestOptions,
+    ),
+  applyHostAction: async (id: string, previewId: string, idempotencyKey: string) =>
+    pmsOperationsClient.post<{ bookingId: string; lifecycleStatus: string }>(
+      await reservationEndpoint(id, "/host-actions/apply"),
+      { previewId, idempotencyKey },
+      pmsOperationsRequestOptions,
+    ),
+
+  cancelWithReason: async (id: string, reason: string, guestMessage?: string) => {
+    await pmsOperationsClient.post<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/cancel"),
+      {
+        ...commandMetadata("pms.cancel"),
+        reason,
+        guestMessage,
+        accountingDate: null,
+        retainedCharges: [],
+      },
+      pmsOperationsRequestOptions,
+    );
+  },
+
+  getNoShowReport: async (id: string) =>
+    pmsOperationsClient.get<NoShowReport>(
+      await reservationEndpoint(id, "/no-show-report"),
+      pmsOperationsRequestOptions,
+    ),
+  reportNoShow: async (id: string, waivedFees: boolean, retry: boolean) =>
+    pmsOperationsClient.post<NoShowReport>(
+      await reservationEndpoint(id, "/no-show-report"),
+      { waivedFees, retry },
+      pmsOperationsRequestOptions,
+    ),
 
   markNoShow: async (id: string) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
@@ -1043,7 +1137,10 @@ function toBooking(
     id: reservation.guestBookingId,
     bookingReference: reservation.bookingReference,
     roomTypeId,
-    roomName: roomType?.name || reservation.bookedOffer?.roomName || "",
+    mealDescription: reservation.mealDescription,
+    roomName: reservation.roomLines?.length
+      ? reservation.roomLines.map((line) => `${line.roomCount} × ${line.roomName}`).join(" + ")
+      : roomType?.name || reservation.bookedOffer?.roomName || "",
     roomMaxOccupancy: maxOccupancy(roomType),
     totalRoomCapacity,
     guestFirstName,
@@ -1082,27 +1179,44 @@ function toBooking(
       position: Math.max(assignment.position - 1, 0),
       roomTypeId: assignment.roomTypeId,
     })),
-    stays: reservation.assignments.map((assignment) => {
-      const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
-      const ratePlan = assignmentRoomType?.ratePlans?.find(
-        (plan) => plan.ratePlanId === assignment.ratePlanId,
-      );
-      return {
-        position: Math.max(assignment.position - 1, 0),
-        roomName: assignmentRoomType?.name ?? "",
-        ratePlanName: ratePlan?.name ?? null,
-        roomNumber: assignment.roomNumber,
-        checkIn: assignment.stay?.checkIn ?? null,
-        checkOut: assignment.stay?.checkOut ?? null,
-        adults: assignment.stay?.adults ?? null,
-        children: assignment.stay?.children ?? null,
-        nightly: (assignment.nightly ?? []).map((night) => ({
-          appliedAmount: night.applied ? moneyAmount(night.applied) : null,
-          currency: night.applied?.currency ?? null,
-          evidenceQuality: night.evidenceQuality,
-        })),
-      };
-    }),
+    stays:
+      !reservation.assignments.length && reservation.roomLines?.length
+        ? reservation.roomLines
+            .flatMap((line) =>
+              line.guests.map((guest) => ({
+                roomName: line.roomName,
+                ratePlanName:
+                  typeof line.rateSummary["name"] === "string" ? line.rateSummary["name"] : null,
+                roomNumber: null,
+                checkIn: reservation.stay.checkIn,
+                checkOut: reservation.stay.checkOut,
+                adults: guest.adults,
+                children: guest.children,
+                nightly: [],
+              })),
+            )
+            .map((stay, position) => ({ ...stay, position }))
+        : reservation.assignments.map((assignment) => {
+            const assignmentRoomType = roomTypesById.get(assignment.roomTypeId);
+            const ratePlan = assignmentRoomType?.ratePlans?.find(
+              (plan) => plan.ratePlanId === assignment.ratePlanId,
+            );
+            return {
+              position: Math.max(assignment.position - 1, 0),
+              roomName: assignmentRoomType?.name ?? "",
+              ratePlanName: ratePlan?.name ?? null,
+              roomNumber: assignment.roomNumber,
+              checkIn: assignment.stay?.checkIn ?? null,
+              checkOut: assignment.stay?.checkOut ?? null,
+              adults: assignment.stay?.adults ?? null,
+              children: assignment.stay?.children ?? null,
+              nightly: (assignment.nightly ?? []).map((night) => ({
+                appliedAmount: night.applied ? moneyAmount(night.applied) : null,
+                currency: night.applied?.currency ?? null,
+                evidenceQuality: night.evidenceQuality,
+              })),
+            };
+          }),
     channel:
       reservation.source === "manual"
         ? "manual"
@@ -1123,12 +1237,28 @@ function toBooking(
     addonTotal: 0,
     addonQuantities: Object.fromEntries(addOns.map(({ addonId, quantity }) => [addonId, quantity])),
     addonDates: {},
+    addonSelections: toAddonSelections(addOns),
     estimatedArrivalTime: null,
     numberOfGuests: reservation.stay.adults + reservation.stay.children,
     guestWithdrawn: false,
     createdAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
     updatedAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
   };
+}
+
+function toAddonSelections(addOns: NonNullable<PmsOperationalReservation["addOns"]>) {
+  const selections = new Map<string, NonNullable<Booking["addonSelections"]>[number]>();
+  for (const addOn of addOns) {
+    if (!addOn.selectionId) continue;
+    const current = selections.get(addOn.selectionId);
+    selections.set(addOn.selectionId, {
+      selectionId: addOn.selectionId,
+      addonId: current?.addonId ?? addOn.addonId,
+      name: current ? `${current.name}, ${addOn.name}` : addOn.name,
+      quantity: (current?.quantity ?? 0) + addOn.quantity,
+    });
+  }
+  return Array.from(selections.values());
 }
 
 function toPaymentBreakdown(
@@ -1227,3 +1357,39 @@ function toBookingStatus(status: string): Booking["status"] {
       return "confirmed";
   }
 }
+
+export type HostBookingActionRequest = {
+  action: "edit_dates" | "reject" | "cancel";
+  reason: string;
+  guestMessage?: string;
+  checkIn?: string;
+  checkOut?: string;
+};
+export type HostBookingActionPreview = {
+  previewId: string;
+  expiresAt: string;
+  impact: {
+    checkIn: string;
+    checkOut: string;
+    totalAmount: string;
+    newTotalAmount: string;
+    currency: string;
+    inventory: "release" | "replace";
+    payment: "no_payment_received" | "authorization_void";
+    cancellationPolicy: {
+      type: "non_refundable" | "flexible" | "mixed_room";
+      lines?: {
+        roomTypeId: string;
+        roomName: string;
+        roomCount: number;
+        type: "non_refundable" | "flexible";
+        previousDeadline: string | null;
+        newDeadline: string | null;
+        timezone: string;
+      }[];
+      previousDeadline: string | null;
+      newDeadline: string | null;
+      timezone: string;
+    } | null;
+  };
+};

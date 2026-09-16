@@ -25,6 +25,7 @@ import type {
 } from "./platform/authSessionHandoffs.js";
 import type { ApprovedPublicProfileImageRepository } from "./routes/platformMedia.js";
 import type { HotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
+import type { AdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
 
 const user: IdentityUser = {
   userId: "user_platform_admin",
@@ -90,6 +91,127 @@ describe("AuthKit session routes", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("binds administrator transfer reauthentication to the live first-party PMS session", async () => {
+    const hotelSession: AuthKitSession = {
+      ...session,
+      sealedSession: "hotel-sealed-session",
+      organizationId: "org_workos_hotel",
+      user: { ...session.user, id: "user_workos_hotel", email: "owner@example.test" },
+    };
+    const adminTransfer = {
+      start: vi.fn(async () => ({
+        outcome: "prepared" as const,
+        authorizationUrl: "https://auth.workos.test/reauthenticate",
+        flowCookie: "encrypted-flow",
+      })),
+      completeReauthentication: vi.fn(async () => ({ proofId: "proof-id", binding: {} })),
+      transfer: vi.fn(async () => ({ outcome: "transferred" as const })),
+    } as unknown as AdminTransferCoordinator;
+    app = buildAuthSessionApp({
+      adminTransfer,
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return hotelSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(hotelSession),
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel",
+          workosOrgId: "org_workos_hotel",
+          name: "Hotel",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_owner",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_owner",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            organizationId: "org_hotel",
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: "property",
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+          firstPartySession: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+    const baseCookie =
+      "vayada_fp_workos_session=hotel-sealed-session; vayada_fp_auth_csrf=csrf; vayada_fp_pms_selected_org=org_workos_hotel";
+    const denied = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/start",
+      headers: { origin: "https://pms.localhost", cookie: baseCookie },
+      payload: { transfer: { complete: true } },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(adminTransfer.start).not.toHaveBeenCalled();
+    const start = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/start",
+      headers: { origin: "https://pms.localhost", "x-vayada-csrf": "csrf", cookie: baseCookie },
+      payload: { transfer: { complete: true } },
+    });
+    expect(start.statusCode).toBe(200);
+    expect(start.json()).toEqual({ authorizationUrl: "https://auth.workos.test/reauthenticate" });
+    const flowCookie = cookieHeader(start, "vayada_fp_admin_transfer_flow");
+    expect(start.headers["set-cookie"]?.toString()).toContain("Path=/auth/admin-transfer/callback");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: "/auth/admin-transfer/callback?state=state&code=code",
+      headers: { cookie: `${baseCookie}; ${flowCookie}` },
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe(
+      "https://pms.localhost/settings/team?adminTransfer=verified",
+    );
+    const proofCookie = cookieHeader(callback, "vayada_fp_admin_transfer_proof");
+    expect(callback.headers["set-cookie"]?.toString()).toContain(
+      "Path=/auth/admin-transfer/complete",
+    );
+
+    const complete = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/complete",
+      headers: {
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf",
+        cookie: `${baseCookie}; ${proofCookie}`,
+      },
+      payload: { transfer: { complete: true } },
+    });
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json()).toEqual({ outcome: "transferred" });
+    expect(complete.headers["set-cookie"]).toBeUndefined();
+    expect(adminTransfer.start).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_hotel", sessionId: "session_workos" }),
+      { complete: true },
+      "f.maliqi@vayada.com",
+    );
+    expect(adminTransfer.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: "user_platform_admin" }),
+      { complete: true },
+      "proof-id",
+    );
   });
 
   it("logs in with email and password through WorkOS and creates the AuthKit browser session", async () => {
@@ -293,6 +415,82 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({ state: "organization_selection_required" });
     expect(authenticateWithOrganizationSelection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "allowed",
+    "unoffered",
+    "inactive",
+    "wrong_surface",
+    "mismatched_session",
+    "direct_mismatched_session",
+  ])("guards requested Marketplace password workspace: %s", async (scenario) => {
+    const select = vi.fn(async () => ({
+      ...session,
+      organizationId: scenario === "mismatched_session" ? "org_other" : "org_hotel",
+    }));
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      surfacePolicies: {
+        "marketplace-web": {
+          requiredOrganizationKind: "hotel_group",
+          firstPartySession: true,
+          publicOrigin: "https://marketplace.localhost",
+        },
+      },
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async (id) => ({
+          organizationId: id,
+          workosOrgId: id,
+          name: id,
+          kind: scenario === "wrong_surface" ? "platform" : "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () =>
+          scenario === "inactive"
+            ? null
+            : {
+                membershipId: "membership",
+                workosMembershipId: "om_membership",
+                status: "active",
+                roleKey: "hotel_owner",
+                workosRoleSlugs: [],
+              },
+      }),
+      authKitClient: createAuthKitClient({
+        async authenticateWithPassword() {
+          if (scenario === "direct_mismatched_session")
+            return { ...session, organizationId: "org_other" };
+          throw {
+            code: "organization_selection_required",
+            pending_authentication_token: "pending-secret",
+            organizations: [
+              { id: "org_hotel", name: "Hotel" },
+              { id: "org_other", name: "Other" },
+            ],
+          };
+        },
+        authenticateWithOrganizationSelection: select,
+      }),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/login",
+      headers: { origin: "https://marketplace.localhost" },
+      payload: {
+        email: "owner@example.test",
+        password: "password",
+        surface: "marketplace-web",
+        organizationId: scenario === "unoffered" ? "org_unoffered" : "org_hotel",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(scenario === "allowed" ? 200 : 403);
+    if (scenario === "unoffered") expect(select).not.toHaveBeenCalled();
+    if (scenario === "allowed") {
+      expect(response.json()).toMatchObject({ workosOrganizationId: "org_hotel" });
+      expect(response.headers["set-cookie"]).toBeDefined();
+      expect(response.body).not.toContain("pending-secret");
+    }
   });
 
   it("starts Google OAuth with a signed callback state", async () => {
@@ -801,6 +999,237 @@ describe("AuthKit session routes", () => {
     });
     expect(restored.statusCode).toBe(200);
     expect(restored.json().csrfToken).toEqual(expect.any(String));
+  });
+
+  it.each([
+    { surface: "pms-web", kind: "hotel_group", selected: "org_hotel" },
+    { surface: "booking-admin", kind: "hotel_group", selected: "org_hotel" },
+    { surface: "platform-admin", kind: "platform", selected: "org_platform" },
+  ] as const)(
+    "selects only the organization appropriate for Google $surface login",
+    async ({ surface, kind, selected }) => {
+      let state = "";
+      const select = vi.fn(async (input: { organizationId: string }) => ({
+        ...session,
+        organizationId: input.organizationId,
+      }));
+      app = buildAuthSessionApp({
+        allowedOrigins: ["https://admin.localhost"],
+        surfacePolicies: { [surface]: { requiredOrganizationKind: kind } },
+        identityRepository: createIdentityRepository({
+          organizationByWorkosOrgId: async (id) => ({
+            organizationId: id,
+            workosOrgId: id,
+            name: id,
+            kind: id === "org_hotel" ? "hotel_group" : "platform",
+            status: "active",
+          }),
+          activeMembership: async () => ({
+            membershipId: "membership",
+            status: "active",
+            roleKey: kind === "hotel_group" ? "hotel_owner" : "platform_admin",
+            workosMembershipId: "om_member",
+            workosRoleSlugs: [],
+          }),
+        }),
+        authKitClient: createAuthKitClient({
+          getAuthorizationUrl(input) {
+            state = input.state;
+            return "https://auth.workos.test/google";
+          },
+          async authenticateWithCode() {
+            throw {
+              code: "organization_selection_required",
+              rawData: {
+                pending_authentication_token: "pending-google-secret",
+                organizations: [{ id: "org_platform" }, { id: "org_hotel" }, { id: "org_hotel" }],
+              },
+            };
+          },
+          authenticateWithOrganizationSelection: select,
+        }),
+      });
+      const start = await app.inject({
+        method: "GET",
+        url: `/auth/oauth/google/start?surface=${surface}&flow=login&return_to=https%3A%2F%2Fadmin.localhost%2Flogin&error_return_to=https%3A%2F%2Fadmin.localhost%2Flogin`,
+        headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+      });
+      const response = await app.inject({
+        method: "GET",
+        url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
+        headers: { cookie: cookieHeader(start, "vayada_oauth_state"), "user-agent": "test-agent" },
+      });
+      expect(select).toHaveBeenCalledExactlyOnceWith({
+        organizationId: selected,
+        pendingAuthenticationToken: "pending-google-secret",
+        ipAddress: "127.0.0.1",
+        userAgent: "test-agent",
+      });
+      expect(response.statusCode).toBe(302);
+      expect(response.headers.location).toBe("https://admin.localhost/login");
+      expect(cookieHeader(response, "vayada_workos_session")).toContain("sealed-session");
+      expect(JSON.stringify(response.headers)).not.toContain("pending-google-secret");
+    },
+  );
+
+  it.each([
+    { reason: "no hotel", offered: ["org_platform"], selectCalled: false },
+    { reason: "two hotels", offered: ["org_hotel", "org_hotel_other"], selectCalled: false },
+    { reason: "unknown organization", offered: ["org_unknown"], selectCalled: false },
+    {
+      reason: "inactive organization",
+      offered: ["org_hotel"],
+      inactiveOrganization: true,
+      selectCalled: false,
+    },
+    {
+      reason: "missing pending token",
+      offered: ["org_hotel"],
+      missingToken: true,
+      selectCalled: false,
+    },
+    {
+      reason: "no local membership",
+      offered: ["org_hotel"],
+      missingMembership: true,
+      selectCalled: true,
+    },
+    { reason: "inactive user", offered: ["org_hotel"], inactiveUser: true, selectCalled: true },
+    {
+      reason: "wrong returned organization",
+      offered: ["org_hotel"],
+      wrongSession: true,
+      selectCalled: true,
+    },
+    {
+      reason: "provider requires MFA",
+      offered: ["org_hotel"],
+      providerFailure: true,
+      selectCalled: true,
+    },
+  ])("denies Google organization continuation for $reason", async (scenario) => {
+    let state = "";
+    const select = vi.fn(async () => {
+      if (scenario.providerFailure)
+        throw { code: "mfa_challenge", rawData: { pending_authentication_token: "mfa-secret" } };
+      return { ...session, organizationId: scenario.wrongSession ? "org_platform" : "org_hotel" };
+    });
+    app = buildAuthSessionApp({
+      surfacePolicies: { "pms-web": { requiredOrganizationKind: "hotel_group" } },
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          ...user,
+          status: scenario.inactiveUser ? "suspended" : "active",
+        }),
+        organizationByWorkosOrgId: async (id) =>
+          id === "org_unknown"
+            ? null
+            : {
+                organizationId: id,
+                workosOrgId: id,
+                name: id,
+                kind: id === "org_platform" ? "platform" : "hotel_group",
+                status: scenario.inactiveOrganization ? "suspended" : "active",
+              },
+        activeMembership: async () =>
+          scenario.missingMembership
+            ? null
+            : {
+                membershipId: "membership",
+                status: "active",
+                roleKey: "hotel_owner",
+                workosMembershipId: "om_member",
+                workosRoleSlugs: [],
+              },
+      }),
+      authKitClient: createAuthKitClient({
+        getAuthorizationUrl(input) {
+          state = input.state;
+          return "https://auth.workos.test/google";
+        },
+        async authenticateWithCode() {
+          throw {
+            code: "organization_selection_required",
+            rawData: {
+              pending_authentication_token: scenario.missingToken
+                ? undefined
+                : "pending-google-secret",
+              organizations: scenario.offered.map((id) => ({ id })),
+            },
+          };
+        },
+        authenticateWithOrganizationSelection: select,
+      }),
+    });
+    const start = await app.inject({
+      method: "GET",
+      url: "/auth/oauth/google/start?surface=pms-web&flow=login&return_to=https%3A%2F%2Fadmin.localhost%2Flogin&error_return_to=https%3A%2F%2Fadmin.localhost%2Flogin",
+      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/oauth/google/callback?code=google-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: cookieHeader(start, "vayada_oauth_state") },
+    });
+    expect(select).toHaveBeenCalledTimes(scenario.selectCalled ? 1 : 0);
+    expect(response.statusCode).toBe(302);
+    expect(new URL(response.headers.location!).searchParams.has("auth_error")).toBe(true);
+    const headers = JSON.stringify(response.headers);
+    expect(headers).not.toContain("vayada_workos_session=");
+    expect(headers).not.toContain("pending-google-secret");
+    expect(headers).not.toContain("mfa-secret");
+  });
+
+  it("logs sanitized OAuth diagnostics and preserves the failure redirect", async () => {
+    const warn = vi.fn();
+    let state = "";
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      surfacePolicies: {
+        "marketplace-web": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+      },
+      authKitClient: createAuthKitClient({
+        getAuthorizationUrl(input) {
+          state = input.state;
+          return "https://auth.workos.test/google";
+        },
+        async authenticateWithCode() {
+          throw {
+            error: "invalid_grant",
+            status: 400,
+            requestID: "req_oauth_123",
+            errorDescription: "private@example.test secret-token",
+            rawData: { code: "secret-code" },
+          };
+        },
+      }),
+    });
+    app.addHook("onRequest", async (request) => {
+      request.log.warn = warn;
+    });
+    const start = await app.inject({
+      method: "GET",
+      url: "/auth/oauth/google/start?surface=marketplace-web&flow=signup&return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin&error_return_to=https%3A%2F%2Fmarketplace.localhost%2Fsignup",
+      headers: { host: "api.localhost", "x-forwarded-proto": "https" },
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/auth/oauth/google/callback?code=secret-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: cookieHeader(start, "vayada_oauth_state") },
+    });
+    expect(response.statusCode).toBe(302);
+    const target = new URL(response.headers.location!);
+    expect(target.origin + target.pathname).toBe("https://marketplace.localhost/signup");
+    expect(target.searchParams.get("auth_error")).toBe("Google sign-in failed. Please try again.");
+    expect(warn.mock.calls).toEqual([
+      [
+        {
+          workos: { code: "invalid_grant", status: 400, requestId: "req_oauth_123" },
+          surface: "marketplace-web",
+        },
+        "WorkOS Google code exchange failed",
+      ],
+    ]);
   });
 
   it("signs up a Google account and redirects to onboarding without product provisioning", async () => {
@@ -2161,6 +2590,58 @@ describe("AuthKit session routes", () => {
     expect(workosCalls).toEqual(["user", "password", "organization", "membership", "refresh"]);
   });
 
+  it.each([
+    [
+      "password_strength_error",
+      "This password isn't strong enough. Try several unrelated words or generate a unique password with a password manager.",
+    ],
+    ["unknown_provider_error", "Signup failed. Please check your details and try again."],
+  ])("logs safe signup diagnostics and maps %s to an actionable message", async (code, message) => {
+    const warn = vi.fn();
+    app = buildAuthSessionApp({
+      surfacePolicies: {
+        "marketplace-web": { requiredOrganizationKind: ["creator_workspace", "hotel_group"] },
+      },
+      authKitClient: createAuthKitClient({
+        async createUser() {
+          throw Object.assign(new Error("secret-password private@example.test"), {
+            code,
+            status: 422,
+            requestID: "req_workos_123",
+            rawData: { password: "secret-password", token: "secret-token" },
+            headers: { authorization: "Bearer secret-token" },
+          });
+        },
+      }),
+    });
+    app.addHook("onRequest", async (request) => {
+      request.log.warn = warn;
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/password/signup",
+      payload: {
+        email: "private@example.test",
+        password: "secret-password",
+        surface: "marketplace-web",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(400);
+    expect(response.json()).toEqual({
+      state: "auth_failed",
+      message,
+    });
+    expect(warn.mock.calls).toEqual([
+      [
+        {
+          workos: { code, status: 422, requestId: "req_workos_123" },
+          surface: "marketplace-web",
+        },
+        "WorkOS password signup failed",
+      ],
+    ]);
+  });
+
   it("rejects custom signup when the WorkOS email already exists", async () => {
     let authenticateCalled = false;
     let organizationCalled = false;
@@ -2200,7 +2681,7 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({
       state: "auth_failed",
-      message: "This email already has a Vayada account. Sign in instead.",
+      message: "This email already has a vayada account. Sign in instead.",
     });
     expect(authenticateCalled).toBe(false);
     expect(organizationCalled).toBe(false);
@@ -5091,6 +5572,7 @@ function buildAuthSessionApp(
     hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
     handoffRepository?: AuthSessionHandoffRepository;
     propertyAccessRepository?: PropertyAccessRepository;
+    adminTransfer?: AdminTransferCoordinator;
   } = {},
 ) {
   const compatibilityCallbackOrigin =
@@ -5132,6 +5614,7 @@ function buildAuthSessionApp(
           };
         },
       },
+      adminTransfer: options.adminTransfer,
     },
   });
 }

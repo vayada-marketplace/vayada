@@ -38,6 +38,47 @@ describe("protected Booking guest-policy routes", () => {
     app = null;
   });
 
+  it("rejects incomplete and reversed arrival windows before any policy write", async () => {
+    const application = routeApplication(
+      revisionFixture(),
+      compositionFixture(),
+      firstVisitReadiness(),
+      [],
+    );
+    app = await routeApp(application);
+    for (const change of [
+      { checkInUntil: "14:00" },
+      { checkOutFrom: "12:00" },
+      { checkInTime: "" },
+    ]) {
+      const response = await put(app, {
+        expectedRevision: 1,
+        expectedSourceFingerprint: compositionFixture().bundle.sourceFingerprint,
+        choices: { ...choices, ...change },
+        confirmPolicyBundle: true,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({ code: "invalid_request", message: expect.any(String) });
+    }
+    expect(application.upsertGuestPolicy).not.toHaveBeenCalled();
+  });
+
+  it("accepts midnight as the explicit end-of-arrival-day check-in deadline", async () => {
+    const application = routeApplication(
+      revisionFixture(),
+      compositionFixture(),
+      firstVisitReadiness(),
+      [],
+    );
+    app = await routeApp(application);
+    const midnightChoices = { ...choices, checkInUntil: "00:00" };
+
+    expect((await post(app, "/preview", { choices: midnightChoices })).statusCode).toBe(200);
+    expect(application.previewGuestPolicy).toHaveBeenCalledWith(
+      expect.objectContaining({ choices: midnightChoices }),
+    );
+  });
+
   it("mounts the protected production route only with its application", async () => {
     const disabled = buildApp({ logger: false });
     const path = `/api/booking/properties/${propertyId}/booking-guest-policy`;

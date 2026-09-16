@@ -1,3 +1,8 @@
+import {
+  ChannexMealSyncError,
+  reconcileChannexMeals,
+  type ChannexMeal,
+} from "./channexMealSync.js";
 import type {
   ChannexConnectedChannel,
   ChannexRatePlanMapping,
@@ -10,6 +15,10 @@ import type {
   ChannexManagementProviderFailure,
   ChannexManagementProviderSuccess,
 } from "../jobs/pmsChannexManagementWorker.js";
+import {
+  reconcileChannexInventoryRules,
+  type InventoryRulesPlan,
+} from "./channexInventoryRules.js";
 
 type ChannexRequest = {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -60,7 +69,18 @@ type ChannexRequest = {
 };
 
 export type ChannexManagementActionPlan = {
+  inventoryRules?: InventoryRulesPlan;
   requests: ChannexRequest[];
+  meals?: Array<{
+    ratePlanId: string;
+    channel: string;
+    mealType: ChannexMeal["mealType"];
+    externalRatePlanId?: string;
+    externalRoomTypeId?: string;
+  }>;
+  recoveryChannelId?: string;
+  verifyRecovery?: boolean;
+  recoveryScopeCovered?: boolean;
   externalPropertyId?: string;
   roomTypeMappings?: ChannexRoomTypeMapping[];
   ratePlanMappings?: ChannexRatePlanMapping[];
@@ -69,28 +89,103 @@ export type ChannexManagementActionPlan = {
 };
 
 export type ChannexManagementPlanPort = {
+  withPropertyLock?<T>(
+    job: ChannexManagementJob,
+    work: (preparePlan: () => Promise<ChannexManagementActionPlan>) => Promise<T>,
+  ): Promise<T>;
   plan(job: ChannexManagementJob): Promise<ChannexManagementActionPlan>;
 };
+
+export class ChannexAriMappingMissingError extends Error {
+  constructor() {
+    super("Future availability cannot sync: an active Channex room or rate mapping is missing.");
+  }
+}
 
 export function createChannexManagementProvider(config: {
   apiBaseUrl: string;
   apiKey: string;
   plans: ChannexManagementPlanPort;
   fetch?: typeof fetch;
+  canSyncAri?: boolean;
 }): ChannexManagementProvider {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
   const fetcher = config.fetch ?? fetch;
-  return {
-    async execute(job, input) {
+  const provider = {
+    async execute(
+      job: ChannexManagementJob,
+      input?: Parameters<ChannexManagementProvider["execute"]>[1],
+      preparedPlan?: () => Promise<ChannexManagementActionPlan>,
+    ): ReturnType<ChannexManagementProvider["execute"]> {
+      if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
+        return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
+      }
       let plan: ChannexManagementActionPlan;
       try {
-        plan = await config.plans.plan(job);
+        plan = await (preparedPlan ? preparedPlan() : config.plans.plan(job));
       } catch (error) {
-        return failure("invalid_state", error);
+        return failure(
+          error instanceof ChannexAriMappingMissingError ? "mapping_missing" : "invalid_state",
+          error,
+        );
+      }
+      if (plan.inventoryRules) {
+        try {
+          const currentChannels = await reconcileChannexInventoryRules(
+            plan.inventoryRules,
+            async (path, method, body) => {
+              await input?.onProgress?.();
+              const response = await fetcher(new URL(path, `${apiBaseUrl}/`), {
+                method,
+                headers: { "content-type": "application/json", "user-api-key": apiKey },
+                ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+                signal: AbortSignal.timeout(30_000),
+              });
+              if (!response.ok && !(method === "DELETE" && response.status === 404))
+                throw await responseFailure(
+                  response,
+                  response.headers.get("x-request-id") ?? undefined,
+                );
+              return response.status === 204 || response.status === 404 ? {} : response.json();
+            },
+          );
+          return {
+            ok: true,
+            externalPropertyId: plan.externalPropertyId,
+            channels: currentChannels
+              .map(channelFromProvider)
+              .filter((channel): channel is ChannexConnectedChannel => channel !== null),
+          };
+        } catch (error) {
+          if (error && typeof error === "object" && "ok" in error && error.ok === false)
+            return error as ChannexManagementProviderFailure;
+          return failure(isTimeout(error) ? "timeout" : "provider_unavailable", error);
+        }
+      }
+      if (plan.recoveryChannelId) {
+        await input?.onProgress?.();
+        const response = await fetcher(
+          new URL(`/api/v1/channels/${encodeURIComponent(plan.recoveryChannelId)}`, apiBaseUrl),
+          { headers: { "user-api-key": apiKey }, signal: AbortSignal.timeout(30_000) },
+        );
+        if (!response.ok) return responseFailure(response);
+        const body = (await response.json()) as { data?: Record<string, unknown> };
+        const channel = (body.data?.attributes ?? body.data) as Record<string, unknown> | undefined;
+        if (
+          !channel ||
+          channel.is_active !== true ||
+          !Array.isArray(channel.properties) ||
+          !channel.properties.includes(plan.externalPropertyId)
+        )
+          return failure(
+            "invalid_state",
+            new Error("Reconnect this channel in channel settings before retrying."),
+          );
       }
       let lastRequestId: string | undefined;
       let revisions: unknown[] = [];
+      let createdProperty: ChannexManagementProviderSuccess["createdProperty"];
       let externalPropertyId = plan.externalPropertyId;
       let connectionStatus: ChannexManagementProviderSuccess["connectionStatus"];
       let messagingAppInstalled: boolean | undefined;
@@ -120,6 +215,9 @@ export function createChannexManagementProvider(config: {
           await input?.onProgress?.();
           const response = await fetcher(requestUrl(apiBaseUrl, request), {
             method: request.method,
+            ...(request.method === "POST" && request.path === "/api/v1/properties"
+              ? { redirect: "manual" as const }
+              : {}),
             headers: {
               "content-type": "application/json",
               "user-api-key": apiKey,
@@ -137,8 +235,54 @@ export function createChannexManagementProvider(config: {
           ) {
             return await responseFailure(response, lastRequestId);
           }
+          if (
+            plan.verifyRecovery &&
+            response.status === 204 &&
+            ["/api/v1/availability", "/api/v1/restrictions"].includes(request.path)
+          )
+            return failure(
+              "provider_unavailable",
+              new Error("Channex returned no verification evidence."),
+            );
           if (response.status !== 204) {
             const responseBody = response.status === 404 ? undefined : await response.json();
+            if (
+              !plan.verifyRecovery &&
+              request.path === "/api/v1/restrictions" &&
+              hasAriWarnings(responseBody)
+            ) {
+              return {
+                ok: false,
+                code: "provider_rejected",
+                message: "Channex rejected one or more ARI values",
+                providerRequestId: lastRequestId,
+              };
+            }
+            if (
+              plan.verifyRecovery &&
+              ["/api/v1/availability", "/api/v1/restrictions"].includes(request.path)
+            ) {
+              const body = responseBody as { meta?: { warnings?: unknown[] } };
+              if (!body?.meta || !Array.isArray(body.meta.warnings) || hasAriWarnings(responseBody))
+                return failure(
+                  "invalid_payload",
+                  new Error(
+                    "Channex rejected part of the update. Review rate and availability settings.",
+                  ),
+                );
+              const verified = await verifyAriReadback(
+                fetcher,
+                apiBaseUrl,
+                apiKey,
+                request,
+                input?.onProgress,
+              );
+              if (!verified)
+                return failure(
+                  "provider_unavailable",
+                  new Error("Channex has not confirmed the submitted values yet."),
+                );
+            }
             if (request.path === "/api/v1/booking_revisions/feed") {
               revisions = dataList(responseBody);
             }
@@ -151,6 +295,25 @@ export function createChannexManagementProvider(config: {
             if (request.capture?.kind === "property") {
               externalPropertyId = externalId;
               connectionStatus = "connected";
+              const environment =
+                new URL(apiBaseUrl).href === "https://staging.channex.io/"
+                  ? "staging"
+                  : new URL(apiBaseUrl).href === "https://app.channex.io/"
+                    ? "production"
+                    : null;
+              if (
+                job.input.operationType === "enable" &&
+                request.method === "POST" &&
+                request.path === "/api/v1/properties" &&
+                response.status === 201 &&
+                environment &&
+                externalId &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                  externalId,
+                )
+              ) {
+                createdProperty = { environment, externalPropertyId: externalId.toLowerCase() };
+              }
             }
             if (request.capture?.kind === "property_list") {
               externalPropertyId = findByTitle(responseBody, request.capture.title)?.id;
@@ -214,6 +377,7 @@ export function createChannexManagementProvider(config: {
           await plan.checkpoint?.(
             progress({
               lastRequestId,
+              createdProperty,
               externalPropertyId,
               connectionStatus,
               messagingAppInstalled,
@@ -226,6 +390,38 @@ export function createChannexManagementProvider(config: {
           return failure(isTimeout(error) ? "timeout" : "provider_unavailable", error);
         }
       }
+      try {
+        const meals = (plan.meals ?? []).map((meal) => {
+          const mapping = ratePlanMappings.get(rateKey(meal));
+          const externalRatePlanId = meal.externalRatePlanId ?? mapping?.externalRatePlanId;
+          const externalRoomTypeId = meal.externalRoomTypeId ?? mapping?.externalRoomTypeId;
+          if (!externalRatePlanId || !externalRoomTypeId)
+            throw new ChannexMealSyncError("Missing Channex meal rate mapping");
+          return { externalRatePlanId, externalRoomTypeId, mealType: meal.mealType };
+        });
+        await reconcileChannexMeals(externalPropertyId!, meals, async (method, path, body) => {
+          await input?.onProgress?.();
+          const response = await fetcher(new URL(path, `${apiBaseUrl}/`), {
+            method,
+            headers: { "content-type": "application/json", "user-api-key": apiKey },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: AbortSignal.timeout(30_000),
+          });
+          lastRequestId = response.headers.get("x-request-id") ?? lastRequestId;
+          if (!response.ok) throw response;
+          return response.status === 204 ? undefined : response.json();
+        });
+      } catch (error) {
+        if (error instanceof Response) return responseFailure(error, lastRequestId);
+        return failure(
+          error instanceof ChannexMealSyncError
+            ? "invalid_state"
+            : isTimeout(error)
+              ? "timeout"
+              : "provider_unavailable",
+          error,
+        );
+      }
       if (plan.bookingRevisionHandoff) {
         try {
           await plan.bookingRevisionHandoff(revisions);
@@ -233,16 +429,28 @@ export function createChannexManagementProvider(config: {
           return failure("provider_unavailable", error);
         }
       }
-      return progress({
-        lastRequestId,
-        externalPropertyId,
-        connectionStatus,
-        messagingAppInstalled,
-        roomTypeMappings,
-        ratePlanMappings,
-        channels,
-      });
+      return {
+        ...progress({
+          lastRequestId,
+          createdProperty,
+          externalPropertyId,
+          connectionStatus,
+          messagingAppInstalled,
+          roomTypeMappings,
+          ratePlanMappings,
+          channels,
+        }),
+        ...(plan.verifyRecovery
+          ? { alertRecoveryVerified: plan.recoveryScopeCovered !== false }
+          : {}),
+      };
     },
+  };
+  return {
+    execute: (job, input) =>
+      config.plans.withPropertyLock
+        ? config.plans.withPropertyLock(job, (plan) => provider.execute(job, input, plan))
+        : provider.execute(job, input),
   };
 }
 
@@ -250,6 +458,16 @@ async function responseFailure(
   response: Response,
   providerRequestId?: string,
 ): Promise<ChannexManagementProviderFailure> {
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    return {
+      ok: false,
+      code: "provider_rejected",
+      message: `Channex request rejected an HTTP ${response.status} redirect`,
+      statusCode: response.status,
+      providerRequestId,
+    };
+  }
   const message = await safeResponseMessage(response);
   const code =
     response.status === 429
@@ -427,6 +645,7 @@ function isMessagingApplication(value: unknown) {
 
 function progress(input: {
   lastRequestId?: string;
+  createdProperty?: ChannexManagementProviderSuccess["createdProperty"];
   externalPropertyId?: string;
   connectionStatus?: ChannexManagementProviderSuccess["connectionStatus"];
   messagingAppInstalled?: boolean;
@@ -437,6 +656,7 @@ function progress(input: {
   return {
     ok: true,
     providerRequestId: input.lastRequestId,
+    ...(input.createdProperty ? { createdProperty: input.createdProperty } : {}),
     externalPropertyId: input.externalPropertyId,
     connectionStatus: input.connectionStatus,
     messagingAppInstalled: input.messagingAppInstalled,
@@ -453,12 +673,41 @@ function channelFromProvider(value: unknown): ChannexConnectedChannel | null {
     item.attributes && typeof item.attributes === "object"
       ? (item.attributes as Record<string, unknown>)
       : item;
-  if (typeof attributes.application !== "string") return null;
+  const application =
+    typeof attributes.channel === "string" ? attributes.channel : attributes.application;
+  if (typeof application !== "string") return null;
+  const key = canonicalChannel(application);
+  const settings =
+    attributes.settings &&
+    typeof attributes.settings === "object" &&
+    !Array.isArray(attributes.settings)
+      ? (attributes.settings as Record<string, unknown>)
+      : {};
+  const mode = settings.booking_amount_settings;
+  const channelId = item.id ?? attributes.id;
   return {
-    key: canonicalChannel(attributes.application),
-    application: attributes.application,
+    key,
+    ...(typeof item.id === "string" ? { externalChannelId: item.id } : {}),
+    application,
     title: typeof attributes.title === "string" ? attributes.title : null,
     isActive: attributes.is_active === true,
+    ...(key === "airbnb"
+      ? {
+          airbnbAmountSettings: {
+            channelId:
+              typeof channelId === "string" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId)
+                ? channelId
+                : null,
+            bookingAmountMode:
+              mode === "Payout Amount" || mode === "Total Paid Amount" ? mode : null,
+            deductCoHostPayout:
+              typeof settings.cohost_payout_calculations === "boolean"
+                ? settings.cohost_payout_calculations
+                : null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -503,6 +752,14 @@ export const channexRequests = {
     body: { property },
     skipIf: { kind: "property" },
     capture: { kind: "property" },
+  }),
+  updateProperty: (
+    externalPropertyId: string,
+    property: Record<string, unknown>,
+  ): ChannexRequest => ({
+    method: "PUT",
+    path: `/api/v1/properties/${encodeURIComponent(externalPropertyId)}`,
+    body: { property },
   }),
   deleteProperty: (externalPropertyId: string): ChannexRequest => ({
     method: "DELETE",
@@ -630,3 +887,73 @@ export const channexRequests = {
     capture: { kind: "channels" },
   }),
 };
+
+function hasAriWarnings(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(
+    ([key, item]) =>
+      ((key === "warning" || key === "warnings" || key === "errors") &&
+        item != null &&
+        (typeof item !== "object" || Object.keys(item).length > 0)) ||
+      hasAriWarnings(item),
+  );
+}
+
+async function verifyAriReadback(
+  fetcher: typeof fetch,
+  base: string,
+  apiKey: string,
+  request: ChannexRequest,
+  progress?: () => Promise<void>,
+) {
+  const values = (request.body as { values?: Record<string, unknown>[] } | undefined)?.values;
+  if (!values?.length) return false;
+  const dates = values.flatMap((value) => [String(value.date_from), String(value.date_to)]).sort();
+  const url = new URL(request.path, base);
+  url.searchParams.set("filter[property_id]", String(values[0]!.property_id));
+  url.searchParams.set("filter[date][gte]", dates[0]!);
+  url.searchParams.set("filter[date][lte]", dates.at(-1)!);
+  const availability = request.path.endsWith("availability");
+  const fields = availability
+    ? ["availability"]
+    : [
+        ...new Set(
+          values.flatMap((value) =>
+            Object.keys(value).filter(
+              (key) => !["property_id", "rate_plan_id", "date_from", "date_to"].includes(key),
+            ),
+          ),
+        ),
+      ];
+  if (!fields.length) return false;
+  if (!availability) url.searchParams.set("filter[restrictions]", fields.join(","));
+  await progress?.();
+  const response = await fetcher(url, {
+    headers: { "user-api-key": apiKey },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) return false;
+  const body = (await response.json()) as { data?: Record<string, Record<string, unknown>> };
+  return values.every((value) => {
+    if (value.date_from !== value.date_to) return false;
+    const actual =
+      body.data?.[String(value[availability ? "room_type_id" : "rate_plan_id"])]?.[
+        String(value.date_from)
+      ];
+    return fields
+      .filter((field) => field in value)
+      .every((field) => {
+        const read = availability
+          ? actual
+          : (actual as Record<string, unknown> | undefined)?.[field];
+        const expected = value[field];
+        return typeof expected === "boolean"
+          ? read === expected
+          : read !== null &&
+              read !== undefined &&
+              typeof read !== "boolean" &&
+              Number.isFinite(Number(read)) &&
+              Number(read) === Number(expected);
+      });
+  });
+}

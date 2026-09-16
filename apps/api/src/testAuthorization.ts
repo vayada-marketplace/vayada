@@ -6,6 +6,7 @@ export const agencyPropertyAccessRepository: PropertyAccessRepository = {
       mode: "all",
       roleKey: context.membership.roleKey,
       accessOrigin: "agency",
+      productAccess: { pms: true, booking: true },
       assignedPropertyIds: [],
     };
   },

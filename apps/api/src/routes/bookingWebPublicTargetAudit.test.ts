@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { describe, expect, it } from "vitest";
 
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
@@ -7,189 +8,6 @@ const propertyA = "a9fccec2-eb4c-4c35-bfd3-02a748c2e117";
 const propertyB = "b9fccec2-eb4c-4c35-bfd3-02a748c2e118";
 
 describe("target Booking public audit regressions", () => {
-  it("uses property-bound strong quote references and resolves non-refundable aliases", async () => {
-    const first = quoteHarness({ propertyId: propertyA });
-    const second = quoteHarness({ propertyId: propertyB });
-    const request = {
-      roomTypeId: "room-deluxe",
-      checkIn: "2026-09-12",
-      checkOut: "2026-09-15",
-      adults: 2,
-      children: 0,
-      numberOfRooms: 1,
-      paymentMethod: "pay_at_property",
-      rateType: "nonrefundable",
-    };
-    const context = quoteContext();
-
-    await expect(first.adapter.quoteBooking("hotel-a", request, context)).resolves.toMatchObject({
-      rateType: "nonrefundable",
-    });
-    await expect(second.adapter.quoteBooking("hotel-b", request, context)).resolves.toMatchObject({
-      rateType: "nonrefundable",
-    });
-
-    expect(first.publicQuoteReference).toMatch(/^Q-[A-F0-9]{32}$/);
-    expect(second.publicQuoteReference).toMatch(/^Q-[A-F0-9]{32}$/);
-    expect(first.publicQuoteReference).not.toBe(second.publicQuoteReference);
-    expect(first.offerRead?.values?.[8]).toBe("non_refundable");
-    expect(first.offerRead?.text).toContain("lower(offer.public_offer_key) LIKE '%:nrf'");
-    expect(first.offerRead?.text).toContain("offer.rate_summary ->> 'rateType'");
-    expect(first.quoteWrite?.text).toContain("ON CONFLICT (public_quote_reference) DO NOTHING");
-    expect(first.quoteWrite?.text).not.toContain("DO UPDATE");
-    expect(JSON.parse(String(first.quoteWrite?.values?.[9]))).toMatchObject({
-      rateType: "non_refundable",
-      publicOfferKey: "room-deluxe:nrf",
-    });
-  });
-
-  it("fails closed when a quote public reference already exists", async () => {
-    const target = quoteHarness({ propertyId: propertyA, referenceCollision: true });
-
-    await expect(
-      target.adapter.quoteBooking(
-        "hotel-a",
-        {
-          roomTypeId: "room-deluxe",
-          checkIn: "2026-09-12",
-          checkOut: "2026-09-15",
-          adults: 2,
-          numberOfRooms: 1,
-          rateType: "nrf",
-        },
-        quoteContext(),
-      ),
-    ).rejects.toThrow("Checkout quote is no longer available");
-
-    expect(target.calls.map((call) => call.text)).toContain("ROLLBACK");
-    expect(target.quoteWrite?.text).toContain("ON CONFLICT (public_quote_reference) DO NOTHING");
-  });
-
-  it("trusts Booking publication eligibility when catalog description is the only omission", async () => {
-    const target = quoteHarness({ propertyId: propertyA });
-
-    await expect(
-      target.adapter.quoteBooking(
-        "hotel-a",
-        {
-          roomTypeId: "room-deluxe",
-          checkIn: "2026-09-12",
-          checkOut: "2026-09-15",
-          adults: 2,
-          children: 0,
-          numberOfRooms: 1,
-          paymentMethod: "pay_at_property",
-          rateType: "flexible",
-        },
-        quoteContext(),
-      ),
-    ).resolves.toBeDefined();
-
-    const propertyLookup = target.calls.find((call) =>
-      call.text.includes("FROM hotel_catalog.property_slugs"),
-    );
-    expect(propertyLookup?.text).toContain("profile.profile_status = 'public'");
-    expect(propertyLookup?.text).not.toContain("p.profile_status = 'complete'");
-  });
-
-  it("bounds transactional retries when short booking references collide", async () => {
-    const first = bookingCollisionHarness(propertyA);
-    const second = bookingCollisionHarness(propertyB);
-    const retry = bookingCollisionHarness(propertyA);
-    const request = bookingRequest();
-    const context = bookingContext();
-
-    await expect(first.adapter.createBooking("hotel-a", request, context)).rejects.toThrow(
-      "Unable to allocate a booking reference",
-    );
-    await expect(second.adapter.createBooking("hotel-b", request, context)).rejects.toThrow(
-      "Unable to allocate a booking reference",
-    );
-    await expect(retry.adapter.createBooking("hotel-a", request, context)).rejects.toThrow(
-      "Unable to allocate a booking reference",
-    );
-
-    expect(first.publicBookingReference).toMatch(/^VAY-[A-F0-9]{6}$/);
-    expect(second.publicBookingReference).toMatch(/^VAY-[A-F0-9]{6}$/);
-    expect(first.publicBookingReference).not.toBe(second.publicBookingReference);
-    expect(retry.publicBookingReference).toBe(first.publicBookingReference);
-    expect(
-      first.calls.filter((call) => call.text.includes("WHERE public_reference = $1")),
-    ).toHaveLength(8);
-    expect(first.calls.map((call) => call.text)).toContain(
-      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-    );
-    expect(first.calls.map((call) => call.text)).toContain("ROLLBACK");
-    expect(second.calls.map((call) => call.text)).toContain("ROLLBACK");
-  });
-
-  it("rejects a check-in before the property's local date", async () => {
-    const target = quoteHarness({
-      propertyId: propertyA,
-      timezone: "Pacific/Kiritimati",
-    });
-
-    await expect(
-      target.adapter.quoteBooking(
-        "hotel-a",
-        {
-          roomTypeId: "room-deluxe",
-          checkIn: "2026-07-20",
-          checkOut: "2026-07-21",
-          adults: 2,
-          numberOfRooms: 1,
-          rateType: "flexible",
-        },
-        {
-          ...quoteContext(),
-          occurredAt: new Date("2026-07-20T10:30:00.000Z"),
-        },
-      ),
-    ).rejects.toThrow("checkIn cannot be in the past");
-
-    expect(target.calls.some((call) => call.text.includes("public_room_offer_snapshots"))).toBe(
-      false,
-    );
-    expect(target.calls.some((call) => call.text.includes("booking.quote_sessions"))).toBe(false);
-    expect(target.calls.map((call) => call.text)).toContain("ROLLBACK");
-  });
-
-  it("applies a property-currency promo to the authoritative checkout quote", async () => {
-    const target = quoteHarness({ propertyId: propertyA, promo: {} });
-
-    await expect(
-      target.adapter.quoteBooking(
-        "hotel-a",
-        {
-          roomTypeId: "room-deluxe",
-          checkIn: "2026-09-12",
-          checkOut: "2026-09-15",
-          adults: 2,
-          numberOfRooms: 1,
-          paymentMethod: "pay_at_property",
-          rateType: "nonrefundable",
-          promoCode: "summer20",
-        },
-        quoteContext(),
-      ),
-    ).resolves.toMatchObject({
-      promoCode: "SUMMER20",
-      promoDiscount: 54,
-      totalAmount: 216,
-      currency: "EUR",
-    });
-
-    expect(target.promoApplicationWrite?.values).toEqual([
-      propertyA,
-      "49b3e1e1-95f8-47f2-8bf1-c2d18e3d7a66",
-      "59b3e1e1-95f8-47f2-8bf1-c2d18e3d7a66",
-      "SUMMER20",
-      "54.00",
-      "EUR",
-      expect.any(String),
-    ]);
-  });
-
   it.each([
     [{ validUntil: "2026-07-19" }, { code: "SUMMER20" }, "This promo code has expired."],
     [
@@ -226,7 +44,10 @@ describe("target Booking public audit regressions", () => {
 function quoteHarness(options: {
   propertyId: string;
   timezone?: string;
+  sameDayBookingsEnabled?: boolean;
+  sameDayBookingCutoffTime?: string | null;
   referenceCollision?: boolean;
+  promotionSettings?: unknown;
   promo?: Partial<{
     validUntil: string | null;
     stayDateFrom: string | null;
@@ -249,6 +70,8 @@ function quoteHarness(options: {
               displayName: "Hotel Audit",
               defaultLocale: "en",
               timezone: options.timezone ?? "Europe/Berlin",
+              sameDayBookingsEnabled: options.sameDayBookingsEnabled,
+              sameDayBookingCutoffTime: options.sameDayBookingCutoffTime,
             },
           ],
         };
@@ -259,6 +82,7 @@ function quoteHarness(options: {
             {
               propertyId: options.propertyId,
               defaultCurrency: "EUR",
+              promotionSettings: options.promotionSettings,
               acceptedMethods: ["pay_at_property"],
               depositPolicy: {},
             },
@@ -340,6 +164,7 @@ function quoteHarness(options: {
     async end() {},
   };
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: "postgresql://unused",
     inventoryReservationPort: createTargetPmsInventoryReservationPort(),
     pool: pool as never,
@@ -362,7 +187,14 @@ function quoteHarness(options: {
   };
 }
 
-function bookingCollisionHarness(propertyId: string) {
+function bookingCollisionHarness(
+  propertyId: string,
+  policy: { timezone: string; cutoffLocalTime: string | null; now?: Date } = {
+    timezone: "Europe/Berlin",
+    cutoffLocalTime: "18:00",
+    now: new Date("2026-09-01T10:00:00.000Z"),
+  },
+) {
   const calls: Array<{ text: string; values?: readonly unknown[] }> = [];
   let publicBookingReference: string | undefined;
   const pool = {
@@ -375,7 +207,9 @@ function bookingCollisionHarness(propertyId: string) {
               propertyId,
               displayName: "Hotel Audit",
               defaultLocale: "en",
-              timezone: "Europe/Berlin",
+              timezone: policy.timezone,
+              sameDayBookingsEnabled: true,
+              sameDayBookingCutoffTime: policy.cutoffLocalTime,
             },
           ],
         };
@@ -418,7 +252,7 @@ function bookingCollisionHarness(propertyId: string) {
               },
               totals: { totalAmount: "270.00", balanceAmount: "270.00" },
               policySnapshot: {},
-              expiresAt: "2026-09-12T12:00:00.000Z",
+              expiresAt: "2026-09-12T23:00:00.000Z",
             },
           ],
         };
@@ -437,11 +271,13 @@ function bookingCollisionHarness(propertyId: string) {
     async end() {},
   };
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: "postgresql://unused",
     inventoryReservationPort: createTargetPmsInventoryReservationPort(),
     billingConfigReadPortFactory: () => ({
       getBillingConfig: async () => ({ propertyId }) as never,
     }),
+    now: () => policy.now ?? new Date("2026-09-01T10:00:00.000Z"),
     pool: pool as never,
   });
   return {

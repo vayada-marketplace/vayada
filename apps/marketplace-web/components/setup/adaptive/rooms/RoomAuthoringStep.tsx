@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -23,6 +24,7 @@ import {
   type RefObject,
 } from "react";
 
+import { RoomImportRevisionContext } from "../../RoomImportRevisionContext";
 import type { AdaptiveSetupStepRenderContext } from "../AdaptiveHotelSetupController";
 import {
   ROOM_AMENITY_GROUPS,
@@ -79,6 +81,7 @@ export function RoomAuthoringStep({
   refreshRoute,
   reportRevisionConflict,
   sessionStore,
+  requestedEntityId,
 }: RoomAuthoringStepProps) {
   const propertyId = route.scope.propertyId;
   const initialRooms =
@@ -93,6 +96,7 @@ export function RoomAuthoringStep({
   );
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>("loading");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const roomImportRevision = useContext(RoomImportRevisionContext);
   const [workspaceReload, setWorkspaceReload] = useState(0);
   const [photoPlan, setPhotoPlan] = useState<RoomPhotoPlan | null>(null);
   const [errors, setErrors] = useState<RoomValidationErrors>({});
@@ -269,7 +273,26 @@ export function RoomAuthoringStep({
     return () => controller.abort();
     // The explicit reload counter controls owner reads; local edits do not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftManifestMissing, propertyId, step.draft, workspaceReload]);
+  }, [draftManifestMissing, propertyId, step.draft, workspaceReload, roomImportRevision]);
+
+  const openedReviewEntity = useRef<string | null>(null);
+  useEffect(() => {
+    if (!requestedEntityId) {
+      openedReviewEntity.current = null;
+      return;
+    }
+    if (workspaceState !== "ready" || openedReviewEntity.current === requestedEntityId) return;
+    const target = rooms.find(
+      (room) => room.roomTypeId === requestedEntityId || room.draftRoomId === requestedEntityId,
+    );
+    if (!target) return;
+    openedReviewEntity.current = requestedEntityId;
+    setActiveRoomId(target.draftRoomId);
+    const frame = requestAnimationFrame(() =>
+      document.getElementById(`${target.draftRoomId}-name`)?.focus(),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [requestedEntityId, workspaceState, rooms]);
 
   const activeRoom = rooms.find(({ draftRoomId }) => draftRoomId === activeRoomId) ?? null;
   const firstIncompleteRoom = rooms.find(
@@ -681,7 +704,7 @@ export function RoomAuthoringStep({
       {draftManifestMissing && (
         <RecoveryBanner
           title="Setup data is still unavailable"
-          message="You can keep editing this room. Refresh before saving or leaving so Vayada can protect the latest room revisions."
+          message="You can keep editing this room. Refresh before saving or leaving so vayada can protect the latest room revisions."
           actionLabel="Refresh setup data"
           onAction={() => void refreshRoute()}
           tone="warning"
@@ -719,8 +742,10 @@ export function RoomAuthoringStep({
         </div>
       )}
 
-      {rooms.filter(({ draftRoomId, saved }) => saved && draftRoomId !== activeRoomId).length >
-        0 && (
+      {rooms.filter(
+        ({ draftRoomId, saved, roomTypeId }) =>
+          (saved || roomTypeId !== null) && draftRoomId !== activeRoomId,
+      ).length > 0 && (
         <section aria-labelledby="saved-room-types-heading">
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 id="saved-room-types-heading" className="text-sm font-semibold text-gray-950">
@@ -743,7 +768,10 @@ export function RoomAuthoringStep({
           </div>
           <div className="space-y-3">
             {rooms
-              .filter(({ draftRoomId, saved }) => saved && draftRoomId !== activeRoomId)
+              .filter(
+                ({ draftRoomId, saved, roomTypeId }) =>
+                  (saved || roomTypeId !== null) && draftRoomId !== activeRoomId,
+              )
               .map((room) => (
                 <RoomSummary
                   key={room.draftRoomId}
@@ -828,7 +856,7 @@ export function RoomAuthoringStep({
               max="500"
               inputMode="numeric"
               value={activeRoom.unitCount}
-              help="Vayada creates one PMS room for each unit. Add room numbers later."
+              help="vayada creates one PMS room for each unit. Add room numbers later."
               error={errors.unitCount}
               onChange={(value) => {
                 updateActive({ unitCount: value });
@@ -1459,7 +1487,7 @@ export function RoomAuthoringStep({
         >
           <p className="text-sm leading-6 text-gray-600">
             {removeTarget.saved
-              ? "Vayada will first check bookings, assigned or verified rooms, channel mappings, pricing, calendar, and other operational references. Shared photos will not be deleted."
+              ? "vayada will first check bookings, assigned or verified rooms, channel mappings, pricing, calendar, and other operational references. Shared photos will not be deleted."
               : "This removes the unfinished room draft and its photo assignments. Shared photos will not be deleted."}
           </p>
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">

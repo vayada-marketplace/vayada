@@ -1,7 +1,37 @@
+import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
+import {
+  registerAirbnbImportRoutes,
+  type AirbnbImportRoutesOptions,
+} from "./routes/airbnbImports.js";
+import {
+  registerMarketplacePublicHotelRoutes,
+  type MarketplacePublicHotelRoutesOptions,
+} from "./routes/marketplacePublicHotel.js";
+import {
+  registerMarketplaceSubmissionRoutes,
+  type MarketplaceSubmissionRoutesOptions,
+} from "./routes/marketplaceSubmission.js";
+import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
+import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
+import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import type { AffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { registerMarketplaceAffiliateCompletionRoutes } from "./routes/marketplaceAffiliateCompletion.js";
+import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import { registerMarketplaceAffiliateDestinationRoutes } from "./routes/marketplaceAffiliateDestinations.js";
+import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
+import type { BookingHostActions } from "./domains/bookingHostActions.js";
+import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
+import type { PmsConfirmationEmails } from "./domains/pmsConfirmationEmails.js";
+import {
+  registerPlatformMarketplaceActivationRoutes,
+  type PlatformMarketplaceActivationOptions,
+} from "./routes/platform/admin/marketplaceActivation.js";
 import { backendAuthPlugin, type BackendAuthPluginOptions } from "@vayada/backend-auth";
 import type { IdentityLifecycleCommandBus } from "@vayada/backend-auth";
 import type { BookingGuestPiiPort } from "@vayada/domain-booking";
 import type { FinanceSubscriptionService } from "@vayada/domain-finance";
+import type { PmsCalendarAutoOpenSettingsPort } from "@vayada/domain-pms";
 import type {
   PmsInventoryPublicOfferProjectionPort,
   PublicBookabilityPublicationCommandPort,
@@ -21,6 +51,7 @@ import type { PropertyMediaCommandRepository } from "./domains/propertyMediaComm
 import type { PropertySetupDraftCommandRepository } from "./domains/propertySetupDraftCommandRepository.js";
 import type { PropertyPlanReadRepository } from "./domains/propertyPlanReadModel.js";
 import type { BookingAcceptanceSettingsPort } from "./domains/bookingAcceptanceSettings.js";
+import type { SameDayBookingSettingsPort } from "./domains/sameDayBookingSettings.js";
 import type { PmsRoomAssignmentSettingsPort } from "./domains/pmsRoomAssignmentSettings.js";
 import type { PmsRoomAssignmentOptimizationHistoryPort } from "./domains/pmsRoomAssignmentOptimizationHistory.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
@@ -35,6 +66,7 @@ import type {
   BookingSettingsReadRepository,
   BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
+import type { BookingPublicationRefreshPort } from "./domains/bookingPublicationProductionRuntime.js";
 import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
@@ -82,6 +114,10 @@ import {
   type MarketplaceHotelSelfServiceRepository,
 } from "./routes/marketplaceHotelSelfService.js";
 import { registerMarketplaceAffiliateAdminRoutes } from "./routes/marketplaceAffiliateAdmin.js";
+import { registerMarketplaceAffiliatePolicyRoutes } from "./routes/marketplaceAffiliatePolicies.js";
+import type { AffiliatePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
+import { registerMarketplaceAffiliateDraftRoutes } from "./routes/marketplaceAffiliateDrafts.js";
+import type { AffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import type { MarketplaceAffiliateAdminRepository } from "@vayada/domain-marketplace";
 import {
   registerFinanceAffiliateCommissionRoutes,
@@ -96,6 +132,8 @@ import {
   registerMarketplaceCreatorPlatformConnectionRoutes,
   type MarketplaceCreatorPlatformConnectionRoutesOptions,
 } from "./routes/marketplaceCreatorPlatformConnections.js";
+import { registerPropertyNearbyRoutes } from "./routes/propertyNearby.js";
+import type { PropertyNearbyRepository } from "./domains/propertyNearbyRepository.js";
 import {
   registerSharedHotelSetupStatusRoutes,
   type SharedHotelSetupStatusRepository,
@@ -156,6 +194,7 @@ import {
 import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { registerFinanceExpenseRoutes } from "./routes/financeExpenses.js";
 import { registerFinanceFolioRoutes } from "./routes/financeFolios.js";
+import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
   registerAffiliateDashboardRoutes,
   type AffiliateDashboardReadRepository,
@@ -177,7 +216,24 @@ import {
   registerPlatformPropertyLifecycleRoutes,
   type PlatformPropertyLifecycleRoutesOptions,
 } from "./routes/platform/admin/propertyLifecycle.js";
+import { registerPlatformPropertyMediaRoutes } from "./routes/platform/admin/propertyMedia.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
+import type {
+  PmsInboxAssistancePort,
+  PmsInboxMarkReadPort,
+  PmsInboxProviderActionPort,
+  PmsInboxQuickReplyPort,
+  PmsInboxReadPort,
+  PmsInboxReplyPort,
+  PmsInboxStartDirectEmailPort,
+  PmsInboxStaffCommandPort,
+  PmsInboxTriagePort,
+} from "./domains/pmsInbox.js";
+import {
+  registerPmsInboxAttachmentMediaRoutes,
+  type PmsInboxAttachmentMediaRoutesOptions,
+} from "./routes/pmsInboxAttachmentMedia.js";
+import { registerPmsCalendarAutoOpenRoutes } from "./routes/pmsCalendarAutoOpen.js";
 import type { PmsLinkedInventoryGroupCommandRepository } from "./domains/pmsLinkedInventoryGroupRepository.js";
 import {
   registerPmsManualBookingPreviewRoutes,
@@ -189,9 +245,16 @@ import {
   type PmsManualBookingCreateRoutesOptions,
 } from "./routes/pmsManualBookingCreate.js";
 import {
+  registerPmsPhysicalRoomUnitRoutes,
+  registerPmsPhysicalRoomManagementRoutes,
   registerPmsPhysicalRoomOperationalLabelRoutes,
+  type PmsPhysicalRoomUnitRoutesOptions,
   type PmsPhysicalRoomOperationalLabelRoutesOptions,
 } from "./routes/pmsPhysicalRoomUnits.js";
+import {
+  registerPmsRoomFactsRoutes,
+  type PmsRoomFactsRoutesOptions,
+} from "./routes/pmsRoomFacts.js";
 import {
   registerPmsRoomPublicationRoutes,
   type PmsRoomPublicationRoutesOptions,
@@ -226,6 +289,10 @@ import {
   type BookingGuestPolicyRoutesOptions,
 } from "./routes/bookingGuestPolicy.js";
 import { registerFinanceOtaCommissionSettingsRoutes as registerOtaSettings } from "./routes/financeOtaCommissionSettings.js";
+import {
+  registerFinancePaymentReadinessRoutes,
+  type FinancePaymentReadinessRoutesOptions,
+} from "./routes/financePaymentReadiness.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -241,8 +308,22 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingGuestPolicy?: BookingGuestPolicyRoutesOptions;
+  financePaymentSetup?: FinancePaymentReadinessRoutesOptions;
   bookingChangeRequestRepository?: BookingHotelChangeRequestRepository;
+  pmsConfirmationEmails?: PmsConfirmationEmails;
+  bookingHostActions?: BookingHostActions;
   pmsOperationsRepository?: PmsOperationsReadRepository;
+  pmsInboxAssistancePort?: PmsInboxAssistancePort;
+  pmsInboxReadPort?: PmsInboxReadPort;
+  pmsInboxMarkReadPort?: PmsInboxMarkReadPort;
+  pmsInboxProviderActionPort?: PmsInboxProviderActionPort;
+  pmsInboxQuickReplyPort?: PmsInboxQuickReplyPort;
+  pmsInboxReplyPort?: PmsInboxReplyPort;
+  pmsInboxSendingEnabled?: boolean;
+  pmsInboxStartDirectEmailPort?: PmsInboxStartDirectEmailPort;
+  pmsInboxTriagePort?: PmsInboxTriagePort;
+  pmsInboxStaffCommandPort?: PmsInboxStaffCommandPort;
+  pmsInboxAttachmentMedia?: Omit<PmsInboxAttachmentMediaRoutesOptions, "propertyAccessRepository">;
   pmsManualBookingPreview?: PmsManualBookingPreviewRoutesOptions;
   pmsManualBookingCreate?: PmsManualBookingCreateRoutesOptions;
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
@@ -250,19 +331,29 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+  pmsRoomClosureRepository?: PmsRoomClosureRepository;
   pmsLinkedInventoryGroupCommandRepository?: PmsLinkedInventoryGroupCommandRepository;
   pmsInventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort;
   bookingGuestPiiPort?: BookingGuestPiiPort;
   pmsOperationsAllowedOrigins?: string[];
   propertyPlanReadRepository?: PropertyPlanReadRepository;
   bookingAcceptanceSettings?: BookingAcceptanceSettingsPort;
+  sameDayBookingSettings?: SameDayBookingSettingsPort;
   pmsRoomAssignmentSettings?: PmsRoomAssignmentSettingsPort;
   pmsRoomAssignmentHistory?: PmsRoomAssignmentOptimizationHistoryPort;
+  pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
   pmsOperatingCalendar?: PmsOperatingCalendarRoutesOptions;
+  pmsRoomSetup?: {
+    facts: PmsRoomFactsRoutesOptions;
+    physicalUnits: PmsPhysicalRoomUnitRoutesOptions;
+  };
+  pmsPhysicalRoomManagement?: {
+    commandPort: import("@vayada/domain-pms").PhysicalRoomManagementPort;
+  };
   pmsPhysicalRoomOperationalLabels?: PmsPhysicalRoomOperationalLabelRoutesOptions;
   bookingDashboardMetricsReadPort?: BookingRoutesOptions["dashboardMetricsReadPort"];
   bookingPropertyAccessRepository?: BookingRoutesOptions["propertyAccessRepository"];
@@ -271,6 +362,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort;
+  bookingPublicationRefresh?: BookingPublicationRefreshPort;
   bookingCustomDomainRepository?: BookingCustomDomainRepository;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
@@ -282,6 +374,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
+  marketplaceAffiliateAssentRepository?: AffiliateAssentRepository;
+  marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
+  marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
+  marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
+  marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -290,7 +387,14 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     "profileRepository" | "lifecycleCommandBus"
   >;
   marketplaceCreatorProfileMediaRepository?: MarketplaceCreatorProfileMediaRepository;
+  airbnbImports?: Omit<AirbnbImportRoutesOptions, "propertyAccessRepository" | "review"> & {
+    applications: NonNullable<AirbnbImportRoutesOptions["review"]>["applications"];
+  };
+  preparedImportRepository?: PreparedImportRepository;
   sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
+  propertyNearbyRepository?: PropertyNearbyRepository;
+  publicNearby?: import("./routes/publicNearby.js").PublicNearbyOptions;
+  propertyNearbyDiscovery?: Parameters<typeof registerPropertyNearbyRoutes>[1]["discovery"];
   propertyLaunchSettingsRepository?: SharedPropertyLaunchSettingsRepository;
   hotelSetupTrackCommandRepository?: HotelSetupTrackCommandRepository;
   propertyMediaCommandRepository?: PropertyMediaCommandRepository;
@@ -298,6 +402,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     repository: HotelCatalogStep1Repository;
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
+  marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
+  marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
@@ -315,6 +421,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   platformContactIntake?: PlatformContactIntakeRoutesOptions;
   platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   platformAdminSmokeRecovery?: PlatformAdminDashboardRoutesOptions["smokeRecovery"];
+  platformMarketplaceActivation?: PlatformMarketplaceActivationOptions;
   platformPropertyLifecycle?: PlatformPropertyLifecycleRoutesOptions;
   marketplaceDiscoveryAllowedOrigins?: string[];
   identityPrivacyAllowedOrigins?: string[];
@@ -330,6 +437,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeOtaCommissionSettingsRepository?: Parameters<typeof registerOtaSettings>[1]["repository"];
   financeExpenses?: Parameters<typeof registerFinanceExpenseRoutes>[1];
   financeFolios?: Parameters<typeof registerFinanceFolioRoutes>[1];
+  financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
   financePublicHotelProfileRepository?: PublicHotelProfileRepository;
@@ -344,7 +452,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     },
     trustProxy: options.trustProxy ?? false,
     disableRequestLogging: (request) =>
-      request.url.startsWith("/api/marketplace/creator-platform-oauth/"),
+      request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
+      (request.url.startsWith("/api/pms/properties/") &&
+        request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -421,6 +531,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingWebPublicRoutes, {
       prefix: "/api/booking-web",
       profileRepository: options.publicHotelProfileRepository,
+      nearby: options.publicNearby,
       quoteRepository: options.publicHotelQuoteRepository,
       calendarRepository: options.bookingWebCalendarRepository,
       checkoutAdapter: bookingWebCheckoutAdapter,
@@ -492,6 +603,36 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceAffiliateAdminRepository,
     });
   }
+  if (options.marketplaceAffiliateCompletionRepository) {
+    app.register(registerMarketplaceAffiliateCompletionRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateCompletionRepository,
+    });
+  }
+  if (options.marketplaceAffiliateDestinationRepository) {
+    app.register(registerMarketplaceAffiliateDestinationRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateDestinationRepository,
+    });
+  }
+  if (options.marketplaceAffiliatePolicyRepository) {
+    app.register(registerMarketplaceAffiliatePolicyRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliatePolicyRepository,
+    });
+  }
+  if (options.marketplaceAffiliateAssentRepository) {
+    app.register(registerMarketplaceAffiliateAssentRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateAssentRepository,
+    });
+  }
+  if (options.marketplaceAffiliateDraftRepository) {
+    app.register(registerMarketplaceAffiliateDraftRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateDraftRepository,
+    });
+  }
   if (options.financeAffiliateCommissions) {
     app.register(registerFinanceAffiliateCommissionRoutes, {
       prefix: "/api/finance",
@@ -516,6 +657,43 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.marketplaceCreatorPlatformConnections,
       profileRepository: options.marketplaceCreatorSelfServiceRepository,
       lifecycleCommandBus: options.identityLifecycleCommandBus,
+    });
+  }
+  if (options.propertyNearbyRepository) {
+    if (!options.auth?.propertyAccessRepository) {
+      throw new Error("Nearby routes require property access resolution");
+    }
+    app.register(registerPropertyNearbyRoutes, {
+      prefix: "/api/hotel-setup",
+      repository: options.propertyNearbyRepository,
+      discovery: options.propertyNearbyDiscovery,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+    });
+  }
+  if (options.airbnbImports) {
+    if (
+      !options.auth?.propertyAccessRepository ||
+      !options.sharedHotelSetupStatusRepository ||
+      !options.pmsRoomSetup?.facts
+    )
+      throw new Error("Airbnb imports require authorization and canonical hotel room setup");
+    app.register(registerAirbnbImportRoutes, {
+      prefix: "/api/hotel-setup",
+      ...options.airbnbImports,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      review: {
+        profiles: options.sharedHotelSetupStatusRepository,
+        rooms: options.pmsRoomSetup.facts,
+        applications: options.airbnbImports.applications,
+      },
+    });
+  }
+  if (options.preparedImportRepository && options.sharedHotelSetupStatusRepository) {
+    app.register(registerPreparedHotelImportRoutes, {
+      prefix: "/api/hotel-setup",
+      repository: options.preparedImportRepository,
+      profiles: options.sharedHotelSetupStatusRepository,
+      rooms: options.pmsRoomSetup?.facts,
     });
   }
   if (options.sharedHotelSetupStatusRepository) {
@@ -549,11 +727,27 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/hotel-setup",
       repository: options.propertyMediaCommandRepository,
     });
+    app.register(registerPlatformPropertyMediaRoutes, {
+      prefix: "/api/platform/admin",
+      repository: options.propertyMediaCommandRepository,
+    });
   }
   if (options.hotelCatalogStep1) {
     app.register(registerHotelCatalogStep1Routes, {
       prefix: "/api/hotel-setup",
       ...options.hotelCatalogStep1,
+    });
+  }
+  if (options.marketplacePublicHotel) {
+    app.register(registerMarketplacePublicHotelRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplacePublicHotel,
+    });
+  }
+  if (options.marketplaceSubmission) {
+    app.register(registerMarketplaceSubmissionRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceSubmission,
     });
   }
   if (options.marketplaceHotelCollaborationPreferences) {
@@ -584,6 +778,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerBookingPublicationRoutes, {
       prefix: "/api/hotel-setup",
       ...options.bookingPublication,
+    });
+  }
+  if (options.financePaymentSetup) {
+    app.register(registerFinancePaymentReadinessRoutes, {
+      prefix: "/api",
+      ...options.financePaymentSetup,
     });
   }
   if (options.identityPrivacyRepository) {
@@ -617,7 +817,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsRepository: options.bookingSettingsRepository,
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     bookingAcceptanceSettings: options.bookingAcceptanceSettings,
+    sameDayBookingSettings: options.sameDayBookingSettings,
+    ownsSameDayBookingSettings: !options.pmsOperationsRepository,
     publicBookabilityPublisher: options.publicBookabilityPublisher,
+    bookingPublicationRefresh: options.bookingPublicationRefresh,
     inventoryPublicOfferProjector: options.pmsInventoryPublicOfferProjector,
     customDomainRepository: options.bookingCustomDomainRepository,
     changeRequestRepository: options.bookingChangeRequestRepository,
@@ -633,6 +836,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     repository: options.affiliateDashboardRepository,
     financeRepository: options.financeRepository,
   });
+  if (options.bookingHostActions && options.auth) {
+    app.register(registerBookingHostActionRoutes, {
+      prefix: "/api/pms",
+      actions: options.bookingHostActions,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.pmsConfirmationEmails && options.auth) {
+    app.register(registerPmsConfirmationEmailRoutes, {
+      prefix: "/api/pms",
+      emails: options.pmsConfirmationEmails,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
   if (options.pmsOperationsRepository) {
     app.register(registerPmsOperationsRoutes, {
       prefix: "/api/pms",
@@ -640,6 +859,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       propertyAccessRepository: options.auth?.propertyAccessRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
+      roomClosureRepository: options.pmsRoomClosureRepository,
       linkedInventoryGroupCommandRepository: options.pmsLinkedInventoryGroupCommandRepository,
       resolveOnboardingRoomCurrency: async (propertyId) =>
         (await options.bookingSettingsRepository?.findPropertySettingsByHotelId?.(propertyId))
@@ -649,9 +869,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       allowedOrigins: options.pmsOperationsAllowedOrigins,
       propertyPlanReadRepository: options.propertyPlanReadRepository,
       bookingAcceptanceSettings: options.bookingAcceptanceSettings,
+      sameDayBookingSettings: options.sameDayBookingSettings,
       roomAssignmentSettings: options.pmsRoomAssignmentSettings,
       roomAssignmentHistory: options.pmsRoomAssignmentHistory,
+      inboxAssistancePort: options.pmsInboxAssistancePort,
+      inboxReadPort: options.pmsInboxReadPort,
+      inboxMarkReadPort: options.pmsInboxMarkReadPort,
+      inboxProviderActionPort: options.pmsInboxProviderActionPort,
+      inboxQuickReplyPort: options.pmsInboxQuickReplyPort,
+      inboxReplyPort: options.pmsInboxReplyPort,
+      inboxSendingEnabled: options.pmsInboxSendingEnabled,
+      inboxStartDirectEmailPort: options.pmsInboxStartDirectEmailPort,
+      inboxTriagePort: options.pmsInboxTriagePort,
+      inboxStaffCommandPort: options.pmsInboxStaffCommandPort,
       publicBookabilityPublisher: options.publicBookabilityPublisher,
+    });
+  }
+  if (options.pmsCalendarAutoOpenSettings && options.auth) {
+    app.register(registerPmsCalendarAutoOpenRoutes, {
+      prefix: "/api/pms",
+      settings: options.pmsCalendarAutoOpenSettings,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
   if (options.pmsRoomPublication) {
@@ -683,6 +922,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsOperatingCalendarRoutes, {
       prefix: "/api/pms",
       ...options.pmsOperatingCalendar,
+    });
+  }
+  if (options.pmsRoomSetup) {
+    app.register(registerPmsRoomFactsRoutes, {
+      prefix: "/api/pms/setup",
+      ...options.pmsRoomSetup.facts,
+    });
+    app.register(registerPmsPhysicalRoomUnitRoutes, {
+      prefix: "/api/pms/setup",
+      ...options.pmsRoomSetup.physicalUnits,
+    });
+  }
+  if (options.pmsPhysicalRoomManagement) {
+    app.register(registerPmsPhysicalRoomManagementRoutes, {
+      prefix: "/api/pms",
+      ...options.pmsPhysicalRoomManagement,
     });
   }
   if (options.pmsPhysicalRoomOperationalLabels) {
@@ -729,6 +984,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerFinanceRoutes, {
       prefix: "/api",
       repository: options.financeRepository,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
       publicBookabilityPublisher: options.publicBookabilityPublisher,
       xenditBankValidator: options.financeXenditBankValidator,
       publicHotelPropertyResolver: options.financePublicHotelPropertyResolver,
@@ -741,25 +997,46 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsFinanceCompatibilityRoutes, {
       prefix: "/api",
       repository: options.pmsFinanceCompatibilityRepository,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.financeSubscriptionService) {
     app.register(registerFinanceSubscriptionRoutes, {
       prefix: "/api",
       service: options.financeSubscriptionService,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.financeOtaCommissionSettingsRepository) {
     app.register(registerOtaSettings, {
       prefix: "/api",
       repository: options.financeOtaCommissionSettingsRepository,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.financeExpenses) {
-    app.register(registerFinanceExpenseRoutes, { prefix: "/api", ...options.financeExpenses });
+    app.register(registerFinanceExpenseRoutes, {
+      prefix: "/api",
+      ...options.financeExpenses,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ?? options.financeExpenses.propertyAccessRepository,
+    });
   }
   if (options.financeFolios) {
-    app.register(registerFinanceFolioRoutes, { prefix: "/api", ...options.financeFolios });
+    app.register(registerFinanceFolioRoutes, {
+      prefix: "/api",
+      ...options.financeFolios,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ?? options.financeFolios.propertyAccessRepository,
+    });
+  }
+  if (options.financeBankTransfer) {
+    app.register(registerFinanceBankTransferRoutes, {
+      prefix: "/api",
+      publicBookabilityPublisher: options.publicBookabilityPublisher,
+      ...options.financeBankTransfer,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
+    });
   }
   if (options.platformContactIntake) {
     app.register(registerPlatformContactIntakeRoutes, {
@@ -772,6 +1049,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     repository: options.platformAdminDashboardRepository,
     smokeRecovery: options.platformAdminSmokeRecovery,
   });
+  if (options.platformMarketplaceActivation) {
+    app.register(registerPlatformMarketplaceActivationRoutes, {
+      prefix: "/api/platform/admin",
+      ...options.platformMarketplaceActivation,
+    });
+  }
   if (options.platformPropertyLifecycle) {
     app.register(registerPlatformPropertyLifecycleRoutes, {
       prefix: "/api/platform/admin",
@@ -782,6 +1065,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPlatformMediaRoutes, {
       prefix: "/api/media",
       ...options.platformMedia,
+    });
+  }
+  if (options.pmsInboxAttachmentMedia && options.auth?.propertyAccessRepository) {
+    app.register(registerPmsInboxAttachmentMediaRoutes, {
+      prefix: "/api/media",
+      ...options.pmsInboxAttachmentMedia,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
     });
   }
 

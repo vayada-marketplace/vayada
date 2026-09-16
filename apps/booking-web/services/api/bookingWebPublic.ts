@@ -1,4 +1,4 @@
-import type { Hotel, RoomType } from "@/lib/types";
+import type { Hotel, RoomType, RoomSelectionSnapshot } from "@/lib/types";
 
 import { bookingWebPublic, type ApiRequestInit } from "./client";
 
@@ -28,6 +28,10 @@ export type BookingWebPublicHotelResponse = {
     summary: string | null;
     branding?: {
       logoUrl?: string | null;
+      showContactButton?: boolean;
+      showReferAGuestButton?: boolean;
+      showLanguageSelector?: boolean;
+      showCurrencySelector?: boolean;
       heroImage: string | null;
       heroHeading: string | null;
       heroSubtext: string | null;
@@ -43,6 +47,8 @@ export type BookingWebPublicHotelResponse = {
     policies: {
       checkInFrom: string | null;
       checkOutUntil: string | null;
+      checkInUntil?: string | null;
+      checkOutFrom?: string | null;
       cancellationSummary: string | null;
       termsUrl: string | null;
     };
@@ -67,7 +73,8 @@ export type BookingWebPublicHotelResponse = {
   };
 };
 
-export type BookingWebPublicOffer = {
+export type BookingWebPublicOffer = RoomSelectionSnapshot & {
+  expiresAt?: string;
   offerId: string;
   roomTypeId: string;
   ratePlanId: string | null;
@@ -86,6 +93,7 @@ export type BookingWebPublicOffer = {
   paymentOptions: string[];
   totals: {
     currency: string;
+    promotion?: { name: string; discountAmount: number; discountPercent: number };
     roomTotal: number;
     taxesAndFees: number;
     discounts: number;
@@ -100,10 +108,15 @@ export type BookingWebPublicOffer = {
 
 export type BookingWebPublicOffersResponse = {
   request: {
+    checkIn?: string;
+    checkOut?: string;
+    adults?: number;
+    children?: number;
     nights: number;
     rooms: number;
   };
   status: "bookable" | "unavailable" | "stale";
+  unavailableReasons?: Array<{ code: string }>;
   quote?: {
     offers: BookingWebPublicOffer[];
   };
@@ -113,6 +126,7 @@ export type BookingWebPublicCalendarResponse = {
   calendar: {
     unavailableDates: string[];
     minStayByArrival: Record<string, number>;
+    validCheckOutsByArrival?: Record<string, string[]>;
     maxStayByArrival: Record<string, number>;
   };
   freshness?: {
@@ -134,29 +148,6 @@ export type BookingWebPublicHostResponse = {
     defaultLocale: string;
     supportedLocales: string[];
   };
-};
-
-export type BookingWebAffiliateRegistrationRequest = {
-  fullName: string;
-  email: string;
-  socialMedia?: string;
-  userType?: "guest" | "creator";
-  paymentMethod?: "stripe" | "paypal" | "bank";
-  paypalEmail?: string;
-  bankIban?: string;
-  bankAccountHolder?: string;
-  bankSwiftBic?: string;
-  bankName?: string;
-  bankCountry?: string;
-};
-
-export type BookingWebAffiliateRegistrationResponse = {
-  id: string;
-  referralCode: string;
-};
-
-export type BookingWebAffiliateStripeConnectResponse = {
-  onboardingUrl: string;
 };
 
 export const bookingWebPublicApi = {
@@ -217,38 +208,6 @@ export const bookingWebPublicApi = {
   },
 };
 
-export const bookingWebAffiliateApi = {
-  async checkEmail(slug: string, email: string): Promise<{ exists: boolean }> {
-    const params = new URLSearchParams({ email });
-    return bookingWebPublic.get<{ exists: boolean }>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/affiliates/check-email?${params.toString()}`,
-    );
-  },
-
-  async register(
-    slug: string,
-    request: BookingWebAffiliateRegistrationRequest,
-  ): Promise<BookingWebAffiliateRegistrationResponse> {
-    return bookingWebPublic.post<BookingWebAffiliateRegistrationResponse>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/affiliates`,
-      request,
-    );
-  },
-
-  async createStripeConnectLink(
-    slug: string,
-    affiliateId: string,
-    request: { email: string },
-  ): Promise<BookingWebAffiliateStripeConnectResponse> {
-    return bookingWebPublic.post<BookingWebAffiliateStripeConnectResponse>(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/affiliates/${encodeURIComponent(
-        affiliateId,
-      )}/stripe/connect`,
-      request,
-    );
-  },
-};
-
 export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
   const hotel = data.hotel;
   const images = hotel.images.map((image) => image.url).filter(Boolean);
@@ -278,6 +237,8 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     amenities: hotel.amenities,
     checkInTime: hotel.policies.checkInFrom || "",
     checkOutTime: hotel.policies.checkOutUntil || "",
+    checkInUntil: hotel.policies.checkInUntil || undefined,
+    checkOutFrom: hotel.policies.checkOutFrom || undefined,
     timezone: hotel.timezone,
     contact: {
       address,
@@ -303,17 +264,21 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
           fontPairing: hotel.branding.fontPairing || undefined,
         }
       : undefined,
+    headerSettings: {
+      showContactButton: hotel.branding?.showContactButton ?? true,
+      showReferAGuestButton: hotel.branding?.showReferAGuestButton ?? false,
+      showLanguageSelector: hotel.branding?.showLanguageSelector ?? true,
+      showCurrencySelector: hotel.branding?.showCurrencySelector ?? true,
+    },
     defaultLanguage: hotel.defaultLocale,
     supportedLanguages: hotel.supportedLocales,
     guestTypeSettings: {
       adultAgeThreshold: hotel.supportedQuoteParameters.adultAgeThreshold ?? 18,
       childrenEnabled: hotel.supportedQuoteParameters.childrenSupported,
     },
-    referAGuestEnabled: hotel.capabilities.referralCodes,
+    // New public enrolment is retired; existing referral-code attribution remains supported.
+    referAGuestEnabled: false,
     instantBook: hotel.capabilities.instantBook,
-    mapViewEnabled: false,
-    showRoomDetailMap: false,
-    pointsOfInterest: [],
   };
 }
 
@@ -363,23 +328,48 @@ export function toLegacyRooms(
   const offers = data.quote?.offers || [];
   const grouped = new Map<string, BookingWebPublicOffer[]>();
   const displayRoomById = new Map(displayRooms.map((room) => [room.id, room]));
-  for (const offer of offers) {
+  for (const offer of offers.filter(
+    (offer) =>
+      offer.roomSelection === undefined &&
+      offer.roomLines === undefined &&
+      !offer.offerId.startsWith("selection-"),
+  )) {
     const existing = grouped.get(offer.roomTypeId) || [];
     existing.push(offer);
     grouped.set(offer.roomTypeId, existing);
   }
 
-  return Array.from(grouped.entries()).flatMap(([roomTypeId, roomOffers]) => {
+  const legacyRooms = Array.from(grouped.entries()).flatMap(([roomTypeId, roomOffers]) => {
     const firstOffer = roomOffers[0];
     if (!firstOffer) return [];
-    const flexible = roomOffers.find((offer) => offer.refundable) || firstOffer;
+    const flexible =
+      roomOffers.find(
+        (offer) =>
+          offer.refundable &&
+          offer.ratePlanId &&
+          offer.offerId === `${roomTypeId}:onb15-flex-${offer.ratePlanId}`,
+      ) ||
+      roomOffers.find((offer) => offer.refundable) ||
+      firstOffer;
     const nonRefundable = roomOffers.find((offer) => !offer.refundable) || null;
     const displayRoom = displayRoomById.get(roomTypeId);
     const nights = Math.max(data.request.nights || 1, 1);
     const rooms = Math.max(data.request.rooms || 1, 1);
-    const baseRate = nightlyRoomRate(flexible.totals.roomTotal, nights, rooms);
+    const baseRate = nightlyRoomRate(
+      flexible.totals.roomTotal -
+        flexible.totals.discounts +
+        (flexible.totals.promotion?.discountAmount ?? 0),
+      nights,
+      rooms,
+    );
     const nonRefundableRate = nonRefundable
-      ? nightlyRoomRate(nonRefundable.totals.roomTotal, nights, rooms)
+      ? nightlyRoomRate(
+          nonRefundable.totals.roomTotal -
+            nonRefundable.totals.discounts +
+            (nonRefundable.totals.promotion?.discountAmount ?? 0),
+          nights,
+          rooms,
+        )
       : null;
     const maxAdults = flexible.occupancy.maxAdults;
     const maxChildren = flexible.occupancy.maxChildren;
@@ -404,6 +394,18 @@ export function toLegacyRooms(
       size: displayRoom?.size || 0,
       baseRate,
       nonRefundableRate,
+      promotion: flexible.totals.promotion
+        ? {
+            ...flexible.totals.promotion,
+            discountAmount: flexible.totals.promotion.discountAmount / rooms,
+          }
+        : undefined,
+      nonRefundablePromotion: nonRefundable?.totals.promotion
+        ? {
+            ...nonRefundable.totals.promotion,
+            discountAmount: nonRefundable.totals.promotion.discountAmount / rooms,
+          }
+        : undefined,
       nightlyRates: Array.from({ length: nights }, () => baseRate),
       nonRefundableNightlyRates:
         nonRefundableRate === null
@@ -423,6 +425,10 @@ export function toLegacyRooms(
       remainingRooms: Math.max(0, flexible.availableRooms),
       features: displayRoom?.features || [],
       benefits: displayRoom?.benefits || [],
+      rateMealDescriptions: {
+        flexible: mealDescription(flexible.mealPlan),
+        nonrefundable: mealDescription(nonRefundable?.mealPlan),
+      },
       flexibleRateEnabled: Boolean(roomOffers.find((offer) => offer.refundable)),
       cancellationPolicy: flexible.policies.cancellation || undefined,
       ratePaymentMethods: {
@@ -437,11 +443,65 @@ export function toLegacyRooms(
       },
     };
   });
+  const combinations = offers.flatMap((offer): RoomType[] => {
+    const { roomSelection, roomLines, expiresAt } = offer;
+    const { checkIn, checkOut, adults, children } = data.request;
+    if (!roomSelection) return [];
+    // An incomplete selection must never become a first-room legacy option.
+    if (
+      !roomLines?.length ||
+      roomLines.length !== roomSelection.lines.length ||
+      !expiresAt ||
+      !Number.isFinite(Date.parse(expiresAt)) ||
+      !checkIn ||
+      !checkOut ||
+      adults === undefined ||
+      children === undefined
+    )
+      return [];
+    const quantity = roomLines.reduce((sum, line) => sum + line.roomCount, 0);
+    const display = displayRoomById.get(offer.roomTypeId);
+    return [
+      {
+        id: offer.offerId,
+        name: offer.name,
+        description: offer.name,
+        shortDescription: offer.name,
+        maxOccupancy: adults + children,
+        maxAdults: adults,
+        maxChildren: children,
+        size: 0,
+        baseRate: offer.totals.grandTotal / Math.max(1, data.request.nights),
+        nonRefundableRate: null,
+        currency: offer.totals.currency,
+        amenities: [],
+        images: display?.images?.length ? display.images : [FALLBACK_IMAGE],
+        bedType: "",
+        remainingRooms: quantity,
+        features: [],
+        benefits: [],
+        flexibleRateEnabled: true,
+        ratePaymentMethods: { flexible: offer.paymentOptions },
+        combination: {
+          roomSelection,
+          roomLines,
+          expiresAt,
+          totalAmount: offer.totals.grandTotal,
+          checkIn,
+          checkOut,
+          adults,
+          children,
+        },
+      },
+    ];
+  });
+  return [...legacyRooms, ...combinations];
 }
 
 export function toLegacyCalendar(data: BookingWebPublicCalendarResponse): {
   dates: string[];
   minStayByArrival: Record<string, number>;
+  validCheckOutsByArrival?: Record<string, string[]>;
   maxStayByArrival: Record<string, number>;
   availabilityUnavailable: boolean;
 } {
@@ -452,6 +512,9 @@ export function toLegacyCalendar(data: BookingWebPublicCalendarResponse): {
 
   return {
     dates: data.calendar.unavailableDates,
+    ...(data.calendar.validCheckOutsByArrival && {
+      validCheckOutsByArrival: data.calendar.validCheckOutsByArrival,
+    }),
     minStayByArrival: data.calendar.minStayByArrival,
     maxStayByArrival: data.calendar.maxStayByArrival,
     availabilityUnavailable: data.freshness?.status === "unavailable" && !hasSelectableCoverage,
@@ -488,4 +551,8 @@ function depositSettings(summary: string | null): { enabled: boolean; percentage
     enabled: true,
     percentage: percentage ? Number(percentage[1]) : null,
   };
+}
+
+function mealDescription(value: string | null | undefined): string | null {
+  return value === "breakfast" ? "Breakfast included" : value === "room_only" ? "Room only" : null;
 }

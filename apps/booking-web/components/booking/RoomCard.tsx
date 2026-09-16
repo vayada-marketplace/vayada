@@ -11,6 +11,7 @@ import {
   hasVariableNightlyRates,
 } from "@/lib/constants/booking";
 import { bookingImageSizes } from "@/components/booking/imageSizes";
+import RoomCombinationCard from "./RoomCombinationCard";
 import RateOption from "./RateOption";
 
 interface RoomCardProps {
@@ -25,10 +26,6 @@ interface RoomCardProps {
   onChangeSelectedRate: (next: "flexible" | "nonrefundable") => void;
   onView: () => void;
   onSelectRate: (rateType: "flexible" | "nonrefundable", requiredRooms: number) => void;
-  active?: boolean;
-  highlighted?: boolean;
-  onHover?: (hovered: boolean) => void;
-  onSelectCard?: () => void;
   selectRateDisabled?: boolean;
   selectRatePending?: boolean;
 }
@@ -45,10 +42,6 @@ export default function RoomCard({
   onChangeSelectedRate,
   onView,
   onSelectRate,
-  active = false,
-  highlighted = false,
-  onHover,
-  onSelectCard,
   selectRateDisabled = false,
   selectRatePending = false,
 }: RoomCardProps) {
@@ -60,7 +53,16 @@ export default function RoomCard({
   const flexibleNightlies = getFlexibleNightlyRates(room, nights).map((rate) =>
     convertAndRound(rate, room.currency),
   );
-  const flexibleTotal = flexibleNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms;
+  const flexiblePromotion = convertAndRound(
+    (room.promotion?.discountAmount ?? 0) * requiredRooms,
+    room.currency,
+  );
+  const nonRefundablePromotion = convertAndRound(
+    (room.nonRefundablePromotion?.discountAmount ?? 0) * requiredRooms,
+    room.currency,
+  );
+  const flexibleTotal =
+    flexibleNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms - flexiblePromotion;
   const flexibleFromNightly =
     (flexibleNightlies.length > 0 ? Math.min(...flexibleNightlies) : 0) * requiredRooms;
   const flexibleVaries = hasVariableNightlyRates(flexibleNightlies);
@@ -68,7 +70,8 @@ export default function RoomCard({
     convertAndRound(rate, room.currency),
   );
   const nonRefundableTotal =
-    nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms;
+    nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms -
+    nonRefundablePromotion;
   const nonRefundableFromNightly =
     (nonRefundableNightlies.length > 0 ? Math.min(...nonRefundableNightlies) : 0) * requiredRooms;
   const nonRefundableVaries = hasVariableNightlyRates(nonRefundableNightlies);
@@ -112,12 +115,18 @@ export default function RoomCard({
   const showFlexibleRate =
     room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
   const hasNonRefundable = room.nonRefundableRate != null;
-  const flexibleNightlyLabel = flexibleVaries
-    ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
-    : formatPrice(flexibleFromNightly, selectedCurrency);
-  const nonRefundableNightlyLabel = nonRefundableVaries
-    ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
-    : formatPrice(nonRefundableFromNightly, selectedCurrency);
+  const flexibleNightlyLabel =
+    flexiblePromotion > 0
+      ? formatPrice(flexibleTotal / Math.max(nights, 1), selectedCurrency)
+      : flexibleVaries
+        ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
+        : formatPrice(flexibleFromNightly, selectedCurrency);
+  const nonRefundableNightlyLabel =
+    nonRefundablePromotion > 0
+      ? formatPrice(nonRefundableTotal / Math.max(nights, 1), selectedCurrency)
+      : nonRefundableVaries
+        ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
+        : formatPrice(nonRefundableFromNightly, selectedCurrency);
 
   const effectiveSelectedRate: "flexible" | "nonrefundable" | null =
     selectedRate === "flexible" && showFlexibleRate
@@ -130,24 +139,17 @@ export default function RoomCard({
             ? "flexible"
             : null;
 
+  const selectedPromotion =
+    effectiveSelectedRate === "nonrefundable" ? room.nonRefundablePromotion : room.promotion;
+  const selectedPromotionAmount =
+    effectiveSelectedRate === "nonrefundable" ? nonRefundablePromotion : flexiblePromotion;
+
+  if (room.combination) return <RoomCombinationCard room={room} nights={nights} timezone={hotelTimezone}
+    disabled={selectRateDisabled} pending={selectRatePending} onSelect={(quantity) => onSelectRate("flexible", quantity)} />;
+
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onMouseEnter={() => onHover?.(true)}
-      onMouseLeave={() => onHover?.(false)}
-      onClick={onSelectCard}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelectCard?.();
-        }
-      }}
-      className={`bg-white border rounded-2xl overflow-hidden transition-all ${
-        active || highlighted
-          ? "border-primary-400 shadow-[0_0_0_3px_rgba(99,102,241,0.14)]"
-          : "border-gray-200"
-      } ${soldOut ? "opacity-60" : "hover:shadow-lg"}`}
+      className={`bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all ${soldOut ? "opacity-60" : "hover:shadow-lg"}`}
     >
       <div className="flex flex-col md:flex-row">
         {/* Image carousel */}
@@ -333,6 +335,12 @@ export default function RoomCard({
             )}
           </div>
 
+          {selectedPromotion && (
+            <div className="mb-3 flex justify-between rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span>{selectedPromotion.name}</span>
+              <span>-{formatPrice(selectedPromotionAmount, selectedCurrency)}</span>
+            </div>
+          )}
           {hasLastMinuteDeal && (
             <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
               <span className="text-[11px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded">
@@ -359,7 +367,9 @@ export default function RoomCard({
                   onSelect={() => onChangeSelectedRate("nonrefundable")}
                   iconType="nonrefundable"
                   title={t("nonRefundableRate")}
-                  description={t("nonRefundableDesc")}
+                  description={[t("nonRefundableDesc"), room.rateMealDescriptions?.nonrefundable]
+                    .filter(Boolean)
+                    .join(" · ")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
                   nightlyLabel={nonRefundableNightlyLabel}
                   discountPercent={discount}
@@ -374,7 +384,9 @@ export default function RoomCard({
                   onSelect={() => onChangeSelectedRate("flexible")}
                   iconType="flexible"
                   title={t("flexibleRate")}
-                  description={flexibleDescription}
+                  description={[flexibleDescription, room.rateMealDescriptions?.flexible]
+                    .filter(Boolean)
+                    .join(" · ")}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
                   nightlyLabel={flexibleNightlyLabel}
                   soldOut={soldOut}

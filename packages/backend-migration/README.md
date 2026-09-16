@@ -66,7 +66,7 @@ URLs stay in environment variables and never appear in the report.
 ```bash
 npm --workspace @vayada/backend-migration run target:source:extract -- \
   --manifest <reviewed-manifest.json> \
-  --source-schema-revision 2d7fe21080646cb1931aac4054a5648bac9b8227 \
+  --source-schema-revision 215242008bb990c25f65bd5c03099d56015a29cb \
   --auth-snapshot-arn <arn> \
   --booking-snapshot-arn <arn> \
   --marketplace-snapshot-arn <arn> \
@@ -84,9 +84,9 @@ reviewed `cutoverFreezeProofSha256` in the manifest and the matching
 `--cutover-freeze-proof-sha256` argument.
 
 Before opening the read-only extractor connections, attest each restored source
-with database-level settings applied by its administrator. The extractor reads
-the settings from `pg_db_role_setting`, so session parameters cannot impersonate
-another snapshot:
+with durable evidence applied by its administrator. On PostgreSQL installations
+that allow custom database settings, the existing `pg_db_role_setting` path is
+still supported; session parameters cannot impersonate another snapshot:
 
 ```sql
 ALTER DATABASE <source_database>
@@ -95,6 +95,57 @@ ALTER DATABASE <source_database>
 ALTER DATABASE <source_database>
   SET vayada.cutover_freeze_proof_sha256 TO '<reviewed-sha256>';
 ```
+
+AWS RDS administrators cannot set arbitrary custom database parameters. Use the
+evidence table there, owned by the dedicated `NOLOGIN`
+`vayada_migration_attestor` role, and connect the extractor with a dedicated
+login (not `SET ROLE`). Create the attestor once per RDS cluster. Its grant to
+the database administrator must be non-inherited so administrator-owned
+`SECURITY DEFINER` functions cannot inherit evidence-write access:
+
+```sql
+CREATE ROLE vayada_migration_attestor NOLOGIN
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+GRANT vayada_migration_attestor TO <database_admin> WITH INHERIT FALSE, SET TRUE;
+
+CREATE ROLE <migration_reader> LOGIN PASSWORD '<generated-secret>'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+REVOKE CREATE ON DATABASE <source_database> FROM <migration_reader>;
+
+CREATE SCHEMA vayada_migration_evidence AUTHORIZATION vayada_migration_attestor;
+SET ROLE vayada_migration_attestor;
+REVOKE ALL ON SCHEMA vayada_migration_evidence FROM PUBLIC;
+CREATE TABLE vayada_migration_evidence.database_attestations (
+  attestation_key text PRIMARY KEY,
+  attestation_value text NOT NULL,
+  attested_at timestamptz NOT NULL DEFAULT now()
+);
+REVOKE ALL ON vayada_migration_evidence.database_attestations FROM PUBLIC;
+INSERT INTO vayada_migration_evidence.database_attestations
+  (attestation_key, attestation_value)
+VALUES
+  ('vayada.source_snapshot_identifier', '<reviewed-snapshot-identifier>'),
+  ('vayada.cutover_freeze_proof_sha256', '<reviewed-sha256>');
+GRANT USAGE ON SCHEMA vayada_migration_evidence TO <migration_reader>;
+GRANT SELECT ON vayada_migration_evidence.database_attestations TO <migration_reader>;
+RESET ROLE;
+
+GRANT CONNECT ON DATABASE <source_database> TO <migration_reader>;
+GRANT USAGE ON SCHEMA <reviewed_schema> TO <migration_reader>;
+GRANT SELECT ON <reviewed_schema>.<reviewed_table> TO <migration_reader>;
+```
+
+Omit the freeze-proof row only when the reviewed manifest has no freeze proof.
+Repeat the final two grants for every reviewed schema and active source table;
+do not use all-table grants. The extractor rejects a wrong owner, any
+evidence-write ACL outside the attestor, inherited attestor membership, an
+assumable writer role, a `SET ROLE` connection, callable `SECURITY DEFINER`
+code whose owner can mutate the evidence, RLS, partitions/inheritance, extra
+constraints or triggers (including cascading foreign keys), malformed columns
+or primary key, duplicate keys, and any disagreement between the table and
+database settings. The auxiliary evidence schema is deliberately excluded from
+the reviewed legacy schema fingerprint; all legacy application schemas remain
+fingerprinted.
 
 ## Production Identity Migration
 
@@ -208,6 +259,11 @@ are recorded individually while the remaining inventory continues. Public
 objects receive `original_safe`, `large`, `thumbnail`, and `blur_preview` WebP
 variants under `public/media/*`; private attachments receive only a private
 `provider_original` object. Raw S3 endpoints are rejected as CDN configuration.
+Malformed URL fields and non-string media arrays are quarantined as an immutable
+source-value hash plus a reason code; their raw value is never copied. Valid
+media fields on the same row still import. Catalog omits a quarantined field only
+when the same run, source identity, field, reason, and current source-value hash
+all match, so stale evidence cannot suppress a changed legacy value.
 
 Apply only the same reviewed run and configuration:
 
@@ -275,6 +331,47 @@ retention deadline. Rerun the dry run with the same ID after apply and require u
 checksums/counts. Booking success still does not authorize legacy shutdown:
 VAY-1356 through VAY-1363 and the rollback window remain mandatory gates.
 
+## Booking Nightly Revenue Backfill
+
+VAY-1181 reconstructs Booking-owned nightly room revenue from retained target
+evidence. It never calls Booking.com or another provider, and it excludes any
+booking with producer-owned base room-night evidence. Exact nightly evidence is
+preferred; missing amounts stay explicit. Equal allocation from a retained
+booking total is disabled unless the operator opts in.
+
+Start with a dry run (the default):
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<24 lowercase hex characters> \
+  --recognized-on <YYYY-MM-DD> \
+  --dry-run
+```
+
+Review every exception and the planned reconciliation by property, stay date,
+currency, source, and evidence quality. Add
+`--allow-inferred-equal-allocation` only after approving that policy. Apply the
+same reviewed run with its exact guard:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<same 24 lowercase hex characters> \
+  --recognized-on <same YYYY-MM-DD> \
+  --apply \
+  --confirm nightly-revenue-backfill:vay1181-<same 24 lowercase hex characters>
+```
+
+Each page is verified before its independent transaction commits. After an
+interruption, rerun with the same immutable run ID and arguments: committed
+pages replay, while uncaptured or backfill-owned corrected bookings append the
+next revision. Never mint a new run ID merely to resume. `--recognized-on` is
+the correction recognition date; base room-night rows retain their stay date.
+The JSON report includes every page checkpoint, exception, planned totals, and
+applied ledger totals. Any exception sets exit code 2 after printing the report;
+an execution or verification failure sets exit code 1 and rolls back that page.
+
 ## Production PMS Migration
 
 VAY-1356 consumes PMS rooms and rate configuration, exact 366-day inventory,
@@ -311,6 +408,67 @@ repeatable-read transaction, verifies exact write/provenance counts, and rereads
 the target before commit. Rerun the same dry run and require unchanged parity.
 PMS success does not authorize legacy shutdown: VAY-1357 through VAY-1363,
 the rollback window, and the final human cutover approval remain mandatory.
+
+### Signed Channex adoption
+
+VAY-1963 consumes the VAY-1962 proof artifact only through a one-off migration
+runner. It rereads source and target evidence, then reserves the exact target
+property and Channex property as `verified_non_active`. It does not call
+Channex, create or activate a connection, schedule work, import bookings, or
+change the legacy runtime owner.
+
+The deployment-controlled JSON config has exactly these fields:
+
+```json
+{
+  "environment": "staging",
+  "allowedExecutionPrincipals": ["iam:approved-migration-runner"],
+  "verificationKeys": [
+    {
+      "id": "migration-staging-2026-01",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+      "principal": "kms:controlled-manifest-signer"
+    }
+  ],
+  "approvalPrincipals": {
+    "00000000-0000-4000-8000-000000000001": "user:flamur-maliqi"
+  },
+  "singleHumanDualAuthority": {
+    "actorUserId": "00000000-0000-4000-8000-000000000001",
+    "principal": "user:flamur-maliqi",
+    "decisionId": "VAY-1320@2026-09-12"
+  }
+}
+```
+
+The manifest still contains one immutable `migration_owner` record and one
+immutable `security_owner` record. Both may name the same registry-authorized
+target user; the restricted audit records
+`single_human_dual_authority.v1` together with the exact VAY-1320 decision ID.
+Set `singleHumanDualAuthority` to `null` when two independent humans approve.
+The signer and runner remain distinct machine principals and cannot satisfy
+either human authority.
+
+Consume reviewed files without putting the signature or manifest in command
+arguments:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+CHANNEX_ADOPTION_EXECUTION_PRINCIPAL=<runtime IAM principal> \
+npm run target:channex:adopt -- consume \
+  --config <deployment config.json> \
+  --manifest-file <manifest.json> \
+  --signature-file <manifest.sig>
+```
+
+Rollback requires two fresh, unrevoked migration/security authority records
+bound to the original manifest, exact claim, reason hash, environment, and new
+expiry. Rollback validates the same approval policy as consumption. Both records
+may name the same human only when `singleHumanDualAuthority` matches that actor
+and principal and carries the exact `VAY-1320@2026-09-12` decision; otherwise
+two independent humans are required.
+Supply the reviewed reason through a file. Successful rollback only changes the
+matching adoption claim from `verified_non_active` to retained `released`.
 
 ## Production Marketplace Migration
 
@@ -362,20 +520,27 @@ TARGET_DATABASE_URL=<target database> npm run target:finance:migrate -- \
   --source-run-id vay1351-<24 lowercase hex characters> --dry-run
 ```
 
-Any ambiguous owner, duplicate provider identity, invalid amount, newer target
-economic fact, unattributed webhook, checkout row lacking encrypted folio
-recipient evidence, or payout destination lacking an approved secrets-store
-reference is a hard blocker. Resolve every blocker and rerun the same immutable
-source run. The legacy extraction has no standalone expense rows and does not
-contain the encrypted recipient revisions, invoice identity, or immutable
-affiliate-payout command evidence required by the target. The migration never
-fabricates those records: affected checkout and completed affiliate-payout rows
-remain explicit blockers until reviewed canonical evidence is supplied. Legacy
-fixed-plan Stripe subscriptions also remain suspended and block migration until
-a reviewed provider cutover rebinds them to the target canonical tiered price
-and target property/organization metadata. After
-backup, source write freeze/queue, a reviewed blocker-free dry
-run, and explicit human go/no-go approval, apply with the run-bound guard:
+Ambiguous ownership, duplicate provider identities, unexplained monetary
+variance, newer target economic facts, unattributed webhooks, checkout rows
+lacking encrypted folio-recipient evidence, and completed affiliate payouts
+lacking immutable command evidence remain hard blockers. Invalid source rows
+and capture-incomplete payments are omitted only through immutable hash-only
+dispositions; raw source totals must equal planned target totals plus those
+explicit omissions. Bank, PayPal, and payout destinations never enter target
+product state: their target settings remain disabled or setup-incomplete until
+approved re-entry. Historical provider transactions without account ownership
+remain unbound, and disagreeing payment flags cannot enable a method.
+
+Legacy fixed-plan subscriptions and noncanonical pricing are preserved only as
+immutable review evidence on a suspended, provider-free Commission baseline;
+the migration does not activate a corrected price or expose a legacy billing
+reference to runtime provider commands. Every child reference must resolve to a
+parent that will actually exist after target reconciliation. Missing or
+deliberately deleted parents either leave the child unbound/setup-incomplete or
+block before SQL. Resolve every remaining blocker and rerun the same immutable
+source run. After backup, source write freeze/queue, a reviewed
+blocker-free dry run, and explicit human go/no-go approval, apply with the
+run-bound guard:
 
 ```bash
 TARGET_DATABASE_URL=<target database> npm run target:finance:migrate -- \
@@ -383,10 +548,11 @@ TARGET_DATABASE_URL=<target database> npm run target:finance:migrate -- \
   --confirm production-finance:vay1351-<same 24 lowercase hex characters>
 ```
 
-Apply is transactional, locks Finance and its prerequisites, verifies exact
-write and provenance counts, then rereads the target before commit. Finance
-success does not authorize legacy shutdown: VAY-1359 through VAY-1363, the
-rollback window, and final human approval remain mandatory.
+Apply is transactional, locks Finance and its prerequisites, writes immutable
+dispositions in the same transaction, verifies exact target, disposition, and
+provenance counts, then rereads the target before commit. Finance success does
+not authorize legacy shutdown: VAY-1359 through VAY-1363, the rollback window,
+and final human approval remain mandatory.
 
 ## Production Full Parity and Go/No-Go
 
@@ -473,6 +639,20 @@ failed or interrupted run requires `--resume`; completed steps are not executed
 again. The run ID and all guard inputs are immutable, and a PostgreSQL advisory
 lock excludes concurrent orchestration.
 
+Staging and pre-production targets must run on a PostgreSQL instance/cluster
+that does not serve production. A separate database on the production instance
+does not isolate memory, CPU, or restart risk. The restored rehearsal instance
+may host a separate target database only while every source role remains
+read-only and the immutable source attestations remain unchanged. Record and
+verify the source/target instance identities before starting; a changed target
+identity or application release requires a fresh run and clean-target evidence.
+
+PMS collision checks exclude tables without secondary-unique predicates and
+process at most 500 candidates per statement. PMS row and shared provenance
+writes also use 500-row statements inside the existing single domain transaction;
+a later batch failure still rolls back every earlier batch. Batching does not
+replace the resource-isolation requirement.
+
 All run modes require these inputs in addition to the four source database URLs
 and `TARGET_DATABASE_URL`:
 
@@ -504,10 +684,10 @@ The trusted runtime `APPLICATION_RELEASE` or `GIT_SHA` must exactly equal
 staging/staging, dry-run uses preprod/preprod, and production uses
 production/preprod.
 
-Before a run, a database administrator must bind the target itself with
-database-level settings. The command reads these only from
-`pg_catalog.pg_db_role_setting` for the current database and role `0`; session
-options cannot spoof them:
+Before a run, a database administrator must bind the target itself with durable
+evidence. The database-level settings path remains supported where available;
+the command reads it only from `pg_catalog.pg_db_role_setting` for the current
+database and role `0`, so session options cannot spoof it:
 
 ```sql
 ALTER DATABASE <target_database> SET vayada.target_environment TO '<environment>';
@@ -517,11 +697,32 @@ ALTER DATABASE <target_database> SET vayada.target_clean_proof_sha256 TO '<clean
 ALTER DATABASE <target_database> SET vayada.target_application_release TO '<deployed full Git SHA>';
 ```
 
+On AWS RDS, create the same dedicated-owner evidence table shown above in
+the target database through `SET ROLE vayada_migration_attestor`, grant the
+cutover role only `USAGE` and `SELECT` on that schema/table, and insert these
+keys while the attestor role is active:
+
+```sql
+SET ROLE vayada_migration_attestor;
+INSERT INTO vayada_migration_evidence.database_attestations
+  (attestation_key, attestation_value)
+VALUES
+  ('vayada.target_environment', '<environment>'),
+  ('vayada.target_identity_sha256', '<stable target SHA-256>'),
+  ('vayada.target_clean_run_id', '<vay1360 run ID>'),
+  ('vayada.target_clean_proof_sha256', '<clean-target evidence SHA-256>'),
+  ('vayada.target_application_release', '<deployed full Git SHA>');
+GRANT USAGE ON SCHEMA vayada_migration_evidence TO <cutover_role>;
+GRANT SELECT ON vayada_migration_evidence.database_attestations TO <cutover_role>;
+RESET ROLE;
+```
+
 Production additionally requires
-`vayada.target_backup_proof_sha256` to equal the reviewed
+`vayada.target_backup_proof_sha256` in the same durable trust path to equal the reviewed
 `--backup-proof-sha256`. A wrong database, environment, run, release, clean
 proof, or production backup proof fails before the advisory lock or any
-migration service runs.
+migration service runs. If both durable trust paths are populated, every shared
+value must agree exactly.
 
 Run staging and the isolated pre-production dry-run with confirmations bound to
 the exact orchestration and source run IDs:

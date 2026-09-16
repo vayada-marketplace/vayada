@@ -1,3 +1,4 @@
+import { recordChannexAlert } from "../domains/channexOperationalAlerts.js";
 import { createHash } from "node:crypto";
 import type { FinanceStripeConnectProvider } from "@vayada/domain-finance";
 import pg from "pg";
@@ -25,6 +26,7 @@ type PgProviderWebhookStoreConfig = {
   stripeConnectProvider?: Pick<FinanceStripeConnectProvider, "retrieveAccount">;
   stripePaymentProvider?: Pick<StripeBookingPaymentProvider, "retrievePaymentIntent">;
 };
+class AlterationBindingUnavailable extends Error {}
 
 export function createPgProviderWebhookStore(
   config: PgProviderWebhookStoreConfig,
@@ -37,9 +39,16 @@ export function createPgProviderWebhookStore(
   return {
     async resolveChannexPropertyId(externalPropertyId) {
       const result = await pool.query<{ propertyId: string }>(
-        `SELECT property_id::text AS "propertyId" FROM pms.channel_connections
-         WHERE provider = 'channex' AND external_property_id = $1
-           AND connection_status = 'connected' ORDER BY property_id LIMIT 2`,
+        `SELECT DISTINCT property_id::text AS "propertyId"
+         FROM (
+           SELECT property_id FROM pms.channel_binding_claims
+           WHERE provider = 'channex' AND external_property_id = $1 AND claim_state = 'active'
+           UNION
+           SELECT property_id FROM pms.channel_connections
+           WHERE provider = 'channex' AND external_property_id = $1
+             AND connection_status IN ('connected', 'degraded')
+         ) ownership
+         ORDER BY "propertyId" LIMIT 2`,
         [externalPropertyId],
       );
       if (result.rows.length > 1) throw new Error("Ambiguous Channex property ownership");
@@ -69,6 +78,7 @@ async function recordReceipt(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const scope = promotionScope(input);
     const inserted = await client.query<{ id: string; delivery_status: string }>(
       `INSERT INTO platform.external_webhook_events
          (
@@ -81,11 +91,14 @@ async function recordReceipt(
            payload_hash,
            raw_headers,
            raw_payload,
+           tenant_scope,
+           property_id,
            payload_retention_until
          )
        VALUES (
-         $1, $2, $3, $4, 'observed', TRUE, $5, $6, $7,
-         CASE WHEN $1 = 'stripe' THEN now() + INTERVAL '30 days' END
+         $1, $2, $3, $4, 'observed', TRUE, $5, $6, $7, $8, $9::uuid,
+         CASE WHEN $1 = 'stripe' OR ($1 = 'channex' AND $4 = 'message')
+           THEN now() + INTERVAL '30 days' END
        )
        ON CONFLICT (provider, provider_event_id) DO NOTHING
        RETURNING id, delivery_status`,
@@ -97,11 +110,14 @@ async function recordReceipt(
         input.payloadHash,
         JSON.stringify(input.rawHeaders),
         JSON.stringify(input.rawPayload),
+        scope.tenantScope,
+        scope.propertyId,
       ],
     );
 
     const row = inserted.rows[0];
     if (row) {
+      await recordChannexAlert(client, input, row.id);
       await insertOrTouchIdempotencyKey(client, {
         operation: "external_webhook_receipt",
         keyHash: input.receiptKeyHash,
@@ -134,6 +150,7 @@ async function recordReceipt(
           existing.delivery_status as ProviderWebhookReceiptResult["lifecycleStatus"],
       };
     }
+    await recordChannexAlert(client, input, existing.id);
     await insertOrTouchIdempotencyKey(client, {
       operation: "external_webhook_receipt",
       keyHash: input.receiptKeyHash,
@@ -276,6 +293,8 @@ export async function promoteReceipt(
     };
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof AlterationBindingUnavailable)
+      return { status: "observed", receiptId: input.receiptId, jobIds: [] };
     throw error;
   } finally {
     client.release();
@@ -555,6 +574,7 @@ async function insertOrFindDomainEvent(
   client: pg.PoolClient,
   input: ProviderWebhookPromotionInput,
 ): Promise<string> {
+  const scope = promotionScope(input);
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO platform.domain_events
        (
@@ -563,6 +583,7 @@ async function insertOrFindDomainEvent(
          event_type,
          occurred_at,
          tenant_scope,
+         property_id,
          resource_product,
          resource_type,
          resource_id,
@@ -579,16 +600,17 @@ async function insertOrFindDomainEvent(
        $1,
        $2,
        now(),
-       'external',
        $3,
        $4,
        $5,
-       'provider',
        $6,
        $7,
+       'provider',
        $8,
        $9,
        $10,
+       $11,
+       $12,
        'restricted'
      )
      ON CONFLICT (source_system, event_key) DO NOTHING
@@ -596,13 +618,15 @@ async function insertOrFindDomainEvent(
     [
       input.normalizedPreview.domainEventKey,
       input.normalizedPreview.domainEventType,
+      scope.tenantScope,
+      scope.propertyId,
       input.normalizedPreview.resourceProduct,
       input.normalizedPreview.resourceType,
       input.normalizedPreview.resourceId,
       input.receiptKey,
       input.receiptId,
       hashForKey(input.normalizedPreview.domainEventKey),
-      JSON.stringify(input.normalizedPreview.payload),
+      JSON.stringify(domainEventPayload(input)),
       JSON.stringify({
         provider: input.provider,
         receiptId: input.receiptId,
@@ -632,6 +656,26 @@ async function insertOrFindJob(
   input: ProviderWebhookPromotionInput,
   domainEventId: string,
 ): Promise<string> {
+  const scope = promotionScope(input);
+  const alteration =
+    input.provider === "channex" && input.normalizedPreview.jobType === "channex.scan-alterations";
+  let alterationBinding: { connectionId: string; bindingGeneration: string } | undefined;
+  if (alteration) {
+    if (!scope.propertyId) throw new AlterationBindingUnavailable();
+    const result = await client.query<{ connectionId: string; bindingGeneration: string }>(
+      `SELECT connection.id AS "connectionId",connection.binding_generation AS "bindingGeneration"
+       FROM pms.channel_connections connection
+       JOIN pms.channel_binding_claims claim ON claim.property_id=connection.property_id
+         AND claim.provider='channex' AND claim.external_property_id=connection.external_property_id
+         AND claim.claim_state='active'
+       WHERE connection.property_id=$1 AND connection.external_property_id=$2
+         AND connection.provider='channex' AND connection.connection_status='connected'
+       FOR SHARE OF connection,claim`,
+      [scope.propertyId, input.normalizedPreview.payload["providerPropertyId"]],
+    );
+    if (result.rows.length !== 1) throw new AlterationBindingUnavailable();
+    alterationBinding = result.rows[0]!;
+  }
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO platform.jobs
        (
@@ -640,6 +684,7 @@ async function insertOrFindJob(
          job_type,
          source_domain_event_id,
          tenant_scope,
+         property_id,
          resource_product,
          resource_type,
          resource_id,
@@ -648,7 +693,7 @@ async function insertOrFindJob(
          payload,
          job_metadata
        )
-     VALUES ($1, $2, $3, $4, 'external', $5, $6, $7, $8, $9, $10, $11)
+     VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (queue_name, job_key) DO NOTHING
      RETURNING id`,
     [
@@ -656,19 +701,24 @@ async function insertOrFindJob(
       input.normalizedPreview.queueName,
       input.normalizedPreview.jobType,
       domainEventId,
+      scope.tenantScope,
+      scope.propertyId,
       input.normalizedPreview.resourceProduct,
       input.normalizedPreview.resourceType,
       input.normalizedPreview.resourceId,
       input.receiptKey,
       hashForKey(input.normalizedPreview.jobKey),
       JSON.stringify({
-        ...input.normalizedPreview.payload,
+        ...domainEventPayload(input),
+        ...alterationBinding,
         receiptId: input.receiptId,
         receiptKey: input.receiptKey,
       }),
       JSON.stringify({
         provider: input.provider,
         source: "target_provider_webhook_intake",
+        ...(alteration ? { page: 1 } : {}),
+        ...(scope.propertyId ? { propertyId: scope.propertyId } : {}),
       }),
     ],
   );
@@ -687,6 +737,31 @@ async function insertOrFindJob(
     throw new Error(`Unable to resolve webhook job ${input.normalizedPreview.jobKey}`);
   }
   return existingId;
+}
+
+function promotionScope(
+  input: Pick<ProviderWebhookPromotionInput, "provider" | "normalizedPreview">,
+): {
+  tenantScope: "external" | "property";
+  propertyId: string | null;
+} {
+  const propertyId = input.normalizedPreview.payload["propertyId"];
+  return input.provider === "channex" &&
+    ["channex.ingest-message", "channex.scan-alterations"].includes(
+      input.normalizedPreview.jobType,
+    ) &&
+    input.normalizedPreview.payload["propertyOwnerResolved"] === true &&
+    typeof propertyId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(propertyId)
+    ? { tenantScope: "property", propertyId }
+    : { tenantScope: "external", propertyId: null };
+}
+
+function domainEventPayload(input: ProviderWebhookPromotionInput): Record<string, unknown> {
+  if (promotionScope(input).tenantScope !== "property") return input.normalizedPreview.payload;
+  const normalized = { ...input.normalizedPreview.payload };
+  delete normalized["rawPayload"];
+  return normalized;
 }
 
 async function insertOrFindFinanceAuditEvent(

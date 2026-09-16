@@ -6,6 +6,7 @@ import {
   type ProductionCatalogMigrationServices,
 } from "./productionCatalogMigration.js";
 import type { ProductionCatalogPlan } from "./productionCatalogPlan.js";
+import { stableCatalogId } from "./productionCatalogValues.js";
 
 const RUN = "vay1351-0123456789abcdef01234567";
 
@@ -110,6 +111,45 @@ describe("production catalog migration transaction", () => {
     expect(log.at(-1)).toBe("ROLLBACK");
     expect(log).not.toContain("projection");
   });
+
+  it("includes deterministic private property IDs in the initial target read", async () => {
+    const log: string[] = [];
+    const pmsHotel = "22222222-2222-4222-8222-222222222222";
+    const marketplaceHotel = "33333333-3333-4333-8333-333333333333";
+    const targetReads: string[][] = [];
+    const configured = services(log, plan());
+    configured.readSnapshot = async () => [
+      {
+        sourceDatabase: "pms",
+        sourceTable: "hotels",
+        rowOrdinal: 1,
+        data: { id: pmsHotel },
+      },
+      {
+        sourceDatabase: "marketplace",
+        sourceTable: "hotel_profiles",
+        rowOrdinal: 1,
+        data: { id: marketplaceHotel },
+      },
+    ];
+    configured.readTarget = async (_client, propertyIds) => {
+      targetReads.push(propertyIds);
+      return emptyTarget();
+    };
+
+    await runProductionCatalogTransaction(
+      new TransactionClient(log) as never,
+      { sourceRunId: RUN, mode: "dry-run" },
+      configured,
+    );
+
+    expect(targetReads).toEqual([
+      [
+        stableCatalogId("private-property", `marketplace:hotel_profiles:${marketplaceHotel}`),
+        stableCatalogId("private-property", `pms:hotels:${pmsHotel}`),
+      ].sort(),
+    ]);
+  });
 });
 
 class TransactionClient {
@@ -159,6 +199,7 @@ function services(
 function plan(): ProductionCatalogPlan {
   return {
     sourceLinks: [],
+    quarantinedSources: [],
     propertyIds: [],
     writes: {
       properties: [],
@@ -176,6 +217,7 @@ function plan(): ProductionCatalogPlan {
     counts: {
       properties: 0,
       sourceLinks: 0,
+      quarantinedSourceRows: 0,
       slugs: 0,
       domains: 0,
       locations: 0,
@@ -194,6 +236,7 @@ function emptyTarget() {
   return {
     properties: [],
     sourceLinks: [],
+    ownerLinks: [],
     slugs: [],
     domains: [],
     locations: [],

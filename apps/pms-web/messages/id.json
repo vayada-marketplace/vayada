@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Tinjau ketidakhadiran…",
+  "checkOut.reviewNoShow": "Tinjau ketidakhadiran…",
   "layout.header.signOut": "Keluar",
   "layout.header.noProperties": "Tidak ada properti",
   "layout.header.user": "Pengguna",
@@ -6,7 +8,7 @@
   "layout.header.currency": "Mata Uang",
   "layout.header.remaining": "tersisa",
   "layout.sidebar.propertyManagerDescription": "Operasional & Inventaris",
-  "layout.sidebar.creatorMarketplace": "Marketplace Vayada",
+  "layout.sidebar.creatorMarketplace": "Marketplace vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Kreator & Kolaborasi",
   "layout.sidebar.bookingEngineDescription": "Pemesanan langsung & pendapatan",
   "common.save": "Simpan",
@@ -620,5 +622,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "Kedatangan • {date}",
+  "dashboard.departuresOn": "Keberangkatan • {date}",
+  "dashboard.noArrivalsOnDate": "Tidak ada kedatangan pada tanggal ini",
+  "dashboard.noDeparturesOnDate": "Tidak ada keberangkatan pada tanggal ini",
+  "dashboard.previousDay": "Hari sebelumnya",
+  "dashboard.nextDay": "Hari berikutnya"
 }

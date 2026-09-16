@@ -11,8 +11,10 @@ export const BOOKING_ADMIN_ADDON_ITEMS_PATH = `/api/booking/hotels/${BOOKING_ADM
 export const BOOKING_ADMIN_PROMO_CODES_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/promo-codes`;
 export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
 export const BOOKING_ADMIN_PROPERTY_PROFILE_PATH = `/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/profile`;
+export const BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH = `/api/hotel-setup/properties/${BOOKING_ADMIN_PROPERTY_ID}/public-profile`;
 export const BOOKING_ADMIN_PROPERTY_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/property`;
 const BOOKING_ADMIN_BOOKING_ACCEPTANCE_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/booking-acceptance`;
+export const BOOKING_ADMIN_SAME_DAY_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/same-day-booking`;
 export const BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/public-bookability`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
@@ -120,6 +122,10 @@ export interface BookingAdminRoomFilterSettingsFixture {
 export interface BookingAdminDesignSettingsFixture {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
+  showContactButton: boolean;
+  showReferAGuestButton: boolean;
+  showLanguageSelector: boolean;
+  showCurrencySelector: boolean;
   heroImage: string;
   heroHeading: string;
   heroSubtext: string;
@@ -221,6 +227,17 @@ export const defaultBookingAdminPropertyProfile = {
   },
 };
 
+export const defaultBookingAdminPublicPropertyProfile = {
+  propertyId: BOOKING_ADMIN_PROPERTY_ID,
+  profileRevision: 1,
+  publicProfile: {
+    locale: "en",
+    shortDescription: "An independent alpine escape made for memorable direct stays.",
+    longDescription: null,
+    media: [],
+  },
+};
+
 const defaultAddonSettings: BookingAdminAddonSettingsFixture = {
   showAddonsStep: true,
   groupAddonsByCategory: true,
@@ -301,6 +318,10 @@ const defaultRoomFilterSettings: BookingAdminRoomFilterSettingsFixture = {
 export const defaultBookingAdminDesignSettings: BookingAdminDesignSettingsFixture = {
   headerLogo: "",
   headerLogoMediaObjectId: null,
+  showContactButton: true,
+  showReferAGuestButton: false,
+  showLanguageSelector: true,
+  showCurrencySelector: true,
   heroImage: "/hotel-hero.JPG",
   heroHeading: "Stay above the clouds",
   heroSubtext: "An independent alpine escape made for memorable direct stays.",
@@ -366,6 +387,8 @@ export async function mockBookingAdminShellRoutes(
 ): Promise<void> {
   const propertySettings = options.propertySettings ?? defaultBookingAdminPropertySettings;
   let bookingAcceptanceMode: "instant" | "request" = "instant";
+  let sameDayEnabled = true;
+  let sameDayCutoff: string | null = "18:00";
   await page.route("**/api/pms/properties/*/module-activations", (route) =>
     route.fulfill({
       json: {
@@ -408,6 +431,30 @@ export async function mockBookingAdminShellRoutes(
       },
     });
   });
+  await page.route(`**${BOOKING_ADMIN_SAME_DAY_PATH}*`, async (route) => {
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON() as {
+        enabled: boolean;
+        cutoffLocalTime: string | null;
+      };
+      sameDayEnabled = body.enabled;
+      sameDayCutoff = body.cutoffLocalTime;
+    }
+    await route.fulfill({
+      json: {
+        contractVersion: "same-day-booking-policy.v1",
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        propertyTimeZone: "Europe/Vienna",
+        enabled: sameDayEnabled,
+        cutoffLocalTime: sameDayCutoff,
+        revision: 2,
+        updatedAt: "2026-09-01T10:00:00.000Z",
+      },
+    });
+  });
+  await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: defaultLocalizationSettings }),
+  );
   await page.route("**/api/booking/hotels/*/settings/design", (route) =>
     route.fulfill({ json: defaultBookingAdminDesignSettings }),
   );
@@ -467,8 +514,40 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await page.route(
+    `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/bank-transfer-destination`,
+    (route) => route.fulfill({ json: { destination: null } }),
+  );
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "finance-route-contracts.v1",
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        paymentSettings: {
+          paymentsEnabled: false,
+          paymentProvider: "vayada",
+          acceptedMethods: ["pay_at_property", "cash"],
+          defaultCurrency: "EUR",
+          supportedCurrencies: ["EUR"],
+          requiresManualReview: false,
+          providerAccount: {
+            providerAccountId: null,
+            provider: null,
+            status: "not_configured",
+            onboardingStatus: "not_started",
+            chargesEnabled: false,
+            payoutsEnabled: false,
+            capabilities: [],
+          },
+        },
+      },
+    }),
+  );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_PROFILE_PATH}*`, (route) =>
     route.fulfill({ json: defaultBookingAdminPropertyProfile }),
+  );
+  await page.route(`**${BOOKING_ADMIN_PUBLIC_PROPERTY_PROFILE_PATH}*`, (route) =>
+    route.fulfill({ json: defaultBookingAdminPublicPropertyProfile }),
   );
   await page.route(`**${BOOKING_ADMIN_PUBLIC_BOOKABILITY_PATH}*`, (route) =>
     route.fulfill({
@@ -596,7 +675,13 @@ export async function mockBookingAdminBookingFlow(
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
   await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, (route) =>
-    route.fulfill({ json: options.addonItems ?? defaultAddonItems }),
+    route.fulfill({
+      json: {
+        propertyCurrency: "EUR",
+        propertyPlan: { plan: "fixed", limits: { maxAddons: 9 } },
+        ...(options.addonItems ?? defaultAddonItems),
+      },
+    }),
   );
   await page.route(`**${BOOKING_ADMIN_PROMO_CODES_PATH}**`, (route) =>
     route.fulfill({ json: options.promoCodes ?? defaultPromoCodes }),

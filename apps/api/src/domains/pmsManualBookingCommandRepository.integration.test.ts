@@ -32,6 +32,7 @@ import type {
 } from "./pmsManualBookingTransactionPorts.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
+import { appendCheckoutAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const uuid = (suffix: number) => `82000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -381,6 +382,20 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
           occupied === 0 && amount === "0.0000" && recognizedOn === "2026-08-13",
       ),
     ).toBe(true);
+    const addonEvidence = await admin.query(
+      `SELECT economic_event AS event,evidence_quality AS quality,gross_amount AS gross,
+         command_key AS "commandKey"
+       FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1::uuid`,
+      [created.guestBookingId],
+    );
+    expect(addonEvidence.rows).toEqual([
+      expect.objectContaining({
+        event: "missing_fulfillment",
+        quality: "missing",
+        gross: null,
+        commandKey: expect.stringMatching(/^pms-no-show:/),
+      }),
+    ]);
     const assignments = await admin.query(
       `SELECT DISTINCT assignment_status AS status,room_id AS room
        FROM pms.operational_booking_assignments WHERE guest_booking_id=$1::uuid`,
@@ -1015,12 +1030,20 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     const created = await repository.createManualBooking(
       command("cancel", "unpaid", "cash", "2026-08-20", false),
     );
+    await admin.query(
+      `INSERT INTO booking.booking_addon_selections
+         (id,property_id,guest_booking_id,service_date,quantity,total_amount,currency,
+          ownership_kind_snapshot,edit_revision)
+       VALUES ($1::uuid,$2::uuid,$3::uuid,'2026-08-20',1,10,'EUR','property',0)`,
+      [uuid(96), propertyId, created.guestBookingId],
+    );
     const cancellation = {
       propertyId,
       guestBookingId: created.guestBookingId,
       commandId: "cancel-command",
       idempotencyKey: "cancel-key",
       reason: "property cancellation",
+      guestMessage: "Sorry for the inconvenience.\n\nPlease call <help@example.test>.",
       accountingDate: "2026-08-21",
       retainedCharges: [
         {
@@ -1046,7 +1069,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     ).resolves.toMatchObject({ ok: false, code: "invalid_body" });
     await expect(operations.cancelManualBooking!(cancellation)).resolves.toMatchObject({
       ok: true,
-      commandMeta: { sideEffects: ["calendar_refresh", "ari_changed", "audit_event"] },
+      commandMeta: {
+        sideEffects: ["calendar_refresh", "ari_changed", "guest_notification", "audit_event"],
+      },
     });
     expect(optimizationCalls).toEqual([{ reason: "cancel", roomTypeIds: [roomTypeId] }]);
     await expect(operations.cancelManualBooking!(cancellation)).resolves.toMatchObject({
@@ -1056,6 +1081,19 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     await expect(
       operations.cancelManualBooking!({ ...cancellation, reason: "changed" }),
     ).resolves.toMatchObject({ ok: false, code: "idempotency_conflict" });
+
+    await expect(
+      operations.cancelManualBooking!({ ...cancellation, guestMessage: "Changed" }),
+    ).resolves.toMatchObject({ ok: false, code: "idempotency_conflict" });
+    const emails = await admin.query(
+      `SELECT payload FROM platform.jobs
+      WHERE resource_id=$1 AND job_type='email.booking-canceled'`,
+      [created.guestBookingId],
+    );
+    expect(emails.rows).toHaveLength(1);
+    expect(emails.rows[0].payload.text).toContain(cancellation.guestMessage);
+    expect(emails.rows[0].payload.text).not.toContain(cancellation.reason);
+    expect(emails.rows[0].payload.html).toBeUndefined();
 
     const stored = await admin.query(
       `SELECT booking.lifecycle_status AS status,assignment.assignment_status AS assignment,
@@ -1072,6 +1110,10 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
           WHERE evidence.guest_booking_id=booking.id AND economic_event='occupancy_adjustment') AS occupancy_revision,
          (SELECT MAX(source_revision)::int FROM booking.nightly_revenue_evidence evidence
           WHERE evidence.guest_booking_id=booking.id AND economic_event='retained_charge') AS retained_revision,
+         (SELECT count(*)::int FROM booking.addon_revenue_evidence evidence
+          WHERE evidence.guest_booking_id=booking.id) AS addon_evidence_count,
+         (SELECT MAX(economic_event) FROM booking.addon_revenue_evidence evidence
+          WHERE evidence.guest_booking_id=booking.id) AS addon_event,
          (SELECT count(*)::int FROM platform.outbox_events outbox
           WHERE outbox.resource_id=booking.id::text AND outbox.outbox_key LIKE 'booking.manual-cancellation.%') AS outbox,
          (SELECT source_system FROM platform.domain_events event
@@ -1095,6 +1137,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       recognized: "2026-08-21",
       occupancy_revision: 2,
       retained_revision: 3,
+      addon_evidence_count: 1,
+      addon_event: "missing_fulfillment",
       outbox: 2,
       event_source: "booking",
       leaks_reason: false,
@@ -1324,6 +1368,66 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         },
       ],
     });
+  });
+
+  it("atomically allocates a manual refund to current add-on evidence", async () => {
+    const created = await repository.createManualBooking(
+      command("refund-addon", "paid", "cash", "2026-08-20", true),
+    );
+    const scope = await admin.query<{ payment: string; selection: string }>(
+      `SELECT payment.id::text AS payment,selection.id::text AS selection
+       FROM finance.payments payment JOIN booking.booking_addon_selections selection
+         ON selection.guest_booking_id=payment.guest_booking_id
+       WHERE payment.guest_booking_id=$1::uuid AND payment.payment_kind='manual'`,
+      [created.guestBookingId],
+    );
+    await appendCheckoutAddonRevenueEvidence(admin, {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      fulfilledSelectionIds: [scope.rows[0]!.selection],
+      commandKeyHash: "b".repeat(64),
+    });
+    const target = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='fulfillment'`,
+      [created.guestBookingId],
+    );
+    const refund = {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      commandId: "refund-addon-command",
+      idempotencyKey: "refund-addon-key",
+      paymentEvidenceId: scope.rows[0]!.payment,
+      accountingDate: "2026-08-21",
+      allocations: [
+        {
+          evidenceId: target.rows[0]!.id,
+          amount: { amountDecimal: "5.00", currency: "EUR" },
+        },
+      ],
+      audit: {
+        actor: { kind: "user" as const, userId: actorId, organizationId },
+        requestId: "refund-addon-request",
+        reason: "Refund manual booking add-on",
+        requestedAt: acceptedAt.toISOString(),
+      },
+    };
+    await expect(operations.refundManualBooking!(refund)).resolves.toMatchObject({ ok: true });
+    await expect(operations.refundManualBooking!(refund)).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+    });
+    const evidence = await admin.query(
+      `SELECT economic_event AS event,gross_amount::text AS gross,
+         recognized_on::text AS recognized,corrects_evidence_id::text AS target
+       FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1::uuid
+       ORDER BY source_revision`,
+      [created.guestBookingId],
+    );
+    expect(evidence.rows).toEqual([
+      { event: "fulfillment", gross: "10.0000", recognized: "2026-08-20", target: null },
+      { event: "refund", gross: "-5.0000", recognized: "2026-08-21", target: target.rows[0]!.id },
+    ]);
   });
 
   it("refunds the current retained-charge tip after a paid cancellation", async () => {
@@ -1901,6 +2005,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         "DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id = $1::uuid",
         "DELETE FROM pms.booking_notes_private WHERE property_id = $1::uuid",
         "DELETE FROM pms.operational_booking_assignments WHERE property_id = $1::uuid",
+        "DELETE FROM booking.addon_revenue_evidence WHERE property_id = $1::uuid",
         "DELETE FROM booking.booking_addon_selections WHERE property_id = $1::uuid",
         "DELETE FROM booking.nightly_revenue_evidence WHERE property_id = $1::uuid",
         "DELETE FROM booking.nightly_revenue_room_scopes WHERE property_id = $1::uuid",

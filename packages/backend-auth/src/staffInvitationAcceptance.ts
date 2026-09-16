@@ -2,6 +2,11 @@ import pg from "pg";
 
 import { parseStaffPermissionOverrides, validateStaffInviteAccess } from "./lifecycle.js";
 import type { RepositoryConfig } from "./repository.js";
+import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
+import {
+  authorizeStaffInvitationAcceptance,
+  enqueueInboxAssignmentReconciliation,
+} from "./staffInvitations.js";
 
 export type StaffInvitationAcceptanceEvent = {
   providerEventId: string;
@@ -29,6 +34,11 @@ export type StaffInvitationAcceptanceResult =
   | { outcome: "rejected"; reason: RejectionReason };
 
 type InvitationRow = {
+  inviter_user_id: string;
+  role_definition_id: string | null;
+  role_definition: (TeamRolePolicy & { id: string }) | null;
+  pms_access_enabled: boolean;
+  booking_access_enabled: boolean;
   id: string;
   organization_id: string;
   email: string;
@@ -67,10 +77,24 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await client.query(
+          `SELECT organization.id FROM identity.organizations organization
+           JOIN identity.staff_invitations invitation ON invitation.organization_id = organization.id
+           WHERE invitation.provider_invitation_id = $1 FOR UPDATE OF organization`,
+          [event.providerInvitationId],
+        );
         const invitation = (
           await client.query<InvitationRow>(
             `SELECT invitation.id, invitation.organization_id, invitation.email, invitation.role_key,
+                    invitation.inviter_user_id,
+                    invitation.role_definition_id,
+                    CASE WHEN definition.id IS NULL THEN NULL ELSE jsonb_build_object(
+                      'id', definition.id, 'securityClass', definition.security_class,
+                      'baseRoleKey', definition.base_role_key, 'presetKey', definition.preset_key,
+                      'defaultPermissions', definition.default_permissions
+                    ) END AS role_definition,
                     invitation.permission_overrides, invitation.property_access_mode, invitation.status,
+                    invitation.pms_access_enabled, invitation.booking_access_enabled,
                     invitation.delivery_state, invitation.expires_at <= now() AS is_expired,
                     invitation.accepted_user_id, invitation.accepted_membership_id,
                     invitation.request_id, invitation.correlation_id,
@@ -81,6 +105,8 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
                           WHERE invitation_id = invitation.id ORDER BY property_id) AS property_ids
              FROM identity.staff_invitations invitation
              JOIN identity.organizations organization ON organization.id = invitation.organization_id
+             LEFT JOIN identity.organization_roles definition
+               ON definition.organization_id = invitation.organization_id AND definition.id = invitation.role_definition_id
              WHERE invitation.provider_invitation_id = $1
              FOR UPDATE OF invitation, organization`,
             [event.providerInvitationId],
@@ -155,15 +181,34 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           return reject("provider_identity_mismatch", identity);
         }
 
+        if (
+          !(await authorizeStaffInvitationAcceptance(
+            client,
+            invitation.organization_id,
+            invitation.inviter_user_id,
+            identity.user_id,
+            invitation.id,
+          ))
+        )
+          return reject("invitation_access_invalid", identity);
         const overrides = parseStaffPermissionOverrides(invitation.permission_overrides);
         if (
           !overrides ||
+          (invitation.role_key === "external_owner" && invitation.role_definition_id === null) ||
           validateStaffInviteAccess({
             roleKey: invitation.role_key,
             propertyAccessMode: invitation.property_access_mode,
             propertyIds: invitation.property_ids,
             permissionOverrides: overrides,
-          }).length
+          }).filter(
+            (issue) =>
+              invitation.role_definition_id === null || issue !== "missing_required_permission",
+          ).length ||
+          (invitation.role_definition_id !== null &&
+            (!invitation.role_definition ||
+              invitation.role_definition.id !== invitation.role_definition_id ||
+              invitation.role_definition.baseRoleKey !== invitation.role_key ||
+              !resolveTeamRolePermissions(invitation.role_definition, overrides)))
         )
           return reject("invitation_access_invalid", identity);
         const linked = await client.query<{ property_id: string }>(
@@ -187,23 +232,31 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           await client.query<{ id: string }>(
             `INSERT INTO identity.organization_memberships
                (organization_id, user_id, status, role_key, permission_overrides,
-                property_access_mode, access_origin, invited_at)
-             VALUES ($1, $2, 'active', $3, $4::jsonb, 'assigned', 'agency', now())
+                property_access_mode, access_origin, invited_at, pms_access_enabled, booking_access_enabled, role_definition_id)
+             VALUES ($1, $2, 'active', $3, $4::jsonb, $7, 'agency', now(), $5, $6, $8)
              ON CONFLICT (organization_id, user_id) DO UPDATE SET
                status = 'active', role_key = EXCLUDED.role_key,
                permission_overrides = EXCLUDED.permission_overrides,
-               property_access_mode = 'assigned',
+               role_definition_id = EXCLUDED.role_definition_id,
+               property_access_mode = EXCLUDED.property_access_mode,
+               pms_access_enabled = EXCLUDED.pms_access_enabled,
+               booking_access_enabled = EXCLUDED.booking_access_enabled,
                invited_at = COALESCE(identity.organization_memberships.invited_at, EXCLUDED.invited_at),
                updated_at = now()
              WHERE identity.organization_memberships.status <> 'suspended'
+               AND identity.organization_memberships.role_definition_id IS NULL
                AND identity.organization_memberships.access_origin = 'agency'
-               AND identity.organization_memberships.role_key NOT IN ('hotel_owner', 'owner', 'operator')
+               AND identity.organization_memberships.role_key NOT IN ('hotel_owner', 'owner', 'operator', 'external_owner')
              RETURNING id`,
             [
               invitation.organization_id,
               identity.user_id,
               invitation.role_key,
               JSON.stringify(overrides),
+              invitation.pms_access_enabled,
+              invitation.booking_access_enabled,
+              invitation.property_access_mode,
+              invitation.role_definition_id,
             ],
           )
         ).rows[0]?.id;
@@ -224,6 +277,14 @@ export function createPgStaffInvitationAcceptanceRepository(config: RepositoryCo
           [invitation.id, identity.user_id, membershipId],
         );
         await audit(client, invitation, event, "accepted", undefined, identity, membershipId);
+        await enqueueInboxAssignmentReconciliation(client, {
+          organizationId: invitation.organization_id,
+          membershipId,
+          idempotencyId: invitation.id,
+          correlationId: invitation.correlation_id ?? invitation.request_id,
+          commandId: event.providerEventId,
+          reason: "role_permissions_changed",
+        });
         await client.query("COMMIT");
         return { outcome: "accepted", invitationId: invitation.id, membershipId };
       } catch (error) {
@@ -291,6 +352,12 @@ async function audit(
         membershipId,
         providerEventId: event.providerEventId,
         propertyIds: invitation.property_ids,
+        propertyAccessMode: invitation.property_access_mode,
+        roleDefinitionId: invitation.role_definition_id,
+        productAccess: {
+          pms: invitation.pms_access_enabled,
+          booking: invitation.booking_access_enabled,
+        },
       }),
     ],
   );

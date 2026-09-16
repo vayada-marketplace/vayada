@@ -1,6 +1,7 @@
 import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backend-authorization";
 import type {
   BookingPublicationCommandPort,
+  BookingPublicationReviewReadPort,
   ReadyBookingPublicationEvidence,
 } from "@vayada/domain-booking";
 import type { ProductReadinessResult, ReadinessProviderFailure } from "@vayada/domain-hotels";
@@ -24,7 +25,7 @@ export interface BookingPublicationReadinessProvider {
 
 export type BookingPublicationRoutesOptions = {
   propertyAccessRepository: PropertyAccessRepository;
-  repository: BookingPublicationCommandPort;
+  repository: BookingPublicationCommandPort & Partial<BookingPublicationReviewReadPort>;
   readinessProvider: BookingPublicationReadinessProvider;
 };
 type AuthorizedPublicationScope = {
@@ -84,6 +85,57 @@ export async function registerBookingPublicationRoutes(
     });
     authorizedScopes.set(request, { context, propertyId });
   };
+
+  app.get<{ Params: PropertyParams }>(
+    "/properties/:propertyId/publications/booking",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const scope = authorizedScopes.get(request);
+      if (!scope) return forbidden(reply);
+      if (!repository.getPublicationReview)
+        return reply.status(503).send({ code: "publication_review_unavailable" });
+      const idempotencyKey =
+        request.headers["idempotency-key"] === undefined ? undefined : readIdempotencyKey(request);
+      if (idempotencyKey === null) return invalidRequest(reply, "The recovery key is invalid.");
+      const input = {
+        organizationId: scope.context.selectedOrganization.organizationId,
+        propertyId: scope.propertyId,
+        actorUserId: scope.context.actor.internalUserId,
+      };
+      const review = await repository.getPublicationReview({
+        ...input,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
+      if (!review || review.propertyId !== scope.propertyId)
+        return reply.status(404).send({ code: "setup_scope_unavailable" });
+      // Readiness failures must not hide an accepted operation or previous active revision.
+      let readiness;
+      try {
+        readiness = await readinessProvider.getBookingReadiness(input);
+        if (readiness.propertyId !== scope.propertyId || readiness.product !== "booking")
+          throw new Error("Readiness scope mismatch");
+      } catch {
+        readiness = {
+          outcome: "provider_failure",
+          contractVersion: "onboarding-product-readiness.v1",
+          propertyId: scope.propertyId,
+          product: "booking",
+          status: "error",
+          error: {
+            kind: "system_error",
+            errorSource: "provider",
+            code: "readiness_unavailable",
+            message: "Booking readiness is temporarily unavailable.",
+            retryable: true,
+          },
+          evaluatedAt: new Date().toISOString(),
+        };
+      }
+      return reply
+        .header("Cache-Control", "no-store")
+        .send({ contractVersion: "booking-publication-review.v1", ...review, readiness });
+    },
+  );
 
   app.post<{ Params: PropertyParams; Body: unknown }>(
     "/properties/:propertyId/publications/booking",

@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 
 import type { IdentityMigrationBlocker } from "./productionIdentityDisposition.js";
 import { sortedBy } from "./productionIdentityOwnershipPolicy.js";
-import { addBlocker, stableJson } from "./productionIdentitySourceValidation.js";
+import {
+  addBlocker,
+  canonicalTimestamp,
+  stableJson,
+} from "./productionIdentitySourceValidation.js";
 import type {
   PlannedCatalogAmenity,
   PlannedCatalogContact,
@@ -66,14 +70,28 @@ export function reconcileProductionCatalog(
     target.sourceLinks
       .filter(
         (row) =>
-          row.sourceSystem === "booking" &&
-          row.sourceTable === "booking_hotels" &&
-          row.propertyId === row.sourceId &&
           row.migrationPhase !== "prerequisites" &&
-          VAY1351_RUN.test(row.migrationRunId ?? ""),
+          VAY1351_RUN.test(row.migrationRunId ?? "") &&
+          (row.migrationDisposition === "canonical" ||
+            row.migrationDisposition === "private_quarantine" ||
+            (row.sourceSystem === "booking" &&
+              row.sourceTable === "booking_hotels" &&
+              row.propertyId === row.sourceId)),
       )
       .map((row) => row.propertyId),
   );
+  const currentProperties = new Map(target.properties.map((row) => [String(row["id"]), row]));
+  for (const property of core.properties) {
+    const current = currentProperties.get(property.id);
+    if (property.profileStatus === "private" && current && current["profileStatus"] !== "private")
+      addBlocker(
+        blockers,
+        "CATALOG_PRIVATE_DISPOSITION_CONFLICT",
+        "hotel_catalog.properties",
+        property.id,
+        "Target property is public-capable but the reviewed migration disposition is private",
+      );
+  }
   const sourceSlugs = protectCanonicalSlugs(core.slugs, target.slugs, blockers);
   const reconcile = <T extends { updatedAt: string }>(
     entity: string,
@@ -164,7 +182,14 @@ export function reconcileProductionCatalog(
       content.policies,
       target.policies,
       by("propertyId"),
-      ["checkInTime", "checkOutTime", "cancellationSummary", "paymentPolicySummary"],
+      [
+        "checkInTime",
+        "checkOutTime",
+        "checkInUntil",
+        "checkOutFrom",
+        "cancellationSummary",
+        "paymentPolicySummary",
+      ],
       "hotel_catalog.policy",
     ),
     media: reconcile("property_media", presentation.media, target.media, by("id"), [
@@ -271,6 +296,14 @@ function reconcileRows<T extends { updatedAt: string }>(
     else if (targetTime > sourceTime) preserve("target_newer");
     else if (targetTime === sourceTime) {
       if (sameOwnedFields(sourceRecord, existing, fields)) preserve("identical");
+      else if (
+        entity === "property_policy_summaries" &&
+        migratedProperties.has(String(sourceRecord.propertyId)) &&
+        existing.checkInUntil == null &&
+        existing.checkOutFrom == null &&
+        sameOwnedFields(sourceRecord, existing, ["cancellationSummary", "paymentPolicySummary"])
+      )
+        writes.push(row);
       else
         addBlocker(
           blockers,
@@ -306,8 +339,12 @@ function sameOwnedFields(
 }
 function normalize(field: string, value: unknown): unknown {
   if (value == null) return null;
+  if (field === "verifiedAt") return canonicalTimestamp(value, field);
   if (["starRating", "latitude", "longitude", "sortOrder"].includes(field)) return Number(value);
-  if (["checkInTime", "checkOutTime"].includes(field) && typeof value === "string")
+  if (
+    ["checkInTime", "checkOutTime", "checkInUntil", "checkOutFrom"].includes(field) &&
+    typeof value === "string"
+  )
     return value.slice(0, 5);
   return value;
 }
