@@ -34,6 +34,7 @@ export type MarketplaceCommunicationPreferencesRepositoryConfig = {
   max?: number;
   pool?: MarketplaceCommunicationPreferencesPool;
   now?: () => Date;
+  lockTimeoutMs?: number;
 };
 export type MarketplaceCommunicationPreferencesRepository =
   MarketplaceCommunicationPreferenceReadPort &
@@ -70,6 +71,10 @@ export function createPgMarketplaceCommunicationPreferencesRepository(
   const pool: MarketplaceCommunicationPreferencesPool =
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
   const now = config.now ?? (() => new Date());
+  const lockTimeoutMs = config.lockTimeoutMs ?? 5_000;
+  if (!Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 1) {
+    throw new Error("lockTimeoutMs must be a positive integer");
+  }
 
   return {
     async getCommunicationPreferences(scope) {
@@ -93,7 +98,7 @@ export function createPgMarketplaceCommunicationPreferencesRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await client.query("SET LOCAL lock_timeout = '5s'");
+        await client.query("SELECT set_config('lock_timeout', $1, true)", [`${lockTimeoutMs}ms`]);
         await client.query("SET LOCAL statement_timeout = '15s'");
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
           `${command.organizationId}:${command.userId}`,
@@ -147,6 +152,7 @@ export function createPgMarketplaceCommunicationPreferencesRepository(
         return result;
       } catch (error) {
         await rollbackQuietly(client);
+        if (lockUnavailable(error)) return failed("command_in_progress");
         throw error;
       } finally {
         client.release();
@@ -491,6 +497,13 @@ const iso = (value: Date | string | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const lockUnavailable = (error: unknown): boolean => {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code: unknown }).code
+      : null;
+  return code === "55P03" || code === "57014";
+};
 async function rollbackQuietly(client: MarketplaceCommunicationPreferencesClient): Promise<void> {
   try {
     await client.query("ROLLBACK");
