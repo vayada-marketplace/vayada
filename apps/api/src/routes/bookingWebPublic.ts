@@ -28,6 +28,7 @@ import {
   bookedMealDescription,
   projectBookingRoomSelection,
 } from "../domains/bookingRoomSelectionProjection.js";
+import { appendMissingAddonRevenueEvidence } from "../domains/bookingAddonRevenueEvidence.js";
 import type { BankTransferBookingOperations } from "../domains/financeBankTransferBooking.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import { releaseAbandonedBookingEdits } from "../jobs/pendingBookingEditCleanup.js";
@@ -3619,6 +3620,11 @@ async function withGuestLifecycleMutation(
         required: true,
       });
     }
+    await appendMissingAddonRevenueEvidence(client, {
+      propertyId: updated.propertyId,
+      guestBookingId: updated.guestBookingId,
+      commandKey: `guest-cancel:${context.fingerprint}`,
+    });
     const currentReservation = inventoryReservationReceiptFromBookingMetadata(
       updated.bookingMetadata,
       updated.propertyId,
