@@ -51,8 +51,16 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-const render = async (slug = "hotel", value = quote) => {
-  await act(async () => root.render(createElement(ReplacementGuestRules, { slug, quote: value })));
+const render = async (
+  slug = "hotel",
+  value = quote,
+  onAcknowledgementChange?: (value: PublicQuoteGuestDisclosure | null) => void,
+) => {
+  await act(async () =>
+    root.render(
+      createElement(ReplacementGuestRules, { slug, quote: value, onAcknowledgementChange }),
+    ),
+  );
 };
 const checkbox = () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 it("discloses every guest rule without inventing booking submission or dropping age information", async () => {
@@ -121,4 +129,15 @@ it("aborts disclosure reads when the quote preview unmounts", async () => {
   const signal = vi.mocked(getQuoteGuestDisclosure).mock.calls[0][2]!;
   act(() => root.render(null));
   expect(signal.aborted).toBe(true);
+});
+it("supplies exact server evidence only while the current rules are acknowledged", async () => {
+  const changed = vi.fn();
+  await render("hotel", quote, changed);
+  expect(changed).toHaveBeenLastCalledWith(null);
+  act(() => checkbox().click());
+  expect(changed).toHaveBeenLastCalledWith(disclosure);
+  const next = { ...quote, quoteId: "22222222-2222-4222-8222-222222222222" };
+  vi.mocked(getQuoteGuestDisclosure).mockResolvedValue({ ...disclosure, quoteId: next.quoteId });
+  await render("hotel", next, changed);
+  expect(changed).toHaveBeenLastCalledWith(null);
 });

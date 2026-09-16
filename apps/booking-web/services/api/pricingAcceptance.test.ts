@@ -121,6 +121,20 @@ it("reuses uncertain retry keys and separates changed guest details", async () =
   expect(sent(2).key).not.toBe(sent(1).key);
 });
 
+it("allows only an exact uncertain retry to recover after quote expiry", async () => {
+  fetcher.mockRejectedValueOnce(new Error("network"));
+  await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).rejects.toThrow("network");
+  vi.setSystemTime(new Date(quote.expiresAt));
+  await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).rejects.toThrow(
+    "cannot be booked online",
+  );
+  await expect(
+    acceptPricingQuote("hotel", quote, disclosure, guest, undefined, "uncertain-retry"),
+  ).resolves.toEqual(fresh);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(sent(1).key).toBe(sent(0).key);
+});
+
 it("rotates the exact key after a definite conflict", async () => {
   fetcher.mockResolvedValueOnce(new Response("{}", { status: 409 }));
   await expect(acceptPricingQuote("hotel", quote, disclosure, guest)).rejects.toMatchObject({
