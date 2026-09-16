@@ -39,7 +39,6 @@ const hotel = {
   supportedLanguages: ["en", "de", "nl"],
   referAGuestEnabled: true,
   instantBook: true,
-  mapViewEnabled: false,
 };
 
 const publicHotelProfile = {
@@ -133,6 +132,8 @@ const rooms = [
       "Balcony",
       "Kitchen",
       "Non-smoking",
+      "Safe",
+      "Coffee machine",
       "Minibar",
       "Laptop-friendly workspace",
     ],
@@ -200,7 +201,7 @@ const addons = [
   },
 ];
 
-const publicOffers = {
+export const publicOffers = {
   contractVersion: "public-bookability.v1",
   generatedAt: "2026-06-06T11:00:00.000Z",
   publicVisibility: "public_safe",
@@ -236,7 +237,7 @@ const publicOffers = {
         },
         availableRooms: 2,
         refundable: true,
-        mealPlan: "Breakfast",
+        mealPlan: "breakfast",
         amenities: rooms[0].amenities,
         paymentOptions: ["card", "pay_at_property"],
         totals: {
@@ -264,7 +265,7 @@ const publicOffers = {
         },
         availableRooms: 2,
         refundable: false,
-        mealPlan: "Breakfast",
+        mealPlan: "breakfast",
         amenities: rooms[0].amenities,
         paymentOptions: ["card"],
         totals: {
@@ -292,7 +293,7 @@ const publicOffers = {
         },
         availableRooms: 0,
         refundable: true,
-        mealPlan: null,
+        mealPlan: "room_only",
         amenities: rooms[1].amenities,
         paymentOptions: ["card", "pay_at_property"],
         totals: {
@@ -320,8 +321,18 @@ const publicOffers = {
 };
 
 type MockBookingApisOptions = {
+  arrivalBounds?: { checkInUntil: string; checkOutFrom: string };
+  automaticPromotion?: { name: string; discountPercent: number };
   supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
+  supportedLocales?: string[];
+  supportedCurrencies?: string[];
   headerLogoUrl?: string;
+  headerSettings?: {
+    showContactButton: boolean;
+    showReferAGuestButton: boolean;
+    showLanguageSelector: boolean;
+    showCurrencySelector: boolean;
+  };
   gardenAmenities?: string[];
   publicContacts?: typeof publicHotelProfile.hotel.publicContacts;
 };
@@ -332,10 +343,14 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
     ...publicHotelProfile,
     hotel: {
       ...publicHotelProfile.hotel,
-      ...(options.headerLogoUrl
+      ...(options.headerLogoUrl || options.headerSettings
         ? {
             branding: {
-              logoUrl: options.headerLogoUrl,
+              logoUrl: options.headerLogoUrl ?? null,
+              showContactButton: options.headerSettings?.showContactButton ?? true,
+              showReferAGuestButton: options.headerSettings?.showReferAGuestButton ?? true,
+              showLanguageSelector: options.headerSettings?.showLanguageSelector ?? true,
+              showCurrencySelector: options.headerSettings?.showCurrencySelector ?? true,
               heroImage: null,
               heroHeading: null,
               heroSubtext: null,
@@ -344,7 +359,11 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
             },
           }
         : {}),
+      policies: { ...publicHotelProfile.hotel.policies, ...options.arrivalBounds },
       publicContacts: options.publicContacts ?? publicHotelProfile.hotel.publicContacts,
+      supportedLocales: options.supportedLocales ?? publicHotelProfile.hotel.supportedLocales,
+      supportedCurrencies:
+        options.supportedCurrencies ?? publicHotelProfile.hotel.supportedCurrencies,
       supportedQuoteParameters: {
         ...publicHotelProfile.hotel.supportedQuoteParameters,
         ...options.supportedQuoteParameters,
@@ -387,7 +406,29 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
   );
 
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
-    await route.fulfill({ json: offersResponse });
+    const response = options.automaticPromotion
+      ? {
+          ...offersResponse,
+          quote: {
+            ...offersResponse.quote,
+            offers: offersResponse.quote.offers.map((offer) => {
+              const discountAmount =
+                Math.round(offer.totals.roomTotal * options.automaticPromotion!.discountPercent) /
+                100;
+              return {
+                ...offer,
+                totals: {
+                  ...offer.totals,
+                  discounts: discountAmount,
+                  grandTotal: offer.totals.grandTotal - discountAmount,
+                  promotion: { ...options.automaticPromotion, discountAmount },
+                },
+              };
+            }),
+          },
+        }
+      : offersResponse;
+    await route.fulfill({ json: response });
   });
 
   await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/calendar**`, async (route) => {
@@ -409,6 +450,22 @@ export async function mockBookingApis(page: Page, options: MockBookingApisOption
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/rooms**`, async (route) => {
     await route.fulfill({ json: rooms });
   });
+
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/checkout-config`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          addons,
+          showAddonsStep: true,
+          payAtPropertyEnabled: true,
+          onlineCardPayment: false,
+          freeCancellationDays: 7,
+          phoneRequired: true,
+        },
+      });
+    },
+  );
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/addons`, async (route) => {
     await route.fulfill({ json: addons });

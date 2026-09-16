@@ -3,6 +3,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.config import settings
 from app.database import Database
 from app.dependencies import require_hotel_admin
 from app.models.checkout import (
@@ -161,7 +162,7 @@ async def create_checkout_charge(
         )
 
     pool = await Database.get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
         async with conn.transaction():
             row = await CheckoutRepository.create_charge(
                 booking_id, hotel_id, data.label, data.amount, user_id, conn=conn
@@ -227,7 +228,7 @@ async def complete_booking_check_out(
         raise HTTPException(status_code=400, detail="Only checked-in bookings can be checked out")
 
     pool = await Database.get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
         async with conn.transaction():
             pending_total = await CheckoutRepository.pending_total(booking_id, conn=conn)
             if pending_total > 0:

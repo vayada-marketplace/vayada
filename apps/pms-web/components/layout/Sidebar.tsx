@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BoltIcon,
+  ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
   ChevronDownIcon,
   CheckIcon,
@@ -14,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
+import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import { messagingService } from "@/services/messaging";
 import {
   createBrowserAuthHandoff,
   crossAppReauthenticationUrl,
@@ -33,24 +36,74 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
   unavailable?: boolean;
+  requiredAny: string[];
 }
 
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
-  { labelKey: "layout.sidebar.dashboard", href: "/dashboard", icon: DashboardIcon },
-  { labelKey: "layout.sidebar.calendar", href: "/calendar", icon: CalendarIcon },
-  { labelKey: "layout.sidebar.reservations", href: "/bookings", icon: ReservationsIcon },
-  { label: "Reviews", href: "/reviews", icon: StarIcon },
-  { labelKey: "layout.sidebar.roomsAndRates", href: "/rooms", icon: RoomsIcon },
+  {
+    labelKey: "layout.sidebar.dashboard",
+    href: "/dashboard",
+    icon: DashboardIcon,
+    requiredAny: ["pms.dashboard.read"],
+  },
+  {
+    labelKey: "layout.sidebar.calendar",
+    href: "/calendar",
+    icon: CalendarIcon,
+    requiredAny: ["pms.calendar.read"],
+  },
+  {
+    labelKey: "layout.sidebar.reservations",
+    href: "/bookings",
+    icon: ReservationsIcon,
+    requiredAny: ["pms.reservation.read"],
+  },
+  {
+    labelKey: "layout.sidebar.inbox",
+    href: "/inbox",
+    icon: ChatBubbleLeftRightIcon,
+    requiredAny: ["pms.inbox.read"],
+  },
+  {
+    labelKey: "layout.sidebar.reviews",
+    href: "/reviews",
+    icon: StarIcon,
+    requiredAny: ["pms.operations.read"],
+  },
+  {
+    labelKey: "layout.sidebar.roomsAndRates",
+    href: "/rooms",
+    icon: RoomsIcon,
+    requiredAny: ["pms.room_status.read", "pms.rooms_rates.read"],
+  },
   {
     labelKey: "layout.sidebar.channelManager",
     href: "/channel-manager",
     icon: ChannelsIcon,
     unavailable: true,
+    requiredAny: ["pms.channel_manager.read"],
   },
-  { labelKey: "layout.sidebar.settings", href: "/settings", icon: SettingsIcon },
+  {
+    labelKey: "layout.sidebar.settings",
+    href: "/settings",
+    icon: SettingsIcon,
+    requiredAny: ["pms.settings.read", "pms.settings.manage", "identity.staff.manage"],
+  },
 ];
 
-export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function visiblePmsNavigation(permissions: readonly string[]) {
+  return CORE_NAV_ITEMS.filter((item) =>
+    item.requiredAny.some((permission) => permissions.includes(permission)),
+  );
+}
+
+export default function Sidebar({
+  onNavigate,
+  permissions,
+}: {
+  onNavigate?: () => void;
+  permissions: readonly string[];
+}) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -58,6 +111,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [enabledProducts, setEnabledProducts] = useState<Set<Product>>(
     () => new Set<Product>(["pms"]),
   );
+  const [inboxUnread, setInboxUnread] = useState(0);
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -85,7 +139,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     try {
       window.location.href = crossAppReauthenticationUrl(baseUrl, targetPath);
     } catch {
-      setSwitchError("We couldn't open that app. Please try again later.");
+      setSwitchError(t("layout.sidebar.switchError"));
     }
   };
 
@@ -98,6 +152,29 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadUnread = async () => {
+      try {
+        const propertyId = await resolveSelectedPmsPropertyId("loading the Inbox unread count");
+        const count = await messagingService.unreadCount(propertyId);
+        if (!cancelled) setInboxUnread(count.threadCount);
+      } catch {
+        if (!cancelled) setInboxUnread(0);
+      }
+    };
+    void loadUnread();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadUnread();
+    }, 30_000);
+    window.addEventListener("pms-inbox-unread-changed", loadUnread);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("pms-inbox-unread-changed", loadUnread);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,17 +202,9 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     };
   }, []);
 
-  const baseNavItems: Omit<NavItem, "badge">[] = [
-    CORE_NAV_ITEMS[0],
-    CORE_NAV_ITEMS[1],
-    CORE_NAV_ITEMS[2],
-    CORE_NAV_ITEMS[3],
-    CORE_NAV_ITEMS[4],
-    CORE_NAV_ITEMS[5],
-    CORE_NAV_ITEMS[6],
-  ];
-
-  const navItems: NavItem[] = baseNavItems;
+  const navItems: NavItem[] = visiblePmsNavigation(permissions).map((item) =>
+    item.href === "/inbox" && inboxUnread > 0 ? { ...item, badge: inboxUnread } : item,
+  );
 
   return (
     <aside
@@ -342,14 +411,14 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     "relative flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] text-gray-400",
                     collapsed && "justify-center px-0",
                   )}
-                  title={`${label} — not available yet`}
+                  title={t("layout.sidebar.unavailableNamed", { label })}
                 >
                   <item.icon className="h-[18px] w-[18px] shrink-0 text-gray-300" />
                   {!collapsed && (
                     <>
                       <span className="flex-1">{label}</span>
                       <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
-                        Soon
+                        {t("layout.sidebar.soon")}
                       </span>
                     </>
                   )}

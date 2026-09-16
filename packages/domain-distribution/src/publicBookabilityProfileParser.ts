@@ -53,12 +53,26 @@ const contactSchema = z
     if (contact.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.value))
       issue(context, ["value"]);
   });
-const policiesSchema = z.strictObject({
-  checkInFrom: localTime.nullable().optional(),
-  checkOutUntil: localTime.nullable().optional(),
-  cancellationSummary: optionalText,
-  termsUrl: httpsUrl.nullable().optional(),
-});
+const policiesSchema = z
+  .strictObject({
+    checkInFrom: localTime.nullable().optional(),
+    checkInUntil: localTime.nullable().optional(),
+    checkOutFrom: localTime.nullable().optional(),
+    checkOutUntil: localTime.nullable().optional(),
+    cancellationSummary: optionalText,
+    termsUrl: httpsUrl.nullable().optional(),
+  })
+  .superRefine((policy, context) => {
+    if (
+      policy.checkInFrom &&
+      policy.checkInUntil &&
+      policy.checkInUntil !== "00:00" &&
+      policy.checkInUntil <= policy.checkInFrom
+    )
+      issue(context, ["checkInUntil"]);
+    if (policy.checkOutFrom && policy.checkOutUntil && policy.checkOutFrom >= policy.checkOutUntil)
+      issue(context, ["checkOutFrom"]);
+  });
 const capabilitiesSchema = z.strictObject({
   instantBook: z.boolean(),
   onlinePayment: z.boolean(),
@@ -79,6 +93,10 @@ const quoteParametersSchema = z.strictObject({
 });
 const brandingSchema = z.strictObject({
   logoUrl: httpsUrl.nullable().optional(),
+  showContactButton: z.boolean().optional(),
+  showReferAGuestButton: z.boolean().optional(),
+  showLanguageSelector: z.boolean().optional(),
+  showCurrencySelector: z.boolean().optional(),
   heroImage: httpsUrl.nullable(),
   heroHeading: nonEmpty.nullable(),
   heroSubtext: nonEmpty.nullable(),

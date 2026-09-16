@@ -37,6 +37,51 @@ describe("production migration parity", () => {
     expect(formatProductionParityText(report)).toContain("Decision: GO");
   });
 
+  it("reconciles explicit Finance omissions without hiding unexplained variance", async () => {
+    const reports = domainReports();
+    const dimension = "EUR:unbound:paid:owner_0123456789abcdef";
+    reports.finance.parity.sourcePaymentAmountsByCurrencyStatusOwner = {
+      [dimension]: "10.00",
+    };
+    reports.finance.parity.targetPaymentAmountsByCurrencyStatusOwner = {
+      [dimension]: "7.00",
+    };
+    reports.finance.parity.omittedPaymentAmountsByCurrencyStatusOwner = {
+      [dimension]: "3.00",
+    };
+
+    const reconciled = await runProductionParity(config(), services({ reports }));
+    expect(reconciled.decision).toBe("go");
+
+    reports.finance.parity.omittedPaymentAmountsByCurrencyStatusOwner[dimension] = "2.00";
+    const unexplained = await runProductionParity(config(), services({ reports }));
+    expect(unexplained.decision).toBe("no-go");
+    expect(unexplained.findings).toContainEqual(
+      expect.objectContaining({ code: "FINANCIAL_VARIANCE" }),
+    );
+  });
+
+  it("reconciles hash-only booking allocation omissions in the final gate", async () => {
+    const reports = domainReports();
+    const dimension = "booking_0123456789abcdef:property:owner_fedcba9876543210";
+    reports.finance.parity.sourcePayoutAllocationsByBookingOwner = {
+      [dimension]: "100.00",
+    };
+    reports.finance.parity.omittedPayoutAllocationsByBookingOwner = {
+      [dimension]: "100.00",
+    };
+
+    const reconciled = await runProductionParity(config(), services({ reports }));
+    expect(reconciled.decision).toBe("go");
+
+    reports.finance.parity.omittedPayoutAllocationsByBookingOwner = {};
+    const unexplained = await runProductionParity(config(), services({ reports }));
+    expect(unexplained.decision).toBe("no-go");
+    expect(unexplained.findings).toContainEqual(
+      expect.objectContaining({ code: "FINANCIAL_VARIANCE" }),
+    );
+  });
+
   it("requires human review for preserved newer target state even within the warning budget", async () => {
     const reports = domainReports();
     reports.booking.counts.preservedNewerTarget = 1;
@@ -51,6 +96,50 @@ describe("production migration parity", () => {
       expect.objectContaining({ severity: "warn", code: "PRESERVED_NEWER_TARGET_STATE" }),
     );
   });
+
+  it.each([
+    { reasons: ["identical"], warningCount: 0 },
+    { reasons: ["target_newer"], warningCount: 1 },
+    { reasons: ["target_owner_revision"], warningCount: 1 },
+    { reasons: ["target_removed"], warningCount: 1 },
+    {
+      reasons: ["identical", "target_newer", "target_owner_revision", "target_removed"],
+      warningCount: 3,
+    },
+  ] as const)(
+    "warns only for genuine Catalog preservation: $reasons",
+    async ({ reasons, warningCount }) => {
+      const reports = domainReports();
+      reports.catalog.preservedTarget = reasons.map((reason, index) => ({
+        entity: "property_profiles",
+        key: `profile-${index}`,
+        reason,
+        sourceUpdatedAt: "2026-08-01T00:00:00.000Z",
+        targetUpdatedAt: reason === "target_removed" ? null : "2026-08-01T00:00:00.000Z",
+      }));
+      reports.catalog.counts.preservedTarget = reasons.length;
+
+      for (const warningBudget of [0, 1]) {
+        const report = await runProductionParity(
+          { ...config(), warningBudget },
+          services({ reports }),
+        );
+        const warnings = report.findings.filter((row) => row.severity === "warn");
+        expect(report.decision).toBe(
+          warningCount === 0 ? "go" : warningBudget === 0 ? "no-go" : "review",
+        );
+        if (warningCount === 0) expect(warnings).toEqual([]);
+        else
+          expect(warnings).toEqual([
+            expect.objectContaining({
+              code: "PRESERVED_NEWER_TARGET_STATE",
+              owner: "catalog",
+              actual: String(warningCount),
+            }),
+          ]);
+      }
+    },
+  );
 
   it("hard-fails unresolved financial, PII, and raw-media evidence", async () => {
     const reports = domainReports();
@@ -352,6 +441,10 @@ function domainReports(): {
       counts: {
         users: 1,
         preservedNewerUsers: 0,
+        retiredDuplicateUsers: 0,
+        quarantinedUsers: 0,
+        quarantinedOrganizations: 0,
+        quarantinedResourceLinks: 0,
         pendingTargetWrites: 0,
         organizations: 1,
         memberships: 1,
@@ -376,6 +469,7 @@ function domainReports(): {
       counts: {
         properties: 1,
         sourceLinks: 1,
+        quarantinedSourceRows: 0,
         slugs: 1,
         domains: 0,
         locations: 1,
@@ -387,6 +481,7 @@ function domainReports(): {
         writes: 0,
         preservedTarget: 0,
       },
+      quarantinedSources: [],
       preservedTarget: [],
       blockers: [],
     },
@@ -418,6 +513,8 @@ function domainReports(): {
         sourceDraftMaterialization: {},
         plannedDraftStatuses: {},
       },
+      quarantines: [],
+      inferences: [],
       blockers: [],
     },
     pms: {
@@ -454,7 +551,12 @@ function domainReports(): {
       mode: "dry-run",
       applied: false,
       checksum: SHA,
-      counts: { ...reconciliationCounts },
+      counts: {
+        ...reconciliationCounts,
+        quarantinedValues: 0,
+        quarantinedSourceRows: 0,
+      },
+      quarantineCountsByReason: {},
       parity: {
         sourceTableCounts: { "marketplace.creator_profiles": 1 },
         targetTableCounts: { "marketplace.creator_profiles": 1 },
@@ -469,27 +571,39 @@ function domainReports(): {
       mode: "dry-run",
       applied: false,
       checksum: SHA,
-      counts: { ...reconciliationCounts },
+      counts: { ...reconciliationCounts, dispositions: 0, omittedSourceRows: 0 },
+      dispositionCountsByReason: {},
       parity: {
         sourceTableCounts: {},
         targetTableCounts: {},
+        dispositionCountsByReason: {},
+        omittedSourceRowCounts: {},
         sourcePaymentAmountsByCurrencyStatusOwner: {},
+        omittedPaymentAmountsByCurrencyStatusOwner: {},
         targetPaymentAmountsByCurrencyStatusOwner: {},
         sourcePaymentCountsByCurrencyStatusOwner: {},
+        omittedPaymentCountsByCurrencyStatusOwner: {},
         targetPaymentCountsByCurrencyStatusOwner: {},
         sourcePaymentFeesByCurrencyStatusOwner: {},
+        omittedPaymentFeesByCurrencyStatusOwner: {},
         targetPaymentFeesByCurrencyStatusOwner: {},
         sourcePaymentNetByCurrencyStatusOwner: {},
+        omittedPaymentNetByCurrencyStatusOwner: {},
         targetPaymentNetByCurrencyStatusOwner: {},
         sourcePaymentRefundsByCurrencyStatusOwner: {},
+        omittedPaymentRefundsByCurrencyStatusOwner: {},
         targetPaymentRefundsByCurrencyStatusOwner: {},
         sourcePayoutAmountsByCurrencyStatusOwner: {},
+        omittedPayoutAmountsByCurrencyStatusOwner: {},
         targetPayoutAmountsByCurrencyStatusOwner: {},
         sourcePayoutCountsByCurrencyStatusOwner: {},
+        omittedPayoutCountsByCurrencyStatusOwner: {},
         targetPayoutCountsByCurrencyStatusOwner: {},
         sourcePayoutNetByCurrencyStatusOwner: {},
+        omittedPayoutNetByCurrencyStatusOwner: {},
         targetPayoutNetByCurrencyStatusOwner: {},
         sourcePayoutAllocationsByBookingOwner: {},
+        omittedPayoutAllocationsByBookingOwner: {},
         targetPayoutAllocationsByBookingOwner: {},
       },
       blockers: [],

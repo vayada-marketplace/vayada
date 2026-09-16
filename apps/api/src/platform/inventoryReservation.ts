@@ -1,6 +1,8 @@
 import {
   PMS_INVENTORY_RESERVATION_MARKER_VERSION,
   parsePmsInventoryReservationReceipt,
+  parsePmsInventoryReservationBundle,
+  type PmsInventoryReservationBundle,
   type PmsInventoryReservationReceipt,
   type PmsInventoryReservationMarker,
 } from "@vayada/domain-pms";
@@ -14,9 +16,23 @@ export type InventoryReservationTransaction = {
 };
 
 export type InventoryReservationReceipt =
-  PmsInventoryReservationReceipt | PmsInventoryReservationMarker;
+  | PmsInventoryReservationBundle
+  | PmsInventoryReservationReceipt
+  | PmsInventoryReservationMarker;
 
 export type DirectBookingInventoryReservationPort = {
+  /** Caller owns the transaction and must roll it back on any failure. */
+  reserveBundle?(input: {
+    transaction: InventoryReservationTransaction;
+    propertyId: string;
+    quoteSessionId: string;
+    lines: readonly { roomTypeId: string; publicOfferKey: string; roomCount: number }[];
+    checkIn: string;
+    checkOut: string;
+    currency: string;
+    occurredAt: Date;
+    replacingReservation?: InventoryReservationReceipt;
+  }): Promise<PmsInventoryReservationBundle>;
   reserve(input: {
     transaction: InventoryReservationTransaction;
     propertyId: string;
@@ -28,13 +44,30 @@ export type DirectBookingInventoryReservationPort = {
     roomCount: number;
     currency: string;
     occurredAt: Date;
+    /** Original hold released in this transaction by an authorized pending edit. */
+    replacingReservation?: InventoryReservationReceipt;
   }): Promise<InventoryReservationReceipt | null>;
   release(input: {
     transaction: InventoryReservationTransaction;
     propertyId: string;
     reservation: InventoryReservationReceipt;
     occurredAt: Date;
+    requireReserved?: boolean;
   }): Promise<void>;
+  /** Verify a complete reserved bundle against the current booking selection and stay. */
+  bundleAvailabilityCredits?(input: {
+    transaction: InventoryReservationTransaction;
+    propertyId: string;
+    reservation: PmsInventoryReservationBundle;
+    lines: readonly { roomTypeId: string; publicOfferKey: string; roomCount: number }[];
+    checkIn: string;
+    checkOut: string;
+  }): Promise<Map<string, { checkIn: string; checkOut: string; roomCount: number }> | null>;
+  selectionAvailabilityCredits?(input: {
+    transaction: InventoryReservationTransaction;
+    propertyId: string;
+    guestBookingId: string;
+  }): Promise<Map<string, { checkIn: string; checkOut: string; roomCount: number }>>;
   availabilityCredit?(input: {
     transaction: InventoryReservationTransaction;
     propertyId: string;
@@ -52,6 +85,8 @@ export function inventoryReservationReceiptFromBookingMetadata(
   expectedPropertyId: string,
 ): InventoryReservationReceipt | null {
   const marker = objectValue(objectValue(bookingMetadata)["inventoryReservation"]);
+  const bundle = parsePmsInventoryReservationBundle(marker);
+  if (bundle) return bundle;
   const receipt = parsePmsInventoryReservationReceipt(marker);
   if (receipt) return receipt;
   if (

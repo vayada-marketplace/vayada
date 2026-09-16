@@ -1,4 +1,15 @@
 {
+  "analyticsConsent": {
+    "settings": "Choix de confidentialité",
+    "title": "Statistiques facultatives",
+    "description": "Nous utilisons des statistiques facultatives pour comprendre les visites et les étapes de réservation. Vous pouvez réserver sans les activer. Votre choix concerne uniquement le site de réservation de cet hôtel.",
+    "enabled": "Statistiques activées.",
+    "disabled": "Statistiques désactivées.",
+    "saveError": "Impossible d’enregistrer votre choix. Les statistiques restent désactivées.",
+    "reject": "Refuser les statistiques",
+    "accept": "Autoriser les statistiques",
+    "close": "Conserver le choix actuel"
+  },
   "common": {
     "checkAvailability": "Vérifier la disponibilité",
     "bookNow": "Réserver maintenant",
@@ -32,6 +43,8 @@
     "loading": "Chargement...",
     "qty": "Qté",
     "perPerson": "par personne",
+    "checkInWindow": "Arrivée: {time}",
+    "checkOutWindow": "Départ: {time}",
     "checkInFrom": "Arrivée à partir de {time}",
     "checkOutBy": "Départ avant {time}",
     "pricingUpdating": "Les tarifs pour ces dates sont encore en cours de mise à jour. Veuillez patienter un instant puis réessayer."
@@ -50,6 +63,11 @@
     "payment": "Paiement"
   },
   "home": {
+    "guestCountUnsupported": "La recherche en ligne ne prend pas en charge votre groupe de {count} personnes. Essayez avec moins de personnes ou contactez-nous.",
+    "guestCountUnavailable": "Aucun de nos hébergements disponibles ne peut accueillir votre groupe de {count} personnes. Essayez avec moins de personnes ou à d’autres dates.",
+    "noAvailability": "Aucun hébergement disponible pour cette recherche. Essayez d’autres dates ou options.",
+    "availabilityError": "Nous n’avons pas pu vérifier la disponibilité. Veuillez réessayer.",
+    "noMatchingRooms": "Aucun hébergement ne correspond à vos filtres. Essayez de retirer un filtre.",
     "yourStay": "Votre séjour",
     "addPromo": "Ajouter un code promo",
     "promoTitle": "Vous avez un code promo ?",
@@ -72,7 +90,7 @@
     "priceHighLow": "Prix : décroissant",
     "upToGuests": "Jusqu'à {count} voyageurs",
     "viewDetails": "Voir les détails",
-    "viewFullAmenities": "Voir tous les équipements ({count} de plus)",
+    "viewFullAmenities": "Voir tous les équipements ({count})",
     "showLess": "Afficher moins",
     "rateOptions": "Options de tarif",
     "selectYourRate": "Choisissez votre tarif",
@@ -104,19 +122,6 @@
       "checkingAvailability": "Vérification des disponibilités",
       "availabilityUnavailable": "Les disponibilités pour ces dates sont temporairement indisponibles.",
       "availabilityUnavailableTooltip": "Disponibilités indisponibles"
-    },
-    "mobileView": {
-      "list": "Liste",
-      "map": "Carte"
-    },
-    "roomMap": {
-      "noLocations": "Aucun emplacement disponible",
-      "noLocationsDesc": "Les types de chambres sans coordonnées enregistrées apparaissent toujours dans la liste.",
-      "locations": "{count, plural, one {# emplacement} other {# emplacements}}",
-      "perNight": "/ nuit",
-      "view": "Voir →",
-      "zoomIn": "Zoomer",
-      "zoomOut": "Dézoomer"
     }
   },
   "rooms": {
@@ -254,6 +259,7 @@
     "xenditTitle": "QRIS / E-Wallet / Virement bancaire",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay ou virement bancaire indonésien via Xendit",
     "xenditExplanation": "Vous serez redirigé vers une page de paiement sécurisée où vous pourrez payer avec QRIS, OVO, DANA, ShopeePay, GoPay ou par virement bancaire. Nous examinerons votre réservation une fois le paiement confirmé.",
+    "errorPaymentUnavailable": "Ce mode de paiement n’est plus disponible. Veuillez actualiser la page et choisir un mode de paiement disponible.",
     "errorSoldOut": "Malheureusement, cette chambre vient d'être complète. Veuillez choisir une autre chambre ou d'autres dates.",
     "errorSameDaySoldOut": "Les réservations le jour même ne sont plus disponibles pour aujourd'hui. Veuillez sélectionner demain ou une autre date disponible.",
     "errorGeneric": "Une erreur s'est produite lors de la création de votre réservation. Veuillez réessayer ou choisir une autre chambre.",
@@ -405,5 +411,24 @@
     "unableToLoad": "Impossible de charger l'hôtel",
     "tryAgainLater": "Nous n'avons pas pu récupérer les données de l'hôtel. Veuillez réessayer plus tard.",
     "retry": "Réessayer"
+  },
+  "roomSelection": {
+    "breakfastIncluded": "Petit-déjeuner inclus",
+    "roomOnly": "Chambre seule",
+    "accommodation": "Hébergement pour {count} personnes",
+    "perRoomTerms": "Les conditions d’annulation s’appliquent à chaque chambre.",
+    "roomNumber": "Chambre {number}",
+    "totalStay": "Total pour {nights} nuits",
+    "freeUntil": "Annulation gratuite jusqu’au {date} ({timezone}).",
+    "afterDeadline": "Aucun remboursement après la date limite ou en cas de non-présentation.",
+    "termsUnavailable": "Les conditions d’annulation ne sont pas disponibles.",
+    "unavailable": "Cette sélection n’est plus disponible. Veuillez relancer la recherche.",
+    "choose": "Choisir cet hébergement",
+    "selectedAccommodation": "Hébergement sélectionné",
+    "partyChanged": "Le nombre de voyageurs a changé. Mettez à jour les voyageurs de chaque chambre ou choisissez un autre hébergement avant de vérifier le prix.",
+    "editRequest": "Modifier la demande",
+    "allocateGuests": "Voyageurs dans chaque chambre",
+    "allocationAdults": "Adultes",
+    "allocationChildren": "Enfants"
   }
 }

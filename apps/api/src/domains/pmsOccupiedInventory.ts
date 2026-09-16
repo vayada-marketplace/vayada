@@ -35,9 +35,49 @@ export async function reconcilePmsOccupiedInventory(
   spans: readonly PmsOccupiedInventorySpan[],
   acceptedAt: string,
 ): Promise<void> {
-  const targetDays = occupiedDays(spans);
-  if (targetDays.length === 0) return;
+  if (spans.length === 0) return;
   await lockPmsInventoryMutationScope(client, propertyId);
+  const days = await readPmsOccupiedInventory(client, propertyId, spans);
+  for (const day of days) {
+    const total = integer(day.totalCount);
+    const blocked = integer(day.blockedCount);
+    const assigned = integer(day.assignedCount);
+    const expected = integer(day.expectedAssignedCount);
+    const effective = integer(day.effectiveSellableLimitCount);
+    if (
+      [total, blocked, assigned, expected, effective].some((value) => value === null) ||
+      expected! + blocked! > total!
+    ) {
+      throw new PmsOccupiedInventoryInvariantError(
+        "Occupied inventory exceeds physical room capacity",
+      );
+    }
+    if (assigned === expected) continue;
+    const available =
+      day.status === "closed" || day.linkedStopSell
+        ? 0
+        : Math.max(0, effective! - expected! - blocked!);
+    const updated = await client.query(
+      `UPDATE pms.inventory_days SET assigned_count=$4,available_count=$5,
+         inventory_revision=inventory_revision+1,
+         booking_source_revision=booking_source_revision+1,updated_at=$6::timestamptz
+       WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND stay_date=$3::date`,
+      [propertyId, day.roomTypeId, day.stayDate, expected, available, acceptedAt],
+    );
+    if (updated.rowCount !== 1) {
+      throw new PmsOccupiedInventoryInvariantError("Canonical inventory changed under lock");
+    }
+  }
+}
+
+/** Reads canonical occupancy under row locks without repairing inventory. */
+export async function readPmsOccupiedInventory(
+  client: PmsOccupiedInventoryClient,
+  propertyId: string,
+  spans: readonly PmsOccupiedInventorySpan[],
+): Promise<InventoryDay[]> {
+  const targetDays = occupiedDays(spans);
+  if (targetDays.length === 0) return [];
   const result = await client.query<InventoryDay>(
     `WITH target_days AS (
        SELECT DISTINCT item."roomTypeId"::uuid AS room_type_id,item."stayDate"::date AS stay_date
@@ -60,11 +100,15 @@ export async function reconcilePmsOccupiedInventory(
                  OR adopted.room_type_id=receipt.room_type_id)
                AND COALESCE(adopted.check_in,booking.check_in)=receipt.check_in AND COALESCE(adopted.check_out,booking.check_out)=receipt.check_out
              WHERE booking.property_id=receipt.property_id
-               AND (booking.booking_metadata#>>'{inventoryReservation,receiptId}'=
-                 receipt.receipt_id::text OR booking.quote_session_id::text=receipt.quote_session_id
-                 OR booking.booking_metadata#>>'{inventoryReservation,quoteSessionId}'=receipt.quote_session_id)
+               AND (CASE WHEN booking.booking_metadata#>>'{inventoryReservation,contractVersion}'='pms-inventory-reservation-bundle.v1'
+                 THEN booking.booking_metadata#>'{inventoryReservation,receipts}' @>
+                   jsonb_build_array(jsonb_build_object('receiptId',receipt.receipt_id::text))
+                   AND adopted.assignment_payload#>>'{inventoryReservation,receiptId}'=receipt.receipt_id::text
+                 ELSE booking.booking_metadata#>>'{inventoryReservation,receiptId}'=receipt.receipt_id::text
+                   OR booking.quote_session_id::text=receipt.quote_session_id
+                   OR booking.booking_metadata#>>'{inventoryReservation,quoteSessionId}'=receipt.quote_session_id END)
            ),0)))::int
-           FROM pms.inventory_reservation_receipts receipt
+           FROM pms.active_inventory_reservation_receipts receipt
            JOIN pms.inventory_reservation_statuses reservation_status
              ON reservation_status.receipt_id=receipt.receipt_id AND reservation_status.organization_id=receipt.organization_id
             AND reservation_status.property_id=receipt.property_id
@@ -129,36 +173,7 @@ export async function reconcilePmsOccupiedInventory(
   if (result.rows.length !== targetDays.length) {
     throw new PmsOccupiedInventoryInvariantError("Canonical inventory coverage is incomplete");
   }
-  for (const day of result.rows) {
-    const total = integer(day.totalCount);
-    const blocked = integer(day.blockedCount);
-    const assigned = integer(day.assignedCount);
-    const expected = integer(day.expectedAssignedCount);
-    const effective = integer(day.effectiveSellableLimitCount);
-    if (
-      [total, blocked, assigned, expected, effective].some((value) => value === null) ||
-      expected! + blocked! > total!
-    ) {
-      throw new PmsOccupiedInventoryInvariantError(
-        "Occupied inventory exceeds physical room capacity",
-      );
-    }
-    if (assigned === expected) continue;
-    const available =
-      day.status === "closed" || day.linkedStopSell
-        ? 0
-        : Math.max(0, effective! - expected! - blocked!);
-    const updated = await client.query(
-      `UPDATE pms.inventory_days SET assigned_count=$4,available_count=$5,
-         inventory_revision=inventory_revision+1,
-         booking_source_revision=booking_source_revision+1,updated_at=$6::timestamptz
-       WHERE property_id=$1::uuid AND room_type_id=$2::uuid AND stay_date=$3::date`,
-      [propertyId, day.roomTypeId, day.stayDate, expected, available, acceptedAt],
-    );
-    if (updated.rowCount !== 1) {
-      throw new PmsOccupiedInventoryInvariantError("Canonical inventory changed under lock");
-    }
-  }
+  return result.rows;
 }
 
 function occupiedDays(spans: readonly PmsOccupiedInventorySpan[]) {

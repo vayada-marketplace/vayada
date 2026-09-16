@@ -42,6 +42,7 @@ describe("target PMS inventory reservation adapter", () => {
     expect(calls[0]?.text).toContain("pg_advisory_xact_lock");
     expect(calls[1]?.text).toContain("UPDATE pms.inventory_days");
     expect(calls[1]?.text).toContain("booking_source_revision + 1");
+    expect(calls[1]?.text.match(/COALESCE\(inventory\.rate_gate_open, TRUE\)/g)).toHaveLength(2);
     expect(calls[1]?.text).not.toContain("payAtProperty");
     expect(calls[1]?.text).toContain(
       "WHEN offer.availability_status IN ('closed', 'stale', 'unavailable')",
@@ -58,6 +59,7 @@ describe("target PMS inventory reservation adapter", () => {
       reservationInput.roomCount,
       reservationInput.currency,
       reservationInput.occurredAt.toISOString(),
+      [],
     ]);
     expect(calls[2]?.text).toContain("pms.direct_booking_inventory.reserve");
   });

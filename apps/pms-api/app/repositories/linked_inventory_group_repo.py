@@ -2,6 +2,7 @@ from datetime import date
 
 import asyncpg
 
+from app.config import settings
 from app.database import Database
 
 
@@ -80,7 +81,10 @@ class LinkedInventoryGroupRepository:
 
         pool = await Database.get_pool()
         try:
-            async with pool.acquire() as conn, conn.transaction():
+            async with (
+                pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn,
+                conn.transaction(),
+            ):
                 if group_id:
                     existing = await conn.fetchrow(
                         """

@@ -1,3 +1,4 @@
+import { listChannexAlerts, type ChannexAlert } from "./channexOperationalAlerts.js";
 import {
   CHANNEX_MANAGEMENT_CONTRACT_VERSION,
   type ChannexConnectedChannel,
@@ -9,6 +10,7 @@ import {
   type ChannexSyncDomainState,
 } from "@vayada/domain-pms-channex";
 import pg from "pg";
+import { CHANNEX_ARI_MAPPING_MISSING_SQL } from "./pmsChannexAriMapping.js";
 
 export const PMS_CHANNEX_MANAGEMENT_QUEUE = "pms.channex.management";
 
@@ -19,6 +21,7 @@ type ConnectionRow = {
   externalPropertyId: string | null;
   messagingAppInstalled: boolean;
   metadata: Record<string, unknown>;
+  ariMappingMissing: boolean;
 };
 
 export type PmsChannexManagementJobRow = {
@@ -34,22 +37,43 @@ export type PmsChannexManagementJobRow = {
 };
 
 export type PmsChannexManagementReadRepository = {
+  getStayRestrictions?(propertyId: string): Promise<unknown[]>;
   getSnapshot(
     propertyId: string,
     capabilityModes: ChannexManagementCapabilityModes,
   ): Promise<ChannexManagementSnapshot>;
   getOperation(propertyId: string, operationId: string): Promise<ChannexManagementOperation | null>;
+  getAlerts?(propertyId: string): Promise<ChannexAlert[]>;
+  acknowledgeAlert?(propertyId: string, alertId: string, userId: string): Promise<boolean>;
   close?(): Promise<void>;
 };
 
 export function createPgPmsChannexManagementReadRepository(config: {
   connectionString: string;
   pool?: Pool;
+  now?: () => Date;
+  stagingAlertPropertyId?: string;
 }): PmsChannexManagementReadRepository {
   const pool =
     config.pool ?? new pg.Pool({ connectionString: required(config.connectionString), max: 5 });
 
   return {
+    async getStayRestrictions(propertyId) {
+      return (
+        await pool.query(
+          `SELECT * FROM pms.rate_rules WHERE property_id=$1::uuid ORDER BY room_type_id,starts_on,id`,
+          [propertyId],
+        )
+      ).rows;
+    },
+    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
+    async acknowledgeAlert(propertyId, alertId, userId) {
+      const result = await pool.query(
+        `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
+        [propertyId, alertId, userId],
+      );
+      return result.rows.length === 1;
+    },
     async getSnapshot(propertyId, capabilityModes) {
       const [connection, roomMappings, rateMappings, syncRows, activeOperation] = await Promise.all(
         [
@@ -57,10 +81,17 @@ export function createPgPmsChannexManagementReadRepository(config: {
             `SELECT connection_status AS status,
                     external_property_id AS "externalPropertyId",
                     messaging_app_installed AS "messagingAppInstalled",
-                    connection_metadata AS metadata
-             FROM pms.channel_connections
-             WHERE property_id = $1::uuid AND provider = 'channex'`,
-            [propertyId],
+                    connection_metadata AS metadata,
+                    EXISTS (
+                      SELECT 1 FROM pms.inventory_days inventory
+                      WHERE inventory.property_id = connection.property_id
+                        AND inventory.stay_date >= ($2::timestamptz AT TIME ZONE COALESCE(location.timezone, 'UTC'))::date
+                        AND ${CHANNEX_ARI_MAPPING_MISSING_SQL}
+                    ) AS "ariMappingMissing"
+             FROM pms.channel_connections connection
+             LEFT JOIN hotel_catalog.property_locations location ON location.property_id = connection.property_id
+             WHERE connection.property_id = $1::uuid AND connection.provider = 'channex'`,
+            [propertyId, (config.now?.() ?? new Date()).toISOString()],
           ),
           pool.query(
             `SELECT mapping.id::text AS "mappingId", mapping.room_type_id::text AS "roomTypeId",
@@ -117,8 +148,30 @@ export function createPgPmsChannexManagementReadRepository(config: {
       );
 
       const row = connection.rows[0];
+      const inventoryState = row?.metadata.inventoryRules as
+        | {
+            rules: import("@vayada/domain-pms-channex").ChannexInventoryRule[];
+            operationId: string;
+          }
+        | undefined;
+      const inventoryOperation = inventoryState
+        ? await pool.query<PmsChannexManagementJobRow>(
+            operationSelect("property_id = $1::uuid AND id = $2::uuid") + " LIMIT 1",
+            [propertyId, inventoryState.operationId],
+          )
+        : null;
       const sync = emptySyncState();
       for (const item of syncRows.rows) sync[item.domain] = item.state;
+      if (row?.ariMappingMissing && (row.status === "connected" || row.status === "degraded")) {
+        sync.ari = {
+          ...sync.ari,
+          status: "failed",
+          lastErrorCode: "mapping_missing",
+          lastErrorMessage:
+            "Future availability cannot sync: an active Channex room or rate mapping is missing.",
+          retryAfter: null,
+        };
+      }
 
       return {
         contractVersion: CHANNEX_MANAGEMENT_CONTRACT_VERSION,
@@ -139,6 +192,12 @@ export function createPgPmsChannexManagementReadRepository(config: {
           ratePlans: rateMappings.rows as ChannexManagementSnapshot["mappings"]["ratePlans"],
         },
         channels: connectedChannels(row?.metadata),
+        inventoryRules: {
+          rules: inventoryState?.rules ?? [],
+          operation: inventoryOperation?.rows[0]
+            ? mapPmsChannexManagementOperation(inventoryOperation.rows[0])
+            : null,
+        },
         markups:
           row && (row.status === "connected" || row.status === "degraded")
             ? uniqueMarkups(

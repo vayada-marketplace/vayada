@@ -1,3 +1,4 @@
+import { workosErrorDiagnostics } from "../platform/workosErrorDiagnostics.js";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type {
   IdentityLifecycleCommandBus,
@@ -29,6 +30,7 @@ import type {
   AuthSessionHandoff,
   AuthSessionHandoffRepository,
 } from "../platform/authSessionHandoffs.js";
+import type { AdminTransferCoordinator } from "../platform/adminTransferCoordinator.js";
 import {
   resolveApprovedPublicProfileImage,
   type ApprovedPublicProfileImageRepository,
@@ -185,11 +187,14 @@ export type AuthSessionRouteOptions = {
   hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
   handoffRepository?: AuthSessionHandoffRepository;
   propertyAccessRepository?: PropertyAccessRepository;
+  adminTransfer?: AdminTransferCoordinator;
 };
 
 const SESSION_COOKIE = "vayada_workos_session";
 const CSRF_COOKIE = "vayada_auth_csrf";
 const OAUTH_STATE_COOKIE = "vayada_oauth_state";
+const ADMIN_TRANSFER_FLOW_COOKIE = "vayada_admin_transfer_flow";
+const ADMIN_TRANSFER_PROOF_COOKIE = "vayada_admin_transfer_proof";
 const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 const DEFAULT_SURFACE: AuthSurface = "platform-admin";
 const EMAIL_SEND_COOLDOWN_MS = 60_000;
@@ -246,6 +251,116 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
   options: AuthSessionRouteOptions,
 ) => {
   const emailSendCooldowns = new Map<string, number>();
+
+  if (options.adminTransfer) {
+    const surfacePolicy = getSurfacePolicy("pms-web", options);
+    if (!surfacePolicy.firstPartySession || !surfacePolicy.publicOrigin)
+      throw new Error("Administrator transfer requires the first-party PMS auth surface");
+    app.post("/admin-transfer/start", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      if (
+        !writeCorsHeaders(request, reply, options) ||
+        !passesCsrfCheck(request, options, surfacePolicy)
+      )
+        return reply.code(403).send({ error: "forbidden" });
+      const live = await resolveLiveAdminTransferSession(request, reply, options, surfacePolicy);
+      if (!live) return;
+      const body = request.body as { transfer?: unknown } | undefined;
+      const result = await options.adminTransfer!.start(live.source, body?.transfer, live.email);
+      if (result.outcome === "rejected")
+        return reply
+          .code(
+            result.reason === "stale_transfer" ? 409 : result.reason === "forbidden" ? 403 : 400,
+          )
+          .send({ error: result.reason });
+      reply.header(
+        "set-cookie",
+        adminTransferCookieHeader(
+          ADMIN_TRANSFER_FLOW_COOKIE,
+          result.flowCookie,
+          300,
+          "/auth/admin-transfer/callback",
+          surfacePolicy,
+          options,
+        ),
+      );
+      return reply.send({
+        authorizationUrl: result.authorizationUrl,
+      });
+    });
+
+    app.get("/admin-transfer/callback", async (request, reply) => {
+      const query = request.query as { state?: unknown; code?: unknown };
+      const flowCookie = readCookie(request, ADMIN_TRANSFER_FLOW_COOKIE, surfacePolicy) ?? "";
+      const clearFlow = adminTransferCookieHeader(
+        ADMIN_TRANSFER_FLOW_COOKIE,
+        "",
+        0,
+        "/auth/admin-transfer/callback",
+        surfacePolicy,
+        options,
+      );
+      reply.header("set-cookie", clearFlow);
+      const live = await resolveLiveAdminTransferSession(request, reply, options, surfacePolicy);
+      if (!live) return;
+      const completed = await options.adminTransfer!.completeReauthentication({
+        source: live.source,
+        flowCookie,
+        state: typeof query.state === "string" ? query.state : "",
+        code: typeof query.code === "string" ? query.code : "",
+        ipAddress: request.ip,
+        userAgent: request.headers["user-agent"],
+      });
+      const returnUrl = new URL("/settings/team", surfacePolicy.publicOrigin);
+      returnUrl.searchParams.set("adminTransfer", completed ? "verified" : "failed");
+      const cookies = [clearFlow];
+      if (completed)
+        cookies.push(
+          adminTransferCookieHeader(
+            ADMIN_TRANSFER_PROOF_COOKIE,
+            completed.proofId,
+            300,
+            "/auth/admin-transfer/complete",
+            surfacePolicy,
+            options,
+          ),
+        );
+      return reply
+        .header("Cache-Control", "private, no-store")
+        .header("set-cookie", cookies)
+        .redirect(returnUrl.toString());
+    });
+
+    app.post("/admin-transfer/complete", async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      if (
+        !writeCorsHeaders(request, reply, options) ||
+        !passesCsrfCheck(request, options, surfacePolicy)
+      )
+        return reply.code(403).send({ error: "forbidden" });
+      const proofId = readCookie(request, ADMIN_TRANSFER_PROOF_COOKIE, surfacePolicy) ?? "";
+      const live = await resolveLiveAdminTransferSession(request, reply, options, surfacePolicy);
+      if (!live) return;
+      const body = request.body as { transfer?: unknown } | undefined;
+      const result = await options.adminTransfer!.transfer(live.source, body?.transfer, proofId);
+      if (result.outcome === "transferred" || result.outcome === "idempotent_replay")
+        return reply.send(result);
+      reply.header(
+        "set-cookie",
+        adminTransferCookieHeader(
+          ADMIN_TRANSFER_PROOF_COOKIE,
+          "",
+          0,
+          "/auth/admin-transfer/complete",
+          surfacePolicy,
+          options,
+        ),
+      );
+      return reply
+        .code(result.reason === "stale_transfer" ? 409 : result.reason === "forbidden" ? 403 : 400)
+        .send({ error: result.reason });
+    });
+  }
 
   for (const path of [
     "/email-verification/confirm",
@@ -347,12 +462,16 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 
     let session: AuthKitSession;
     try {
-      session = await options.authKitClient.authenticateWithCode({
+      session = await authenticateGoogleForSurface(options, surfacePolicy, {
         code: query.code,
         ipAddress: request.ip,
         userAgent: request.headers["user-agent"],
       });
-    } catch {
+    } catch (error) {
+      request.log.warn(
+        { workos: workosErrorDiagnostics(error), surface: state.value.surface },
+        "WorkOS Google code exchange failed",
+      );
       return redirectWithOAuthError(reply, state.value, "Google sign-in failed. Please try again.");
     }
 
@@ -367,7 +486,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         return redirectWithOAuthError(
           reply,
           state.value,
-          "This email already has a Vayada account. Sign in instead.",
+          "This email already has a vayada account. Sign in instead.",
         );
       }
       if (state.value.intent) {
@@ -415,7 +534,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         return redirectWithOAuthError(
           reply,
           state.value,
-          "No Vayada account exists for this Google login. Create an account first.",
+          "No vayada account exists for this Google login. Create an account first.",
         );
       }
     }
@@ -492,13 +611,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       });
     } catch (error) {
       const mapped = mapWorkOSAuthError(error);
-      const canSelectRequestedPlatformOrganization =
-        parsed.surface === "platform-admin" &&
+      const canSelectRequestedOrganization =
         parsed.organizationId &&
         mapped.state === "organization_selection_required" &&
         mapped.pendingAuthenticationToken &&
         mapped.organizations?.some(({ id }) => id === parsed.organizationId);
-      if (canSelectRequestedPlatformOrganization) {
+      if (canSelectRequestedOrganization) {
         try {
           session = await options.authKitClient.authenticateWithOrganizationSelection({
             organizationId: parsed.organizationId!,
@@ -530,6 +648,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
     }
 
+    if (parsed.organizationId && session.organizationId !== parsed.organizationId) {
+      return reply
+        .code(403)
+        .send({ state: "auth_failed", message: "Selected workspace could not be authenticated." });
+    }
+
     let resolution: IdentityResolution;
     try {
       resolution = await resolveOrCreateIdentity(
@@ -537,7 +661,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         request,
         options,
         surfacePolicy,
-        organizationAccessOptionsFromRequest(request, surfacePolicy),
+        organizationAccessOptionsFromRequest(request, surfacePolicy, {
+          explicitOrganizationSelection: Boolean(parsed.organizationId),
+        }),
       );
     } catch (error) {
       if (error instanceof OrganizationSelectionRequiredError) {
@@ -556,6 +682,15 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       });
       request.log.warn({ err: error }, "Password login identity resolution failed");
       return reply.code(403).send(toAuthError(error));
+    }
+
+    if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
+      return reply
+        .code(403)
+        .send({
+          state: "auth_failed",
+          message: "Selected workspace is not available on this surface.",
+        });
     }
 
     await options.productAuditSink.record({
@@ -614,15 +749,22 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         },
       });
     } catch (error) {
+      request.log.warn(
+        { workos: workosErrorDiagnostics(error), surface: parsed.surface },
+        "WorkOS password signup failed",
+      );
       if (isConflictError(error)) {
         return reply.code(409).send({
           state: "auth_failed",
-          message: "This email already has a Vayada account. Sign in instead.",
+          message: "This email already has a vayada account. Sign in instead.",
         });
       }
       return reply.code(400).send({
         state: "auth_failed",
-        message: "Signup failed. Please check your details and try again.",
+        message:
+          workosErrorDiagnostics(error).code === "password_strength_error"
+            ? "This password isn't strong enough. Try several unrelated words or generate a unique password with a password manager."
+            : "Signup failed. Please check your details and try again.",
       });
     }
 
@@ -2195,9 +2337,7 @@ function parsePasswordLoginBody(body: unknown):
   try {
     const surface = parseSurface(typeof input.surface === "string" ? input.surface : undefined);
     const organizationId =
-      surface === "platform-admin" && typeof input.organizationId === "string"
-        ? input.organizationId.trim()
-        : "";
+      typeof input.organizationId === "string" ? input.organizationId.trim() : "";
     return {
       ok: true,
       email,
@@ -3019,6 +3159,76 @@ async function resolveExistingIdentity(
   return { user, ...access };
 }
 
+async function resolveLiveAdminTransferSession(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options: AuthSessionRouteOptions,
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<
+  | {
+      source: Parameters<AdminTransferCoordinator["start"]>[0];
+      email: string;
+    }
+  | undefined
+> {
+  const sealedSession = readCookie(request, SESSION_COOKIE, surfacePolicy);
+  if (!sealedSession) {
+    sendTerminalSessionError(reply, surfacePolicy, options, "missing_session");
+    return;
+  }
+  let session: AuthKitSession | null;
+  try {
+    session = await options.authKitClient.authenticateSession({ sealedSession });
+    if (
+      session &&
+      (!session.sessionId ||
+        !(await options.authKitClient.isSessionActive({
+          sessionId: session.sessionId,
+          workosUserId: session.user.id,
+        })))
+    )
+      session = null;
+  } catch {
+    reply.code(503).send({ error: "reauthentication_unavailable" });
+    return;
+  }
+  if (!session) {
+    sendTerminalSessionError(reply, surfacePolicy, options, "invalid_session");
+    return;
+  }
+  let resolution: IdentityResolution;
+  try {
+    resolution = await resolveExistingIdentity(
+      session,
+      options,
+      surfacePolicy,
+      organizationAccessOptionsFromRequest(request, surfacePolicy),
+    );
+  } catch {
+    reply.code(403).send({ error: "forbidden" });
+    return;
+  }
+  persistRefreshedSessionCookie(reply, sealedSession, resolution.session, surfacePolicy, options);
+  if (
+    !resolution.organizationId ||
+    !resolution.session.organizationId ||
+    !resolution.session.sessionId
+  ) {
+    reply.code(403).send({ error: "forbidden" });
+    return;
+  }
+  return {
+    source: {
+      organizationId: resolution.organizationId,
+      actorUserId: resolution.user.userId,
+      workosUserId: resolution.session.user.id,
+      workosOrgId: resolution.session.organizationId,
+      sessionId: resolution.session.sessionId,
+    },
+    email: resolution.user.email,
+  };
+}
+
 type IdentityResolution = {
   session: AuthKitSession;
   user: IdentityUser;
@@ -3046,6 +3256,45 @@ async function findUserAfterLifecycle(
     };
   }
   throw new Error("Identity lifecycle command did not create a resolvable user");
+}
+
+async function authenticateGoogleForSurface(
+  options: AuthSessionRouteOptions,
+  surfacePolicy: AuthSurfacePolicy,
+  input: Parameters<AuthKitClient["authenticateWithCode"]>[0],
+): Promise<AuthKitSession> {
+  try {
+    return await options.authKitClient.authenticateWithCode(input);
+  } catch (error) {
+    const mapped = mapWorkOSAuthError(error);
+    if (mapped.state !== "organization_selection_required" || !mapped.pendingAuthenticationToken) {
+      throw error;
+    }
+    // Only use organizations offered for this pending authentication by WorkOS.
+    const offeredIds = [...new Set((mapped.organizations ?? []).map(({ id }) => id))];
+    const organizations = await Promise.all(
+      offeredIds.map((id) => options.identityRepository.findOrganizationByWorkosOrgId(id)),
+    );
+    const candidates = organizations.filter(
+      (organization) =>
+        organization?.status === "active" &&
+        organization.workosOrgId &&
+        offeredIds.includes(organization.workosOrgId) &&
+        matchesOrganizationKind(organization.kind, surfacePolicy.requiredOrganizationKind),
+    );
+    if (candidates.length !== 1) throw error;
+    const organizationId = candidates[0]!.workosOrgId!;
+    const session = await options.authKitClient.authenticateWithOrganizationSelection({
+      organizationId,
+      pendingAuthenticationToken: mapped.pendingAuthenticationToken,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+    });
+    if (session.organizationId !== organizationId) {
+      throw new Error("WorkOS returned a different organization after selection");
+    }
+    return session;
+  }
 }
 
 async function resolveOrganizationAccess(
@@ -3687,11 +3936,12 @@ function serializeCookie(
     sameSite: "Lax" | "None";
     domain?: string;
     httpOnly?: boolean;
+    path?: string;
   },
 ): string {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
-    "Path=/auth",
+    `Path=${options.path ?? "/auth"}`,
     `Max-Age=${options.maxAge}`,
     `SameSite=${options.sameSite}`,
   ];
@@ -3699,6 +3949,22 @@ function serializeCookie(
   if (options.secure) parts.push("Secure");
   if (options.domain) parts.push(`Domain=${options.domain}`);
   return parts.join("; ");
+}
+
+function adminTransferCookieHeader(
+  name: string,
+  value: string,
+  maxAge: number,
+  path: string,
+  surfacePolicy: AuthSurfacePolicy,
+  options: AuthSessionRouteOptions,
+): string {
+  return serializeCookie(activeCookieName(name, surfacePolicy), value, {
+    maxAge,
+    secure: options.cookieSecure,
+    sameSite: "Lax",
+    path,
+  });
 }
 
 function authCookieHeaders(

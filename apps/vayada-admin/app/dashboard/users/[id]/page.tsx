@@ -1,5 +1,7 @@
 "use client";
 
+import { MarketplaceAccountSetup } from "@/components/users/MarketplaceAccountSetup";
+
 import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui";
@@ -23,7 +25,14 @@ import {
 import { usersService, uploadService } from "@/services/api";
 import { Input } from "@/components/ui";
 import { Textarea } from "@/components/ui/Textarea";
+import { CreatorModerationPanel } from "@/components/marketplace/CreatorModerationPanel";
 import { ApiErrorResponse } from "@/services/api/client";
+import { ApiErrorResponse as VayadaApiErrorResponse } from "@vayada/marketplace-shared/api/client";
+import {
+  createOfferWithMedia,
+  OfferMediaPublicationError,
+  updateOfferWithMedia,
+} from "@/services/api/offerMedia";
 import type {
   UserDetailResponse,
   CreatorProfileDetail,
@@ -38,16 +47,9 @@ import { getCurrencySymbol } from "@/lib/utils/getCurrencySymbol";
 
 const PLATFORMS = ["Instagram", "TikTok", "YouTube", "Facebook"] as const;
 const AGE_GROUPS = ["18-24", "25-34", "35-44", "45-54", "55+"] as const;
-const ACCOMMODATION_TYPES = [
-  "Hotel",
-  "Boutiques Hotel",
-  "City Hotel",
-  "Luxury Hotel",
-  "Apartment",
-  "Villa",
-  "Lodge",
-] as const;
+
 const COLLABORATION_TYPES = ["Free Stay", "Paid", "Discount", "Affiliate"] as const;
+const CREATOR_PLATFORM_EDITING_ENABLED = false;
 const MONTHS = [
   "January",
   "February",
@@ -142,6 +144,11 @@ function UserDetailContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const userId = params.id as string;
+  const selectedPropertyId = searchParams?.get("propertyId") || undefined;
+  const draftKey = useRef<string | undefined>(undefined);
+  const detailRequest = useRef(0);
+  const [publishingOfferId, setPublishingOfferId] = useState<string | null>(null);
+  const [publicationError, setPublicationError] = useState("");
 
   const initialTab = (() => {
     const t = searchParams?.get("tab");
@@ -154,6 +161,7 @@ function UserDetailContent() {
   const [userDetail, setUserDetail] = useState<UserDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshWarning, setRefreshWarning] = useState("");
   const [selectedListing, setSelectedListing] = useState<ListingResponse | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -161,9 +169,6 @@ function UserDetailContent() {
   const [listingToDelete, setListingToDelete] = useState<ListingResponse | null>(null);
   const [deletingListing, setDeletingListing] = useState(false);
   const [listingDeleteError, setListingDeleteError] = useState("");
-  const [verifyingListingId, setVerifyingListingId] = useState<string | null>(null);
-  const [listingVerifyError, setListingVerifyError] = useState("");
-  const [listingVerifySuccess, setListingVerifySuccess] = useState("");
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -235,7 +240,11 @@ function UserDetailContent() {
     },
   });
   const [savingListing, setSavingListing] = useState(false);
-  const [listingSaveError, setListingSaveError] = useState("");
+  const [listingSaveError, setListingSaveError] = useState(
+    searchParams?.get("notice") === "offer-setup-incomplete"
+      ? "Some offers or media were not published. Review existing offers, then retry only the missing work."
+      : "",
+  );
   const [listingSaveSuccess, setListingSaveSuccess] = useState("");
 
   // Listing edit state for dropdowns
@@ -251,7 +260,7 @@ function UserDetailContent() {
 
   useEffect(() => {
     loadUserDetail();
-  }, [userId]);
+  }, [userId, selectedPropertyId]);
 
   // Auto-open the listing edit modal when deep-linked via ?tab=listings&listingId=...
   useEffect(() => {
@@ -342,14 +351,25 @@ function UserDetailContent() {
     }
   }, [isEditing, userDetail]);
 
-  const loadUserDetail = async () => {
+  const loadUserDetail = async (showLoading = true) => {
+    const sequence = ++detailRequest.current;
     try {
-      setLoading(true);
-      setError("");
-      const data = await usersService.getUserById(userId);
+      if (showLoading) setLoading(true);
+      if (showLoading) setError("");
+      else setRefreshWarning("");
+      const data = await usersService.getUserById(userId, selectedPropertyId ?? null);
+      if (sequence !== detailRequest.current) return;
       setUserDetail(data);
+      setRefreshWarning("");
     } catch (err) {
-      if (err instanceof ApiErrorResponse) {
+      if (sequence !== detailRequest.current) return;
+      if (!showLoading) {
+        setRefreshWarning(
+          "The latest creator profile could not be refreshed. Reload this page before another decision.",
+        );
+        return;
+      }
+      if (err instanceof ApiErrorResponse || err instanceof VayadaApiErrorResponse) {
         if (err.status === 404) {
           setError("User not found");
         } else if (err.status === 403) {
@@ -361,7 +381,7 @@ function UserDetailContent() {
         setError("Failed to load user details");
       }
     } finally {
-      setLoading(false);
+      if (showLoading && sequence === detailRequest.current) setLoading(false);
     }
   };
 
@@ -507,58 +527,12 @@ function UserDetailContent() {
             profilePictureFile,
             userDetail.id,
           );
-          profileUpdateData.profilePicture = uploadResponse.url;
+          profileUpdateData.profilePictureMediaObjectId = uploadResponse.mediaObjectId;
         }
 
-        // Handle platforms - always include when in edit mode (even if empty array to allow clearing all)
-        // Filter out invalid platforms and map to API format
-        profileUpdateData.platforms = editPlatforms
-          .filter((p) => p.handle && p.followers && p.engagementRate)
-          .map((p) => {
-            const platformData: any = {
-              name: p.name,
-              handle: p.handle,
-              followers: parseInt(p.followers) || 0,
-              engagementRate: parseFloat(p.engagementRate) || 0,
-            };
-
-            if (p.topCountries && p.topCountries.length > 0) {
-              const validCountries = p.topCountries.filter(
-                (tc: { country: string; percentage: string }) =>
-                  tc.country && (tc.percentage || tc.percentage === "0"),
-              );
-              if (validCountries.length > 0) {
-                platformData.topCountries = validCountries.map(
-                  (tc: { country: string; percentage: string }) => ({
-                    country: tc.country,
-                    percentage: parseFloat(tc.percentage) || 0,
-                  }),
-                );
-              }
-            }
-
-            if (p.topAgeGroups && p.topAgeGroups.length > 0) {
-              const validAgeGroups = p.topAgeGroups.filter(
-                (ag: { ageRange: string }) => ag.ageRange,
-              );
-              if (validAgeGroups.length > 0) {
-                platformData.topAgeGroups = validAgeGroups.map((ag: { ageRange: string }) => ({
-                  ageRange: ag.ageRange,
-                }));
-              }
-            }
-
-            if (p.genderSplit && (p.genderSplit.male || p.genderSplit.female)) {
-              platformData.genderSplit = {
-                male: p.genderSplit.male ? parseFloat(p.genderSplit.male) : 0,
-                female: p.genderSplit.female ? parseFloat(p.genderSplit.female) : 0,
-              };
-            }
-
-            return platformData;
-          });
-
-        await usersService.updateCreatorProfile(userDetail.id, profileUpdateData);
+        if (Object.keys(profileUpdateData).length > 0) {
+          await usersService.updateCreatorProfile(userDetail.id, profileUpdateData);
+        }
       }
 
       // Update hotel profile fields (only for hotels)
@@ -570,7 +544,7 @@ function UserDetailContent() {
           profileUpdateData.about = editFormData.about || null;
         }
 
-        await usersService.updateHotelProfile(userDetail.id, profileUpdateData);
+        await usersService.updateHotelProfile(userDetail.id, profileUpdateData, selectedPropertyId);
       }
 
       // Reload user details
@@ -688,10 +662,11 @@ function UserDetailContent() {
   };
 
   const handleStartCreateListing = () => {
+    draftKey.current = crypto.randomUUID();
     setEditingListingId("new");
     setEditListingData({
       name: "",
-      location: "",
+      location: userDetail?.profile?.location ?? "",
       description: "",
       accommodationType: "",
       collaborationOfferings: [],
@@ -713,9 +688,10 @@ function UserDetailContent() {
       id: "new",
       hotelProfileId: userDetail?.id || "",
       name: "",
-      location: "",
+      location: userDetail?.profile?.location ?? "",
       description: "",
       accommodationType: null,
+      media: [],
       images: [],
       status: "draft",
       createdAt: new Date().toISOString(),
@@ -737,18 +713,9 @@ function UserDetailContent() {
         setSavingListing(false);
         return;
       }
-      if (!editListingData.location.trim()) {
-        setListingSaveError("Location is required");
-        setSavingListing(false);
-        return;
-      }
-      if (!editListingData.description.trim()) {
-        setListingSaveError("Description is required");
-        setSavingListing(false);
-        return;
-      }
-
       const createData: any = {
+        propertyId: selectedPropertyId,
+        idempotencyKey: draftKey.current,
         name: editListingData.name,
         location: editListingData.location,
         description: editListingData.description,
@@ -813,36 +780,18 @@ function UserDetailContent() {
         targetAgeMax,
       };
 
-      // Handle image uploads if there are new images
-      if (listingImageFiles.length > 0) {
-        setUploadingListingImages(true);
-        try {
-          const uploadResponse = await uploadService.uploadListingImages(
-            listingImageFiles,
-            userDetail.id,
-          );
-          const newImageUrls = uploadResponse.images.map((img) => img.url);
-          createData.images = newImageUrls;
-        } catch (uploadError) {
-          if (uploadError instanceof ApiErrorResponse) {
-            setListingSaveError(
-              `Failed to upload images: ${(uploadError.data.detail as string) || "Upload failed"}`,
-            );
-          } else {
-            setListingSaveError("Failed to upload images. Please try again.");
-          }
-          setSavingListing(false);
-          setUploadingListingImages(false);
-          return;
-        } finally {
-          setUploadingListingImages(false);
-        }
+      if (listingImageFiles.length > 0) setUploadingListingImages(true);
+      try {
+        await createOfferWithMedia(userDetail.id, createData, listingImageFiles);
+      } finally {
+        setUploadingListingImages(false);
       }
 
-      await usersService.createOffer(userDetail.id, createData);
-
       // Reload user details to get new listing
-      const updatedUserDetail = await usersService.getUserById(userDetail.id);
+      const updatedUserDetail = await usersService.getUserById(
+        userDetail.id,
+        selectedPropertyId ?? null,
+      );
       setUserDetail(updatedUserDetail);
 
       // Exit create mode and clear state
@@ -851,10 +800,24 @@ function UserDetailContent() {
       setListingExistingImages([]);
       setListingImageFiles([]);
       setListingImagePreviews([]);
-      setListingSaveSuccess("Offer created successfully!");
+      setListingSaveSuccess("Draft saved. It stays private until published.");
 
       setTimeout(() => setListingSaveSuccess(""), 5000);
     } catch (err) {
+      if (err instanceof OfferMediaPublicationError) {
+        const updatedUserDetail = await usersService
+          .getUserById(userDetail.id, selectedPropertyId ?? null)
+          .catch(() => null);
+        if (updatedUserDetail) setUserDetail(updatedUserDetail);
+        setEditingListingId(null);
+        setSelectedListing(null);
+        setListingImageFiles([]);
+        setListingImagePreviews([]);
+        setListingSaveError(
+          "The offer was created, but its media was not published. Open the existing offer to retry.",
+        );
+        return;
+      }
       if (err instanceof ApiErrorResponse) {
         setListingSaveError((err.data.detail as string) || "Failed to create offer");
       } else {
@@ -872,10 +835,17 @@ function UserDetailContent() {
       setDeletingListing(true);
       setListingDeleteError("");
 
-      const response = await usersService.deleteOffer(userDetail.id, listingToDelete.id);
+      const response = await usersService.deleteOffer(
+        userDetail.id,
+        listingToDelete.id,
+        selectedPropertyId,
+      );
 
       // Reload user details to get updated listings
-      const updatedUserDetail = await usersService.getUserById(userDetail.id);
+      const updatedUserDetail = await usersService.getUserById(
+        userDetail.id,
+        selectedPropertyId ?? null,
+      );
       setUserDetail(updatedUserDetail);
 
       // Close modals
@@ -911,30 +881,6 @@ function UserDetailContent() {
     }
   };
 
-  const handleVerifyListing = async (listing: ListingResponse) => {
-    if (!userDetail) return;
-
-    try {
-      setVerifyingListingId(listing.id);
-      setListingVerifyError("");
-      setListingVerifySuccess("");
-
-      await usersService.verifyOffer(userDetail.id, listing.id);
-      const updatedUserDetail = await usersService.getUserById(userDetail.id);
-      setUserDetail(updatedUserDetail);
-      setSelectedListing(null);
-      setListingVerifySuccess(`Offer "${listing.name}" is live.`);
-    } catch (err) {
-      if (err instanceof ApiErrorResponse) {
-        setListingVerifyError((err.data.detail as string) || "Failed to publish offer.");
-      } else {
-        setListingVerifyError("Failed to publish offer. Please try again.");
-      }
-    } finally {
-      setVerifyingListingId(null);
-    }
-  };
-
   const handleSaveListing = async () => {
     if (!userDetail || !editingListingId) return;
 
@@ -951,7 +897,9 @@ function UserDetailContent() {
       setListingSaveError("");
       setListingSaveSuccess("");
 
-      const updateData: any = {};
+      const updateData: any = {
+        propertyId: selectedPropertyId,
+      };
 
       if (editListingData.name !== selectedListing.name) {
         updateData.name = editListingData.name;
@@ -1032,42 +980,18 @@ function UserDetailContent() {
         updateData.creatorRequirements.id = editListingData.creatorRequirements.id;
       }
 
-      // Handle image uploads if there are new images
-      if (listingImageFiles.length > 0) {
-        setUploadingListingImages(true);
-        try {
-          const uploadResponse = await uploadService.uploadListingImages(
-            listingImageFiles,
-            userDetail.id,
-          );
-          const newImageUrls = uploadResponse.images.map((img) => img.url);
-          // Combine existing images (that weren't removed) with new images
-          updateData.images = [...listingExistingImages, ...newImageUrls];
-        } catch (uploadError) {
-          if (uploadError instanceof ApiErrorResponse) {
-            setListingSaveError(
-              `Failed to upload images: ${(uploadError.data.detail as string) || "Upload failed"}`,
-            );
-          } else {
-            setListingSaveError("Failed to upload images. Please try again.");
-          }
-          setSavingListing(false);
-          setUploadingListingImages(false);
-          return;
-        } finally {
-          setUploadingListingImages(false);
-        }
-      } else {
-        // Only update images if existing images were removed
-        if (listingExistingImages.length !== (selectedListing.images?.length || 0)) {
-          updateData.images = listingExistingImages;
-        }
+      if (listingImageFiles.length > 0) setUploadingListingImages(true);
+      try {
+        await updateOfferWithMedia(userDetail.id, editingListingId, updateData, listingImageFiles);
+      } finally {
+        setUploadingListingImages(false);
       }
 
-      await usersService.updateOffer(userDetail.id, editingListingId, updateData);
-
       // Reload user details to get updated listing
-      const updatedUserDetail = await usersService.getUserById(userDetail.id);
+      const updatedUserDetail = await usersService.getUserById(
+        userDetail.id,
+        selectedPropertyId ?? null,
+      );
       setUserDetail(updatedUserDetail);
 
       // Update selected listing in modal
@@ -1087,6 +1011,12 @@ function UserDetailContent() {
       setListingSaveSuccess("Offer updated successfully!");
       setTimeout(() => setListingSaveSuccess(""), 5000);
     } catch (err) {
+      if (err instanceof OfferMediaPublicationError) {
+        setListingSaveError(
+          "The offer changes were saved, but its media was not published. Reselect those images to retry.",
+        );
+        return;
+      }
       if (err instanceof ApiErrorResponse) {
         if (err.status === 400) {
           setListingSaveError((err.data.detail as string) || "Validation error");
@@ -1282,10 +1212,6 @@ function UserDetailContent() {
   const handleRemoveListingImageFile = (index: number) => {
     setListingImageFiles((prev) => prev.filter((_, i) => i !== index));
     setListingImagePreviews((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleRemoveListingExistingImage = (imageUrl: string) => {
-    setListingExistingImages((prev) => prev.filter((img) => img !== imageUrl));
   };
 
   const handleAddPlatform = () => {
@@ -1803,6 +1729,43 @@ function UserDetailContent() {
                 {/* Creator Profile Section */}
                 {isCreator && profile && (
                   <div className="border-t pt-6">
+                    {refreshWarning && (
+                      <div
+                        role="alert"
+                        className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+                      >
+                        {refreshWarning}
+                      </div>
+                    )}
+                    <CreatorModerationPanel
+                      creatorName={userDetail.name}
+                      profile={profile as CreatorProfileDetail}
+                      moderation={
+                        userDetail.creatorModeration ?? {
+                          allowed: false,
+                          allowedTransitions: [],
+                        }
+                      }
+                      onModerated={async (profileStatus) => {
+                        setUserDetail((current) => {
+                          if (!current || current.type !== "creator") return current;
+                          return {
+                            ...current,
+                            creatorModeration: current.creatorModeration
+                              ? { ...current.creatorModeration, allowedTransitions: [] }
+                              : current.creatorModeration,
+                            profile:
+                              profileStatus && current.profile
+                                ? {
+                                    ...(current.profile as CreatorProfileDetail),
+                                    profileStatus,
+                                  }
+                                : current.profile,
+                          };
+                        });
+                        await loadUserDetail(false);
+                      }}
+                    />
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900">
@@ -2010,6 +1973,15 @@ function UserDetailContent() {
                   </div>
                 )}
 
+                {isCreator && !profile && (
+                  <div
+                    role="status"
+                    className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700"
+                  >
+                    This creator does not have an available marketplace profile.
+                  </div>
+                )}
+
                 {/* Hotel Profile Section */}
                 {isHotel && profile && (
                   <div className="border-t pt-6">
@@ -2174,7 +2146,7 @@ function UserDetailContent() {
             {/* Social Media Tab */}
             {activeTab === "social" && isCreator && profile && (
               <div className="space-y-4">
-                {isEditing ? (
+                {isEditing && CREATOR_PLATFORM_EDITING_ENABLED ? (
                   <>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">
@@ -2508,6 +2480,12 @@ function UserDetailContent() {
                   </>
                 ) : (
                   <>
+                    {isEditing && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                        Connected platform data is read-only here and remains managed by its source
+                        connection.
+                      </div>
+                    )}
                     {(profile as CreatorProfileDetail).platforms &&
                     (profile as CreatorProfileDetail).platforms.length > 0 ? (
                       <div className="space-y-4">
@@ -2616,18 +2594,39 @@ function UserDetailContent() {
               </div>
             )}
 
+            {isHotel && (
+              <MarketplaceAccountSetup
+                userId={userId}
+                propertyId={selectedPropertyId}
+                onActivated={() => {
+                  void loadUserDetail(false);
+                }}
+                onSelect={(propertyId) => {
+                  const query = new URLSearchParams(searchParams?.toString());
+                  if (propertyId) query.set("propertyId", propertyId);
+                  else query.delete("propertyId");
+                  query.set("tab", "listings");
+                  setActiveTab("listings");
+                  setSelectedListing(null);
+                  setEditingListingId(null);
+                  setUserDetail((current) => (current ? { ...current, profile: null } : current));
+                  router.replace(`/dashboard/users/${userId}?${query.toString()}`);
+                }}
+              />
+            )}
+            {publicationError && (
+              <p role="alert" className="p-4 text-red-700">
+                {publicationError}
+              </p>
+            )}
             {/* Offers Tab */}
             {activeTab === "listings" && isHotel && profile && (
               <div className="space-y-4">
-                {listingVerifyError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-3" role="alert">
-                    <p className="text-sm text-red-800">{listingVerifyError}</p>
-                  </div>
-                )}
-                {listingVerifySuccess && (
-                  <div className="rounded-lg border border-green-200 bg-green-50 p-3" role="status">
-                    <p className="text-sm text-green-800">{listingVerifySuccess}</p>
-                  </div>
+                {(profile as HotelProfileDetail).profileComplete === false && (
+                  <p className="text-sm text-amber-800">
+                    The hotel’s Marketplace setup is incomplete. Drafts can be saved, but the hotel
+                    must complete its Marketplace setup before publication.
+                  </p>
                 )}
                 <div className="flex justify-end">
                   <Button
@@ -2636,7 +2635,7 @@ function UserDetailContent() {
                     className="flex items-center gap-2"
                   >
                     <PlusIcon className="w-5 h-5" />
-                    Create New Offer
+                    Create Draft Offer
                   </Button>
                 </div>
                 {(profile as HotelProfileDetail).listings &&
@@ -2670,6 +2669,29 @@ function UserDetailContent() {
                                 {listing.description}
                               </p>
                             )}
+                            {listing.status === "draft" && (
+                              <p className="text-sm text-gray-600">
+                                Private draft. Before publishing:{" "}
+                                {[
+                                  ...((profile as HotelProfileDetail).profileComplete === false
+                                    ? ["complete Marketplace setup"]
+                                    : []),
+                                  ...(!listing.media.some(
+                                    (media) =>
+                                      (media.approvalStatus === "pending_domain_approval" &&
+                                        media.lifecycleStatus === "staged") ||
+                                      (media.approvalStatus === "approved" &&
+                                        media.lifecycleStatus === "active"),
+                                  )
+                                    ? ["add a photo"]
+                                    : []),
+                                  ...(!listing.collaborationOfferings?.length
+                                    ? ["add collaboration terms and deliverables"]
+                                    : []),
+                                ].join(", ") || "review the offer and publish when ready"}
+                                .
+                              </p>
+                            )}
                             <div className="flex items-center justify-between mt-3">
                               <span
                                 className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(listing.status)}`}
@@ -2682,24 +2704,42 @@ function UserDetailContent() {
                                 </span>
                               )}
                             </div>
-                            {listing.status === "pending" && (
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleVerifyListing(listing);
-                                }}
-                                disabled={verifyingListingId !== null}
-                                className="mt-4 w-full"
-                              >
-                                {verifyingListingId === listing.id
-                                  ? "Publishing..."
-                                  : "Verify & publish"}
-                              </Button>
-                            )}
                           </div>
                         </div>
+                        {["draft", "pending", "verified"].includes(listing.status) && (
+                          <button
+                            type="button"
+                            className="m-4 rounded border px-3 py-2 text-sm disabled:opacity-50"
+                            disabled={publishingOfferId !== null}
+                            onClick={async () => {
+                              setPublishingOfferId(listing.id);
+                              setPublicationError("");
+                              try {
+                                await usersService.verifyOffer(
+                                  userId,
+                                  listing.id,
+                                  undefined,
+                                  selectedPropertyId,
+                                );
+                                await loadUserDetail(false);
+                              } catch (failure) {
+                                setPublicationError(
+                                  failure instanceof Error
+                                    ? failure.message
+                                    : "Could not publish offer.",
+                                );
+                              } finally {
+                                setPublishingOfferId(null);
+                              }
+                            }}
+                          >
+                            {publishingOfferId === listing.id
+                              ? "Publishing…"
+                              : listing.status === "verified"
+                                ? "Publish updated photos"
+                                : "Verify & publish"}
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2782,12 +2822,10 @@ function UserDetailContent() {
                     {/* Existing Images */}
                     {listingExistingImages.length > 0 && (
                       <div>
-                        <p className="text-sm text-gray-600 mb-3">
-                          Existing Images (click X to remove)
-                        </p>
+                        <p className="text-sm text-gray-600 mb-3">Published images</p>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           {listingExistingImages.map((imageUrl, idx) => (
-                            <div key={idx} className="relative group">
+                            <div key={idx}>
                               <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
                                 <img
                                   src={imageUrl}
@@ -2795,13 +2833,6 @@ function UserDetailContent() {
                                   className="w-full h-full object-cover"
                                 />
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveListingExistingImage(imageUrl)}
-                                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <XMarkIcon className="w-4 h-4" />
-                              </button>
                             </div>
                           ))}
                         </div>
@@ -2908,46 +2939,11 @@ function UserDetailContent() {
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                    {editingListingId === selectedListing.id || editingListingId === "new" ? (
-                      <Input
-                        value={editListingData.location}
-                        onChange={(e) =>
-                          setEditListingData((prev) => ({ ...prev, location: e.target.value }))
-                        }
-                        placeholder="Location"
-                      />
-                    ) : (
-                      <p className="mt-1 text-sm text-gray-900">{selectedListing.location}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Accommodation Type
-                    </label>
-                    {editingListingId === selectedListing.id || editingListingId === "new" ? (
-                      <select
-                        value={editListingData.accommodationType}
-                        onChange={(e) =>
-                          setEditListingData((prev) => ({
-                            ...prev,
-                            accommodationType: e.target.value,
-                          }))
-                        }
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900"
-                      >
-                        <option value="">Select type</option>
-                        {ACCOMMODATION_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <p className="mt-1 text-sm text-gray-900">
-                        {selectedListing.accommodationType || "-"}
-                      </p>
-                    )}
+                    <p className="text-sm font-medium text-gray-700">Property</p>
+                    <p className="text-sm text-gray-900">
+                      {(profile as HotelProfileDetail)?.name} ·{" "}
+                      {profile?.location || "Location missing in the shared hotel profile"}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Status</label>

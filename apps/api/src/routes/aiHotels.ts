@@ -81,6 +81,11 @@ type TargetPublicHotelProfileRow = {
   capabilities: unknown;
   supportedQuoteParameters: unknown;
   bookingHeaderLogo: string | null;
+  bookingShowContactButton: boolean | null;
+  bookingShowReferAGuestButton: boolean | null;
+  bookingShowLanguageSelector: boolean | null;
+  bookingShowCurrencySelector: boolean | null;
+  bookingReferAGuestModuleEnabled: boolean;
   bookingHeroImage: string | null;
   bookingHeroHeading: string | null;
   bookingHeroSubtext: string | null;
@@ -116,11 +121,21 @@ export async function registerAiHotelRoutes(
 
     const response = serializePublicHotelProfileProjection(profile);
     assertPublicBookabilityPublicSafe(response);
-    reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    reply.header("Cache-Control", "no-store");
     reply.header("X-Vayada-RateLimit-Policy", "public-ai-profile-read");
     return response;
   });
 }
+
+const TARGET_PUBLIC_CATALOG_PROFILE_READY = `(
+  catalog_profile.profile_status = 'complete'
+  OR (
+    catalog_profile.profile_status = 'incomplete'
+    AND cardinality(catalog_profile.completeness_reasons) = 1
+    AND 'description' = ANY(catalog_profile.completeness_reasons)
+    AND NULLIF(BTRIM(booking_branding.hero_subtext), '') IS NOT NULL
+  )
+)`;
 
 export function createTargetPublicHotelProfileRepository(config: {
   connectionString: string;
@@ -151,9 +166,10 @@ export function createTargetPublicHotelProfileRepository(config: {
           AND slug_alias.purpose = 'redirect'
           AND slug_alias.status = 'redirected'
          WHERE (profile.canonical_slug = lower($1)
-            OR slug_alias.property_id IS NOT NULL)
+           OR slug_alias.property_id IS NOT NULL)
            AND profile.public_visibility = 'public_safe'
            AND profile.profile_status = 'public'
+           AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
          ORDER BY CASE WHEN profile.canonical_slug = lower($1) THEN 0 ELSE 1 END
          LIMIT 1`,
@@ -179,6 +195,7 @@ export function createTargetPublicHotelProfileRepository(config: {
          WHERE verified_domain.property_id IS NOT NULL
            AND profile.public_visibility = 'public_safe'
            AND profile.profile_status = 'public'
+           AND ${TARGET_PUBLIC_CATALOG_PROFILE_READY}
            AND (profile.expires_at IS NULL OR profile.expires_at > now())
          LIMIT 1`,
         [normalizedDomain],
@@ -352,6 +369,18 @@ function serializeHotelProfile(
       ? {
           branding: {
             logoUrl: hotel.branding.logoUrl ?? null,
+            ...(hotel.branding.showContactButton === undefined
+              ? {}
+              : { showContactButton: hotel.branding.showContactButton }),
+            ...(hotel.branding.showReferAGuestButton === undefined
+              ? {}
+              : { showReferAGuestButton: hotel.branding.showReferAGuestButton }),
+            ...(hotel.branding.showLanguageSelector === undefined
+              ? {}
+              : { showLanguageSelector: hotel.branding.showLanguageSelector }),
+            ...(hotel.branding.showCurrencySelector === undefined
+              ? {}
+              : { showCurrencySelector: hotel.branding.showCurrencySelector }),
             heroImage: hotel.branding.heroImage ?? null,
             heroHeading: hotel.branding.heroHeading ?? null,
             heroSubtext: hotel.branding.heroSubtext ?? null,
@@ -369,6 +398,8 @@ function serializeHotelProfile(
     policies: {
       checkInFrom: hotel.policies.checkInFrom ?? null,
       checkOutUntil: hotel.policies.checkOutUntil ?? null,
+      ...(hotel.policies.checkInUntil ? { checkInUntil: hotel.policies.checkInUntil } : {}),
+      ...(hotel.policies.checkOutFrom ? { checkOutFrom: hotel.policies.checkOutFrom } : {}),
       cancellationSummary: hotel.policies.cancellationSummary ?? null,
       termsUrl: hotel.policies.termsUrl ?? null,
     },
@@ -495,6 +526,42 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
            profile.capabilities,
            profile.supported_quote_parameters AS "supportedQuoteParameters",
            booking_header_logo.public_cdn_url AS "bookingHeaderLogo",
+           booking_branding.show_contact_button AS "bookingShowContactButton",
+           booking_branding.show_refer_a_guest_button AS "bookingShowReferAGuestButton",
+           booking_branding.show_language_selector AS "bookingShowLanguageSelector",
+           booking_branding.show_currency_selector AS "bookingShowCurrencySelector",
+           EXISTS (
+             SELECT 1
+             FROM identity.product_entitlements entitlement
+             WHERE entitlement.product = 'pms'
+               AND entitlement.entitlement_key = 'module:affiliates'
+               AND entitlement.status = 'active'
+               AND entitlement.resource_product = 'pms'
+               AND entitlement.resource_type = 'pms_property'
+               AND entitlement.resource_id = profile.property_id::text
+               AND (entitlement.starts_at IS NULL OR entitlement.starts_at <= now())
+               AND (entitlement.expires_at IS NULL OR entitlement.expires_at > now())
+               AND EXISTS (
+                 SELECT 1
+                 FROM identity.organization_resource_links pms_resource
+                 WHERE pms_resource.organization_id = entitlement.organization_id
+                   AND pms_resource.product = 'pms'
+                   AND pms_resource.resource_type = 'pms_property'
+                   AND pms_resource.resource_id = profile.property_id::text
+                   AND pms_resource.relationship IN ('owner', 'operator')
+                   AND pms_resource.status = 'active'
+               )
+               AND EXISTS (
+                 SELECT 1
+                 FROM identity.organization_resource_links booking_resource
+                 WHERE booking_resource.organization_id = entitlement.organization_id
+                   AND booking_resource.product = 'booking'
+                   AND booking_resource.resource_type = 'booking_hotel'
+                   AND booking_resource.resource_id = profile.property_id::text
+                   AND booking_resource.relationship IN ('owner', 'operator')
+                   AND booking_resource.status = 'active'
+               )
+           ) AS "bookingReferAGuestModuleEnabled",
            booking_branding.hero_image_url AS "bookingHeroImage",
            booking_branding.hero_heading AS "bookingHeroHeading",
            booking_branding.hero_subtext AS "bookingHeroSubtext",
@@ -509,7 +576,6 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
          FROM distribution.public_hotel_bookability_profiles profile
          JOIN hotel_catalog.property_public_profile_read_model catalog_profile
            ON catalog_profile.property_id = profile.property_id
-          AND catalog_profile.profile_status = 'complete'
          LEFT JOIN booking.booking_settings booking_branding
            ON booking_branding.property_id = profile.property_id
          LEFT JOIN LATERAL (
@@ -560,7 +626,7 @@ function toTargetPublicHotelProfileProjection(
     onlinePayment: booleanValue(capabilities["onlinePayment"]),
     payAtProperty: booleanValue(capabilities["payAtProperty"]),
     promoCodes: booleanValue(capabilities["promoCodes"]),
-    referralCodes: booleanValue(capabilities["referralCodes"]),
+    referralCodes: row.bookingReferAGuestModuleEnabled,
     bookingDeepLinks: booleanValue(capabilities["bookingDeepLinks"]),
   };
   const trust = targetProfileTrust(
@@ -607,6 +673,12 @@ function toTargetPublicHotelProfileProjection(
       policies: {
         checkInFrom: stringValue(policies["checkInFrom"]),
         checkOutUntil: stringValue(policies["checkOutUntil"]),
+        ...(stringValue(policies["checkInUntil"])
+          ? { checkInUntil: stringValue(policies["checkInUntil"]) }
+          : {}),
+        ...(stringValue(policies["checkOutFrom"])
+          ? { checkOutFrom: stringValue(policies["checkOutFrom"]) }
+          : {}),
         cancellationSummary: stringValue(policies["cancellationSummary"]),
         termsUrl: stringValue(policies["termsUrl"]),
       },
@@ -652,6 +724,11 @@ function publicBookingBranding(
 ): Pick<PublicBookabilityHotelProfile, "branding"> {
   const branding = {
     logoUrl: stringValue(row.bookingHeaderLogo),
+    showContactButton: row.bookingShowContactButton ?? true,
+    showReferAGuestButton:
+      row.bookingReferAGuestModuleEnabled && (row.bookingShowReferAGuestButton ?? false),
+    showLanguageSelector: row.bookingShowLanguageSelector ?? true,
+    showCurrencySelector: row.bookingShowCurrencySelector ?? true,
     heroImage: stringValue(row.bookingHeroImage),
     heroHeading: stringValue(row.bookingHeroHeading),
     heroSubtext: stringValue(row.bookingHeroSubtext),

@@ -7,7 +7,7 @@ import {
 } from "./pmsOperationsReadModel.js";
 
 describe("target PMS room order", () => {
-  it("uses a stable ID tie-break after sort order and room number", async () => {
+  it("returns only verified operational labels with a stable order", async () => {
     let roomQuery = "";
     const pool: PmsOperationsReadPool = {
       async query<T extends QueryResultRow = QueryResultRow>(
@@ -30,6 +30,8 @@ describe("target PMS room order", () => {
 
     await repository.listRoomsByPropertyId("property-1");
 
+    expect(roomQuery).toContain("room.operational_label_status = 'verified'");
+    expect(roomQuery).toContain("room.room_number IS NOT NULL");
     expect(roomQuery).toContain("ORDER BY room.sort_order ASC, room.room_number ASC, room.id ASC");
   });
 });
@@ -164,7 +166,14 @@ describe("target PMS reservation stay dates", () => {
                 primaryGuestCountryCode: "GB",
                 primaryGuestSpecialRequests: "Quiet room",
                 guestContactAccepted: false,
-                addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+                addOns: [
+                  {
+                    selectionId: "selection-1",
+                    addonId: "addon-1",
+                    name: "Breakfast",
+                    quantity: 2,
+                  },
+                ],
                 assignments: [],
                 checkinCompletedAt: null,
                 checkinPendingFlags: [],
@@ -245,7 +254,9 @@ describe("target PMS reservation stay dates", () => {
     expect(listQuery).toContain("booking.booking_metadata #>> '{selectedOffer,roomName}'");
     expect(listQuery).toContain('AS "guestContactAccepted"');
     expect(listQuery).toContain('primary_guest.special_requests AS "primaryGuestSpecialRequests"');
-    expect(listQuery).toContain("FROM booking.booking_addon_selections selection");
+    expect(listQuery).toContain("FROM booking.booking_addon_selection_items item");
+    expect(listQuery).toContain("JOIN booking.active_booking_addon_selections active_selection");
+    expect(listQuery).toContain("item.item_ordinality");
     expect(listQuery).toContain("'guest_booking.accepted'");
     expect(listQuery).not.toContain("contact_event.actor_type = 'property_user'");
     expect(listQuery).toContain("booking.booking_metadata ->> 'acceptedPaymentDeadlineAt'");
@@ -273,7 +284,14 @@ describe("target PMS reservation stay dates", () => {
         countryCode: "GB",
         specialRequests: "Quiet room",
       },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+      addOns: [
+        {
+          selectionId: "selection-1",
+          addonId: "addon-1",
+          name: "Breakfast",
+          quantity: 2,
+        },
+      ],
       bookedOffer: {
         roomTypeId: "room-type-1",
         roomName: "Munich Booking Room",
@@ -488,6 +506,7 @@ describe("target PMS room media compatibility", () => {
     const result = await repository.listRoomTypesByPropertyId("property-1");
 
     expect(roomTypeQuery).toContain("'pricingContractVersion', rate_plan.pricing_contract_version");
+    expect(roomTypeQuery).not.toContain("room.operational_label_status = 'verified'");
     expect(roomTypeQuery).toContain("'cancellationPolicySnapshot', COALESCE(");
     expect(roomTypeQuery).toContain(
       "LEFT JOIN pms.flexible_rate_plan_cancellation_extensions cancellation_extension",

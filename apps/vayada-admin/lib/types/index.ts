@@ -167,16 +167,24 @@ export interface UserDetailResponse {
   createdAt: string;
   updatedAt: string;
   profile: CreatorProfileDetail | HotelProfileDetail | null;
+  creatorModeration?: CreatorModerationCapabilities;
+}
+
+export interface CreatorModerationCapabilities {
+  allowed: boolean;
+  allowedTransitions: Array<"active" | "rejected" | "suspended" | "archived">;
 }
 
 export interface CreatorProfileDetail {
   id: string;
   userId: string;
+  profileStatus: "pending" | "active" | "rejected" | "suspended" | "archived";
   location: string | null;
   shortDescription: string | null;
   portfolioLink: string | null;
   phone: string | null;
   profilePicture: string | null;
+  profilePictureMediaObjectId: string | null;
   profileComplete: boolean;
   profileCompletedAt: string | null;
   createdAt: string;
@@ -198,6 +206,7 @@ export interface PlatformResponse {
 }
 
 export interface HotelProfileDetail {
+  profileComplete?: boolean;
   id: string;
   userId: string;
   name: string;
@@ -220,6 +229,12 @@ export interface ListingResponse {
   location: string;
   description: string;
   accommodationType: string | null;
+  media: Array<{
+    mediaObjectId: string | null;
+    url: string | null;
+    approvalStatus: "pending_domain_approval" | "approved";
+    lifecycleStatus: "staged" | "active";
+  }>;
   images: string[];
   status: string;
   createdAt: string;

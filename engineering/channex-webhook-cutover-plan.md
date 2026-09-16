@@ -272,7 +272,7 @@ also create semantic domain-event keys:
 | Channex message ingest            | `channex.message.ingest:<property_id>:<thread_id>:<source_message_id>:v1`                      |
 | Channex booking ingest            | `channex.booking.ingest:<property_id>:<channel_booking_id>:<revision>:v1`                      |
 | ARI push                          | `channex.push-ari:<property_id>:<room_type_id>:<date_start>_<date_end>:<inventory_version>:v1` |
-| Rolling calendar auto-open        | `pms.calendar-auto-open:<property_id>:<open_through>:v1`                                       |
+| Calendar auto-open                | `pms.calendar-auto-open:<property_id>:<open_through>:source-<source_fingerprint>:v2`           |
 | Booking expiry/cancellation sweep | `booking.lifecycle-sweep:<booking_id>:<action>:<deadline_or_window>:v1`                        |
 
 ### Job keys
@@ -480,3 +480,27 @@ The staging rehearsal passes only if all of these are true:
 - Scope: run this plan in staging, attach provider exports, freeze matrix
   approvals, replay outputs, rollback proof, and follow-up defects.
 - Labels: Platform.
+
+## Review-only Next activation (VAY-1532, 2026-09-12)
+
+Flamur authorized incoming review activation on next-pms.vayada.com after
+review sending was deployed. This is an event-scoped cutover: only `review`
+and `updated_review` target the Next callback. Booking/message subscriptions,
+legacy schedulers, and other provider modes keep their existing ownership.
+
+`CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE` overrides the general Channex intake mode
+only for these two event families; omission preserves existing mode behavior.
+The Next API already runs the durable review worker. Configure a separate
+production callback secret through encrypted SSM and subscribe these two global
+event masks to `https://next-api.vayada.com/webhooks/channex`, with send_data
+enabled and X-Vayada-Webhook-Token authentication. Export existing subscriptions
+first and preserve unrelated callbacks; do not create overlapping review owners.
+Staging canaries must reset the new override to observe_only.
+
+Deploy code before enabling the override, verify receipt promotion/replay and
+stored review visibility using a bounded synthetic event for the shared test
+property, then remove the synthetic review. Provider review/reply POSTs are not
+part of this smoke. Real future OTA delivery remains distinct evidence.
+Rollback disables the two new subscriptions and resets the override to
+observe_only, retaining receipts for reconciliation. No global Channex cutover
+or booking/message worker activation is required.

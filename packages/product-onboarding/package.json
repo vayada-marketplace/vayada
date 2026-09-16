@@ -10,10 +10,12 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./useNearbyNavigationGuard": "./src/useNearbyNavigationGuard.ts",
+    "./NearbyEditor": "./src/NearbyEditor.tsx",
+    "./NearbyPreview": "./src/NearbyPreview.tsx",
+    "./nearbyApi": "./src/nearbyApi.ts",
     "./AddonsStep": "./src/AddonsStep.tsx",
-    "./BenefitsStep": "./src/BenefitsStep.tsx",
     "./BrandMediaStep": "./src/BrandMediaStep.tsx",
-    "./LastMinuteStep": "./src/LastMinuteStep.tsx",
     "./localApiOrigin": "./src/localApiOrigin.ts",
     "./LocalizationMultiSelect": "./src/LocalizationMultiSelect.tsx",
     "./PoliciesStep": "./src/PoliciesStep.tsx",
@@ -22,7 +24,11 @@
     "./returnTo": "./src/returnTo.ts",
     "./RoomsStep": "./src/RoomsStep.tsx",
     "./SharedHotelLoginForm": "./src/SharedHotelLoginForm.tsx",
-    "./SharedSignupPage": "./src/SharedSignupPage.tsx"
+    "./SharedSignupPage": "./src/SharedSignupPage.tsx",
+    "./bankTransferDestination": "./src/bankTransferDestination.ts",
+    "./AddonEditor": "./src/AddonEditor.tsx",
+    "./PreparedHotelEditor": "./src/PreparedHotelEditor.tsx",
+    "./PreparedHotelImportPanel": "./src/PreparedHotelImportPanel.tsx"
   },
   "dependencies": {
     "@vayada/domain-hotels": "*",

@@ -9,12 +9,36 @@ import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 const profile = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "bookable")!.profile;
 
 describe("active immutable Booking publication profile reads", () => {
+  it("does not return old published coordinates when current location is hidden", async () => {
+    const repository = createActiveBookingPublicationProfileRepository({
+      connectionString: "postgresql://unused",
+      pool: pool(async (text) =>
+        text.includes("identity.product_entitlements")
+          ? [{ domainVerified: true, referralEnabled: true, latitude: null, longitude: null }]
+          : [{ propertyId: profile.hotel.propertyId, publicContent: content(profile) }],
+      ),
+    });
+    expect((await repository.findProfileBySlug(profile.hotel.slug))?.hotel.location).toMatchObject({
+      latitude: null,
+      longitude: null,
+    });
+  });
   it("returns only a profile reached through the active revision pointer", async () => {
     const calls: { text: string; values?: readonly unknown[] }[] = [];
     const repository = createActiveBookingPublicationProfileRepository({
       connectionString: "postgresql://unused",
       pool: pool(async (text, values) => {
         calls.push({ text, values });
+        if (text.includes("identity.product_entitlements")) {
+          return [
+            {
+              domainVerified: true,
+              referralEnabled: true,
+              latitude: profile.hotel.location.latitude,
+              longitude: profile.hotel.location.longitude,
+            },
+          ];
+        }
         return [{ propertyId: profile.hotel.propertyId, publicContent: content(profile) }];
       }),
     });
@@ -25,6 +49,12 @@ describe("active immutable Booking publication profile reads", () => {
     expect(calls[0]?.text).toContain("distribution.active_public_booking_revision");
     expect(calls[0]?.text).toContain("distribution.public_booking_content_revisions");
     expect(calls[0]?.values).toEqual([profile.hotel.slug]);
+    expect(calls[1]?.text).toContain("identity.product_entitlements");
+    expect(calls[1]?.text).toContain("pms_resource.product = 'pms'");
+    expect(calls[1]?.text).toContain("pms_resource.resource_type = 'pms_property'");
+    expect(calls[1]?.text).toContain("booking_resource.product = 'booking'");
+    expect(calls[1]?.text).toContain("booking_resource.resource_type = 'booking_hotel'");
+    expect(calls[1]?.values).toEqual([profile.hotel.propertyId, null]);
   });
 
   it("fails closed for poisoned or unpublished profile content", async () => {
@@ -59,6 +89,16 @@ describe("active immutable Booking publication profile reads", () => {
       connectionString: "postgresql://unused",
       pool: pool(async (text, values) => {
         calls.push([text, values]);
+        if (text.includes("identity.product_entitlements")) {
+          return [
+            {
+              domainVerified: true,
+              referralEnabled: true,
+              latitude: profile.hotel.location.latitude,
+              longitude: profile.hotel.location.longitude,
+            },
+          ];
+        }
         return [
           { propertyId: domainProfile.hotel.propertyId, publicContent: content(domainProfile) },
         ];
@@ -71,6 +111,33 @@ describe("active immutable Booking publication profile reads", () => {
     expect(calls[0]?.[0]).toContain("hotel_catalog.property_domains");
     expect(calls[0]?.[0]).toContain("verification_status = 'verified'");
     expect(calls[0]?.[1]).toEqual(["book.example.test"]);
+  });
+
+  it("fails Refer a Guest closed against the current property entitlement", async () => {
+    const staleProfile = structuredClone(profile);
+    staleProfile.hotel.capabilities.referralCodes = true;
+    staleProfile.hotel.branding = {
+      logoUrl: null,
+      heroImage: null,
+      heroHeading: null,
+      heroSubtext: null,
+      primaryColor: null,
+      fontPairing: null,
+      showReferAGuestButton: true,
+    };
+    const repository = createActiveBookingPublicationProfileRepository({
+      connectionString: "postgresql://unused",
+      pool: pool(async (text) =>
+        text.includes("identity.product_entitlements")
+          ? [{ domainVerified: true, referralEnabled: false }]
+          : [{ propertyId: staleProfile.hotel.propertyId, publicContent: content(staleProfile) }],
+      ),
+    });
+
+    const result = await repository.findProfileBySlug(staleProfile.hotel.slug);
+
+    expect(result?.hotel.capabilities.referralCodes).toBe(false);
+    expect(result?.hotel.branding?.showReferAGuestButton).toBe(false);
   });
 });
 

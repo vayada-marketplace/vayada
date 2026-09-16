@@ -1,5 +1,5 @@
 import { Hotel, RoomType, Addon } from "@/lib/types";
-import { bookingEngine, bookingWebPublic } from "./client";
+import { bookingWebPublic } from "./client";
 import {
   bookingWebPublicApi,
   defaultOfferDates,
@@ -14,7 +14,7 @@ export const hotelService = {
     return toLegacyHotel(await bookingWebPublicApi.getHotel(slug, { locale }));
   },
 
-  async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
+  async recordAffiliateClick(slug: string, referralCode: string, clickId: string): Promise<void> {
     try {
       await fetch(
         `${bookingWebPublic.baseURL}/api/booking-web/hotels/${encodeURIComponent(slug)}/attribution/clicks`,
@@ -22,8 +22,9 @@ export const hotelService = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            clickId,
             referralCode,
-            sessionId: getBookingWebSessionId(),
+            sessionId: getBookingWebSessionId(slug),
             landingUrl: typeof window === "undefined" ? undefined : window.location.href,
             referrer: typeof document === "undefined" ? undefined : document.referrer,
           }),
@@ -43,20 +44,50 @@ export const hotelService = {
     children?: number,
     locale?: string,
   ): Promise<RoomType[]> {
+    return (await hotelService.searchRooms(slug, checkIn, checkOut, adults, children, locale))
+      .rooms;
+  },
+
+  async searchRooms(
+    slug: string,
+    checkIn?: string,
+    checkOut?: string,
+    adults?: number,
+    children?: number,
+    locale?: string,
+    roomCount = 1,
+  ) {
     const dates = checkIn && checkOut ? { checkIn, checkOut } : defaultOfferDates();
     const data = await bookingWebPublicApi.getOffers(slug, {
       checkIn: dates.checkIn,
       checkOut: dates.checkOut,
       adults,
       children,
-      rooms: 1,
+      rooms: roomCount,
       locale,
     });
-    return toLegacyRooms(data);
+    let searchMessage: string | null = null;
+    if (data.status !== "bookable") {
+      const reasons = data.unavailableReasons ?? [];
+      searchMessage = "noAvailability";
+      if (
+        data.status === "stale" ||
+        reasons.some(({ code }) => ["stale_data", "unavailable_data"].includes(code))
+      ) {
+        searchMessage = "availabilityError";
+      } else if (reasons.length === 1) {
+        if (reasons[0].code === "occupancy_unavailable") searchMessage = "guestCountUnavailable";
+        if (reasons[0].code === "unsupported_occupancy") searchMessage = "guestCountUnsupported";
+      }
+    }
+    return { rooms: toLegacyRooms(data), searchMessage };
   },
 
   async getAddons(slug: string): Promise<Addon[]> {
-    return bookingEngine.get<Addon[]>(`/api/hotels/${slug}/addons`);
+    const config = await bookingWebPublic.get<{ addons: Addon[] }>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
+    );
+    return config.addons ?? [];
   },
 
   async getUnavailableDates(
@@ -66,6 +97,7 @@ export const hotelService = {
   ): Promise<{
     dates: string[];
     minStayByArrival: Record<string, number>;
+    validCheckOutsByArrival?: Record<string, string[]>;
     maxStayByArrival: Record<string, number>;
     availabilityUnavailable: boolean;
   }> {

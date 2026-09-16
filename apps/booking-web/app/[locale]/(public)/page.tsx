@@ -12,7 +12,7 @@ import GuestSelector from "@/components/booking/GuestSelector";
 import RoomDetailModal from "@/components/booking/RoomDetailModal";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomFiltersBar from "@/components/booking/RoomFiltersBar";
-import RoomMapPanel from "@/components/booking/RoomMapPanel";
+import Surroundings from "@/components/booking/Surroundings";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import PropertyGallery from "@/components/booking/PropertyGallery";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
@@ -101,7 +101,13 @@ function HomePageContent() {
   const t = useTranslations("home");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
-  const { rooms, loading: roomsLoading, roomsLoading: roomsRefetching, refetchRooms } = useRooms();
+  const {
+    rooms,
+    loading: roomsLoading,
+    roomsLoading: roomsRefetching,
+    searchMessage,
+    refetchRooms,
+  } = useRooms();
   const { addons } = useAddons();
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const { slug } = useSlug();
@@ -150,7 +156,7 @@ function HomePageContent() {
   // Fetch rooms with default dates on initial load so prices reflect seasonal rates
   const [initialFetchDone, setInitialFetchDone] = useState(false);
   useEffect(() => {
-    if (!roomsLoading && rooms.length > 0 && !initialFetchDone) {
+    if (!roomsLoading && !initialFetchDone) {
       setInitialFetchDone(true);
       refetchRooms(checkIn, checkOut, adults, effectiveChildren);
     }
@@ -198,16 +204,13 @@ function HomePageContent() {
   const [imageIndices, setImageIndices] = useState<Record<string, number>>({});
   const [selectedRates, setSelectedRates] = useState<Record<string, string | null>>({});
   const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null);
+  const closeRoomDetails = useCallback(() => setDetailModalIndex(null), []);
   const [searching, setSearching] = useState(false);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
-  const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
-  const [mobileResultView, setMobileResultView] = useState<"list" | "map">("list");
   const [pendingRateSelection, setPendingRateSelection] = useState<PendingRateSelection | null>(
     null,
   );
   const [isRateNavigationPending, startRateNavigation] = useTransition();
   const roomsSectionRef = useRef<HTMLDivElement>(null);
-  const roomRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Reset stale modal index if the underlying room list shrinks (e.g. after a refetch)
   useEffect(() => {
@@ -273,6 +276,7 @@ function HomePageContent() {
             }),
           );
     const stayTotal = (room: (typeof rooms)[number]) => {
+      if (room.combination) return room.combination.totalAmount;
       const rates = getFlexibleNightlyRates(room, nights);
       return rates.reduce((sum, rate) => sum + rate, 0);
     };
@@ -335,7 +339,7 @@ function HomePageContent() {
     const totalGuests = committedAdults + effectiveCommittedChildren;
     const targets = new Set<string>();
     for (const room of rooms.slice(0, 8)) {
-      const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy);
+      const requiredRooms = room.combination ? room.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0) : Math.ceil(totalGuests / room.maxOccupancy);
       if (room.remainingRooms < requiredRooms) continue;
       const rateType = getSelectedAvailableRate(room);
       if (!rateType) continue;
@@ -355,6 +359,7 @@ function HomePageContent() {
 
   const handleSelectRate = (room: RoomType, rateType: RateType, requiredRooms: number) => {
     if (pendingRateSelection || isRateNavigationPending) return;
+    trackEvent(slug, "rate_selected");
     const target = buildRateTarget(room.id, requiredRooms, rateType);
 
     setPendingRateSelection({ roomId: room.id, rateType });
@@ -375,15 +380,6 @@ function HomePageContent() {
     );
   };
 
-  const selectRoomFromMap = (roomId: string) => {
-    setActiveRoomId(roomId);
-    setMobileResultView("list");
-    requestAnimationFrame(() => {
-      roomRefs.current[roomId]?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-  };
-
-  const mapViewEnabled = hotel.mapViewEnabled === true;
   const heroImage = hotel.heroImage;
   const heroHeading = hotel.branding?.heroHeading || hotel.name;
   const heroSubtext = hotel.branding?.heroSubtext || hotel.description;
@@ -717,38 +713,27 @@ function HomePageContent() {
           onSortChange={setSortOption}
         />
 
-        {/* Room Cards */}
-        {mapViewEnabled && !roomsLoading && (
-          <div className="mb-5 flex rounded-full border border-gray-200 bg-gray-50 p-1 md:hidden">
-            {(["list", "map"] as const).map((view) => (
-              <button
-                key={view}
-                type="button"
-                onClick={() => setMobileResultView(view)}
-                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold capitalize transition-colors ${
-                  mobileResultView === view
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-900"
-                }`}
-              >
-                {t(`mobileView.${view}`)}
-              </button>
-            ))}
-          </div>
-        )}
+        {!roomsLoading &&
+          !roomsRefetching &&
+          initialFetchDone &&
+          checkIn === committedCheckIn &&
+          checkOut === committedCheckOut &&
+          adults === committedAdults &&
+          effectiveChildren === effectiveCommittedChildren &&
+          (searchMessage || (filteredRooms.length === 0 ? "noMatchingRooms" : null)) && (
+            <div
+              role="status"
+              className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-6 text-gray-700"
+            >
+              {t(searchMessage || "noMatchingRooms", {
+                count: committedAdults + effectiveCommittedChildren,
+              })}
+            </div>
+          )}
 
-        <div
-          className={
-            mapViewEnabled && !roomsLoading
-              ? "grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_420px] gap-6"
-              : ""
-          }
-        >
-          <div
-            className={`space-y-6 ${
-              mapViewEnabled && mobileResultView === "map" ? "hidden md:block" : ""
-            } ${mapViewEnabled ? "md:max-h-[calc(100vh-120px)] md:overflow-y-auto md:pr-2" : ""}`}
-          >
+        {/* Room Cards */}
+        <div>
+          <div className="space-y-6">
             {roomsLoading
               ? Array.from({ length: 3 }).map((_, i) => (
                   <div
@@ -773,13 +758,7 @@ function HomePageContent() {
                   </div>
                 ))
               : filteredRooms.map((room, roomIndex) => (
-                  <div
-                    key={room.id}
-                    id={`room-${room.id}`}
-                    ref={(node) => {
-                      roomRefs.current[room.id] = node;
-                    }}
-                  >
+                  <div key={room.id} id={`room-${room.id}`}>
                     <RoomCard
                       room={room}
                       nights={nights}
@@ -787,10 +766,6 @@ function HomePageContent() {
                       imageIndex={imageIndices[room.id] ?? 0}
                       checkIn={committedCheckIn}
                       hotelTimezone={hotel.timezone}
-                      active={activeRoomId === room.id}
-                      highlighted={hoveredRoomId === room.id}
-                      onHover={(hovered) => setHoveredRoomId(hovered ? room.id : null)}
-                      onSelectCard={() => setActiveRoomId(room.id)}
                       onChangeImageIndex={(i) =>
                         setImageIndices((prev) => ({ ...prev, [room.id]: i }))
                       }
@@ -801,7 +776,7 @@ function HomePageContent() {
                         setSelectedRates((prev) => ({ ...prev, [room.id]: next }))
                       }
                       onView={() => {
-                        trackEvent(slug, "viewed_room", { roomId: room.id });
+                        trackEvent(slug, "room_viewed", { roomId: room.id });
                         setDetailModalIndex(roomIndex);
                       }}
                       onSelectRate={(rateType, requiredRooms) => {
@@ -813,30 +788,16 @@ function HomePageContent() {
                   </div>
                 ))}
           </div>
-
-          {mapViewEnabled && !roomsLoading && (
-            <div className={mobileResultView === "list" ? "hidden md:block" : "block"}>
-              <div className="md:sticky md:top-28">
-                <RoomMapPanel
-                  rooms={filteredRooms}
-                  activeRoomId={activeRoomId}
-                  hoveredRoomId={hoveredRoomId}
-                  onHoverRoom={setHoveredRoomId}
-                  onSelectRoom={selectRoomFromMap}
-                  className="md:h-[calc(100vh-140px)]"
-                />
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
+      <Surroundings key={slug} slug={slug} locality={hotel.contact.address} />
       {/* Room Detail Modal */}
       {detailModalIndex !== null &&
         filteredRooms[detailModalIndex] &&
         (() => {
           const modalRoom = filteredRooms[detailModalIndex];
-          const modalRequiredRooms = Math.ceil(
+          const modalRequiredRooms = modalRoom.combination ? modalRoom.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0) : Math.ceil(
             (committedAdults + effectiveCommittedChildren) / modalRoom.maxOccupancy,
           );
           const modalSoldOut = modalRoom.remainingRooms < modalRequiredRooms;
@@ -845,7 +806,7 @@ function HomePageContent() {
               room={modalRoom}
               nights={nights}
               open={true}
-              onClose={() => setDetailModalIndex(null)}
+              onClose={closeRoomDetails}
               currentIndex={detailModalIndex}
               totalRooms={filteredRooms.length}
               onPrev={() =>
@@ -860,12 +821,11 @@ function HomePageContent() {
               }
               soldOut={modalSoldOut}
               checkInTime={hotel.checkInTime}
+              checkInUntil={hotel.checkInUntil}
               checkOutTime={hotel.checkOutTime}
+              checkOutFrom={hotel.checkOutFrom}
               checkIn={committedCheckIn}
               hotelTimezone={hotel.timezone}
-              propertyName={hotel.name}
-              showLocationMap={hotel.showRoomDetailMap}
-              pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
                 handleSelectRate(modalRoom, rateType, modalRequiredRooms);

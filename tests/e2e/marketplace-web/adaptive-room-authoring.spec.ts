@@ -1,3 +1,8 @@
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
+import {
+  createAdaptiveHotelSetupStatusMock,
+  mockHotelSetupPrerequisites,
+} from "../support/sharedHotelSetupMocks";
 import { expect, test, type Page } from "@playwright/test";
 import type { PropertySetupRouteReadModel, PropertySetupStepDraft } from "@vayada/domain-hotels";
 
@@ -68,6 +73,7 @@ test.describe("adaptive room authoring", () => {
     expect(owner.draftWrites).toBeGreaterThanOrEqual(4);
     expect(owner.events.indexOf("draft")).toBeLessThan(owner.events.indexOf("facts:create"));
     expect(owner.events).toContain("units:reconcile");
+    expect(owner.events.filter((event) => event === "units:label")).toHaveLength(5);
     expect(owner.events).toContain("media:assign");
     expect(owner.events).toContain("amenities:confirm-empty");
     expect(owner.events.join(" ")).not.toMatch(/pricing|calendar/);
@@ -75,16 +81,92 @@ test.describe("adaptive room authoring", () => {
     await assertHealthy();
   });
 
-  test("retains first-visit values and exits only after a refreshed exact manifest", async ({
+  for (const lostResponse of [false, true]) {
+    test(`refreshes imported rooms while preserving local input (mock APIs, lost response: ${lostResponse})`, async ({
+      page,
+      baseURL,
+    }, testInfo) => {
+      await primeBrowserState(page);
+      await mockAuthSession(page);
+      await mockRoute(page, () => routeWithRoomsDraft(emptyRoomsDraft()));
+      const owner = await mockRoomOwnerApis(page);
+      let saved = false;
+      const prepared = {
+        contractVersion: "prepared-hotel-import.v1",
+        property: {},
+        rooms: [
+          {
+            id: "garden",
+            name: "Imported Suite",
+            description: "",
+            maxGuests: 2,
+            maxAdults: 2,
+            maxChildren: 0,
+            bedType: "queen",
+            bedQuantity: 1,
+            bathroomType: "private",
+            sizeSquareMetres: null,
+          },
+        ],
+      };
+      await page.route(
+        /\/api\/hotel-setup\/(?:imports\/prepared|properties\/[^/]+\/import)(?:\?|$)/,
+        async (route) => {
+          if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+          const item = { itemId: "room:garden", status: "applied", resourceId: roomTypeIds[0] };
+          if (route.request().method() === "POST") {
+            owner.insertImportedRoom();
+            saved = true;
+            if (lostResponse) return route.abort("failed");
+            return route.fulfill({ headers: corsHeaders(route), json: { items: [item] } });
+          }
+          return route.fulfill({
+            headers: corsHeaders(route),
+            json: {
+              import: {
+                sourceId: "synthetic-source",
+                propertyId,
+                data: prepared,
+                results: saved ? { "room:garden": item } : {},
+              },
+              profile: { propertyId, profileRevision: 1, profile: { displayName: "Test Hotel" } },
+              canImportRooms: true,
+              canImportProperty: false,
+              existingRooms: saved ? [{ id: roomTypeIds[0], name: "Imported Suite" }] : [],
+            },
+          });
+        },
+      );
+      await page.goto(setupUrl(baseURL));
+      await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
+      await page.getByLabel("Room type name").fill("Unfinished local room");
+      const panel = page.getByRole("region", { name: "Prepared hotel data" });
+      await panel.getByRole("button", { name: "Review prepared hotel data" }).click();
+      await panel.getByRole("checkbox", { name: "Imported Suite", exact: true }).check();
+      await panel.getByRole("button", { name: "Save selected items" }).click();
+      if (lostResponse) {
+        await expect(panel.getByRole("alert")).toContainText("Import could not finish");
+        await panel.getByRole("button", { name: "Refresh", exact: true }).click();
+      }
+      await expect(
+        page.getByRole("heading", { name: "Imported Suite", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByLabel("Room type name")).toHaveValue("Unfinished local room");
+      expect(owner.createdDraftIds).toHaveLength(0);
+      expect(owner.draftWrites).toBe(0);
+      await page.screenshot({ path: testInfo.outputPath("import-refresh.png"), fullPage: true });
+    });
+  }
+
+  test("retains first-visit values and exits with the exact current manifest", async ({
     page,
     baseURL,
   }, testInfo) => {
     await primeBrowserState(page);
     await mockAuthSession(page);
-    let manifestAvailable = false;
-    const routeState = await mockRoute(page, () =>
-      routeWithRoomsDraft(manifestAvailable ? emptyRoomsDraft() : null),
-    );
+    const initialRoute = routeWithRoomsDraft(null);
+    const routeState = await mockRoute(page, () => initialRoute);
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
     const owner = await mockRoomOwnerApis(page);
 
     await page.goto(setupUrl(baseURL));
@@ -94,30 +176,34 @@ test.describe("adaptive room authoring", () => {
     await name.fill("Locally retained room");
     await expect(
       page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add or arrange photos" })).toBeDisabled();
+    await expect(
+      page.getByText("Complete the required room details before uploading."),
+    ).toBeVisible();
 
     expect(owner.draftWrites).toBe(0);
     expect(owner.createdDraftIds).toEqual([]);
     expect(owner.mediaTargets).toEqual([]);
 
-    manifestAvailable = true;
-    await page.getByRole("button", { name: "Refresh setup data" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Setup data is still unavailable" }),
-    ).toHaveCount(0);
-    await expect(page.getByText("Checking saved room details...")).toHaveCount(0);
     const assertHealthy = watchPageHealth(page, testInfo);
     await expect(name).toHaveValue("Locally retained room");
     await assertHealthy();
     await page.getByRole("button", { name: "Exit setup", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/marketplace$/, { timeout: 60_000 });
+    await expect(page).toHaveURL(destination);
     expect(owner.draftWrites).toBe(1);
     expect(owner.lastDraftPayload?.["room.name"]).toEqual(
       expect.objectContaining({ [owner.lastDraftRoomId!]: "Locally retained room" }),
     );
-    expect(routeState.reads).toBe(2);
+    expect(routeState.reads).toBe(1);
+    expect(owner.lastDraftRequest).toMatchObject({
+      expectedBaseRevisions: initialRoute.steps.find((step) => step.stepId === "rooms")!
+        .currentBaseRevisions,
+      expectedDraftRevision: 0,
+      expectedTrackRevision: 3,
+      expectedSessionRevision: 7,
+    });
   });
 
   test("keeps the mobile dialogs keyboard-contained and returns focus without overflow", async ({
@@ -178,6 +264,16 @@ async function uploadPhoto(page: Page, filename: string) {
 }
 
 async function primeBrowserState(page: Page) {
+  await mockHotelSetupPrerequisites(
+    page,
+    createAdaptiveHotelSetupStatusMock({
+      entryProduct: "marketplace",
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      organizationDisplayName: "Test hotel group",
+      propertyId,
+      selectedTracks: ["hotel_operations", "creator_marketplace"],
+    }),
+  );
   await page.addInitScript(
     ({ selectedPropertyId }) => {
       localStorage.setItem(
@@ -244,6 +340,8 @@ async function mockRoomOwnerApis(page: Page) {
     facts: Record<string, unknown>;
     roomFactsRevision: number;
     activeUnitCount: number;
+    roomUnitIds: string[];
+    nextRoomUnitOrdinal: number;
     roomUnitsRevision: number;
     mediaObjectIds: string[];
     roomMediaRevision: number;
@@ -257,8 +355,30 @@ async function mockRoomOwnerApis(page: Page) {
   let draftWrites = 0;
   let draftRevision = 4;
   let sessionRevision = 7;
+  let lastDraftRequest: Record<string, unknown> | null = null;
   let lastDraftPayload: Record<string, unknown> | null = null;
   let lastDraftRoomId: string | null = null;
+
+  await page.route(/\/api\/pms\/properties\/[^/]+\/plan-limits$/, async (route) => {
+    if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+    await route.fulfill({
+      status: 200,
+      headers: corsHeaders(route),
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId,
+        propertyPlan: {
+          propertyId,
+          plan: "commission",
+          limits: {
+            maxRoomPhotosPerType: 10,
+            maxAddons: 3,
+            guestContactAccess: "after_acceptance",
+          },
+        },
+      },
+    });
+  });
 
   await page.route(/\/api\/hotel-setup\/properties\/[^/]+\/setup-drafts\/rooms$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
@@ -267,6 +387,7 @@ async function mockRoomOwnerApis(page: Page) {
     draftWrites += 1;
     draftRevision += 1;
     sessionRevision += 1;
+    lastDraftRequest = body;
     lastDraftPayload = body.payload;
     lastDraftRoomId =
       Object.keys((body.payload["room.name"] as Record<string, unknown>) ?? {})[0] ?? null;
@@ -288,7 +409,7 @@ async function mockRoomOwnerApis(page: Page) {
     });
   });
 
-  await page.route(/\/api\/pms\/properties\/[^/]+\/room-types(?:\?|$)/, async (route) => {
+  await page.route(/\/api\/pms\/setup\/properties\/[^/]+\/room-types(?:\?|$)/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     if (route.request().method() === "GET") {
       await route.fulfill({
@@ -311,6 +432,8 @@ async function mockRoomOwnerApis(page: Page) {
         facts: body.facts,
         roomFactsRevision: 1,
         activeUnitCount: 0,
+        roomUnitIds: [],
+        nextRoomUnitOrdinal: 1,
         roomUnitsRevision: 1,
         mediaObjectIds: [],
         roomMediaRevision: 1,
@@ -342,7 +465,7 @@ async function mockRoomOwnerApis(page: Page) {
   });
 
   await page.route(
-    /\/api\/pms\/properties\/[^/]+\/room-type-bindings\/([^/?]+)$/,
+    /\/api\/pms\/setup\/properties\/[^/]+\/room-type-bindings\/([^/?]+)$/,
     async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       const draftId = decodeURIComponent(
@@ -362,7 +485,7 @@ async function mockRoomOwnerApis(page: Page) {
   );
 
   await page.route(
-    /\/api\/pms\/properties\/[^/]+\/room-types\/([^/]+)\/capacity$/,
+    /\/api\/pms\/setup\/properties\/[^/]+\/room-types\/([^/]+)\/capacity$/,
     async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       const room = roomByType(rooms, route.request().url());
@@ -375,13 +498,26 @@ async function mockRoomOwnerApis(page: Page) {
   );
 
   await page.route(
-    /\/api\/pms\/properties\/[^/]+\/room-types\/([^/]+)\/physical-units\/reconcile$/,
+    /\/api\/pms\/setup\/properties\/[^/]+\/room-types\/([^/]+)\/physical-units\/reconcile$/,
     async (route) => {
       if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
       const room = roomByType(rooms, route.request().url(), 2);
       const body = route.request().postDataJSON() as { targetActiveUnitCount: number };
       const previous = room.activeUnitCount;
-      room.activeUnitCount = body.targetActiveUnitCount;
+      const retiredUnitIds =
+        body.targetActiveUnitCount < previous
+          ? room.roomUnitIds.splice(body.targetActiveUnitCount)
+          : [];
+      const addedUnitIds = Array.from(
+        { length: Math.max(0, body.targetActiveUnitCount - previous) },
+        (_, index) =>
+          `eeeeeeee-eeee-4eee-8eee-${String(
+            roomTypeIds.indexOf(room.roomTypeId) * 100 + room.nextRoomUnitOrdinal + index,
+          ).padStart(12, "0")}`,
+      );
+      room.roomUnitIds.push(...addedUnitIds);
+      room.nextRoomUnitOrdinal += addedUnitIds.length;
+      room.activeUnitCount = room.roomUnitIds.length;
       room.roomUnitsRevision += 1;
       events.push("units:reconcile");
       await route.fulfill({
@@ -394,16 +530,69 @@ async function mockRoomOwnerApis(page: Page) {
           roomTypeId: room.roomTypeId,
           previousActiveUnitCount: previous,
           capacity: capacitySnapshot(room),
-          addedUnits: Array.from({ length: room.activeUnitCount - previous }, (_, index) => ({
+          addedUnits: addedUnitIds.map((roomUnitId) => ({
             contractVersion: "pms-room-facts.v1",
             propertyId,
             roomTypeId: room.roomTypeId,
-            roomUnitId: `eeeeeeee-eeee-4eee-8eee-${String(rooms.size * 100 + index).padStart(12, "0")}`,
+            roomUnitId,
             lifecycle: "active",
             operationalLabel: null,
             operationalLabelStatus: "unverified",
           })),
-          retiredUnitIds: [],
+          retiredUnitIds,
+          acceptedAt: now,
+        },
+      });
+    },
+  );
+
+  await page.route(
+    /\/api\/pms\/setup\/properties\/[^/]+\/room-types\/([^/]+)\/units$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      const room = roomByType(rooms, route.request().url());
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders(route),
+        json: {
+          items: room.roomUnitIds.map((roomUnitId) => ({
+            contractVersion: "pms-room-facts.v1",
+            propertyId,
+            roomTypeId: room.roomTypeId,
+            roomUnitId,
+            lifecycle: "active",
+            operationalLabel: null,
+            operationalLabelStatus: "unverified",
+          })),
+        },
+      });
+    },
+  );
+
+  await page.route(
+    /\/api\/pms\/properties\/[^/]+\/room-types\/([^/]+)\/physical-units\/([^/]+)\/operational-label$/,
+    async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      const room = roomByType(rooms, route.request().url(), 3);
+      const roomUnitId = new URL(route.request().url()).pathname.split("/").at(-2)!;
+      const body = route.request().postDataJSON() as {
+        expectedRevision: number;
+        operationalLabel: string;
+      };
+      room.roomUnitsRevision = body.expectedRevision + 1;
+      events.push("units:label");
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders(route),
+        json: {
+          contractVersion: "pms-room-facts.v1",
+          outcome: "updated",
+          propertyId,
+          roomTypeId: room.roomTypeId,
+          roomUnitId,
+          roomUnitsRevision: room.roomUnitsRevision,
+          operationalLabel: body.operationalLabel,
+          operationalLabelStatus: "verified",
           acceptedAt: now,
         },
       });
@@ -464,7 +653,7 @@ async function mockRoomOwnerApis(page: Page) {
     },
   );
 
-  await page.route(/\/api\/pms\/properties\/[^/]+\/room-types\/([^/?]+)$/, async (route) => {
+  await page.route(/\/api\/pms\/setup\/properties\/[^/]+\/room-types\/([^/?]+)$/, async (route) => {
     if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
     const room = roomByType(rooms, route.request().url(), 0);
     if (route.request().method() === "GET") {
@@ -550,11 +739,32 @@ async function mockRoomOwnerApis(page: Page) {
   });
 
   return {
+    insertImportedRoom() {
+      rooms.set(roomTypeIds[0]!, {
+        ...ownerRoomShape(),
+        roomTypeId: roomTypeIds[0]!,
+        draftRoomId: "import:synthetic-source:garden",
+        facts: {
+          name: "Imported Suite",
+          description: "",
+          category: null,
+          occupancy: { maxGuests: 2, maxAdults: 2, maxChildren: 0 },
+          beds: [{ type: "queen", quantity: 1 }],
+          bedrooms: null,
+          bathrooms: null,
+          bathroomType: "private",
+          size: null,
+        },
+      });
+    },
     events,
     createdDraftIds,
     mediaTargets,
     get draftWrites() {
       return draftWrites;
+    },
+    get lastDraftRequest() {
+      return lastDraftRequest;
     },
     get lastDraftPayload() {
       return lastDraftPayload;
@@ -580,6 +790,8 @@ function ownerRoomShape() {
     facts: {} as Record<string, unknown>,
     roomFactsRevision: 1,
     activeUnitCount: 0,
+    roomUnitIds: [] as string[],
+    nextRoomUnitOrdinal: 1,
     roomUnitsRevision: 1,
     mediaObjectIds: [] as string[],
     roomMediaRevision: 1,

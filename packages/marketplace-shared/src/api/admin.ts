@@ -1,3 +1,15 @@
+import type {
+  MarketplaceOfferMatchingCriteria,
+  MarketplaceOfferMatchingCriteriaWrite,
+  MarketplaceOfferRequirementLevel,
+} from "@vayada/domain-marketplace";
+
+export type {
+  MarketplaceOfferMatchingCriteria,
+  MarketplaceOfferMatchingCriteriaWrite,
+  MarketplaceOfferRequirementLevel,
+} from "@vayada/domain-marketplace";
+
 import {
   type MarketplaceCollaborationRead,
   type MarketplaceCollaborationStatus,
@@ -80,17 +92,21 @@ export type MarketplaceOfferCompensationOptionWrite = {
   discountPercentage: number | null;
   commissionPercentage: number | null;
   minFollowers: number | null;
+  followerRequirementLevel?: MarketplaceOfferRequirementLevel | null;
   currency: string | null;
   termsSummary: string | null;
 };
 
 export type MarketplaceOfferCreatorRequirementsWrite = {
   platforms: MarketplacePlatformName[];
+  platformRequirementLevel?: MarketplaceOfferRequirementLevel | null;
   targetCountries: string[];
+  targetCountriesRequirementLevel?: MarketplaceOfferRequirementLevel | null;
   targetAgeMin: number | null;
   targetAgeMax: number | null;
   targetAgeGroups: string[];
   creatorTypes: ("lifestyle" | "travel" | "other")[];
+  creatorTypesRequirementLevel?: MarketplaceOfferRequirementLevel | null;
 };
 
 export type MarketplaceOfferDeliverableWrite = {
@@ -98,6 +114,7 @@ export type MarketplaceOfferDeliverableWrite = {
   deliverableType: string;
   quantity: number;
   timingGuidance?: string | null;
+  requirementLevel?: MarketplaceOfferRequirementLevel | null;
 };
 
 export type MarketplaceAdminCreateOfferRequest = {
@@ -106,6 +123,7 @@ export type MarketplaceAdminCreateOfferRequest = {
   deliverables: MarketplaceOfferDeliverableWrite[];
   compensationOptions: MarketplaceOfferCompensationOptionWrite[];
   creatorRequirements: MarketplaceOfferCreatorRequirementsWrite;
+  matchingCriteria?: MarketplaceOfferMatchingCriteriaWrite | null;
 };
 
 export type MarketplaceAdminUpdateOfferRequest = Partial<
@@ -117,6 +135,7 @@ export type MarketplaceAdminUpdateOfferRequest = Partial<
   deliverables?: MarketplaceOfferDeliverableWrite[];
   compensationOptions?: MarketplaceOfferCompensationOptionWrite[];
   creatorRequirements?: MarketplaceOfferCreatorRequirementsWrite | null;
+  matchingCriteria?: MarketplaceOfferMatchingCriteriaWrite | null;
 };
 
 export type MarketplaceAdminOffer = {
@@ -138,6 +157,7 @@ export type MarketplaceAdminOffer = {
     compensationOptionId: string;
   })[];
   creatorRequirements: MarketplaceOfferCreatorRequirementsWrite | null;
+  matchingCriteria: MarketplaceOfferMatchingCriteria | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -147,6 +167,7 @@ export type MarketplaceAdminHotelReviewProfile = {
   displayName: string;
   location: string;
   hostSummary: string | null;
+  profileComplete?: boolean;
   profileStatus: "pending" | "verified" | "rejected" | "suspended" | "archived";
   createdAt: string;
   updatedAt: string;
@@ -159,6 +180,104 @@ export type MarketplaceAdminHotelReviewResponse = {
   profile: MarketplaceAdminHotelReviewProfile | null;
   offers: MarketplaceAdminOffer[];
 };
+
+export const MARKETPLACE_ADMIN_CREATOR_PROFILE_STATUSES = [
+  "pending",
+  "active",
+  "rejected",
+  "suspended",
+  "archived",
+] as const;
+
+export type MarketplaceAdminCreatorProfileStatus =
+  (typeof MARKETPLACE_ADMIN_CREATOR_PROFILE_STATUSES)[number];
+
+export type MarketplaceAdminCreatorReviewProfile = {
+  creatorProfileId: string;
+  displayName: string | null;
+  locationText: string | null;
+  shortDescription: string | null;
+  portfolioUrl: string | null;
+  phone: string | null;
+  profilePictureUrl: string | null;
+  profilePictureMediaObjectId: string | null;
+  profileComplete: boolean;
+  profileCompletedAt: string | null;
+  profileStatus: MarketplaceAdminCreatorProfileStatus;
+  platforms: Array<{
+    platformId: string;
+    platform: MarketplacePlatformName;
+    handle: string;
+    profileUrl?: string | null;
+    followerCount: number;
+    engagementRate: number;
+    audienceCountries?: { country: string; percentage: number }[];
+    audienceAgeGroups?: { ageRange: string; percentage: number }[];
+    audienceGenderSplit?: { male: number; female: number; other?: number } | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketplaceAdminCreatorReviewResponse = {
+  contractVersion: MarketplaceAdminContractVersion;
+  authorizationMode: MarketplaceAdminAuthorizationMode;
+  userId: string;
+  profile: MarketplaceAdminCreatorReviewProfile | null;
+  moderation: MarketplaceAdminCreatorModerationCapabilities;
+};
+
+export type MarketplaceAdminCreatorModerationTargetStatus = Exclude<
+  MarketplaceAdminCreatorProfileStatus,
+  "pending"
+>;
+
+export type MarketplaceAdminCreatorModerationCapabilities = {
+  allowed: boolean;
+  allowedTransitions: MarketplaceAdminCreatorModerationTargetStatus[];
+};
+
+export type MarketplaceAdminCreatorModerationRequest = {
+  expectedStatus: MarketplaceAdminCreatorProfileStatus;
+  nextStatus: MarketplaceAdminCreatorModerationTargetStatus;
+  reason: string;
+};
+
+export type MarketplaceAdminCreatorModerationResponse = {
+  contractVersion: "marketplace-creator-moderation.v1";
+  outcome: "transitioned" | "unchanged";
+  creatorProfileId: string;
+  previousStatus: MarketplaceAdminCreatorProfileStatus;
+  profileStatus: MarketplaceAdminCreatorModerationTargetStatus;
+  reason: string;
+  moderatedByUserId: string;
+  moderatedAt: string;
+};
+
+export function isMarketplaceAdminCreatorModerationReason(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 1000 ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (index + 1 >= value.length) return false;
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export type MarketplaceAdminDeleteOfferResponse = {
   contractVersion: MarketplaceAdminContractVersion;
@@ -180,6 +299,10 @@ export const marketplaceAdminEndpoints = {
     `/api/marketplace/admin/users/${encodeURIComponent(hotelUserId)}/offers`,
   hotelReview: (hotelUserId: string) =>
     `/api/marketplace/admin/users/${encodeURIComponent(hotelUserId)}/review`,
+  creatorReview: (userId: string) =>
+    `/api/marketplace/admin/users/${encodeURIComponent(userId)}/review/creator`,
+  creatorModeration: (creatorProfileId: string) =>
+    `/api/marketplace/admin/creators/${encodeURIComponent(creatorProfileId)}/moderation`,
   updateOffer: (hotelUserId: string, offerId: string) =>
     `/api/marketplace/admin/users/${encodeURIComponent(
       hotelUserId,
@@ -227,28 +350,62 @@ export async function approveMarketplaceAdminCollaborationAsHotel(
 export async function createMarketplaceAdminOffer(
   hotelUserId: string,
   request: MarketplaceAdminCreateOfferRequest,
+  scope?: { propertyId?: string; idempotencyKey?: string },
 ): Promise<MarketplaceAdminOffer> {
   return vayadaApiClient.post<MarketplaceAdminOffer>(
-    marketplaceAdminEndpoints.createOffer(hotelUserId),
+    withProperty(marketplaceAdminEndpoints.createOffer(hotelUserId), scope?.propertyId),
     request,
+    toIdempotencyOptions(scope?.idempotencyKey ?? crypto.randomUUID()),
   );
 }
 
 export async function getMarketplaceAdminHotelReview(
   hotelUserId: string,
+  propertyId?: string,
 ): Promise<MarketplaceAdminHotelReviewResponse> {
   return vayadaApiClient.get<MarketplaceAdminHotelReviewResponse>(
-    marketplaceAdminEndpoints.hotelReview(hotelUserId),
+    withProperty(marketplaceAdminEndpoints.hotelReview(hotelUserId), propertyId),
   );
+}
+
+export async function getMarketplaceAdminCreatorReview(
+  userId: string,
+): Promise<MarketplaceAdminCreatorReviewResponse> {
+  return vayadaApiClient.get<MarketplaceAdminCreatorReviewResponse>(
+    marketplaceAdminEndpoints.creatorReview(userId),
+  );
+}
+
+export async function moderateMarketplaceAdminCreatorProfile(
+  creatorProfileId: string,
+  request: MarketplaceAdminCreatorModerationRequest,
+  idempotencyKey: string,
+): Promise<MarketplaceAdminCreatorModerationResponse> {
+  return vayadaApiClient.post<MarketplaceAdminCreatorModerationResponse>(
+    marketplaceAdminEndpoints.creatorModeration(creatorProfileId),
+    request,
+    toIdempotencyOptions(idempotencyKey),
+  );
+}
+
+export function buildMarketplaceAdminCreatorModerationIdempotencyKey(input: {
+  creatorProfileId: string;
+  nextStatus: MarketplaceAdminCreatorModerationTargetStatus;
+  nonce: string;
+}): string {
+  return `marketplace.admin.creator.${input.nextStatus}:${sanitizeIdempotencySegment(
+    input.creatorProfileId,
+  )}:${sanitizeIdempotencySegment(input.nonce)}:v1`;
 }
 
 export async function updateMarketplaceAdminOffer(
   hotelUserId: string,
   offerId: string,
   request: MarketplaceAdminUpdateOfferRequest,
+  propertyId?: string,
 ): Promise<MarketplaceAdminOffer> {
   return vayadaApiClient.put<MarketplaceAdminOffer>(
-    marketplaceAdminEndpoints.updateOffer(hotelUserId, offerId),
+    withProperty(marketplaceAdminEndpoints.updateOffer(hotelUserId, offerId), propertyId),
     request,
   );
 }
@@ -256,18 +413,22 @@ export async function updateMarketplaceAdminOffer(
 export async function deleteMarketplaceAdminOffer(
   hotelUserId: string,
   offerId: string,
+  propertyId?: string,
 ): Promise<MarketplaceAdminDeleteOfferResponse> {
   return vayadaApiClient.delete<MarketplaceAdminDeleteOfferResponse>(
-    marketplaceAdminEndpoints.deleteOffer(hotelUserId, offerId),
+    withProperty(marketplaceAdminEndpoints.deleteOffer(hotelUserId, offerId), propertyId),
   );
 }
 
 export async function verifyMarketplaceAdminOffer(
   hotelUserId: string,
   offerId: string,
+  mediaObjectIds?: string[],
+  propertyId?: string,
 ): Promise<MarketplaceAdminOffer> {
   return vayadaApiClient.post<MarketplaceAdminOffer>(
-    marketplaceAdminEndpoints.verifyOffer(hotelUserId, offerId),
+    withProperty(marketplaceAdminEndpoints.verifyOffer(hotelUserId, offerId), propertyId),
+    mediaObjectIds ? { mediaObjectIds } : undefined,
   );
 }
 
@@ -304,4 +465,8 @@ function sanitizeIdempotencySegment(value: string): string {
 
 function toIdempotencyOptions(idempotencyKey: string): RequestInit {
   return { headers: { "Idempotency-Key": idempotencyKey } };
+}
+
+function withProperty(path: string, propertyId?: string): string {
+  return propertyId ? `${path}?propertyId=${encodeURIComponent(propertyId)}` : path;
 }

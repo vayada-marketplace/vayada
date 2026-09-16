@@ -1,5 +1,7 @@
 "use client";
 
+import { PendingApplicationActions } from "./PendingApplicationActions";
+import { AffiliateAgreementPanel } from "./AffiliateAgreementPanel";
 import { useState } from "react";
 import Image from "next/image";
 
@@ -25,6 +27,7 @@ interface CollaborationRequestDetailModalProps {
   onDecline?: (id: string) => void;
   onApprove?: (id: string) => void;
   onRequestCancel?: () => void;
+  onUpdated?: (value: DetailedCollaboration) => void;
 }
 
 export function CollaborationRequestDetailModal({
@@ -36,6 +39,7 @@ export function CollaborationRequestDetailModal({
   onDecline,
   onApprove,
   onRequestCancel,
+  onUpdated,
 }: CollaborationRequestDetailModalProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [imageError, setImageError] = useState(false);
@@ -284,6 +288,12 @@ export function CollaborationRequestDetailModal({
                 </div>
               )}
 
+            {collaboration.status === "cancelled" && (
+              <p role="status">
+                {collaboration.cancelledBy === "creator" ? "Cancelled by creator" : "Cancelled"}
+              </p>
+            )}
+
             {/* Message / Application Summary */}
             <div>
               <h5 className="font-bold text-gray-900 mb-2">
@@ -332,6 +342,17 @@ export function CollaborationRequestDetailModal({
                   </p>
                 </div>
               </div>
+            )}
+
+            {(currentUserType === "creator" || currentUserType === "hotel") && (
+              <AffiliateAgreementPanel
+                collaborationId={collaboration.id}
+                currentUserType={currentUserType}
+                affiliateExpected={
+                  collaboration.collaborationType === "Affiliate" ||
+                  collaboration.creatorFee != null
+                }
+              />
             )}
 
             {/* Looking For Section (For Creators) */}
@@ -724,6 +745,13 @@ export function CollaborationRequestDetailModal({
                         Waiting for {collaboration.initiator_type === "hotel" ? "Creator" : "Hotel"}{" "}
                         response...
                       </div>
+                      {currentUserType === "creator" && onUpdated && (
+                        <PendingApplicationActions
+                          key={collaboration.id}
+                          collaboration={collaboration}
+                          onUpdated={onUpdated}
+                        />
+                      )}
                       {onRequestCancel && (
                         <Button
                           variant="ghost"

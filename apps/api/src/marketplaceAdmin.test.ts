@@ -1,6 +1,8 @@
 import {
   createFakeVerifier,
   type IdentityRepository,
+  type PermissionKey,
+  type ProductEntitlement,
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
@@ -14,19 +16,25 @@ import {
   createPgMarketplaceAdminRepository,
   mapOfferRow,
   syncPropertyOfferReadModels,
+  validateMergedOfferUpdate,
 } from "./routes/marketplaceAdmin.js";
 import type {
   MarketplaceAdminCollaborationsResponse,
   MarketplaceAdminCreateOfferRequest,
+  MarketplaceAdminCreatorReviewResponse,
+  MarketplaceCreatorModerationResponse,
+  MarketplaceCreatorModerationResult,
   MarketplaceAdminDeleteOfferResponse,
   MarketplaceAdminHotelReviewResponse,
   MarketplaceAdminHotelAccountInviteCreateRequest,
   MarketplaceAdminOffer,
   MarketplaceAdminInviteCode,
   MarketplaceAdminRepository,
+  MarketplaceAdminUpdateOfferRequest,
   MarketplaceAdminUserProfileUpdateResponse,
   MarketplaceCollaborationLifecycleWriteResponse,
   MarketplaceCollaborationRead,
+  OfferRow,
 } from "./routes/marketplaceAdmin.js";
 
 const platformSession: VerifiedSession = {
@@ -42,6 +50,8 @@ const nonPlatformSession: VerifiedSession = {
   sessionId: "session_creator",
   expiresAt: Math.floor(Date.now() / 1000) + 3600,
 };
+
+const creatorProfileId = "14180000-0000-4000-8000-000000000001";
 
 const collaboration: MarketplaceCollaborationRead = {
   contractVersion: "marketplace-collaboration-reads.v1",
@@ -373,7 +383,7 @@ describe("marketplace admin routes", () => {
     const create = await injectJson<MarketplaceAdminOffer>(app, {
       method: "POST",
       url: "/api/marketplace/admin/users/user_hotel/offers",
-      headers: { authorization: "Bearer platform-token" },
+      headers: { authorization: "Bearer platform-token", "idempotency-key": "admin-draft-test" },
       payload,
     });
 
@@ -406,6 +416,7 @@ describe("marketplace admin routes", () => {
       method: "POST",
       url: "/api/marketplace/admin/users/user_hotel/offers/offer_801/verify",
       headers: { authorization: "Bearer platform-token" },
+      payload: { mediaObjectIds: ["f8017000-0000-4000-8000-000000000001"] },
     });
 
     expect(verified.statusCode).toBe(200);
@@ -413,6 +424,7 @@ describe("marketplace admin routes", () => {
     expect(repository.calls.verifyOffer[0]).toMatchObject({
       hotelUserId: "user_hotel",
       offerId: "offer_801",
+      mediaObjectIds: ["f8017000-0000-4000-8000-000000000001"],
     });
 
     const deleted = await injectJson<MarketplaceAdminDeleteOfferResponse>(app, {
@@ -455,6 +467,292 @@ describe("marketplace admin routes", () => {
     ]);
   });
 
+  it("reads the exact Marketplace-owned creator profile separately from identity", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson<MarketplaceAdminCreatorReviewResponse>(app, {
+      method: "GET",
+      url: "/api/marketplace/admin/users/user_creator/review/creator",
+      headers: { authorization: "Bearer platform-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      userId: "user_creator",
+      profile: {
+        creatorProfileId: "creator_profile_801",
+        profilePictureMediaObjectId: "media_creator_801",
+      },
+      moderation: {
+        allowed: true,
+        allowedTransitions: ["suspended", "archived"],
+      },
+    });
+    expect(repository.calls.readCreatorReview).toEqual([
+      {
+        userId: "user_creator",
+        authorizationMode: "platform_organization_membership",
+      },
+    ]);
+  });
+
+  it("keeps creator review read-only when the stricter moderation policy is not met", async () => {
+    const repository = createMemoryMarketplaceAdminRepository({
+      legacySuperadminUserIds: ["user_creator"],
+    });
+    app = buildMarketplaceAdminApp(repository, {
+      marketplaceAdminLegacySuperadminFallbackEnabled: true,
+    });
+
+    const response = await injectJson<MarketplaceAdminCreatorReviewResponse>(app, {
+      method: "GET",
+      url: "/api/marketplace/admin/users/user_creator/review/creator",
+      headers: { authorization: "Bearer creator-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.authorizationMode).toBe("legacy_superadmin_fallback");
+    expect(response.body.moderation).toEqual({ allowed: false, allowedTransitions: [] });
+  });
+
+  it("moderates a creator profile with server-owned audit context", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson<MarketplaceCreatorModerationResponse>(app, {
+      method: "POST",
+      url: `/api/marketplace/admin/creators/${creatorProfileId}/moderation`,
+      headers: {
+        authorization: "Bearer platform-token",
+        "idempotency-key": "activate-creator-1418",
+      },
+      payload: {
+        expectedStatus: "pending",
+        nextStatus: "active",
+        reason: "Profile reviewed and approved.",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: "marketplace-creator-moderation.v1",
+      outcome: "transitioned",
+      creatorProfileId,
+      previousStatus: "pending",
+      profileStatus: "active",
+    });
+    expect(repository.calls.moderateCreatorProfile).toEqual([
+      expect.objectContaining({
+        creatorProfileId,
+        idempotencyKey: "activate-creator-1418",
+        request: {
+          expectedStatus: "pending",
+          nextStatus: "active",
+          reason: "Profile reviewed and approved.",
+        },
+        audit: expect.objectContaining({
+          actorUserId: "user_platform",
+          actorOrganizationId: "org_platform",
+        }),
+      }),
+    ]);
+  });
+
+  it.each([
+    ["missing auth", {}, {}, 401],
+    ["invalid auth", { authorization: "Bearer invalid-token" }, {}, 401],
+    ["missing permission", { authorization: "Bearer platform-token" }, { permissions: [] }, 403],
+    ["missing entitlement", { authorization: "Bearer platform-token" }, { entitlements: [] }, 403],
+    [
+      "inactive entitlement",
+      { authorization: "Bearer platform-token" },
+      { entitlements: [platformAdminEntitlement("suspended")] },
+      403,
+    ],
+    [
+      "missing linked resource",
+      { authorization: "Bearer platform-token" },
+      { platformLink: false },
+      403,
+    ],
+  ] as const)(
+    "denies creator moderation for %s",
+    async (_case, headers, authOptions, statusCode) => {
+      const repository = createMemoryMarketplaceAdminRepository();
+      app = buildMarketplaceAdminApp(repository, authOptions);
+
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/marketplace/admin/creators/${creatorProfileId}/moderation`,
+        headers,
+        payload: { expectedStatus: "pending", nextStatus: "active", reason: "Approved." },
+      });
+
+      expect(response.statusCode).toBe(statusCode);
+      expect(repository.calls.moderateCreatorProfile).toEqual([]);
+    },
+  );
+
+  it("returns typed creator moderation conflicts", async () => {
+    const repository = createMemoryMarketplaceAdminRepository({
+      moderationResult: {
+        ok: false,
+        error: { code: "profile_status_conflict", currentStatus: "suspended" },
+      },
+    });
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson<{ code: string; currentStatus: string }>(app, {
+      method: "POST",
+      url: `/api/marketplace/admin/creators/${creatorProfileId}/moderation`,
+      headers: {
+        authorization: "Bearer platform-token",
+        "idempotency-key": "stale-creator-1418",
+      },
+      payload: { expectedStatus: "pending", nextStatus: "active", reason: "Approved." },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toMatchObject({
+      code: "profile_status_conflict",
+      currentStatus: "suspended",
+    });
+  });
+
+  it.each(["invalid\u0000reason", "invalid\ud800reason"])(
+    "rejects a JSONB-incompatible moderation reason before the repository",
+    async (reason) => {
+      const repository = createMemoryMarketplaceAdminRepository();
+      app = buildMarketplaceAdminApp(repository);
+
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/marketplace/admin/creators/${creatorProfileId}/moderation`,
+        headers: {
+          authorization: "Bearer platform-token",
+          "idempotency-key": "invalid-reason-1418",
+        },
+        payload: { expectedStatus: "pending", nextStatus: "active", reason },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(repository.calls.moderateCreatorProfile).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["missing", []],
+    ["ambiguous", [creatorReviewRow(), creatorReviewRow("f8014000-0000-0000-0000-000000000002")]],
+  ])("fails closed for %s Admin creator profile reads", async (_case, creatorReviewRows) => {
+    const sql: string[] = [];
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool(sql, { creatorReviewRows }) as never,
+    });
+
+    await expect(
+      repository.readCreatorReviewForUser({
+        userId: "f8011000-0000-4000-8000-000000000001",
+        authorizationMode: "platform_organization_membership",
+      }),
+    ).resolves.toMatchObject({ profile: null });
+    expect(sql[0]).toContain("membership.status = 'active'");
+    expect(sql[0]).toContain("organization.kind = 'creator_workspace'");
+    expect(sql[0]).not.toContain("profile.profile_status <> 'archived'");
+    expect(sql[0]).not.toContain("LIMIT 1");
+  });
+
+  it("keeps an archived creator profile visible as its terminal lifecycle state", async () => {
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool([], {
+        creatorReviewRows: [{ ...creatorReviewRow(), profileStatus: "archived" }],
+      }) as never,
+    });
+
+    await expect(
+      repository.readCreatorReviewForUser({
+        userId: "f8011000-0000-4000-8000-000000000001",
+        authorizationMode: "platform_organization_membership",
+      }),
+    ).resolves.toMatchObject({ profile: { profileStatus: "archived" } });
+  });
+
+  it("normalizes persisted creator platform JSON before exposing it", async () => {
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool([], {
+        creatorReviewRows: [
+          {
+            ...creatorReviewRow(),
+            platforms: [
+              {
+                platformId: "platform-801",
+                platform: "instagram",
+                handle: "@lina",
+                profileUrl: null,
+                followerCount: 20000,
+                engagementRate: "4.2",
+                audienceCountries: [
+                  { country: "AT", percentage: 60 },
+                  { country: "", percentage: "bad" },
+                ],
+                audienceAgeGroups: "invalid",
+                audienceGenderSplit: { male: 40, female: 60 },
+                createdAt: "2026-06-12T10:00:00.000Z",
+                updatedAt: "2026-06-13T10:00:00.000Z",
+              },
+              { platform: "invalid" },
+            ],
+          },
+        ],
+      }) as never,
+    });
+
+    await expect(
+      repository.readCreatorReviewForUser({
+        userId: "f8011000-0000-4000-8000-000000000001",
+        authorizationMode: "platform_organization_membership",
+      }),
+    ).resolves.toMatchObject({
+      profile: {
+        platforms: [
+          {
+            platformId: "platform-801",
+            platform: "instagram",
+            followerCount: 20000,
+            engagementRate: 4.2,
+            audienceCountries: [{ country: "AT", percentage: 60 }],
+            audienceAgeGroups: [],
+            audienceGenderSplit: { male: 40, female: 60 },
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps legacy Admin offer verification without a selected media set", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/admin/users/user_hotel/offers/offer_801/verify",
+      headers: { authorization: "Bearer platform-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(repository.calls.verifyOffer[0]).toMatchObject({
+      hotelUserId: "user_hotel",
+      offerId: "offer_801",
+    });
+    expect(repository.calls.verifyOffer[0]).not.toHaveProperty("mediaObjectIds");
+  });
+
   it("updates creator and hotel profiles through marketplace admin target routes", async () => {
     const repository = createMemoryMarketplaceAdminRepository();
     app = buildMarketplaceAdminApp(repository);
@@ -466,6 +764,7 @@ describe("marketplace admin routes", () => {
       payload: {
         displayName: "Lina Travels",
         locationText: "Vienna, Austria",
+        profilePictureMediaObjectId: "f8017000-0000-4000-8000-000000000001",
         platforms: [
           {
             platform: "instagram",
@@ -486,7 +785,11 @@ describe("marketplace admin routes", () => {
     });
     expect(repository.calls.updateCreatorProfile[0]).toMatchObject({
       userId: "user_creator",
-      request: { displayName: "Lina Travels" },
+      actorUserId: "user_platform",
+      request: {
+        displayName: "Lina Travels",
+        profilePictureMediaObjectId: "f8017000-0000-4000-8000-000000000001",
+      },
     });
 
     const hotel = await injectJson<MarketplaceAdminUserProfileUpdateResponse>(app, {
@@ -518,6 +821,135 @@ describe("marketplace admin routes", () => {
     expect(response.statusCode).toBe(422);
     expect(response.body).toMatchObject({ code: "unsupported_website" });
     expect(repository.calls.updateHotelProfile).toHaveLength(0);
+  });
+
+  it("rejects malformed or duplicate media IDs before offer verification", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    for (const mediaObjectIds of [
+      ["not-a-uuid"],
+      ["f8017000-0000-4000-8000-000000000001", "f8017000-0000-4000-8000-000000000001"],
+    ]) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: "/api/marketplace/admin/users/user_hotel/offers/offer_801/verify",
+        headers: { authorization: "Bearer platform-token" },
+        payload: { mediaObjectIds },
+      });
+      expect(response.statusCode).toBe(422);
+      expect(response.body).toMatchObject({ code: "invalid_mediaObjectIds" });
+    }
+    expect(repository.calls.verifyOffer).toHaveLength(0);
+  });
+
+  it("rejects malformed creator profile media object IDs", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_creator/profile/creator",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { profilePictureMediaObjectId: "f8017000--0000-4000-8000-000000000001" },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({ code: "invalid_profilePictureMediaObjectId" });
+    expect(repository.calls.updateCreatorProfile).toHaveLength(0);
+  });
+
+  it("persists only exact approved creator media IDs and their derived URL", async () => {
+    const sql: string[] = [];
+    const values: Array<readonly unknown[] | undefined> = [];
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool(sql, {
+        creatorProfileMediaUrl: "https://cdn.example.test/media/profile.webp",
+        queryValues: values,
+      }) as never,
+    });
+
+    await expect(
+      repository.updateCreatorProfileForUser({
+        userId: "f8011000-0000-4000-8000-000000000001",
+        actorUserId: "f8011000-0000-4000-8000-000000000002",
+        authorizationMode: "platform_organization_membership",
+        request: { profilePictureMediaObjectId: "f8017000-0000-4000-8000-000000000001" },
+      }),
+    ).resolves.toMatchObject({ profileType: "creator" });
+
+    const mediaQuery = sql.findIndex((statement) => statement.includes("platform.media_objects"));
+    expect(sql[mediaQuery]).toContain("media.created_by_user_id = $2::uuid");
+    expect(sql[mediaQuery]).toContain("media.public_approved = TRUE");
+    expect(sql[mediaQuery]).toContain("media.source_metadata ->> 'requestedVisibility'");
+    expect(sql[mediaQuery]).toContain("media.resource_type = 'creator_profile'");
+    expect(values[mediaQuery]).toEqual([
+      "f8017000-0000-4000-8000-000000000001",
+      "f8011000-0000-4000-8000-000000000002",
+      "f8012000-0000-0000-0000-000000000002",
+      "f8014000-0000-0000-0000-000000000001",
+    ]);
+    const updateSql = sql.find((statement) =>
+      statement.includes("UPDATE marketplace.creator_profiles"),
+    );
+    expect(updateSql).toContain("profilePictureMediaObjectId");
+    expect(updateSql).toContain("WHEN $5::boolean THEN profile_metadata -");
+    expect(sql.find((statement) => statement.includes("ORDER BY profile.id ASC"))).toContain(
+      "FOR UPDATE OF profile",
+    );
+
+    const denied = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool([]) as never,
+    });
+    app = buildMarketplaceAdminApp(denied);
+    const deniedResponse = await injectJson(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/f8011000-0000-4000-8000-000000000001/profile/creator",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { profilePictureMediaObjectId: "f8017000-0000-4000-8000-000000000099" },
+    });
+    expect(deniedResponse.statusCode).toBe(422);
+    expect(deniedResponse.body).toMatchObject({ code: "invalid_profile_picture_media" });
+  });
+
+  it.each([
+    ["missing", []],
+    [
+      "ambiguous",
+      [
+        {
+          creatorProfileId: "f8014000-0000-0000-0000-000000000001",
+          organizationId: "f8012000-0000-0000-0000-000000000002",
+        },
+        {
+          creatorProfileId: "f8014000-0000-0000-0000-000000000002",
+          organizationId: "f8012000-0000-0000-0000-000000000003",
+        },
+      ],
+    ],
+  ])("rejects %s creator profile resolution for admin updates", async (_case, rows) => {
+    const sql: string[] = [];
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool(sql, { creatorProfileRows: rows }) as never,
+    });
+
+    await expect(
+      repository.updateCreatorProfileForUser({
+        userId: "f8011000-0000-4000-8000-000000000001",
+        actorUserId: "f8011000-0000-4000-8000-000000000002",
+        authorizationMode: "platform_organization_membership",
+        request: { displayName: "Lina Travels" },
+      }),
+    ).resolves.toBeNull();
+    expect(sql.some((statement) => statement.includes("UPDATE marketplace.creator_profiles"))).toBe(
+      false,
+    );
   });
 
   it("rejects blank offer titles on marketplace admin updates", async () => {
@@ -580,6 +1012,7 @@ describe("marketplace admin routes", () => {
     await expect(
       repository.createOfferForUser({
         hotelUserId: "user_hotel",
+        audit: offerAudit(),
         request: offerPayload(),
         authorizationMode: "platform_organization_membership",
       }),
@@ -589,16 +1022,17 @@ describe("marketplace admin routes", () => {
       repository.verifyOfferForUser({
         hotelUserId: "user_hotel",
         offerId: "f8015000-0000-0000-0000-000000000001",
+        mediaObjectIds: ["f8017000-0000-4000-8000-000000000001"],
         authorizationMode: "platform_organization_membership",
       }),
     ).resolves.toMatchObject({
       offerId: "f8015000-0000-0000-0000-000000000001",
       offerStatus: "verified",
     });
-
     await expect(
       repository.updateOfferForUser({
         hotelUserId: "user_hotel",
+        audit: offerAudit(),
         offerId: "f8015000-0000-0000-0000-000000000001",
         request: { title: "Updated creator suite" },
         authorizationMode: "platform_organization_membership",
@@ -629,6 +1063,7 @@ describe("marketplace admin routes", () => {
       {
         organizationId: "f8012000-0000-0000-0000-000000000001",
         offerId: "f8015000-0000-0000-0000-000000000001",
+        mediaObjectIds: ["f8017000-0000-4000-8000-000000000001"],
       },
     ]);
     expect(statements).toContain("SET offer_status = 'verified', updated_at = now()");
@@ -657,6 +1092,55 @@ describe("marketplace admin routes", () => {
       "COALESCE(public_profile.profile_status, property.profile_status) = 'complete'",
     );
     expect(statements).toContain("SET status = 'archived'");
+  });
+
+  it.each([
+    {
+      name: "required platform against stored deliverables",
+      request: {
+        creatorRequirements: {
+          platforms: ["tiktok"],
+          platformRequirementLevel: "required",
+          targetCountries: ["AT"],
+          targetAgeMin: 18,
+          targetAgeMax: 45,
+          targetAgeGroups: ["18-24"],
+          creatorTypes: ["travel"],
+        },
+      } satisfies MarketplaceAdminUpdateOfferRequest,
+      code: "inconsistent_requirement_platforms",
+    },
+    {
+      name: "matching value against stored compensation",
+      request: {
+        matchingCriteria: {
+          ...matchingCriteriaWrite(),
+          expectedCompensationValue: { amount: "900.00", currency: "USD" },
+        },
+      } satisfies MarketplaceAdminUpdateOfferRequest,
+      code: "inconsistent_compensation_currency",
+    },
+  ])("rolls back $name partial updates", async ({ request, code }) => {
+    const sql: string[] = [];
+    const repository = createPgMarketplaceAdminRepository({
+      connectionString: "postgresql://target-db",
+      identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
+      pool: createAdminPgPool(sql, { offerRows: [matchingOfferRow()] }) as never,
+    });
+
+    await expect(
+      repository.updateOfferForUser({
+        hotelUserId: "user_hotel",
+        audit: offerAudit(),
+        offerId: "f8015000-0000-0000-0000-000000000001",
+        request,
+        authorizationMode: "platform_organization_membership",
+      }),
+    ).rejects.toMatchObject({ code, statusCode: 422 });
+
+    expect(sql).toContain("ROLLBACK");
+    expect(sql.join("\n")).not.toContain("INSERT INTO platform.product_audit_events");
+    expect(sql.join("\n")).not.toContain("DELETE FROM marketplace.offer_deliverables");
   });
 
   it("refreshes every nonarchived offer projection for a canonical profile write", async () => {
@@ -740,23 +1224,34 @@ describe("marketplace admin routes", () => {
     expect(statements).not.toContain("JOIN hotel_catalog.property_locations location");
   });
 
-  it("rejects offer verification when the offer has no pending or approved media", async () => {
+  it("rejects offer verification when any requested media ID is outside the exact offer", async () => {
     const promoteOfferMedia = vi.fn(async () => 0);
+    const sql: string[] = [];
+    const values: Array<readonly unknown[] | undefined> = [];
     const repository = createPgMarketplaceAdminRepository({
       connectionString: "postgresql://target-db",
       identityAccess: createPgMarketplaceOfferIdentityAccessCommandPort(),
       offerMediaPromotion: { promoteOfferMedia },
-      pool: createAdminPgPool([], { hasEligibleMedia: false }) as never,
+      pool: createAdminPgPool(sql, { eligibleMediaCount: 0, queryValues: values }) as never,
     });
 
     await expect(
       repository.verifyOfferForUser({
         hotelUserId: "user_hotel",
         offerId: "f8015000-0000-0000-0000-000000000001",
+        mediaObjectIds: ["f8017000-0000-4000-8000-000000000099"],
         authorizationMode: "platform_organization_membership",
       }),
     ).rejects.toMatchObject({ statusCode: 422 });
     expect(promoteOfferMedia).not.toHaveBeenCalled();
+    const eligibilityQuery = sql.findIndex((statement) => statement.includes('AS "eligibleCount"'));
+    expect(sql[eligibilityQuery]).toContain("media.owner_organization_id = $1::uuid");
+    expect(sql[eligibilityQuery]).toContain("media.resource_id = $2");
+    expect(values[eligibilityQuery]).toEqual([
+      "f8012000-0000-0000-0000-000000000001",
+      "f8015000-0000-0000-0000-000000000001",
+      ["f8017000-0000-4000-8000-000000000099"],
+    ]);
   });
 
   it("rejects offer verification while the Marketplace hotel profile is incomplete", async () => {
@@ -780,7 +1275,7 @@ describe("marketplace admin routes", () => {
     expect(sql.join("\n")).not.toContain("SET offer_status = 'verified'");
   });
 
-  it("rejects verified admin offer creation while the Marketplace hotel profile is incomplete", async () => {
+  it("saves an unpublished draft while the Marketplace hotel profile is incomplete", async () => {
     const sql: string[] = [];
     const repository = createPgMarketplaceAdminRepository({
       connectionString: "postgresql://target-db",
@@ -791,11 +1286,13 @@ describe("marketplace admin routes", () => {
     await expect(
       repository.createOfferForUser({
         hotelUserId: "user_hotel",
+        audit: offerAudit(),
         request: offerPayload(),
         authorizationMode: "platform_organization_membership",
       }),
-    ).rejects.toMatchObject({ statusCode: 422 });
-    expect(sql.join("\n")).not.toContain("INSERT INTO marketplace.marketplace_offers");
+    ).resolves.toMatchObject({ offerId: expect.any(String) });
+    expect(sql.join("\n")).toContain("INSERT INTO marketplace.marketplace_offers");
+    expect(sql.join("\n")).toContain("$4, 'draft'");
   });
 
   it("retains pending offer media metadata for the owner without publishing a URL", () => {
@@ -823,6 +1320,57 @@ describe("marketplace admin routes", () => {
         lifecycleStatus: "staged",
       },
     ]);
+    expect(offer.matchingCriteria).toBeNull();
+  });
+
+  it("maps explicit matching criteria and requirement levels on offer reads", () => {
+    const offer = mapOfferRow(
+      {
+        ...adminOfferRow("offer_801", "property_801"),
+        deliverables: [
+          {
+            deliverableId: "deliverable_801",
+            platform: "instagram",
+            deliverableType: "reel",
+            quantity: 1,
+            timingGuidance: null,
+            requirementLevel: "required",
+          },
+        ],
+        matchingCriteria: matchingCriteriaDocument(),
+      },
+      "platform_organization_membership",
+    );
+
+    expect(offer.deliverables[0]?.requirementLevel).toBe("required");
+    expect(offer.matchingCriteria).toMatchObject({
+      contractVersion: "marketplace-offer-matching-criteria.v1",
+      revision: 1,
+      primaryCampaignGoal: "ugc_asset_creation",
+    });
+  });
+
+  it("validates one-sided updates against the persisted matching inputs", () => {
+    const current = { ...offerResponse("platform_organization_membership") };
+    current.matchingCriteria = matchingCriteriaDocument();
+
+    expect(
+      validateMergedOfferUpdate(current, {
+        creatorRequirements: {
+          ...current.creatorRequirements!,
+          platforms: ["tiktok"],
+          platformRequirementLevel: "required",
+        },
+      }),
+    ).toBe("inconsistent_requirement_platforms");
+    expect(
+      validateMergedOfferUpdate(current, {
+        matchingCriteria: {
+          ...matchingCriteriaWrite(),
+          expectedCompensationValue: { amount: "900.00", currency: "USD" },
+        },
+      }),
+    ).toBe("inconsistent_compensation_currency");
   });
 
   it("requests affiliate provisioning when an admin approval accepts the collaboration", async () => {
@@ -861,6 +1409,12 @@ function createAdminPgPool(
     profileComplete?: boolean;
     revokeInviteExists?: boolean;
     successfulInviteRedemption?: boolean;
+    creatorProfileMediaUrl?: string;
+    creatorProfileRows?: Array<{ creatorProfileId: string; organizationId: string }>;
+    creatorReviewRows?: unknown[];
+    eligibleMediaCount?: number;
+    queryValues?: Array<readonly unknown[] | undefined>;
+    offerRows?: OfferRow[];
   } = {},
 ) {
   const offerId = "f8015000-0000-0000-0000-000000000001";
@@ -872,6 +1426,7 @@ function createAdminPgPool(
     _values?: readonly unknown[],
   ): Promise<{ rows: T[] }> => {
     sql.push(text);
+    options.queryValues?.push(_values);
     if (text.includes("INSERT INTO marketplace.marketplace_offer_read_model")) {
       options.projectionModes?.push(String(_values?.[1]));
     }
@@ -898,6 +1453,30 @@ function createAdminPgPool(
     ) {
       rows = [acceptedAffiliateCollaborationRow()];
     } else if (
+      text.includes("FROM marketplace.creator_profiles profile") &&
+      text.includes('profile.display_name AS "displayName"')
+    ) {
+      rows = options.creatorReviewRows ?? [creatorReviewRow()];
+    } else if (
+      text.includes("FROM marketplace.creator_profiles profile") &&
+      text.includes("identity.organization_memberships membership")
+    ) {
+      rows = options.creatorProfileRows ?? [
+        {
+          creatorProfileId: "f8014000-0000-0000-0000-000000000001",
+          organizationId: "f8012000-0000-0000-0000-000000000002",
+        },
+      ];
+    } else if (
+      text.includes("FROM platform.media_objects media") &&
+      text.includes("variant.variant_name = 'original_safe'")
+    ) {
+      rows = options.creatorProfileMediaUrl
+        ? [{ publicCdnUrl: options.creatorProfileMediaUrl }]
+        : [];
+    } else if (text.includes("UPDATE marketplace.creator_profiles")) {
+      rows = [{ updatedAt: "2026-06-13T10:00:00.000Z" }];
+    } else if (
       text.includes("FROM marketplace.marketplace_hotel_profiles profile") &&
       text.includes("identity.organization_memberships membership")
     ) {
@@ -913,6 +1492,10 @@ function createAdminPgPool(
           createdAt: "2026-06-13T10:00:00.000Z",
           updatedAt: "2026-06-13T10:00:00.000Z",
         },
+      ];
+    } else if (text.includes('AS "eligibleCount"')) {
+      rows = [
+        { eligibleCount: options.eligibleMediaCount ?? (_values?.[2] as unknown[])?.length ?? 0 },
       ];
     } else if (
       text.includes("SELECT EXISTS (") &&
@@ -943,7 +1526,7 @@ function createAdminPgPool(
     } else if (text.includes('id::text AS "offerResourceId"')) {
       rows = [{ offerResourceId: offerId, title: "Creator suite", offerStatus: "pending" }];
     } else if (text.includes('offer.id::text AS "offerId"')) {
-      rows = [adminOfferRow(offerId, propertyId)];
+      rows = options.offerRows ?? [adminOfferRow(offerId, propertyId)];
     }
     return { rows: rows as T[] };
   };
@@ -958,7 +1541,7 @@ function createAdminPgPool(
   };
 }
 
-function adminOfferRow(offerId: string, propertyId: string) {
+function adminOfferRow(offerId: string, propertyId: string): OfferRow {
   return {
     offerId,
     propertyId,
@@ -970,6 +1553,73 @@ function adminOfferRow(offerId: string, propertyId: string) {
     compensationOptions: [],
     creatorRequirements: {},
     createdAt: "2026-06-13T10:00:00.000Z",
+    updatedAt: "2026-06-13T10:00:00.000Z",
+  };
+}
+
+function matchingOfferRow(): OfferRow {
+  return {
+    ...adminOfferRow(
+      "f8015000-0000-0000-0000-000000000001",
+      "f8013000-0000-0000-0000-000000000001",
+    ),
+    deliverables: [
+      {
+        deliverableId: "deliverable_801",
+        platform: "instagram",
+        deliverableType: "reel",
+        quantity: 1,
+        timingGuidance: null,
+        requirementLevel: "required",
+      },
+    ],
+    compensationOptions: [
+      {
+        compensationOptionId: "compensation_801",
+        compensationType: "paid",
+        availabilityMonths: [],
+        platforms: ["instagram"],
+        freeStayMinNights: null,
+        freeStayMaxNights: null,
+        paidMaxAmount: "900.00",
+        discountPercentage: null,
+        commissionPercentage: null,
+        minFollowers: null,
+        followerRequirementLevel: null,
+        currency: "EUR",
+        termsSummary: null,
+      },
+    ],
+    creatorRequirements: {
+      platforms: ["instagram"],
+      platformRequirementLevel: "required",
+      targetCountries: ["AT"],
+      targetCountriesRequirementLevel: null,
+      targetAgeMin: 18,
+      targetAgeMax: 45,
+      targetAgeGroups: ["18-24"],
+      creatorTypes: ["travel"],
+      creatorTypesRequirementLevel: null,
+    },
+    matchingCriteria: matchingCriteriaDocument(),
+  };
+}
+
+function creatorReviewRow(creatorProfileId = "f8014000-0000-0000-0000-000000000001") {
+  return {
+    creatorProfileId,
+    displayName: "Lina Travels",
+    locationText: "Vienna, Austria",
+    shortDescription: null,
+    portfolioUrl: null,
+    phone: null,
+    profilePictureUrl: "https://cdn.example.test/creator.webp",
+    profilePictureMediaObjectId: "f8017000-0000-4000-8000-000000000001",
+    profileComplete: true,
+    profileCompletedAt: "2026-06-13T10:00:00.000Z",
+    profileStatus: "active",
+    platforms: [],
+    createdAt: "2026-06-12T10:00:00.000Z",
     updatedAt: "2026-06-13T10:00:00.000Z",
   };
 }
@@ -1019,7 +1669,12 @@ function acceptedAffiliateCollaborationRow() {
 
 function buildMarketplaceAdminApp(
   repository: MarketplaceAdminRepository,
-  options: { marketplaceAdminLegacySuperadminFallbackEnabled?: boolean } = {},
+  options: {
+    marketplaceAdminLegacySuperadminFallbackEnabled?: boolean;
+    permissions?: readonly PermissionKey[];
+    entitlements?: readonly ProductEntitlement[];
+    platformLink?: boolean;
+  } = {},
 ) {
   const identityRepository: IdentityRepository = {
     async findUserByProviderUserId(_provider, providerUserId) {
@@ -1063,7 +1718,7 @@ function buildMarketplaceAdminApp(
       };
     },
     async findLinkedResources(organizationId) {
-      if (organizationId === "org_platform") {
+      if (organizationId === "org_platform" && options.platformLink !== false) {
         return [
           {
             product: "platform",
@@ -1094,7 +1749,14 @@ function buildMarketplaceAdminApp(
       propertyAccessRepository: agencyPropertyAccessRepository,
       rolePermissionRepository: {
         async findPermissionsForRole(kind) {
-          return kind === "platform" ? ["platform.user.suspend"] : ["marketplace.profile.manage"];
+          return kind === "platform"
+            ? [...(options.permissions ?? ["platform.user.suspend"])]
+            : ["marketplace.profile.manage"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return [...(options.entitlements ?? [platformAdminEntitlement()])];
         },
       },
     },
@@ -1102,7 +1764,10 @@ function buildMarketplaceAdminApp(
 }
 
 function createMemoryMarketplaceAdminRepository(
-  options: { legacySuperadminUserIds?: string[] } = {},
+  options: {
+    legacySuperadminUserIds?: string[];
+    moderationResult?: MarketplaceCreatorModerationResult;
+  } = {},
 ) {
   const legacySuperadminUserIds = new Set(options.legacySuperadminUserIds ?? []);
   const calls = {
@@ -1114,6 +1779,8 @@ function createMemoryMarketplaceAdminRepository(
     createInviteCode: [] as unknown[],
     revokeInviteCode: [] as unknown[],
     readHotelReview: [] as unknown[],
+    readCreatorReview: [] as unknown[],
+    moderateCreatorProfile: [] as unknown[],
     createOffer: [] as unknown[],
     updateOffer: [] as unknown[],
     verifyOffer: [] as unknown[],
@@ -1170,6 +1837,48 @@ function createMemoryMarketplaceAdminRepository(
         offers: [offerResponse(input.authorizationMode)],
       };
     },
+    async readCreatorReviewForUser(input) {
+      calls.readCreatorReview.push(input);
+      return {
+        contractVersion: "marketplace-admin.v1",
+        authorizationMode: input.authorizationMode,
+        userId: input.userId,
+        profile: {
+          creatorProfileId: "creator_profile_801",
+          displayName: "Lina Travels",
+          locationText: "Vienna, Austria",
+          shortDescription: null,
+          portfolioUrl: null,
+          phone: null,
+          profilePictureUrl: "https://cdn.example.test/creator.webp",
+          profilePictureMediaObjectId: "media_creator_801",
+          profileComplete: true,
+          profileCompletedAt: "2026-06-13T10:00:00.000Z",
+          profileStatus: "active",
+          platforms: [],
+          createdAt: "2026-06-12T10:00:00.000Z",
+          updatedAt: "2026-06-13T10:00:00.000Z",
+        },
+      };
+    },
+    async moderateCreatorProfile(input) {
+      calls.moderateCreatorProfile.push(input);
+      return (
+        options.moderationResult ?? {
+          ok: true,
+          response: {
+            contractVersion: "marketplace-creator-moderation.v1",
+            outcome: "transitioned",
+            creatorProfileId: input.creatorProfileId,
+            previousStatus: input.request.expectedStatus,
+            profileStatus: input.request.nextStatus,
+            reason: input.request.reason,
+            moderatedByUserId: input.audit.actorUserId,
+            moderatedAt: "2026-09-02T00:00:00.000Z",
+          },
+        }
+      );
+    },
     async createOfferForUser(input) {
       calls.createOffer.push(input);
       return offerResponse(input.authorizationMode);
@@ -1195,6 +1904,17 @@ function createMemoryMarketplaceAdminRepository(
     },
   };
   return repository;
+}
+
+function platformAdminEntitlement(
+  status: ProductEntitlement["status"] = "active",
+): ProductEntitlement {
+  return {
+    product: "platform",
+    key: "platform-admin",
+    status,
+    resource: { product: "platform", resourceType: "platform", resourceId: "vayada" },
+  };
 }
 
 function lifecycleResponse(
@@ -1295,6 +2015,60 @@ function offerPayload(): MarketplaceAdminCreateOfferRequest {
   };
 }
 
+function matchingCriteriaDocument(): NonNullable<MarketplaceAdminOffer["matchingCriteria"]> {
+  return {
+    primaryCampaignGoal: "ugc_asset_creation",
+    availability: {
+      requirementLevel: "required",
+      flexibility: "flexible",
+      startsOn: "2026-10-01",
+      endsOn: "2026-10-31",
+      blackouts: [],
+    },
+    contentCategories: { requirementLevel: "required", values: ["travel"] },
+    contentStyles: { requirementLevel: "preferred", values: ["cinematic"] },
+    usageRights: {
+      channels: ["organic_social"],
+      duration: { mode: "fixed", days: 365 },
+    },
+    includedRevisionRounds: 2,
+    expectedEffortHours: { minimum: 6, maximum: 10 },
+    expectedCompensationValue: { amount: "900.00", currency: "EUR" },
+    applicationCapacity: { acceptingApplications: true, maximumActiveApplications: 20 },
+    contractVersion: "marketplace-offer-matching-criteria.v1",
+    revision: 1,
+    updatedAt: "2026-09-03T00:00:00.000Z",
+  };
+}
+
+function matchingCriteriaWrite(): NonNullable<
+  MarketplaceAdminCreateOfferRequest["matchingCriteria"]
+> {
+  const document = matchingCriteriaDocument();
+  return {
+    primaryCampaignGoal: document.primaryCampaignGoal,
+    availability: document.availability,
+    contentCategories: document.contentCategories,
+    contentStyles: document.contentStyles,
+    usageRights: document.usageRights,
+    includedRevisionRounds: document.includedRevisionRounds,
+    expectedEffortHours: document.expectedEffortHours,
+    expectedCompensationValue: document.expectedCompensationValue,
+    applicationCapacity: document.applicationCapacity,
+  };
+}
+
+function offerAudit() {
+  return {
+    actorUserId: "f8011000-0000-0000-0000-000000000001",
+    actorOrganizationId: "f8012000-0000-0000-0000-000000000001",
+    requestId: "request-marketplace-offer-801",
+    correlationId: "correlation-marketplace-offer-801",
+    source: "api" as const,
+    occurredAt: "2026-09-03T00:00:00.000Z",
+  };
+}
+
 function offerResponse(
   authorizationMode: MarketplaceAdminOffer["authorizationMode"],
   title = "Creator suite",
@@ -1341,6 +2115,7 @@ function offerResponse(
       targetAgeGroups: ["18-24"],
       creatorTypes: ["travel"],
     },
+    matchingCriteria: null,
     createdAt: "2026-06-13T10:00:00.000Z",
     updatedAt: "2026-06-13T10:00:00.000Z",
   };

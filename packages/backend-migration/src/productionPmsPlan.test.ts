@@ -5,6 +5,76 @@ import { reconcileProductionPmsRecords } from "./productionPmsPlan.js";
 import type { PmsBuildContext, PmsTargetRecord } from "./productionPmsTypes.js";
 
 describe("production PMS reconciliation", () => {
+  it.each([false, true])("does not overwrite prior inquiry context (newer target: %s)", (newer) => {
+    const candidate = record(true, {
+      targetTable: "message_threads",
+      row: {
+        id: "target",
+        conversationContextState: "inquiry",
+        sourceBookingId: "inquiry-ext",
+        inquiryArrivalDate: "2026-09-01",
+        inquiryDepartureDate: "2026-09-03",
+        inquiryAdults: 2,
+        inquiryChildren: 0,
+      },
+    });
+    const context = buildContext({
+      records: [
+        {
+          ...existing(candidate, newer ? "2026-09-02T00:00:00Z" : "2026-09-01T00:00:00Z"),
+          row: {
+            ...candidate.row,
+            conversationContextState: "unlinked",
+            sourceBookingId: null,
+            inquiryArrivalDate: null,
+            inquiryDepartureDate: null,
+            inquiryAdults: null,
+            inquiryChildren: null,
+          },
+        },
+      ],
+      provenance: [link(candidate, "2026-09-01T00:00:00Z")],
+    });
+    const plan = reconcileProductionPmsRecords(context, [candidate]);
+    expect(plan.writes).toEqual([]);
+    expect(plan.provenance).toEqual([]);
+    if (newer) expect(plan.counts.preservedNewerTarget).toBe(1);
+    else
+      expect(plan.blockers).toContainEqual(
+        expect.objectContaining({ code: "TARGET_PROVENANCE_MISMATCH" }),
+      );
+  });
+
+  it.each(["messages", "external_webhook_events"])(
+    "does not accept residual private payloads in existing %s rows",
+    (targetTable) => {
+      const candidate = record(targetTable === "messages", {
+        targetTable,
+        row: { id: "target", eventType: "message", rawPayload: {} },
+      });
+      for (const prior of [[], [link(candidate, "2026-09-01T00:00:00Z")]]) {
+        const context = buildContext({
+          records: [
+            {
+              ...existing(candidate, "2026-09-02T00:00:00Z"),
+              row: { ...candidate.row, rawPayload: { token: "secret", body: "private" } },
+            },
+          ],
+          provenance: prior,
+        });
+        const plan = reconcileProductionPmsRecords(context, [candidate]);
+        expect(plan.blockers).toContainEqual(
+          expect.objectContaining({
+            code: "TARGET_MESSAGE_PAYLOAD_REQUIRES_REVIEW",
+          }),
+        );
+        expect(plan.writes).toEqual([]);
+        expect(plan.provenance).toEqual([]);
+        expect(JSON.stringify(plan.blockers)).not.toMatch(/secret|private/);
+      }
+    },
+  );
+
   it("does not overwrite a newer target state from stale legacy source", () => {
     const candidate = record(true);
     const context = buildContext({

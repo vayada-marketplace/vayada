@@ -1,3 +1,4 @@
+import type { AddonPhoto } from "@vayada/product-onboarding/AddonEditor";
 import { ApiErrorResponse, apiClient, isNextApiTarget, omitHotelContext } from "../api/client";
 import { getSelectedBookingHotelId, listScopedBookingHotelIds } from "../api/bookingHotelScope";
 import {
@@ -52,7 +53,6 @@ export interface PropertySettings {
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;
   refer_a_guest_enabled?: boolean;
-  map_view_enabled?: boolean;
   free_cancellation_days: number;
   email_notifications: boolean;
   new_booking_alerts: boolean;
@@ -76,18 +76,6 @@ export interface PropertySettings {
   payout_swift?: string;
   terms_text?: string;
   cancellation_policy_text?: string;
-  show_room_detail_map?: boolean;
-  points_of_interest?: PointOfInterest[];
-}
-
-export interface PointOfInterest {
-  id: string;
-  label: string;
-  travelTime: string;
-  color: string;
-  latitude: number;
-  longitude: number;
-  position: number;
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;
@@ -101,9 +89,25 @@ export interface BookingAcceptanceSettings {
   instantBook: boolean;
 }
 
+export interface SameDayBookingSettings {
+  contractVersion: "same-day-booking-policy.v1";
+  propertyId: string;
+  propertyTimeZone: string;
+  enabled: boolean;
+  cutoffLocalTime: string | null;
+  revision: number;
+  updatedAt: string | null;
+  replayed?: boolean;
+  channexOperationId?: string | null;
+}
+
 export interface DesignSettings {
   header_logo: string;
   header_logo_media_object_id: string | null;
+  show_contact_button: boolean;
+  show_refer_a_guest_button: boolean;
+  show_language_selector: boolean;
+  show_currency_selector: boolean;
   hero_image: string;
   hero_heading: string;
   hero_subtext: string;
@@ -116,6 +120,10 @@ export type DesignSettingsUpdate = Partial<DesignSettings>;
 type BookingDesignSettings = {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
+  showContactButton: boolean;
+  showReferAGuestButton: boolean;
+  showLanguageSelector: boolean;
+  showCurrencySelector: boolean;
   heroImage: string;
   heroHeading: string;
   heroSubtext: string;
@@ -129,6 +137,10 @@ function toDesignSettings(branding: BookingDesignSettings): DesignSettings {
   return {
     header_logo: branding.headerLogo,
     header_logo_media_object_id: branding.headerLogoMediaObjectId,
+    show_contact_button: branding.showContactButton,
+    show_refer_a_guest_button: branding.showReferAGuestButton,
+    show_language_selector: branding.showLanguageSelector,
+    show_currency_selector: branding.showCurrencySelector,
     hero_image: branding.heroImage,
     hero_heading: branding.heroHeading,
     hero_subtext: branding.heroSubtext,
@@ -140,6 +152,10 @@ function toDesignSettings(branding: BookingDesignSettings): DesignSettings {
 function toBrandingDesignUpdate(data: DesignSettingsUpdate): BookingDesignSettingsUpdate {
   return {
     headerLogoMediaObjectId: data.header_logo_media_object_id,
+    showContactButton: data.show_contact_button,
+    showReferAGuestButton: data.show_refer_a_guest_button,
+    showLanguageSelector: data.show_language_selector,
+    showCurrencySelector: data.show_currency_selector,
     heroImage: data.hero_image,
     heroHeading: data.hero_heading,
     heroSubtext: data.hero_subtext,
@@ -265,6 +281,15 @@ function bookingAcceptanceEndpoint(hotelId: string): string {
   return `/api/booking/hotels/${encodeURIComponent(hotelId)}/settings/booking-acceptance`;
 }
 
+function sameDayBookingEndpoint(hotelId: string): string {
+  return `/api/booking/hotels/${encodeURIComponent(hotelId)}/settings/same-day-booking`;
+}
+
+function sameDayCommandId(): string {
+  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  return `booking.same-day-booking:${suffix}`;
+}
+
 async function getTargetDesignSettings(explicitHotelId?: string): Promise<BookingDesignSettings> {
   const hotelId = resolveBookingHotelId(explicitHotelId);
   return apiClient.get<BookingDesignSettings>(
@@ -304,6 +329,9 @@ export interface AddonItem {
   category: string;
   image: string;
   imageMediaObjectId?: string | null;
+  photos?: AddonPhoto[];
+  maxQuantity?: number;
+  leadTime?: string;
   duration?: string;
   perPerson?: boolean;
   perNight?: boolean;
@@ -404,6 +432,21 @@ export const settingsService = {
       { acceptanceMode },
       omitHotelContext,
     ),
+
+  getSameDayBooking: (hotelId?: string) =>
+    apiClient.get<SameDayBookingSettings>(
+      sameDayBookingEndpoint(resolveBookingHotelId(hotelId)),
+      omitHotelContext,
+    ),
+
+  updateSameDayBooking: (enabled: boolean, cutoffLocalTime: string | null, hotelId?: string) => {
+    const commandId = sameDayCommandId();
+    return apiClient.put<SameDayBookingSettings>(
+      sameDayBookingEndpoint(resolveBookingHotelId(hotelId)),
+      { commandId, idempotencyKey: commandId, enabled, cutoffLocalTime },
+      omitHotelContext,
+    );
+  },
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post("/auth/change-password", { current_password, new_password }),

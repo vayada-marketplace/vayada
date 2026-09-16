@@ -127,11 +127,12 @@ export async function runProductionPmsTransaction(
       rows: snapshot.rows,
       target: verifiedTarget,
     });
-    if (
-      verified.blockers.length > 0 ||
-      verified.checksum !== plan.checksum ||
-      verified.writes.length > 0
-    )
+    if (verified.blockers.length > 0) {
+      await client.query("ROLLBACK");
+      finished = true;
+      return report(input, verified, false);
+    }
+    if (verified.checksum !== plan.checksum || verified.writes.length > 0)
       throw new Error("Post-write PMS verification does not match the migration plan");
     await client.query("COMMIT");
     finished = true;
@@ -162,7 +163,8 @@ async function lockPmsTargets(client: QueryClient): Promise<void> {
                 pms.checkout_inspection_templates, pms.booking_checkin_records,
                 pms.booking_checkout_charges, pms.booking_checkout_records,
                 pms.booking_notes_private, pms.message_threads, pms.messages,
-                pms.message_attachments, pms.channel_connections,
+                pms.message_attachments, pms.channel_binding_claims,
+                pms.channel_connections,
                 pms.channel_room_type_mappings, pms.channel_rate_plan_mappings,
                 pms.channel_booking_mappings, pms.channel_sync_status,
                 platform.external_webhook_events, platform.product_audit_events,

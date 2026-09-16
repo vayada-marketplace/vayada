@@ -6,7 +6,6 @@ const apps = [
   { app: "marketplace-web", auth: "services/auth/auth.ts", workflow: "marketplace-web" },
   { app: "booking-admin", auth: "services/auth/index.ts", workflow: "booking-admin" },
   { app: "pms-web", auth: "services/auth/index.ts", workflow: "pms-web" },
-  { app: "affiliate-dashboard", auth: "services/auth/index.ts", workflow: "affiliate-dashboard" },
   { app: "vayada-admin", auth: "services/auth/auth.ts", workflow: "vayada-admin" },
 ] as const;
 
@@ -52,12 +51,6 @@ test("ordinary product API clients retain configured service origins", async ({}
       workflow: ".github/workflows/deploy-next-pms-web.yml",
     },
     {
-      client: "apps/affiliate-dashboard/services/api/client.ts",
-      env: "NEXT_PUBLIC_API_URL",
-      fallback: "https://api.localhost",
-      workflow: ".github/workflows/deploy-next-affiliate-dashboard.yml",
-    },
-    {
       client: "apps/vayada-admin/services/api/client.ts",
       env: "NEXT_PUBLIC_API_URL",
       fallback: "https://api.localhost",
@@ -80,6 +73,20 @@ test("ordinary product API clients retain configured service origins", async ({}
       `${env}=\${{ env.NEXT_API_URL }}`,
     );
   }
+});
+
+test("landing production APIs are explicit and consent remains local", async ({}, testInfo) => {
+  const root = repositoryRoot(testInfo);
+  const [workflowSource, consentSource] = await Promise.all([
+    source(root, ".github/workflows/deploy-landing.yml"),
+    source(root, "apps/landing/context/CookieConsentContext.tsx"),
+  ]);
+
+  expect(workflowSource).toContain("CONTACT_API_URL: https://api.vayada.com");
+  expect(workflowSource).toContain("MARKETPLACE_API_URL: https://next-api.vayada.com");
+  expect(workflowSource).toContain("NEXT_PUBLIC_VAYADA_API_URL=${{ env.MARKETPLACE_API_URL }}");
+  expect(workflowSource).not.toMatch(/NEXT_PUBLIC_[A-Z_]+=.*(?:localhost|127\.0\.0\.1)/);
+  expect(consentSource).not.toContain("@/services/api/consent");
 });
 
 test("all gateway tests lock down cookies, redirects, cache headers, and unsafe headers", async ({}, testInfo) => {

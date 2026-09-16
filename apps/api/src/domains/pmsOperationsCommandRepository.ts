@@ -1,84 +1,34 @@
+import {
+  PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION,
+  type PmsRoomTypeRetirementBlocker,
+  type PmsRoomTypeRetirementImpact,
+} from "@vayada/domain-pms";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
-import {
-  bankTransferDetailsFromPolicy,
-  enqueueBookingTransitionNotifications,
-} from "../jobs/bookingEmails.js";
-import type {
-  StripeBookingPaymentIntent,
-  StripeBookingPaymentProvider,
-} from "./stripeBookingPayments.js";
-import {
-  recordBookingManualPaymentInClient,
-  type FinanceBookingManualPaymentSettlementCommand,
-} from "./financeManualPaymentSettlement.js";
-import { appendPmsManualNoShowNightlyRevenueEvidence } from "./bookingPmsManualNoShowNightlyRevenueEvidence.js";
-import {
-  cancelPmsManualBooking,
-  ManualCancellationEvidenceError,
-  ManualCancellationStateError,
-} from "./bookingPmsManualCancellationNightlyRevenueEvidence.js";
-import {
-  ManualRefundEvidenceError,
-  ManualRefundStateError,
-  refundPmsManualBooking,
-} from "./bookingPmsManualRefundNightlyRevenueEvidence.js";
-import {
-  createFinanceManualBookingRefundPort,
-  financeManualBookingRefundTransaction,
-} from "./financeManualBookingRefund.js";
-import {
-  correctPmsManualStays,
-  ManualStayCorrectionAvailabilityError,
-  ManualStayCorrectionScopeError,
-} from "./pmsManualStayCorrection.js";
-import {
-  ManualStayCorrectionEvidenceError,
-  ManualStayCorrectionStateError,
-} from "./bookingPmsManualStayCorrection.js";
-import {
-  correctBookingPmsManualPrices,
-  ManualPriceCorrectionEvidenceError,
-  ManualPriceCorrectionStateError,
-  propertyDate,
-} from "./bookingPmsManualPriceCorrection.js";
-import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
-import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
-import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
-import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
-import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
-import { lockPmsRoomOrder, pmsRoomOrderVersion } from "./pmsRoomOrder.js";
-import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
-import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
-import {
-  captureDirectNightlyRevenueEvidence,
-  reconcileStripeBookingPaymentProviderDetails,
-  settleStripeBookingPayment,
-} from "./stripeBookingSettlement.js";
-import { stripeAmountMinor } from "./stripeMoney.js";
+import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
-  type PmsCheckInCommand,
-  type PmsCheckOutCommand,
-  type PmsCheckOutCommandResult,
-  type PmsCheckOutRecord,
   type PmsAssignmentCommand,
   type PmsAssignmentCommandConflictCode,
   type PmsAssignmentCommandResult,
   type PmsBookingLifecycleCommand,
+  type PmsCheckInCommand,
   type PmsCheckoutCharge,
   type PmsCheckoutChargeCommandResult,
   type PmsCheckoutChargeCreateCommand,
   type PmsCheckoutChargeMarkPaidCommand,
   type PmsCheckoutChargeStatus,
   type PmsCheckoutChargeWaiveCommand,
+  type PmsCheckOutCommand,
+  type PmsCheckOutCommandResult,
+  type PmsCheckOutRecord,
   type PmsCommandMeta,
-  type PmsNoShowCommand,
   type PmsManualCancellationCommand,
-  type PmsManualRefundCommand,
   type PmsManualPriceCorrectionCommand,
+  type PmsManualRefundCommand,
   type PmsManualStayCorrectionCommand,
+  type PmsNoShowCommand,
   type PmsOperationalCommandResult,
   type PmsOperationalStatus,
   type PmsOperationalStatusCommand,
@@ -86,9 +36,8 @@ import {
   type PmsOperationalTemplateCommandResult,
   type PmsOperationalTemplateKind,
   type PmsOperationalTemplateUpdateCommand,
-  type PmsTemplateStep,
-  type PmsOperationsCommandSideEffect,
   type PmsOperationsCommandRepository,
+  type PmsOperationsCommandSideEffect,
   type PmsPrivateNote,
   type PmsPrivateNoteCommandResult,
   type PmsPrivateNoteCreateCommand,
@@ -105,8 +54,68 @@ import {
   type PmsRoomType,
   type PmsRoomTypeCommandResult,
   type PmsRoomTypeCreateCommand,
+  type PmsRoomTypeDuplicateCommand,
+  type PmsRoomTypeRetireCommand,
+  type PmsRoomTypeRetireCommandResult,
   type PmsRoomTypeUpdateCommand,
+  type PmsTemplateStep,
 } from "../routes/pmsOperations.js";
+import {
+  cancelPmsManualBooking,
+  ManualCancellationEvidenceError,
+  ManualCancellationStateError,
+} from "./bookingPmsManualCancellationNightlyRevenueEvidence.js";
+import { appendPmsManualNoShowNightlyRevenueEvidence } from "./bookingPmsManualNoShowNightlyRevenueEvidence.js";
+import {
+  correctBookingPmsManualPrices,
+  ManualPriceCorrectionEvidenceError,
+  ManualPriceCorrectionStateError,
+} from "./bookingPmsManualPriceCorrection.js";
+import {
+  ManualRefundEvidenceError,
+  ManualRefundStateError,
+  refundPmsManualBooking,
+} from "./bookingPmsManualRefundNightlyRevenueEvidence.js";
+import {
+  appendCheckoutAddonRevenueEvidence,
+  appendMissingAddonRevenueEvidence,
+  BookingAddonRevenueEvidenceError,
+} from "./bookingAddonRevenueEvidence.js";
+import {
+  ManualStayCorrectionEvidenceError,
+  ManualStayCorrectionStateError,
+} from "./bookingPmsManualStayCorrection.js";
+import {
+  createFinanceManualBookingRefundPort,
+  financeManualBookingRefundTransaction,
+} from "./financeManualBookingRefund.js";
+import {
+  recordBookingManualPaymentInClient,
+  type FinanceBookingManualPaymentSettlementCommand,
+} from "./financeManualPaymentSettlement.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
+import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
+import {
+  correctPmsManualStays,
+  ManualStayCorrectionAvailabilityError,
+  ManualStayCorrectionScopeError,
+} from "./pmsManualStayCorrection.js";
+import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
+import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
+import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
+import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
+import { lockPmsRoomOrder, pmsRoomOrderVersion } from "./pmsRoomOrder.js";
+import type {
+  StripeBookingPaymentIntent,
+  StripeBookingPaymentProvider,
+} from "./stripeBookingPayments.js";
+import {
+  captureDirectNightlyRevenueEvidence,
+  reconcileStripeBookingPaymentProviderDetails,
+  settleStripeBookingPayment,
+} from "./stripeBookingSettlement.js";
+import { stripeAmountMinor } from "./stripeMoney.js";
 
 export type PmsOperationsCommandClient = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -220,8 +229,22 @@ type PmsCheckoutChargeOperation =
   | "checkout_charge_create"
   | "checkout_charge_mark_paid"
   | "checkout_charge_waive";
-type PmsRoomTypeCommandOperation = "room_type_create" | "room_type_location_update";
-type PmsRoomTypeCommand = PmsRoomTypeCreateCommand | PmsRoomTypeUpdateCommand;
+type PmsRoomTypeCommandOperation =
+  | "room_type_create"
+  | "room_type_location_update"
+  | "room_type_duplicate"
+  | "room_type_retire";
+type PmsRoomTypeCommand =
+  | PmsRoomTypeCreateCommand
+  | PmsRoomTypeUpdateCommand
+  | PmsRoomTypeDuplicateCommand
+  | PmsRoomTypeRetireCommand;
+
+type PmsRoomTypeLifecycleRow = {
+  roomTypeId: string;
+  name: string;
+  roomFactsRevision: number | string;
+};
 type PmsRoomBlockCommand =
   | PmsRoomBlockCreateCommand
   | PmsRoomBlockUpdateCommand
@@ -342,141 +365,10 @@ export function createTargetPmsOperationsCommandRepository(
       return executeRoomBlockCommand(pool, now, "room_block_release", command);
     },
     async createRoomType(command) {
-      const client = await pool.connect();
-      const acceptedAt = now().toISOString();
-      const keyHash = sha256(command.idempotencyKey);
-      const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
-      const commandMeta: PmsCommandMeta = {
-        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
-        commandId: command.commandId,
-        idempotencyKey: command.idempotencyKey,
-        acceptedAt,
-        sideEffects: ["ari_changed", "distribution_refresh", "audit_event"],
-      };
-
-      try {
-        await client.query("BEGIN");
-        const replay = await findRoomTypeCommandReplay(
-          client,
-          "room_type_create",
-          command,
-          keyHash,
-          requestFingerprintHash,
-        );
-        if (replay) {
-          await client.query("ROLLBACK");
-          return replay;
-        }
-
-        const insertedIdempotencyKey = await recordRoomTypeCommandIdempotency(
-          client,
-          "room_type_create",
-          command,
-          keyHash,
-          requestFingerprintHash,
-          acceptedAt,
-        );
-        if (!insertedIdempotencyKey) {
-          const replay = await findRoomTypeCommandReplay(
-            client,
-            "room_type_create",
-            command,
-            keyHash,
-            requestFingerprintHash,
-          );
-          await client.query("ROLLBACK");
-          return (
-            replay ??
-            roomTypeConflict(
-              "idempotency_conflict",
-              "Room type create idempotency key could not be reserved.",
-            )
-          );
-        }
-
-        if (
-          command.initialSetupOnly &&
-          (await initialRoomSetupAlreadyExists(client, command.propertyId))
-        ) {
-          await client.query("ROLLBACK");
-          return roomTypeConflict(
-            "room_type_conflict",
-            "Initial room setup was already completed for this property.",
-          );
-        }
-
-        const roomTypeId = await insertRoomType(client, command, acceptedAt);
-        const ratePlans = await insertRoomTypeRatePlans(client, command, roomTypeId, acceptedAt);
-        const insertedRoomCount = await insertInitialRooms(client, command, roomTypeId, acceptedAt);
-        if (insertedRoomCount !== command.roomCount) {
-          await client.query("ROLLBACK");
-          return roomTypeConflict(
-            "room_type_conflict",
-            "Generated room numbers conflict with existing rooms.",
-          );
-        }
-        const inventoryHorizon = buildRoomTypeInventoryHorizon(command, acceptedAt);
-        await insertRoomTypeRateRules(
-          client,
-          command,
-          roomTypeId,
-          ratePlans,
-          inventoryHorizon,
-          acceptedAt,
-        );
-        await insertRoomTypeInventoryDays(
-          client,
-          command,
-          roomTypeId,
-          inventoryHorizon,
-          acceptedAt,
-        );
-        const created = roomTypeFromCommand(command, roomTypeId, ratePlans);
-
-        await enqueueInventoryChangedSideEffects(
-          client,
-          command,
-          {
-            roomTypeId: created.roomTypeId,
-            resourceType: "room_type",
-            resourceId: created.roomTypeId,
-            dateRange: {
-              from: acceptedAt.slice(0, 10),
-              to: addUtcDays(acceptedAt.slice(0, 10), PMS_ROOM_INVENTORY_HORIZON_DAYS - 1),
-            },
-            calendarRefresh: false,
-          },
-          commandMeta,
-          keyHash,
-          acceptedAt,
-        );
-        await insertRoomTypeAuditEvent(client, command, created, commandMeta, keyHash);
-        await completeRoomTypeCommandIdempotency(
-          client,
-          "room_type_create",
-          command,
-          keyHash,
-          commandMeta,
-          acceptedAt,
-          created,
-        );
-        await client.query("COMMIT");
-        return { ok: true, roomType: created, commandMeta };
-      } catch (error) {
-        await rollbackQuietly(client);
-        if (isPgUniqueViolation(error)) {
-          return roomTypeConflict(
-            "room_type_conflict",
-            "Room type create conflicts with the current property state.",
-          );
-        }
-        if (isPgForeignKeyViolation(error)) {
-          return roomTypeInvalidBody("Room type create references a property that does not exist.");
-        }
-        throw error;
-      } finally {
-        client.release();
-      }
+      throw Object.assign(
+        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+      );
     },
 
     async updateRoomTypeLocation(command) {
@@ -609,6 +501,152 @@ export function createTargetPmsOperationsCommandRepository(
         if (isPgForeignKeyViolation(error)) {
           return roomTypeInvalidBody("Room type update references a property that does not exist.");
         }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async duplicateRoomType(command) {
+      throw Object.assign(
+        new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+        { statusCode: 503, code: "PRICING_UNAVAILABLE" },
+      );
+    },
+
+    async inspectRoomTypeRetirement(propertyId, roomTypeId) {
+      const client = await pool.connect();
+      try {
+        return inspectRoomTypeRetirement(client, propertyId, roomTypeId);
+      } finally {
+        client.release();
+      }
+    },
+
+    async retireRoomType(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["ari_changed", "distribution_refresh", "audit_event"],
+      };
+      try {
+        await client.query("BEGIN");
+        const replay = await findRoomTypeRetireReplay(
+          client,
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+        const source = await lockActiveRoomTypeForLifecycle(client, command);
+        if (!source) {
+          await client.query("ROLLBACK");
+          return roomTypeRetireNotFound(command.roomTypeId);
+        }
+        if (roomTypeVersion(source.roomFactsRevision) !== command.expectedVersion) {
+          await client.query("ROLLBACK");
+          return roomTypeRetireConflict("version_conflict", "Room type version is stale.");
+        }
+
+        await lockRoomTypeRetirementDependencies(client);
+        const impact = await inspectRoomTypeRetirement(
+          client,
+          command.propertyId,
+          command.roomTypeId,
+        );
+        if (!impact) {
+          await client.query("ROLLBACK");
+          return roomTypeRetireNotFound(command.roomTypeId);
+        }
+        if (!impact.canRetire) {
+          await client.query("ROLLBACK");
+          return {
+            ...roomTypeRetireConflict(
+              "room_type_retirement_blocked",
+              "Resolve the reported room type dependencies before retirement.",
+            ),
+            impact,
+          };
+        }
+
+        const insertedIdempotencyKey = await recordRoomTypeCommandIdempotency(
+          client,
+          "room_type_retire",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return roomTypeRetireConflict(
+            "idempotency_conflict",
+            "Room type retirement idempotency key could not be reserved.",
+          );
+        }
+
+        // Canonical pricing remains historical source evidence; its schema requires
+        // active = TRUE. The owning room type's active flag gates its availability.
+        await client.query(
+          `UPDATE pms.rate_plans
+           SET active = FALSE, updated_at = $3::timestamptz
+           WHERE property_id = $1::uuid AND room_type_id = $2::uuid AND active
+             AND pricing_contract_version IS NULL`,
+          [command.propertyId, command.roomTypeId, acceptedAt],
+        );
+        const retired = await client.query<{ roomFactsRevision: number | string }>(
+          `UPDATE pms.room_types
+           SET active = FALSE,
+               room_facts_revision = room_facts_revision + 1,
+               updated_at = $3::timestamptz
+           WHERE property_id = $1::uuid AND id = $2::uuid AND active
+           RETURNING room_facts_revision AS "roomFactsRevision"`,
+          [command.propertyId, command.roomTypeId, acceptedAt],
+        );
+        if (retired.rowCount !== 1) throw new Error("Room type retirement lost its locked row");
+        const retiredImpact: PmsRoomTypeRetirementImpact = {
+          ...impact,
+          version: roomTypeVersion(retired.rows[0]!.roomFactsRevision),
+          canRetire: false,
+        };
+        await enqueueInventoryChangedSideEffects(
+          client,
+          command,
+          lifecycleInventoryResource(command, command.roomTypeId, acceptedAt),
+          commandMeta,
+          keyHash,
+          acceptedAt,
+        );
+        await insertRoomTypeLifecycleAuditEvent(
+          client,
+          command,
+          "pms.room_type.retired",
+          command.roomTypeId,
+          commandMeta,
+          keyHash,
+          { dependencyImpact: impact },
+        );
+        await completeRoomTypeRetireIdempotency(
+          client,
+          command,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          retiredImpact,
+        );
+        await client.query("COMMIT");
+        return { ok: true, impact: retiredImpact, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
         throw error;
       } finally {
         client.release();
@@ -1407,7 +1445,7 @@ export function createTargetPmsOperationsCommandRepository(
       return executeOperationalCommand(config, pool, now, {
         command,
         operation: "manual_cancellation_command",
-        sideEffects: ["calendar_refresh", "ari_changed", "audit_event"],
+        sideEffects: ["calendar_refresh", "ari_changed", "guest_notification", "audit_event"],
         mutate: applyManualCancellationCommandMutation,
       });
     },
@@ -1733,6 +1771,21 @@ async function executeCheckOutCommand(
       unsettledPaidChargeIds,
     });
     await updateAssignmentsOperationalStatus(client, command, sources, "checked_out");
+    const finalCheckOut =
+      !command.assignmentId || !(await hasRemainingActiveAssignments(client, command));
+    if (!finalCheckOut && command.fulfilledAddonSelectionIds.length > 0) {
+      throw new BookingAddonRevenueEvidenceError(
+        "Add-on fulfillment is only accepted on the final reservation check-out.",
+      );
+    }
+    if (finalCheckOut) {
+      await appendCheckoutAddonRevenueEvidence(client, {
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        fulfilledSelectionIds: command.fulfilledAddonSelectionIds,
+        commandKeyHash: keyHash,
+      });
+    }
     await insertCheckOutAuditEvent(client, command, checkout, commandMeta, keyHash);
     await completeCheckOutCommandIdempotency(
       client,
@@ -1748,6 +1801,9 @@ async function executeCheckOutCommand(
     return checkOutResultForCommand(config, command, commandMeta, checkout, charges, false);
   } catch (error) {
     await rollbackQuietly(client);
+    if (error instanceof BookingAddonRevenueEvidenceError) {
+      return checkOutInvalidBody(error.message);
+    }
     if (error instanceof PmsRoomScopeChangedError) {
       return checkOutVersionConflict("Reservation room scope changed. Retry check-out.");
     }
@@ -1765,6 +1821,21 @@ async function executeCheckOutCommand(
   }
 }
 
+async function hasRemainingActiveAssignments(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+): Promise<boolean> {
+  const result = await client.query<{ remaining: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pms.operational_booking_assignments
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND assignment_status NOT IN ('checked_out','canceled','released')
+     ) AS remaining`,
+    [command.propertyId, command.guestBookingId],
+  );
+  return result.rows[0]?.remaining ?? false;
+}
+
 async function listCheckoutCharges(
   client: PmsOperationsCommandClient,
   propertyId: string,
@@ -1779,85 +1850,6 @@ async function listCheckoutCharges(
     [propertyId, guestBookingId],
   );
   return result.rows.map(toPmsCheckoutCharge);
-}
-
-async function insertRoomType(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  acceptedAt: string,
-): Promise<string> {
-  const result = await client.query<{ roomTypeId: string }>(
-    `INSERT INTO pms.room_types (
-       property_id,
-       name,
-       description,
-       category,
-       occupancy_limits,
-       room_attributes,
-       amenities_snapshot,
-       media_snapshot,
-       base_rate_amount,
-       currency,
-       active,
-       sort_order,
-       created_at,
-       updated_at
-     )
-     VALUES (
-       $1::uuid,
-       $2,
-       $3,
-       $4,
-       $5::jsonb,
-       $6::jsonb,
-       $7::jsonb,
-       $8::jsonb,
-       $9::numeric,
-       $10,
-       $11,
-       $12::integer,
-       $13::timestamptz,
-       $13::timestamptz
-     )
-     RETURNING id::text AS "roomTypeId"`,
-    [
-      command.propertyId,
-      command.name,
-      command.description,
-      command.category,
-      JSON.stringify(command.occupancyLimits),
-      JSON.stringify(command.attributes),
-      JSON.stringify(command.amenities),
-      JSON.stringify(command.media),
-      command.baseRate.amountDecimal,
-      command.baseRate.currency,
-      command.active,
-      command.sortOrder,
-      acceptedAt,
-    ],
-  );
-  return result.rows[0]!.roomTypeId;
-}
-
-async function initialRoomSetupAlreadyExists(
-  client: PmsOperationsCommandClient,
-  propertyId: string,
-): Promise<boolean> {
-  await client.query(
-    `SELECT pg_advisory_xact_lock(
-       hashtextextended(concat('pms-initial-room-setup:', $1::text), 0)
-     )`,
-    [propertyId],
-  );
-  const result = await client.query<{ roomSetupExists: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-       FROM pms.room_types room_type
-       WHERE room_type.property_id = $1::uuid
-     ) AS "roomSetupExists"`,
-    [propertyId],
-  );
-  return result.rows[0]?.roomSetupExists === true;
 }
 
 async function updateRoomTypeLocation(
@@ -1900,109 +1892,6 @@ async function updateRoomTypeFlexibleCancellation(
   return (result.rowCount ?? 0) > 0;
 }
 
-async function insertRoomTypeRatePlans(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  acceptedAt: string,
-): Promise<PmsRoomType["ratePlans"]> {
-  const ratePlans: PmsRoomType["ratePlans"] = [
-    await insertRoomTypeRatePlan(client, command, roomTypeId, acceptedAt, {
-      code: "FLEX",
-      name: "Flexible",
-      rateType: "flexible",
-      baseRate: command.baseRate,
-      cancellationPolicySnapshot: command.flexibleCancellationPolicy ?? {
-        kind: "flexible",
-        text: "Free until 7 days before",
-        flexibleCancellationType: "free",
-        partialRefundCancelWindowDays: 30,
-        partialRefundAmountPercent: 50,
-        partialRefundTiers: [],
-      },
-    }),
-  ];
-  if (command.nonRefundableRate) {
-    ratePlans.push(
-      await insertRoomTypeRatePlan(client, command, roomTypeId, acceptedAt, {
-        code: "NRF",
-        name: "Non-refundable",
-        rateType: "non_refundable",
-        baseRate: command.nonRefundableRate,
-        cancellationPolicySnapshot: {},
-      }),
-    );
-  }
-  return ratePlans;
-}
-
-async function insertRoomTypeRatePlan(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  acceptedAt: string,
-  ratePlan: Pick<
-    PmsRoomType["ratePlans"][number],
-    "code" | "name" | "rateType" | "baseRate" | "cancellationPolicySnapshot"
-  >,
-): Promise<PmsRoomType["ratePlans"][number]> {
-  const result = await client.query<{ ratePlanId: string }>(
-    `INSERT INTO pms.rate_plans (
-       property_id,
-       room_type_id,
-       code,
-       name,
-       rate_type,
-       base_rate_amount,
-       currency,
-       cancellation_policy_snapshot,
-       active,
-       created_at,
-       updated_at
-     )
-     VALUES (
-       $1::uuid,
-       $2::uuid,
-       $3,
-       $4,
-       $5,
-       $6::numeric,
-       $7,
-       $8::jsonb,
-       TRUE,
-       $9::timestamptz,
-       $9::timestamptz
-     )
-     ON CONFLICT (property_id, room_type_id, code) DO UPDATE
-     SET base_rate_amount = EXCLUDED.base_rate_amount,
-         currency = EXCLUDED.currency,
-         cancellation_policy_snapshot = EXCLUDED.cancellation_policy_snapshot,
-         updated_at = EXCLUDED.updated_at
-     RETURNING id::text AS "ratePlanId"`,
-    [
-      command.propertyId,
-      roomTypeId,
-      ratePlan.code,
-      ratePlan.name,
-      ratePlan.rateType,
-      ratePlan.baseRate.amountDecimal,
-      ratePlan.baseRate.currency,
-      JSON.stringify(ratePlan.cancellationPolicySnapshot),
-      acceptedAt,
-    ],
-  );
-  return {
-    ratePlanId: result.rows[0]!.ratePlanId,
-    code: ratePlan.code,
-    name: ratePlan.name,
-    rateType: ratePlan.rateType,
-    mealPlan: null,
-    baseRate: ratePlan.baseRate,
-    cancellationPolicySnapshot: ratePlan.cancellationPolicySnapshot,
-    active: true,
-  };
-}
-
 export const PMS_ROOM_INVENTORY_HORIZON_DAYS = 366;
 
 export type PmsRoomInventoryDaySeed = {
@@ -2016,329 +1905,10 @@ export type PmsRoomInventoryDaySeed = {
   maxStayNights: number | null;
 };
 
-export function buildRoomTypeInventoryHorizon(
-  command: PmsRoomTypeCreateCommand,
-  acceptedAt: string,
-): PmsRoomInventoryDaySeed[] {
-  const firstDate = new Date(`${acceptedAt.slice(0, 10)}T00:00:00.000Z`);
-  if (Number.isNaN(firstDate.getTime())) throw new Error("Room inventory horizon requires a date.");
-
-  return Array.from({ length: PMS_ROOM_INVENTORY_HORIZON_DAYS }, (_, offset) => {
-    const date = new Date(firstDate);
-    date.setUTCDate(firstDate.getUTCDate() + offset);
-    const stayDate = date.toISOString().slice(0, 10);
-    const monthDay = stayDate.slice(5);
-    const isOperating = command.operatingPeriods.some((period) =>
-      recurringMonthDayRangeContains(monthDay, period.from, period.to),
-    );
-    const seasonIndex = command.seasons.findIndex((season) =>
-      recurringMonthDayRangeContains(monthDay, season.from, season.to),
-    );
-    const season = seasonIndex >= 0 ? command.seasons[seasonIndex]! : null;
-    const isOpen = command.active && command.roomCount > 0 && isOperating && season !== null;
-
-    return {
-      stayDate,
-      status: isOpen ? "open" : "closed",
-      totalCount: command.roomCount,
-      availableCount: isOpen ? command.roomCount : 0,
-      seasonIndex: isOpen ? seasonIndex : null,
-      rateAmountDecimal: isOpen ? season!.rate.amountDecimal : null,
-      minStayNights: isOpen ? season!.minStayNights : null,
-      maxStayNights: isOpen ? season!.maxStayNights : null,
-    };
-  });
-}
-
-function recurringMonthDayRangeContains(monthDay: string, from: string, to: string): boolean {
-  return from <= to ? monthDay >= from && monthDay <= to : monthDay >= from || monthDay <= to;
-}
-
-type PmsRoomRateRuleSeed = {
-  startsOn: string;
-  endsOn: string;
-  seasonIndex: number;
-  rateAmountDecimal: string;
-  minStayNights: number;
-  maxStayNights: number | null;
-};
-
-function roomTypeRateRuleSeeds(horizon: readonly PmsRoomInventoryDaySeed[]): PmsRoomRateRuleSeed[] {
-  const rules: PmsRoomRateRuleSeed[] = [];
-  for (const day of horizon) {
-    if (
-      day.status !== "open" ||
-      day.seasonIndex === null ||
-      day.rateAmountDecimal === null ||
-      day.minStayNights === null
-    ) {
-      continue;
-    }
-    const previous = rules.at(-1);
-    if (
-      previous &&
-      addUtcDays(previous.endsOn, 1) === day.stayDate &&
-      previous.seasonIndex === day.seasonIndex &&
-      previous.rateAmountDecimal === day.rateAmountDecimal &&
-      previous.minStayNights === day.minStayNights &&
-      previous.maxStayNights === day.maxStayNights
-    ) {
-      previous.endsOn = day.stayDate;
-      continue;
-    }
-    rules.push({
-      startsOn: day.stayDate,
-      endsOn: day.stayDate,
-      seasonIndex: day.seasonIndex,
-      rateAmountDecimal: day.rateAmountDecimal,
-      minStayNights: day.minStayNights,
-      maxStayNights: day.maxStayNights,
-    });
-  }
-  return rules;
-}
-
 function addUtcDays(dateValue: string, days: number): string {
   const date = new Date(`${dateValue}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
-}
-
-async function insertRoomTypeRateRules(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  ratePlans: readonly PmsRoomType["ratePlans"][number][],
-  horizon: readonly PmsRoomInventoryDaySeed[],
-  acceptedAt: string,
-): Promise<void> {
-  const baseRateMinor = moneyMinorUnits(command.baseRate.amountDecimal);
-  const rules = roomTypeRateRuleSeeds(horizon).flatMap((rule) =>
-    ratePlans.map((ratePlan) => {
-      const ratePlanMinor = moneyMinorUnits(ratePlan.baseRate.amountDecimal);
-      const seasonMinor = moneyMinorUnits(rule.rateAmountDecimal);
-      const effectiveMinor = Math.round((seasonMinor * ratePlanMinor) / baseRateMinor);
-      return {
-        ...rule,
-        ratePlanId: ratePlan.ratePlanId,
-        priceDeltaAmount: ((effectiveMinor - ratePlanMinor) / 100).toFixed(2),
-        effectiveRateAmount: (effectiveMinor / 100).toFixed(2),
-        ratePlanCode: ratePlan.code,
-      };
-    }),
-  );
-  if (rules.length === 0) return;
-
-  await client.query(
-    `INSERT INTO pms.rate_rules (
-       property_id,
-       room_type_id,
-       rate_plan_id,
-       rule_type,
-       starts_on,
-       ends_on,
-       min_stay_nights,
-       max_stay_nights,
-       price_delta_amount,
-       rule_payload,
-       created_at,
-       updated_at
-     )
-     SELECT
-       $1::uuid,
-       $2::uuid,
-       source."ratePlanId"::uuid,
-       'season',
-       source."startsOn"::date,
-       source."endsOn"::date,
-       source."minStayNights"::integer,
-       source."maxStayNights"::integer,
-       source."priceDeltaAmount"::numeric,
-       jsonb_build_object(
-         'seasonIndex', source."seasonIndex"::integer,
-         'name', source."seasonName",
-         'tier', source."seasonTier",
-         'rateAmount', source."effectiveRateAmount",
-         'ratePlanCode', source."ratePlanCode"
-       ),
-       $4::timestamptz,
-       $4::timestamptz
-     FROM jsonb_to_recordset($3::jsonb) AS source(
-       "ratePlanId" text,
-       "startsOn" text,
-       "endsOn" text,
-       "seasonIndex" integer,
-       "seasonName" text,
-       "seasonTier" text,
-       "minStayNights" integer,
-       "maxStayNights" integer,
-       "priceDeltaAmount" text,
-       "effectiveRateAmount" text,
-       "ratePlanCode" text
-     )`,
-    [
-      command.propertyId,
-      roomTypeId,
-      JSON.stringify(
-        rules.map((rule) => ({
-          ...rule,
-          seasonName: command.seasons[rule.seasonIndex]!.name,
-          seasonTier: command.seasons[rule.seasonIndex]!.tier,
-        })),
-      ),
-      acceptedAt,
-    ],
-  );
-}
-
-function moneyMinorUnits(amountDecimal: string): number {
-  return Math.round(Number(amountDecimal) * 100);
-}
-
-async function insertRoomTypeInventoryDays(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  horizon: readonly PmsRoomInventoryDaySeed[],
-  acceptedAt: string,
-): Promise<void> {
-  await client.query(
-    `INSERT INTO pms.inventory_days (
-       property_id,
-       room_type_id,
-       stay_date,
-       total_count,
-       assigned_count,
-       blocked_count,
-       available_count,
-       status,
-       source_freshness,
-       updated_at
-     )
-     SELECT
-       $1::uuid,
-       $2::uuid,
-       source."stayDate"::date,
-       source."totalCount"::integer,
-       0,
-       0,
-       source."availableCount"::integer,
-       source.status,
-       jsonb_build_object(
-         'pms', jsonb_build_object(
-           'status', 'fresh',
-           'generatedAt', $4::timestamptz,
-           'horizonDays', $5::integer
-         )
-       ),
-       $4::timestamptz
-     FROM jsonb_to_recordset($3::jsonb) AS source(
-       "stayDate" text,
-       "totalCount" integer,
-       "availableCount" integer,
-       status text
-     )
-     ON CONFLICT (property_id, room_type_id, stay_date) DO UPDATE SET
-       total_count = EXCLUDED.total_count,
-       available_count = CASE
-         WHEN EXCLUDED.status = 'closed' THEN 0
-         ELSE GREATEST(
-           0,
-           EXCLUDED.total_count
-             - pms.inventory_days.assigned_count
-             - pms.inventory_days.blocked_count
-         )
-       END,
-       status = EXCLUDED.status,
-       source_freshness = EXCLUDED.source_freshness,
-       updated_at = EXCLUDED.updated_at`,
-    [
-      command.propertyId,
-      roomTypeId,
-      JSON.stringify(horizon),
-      acceptedAt,
-      PMS_ROOM_INVENTORY_HORIZON_DAYS,
-    ],
-  );
-}
-
-async function insertInitialRooms(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  acceptedAt: string,
-): Promise<number> {
-  if (command.roomCount === 0) return 0;
-  await lockPmsRoomOrder(client, command.propertyId);
-  const result = await client.query(
-    `INSERT INTO pms.rooms (
-       property_id,
-       room_type_id,
-       room_number,
-       status,
-       sort_order,
-       room_metadata,
-       created_at,
-       updated_at
-     )
-     SELECT
-       $1::uuid,
-       $2::uuid,
-       concat($3::text, ' ', room_number_seed.max_suffix + source.n),
-       'available',
-       room_order_seed.max_sort_order + source.n,
-       jsonb_build_object('roomTypeName', $3::text),
-       $5::timestamptz,
-       $5::timestamptz
-     FROM (
-       SELECT COALESCE(
-         MAX(NULLIF(regexp_replace(room_number, '^.*[^0-9]', ''), '')::integer),
-         0
-       ) AS max_suffix
-       FROM pms.rooms
-       WHERE property_id = $1::uuid
-         AND left(room_number, char_length($3::text) + 1) = $3::text || ' '
-     ) room_number_seed
-     CROSS JOIN (
-       SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
-       FROM pms.rooms
-       WHERE property_id = $1::uuid AND status <> 'retired'
-     ) room_order_seed
-     CROSS JOIN generate_series(1, $4::integer) AS source(n)
-     ON CONFLICT (property_id, room_number) DO NOTHING
-     RETURNING id`,
-    [command.propertyId, roomTypeId, command.name, command.roomCount, acceptedAt],
-  );
-  return result.rowCount ?? result.rows.length;
-}
-
-function roomTypeFromCommand(
-  command: PmsRoomTypeCreateCommand,
-  roomTypeId: string,
-  ratePlans: PmsRoomType["ratePlans"],
-): PmsRoomType {
-  return {
-    roomTypeId,
-    name: command.name,
-    description: command.description,
-    category: command.category,
-    occupancyLimits: command.occupancyLimits,
-    attributes: command.attributes,
-    amenities: command.amenities,
-    media: command.media,
-    baseRate: command.baseRate,
-    active: command.active,
-    sortOrder: command.sortOrder,
-    ratePlans,
-    rateRulesSummary: {
-      minStayNights: null,
-      maxStayNights: null,
-      closedToArrival: false,
-      closedToDeparture: false,
-      activeRuleCount: 0,
-    },
-    roomCount: command.roomCount,
-  };
 }
 
 async function executeRoomOrderCommand(
@@ -3414,6 +2984,255 @@ async function completeRoomTypeCommandIdempotency(
   );
 }
 
+async function lockActiveRoomTypeForLifecycle(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeDuplicateCommand | PmsRoomTypeRetireCommand,
+): Promise<PmsRoomTypeLifecycleRow | null> {
+  const result = await client.query<PmsRoomTypeLifecycleRow>(
+    `SELECT id::text AS "roomTypeId", name,
+            room_facts_revision AS "roomFactsRevision"
+     FROM pms.room_types
+     WHERE property_id = $1::uuid AND id = $2::uuid AND active
+     FOR UPDATE`,
+    [command.propertyId, command.roomTypeId],
+  );
+  return result.rows[0] ?? null;
+}
+
+function roomTypeVersion(revision: number | string): string {
+  return `room-type-facts-v${Number(revision)}`;
+}
+
+type PmsRoomTypeRetirementCountsRow = {
+  reservationCount: number | string;
+  physicalUnitCount: number | string;
+  inventoryCount: number | string;
+  publicationCount: number | string;
+  roomFactsRevision: number | string;
+};
+
+async function inspectRoomTypeRetirement(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  roomTypeId: string,
+): Promise<PmsRoomTypeRetirementImpact | null> {
+  const result = await client.query<PmsRoomTypeRetirementCountsRow>(
+    `SELECT room_type.room_facts_revision AS "roomFactsRevision",
+       ((SELECT count(*) FROM pms.operational_booking_assignments assignment
+         WHERE assignment.property_id = room_type.property_id
+           AND assignment.room_type_id = room_type.id
+           AND assignment.assignment_status IN ('pending','assigned','checked_in','in_house'))
+        +
+        (SELECT count(*) FROM pms.active_inventory_reservation_receipts receipt
+         JOIN pms.inventory_reservation_statuses status
+           ON status.receipt_id = receipt.receipt_id
+         WHERE receipt.property_id = room_type.property_id
+           AND receipt.room_type_id = room_type.id
+           AND status.lifecycle_state IN ('reserved','handed_off')
+           AND receipt.check_out > COALESCE(closure.cutoff_date, CURRENT_DATE)))::bigint AS "reservationCount",
+       (SELECT count(*) FROM pms.rooms room
+        WHERE room.property_id = room_type.property_id
+          AND room.room_type_id = room_type.id
+          AND room.status <> 'retired')::bigint AS "physicalUnitCount",
+       ((SELECT count(*) FROM pms.inventory_days inventory
+         WHERE inventory.property_id = room_type.property_id
+           AND inventory.room_type_id = room_type.id
+           AND inventory.stay_date >= COALESCE(closure.cutoff_date, CURRENT_DATE)
+           AND (inventory.status <> 'closed' OR inventory.available_count > 0
+                OR inventory.assigned_count > 0 OR inventory.blocked_count > 0))
+        +
+        (SELECT count(*) FROM pms.room_blocks block
+         WHERE block.property_id = room_type.property_id
+           AND (block.room_type_id = room_type.id OR block.source_room_type_id = room_type.id)
+           AND block.status = 'active' AND block.ends_on >= COALESCE(closure.cutoff_date, CURRENT_DATE))
+        + CASE WHEN room_type.linked_inventory_group_id IS NULL THEN 0 ELSE 1 END
+       )::bigint AS "inventoryCount",
+       ((SELECT count(*) FROM distribution.public_room_offer_snapshots offer
+         WHERE offer.property_id = room_type.property_id
+           AND offer.room_type_id = room_type.id
+           AND offer.stay_date >= COALESCE(closure.cutoff_date, CURRENT_DATE) AND offer.sellable_publicly)
+        +
+        (SELECT count(*) FROM pms.channel_room_type_mappings mapping
+         WHERE mapping.property_id = room_type.property_id
+           AND mapping.room_type_id = room_type.id AND mapping.status = 'active')
+        +
+        (SELECT count(*) FROM pms.channel_rate_plan_mappings mapping
+         WHERE mapping.property_id = room_type.property_id
+           AND mapping.room_type_id = room_type.id AND mapping.status = 'active')
+        +
+        (SELECT count(*)
+         FROM distribution.active_public_booking_revision active_revision
+         JOIN distribution.public_booking_content_revisions content
+           ON content.id = active_revision.content_revision_id
+          AND content.property_id = active_revision.property_id
+         WHERE active_revision.property_id = room_type.property_id
+           AND (
+             jsonb_path_exists(
+               content.source_manifest,
+               'strict $.** ? (@ == $roomTypeId)',
+               jsonb_build_object('roomTypeId', to_jsonb(room_type.id::text))
+             )
+             OR jsonb_path_exists(
+               content.public_content,
+               'strict $.** ? (@ == $roomTypeId)',
+               jsonb_build_object('roomTypeId', to_jsonb(room_type.id::text))
+             )
+           ))
+       )::bigint AS "publicationCount"
+     FROM pms.room_types room_type
+     LEFT JOIN pms.room_type_closures closure
+       ON closure.property_id=room_type.property_id AND closure.room_type_id=room_type.id
+     WHERE room_type.property_id = $1::uuid AND room_type.id = $2::uuid AND room_type.active`,
+    [propertyId, roomTypeId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const blockers: PmsRoomTypeRetirementBlocker[] = [];
+  const add = (
+    category: PmsRoomTypeRetirementBlocker["category"],
+    code: PmsRoomTypeRetirementBlocker["code"],
+    count: number | string,
+    action: string,
+  ) => {
+    const affectedCount = Number(count);
+    if (affectedCount > 0) blockers.push({ category, code, affectedCount, action });
+  };
+  add(
+    "reservations",
+    "active_reservations",
+    row.reservationCount,
+    "Move, cancel, check out, or release active reservations and inventory holds.",
+  );
+  add(
+    "physical_units",
+    "active_physical_units",
+    row.physicalUnitCount,
+    "Retire or move every active physical room unit assigned to this room type.",
+  );
+  add(
+    "inventory",
+    "future_inventory",
+    row.inventoryCount,
+    "Close future inventory, release room blocks, and remove linked-inventory membership.",
+  );
+  add(
+    "publication",
+    "active_publication",
+    row.publicationCount,
+    "Unpublish public offers and disable channel mappings for this room type.",
+  );
+  return {
+    contractVersion: PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION,
+    propertyId,
+    roomTypeId,
+    version: roomTypeVersion(row.roomFactsRevision),
+    canRetire: blockers.length === 0,
+    blockers,
+  };
+}
+
+async function lockRoomTypeRetirementDependencies(
+  client: PmsOperationsCommandClient,
+): Promise<void> {
+  await client.query("SET LOCAL lock_timeout = '2s'");
+  await client.query("SET LOCAL statement_timeout = '5s'");
+  await client.query(
+    `LOCK TABLE pms.operational_booking_assignments,
+       pms.inventory_reservation_receipts, pms.inventory_reservation_statuses,
+       pms.rooms, pms.inventory_days, pms.room_blocks,
+       pms.rate_plans, pms.rate_rules,
+       pms.channel_room_type_mappings, pms.channel_rate_plan_mappings,
+       distribution.public_room_offer_snapshots,
+       distribution.active_public_booking_revision,
+       distribution.public_booking_content_revisions
+     IN SHARE ROW EXCLUSIVE MODE`,
+  );
+}
+
+function lifecycleInventoryResource(
+  command: PmsRoomTypeDuplicateCommand | PmsRoomTypeRetireCommand,
+  roomTypeId: string,
+  acceptedAt: string,
+) {
+  return {
+    roomTypeId,
+    resourceType: "room_type" as const,
+    resourceId: roomTypeId,
+    dateRange: {
+      from: acceptedAt.slice(0, 10),
+      to: addUtcDays(acceptedAt.slice(0, 10), PMS_ROOM_INVENTORY_HORIZON_DAYS - 1),
+    },
+    calendarRefresh: false,
+  };
+}
+
+async function findRoomTypeRetireReplay(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeRetireCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsRoomTypeRetireCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT status, request_fingerprint_hash AS "requestFingerprintHash",
+            idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms' AND operation = 'room_type_retire'
+       AND key_hash = $1 AND tenant_scope = 'property' AND property_id = $2::uuid
+     FOR UPDATE`,
+    [keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return roomTypeRetireConflict(
+      "idempotency_conflict",
+      "Idempotency key was used with a different room type retirement command.",
+    );
+  }
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const impact = existing.idempotencyMetadata?.["impact"];
+  if (
+    existing.status !== "completed" ||
+    !isPmsCommandMeta(commandMeta) ||
+    !isPmsRoomTypeRetirementImpact(impact)
+  ) {
+    return roomTypeRetireConflict(
+      "idempotency_conflict",
+      "Room type retirement replay metadata is unavailable.",
+    );
+  }
+  return { ok: true, impact, commandMeta, replayed: true };
+}
+
+async function completeRoomTypeRetireIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeRetireCommand,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  impact: PmsRoomTypeRetirementImpact,
+): Promise<void> {
+  const metadata = { commandMeta, impact };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed', response_status_code = 200,
+         response_resource_product = 'pms', response_resource_type = 'room_type',
+         response_resource_id = $1, response_body_hash = $2,
+         completed_at = $3::timestamptz, last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms' AND operation = 'room_type_retire'
+       AND key_hash = $5 AND tenant_scope = 'property' AND property_id = $6::uuid`,
+    [
+      command.roomTypeId,
+      sha256(stableJson(metadata)),
+      acceptedAt,
+      JSON.stringify(metadata),
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
 async function enqueueInventoryChangedSideEffects(
   client: PmsOperationsCommandClient,
   command: Pick<PmsRoomBlockCommand | PmsRoomTypeCommand, "propertyId" | "commandId" | "audit">,
@@ -3609,84 +3428,6 @@ async function enqueueInventoryChangedSideEffects(
   }
 }
 
-async function insertRoomTypeAuditEvent(
-  client: PmsOperationsCommandClient,
-  command: PmsRoomTypeCreateCommand,
-  roomType: PmsRoomType,
-  commandMeta: PmsCommandMeta,
-  keyHash: string,
-): Promise<void> {
-  await client.query(
-    `INSERT INTO platform.product_audit_events (
-       audit_key,
-       product,
-       action,
-       action_version,
-       occurred_at,
-       tenant_scope,
-       organization_id,
-       property_id,
-       actor_type,
-       actor_user_id,
-       target_resource_product,
-       target_resource_type,
-       target_resource_id,
-       correlation_id,
-       causation_id,
-       redacted_payload,
-       private_payload,
-       audit_metadata,
-       retention_class,
-       privacy_scope
-     )
-     VALUES (
-       $1,
-       'pms',
-       'pms.room_type.created',
-       1,
-       $2::timestamptz,
-       'property',
-       NULL,
-       $3::uuid,
-       $4,
-       $5::uuid,
-       'pms',
-       'room_type',
-       $6,
-       $7,
-       $8,
-       $9::jsonb,
-       $10::jsonb,
-       $11::jsonb,
-       'standard',
-       'internal'
-     )
-     ON CONFLICT (product, audit_key) DO NOTHING`,
-    [
-      `pms.room_type.created.property.${command.propertyId}.room_type.${roomType.roomTypeId}.key.${keyHash}.v1`,
-      commandMeta.acceptedAt,
-      command.propertyId,
-      command.audit.actor.kind,
-      roomTypeActorUserId(command),
-      roomType.roomTypeId,
-      command.audit.correlationId ?? command.audit.requestId,
-      command.commandId,
-      JSON.stringify({
-        propertyId: command.propertyId,
-        roomTypeId: roomType.roomTypeId,
-        roomCount: roomType.roomCount,
-        baseRate: roomType.baseRate,
-      }),
-      JSON.stringify({
-        name: roomType.name,
-        description: roomType.description,
-        category: roomType.category,
-      }),
-      JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
-    ],
-  );
-}
-
 async function insertRoomTypeLocationUpdateAuditEvent(
   client: PmsOperationsCommandClient,
   command: PmsRoomTypeUpdateCommand,
@@ -3761,6 +3502,48 @@ async function insertRoomTypeLocationUpdateAuditEvent(
         ...(command.flexibleCancellationPolicy
           ? { flexibleCancellationPolicy: command.flexibleCancellationPolicy }
           : {}),
+      }),
+      JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
+    ],
+  );
+}
+
+async function insertRoomTypeLifecycleAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeDuplicateCommand | PmsRoomTypeRetireCommand,
+  action: "pms.room_type.duplicated" | "pms.room_type.retired",
+  targetRoomTypeId: string,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key, product, action, action_version, occurred_at, tenant_scope,
+       organization_id, property_id, actor_type, actor_user_id,
+       target_resource_product, target_resource_type, target_resource_id,
+       correlation_id, causation_id, redacted_payload, private_payload,
+       audit_metadata, retention_class, privacy_scope
+     ) VALUES (
+       $1, 'pms', $2, 1, $3::timestamptz, 'property', NULL, $4::uuid,
+       $5, $6::uuid, 'pms', 'room_type', $7, $8, $9,
+       $10::jsonb, '{}'::jsonb, $11::jsonb, 'standard', 'internal'
+     ) ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `${action}.property.${command.propertyId}.room_type.${targetRoomTypeId}.key.${keyHash}.v1`,
+      action,
+      commandMeta.acceptedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      roomTypeActorUserId(command),
+      targetRoomTypeId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        roomTypeId: targetRoomTypeId,
+        expectedVersion: command.expectedVersion,
+        ...details,
       }),
       JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
     ],
@@ -4586,8 +4369,10 @@ function checkOutActorUserId(command: PmsCheckOutCommand): string | null {
 }
 
 function checkOutCommandFingerprint(command: PmsCheckOutCommand): unknown {
-  const { audit: _audit, ...fingerprint } = command;
-  return fingerprint;
+  const { audit: _audit, fulfilledAddonSelectionIds, ...fingerprint } = command;
+  return fulfilledAddonSelectionIds.length
+    ? { ...fingerprint, fulfilledAddonSelectionIds: [...fulfilledAddonSelectionIds].sort() }
+    : fingerprint;
 }
 
 async function executeOperationalCommand<TCommand extends PmsOperationalCommand>(
@@ -5580,12 +5365,20 @@ async function applyBookingAcceptanceCommandMutation(
   ) {
     return invalidStatusTransition(booking.lifecycleStatus, "confirmed");
   }
-  const bankTransferDetails = bankTransferDetailsFromPolicy({
-    bankTransferInstructions: jsonObject(booking.paymentInstructions)["bankTransferDetails"],
-  });
-  if (!bankTransferDetails) {
-    return invalidStatusTransition("bank_transfer_unavailable", "confirmed");
-  }
+  const destination = await client.query(
+    `SELECT binding.destination_id
+    FROM finance.bank_transfer_bookings binding
+    JOIN finance.bank_transfer_destinations destination ON destination.id=binding.destination_id
+      AND destination.property_id=binding.property_id
+    WHERE binding.guest_booking_id=$1::uuid AND binding.property_id=$2::uuid AND destination.deleted_at IS NULL
+    FOR SHARE OF destination`,
+    [command.guestBookingId, command.propertyId],
+  );
+  if (!destination.rows.length)
+    return operationalConflict(
+      "bank_transfer_unavailable",
+      "Cannot accept this booking because its bank-transfer destination is unavailable.",
+    );
   const paymentDeadlineAt = new Date(Date.parse(acceptedAt) + 24 * 60 * 60 * 1000).toISOString();
 
   const updated = await client.query(
@@ -5656,7 +5449,6 @@ async function applyBookingAcceptanceCommandMutation(
         : { type: "system" },
     source: "apps/api-pms-booking-acceptance",
     paymentDeadlineAt,
-    bankTransferDetails,
     transition: {
       eventType: "guest_booking.accepted",
       fromStatus: "pending_payment",
@@ -6013,6 +5805,8 @@ async function loadBookingPaymentLifecycle(
        WHERE card.property_id = booking.property_id
          AND card.guest_booking_id = booking.id
          AND card.payment_method = 'card'
+         AND (booking.active_card_payment_id IS NULL OR booking.active_card_payment_id=card.id)
+         AND card.payment_metadata->>'supersededByEdit' IS DISTINCT FROM 'true'
          AND card.provider_payment_intent_id IS NOT NULL
        ORDER BY card.created_at DESC, card.id DESC
        LIMIT 1
@@ -6147,6 +5941,11 @@ async function applyNoShowCommandMutation(
     ],
   );
   await appendPmsManualNoShowNightlyRevenueEvidence(client, command, acceptedAt);
+  await appendMissingAddonRevenueEvidence(client, {
+    propertyId: command.propertyId,
+    guestBookingId: command.guestBookingId,
+    commandKey: `pms-no-show:${sha256(command.idempotencyKey)}`,
+  });
   await reconcilePmsOccupiedInventory(client, command.propertyId, sources, acceptedAt);
   return { ok: true };
 }
@@ -6185,6 +5984,11 @@ async function applyManualCancellationCommandMutation(
   );
   try {
     await cancelPmsManualBooking(client, command, acceptedAt);
+    await appendMissingAddonRevenueEvidence(client, {
+      propertyId: command.propertyId,
+      guestBookingId: command.guestBookingId,
+      commandKey: `pms-cancel:${sha256(command.idempotencyKey)}`,
+    });
   } catch (error) {
     if (error instanceof ManualCancellationEvidenceError)
       return operationalInvalidBody(error.message);
@@ -6418,15 +6222,6 @@ async function applyAssignmentCommandMutation(
   };
 }
 
-type MoveRateScope = {
-  evidenceIds: string[] | null;
-  evidenceCount: number;
-  nightCount: number;
-  targetTotal: string | null;
-  currency: string | null;
-  timezone: string | null;
-};
-
 async function applyTargetBaseRateForMove(
   client: PmsOperationsCommandClient,
   command: PmsAssignmentCommand,
@@ -6434,82 +6229,11 @@ async function applyTargetBaseRateForMove(
   targetRoomTypeId: string,
   acceptedAt: string,
 ): Promise<{ ok: true } | Exclude<PmsAssignmentCommandResult, { ok: true }>> {
-  const result = await client.query<MoveRateScope>(
-    `WITH evidence_state AS (
-       SELECT id,stay_date,line_position,
-         SUM(gross_room_amount) OVER scope AS amount,
-         row_number() OVER (scope ORDER BY source_revision DESC,created_at DESC,id DESC) AS tip
-       FROM booking.nightly_revenue_evidence
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
-         AND economic_event<>'retained_charge'
-       WINDOW scope AS (PARTITION BY stay_date,line_position)
-     ), tips AS (
-       SELECT id,stay_date,amount FROM evidence_state WHERE tip=1 AND line_position=$6::int
-         AND stay_date >= $4::date AND stay_date < $5::date
-     )
-     SELECT array_agg(tips.id::text ORDER BY tips.stay_date)
-         FILTER (WHERE tips.id IS NOT NULL) AS "evidenceIds",
-       COUNT(tips.id)::int AS "evidenceCount",($5::date-$4::date)::int AS "nightCount",
-       (target.base_rate_amount * ($5::date-$4::date))::text AS "targetTotal",
-       target.currency,location.timezone
-     FROM pms.room_types target
-     LEFT JOIN hotel_catalog.property_locations location ON location.property_id=target.property_id
-     LEFT JOIN tips ON TRUE
-     WHERE target.property_id=$1::uuid AND target.id=$3::uuid
-     GROUP BY target.base_rate_amount,target.currency,location.timezone`,
-    [
-      command.propertyId,
-      command.guestBookingId,
-      targetRoomTypeId,
-      source.checkIn,
-      source.checkOut,
-      source.position,
-    ],
+  throw Object.assign(
+    new Error("Pricing is unavailable while the TypeScript pricing system is rebuilt."),
+    { statusCode: 503, code: "PRICING_UNAVAILABLE" },
   );
-  const scope = result.rows[0];
-  if (
-    !scope?.timezone ||
-    !scope.targetTotal ||
-    !scope.currency ||
-    !scope.evidenceIds?.length ||
-    scope.evidenceCount !== scope.nightCount
-  )
-    return assignmentConflict(
-      "assignment_conflict",
-      "Target rate requires exact manual price evidence.",
-    );
-  try {
-    await correctBookingPmsManualPrices(
-      client,
-      {
-        propertyId: command.propertyId,
-        guestBookingId: command.guestBookingId,
-        idempotencyKey: `${command.idempotencyKey}:target-base`,
-        accountingDate: [propertyDate(acceptedAt, scope.timezone), previousDate(source.checkOut)]
-          .sort()
-          .at(-1)!,
-        pricing: {
-          kind: "equal_inferred",
-          targetEvidenceIds: scope.evidenceIds,
-          replacementTotal: { amountDecimal: scope.targetTotal, currency: scope.currency },
-        },
-      },
-      acceptedAt,
-      { allowNoChange: true, requirePricedTargets: true },
-    );
-  } catch (error) {
-    if (
-      error instanceof ManualPriceCorrectionEvidenceError ||
-      error instanceof ManualPriceCorrectionStateError
-    )
-      return assignmentConflict("assignment_conflict", error.message);
-    throw error;
-  }
-  return { ok: true };
 }
-
-const previousDate = (date: string) =>
-  new Date(Date.parse(`${date}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
 
 type AssignmentInventoryTransfer = {
   sourceRoomTypeId: string;
@@ -6676,6 +6400,8 @@ async function findAssignmentsForOperationalCommand(
       AND booking.property_id = assignment.property_id
      WHERE assignment.property_id = $1::uuid
        AND assignment.guest_booking_id = $2::uuid
+       AND NOT (assignment.assignment_status = 'released'
+         AND assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
        AND (
          ($3::uuid IS NOT NULL AND assignment.id = $3::uuid)
          OR ($3::uuid IS NULL)
@@ -7475,7 +7201,11 @@ function assignmentConflict(
 }
 
 function operationalConflict(
-  code: "version_conflict" | "idempotency_conflict" | "room_unavailable",
+  code:
+    | "version_conflict"
+    | "idempotency_conflict"
+    | "room_unavailable"
+    | "bank_transfer_unavailable",
   message: string,
 ): Exclude<PmsOperationalCommandResult, { ok: true }> {
   return {
@@ -7593,7 +7323,7 @@ function checkoutChargeConflict(
 }
 
 function roomTypeConflict(
-  code: "idempotency_conflict" | "room_type_conflict",
+  code: "idempotency_conflict" | "room_type_conflict" | "version_conflict",
   message: string,
 ): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
   return {
@@ -7601,6 +7331,24 @@ function roomTypeConflict(
     statusCode: 409,
     code,
     message,
+  };
+}
+
+function roomTypeRetireConflict(
+  code: "idempotency_conflict" | "version_conflict" | "room_type_retirement_blocked",
+  message: string,
+): Exclude<PmsRoomTypeRetireCommandResult, { ok: true }> {
+  return { ok: false, statusCode: 409, code, message };
+}
+
+function roomTypeRetireNotFound(
+  roomTypeId: string,
+): Exclude<PmsRoomTypeRetireCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "room_type_not_found",
+    message: `PMS room type ${roomTypeId} was not found.`,
   };
 }
 
@@ -7821,6 +7569,7 @@ function isPmsRoomType(value: unknown): value is PmsRoomType {
   const roomType = value as PmsRoomType;
   return (
     typeof roomType.roomTypeId === "string" &&
+    typeof roomType.version === "string" &&
     typeof roomType.name === "string" &&
     typeof roomType.description === "string" &&
     (roomType.category === null || typeof roomType.category === "string") &&
@@ -7831,6 +7580,29 @@ function isPmsRoomType(value: unknown): value is PmsRoomType {
     typeof roomType.sortOrder === "number" &&
     Array.isArray(roomType.ratePlans) &&
     typeof roomType.roomCount === "number"
+  );
+}
+
+function isPmsRoomTypeRetirementImpact(value: unknown): value is PmsRoomTypeRetirementImpact {
+  if (!value || typeof value !== "object") return false;
+  const impact = value as PmsRoomTypeRetirementImpact;
+  return (
+    impact.contractVersion === PMS_ROOM_TYPE_LIFECYCLE_CONTRACT_VERSION &&
+    typeof impact.propertyId === "string" &&
+    typeof impact.roomTypeId === "string" &&
+    typeof impact.version === "string" &&
+    typeof impact.canRetire === "boolean" &&
+    Array.isArray(impact.blockers) &&
+    impact.blockers.every(
+      (blocker) =>
+        !!blocker &&
+        typeof blocker === "object" &&
+        typeof blocker.category === "string" &&
+        typeof blocker.code === "string" &&
+        Number.isInteger(blocker.affectedCount) &&
+        blocker.affectedCount > 0 &&
+        typeof blocker.action === "string",
+    )
   );
 }
 

@@ -12,7 +12,72 @@ import {
 } from "./bookingEmails.js";
 
 describe("booking lifecycle email jobs", () => {
-  it("enqueues a bank-transfer reserved-pending-payment email with details and deadline", async () => {
+  it("includes every accommodation name in confirmation email content", async () => {
+    const target = createTargetEmailStore();
+    const input = bookingEmailInput({ kind: "final_confirmation" });
+    input.booking.accommodation = "2 × Double + 1 × Twin";
+    await enqueueBookingLifecycleEmailJob(target, input);
+    const payload = JSON.parse(
+      String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+    );
+    expect(payload.text).toContain("Accommodation: 2 × Double + 1 × Twin");
+  });
+
+  it("deduplicates retries but sends each accepted host date revision", async () => {
+    const target = createTargetEmailStore();
+    const enqueue = (revision: string) =>
+      enqueueBookingLifecycleEmailJob(
+        target,
+        bookingEmailInput({
+          kind: "booking_updated",
+          transition: {
+            eventType: "guest_booking.host_dates_updated",
+            fromStatus: "confirmed",
+            toStatus: "confirmed",
+            revision,
+          },
+        }),
+      );
+    const first = await enqueue("preview-one");
+    const retry = await enqueue("preview-one");
+    const second = await enqueue("preview-two");
+    expect(retry.jobKey).toBe(first.jobKey);
+    expect(second.jobKey).not.toBe(first.jobKey);
+    expect(target.requiredCall("INSERT INTO platform.jobs").values?.[2]).toBe(
+      "email.booking-updated",
+    );
+  });
+
+  it.each([undefined, "  ", "Sorry.\r\n\r\nCall us.\r\n<script>alert(1)</script>"])(
+    "renders optional cancellation text safely with paragraphs: %s",
+    async (guestMessage) => {
+      const target = createTargetEmailStore();
+      await enqueueBookingLifecycleEmailJob(
+        target,
+        bookingEmailInput({
+          kind: "booking_canceled",
+          guestMessage,
+          transition: {
+            eventType: "guest_booking.canceled",
+            fromStatus: "confirmed",
+            toStatus: "canceled",
+            reason: "property_cancellation",
+          },
+        }),
+      );
+      const payload = JSON.parse(
+        String(target.requiredCall("INSERT INTO platform.jobs").values?.[8]),
+      );
+      expect(payload.subject).toContain("Booking canceled");
+      expect(payload.text).toContain("We've canceled your booking");
+      expect(payload.html).toBeUndefined();
+      if (guestMessage?.trim())
+        expect(payload.text).toContain(`Message from us:\n${guestMessage.replace(/\r\n/g, "\n")}`);
+      else expect(payload.text).not.toContain("Message from us:");
+    },
+  );
+
+  it("enqueues a bank-transfer email without storing credentials", async () => {
     const target = createTargetEmailStore();
 
     const result = await enqueueBookingLifecycleEmailJob(
@@ -43,13 +108,14 @@ describe("booking lifecycle email jobs", () => {
     expect(jobInsert.values?.[2]).toBe(BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE);
 
     const payload = JSON.parse(String(jobInsert.values?.[8]));
+    expect(payload.emailProduct).toBe("booking");
+    expect(jobInsert.text).toContain("ON CONFLICT (queue_name, job_key) DO NOTHING");
     expect(payload.subject).toContain("reserved pending payment");
     expect(payload.text).toContain("We've reserved your room");
     expect(payload.text).toContain("Payment deadline: 2026-09-02T10:00:00.000Z");
-    expect(payload.text).toContain('"iban":"DE89370400440532013000"');
-    expect(payload.bankTransferDetails).toMatchObject({
-      iban: "DE89370400440532013000",
-    });
+    expect(JSON.stringify(payload)).not.toContain("DE89370400440532013000");
+    expect(payload.bankTransferDetails).toBeUndefined();
+    expect(payload.requiresBankTransferInstructions).toBe(true);
 
     expect(target.requiredCall("INSERT INTO platform.domain_events").values?.[1]).toBe(
       "booking.notification.reserved_pending_payment_requested",
@@ -59,13 +125,14 @@ describe("booking lifecycle email jobs", () => {
     );
   });
 
-  it("renders the final confirmation email without the removed extra paragraph", async () => {
+  it("renders confirmation resends without requesting protected bank instructions", async () => {
     const target = createTargetEmailStore();
 
     await enqueueBookingLifecycleEmailJob(
       target,
       bookingEmailInput({
         kind: "final_confirmation",
+        resendKey: "booking.confirmation.resend:test",
       }),
     );
 
@@ -74,6 +141,7 @@ describe("booking lifecycle email jobs", () => {
 
     const payload = JSON.parse(String(jobInsert.values?.[8]));
     expect(payload.template).toBe("booking_final_confirmation");
+    expect(payload.requiresBankTransferInstructions).toBe(false);
     expect(payload.text).toContain("We look forward to welcoming you!");
     expect(payload.text).not.toContain("You can look up your booking anytime");
     expect(payload.text.split("We look forward to welcoming you!")[1]).toBe("");
@@ -246,7 +314,20 @@ describe("booking lifecycle email jobs", () => {
     },
   );
 
-  it("queues an auditable host failure instead of using the guest or creator address", async () => {
+  it.each([null, "", "invalid", "guest@example.test\nother@example.test"])(
+    "rejects a directly supplied invalid host recipient: %s",
+    async (email) => {
+      const target = createTargetEmailStore();
+      const input = bookingEmailInput({ kind: "host_request_updated" });
+      input.recipient = { role: "host", email };
+      await expect(enqueueBookingLifecycleEmailJob(target, input)).rejects.toThrow(
+        "A valid host notification recipient is required.",
+      );
+      expect(target.calls).toHaveLength(0);
+    },
+  );
+
+  it("records a missing host recipient without queuing an undeliverable job", async () => {
     const target = createTargetEmailStore({ hostEmail: null });
 
     const enqueued = await enqueueBookingTransitionNotifications(target, {
@@ -260,16 +341,23 @@ describe("booking lifecycle email jobs", () => {
       },
     });
 
-    expect(enqueued).toHaveLength(2);
-    expect(enqueued[1]?.jobKey).toContain(":recipient:host:");
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]?.jobKey).toContain(":recipient:guest:");
     const payloads = target.calls
       .filter((call) => call.text.includes("INSERT INTO platform.jobs"))
       .map((call) => JSON.parse(String(call.values?.[8])));
-    expect(payloads).toContainEqual(expect.objectContaining({ to: null, recipientRole: "host" }));
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].recipientRole).toBe("guest");
+    const audit = target.requiredCall("'booking.notification.missing_recipient'");
+    expect(JSON.parse(String(audit.values?.[8]))).toMatchObject({
+      reason: "host_recipient_missing",
+      outcome: "blocked",
+      recipientRole: "host",
+    });
     const recipientQuery = target.requiredCall('AS "hostEmail"').text;
     expect(recipientQuery).toContain("contact.purpose = 'operations'");
     expect(recipientQuery).toContain(
-      "contact.purpose = 'general' AND contact.source_system = 'booking'",
+      "contact.purpose = 'general' AND contact.source_system IN ('platform', 'booking')",
     );
     expect(recipientQuery).not.toContain("contact.purpose = 'creator'");
   });

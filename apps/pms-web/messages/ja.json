@@ -1,11 +1,13 @@
 {
+  "dashboard.reviewNoShow": "ノーショーを確認…",
+  "checkOut.reviewNoShow": "ノーショーを確認…",
   "layout.header.signOut": "ログアウト",
   "layout.header.noProperties": "施設なし",
   "layout.header.user": "ユーザー",
   "layout.header.language": "言語",
   "layout.header.currency": "通貨",
   "layout.sidebar.propertyManagerDescription": "運営・在庫管理",
-  "layout.sidebar.creatorMarketplace": "Vayada マーケットプレイス",
+  "layout.sidebar.creatorMarketplace": "vayada マーケットプレイス",
   "layout.sidebar.creatorMarketplaceDescription": "クリエイター・コラボレーション",
   "layout.sidebar.bookingEngineDescription": "直接予約・収益",
   "common.save": "保存",
@@ -616,5 +618,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "到着 • {date}",
+  "dashboard.departuresOn": "出発 • {date}",
+  "dashboard.noArrivalsOnDate": "この日の到着はありません",
+  "dashboard.noDeparturesOnDate": "この日の出発はありません",
+  "dashboard.previousDay": "前日",
+  "dashboard.nextDay": "翌日"
 }

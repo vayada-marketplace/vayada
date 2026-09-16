@@ -1,6 +1,16 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+  ReactNode,
+  Suspense,
+} from "react";
+import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { generateColorPalette } from "@/lib/utils/colors";
@@ -42,6 +52,7 @@ interface HotelContextValue {
   addons: Addon[];
   loading: boolean;
   roomsLoading: boolean;
+  searchMessage: string | null;
   error: string | null;
   locale: string;
   slug: string;
@@ -50,6 +61,7 @@ interface HotelContextValue {
     checkOut?: string,
     adults?: number,
     children?: number,
+    roomCount?: number,
   ) => Promise<void>;
 }
 
@@ -59,6 +71,7 @@ const HotelContext = createContext<HotelContextValue>({
   addons: [],
   loading: true,
   roomsLoading: false,
+  searchMessage: null,
   error: null,
   locale: "en",
   slug: "",
@@ -124,6 +137,8 @@ export function HotelProvider({
   const [addons, setAddons] = useState<Addon[]>([]);
   const [loading, setLoading] = useState(true);
   const [roomsLoading, setRoomsLoading] = useState(false);
+  const [searchMessage, setSearchMessage] = useState<string | null>(null);
+  const searchVersion = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,47 +184,40 @@ export function HotelProvider({
   }, [locale, slug, slugResolved]);
 
   const refetchRooms = useCallback(
-    async (checkIn?: string, checkOut?: string, adults?: number, children?: number) => {
+    async (
+      checkIn?: string,
+      checkOut?: string,
+      adults?: number,
+      children?: number,
+      roomCount?: number,
+    ) => {
+      const version = ++searchVersion.current;
       setRoomsLoading(true);
+      setSearchMessage(null);
       try {
         if (!slug) return;
-        const roomsData = await hotelService.getRooms(
+        const result = await hotelService.searchRooms(
           slug,
           checkIn,
           checkOut,
           adults,
           children,
           locale,
+          roomCount,
         );
-        setRooms(roomsData);
-      } catch (err) {
-        console.error("Failed to refetch rooms", err);
+        if (version !== searchVersion.current) return;
+        setRooms(result.rooms);
+        setSearchMessage(result.searchMessage);
+      } catch {
+        if (version !== searchVersion.current) return;
+        setRooms([]);
+        setSearchMessage("availabilityError");
       } finally {
-        setRoomsLoading(false);
+        if (version === searchVersion.current) setRoomsLoading(false);
       }
     },
     [locale, slug],
   );
-
-  // Record affiliate click once per session per (slug, ref). The
-  // middleware drops the ref into a 30-day cookie on first arrival;
-  // this effect turns that cookie into a real click row in the
-  // affiliate_clicks table so conversion-rate stats are meaningful.
-  useEffect(() => {
-    if (!slugResolved || !slug) return;
-    const refMatch = document.cookie.match(/(?:^|; )ref=([^;]+)/);
-    const refCode = refMatch ? decodeURIComponent(refMatch[1]) : null;
-    if (!refCode) return;
-    const sessionKey = `affClickRecorded:${slug}:${refCode}`;
-    try {
-      if (sessionStorage.getItem(sessionKey)) return;
-      sessionStorage.setItem(sessionKey, "1");
-    } catch {
-      // sessionStorage unavailable (private mode etc.) — fall through
-      // and just fire the call; worst case is one extra click per visit.
-    }
-    hotelService.recordAffiliateClick(slug, refCode);
-  }, [slug, slugResolved]);
 
   // Apply branding colors as CSS variables
   useEffect(() => {
@@ -305,6 +313,7 @@ export function HotelProvider({
         addons,
         loading,
         roomsLoading,
+        searchMessage,
         error,
         locale,
         slug: slug ?? "",
@@ -312,6 +321,11 @@ export function HotelProvider({
       }}
     >
       {children}
+      {slugResolved && slug && (
+        <Suspense fallback={null}>
+          <AffiliateClickTracker slug={slug} />
+        </Suspense>
+      )}
     </HotelContext.Provider>
   );
 }
@@ -322,8 +336,9 @@ export function useHotel() {
 }
 
 export function useRooms() {
-  const { rooms, loading, roomsLoading, error, refetchRooms } = useContext(HotelContext);
-  return { rooms, loading, roomsLoading, error, refetchRooms };
+  const { rooms, loading, roomsLoading, searchMessage, error, refetchRooms } =
+    useContext(HotelContext);
+  return { rooms, loading, roomsLoading, searchMessage, error, refetchRooms };
 }
 
 export function useAddons() {

@@ -1,9 +1,11 @@
 "use client";
+import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
 
+import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { useState, useEffect, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { paymentMethodLabelKey, type PaymentMethodLabelKey } from "@vayada/locale-constants";
-import { Link } from "@/i18n/navigation";
+import { Link, useRouter } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import Image from "next/image";
@@ -17,7 +19,6 @@ import {
   type BookingCreateRequest,
   type BookingQuote,
 } from "@/services/api/booking";
-import { trackEvent } from "@/services/api/tracking";
 import { ApiError } from "@/services/api/client";
 import {
   clearPendingBookingCreate,
@@ -102,6 +103,8 @@ export default function BookingConfirmationPageClient({
   emailParam?: string;
   tokenParam?: string;
 }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
   const t = useTranslations("confirmation");
   const locale = useLocale();
   const tc = useTranslations("common");
@@ -127,10 +130,13 @@ export default function BookingConfirmationPageClient({
   // challenge, replay the original create command: the backend checks the same
   // PaymentIntent and materializes the booking without charging again.
   useEffect(() => {
-    trackEvent(slug, "completed_booking");
     setHydrateError(false);
     const stored = readLastBooking();
-    if (stored && stored.bookingReference === reference) {
+    if (
+      stored &&
+      stored.bookingReference === reference &&
+      !(stored.paymentMethod === "bank_transfer" && tokenParam)
+    ) {
       const guest = readGuestDetails();
       const normalized = toConfirmationBooking(stored, {
         hotelName: hotel.name,
@@ -186,6 +192,7 @@ export default function BookingConfirmationPageClient({
                 addonTotal: quote.addonTotal,
                 addonIds: request.addonIds,
                 addonQuantities: request.addonQuantities,
+                addonPackageQuantities: request.addonPackageQuantities,
                 addonDates: request.addonDates,
                 currency: quote.currency,
                 paymentMethod: "card",
@@ -328,11 +335,15 @@ export default function BookingConfirmationPageClient({
     const poll = async () => {
       try {
         const result = await bookingService.getStatus(slug, reference, booking.guestEmail);
-        if (result.status !== status) {
+        if (result.status !== status || result.canEditRequest !== booking.canEditRequest) {
           setStatus(result.status);
           // Update stored booking
           if (booking) {
-            const updated = { ...booking, status: result.status as Booking["status"] };
+            const updated = {
+              ...booking,
+              status: result.status as Booking["status"],
+              canEditRequest: result.canEditRequest,
+            };
             setBooking(updated);
             saveLastBooking(updated);
           }
@@ -591,10 +602,23 @@ export default function BookingConfirmationPageClient({
                 <span className="text-gray-600">{t("room")}</span>
                 <span className="font-medium text-gray-900">
                   {booking
-                    ? `${displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`
+                    ? `${!booking.roomSelection && displayedRooms > 1 ? `${displayedRooms}× ` : ""}${booking.roomName || t("room")}`
                     : "—"}
                 </span>
               </div>
+              {booking?.mealDescription && (
+                <p className="py-3 text-sm text-gray-700">{booking.mealDescription}</p>
+              )}
+              {booking?.roomLines && (
+                <div className="py-4">
+                  <RoomSelectionSummary
+                    lines={booking.roomLines}
+                    currency={booking.currency}
+                    checkIn={booking.checkIn}
+                    timezone={hotel.timezone}
+                  />
+                </div>
+              )}
               {booking?.unitNames && booking.unitNames.length > 0 && (
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("unit")}</span>
@@ -606,13 +630,13 @@ export default function BookingConfirmationPageClient({
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t("checkIn")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : "—"}
+                  {booking?.checkIn ? `${booking.checkIn}, ${formatCheckInTime(hotel)}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
                 <span className="text-gray-600">{t("checkOut")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : "—"}
+                  {booking?.checkOut ? `${booking.checkOut}, ${formatCheckOutTime(hotel)}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
@@ -630,16 +654,20 @@ export default function BookingConfirmationPageClient({
                 </span>
               </div>
               {booking?.addonIds && booking.addonIds.length > 0 && (
-                <div className="py-3">
-                  <p className="text-gray-600 mb-2">{t("addons") || "Add-ons"}</p>
-                  <div className="space-y-1.5">
+                <div className="flex justify-between gap-4 py-3">
+                  <span className="text-gray-600">{t("addons") || "Add-ons"}</span>
+                  <div className="space-y-1.5 text-right">
                     {booking.addonIds.map((addonId, idx) => {
-                      const qty = booking.addonQuantities?.[addonId];
+                      const qty =
+                        (booking.addonQuantities?.[addonId] ?? 1) *
+                        (booking.addonPackageQuantities?.[addonId] ?? 1);
                       const name = booking.addonNames?.[idx] || addonId;
                       return (
-                        <div key={addonId} className="flex justify-between text-sm">
-                          <span className="font-medium text-gray-900">{name}</span>
-                          {qty && qty > 1 ? <span className="text-gray-500">× {qty}</span> : null}
+                        <div key={addonId} className="font-medium text-gray-900">
+                          {name}
+                          {qty && qty > 1 ? (
+                            <span className="ml-2 font-normal text-gray-500">× {qty}</span>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -701,13 +729,21 @@ export default function BookingConfirmationPageClient({
 
           {(isPending || isConfirmed) &&
             booking?.paymentMethod === "bank_transfer" &&
-            booking.paymentStatus === "unpaid" &&
-            booking.bankTransferDetails && (
+            ["unpaid", "pending", "partially_paid"].includes(booking.paymentStatus ?? "") && (
               <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
                 <p className="text-sm font-semibold text-blue-900">{t("bankTransferPending")}</p>
-                <p className="text-sm text-blue-800 mt-2 whitespace-pre-line">
-                  {booking.bankTransferDetails}
-                </p>
+                {booking.bankTransferDetails ? (
+                  <p className="text-sm text-blue-800 mt-2 whitespace-pre-line">
+                    {booking.bankTransferDetails}
+                  </p>
+                ) : (
+                  <Link
+                    href={manageBookingHref}
+                    className="inline-block text-sm text-blue-800 mt-2 underline"
+                  >
+                    {t("manageBooking")}
+                  </Link>
+                )}
                 {booking.paymentDeadline && (
                   <p className="text-xs text-blue-700 mt-3">
                     {t("paymentDeadline")}:{" "}
@@ -785,10 +821,40 @@ export default function BookingConfirmationPageClient({
               </div>
             )}
 
-          {/* Withdraw button for pending bookings */}
+          {/* Pending request actions use server-owned eligibility. */}
           {isPending && (
             <div className="mt-8">
               {withdrawError && <p className="text-sm text-red-600 mb-3">{withdrawError}</p>}
+              {booking?.canEditRequest &&
+                (!booking.hostResponseDeadline ||
+                  Date.parse(booking.hostResponseDeadline) > Date.now()) && (
+                  <button
+                    type="button"
+                    disabled={editing || withdrawing}
+                    className="mr-3 px-6 py-3 border border-gray-300 font-semibold rounded-full hover:bg-gray-50 disabled:opacity-50"
+                    onClick={async () => {
+                      setEditing(true);
+                      setWithdrawError("");
+                      try {
+                        const token =
+                          tokenParam ||
+                          (await bookingService.lookup(slug, reference, booking.guestEmail))
+                            .confirmationToken;
+                        router.push(
+                          `/booking/${encodeURIComponent(reference)}/edit-request?token=${encodeURIComponent(token)}`,
+                        );
+                      } catch (error) {
+                        setWithdrawError(
+                          error instanceof Error ? error.message : "Unable to edit request.",
+                        );
+                      } finally {
+                        setEditing(false);
+                      }
+                    }}
+                  >
+                    {editing ? "Opening…" : "Edit Request"}
+                  </button>
+                )}
               <button
                 onClick={handleWithdraw}
                 disabled={withdrawing}

@@ -27,12 +27,6 @@ export type PmsModuleActivationsResponse = {
 
 export type PmsModuleActivationRepository = {
   list(context: RequestContext, propertyId: string): Promise<PmsModuleActivation[]>;
-  update(
-    context: RequestContext,
-    propertyId: string,
-    moduleId: string,
-    isActive: boolean,
-  ): Promise<PmsModuleActivation>;
   close?(): Promise<void>;
 };
 
@@ -115,8 +109,11 @@ export async function registerPmsModuleActivationRoutes(
       const parsed = parseModuleActivationUpdateBody(moduleId, body);
       if (!parsed.ok) return reply.status(400).send(parsed.error);
 
-      const context = enforceModuleActivationManagePolicy(request, propertyId);
-      return repository.update(context, propertyId, moduleId, parsed.isActive);
+      enforceModuleActivationManagePolicy(request, propertyId);
+      return reply.header("Cache-Control", "no-store").code(410).send({
+        code: "affiliate_module_activation_retired",
+        message: "Legacy affiliate module changes are no longer available.",
+      });
     },
   );
 }
@@ -217,7 +214,7 @@ function moduleActivationsResponse(
   return {
     hotelId: propertyId,
     canManage,
-    supportedModules: [...PMS_MODULE_IDS],
+    supportedModules: [],
     activeModules: supportedActivations
       .filter((activation) => activation.isActive)
       .map((activation) => activation.moduleId),
@@ -291,91 +288,6 @@ export function createPgPmsModuleActivationRepository(config: {
         ],
       );
       return result.rows.map(toModuleActivation);
-    },
-
-    async update(context, propertyId, moduleId, isActive) {
-      const entitlementKey = moduleEntitlementKey(moduleId);
-      const result = await pool.query<PmsModuleActivationRow>(
-        `INSERT INTO identity.product_entitlements (
-           organization_id,
-           product,
-           entitlement_key,
-           status,
-           resource_product,
-           resource_type,
-           resource_id,
-           starts_at,
-           expires_at,
-           metadata
-         )
-         VALUES (
-           $1::uuid,
-           'pms',
-           $2,
-           CASE WHEN $3::boolean THEN 'active' ELSE 'suspended' END,
-           'pms',
-           'pms_property',
-           $4,
-           CASE WHEN $3::boolean THEN now() ELSE NULL END,
-           CASE WHEN $3::boolean THEN NULL ELSE now() END,
-           $5::jsonb
-         )
-         ON CONFLICT (
-           organization_id,
-           product,
-           entitlement_key,
-           COALESCE(resource_product, ''),
-           COALESCE(resource_type, ''),
-           COALESCE(resource_id, '')
-         ) DO UPDATE SET
-           status = EXCLUDED.status,
-           starts_at = CASE
-             WHEN EXCLUDED.status = 'active'
-               THEN COALESCE(identity.product_entitlements.starts_at, EXCLUDED.starts_at, now())
-             ELSE identity.product_entitlements.starts_at
-           END,
-           expires_at = CASE
-             WHEN EXCLUDED.status = 'active' THEN NULL
-             WHEN identity.product_entitlements.status IS DISTINCT FROM EXCLUDED.status
-               OR identity.product_entitlements.expires_at IS NULL
-               THEN COALESCE(EXCLUDED.expires_at, now())
-             ELSE identity.product_entitlements.expires_at
-           END,
-           metadata = CASE
-             WHEN identity.product_entitlements.status IS DISTINCT FROM EXCLUDED.status
-               OR (EXCLUDED.status = 'active' AND identity.product_entitlements.expires_at IS NOT NULL)
-               OR (EXCLUDED.status = 'active' AND identity.product_entitlements.starts_at IS NULL)
-               OR (EXCLUDED.status <> 'active' AND identity.product_entitlements.expires_at IS NULL)
-               THEN identity.product_entitlements.metadata || EXCLUDED.metadata
-             ELSE identity.product_entitlements.metadata
-           END,
-           updated_at = CASE
-             WHEN identity.product_entitlements.status IS DISTINCT FROM EXCLUDED.status
-               OR (EXCLUDED.status = 'active' AND identity.product_entitlements.expires_at IS NOT NULL)
-               OR (EXCLUDED.status = 'active' AND identity.product_entitlements.starts_at IS NULL)
-               OR (EXCLUDED.status <> 'active' AND identity.product_entitlements.expires_at IS NULL)
-               THEN now()
-             ELSE identity.product_entitlements.updated_at
-           END
-         RETURNING
-           entitlement_key AS "entitlementKey",
-           status,
-           starts_at AS "startsAt",
-           expires_at AS "expiresAt",
-           updated_at AS "updatedAt"`,
-        [
-          context.selectedOrganization.organizationId,
-          entitlementKey,
-          isActive,
-          propertyId,
-          JSON.stringify({
-            source: "feature_hub",
-            moduleId,
-            updatedByUserId: context.actor.internalUserId,
-          }),
-        ],
-      );
-      return toModuleActivation(result.rows[0]);
     },
 
     async close() {

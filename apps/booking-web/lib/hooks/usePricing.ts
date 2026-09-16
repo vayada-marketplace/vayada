@@ -11,6 +11,8 @@ import {
   groupNightlyRates,
   hasVariableNightlyRates,
 } from "@/lib/constants/booking";
+import { resolveCheckoutRoom } from "@/lib/roomSelection";
+import { useRoomSelectionQuote } from "./useRoomSelectionQuote";
 import { hotelService } from "@/services/api/hotel";
 
 export interface PromoDiscount {
@@ -28,8 +30,10 @@ export interface PricingInputs {
   rateType: string;
   roomsParam: number;
   adults: number;
+  children: number;
   selectedAddonIds: string[];
   addonQuantities: Record<string, number>;
+  addonPackageQuantities?: Record<string, number>;
   /** ISO dates per addon for perNight charges. Empty/missing → all stay dates. */
   addonDates?: Record<string, string[]>;
   promoCode: string;
@@ -71,8 +75,10 @@ export function usePricing({
   rateType,
   roomsParam,
   adults,
+  children,
   selectedAddonIds,
   addonQuantities,
+  addonPackageQuantities = {},
   addonDates,
   promoCode,
 }: PricingInputs) {
@@ -82,7 +88,50 @@ export function usePricing({
   const { slug } = useSlug();
   const { convertAndRound } = useCurrency();
 
-  const room = rooms.find((r) => r.id === roomId) || rooms[0];
+  const [, expireSelection] = useState(0);
+  const selectedExpiry = rooms.find((candidate) => candidate.id === roomId)?.combination?.expiresAt;
+  useEffect(() => {
+    if (!selectedExpiry) return;
+    const timer = setTimeout(
+      () => expireSelection((value) => value + 1),
+      Math.max(0, Math.min(2_147_483_647, Date.parse(selectedExpiry) - Date.now())),
+    );
+    return () => clearTimeout(timer);
+  }, [selectedExpiry]);
+  const room = resolveCheckoutRoom(rooms, roomId, {
+    checkIn,
+    checkOut,
+    adults,
+    children,
+    rooms: roomsParam,
+  });
+  const selectionPricing = useRoomSelectionQuote(
+    slug,
+    room?.combination
+      ? {
+          roomSelection: room.combination.roomSelection,
+          currency: room.currency,
+          roomTypeId: room.combination.roomSelection.lines[0].roomTypeId,
+          guestFirstName: "",
+          guestLastName: "",
+          guestEmail: "",
+          guestPhone: "",
+          checkIn,
+          checkOut,
+          adults,
+          children,
+          numberOfRooms: roomsParam,
+          paymentMethod: room.ratePaymentMethods?.flexible?.[0],
+          addonIds: selectedAddonIds,
+          addonQuantities,
+          addonPackageQuantities,
+          addonDates,
+          promoCode: promoCode || undefined,
+        }
+      : null,
+    room?.combination?.expiresAt,
+  );
+
   const nights = calculateNights(checkIn, checkOut);
   const roomCurrency = room?.currency || hotel?.currency || "EUR";
   const hasMismatchedNightlyRates =
@@ -113,7 +162,7 @@ export function usePricing({
   // price = unit × people × days × items, mirroring the backend in
   // pms-backend/app/services/booking_service._compute_addon_total.
   const selectedKey = selectedAddonIds.join(",");
-  const quantitiesKey = JSON.stringify(addonQuantities);
+  const quantitiesKey = JSON.stringify([addonQuantities, addonPackageQuantities]);
   const datesKey = JSON.stringify(addonDates ?? {});
   const addonTotals = useMemo(() => {
     let displayTotal = 0;
@@ -126,10 +175,14 @@ export function usePricing({
         ? Math.max(1, Math.min(count ?? Math.max(1, adults), Math.max(1, adults)))
         : 1;
       const days = addon.perNight
-        ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+        ? Math.max(
+            1,
+            Math.min(dates?.length ?? (addon.perPerson ? nights : (count ?? nights)), nights),
+          )
         : 1;
       const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1;
-      const lineTotal = addon.price * people * days * items;
+      const lineTotal =
+        addon.price * people * days * items * (addonPackageQuantities[addon.id] ?? 1);
       propertyTotal += lineTotal;
       displayTotal += convertAndRound(lineTotal, roomCurrency);
     }
@@ -144,7 +197,7 @@ export function usePricing({
   const [promoDiscount, setPromoDiscount] = useState<PromoDiscount | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   useEffect(() => {
-    if (!promoCode || !slug) {
+    if (!promoCode || !slug || !room || room.combination) {
       setPromoDiscount(null);
       setPromoError(null);
       return;
@@ -185,12 +238,35 @@ export function usePricing({
     convertAndRound,
     checkIn,
     roomId,
+    room?.combination,
   ]);
 
-  const discountAmount = promoDiscount?.amount ?? 0;
-  const grandTotal = roomTotal + addonTotal - discountAmount;
+  const automatic = rateType === "nonrefundable" ? room?.nonRefundablePromotion : room?.promotion;
+  const automaticAmount = automatic
+    ? convertAndRound(automatic.discountAmount * roomsParam, roomCurrency)
+    : 0;
+  const promotion =
+    automatic && automaticAmount > (promoDiscount?.amount ?? 0)
+      ? { ...automatic, discountAmount: automaticAmount }
+      : null;
+  const winningCode = promotion ? null : promoDiscount;
+  const discountAmount = winningCode?.amount ?? 0;
+  const grandTotal = roomTotal + addonTotal - discountAmount - (promotion?.discountAmount ?? 0);
 
-  return {
+  const authoritative = selectionPricing?.quote;
+  const combinedTotal = authoritative
+    ? convertAndRound(authoritative.totalAmount, authoritative.currency)
+    : 0;
+  const combinedAddon = authoritative
+    ? convertAndRound(authoritative.addonTotal, authoritative.currency)
+    : 0;
+  const combinedDiscount = authoritative
+    ? convertAndRound(authoritative.promoDiscount, authoritative.currency)
+    : 0;
+  const combinedPromotion = authoritative
+    ? convertAndRound(authoritative.promotionDiscount ?? 0, authoritative.currency)
+    : 0;
+  const pricing = {
     room,
     nights,
     roomCurrency,
@@ -201,9 +277,35 @@ export function usePricing({
     variableNightlyRates,
     roomTotal,
     addonTotal,
-    promoDiscount,
+    promoDiscount: winningCode,
+    promotion,
     promoError,
     discountAmount,
     grandTotal,
   };
+  return room?.combination
+    ? {
+        ...pricing,
+        quoteReady:
+          quoteReady &&
+          Boolean(authoritative && Date.parse(authoritative.expiresAt ?? "") > Date.now()),
+        roomTotal: combinedTotal - combinedAddon + combinedDiscount + combinedPromotion,
+        addonTotal: combinedAddon,
+        grandTotal: combinedTotal,
+        discountAmount: combinedDiscount,
+        promoDiscount: combinedDiscount
+          ? { type: "fixed", value: combinedDiscount, amount: combinedDiscount }
+          : null,
+        promotion: authoritative?.promotion
+          ? { ...authoritative.promotion, discountAmount: combinedPromotion }
+          : null,
+        promoError: selectionPricing?.error ?? null,
+        nightlyRate:
+          (combinedTotal - combinedAddon + combinedDiscount + combinedPromotion) /
+          Math.max(1, nights * roomsParam),
+        variableNightlyRates: false,
+        rateLineItems: [],
+        selectedRoomLines: authoritative?.roomLines ?? room.combination.roomLines,
+      }
+    : { ...pricing, selectedRoomLines: undefined };
 }

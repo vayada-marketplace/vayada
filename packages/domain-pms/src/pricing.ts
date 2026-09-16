@@ -83,12 +83,15 @@ export type FlexibleCancellationTerms = {
   }[];
 };
 
+export type PmsMealPlan = "room_only" | "breakfast";
+
 export type UpsertFlexibleRatePlanCommand = PmsPricingCommandContext & {
   readonly roomTypeId: string;
   readonly expectedRoomFactsRevision: number;
   readonly expectedPricingCurrencyRevision: number;
   readonly expectedFlexibleRatePlanRevision: number;
   readonly baseAmountDecimal: PmsDecimalAmount;
+  readonly mealPlan?: PmsMealPlan;
   readonly cancellationTerms: FlexibleCancellationTerms;
 };
 
@@ -112,6 +115,7 @@ export type FlexibleRatePlanSnapshot = {
     readonly amountDecimal: PmsDecimalAmount;
     readonly currency: PmsPricingCurrency;
   };
+  readonly mealPlan?: PmsMealPlan;
   readonly cancellationTerms: FlexibleCancellationTerms;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -478,7 +482,11 @@ export function parseUpsertFlexibleRatePlanCommand(
       "expectedFlexibleRatePlanRevision",
       "baseAmountDecimal",
       "cancellationTerms",
+      ...(isRecord(value) && Object.hasOwn(value, "mealPlan") ? ["mealPlan"] : []),
     ]) ||
+    (Object.hasOwn(value, "mealPlan") &&
+      value["mealPlan"] !== "room_only" &&
+      value["mealPlan"] !== "breakfast") ||
     !isUuid(value["roomTypeId"]) ||
     !isRevision(value["expectedRoomFactsRevision"], false) ||
     !isRevision(value["expectedPricingCurrencyRevision"], false) ||
@@ -497,6 +505,7 @@ export function parseUpsertFlexibleRatePlanCommand(
         expectedPricingCurrencyRevision: value["expectedPricingCurrencyRevision"],
         expectedFlexibleRatePlanRevision: value["expectedFlexibleRatePlanRevision"],
         baseAmountDecimal: amount,
+        ...(Object.hasOwn(value, "mealPlan") ? { mealPlan: value["mealPlan"] as PmsMealPlan } : {}),
         cancellationTerms,
       })
     : null;
@@ -524,6 +533,7 @@ export function serializeFlexibleRatePlanFingerprint(
     expectedPricingCurrencyRevision: command.expectedPricingCurrencyRevision,
     expectedFlexibleRatePlanRevision: command.expectedFlexibleRatePlanRevision,
     baseAmountDecimal: command.baseAmountDecimal,
+    ...(command.mealPlan === undefined ? {} : { mealPlan: command.mealPlan }),
     cancellationTerms: command.cancellationTerms,
   });
 }
@@ -574,7 +584,11 @@ export function parseFlexibleRatePlanSnapshot(value: unknown): FlexibleRatePlanS
       "cancellationTerms",
       "createdAt",
       "updatedAt",
+      ...(isRecord(value) && Object.hasOwn(value, "mealPlan") ? ["mealPlan"] : []),
     ]) ||
+    (Object.hasOwn(value, "mealPlan") &&
+      value["mealPlan"] !== "room_only" &&
+      value["mealPlan"] !== "breakfast") ||
     value["contractVersion"] !== PMS_PRICING_CONTRACT_VERSION ||
     !isUuid(value["propertyId"]) ||
     !isUuid(value["roomTypeId"]) ||
@@ -600,6 +614,7 @@ export function parseFlexibleRatePlanSnapshot(value: unknown): FlexibleRatePlanS
         sourceRoomFactsRevision: value["sourceRoomFactsRevision"],
         baseAmount: Object.freeze({ amountDecimal: amount, currency }),
         cancellationTerms,
+        ...(Object.hasOwn(value, "mealPlan") ? { mealPlan: value["mealPlan"] as PmsMealPlan } : {}),
         createdAt: value["createdAt"],
         updatedAt: value["updatedAt"],
       })

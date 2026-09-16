@@ -1,11 +1,13 @@
 {
+  "dashboard.reviewNoShow": "No-show bekijken…",
+  "checkOut.reviewNoShow": "No-show bekijken…",
   "layout.header.signOut": "Uitloggen",
   "layout.header.noProperties": "Geen accommodaties",
   "layout.header.user": "Gebruiker",
   "layout.header.language": "Taal",
   "layout.header.currency": "Valuta",
   "layout.sidebar.propertyManagerDescription": "Operaties & Inventaris",
-  "layout.sidebar.creatorMarketplace": "Vayada Marktplaats",
+  "layout.sidebar.creatorMarketplace": "vayada Marktplaats",
   "layout.sidebar.creatorMarketplaceDescription": "Creators & samenwerkingen",
   "layout.sidebar.bookingEngineDescription": "Directe boekingen & omzet",
   "common.save": "Opslaan",
@@ -616,5 +618,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "Aankomsten • {date}",
+  "dashboard.departuresOn": "Vertrekken • {date}",
+  "dashboard.noArrivalsOnDate": "Geen aankomsten op deze datum",
+  "dashboard.noDeparturesOnDate": "Geen vertrekken op deze datum",
+  "dashboard.previousDay": "Vorige dag",
+  "dashboard.nextDay": "Volgende dag"
 }

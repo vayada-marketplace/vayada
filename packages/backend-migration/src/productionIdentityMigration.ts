@@ -80,9 +80,9 @@ export async function runProductionIdentityTransaction(
        IN SHARE ROW EXCLUSIVE MODE`,
       );
     }
-    const rows = await services.readSnapshot(client, input.sourceRunId);
-    const existing = await services.readTarget(client, rows);
-    const plan = services.buildPlan(rows, existing);
+    const snapshot = await services.readSnapshot(client, input.sourceRunId);
+    const existing = await services.readTarget(client, snapshot.rows);
+    const plan = services.buildPlan(snapshot.rows, existing, snapshot.sourceHorizonAt);
     if (input.mode === "dry-run" || plan.blockers.length > 0) {
       await client.query("ROLLBACK");
       transactionFinished = true;
@@ -91,8 +91,16 @@ export async function runProductionIdentityTransaction(
 
     await services.writeCore(client, plan);
     await services.writePrivacyAudit(client, plan);
-    const verified = services.buildPlan(rows, await services.readTarget(client, rows));
-    if (verified.blockers.length > 0 || verified.checksum !== plan.checksum)
+    const verified = services.buildPlan(
+      snapshot.rows,
+      await services.readTarget(client, snapshot.rows),
+      snapshot.sourceHorizonAt,
+    );
+    if (
+      verified.blockers.length > 0 ||
+      verified.counts.pendingTargetWrites !== 0 ||
+      verified.checksum !== plan.checksum
+    )
       throw new Error("Post-write identity verification does not match the migration plan");
 
     await client.query("COMMIT");

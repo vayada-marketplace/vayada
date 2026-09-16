@@ -1,5 +1,9 @@
 "use client";
+import RoomSelectionSummary from "@/components/booking/RoomSelectionSummary";
+import SelectionUnavailable from "@/components/booking/SelectionUnavailable";
+import { selectionCheckoutFields } from "@/lib/roomSelection";
 
+import { formatCheckInTime, formatCheckOutTime } from "@/lib/arrivalTimes";
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -54,16 +58,12 @@ function BookPageContent() {
   const t = useTranslations("book");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
-  const { refetchRooms } = useRooms();
+  const { refetchRooms, loading: roomsInitialLoading, roomsLoading } = useRooms();
   const { addons } = useAddons();
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const { slug } = useSlug();
   const searchParams = useSearchParams();
   const roomId = searchParams.get("room") || "";
-
-  useEffect(() => {
-    trackEvent(slug, "started_booking");
-  }, [slug]);
 
   // Defensively coerce a same-day or invalid URL range to a valid one-night
   // window before anything downstream computes nights / pricing.
@@ -76,8 +76,9 @@ function BookPageContent() {
   useEffect(() => {
     const a = parseInt(searchParams.get("adults") || "2");
     const c = parseInt(searchParams.get("children") || "0");
-    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, a, c);
-  }, []);
+    if (checkIn && checkOut)
+      refetchRooms(checkIn, checkOut, a, c, Number(searchParams.get("rooms") || "1"));
+  }, [checkIn, checkOut, searchParams, refetchRooms]);
   const adultsParam = parseInt(searchParams.get("adults") || "2");
   const childrenParam = parseInt(searchParams.get("children") || "0");
   const roomsParam = parseInt(searchParams.get("rooms") || "1");
@@ -93,6 +94,11 @@ function BookPageContent() {
     selectedAddonIds.push(id);
     if (qtyStr) addonQuantities[id] = parseInt(qtyStr);
   }
+  const addonPackageQuantities: Record<string, number> = {};
+  for (const entry of (searchParams.get("addonPackages") || "").split(",").filter(Boolean)) {
+    const [id, quantity] = entry.split(":");
+    if (selectedAddonIds.includes(id)) addonPackageQuantities[id] = Number(quantity);
+  }
   const addonDates: Record<string, string[]> = {};
   for (const entry of (searchParams.get("addonDates") || "").split(",").filter(Boolean)) {
     const [id, datesStr] = entry.split(":");
@@ -102,6 +108,7 @@ function BookPageContent() {
 
   const {
     room,
+    selectedRoomLines,
     nights,
     quoteReady,
     nightlyRate,
@@ -109,6 +116,7 @@ function BookPageContent() {
     variableNightlyRates,
     roomTotal,
     promoDiscount,
+    promotion,
     promoError,
     discountAmount,
     grandTotal,
@@ -119,8 +127,10 @@ function BookPageContent() {
     rateType,
     roomsParam,
     adults: adultsParam,
+    children: childrenParam,
     selectedAddonIds,
     addonQuantities,
+    addonPackageQuantities,
     addonDates,
     promoCode: promoCodeParam,
   });
@@ -239,7 +249,8 @@ function BookPageContent() {
         : "";
 
       saveGuestDetails({
-        roomTypeId: room.id,
+        ...selectionCheckoutFields(room),
+        selectionId: room.combination ? room.id : undefined,
         guestFirstName: firstName,
         guestLastName: lastName,
         guestEmail: email,
@@ -257,6 +268,7 @@ function BookPageContent() {
         referralCode,
         addonIds: selectedAddonIds,
         addonQuantities,
+        addonPackageQuantities,
         addonDates,
       });
 
@@ -271,6 +283,7 @@ function BookPageContent() {
         rateType,
       });
       if (promoCodeParam) params.set("promoCode", promoCodeParam);
+      trackEvent(slug, "details_completed");
       router.push(`/payment?${params.toString()}`);
     } catch (err: any) {
       setSubmitError(err.message || "Something went wrong");
@@ -279,13 +292,13 @@ function BookPageContent() {
     }
   };
 
-  if (!room) {
+  if (!room)
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-500">No room selected. Please go back and select a room.</p>
-      </div>
+      <SelectionUnavailable
+        loading={roomsInitialLoading || roomsLoading}
+        search={searchParams.toString()}
+      />
     );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -329,7 +342,7 @@ function BookPageContent() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-gray-900">
-                    {roomsParam > 1 ? `${roomsParam}× ` : ""}
+                    {!room.combination && roomsParam > 1 ? `${roomsParam}× ` : ""}
                     {room.name}
                   </p>
                   <p className="text-sm text-gray-500">
@@ -342,13 +355,26 @@ function BookPageContent() {
                     {formatPrice(roomTotal, selectedCurrency)}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {variableNightlyRates
-                      ? roomRateBreakdown
-                      : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
+                    {room.combination
+                      ? tc("nights", { count: nights })
+                      : variableNightlyRates
+                        ? roomRateBreakdown
+                        : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
                   </p>
                 </div>
               </div>
 
+              {selectedRoomLines && (
+                <div className="pb-5">
+                  <RoomSelectionSummary
+                    lines={selectedRoomLines}
+                    currency={room.currency}
+                    checkIn={checkIn}
+                    timezone={hotel.timezone}
+                    beforeDiscounts
+                  />
+                </div>
+              )}
               {/* Selected Addons */}
               {selectedAddonIds.length > 0 && (
                 <div className="pb-5 border-b border-gray-100">
@@ -364,15 +390,27 @@ function BookPageContent() {
                           )
                         : 1;
                       const days = addon.perNight
-                        ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+                        ? Math.max(
+                            1,
+                            Math.min(
+                              dates?.length ?? (addon.perPerson ? nights : (count ?? nights)),
+                              nights,
+                            ),
+                          )
                         : 1;
                       const items =
                         !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1;
                       const linePrice = convertAndRound(
-                        addon.price * people * days * items,
+                        addon.price *
+                          people *
+                          days *
+                          items *
+                          (addonPackageQuantities[addon.id] ?? 1),
                         addon.currency,
                       );
                       const parts: string[] = [];
+                      if ((addonPackageQuantities[addon.id] ?? 1) > 1)
+                        parts.push(`×${addonPackageQuantities[addon.id]}`);
                       if (addon.perPerson && people < adultsParam)
                         parts.push(`${people}/${adultsParam} ${tc("guests").toLowerCase()}`);
                       if (addon.perNight && days < nights)
@@ -395,10 +433,16 @@ function BookPageContent() {
               )}
 
               {/* Promo Discount */}
-              {promoError && promoCodeParam && (
+              {promoError && (promoCodeParam || room.combination) && (
                 <p role="alert" className="border-b border-red-100 py-3 text-sm text-red-600">
                   {promoError}
                 </p>
+              )}
+              {promotion && (
+                <div className="flex justify-between pt-2 text-sm text-primary-600">
+                  <span>{promotion.name}</span>
+                  <span>-{formatPrice(promotion.discountAmount, selectedCurrency)}</span>
+                </div>
               )}
               {promoDiscount && (
                 <div className="flex items-center justify-between pt-3 pb-3 border-b border-gray-100">
@@ -684,9 +728,11 @@ function BookPageContent() {
                   <span className="text-gray-500">{t("checkIn")}</span>
                   <span className="font-semibold text-gray-900 text-right">
                     {formatDate(checkIn, locale)}
-                    {hotel.checkInTime && (
+                    {formatCheckInTime(hotel) && (
                       <span className="block text-xs font-normal text-gray-500">
-                        {tc("checkInFrom", { time: hotel.checkInTime })}
+                        {tc(hotel.checkInUntil ? "checkInWindow" : "checkInFrom", {
+                          time: formatCheckInTime(hotel),
+                        })}
                       </span>
                     )}
                   </span>
@@ -695,9 +741,11 @@ function BookPageContent() {
                   <span className="text-gray-500">{t("checkOut")}</span>
                   <span className="font-semibold text-gray-900 text-right">
                     {formatDate(checkOut, locale)}
-                    {hotel.checkOutTime && (
+                    {formatCheckOutTime(hotel) && (
                       <span className="block text-xs font-normal text-gray-500">
-                        {tc("checkOutBy", { time: hotel.checkOutTime })}
+                        {tc(hotel.checkOutFrom ? "checkOutWindow" : "checkOutBy", {
+                          time: formatCheckOutTime(hotel),
+                        })}
                       </span>
                     )}
                   </span>
@@ -721,9 +769,11 @@ function BookPageContent() {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 text-right">
-                  {variableNightlyRates
-                    ? roomRateBreakdown
-                    : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
+                  {room.combination
+                    ? tc("nights", { count: nights })
+                    : variableNightlyRates
+                      ? roomRateBreakdown
+                      : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
                 </p>
                 {addons
                   .filter((a) => selectedAddonIds.includes(a.id))
@@ -737,14 +787,22 @@ function BookPageContent() {
                         )
                       : 1;
                     const days = addon.perNight
-                      ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
+                      ? Math.max(
+                          1,
+                          Math.min(
+                            dates?.length ?? (addon.perPerson ? nights : (count ?? nights)),
+                            nights,
+                          ),
+                        )
                       : 1;
                     const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1;
                     const linePrice = convertAndRound(
-                      addon.price * people * days * items,
+                      addon.price * people * days * items * (addonPackageQuantities[addon.id] ?? 1),
                       addon.currency,
                     );
                     const parts: string[] = [];
+                    if ((addonPackageQuantities[addon.id] ?? 1) > 1)
+                      parts.push(`×${addonPackageQuantities[addon.id]}`);
                     if (addon.perPerson && people < adultsParam)
                       parts.push(`${people}/${adultsParam}`);
                     if (addon.perNight && days < nights) parts.push(`${days}/${nights}`);
@@ -765,10 +823,16 @@ function BookPageContent() {
               </div>
 
               {/* Promo Discount */}
-              {promoError && promoCodeParam && (
+              {promoError && (promoCodeParam || room.combination) && (
                 <p role="alert" className="pt-2 text-sm text-red-600">
                   {promoError}
                 </p>
+              )}
+              {promotion && (
+                <div className="flex justify-between pt-2 text-sm text-primary-600">
+                  <span>{promotion.name}</span>
+                  <span>-{formatPrice(promotion.discountAmount, selectedCurrency)}</span>
+                </div>
               )}
               {promoDiscount && (
                 <div className="flex justify-between text-sm pt-2">

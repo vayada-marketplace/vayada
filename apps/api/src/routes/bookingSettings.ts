@@ -1,3 +1,4 @@
+import { parseBookingPromotions, type BookingPromotion } from "@vayada/domain-booking";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
   PmsInventoryPublicOfferProjectionPort,
@@ -10,6 +11,8 @@ import {
   isBookingAcceptanceMode,
   type BookingAcceptanceSettingsPort,
 } from "../domains/bookingAcceptanceSettings.js";
+import type { SameDayBookingSettingsPort } from "../domains/sameDayBookingSettings.js";
+import type { BookingPublicationRefreshPort } from "../domains/bookingPublicationProductionRuntime.js";
 import { syncPropertyOfferReadModels } from "./marketplaceAdmin.js";
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -222,6 +225,10 @@ export type BookingRoomFilterSettingsReadModel = {
 export type BookingDesignSettingsReadModel = {
   headerLogo?: string | null;
   headerLogoMediaObjectId?: string | null;
+  showContactButton?: boolean | null;
+  showReferAGuestButton?: boolean | null;
+  showLanguageSelector?: boolean | null;
+  showCurrencySelector?: boolean | null;
   heroImage?: string | null;
   heroHeading?: string | null;
   heroSubtext?: string | null;
@@ -311,6 +318,10 @@ export type BookingRoomFilterSettingsResponse = {
 export type BookingDesignSettingsResponse = {
   headerLogo: string;
   headerLogoMediaObjectId: string | null;
+  showContactButton: boolean;
+  showReferAGuestButton: boolean;
+  showLanguageSelector: boolean;
+  showCurrencySelector: boolean;
   heroImage: string;
   heroHeading: string;
   heroSubtext: string;
@@ -319,6 +330,7 @@ export type BookingDesignSettingsResponse = {
 };
 
 export type BookingLastMinuteSettingsResponse = {
+  promotions?: BookingPromotion[];
   enabled: boolean;
   stackWithPromo: boolean;
   tiers: BookingLastMinuteTier[];
@@ -340,6 +352,18 @@ export type BookingAcceptanceSettingsResponse = {
   propertyId: string;
   acceptanceMode: "instant" | "request";
   instantBook: boolean;
+};
+
+export type BookingSameDaySettingsResponse = {
+  contractVersion: "same-day-booking-policy.v1";
+  propertyId: string;
+  propertyTimeZone: string;
+  enabled: boolean;
+  cutoffLocalTime: string | null;
+  revision: number;
+  updatedAt: string | null;
+  replayed?: boolean;
+  channexOperationId?: string | null;
 };
 
 export type BookingPropertySettingsResponse = Record<string, unknown>;
@@ -488,6 +512,7 @@ export type BookingSettingsWriteErrorCode =
   | "inactive_entitlement"
   | "missing_resource_access"
   | "invalid_payload"
+  | "idempotency_conflict"
   | "invalid_header_logo_media"
   | "private_contact_conflict"
   | "not_found"
@@ -838,6 +863,10 @@ type TargetBookingSettingsRow = {
   filter_rooms: unknown;
   header_logo_media_object_id: string | null;
   header_logo_url: string | null;
+  show_contact_button: boolean | null;
+  show_refer_a_guest_button: boolean | null;
+  show_language_selector: boolean | null;
+  show_currency_selector: boolean | null;
   hero_image_url: string | null;
   hero_heading: string | null;
   hero_subtext: string | null;
@@ -929,6 +958,8 @@ export class BookingHeaderLogoMediaError extends Error {
     this.name = "BookingHeaderLogoMediaError";
   }
 }
+
+class SameDayIdempotencyConflictError extends Error {}
 
 const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
   WITH scoped_property_candidates AS (
@@ -1051,6 +1082,10 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
       ELSE settings.header_logo_media_object_id
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
+    settings.show_contact_button,
+    settings.show_refer_a_guest_button,
+    settings.show_language_selector,
+    settings.show_currency_selector,
     settings.hero_image_url,
     settings.hero_heading,
     settings.hero_subtext,
@@ -1154,6 +1189,10 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
       ELSE settings.header_logo_media_object_id
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
+    settings.show_contact_button,
+    settings.show_refer_a_guest_button,
+    settings.show_language_selector,
+    settings.show_currency_selector,
     settings.hero_image_url,
     settings.hero_heading,
     settings.hero_subtext,
@@ -1208,6 +1247,26 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
             THEN NULLIF(BTRIM($2::jsonb ->> 'headerLogoMediaObjectId'), '')::uuid
           ELSE settings.header_logo_media_object_id
         END,
+        show_contact_button = CASE
+          WHEN $2::jsonb ? 'showContactButton'
+            THEN ($2::jsonb ->> 'showContactButton')::boolean
+          ELSE settings.show_contact_button
+        END,
+        show_refer_a_guest_button = CASE
+          WHEN $2::jsonb ? 'showReferAGuestButton'
+            THEN ($2::jsonb ->> 'showReferAGuestButton')::boolean
+          ELSE settings.show_refer_a_guest_button
+        END,
+        show_language_selector = CASE
+          WHEN $2::jsonb ? 'showLanguageSelector'
+            THEN ($2::jsonb ->> 'showLanguageSelector')::boolean
+          ELSE settings.show_language_selector
+        END,
+        show_currency_selector = CASE
+          WHEN $2::jsonb ? 'showCurrencySelector'
+            THEN ($2::jsonb ->> 'showCurrencySelector')::boolean
+          ELSE settings.show_currency_selector
+        END,
         hero_image_url = CASE
           WHEN $2::jsonb ? 'heroImage'
             THEN NULLIF(BTRIM($2::jsonb ->> 'heroImage'), '')
@@ -1255,6 +1314,10 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
       settings.custom_filters,
       settings.filter_rooms,
       settings.header_logo_media_object_id,
+      settings.show_contact_button,
+      settings.show_refer_a_guest_button,
+      settings.show_language_selector,
+      settings.show_currency_selector,
       settings.hero_image_url,
       settings.hero_heading,
       settings.hero_subtext,
@@ -1288,6 +1351,10 @@ const TARGET_BOOKING_DESIGN_SETTINGS_UPDATE = `
       ELSE updated_settings.header_logo_media_object_id
     END AS header_logo_media_object_id,
     booking_header_logo.public_cdn_url AS header_logo_url,
+    updated_settings.show_contact_button,
+    updated_settings.show_refer_a_guest_button,
+    updated_settings.show_language_selector,
+    updated_settings.show_currency_selector,
     updated_settings.hero_image_url,
     updated_settings.hero_heading,
     updated_settings.hero_subtext,
@@ -1548,6 +1615,10 @@ function toTargetDesignSettings(row: TargetBookingSettingsRow): BookingDesignSet
   return {
     headerLogo: row.header_logo_url,
     headerLogoMediaObjectId: row.header_logo_media_object_id,
+    showContactButton: row.show_contact_button,
+    showReferAGuestButton: row.show_refer_a_guest_button,
+    showLanguageSelector: row.show_language_selector,
+    showCurrencySelector: row.show_currency_selector,
     heroImage: row.hero_image_url,
     heroHeading: row.hero_heading,
     heroSubtext: row.hero_subtext,
@@ -1788,6 +1859,10 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.custom_filters,
           settings.filter_rooms,
           settings.header_logo_media_object_id,
+          settings.show_contact_button,
+          settings.show_refer_a_guest_button,
+          settings.show_language_selector,
+          settings.show_currency_selector,
           settings.hero_image_url,
           settings.hero_heading,
           settings.hero_subtext,
@@ -1820,6 +1895,10 @@ export function createPgTargetBookingSettingsRepository(config: {
             ELSE updated_settings.header_logo_media_object_id
           END AS header_logo_media_object_id,
           booking_header_logo.public_cdn_url AS header_logo_url,
+          updated_settings.show_contact_button,
+          updated_settings.show_refer_a_guest_button,
+          updated_settings.show_language_selector,
+          updated_settings.show_currency_selector,
           updated_settings.hero_image_url,
           updated_settings.hero_heading,
           updated_settings.hero_subtext,
@@ -2046,9 +2125,15 @@ export function createPgTargetBookingSettingsRepository(config: {
       return row ? toTargetDesignSettings(row) : null;
     },
     async updateLastMinuteSettingsByHotelId(hotelId, settings) {
-      const row = await updateSettings(hotelId, `last_minute_discount = $2::jsonb`, [
-        JSON.stringify(settings),
-      ]);
+      const row = await updateSettings(
+        hotelId,
+        `last_minute_discount = $2::jsonb${
+          settings.promotions === undefined
+            ? " || CASE WHEN settings.last_minute_discount ? 'promotions' THEN jsonb_build_object('promotions', settings.last_minute_discount->'promotions') ELSE '{}'::jsonb END"
+            : ""
+        }`,
+        [JSON.stringify(settings)],
+      );
       return row ? toTargetLastMinuteSettings(row) : null;
     },
     async close() {
@@ -2062,8 +2147,11 @@ export async function registerBookingSettingsRoutes(
   repository: BookingSettingsReadRepository,
   writeRepository?: BookingSettingsWriteRepository,
   publicBookabilityPublisher?: PublicBookabilityPublicationCommandPort,
+  bookingPublicationRefresh?: BookingPublicationRefreshPort,
   inventoryPublicOfferProjector?: PmsInventoryPublicOfferProjectionPort,
   bookingAcceptanceSettings?: BookingAcceptanceSettingsPort,
+  sameDayBookingSettings?: SameDayBookingSettingsPort,
+  ownsSameDayBookingSettings = true,
 ): Promise<void> {
   const closeables = new Set(
     [
@@ -2072,6 +2160,7 @@ export async function registerBookingSettingsRoutes(
       publicBookabilityPublisher,
       inventoryPublicOfferProjector,
       bookingAcceptanceSettings,
+      ownsSameDayBookingSettings ? sameDayBookingSettings : undefined,
     ].filter(Boolean),
   );
   app.addHook("onClose", async () => {
@@ -2145,7 +2234,7 @@ export async function registerBookingSettingsRoutes(
       }
 
       try {
-        const propertyId = await findBookingAcceptancePropertyId(repository, hotelId);
+        const propertyId = await findBookingPropertyId(repository, hotelId);
         if (!propertyId) {
           return sendBookingPropertySettingsError(reply, {
             statusCode: 404,
@@ -2167,6 +2256,38 @@ export async function registerBookingSettingsRoutes(
       } catch (error) {
         request.log.error({ err: error, hotelId }, "Booking acceptance settings read failed");
         return sendBookingPropertySettingsError(reply, bookingAcceptanceReadUnavailable());
+      }
+    },
+  );
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/same-day-booking",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) return sendBookingPropertySettingsError(reply, contractError);
+        throw error;
+      }
+      if (!sameDayBookingSettings) {
+        return sendBookingPropertySettingsError(reply, sameDayBookingReadUnavailable());
+      }
+      try {
+        const propertyId = await findBookingPropertyId(repository, hotelId);
+        const settings = propertyId ? await sameDayBookingSettings.find(propertyId) : null;
+        return settings
+          ? toBookingSameDaySettingsResponse(settings)
+          : sendBookingPropertySettingsError(reply, {
+              statusCode: 404,
+              code: "not_found",
+              category: "read_model",
+              message: "Same-day booking settings were not found.",
+            });
+      } catch (error) {
+        request.log.error({ err: error, hotelId }, "Same-day booking settings read failed");
+        return sendBookingPropertySettingsError(reply, sameDayBookingReadUnavailable());
       }
     },
   );
@@ -2493,14 +2614,16 @@ export async function registerBookingSettingsRoutes(
     },
   );
 
-  if (publicBookabilityPublisher) {
+  const targetPublicBookabilityPublisher = publicBookabilityPublisher;
+  if (targetPublicBookabilityPublisher || bookingPublicationRefresh) {
     app.post<{ Params: BookingHotelParams }>(
       "/hotels/:hotelId/public-bookability",
       async (request, reply) => {
         const { hotelId } = request.params;
 
+        let context: ReturnType<typeof enforceBookingSettingsPolicy>;
         try {
-          enforceBookingSettingsPolicy(request, hotelId);
+          context = enforceBookingSettingsPolicy(request, hotelId);
         } catch (error) {
           const contractError = toBookingSettingsAccessError(error, request, hotelId);
           if (contractError) return sendBookingSettingsWriteError(reply, contractError);
@@ -2539,7 +2662,19 @@ export async function registerBookingSettingsRoutes(
         }
 
         try {
-          let publication = await publicBookabilityPublisher.publish({
+          if (bookingPublicationRefresh) {
+            return await bookingPublicationRefresh.refresh({
+              organizationId: context.selectedOrganization.organizationId,
+              propertyId: propertyLink.propertyId,
+              actorUserId: context.actor.internalUserId,
+              idempotencyKey: context.audit.requestId,
+              audit: context.audit,
+            });
+          }
+          if (!targetPublicBookabilityPublisher) {
+            throw new Error("Public bookability publication is unavailable.");
+          }
+          let publication = await targetPublicBookabilityPublisher.publish({
             propertyId: propertyLink.propertyId,
           });
           if (!publication) {
@@ -2555,7 +2690,7 @@ export async function registerBookingSettingsRoutes(
               propertyId: propertyLink.propertyId,
             });
             if (projection.projectedOfferDays > 0) {
-              publication = await publicBookabilityPublisher.publish({
+              publication = await targetPublicBookabilityPublisher.publish({
                 propertyId: propertyLink.propertyId,
               });
               if (!publication) {
@@ -2610,7 +2745,7 @@ export async function registerBookingSettingsRoutes(
       }
 
       try {
-        const propertyId = await findBookingAcceptancePropertyId(repository, hotelId);
+        const propertyId = await findBookingPropertyId(repository, hotelId);
         if (!propertyId) {
           return sendBookingSettingsWriteError(reply, {
             statusCode: 404,
@@ -2638,6 +2773,31 @@ export async function registerBookingSettingsRoutes(
         return sendBookingSettingsWriteError(reply, bookingAcceptanceWriteUnavailable());
       }
     },
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/same-day-booking",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseSameDayBookingSettingsWriteBody,
+        write: async (hotelId, settings, context) => {
+          if (!sameDayBookingSettings) throw new Error("Same-day settings are unavailable.");
+          const propertyId = await findBookingPropertyId(repository, hotelId);
+          const result = propertyId
+            ? await sameDayBookingSettings.update(context, propertyId, settings, "booking-admin")
+            : null;
+          if (!result || (!result.ok && result.code === "property_not_found")) return null;
+          if (!result.ok) throw new SameDayIdempotencyConflictError();
+          return {
+            ...result.settings,
+            replayed: result.replayed,
+            channexOperationId: result.channexOperationId,
+          };
+        },
+        toResponse: toBookingSameDaySettingsResponse,
+      }),
   );
 
   if (!writeRepository) return;
@@ -2770,14 +2930,25 @@ export async function registerBookingSettingsRoutes(
         request,
         reply,
         parseBody: parseLastMinuteSettingsWriteBody,
-        write: (hotelId, settings) =>
-          writeRepository.updateLastMinuteSettingsByHotelId
+        write: async (hotelId, settings) => {
+          if (settings.promotions === undefined) {
+            const current = await repository.findLastMinuteSettingsByHotelId?.(hotelId);
+            if (
+              isPlainRecord(current?.lastMinuteDiscount) &&
+              current.lastMinuteDiscount.promotions !== undefined
+            )
+              throw new BookingPromotionsConflictError("Manage automatic discounts from Promos.");
+          }
+          return writeRepository.updateLastMinuteSettingsByHotelId
             ? writeRepository.updateLastMinuteSettingsByHotelId(hotelId, settings)
-            : Promise.resolve(null),
+            : null;
+        },
         toResponse: toLastMinuteSettingsResponse,
       }),
   );
 }
+
+class BookingPromotionsConflictError extends Error {}
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; details: string[] };
 
@@ -2792,7 +2963,46 @@ function parseBookingAcceptanceSettingsWriteBody(
   return { ok: true, value: { acceptanceMode: parsed.value.acceptanceMode } };
 }
 
-async function findBookingAcceptancePropertyId(
+function parseSameDayBookingSettingsWriteBody(body: unknown): ValidationResult<{
+  commandId: string;
+  idempotencyKey: string;
+  enabled: boolean;
+  cutoffLocalTime: string | null;
+}> {
+  const parsed = expectStrictObject(body, [
+    "commandId",
+    "idempotencyKey",
+    "enabled",
+    "cutoffLocalTime",
+  ]);
+  if (!parsed.ok) return parsed;
+  const { commandId, idempotencyKey, enabled, cutoffLocalTime } = parsed.value;
+  const details: string[] = [];
+  if (typeof commandId !== "string" || !commandId.trim()) details.push("commandId is required.");
+  if (typeof idempotencyKey !== "string" || !idempotencyKey.trim()) {
+    details.push("idempotencyKey is required.");
+  }
+  if (typeof enabled !== "boolean") details.push("enabled must be a boolean.");
+  if (
+    cutoffLocalTime !== null &&
+    (typeof cutoffLocalTime !== "string" || !/^(?:[01]\d|2[0-3]):(?:00|30)$/.test(cutoffLocalTime))
+  ) {
+    details.push("cutoffLocalTime must be on a 30-minute boundary or null.");
+  }
+  return details.length
+    ? { ok: false, details }
+    : {
+        ok: true,
+        value: {
+          commandId: commandId as string,
+          idempotencyKey: idempotencyKey as string,
+          enabled: enabled as boolean,
+          cutoffLocalTime: cutoffLocalTime as string | null,
+        },
+      };
+}
+
+async function findBookingPropertyId(
   repository: BookingSettingsReadRepository,
   hotelId: string,
 ): Promise<string | null> {
@@ -2800,6 +3010,12 @@ async function findBookingAcceptancePropertyId(
     throw new Error("Booking hotel property link is unavailable.");
   }
   return (await repository.findPropertyLinkByHotelId(hotelId))?.propertyId ?? null;
+}
+
+export function toBookingSameDaySettingsResponse(
+  settings: Omit<BookingSameDaySettingsResponse, "contractVersion">,
+): BookingSameDaySettingsResponse {
+  return { contractVersion: "same-day-booking-policy.v1", ...settings };
 }
 
 export function toBookingAcceptanceSettingsResponse(
@@ -2829,6 +3045,15 @@ function bookingAcceptanceWriteUnavailable(): BookingSettingsWriteError {
     code: "write_model_unavailable",
     category: "write_model",
     message: "Booking acceptance settings could not be saved.",
+  };
+}
+
+function sameDayBookingReadUnavailable(): BookingHotelPropertyLinkError {
+  return {
+    statusCode: 500,
+    code: "read_model_unavailable",
+    category: "read_model",
+    message: "Same-day booking settings are unavailable.",
   };
 }
 
@@ -2877,6 +3102,14 @@ async function handleBookingSettingsWrite<TBody, TStored>(input: {
   try {
     stored = await input.write(hotelId, parsed.value, context);
   } catch (error) {
+    if (error instanceof BookingPromotionsConflictError) {
+      return input.reply.code(409).send({
+        statusCode: 409,
+        code: "promotion_settings_conflict",
+        category: "write_model",
+        message: error.message,
+      });
+    }
     if (error instanceof BookingContactPublicationConflictError) {
       return sendBookingSettingsWriteError(input.reply, {
         statusCode: 409,
@@ -2891,6 +3124,14 @@ async function handleBookingSettingsWrite<TBody, TStored>(input: {
         code: "invalid_header_logo_media",
         category: "validation",
         message: error.message,
+      });
+    }
+    if (error instanceof SameDayIdempotencyConflictError) {
+      return sendBookingSettingsWriteError(input.reply, {
+        statusCode: 409,
+        code: "idempotency_conflict",
+        category: "write_model",
+        message: "The idempotency key was already used for another settings update.",
       });
     }
     input.request.log.error({ err: error, hotelId }, "Booking settings write failed");
@@ -3219,6 +3460,10 @@ function parseDesignSettingsWriteBody(
 
   const allowedKeys = new Set([
     "headerLogoMediaObjectId",
+    "showContactButton",
+    "showReferAGuestButton",
+    "showLanguageSelector",
+    "showCurrencySelector",
     "heroImage",
     "heroHeading",
     "heroSubtext",
@@ -3249,6 +3494,14 @@ function parseDesignSettingsWriteBody(
     }
     value.headerLogoMediaObjectId = headerLogoMediaObjectId;
   }
+  const showContactButton = expectOptionalBoolean(body, "showContactButton", details);
+  if (showContactButton !== undefined) value.showContactButton = showContactButton;
+  const showReferAGuestButton = expectOptionalBoolean(body, "showReferAGuestButton", details);
+  if (showReferAGuestButton !== undefined) value.showReferAGuestButton = showReferAGuestButton;
+  const showLanguageSelector = expectOptionalBoolean(body, "showLanguageSelector", details);
+  if (showLanguageSelector !== undefined) value.showLanguageSelector = showLanguageSelector;
+  const showCurrencySelector = expectOptionalBoolean(body, "showCurrencySelector", details);
+  if (showCurrencySelector !== undefined) value.showCurrencySelector = showCurrencySelector;
   const heroImage = expectOptionalBoundedString(body, "heroImage", 2048, details);
   if (heroImage !== undefined) {
     if (heroImage && !isHttpUrl(heroImage)) {
@@ -3298,10 +3551,20 @@ function isHttpUrl(value: string): boolean {
 function parseLastMinuteSettingsWriteBody(
   body: unknown,
 ): ValidationResult<UpdateBookingLastMinuteSettingsBody> {
-  const parsed = expectStrictObject(body, ["enabled", "stackWithPromo", "tiers"]);
+  const parsed = expectStrictObject(body, [
+    "enabled",
+    "stackWithPromo",
+    "tiers",
+    ...(isPlainRecord(body) && Object.hasOwn(body, "promotions") ? ["promotions"] : []),
+  ]);
   if (!parsed.ok) return parsed;
 
   const details: string[] = [];
+  const promotions =
+    parsed.value.promotions === undefined
+      ? undefined
+      : parseBookingPromotions(parsed.value.promotions);
+  if (promotions === null) return { ok: false, details: ["Invalid or duplicate promotions."] };
   const enabled = expectBoolean(parsed.value, "enabled", details);
   const stackWithPromo = expectBoolean(parsed.value, "stackWithPromo", details);
   const tiers = normalizeLastMinuteTiers(parsed.value.tiers, details);
@@ -3320,6 +3583,7 @@ function parseLastMinuteSettingsWriteBody(
       enabled,
       stackWithPromo,
       tiers,
+      ...(promotions ? { promotions } : {}),
     },
   };
 }
@@ -3383,6 +3647,10 @@ export function toDesignSettingsResponse(
     headerLogoMediaObjectId: settings.headerLogo
       ? (settings.headerLogoMediaObjectId ?? null)
       : null,
+    showContactButton: settings.showContactButton ?? true,
+    showReferAGuestButton: settings.showReferAGuestButton ?? false,
+    showLanguageSelector: settings.showLanguageSelector ?? true,
+    showCurrencySelector: settings.showCurrencySelector ?? true,
     heroImage: settings.heroImage ?? "",
     heroHeading: settings.heroHeading ?? "",
     heroSubtext: settings.heroSubtext ?? "",
@@ -3397,6 +3665,10 @@ export function toLastMinuteSettingsResponse(
   const parsed = parseLastMinuteSettingsValue(settings.lastMinuteDiscount);
   return {
     ...parsed,
+    ...(isPlainRecord(settings.lastMinuteDiscount) &&
+    settings.lastMinuteDiscount.promotions !== undefined
+      ? { promotions: parseBookingPromotions(settings.lastMinuteDiscount.promotions) ?? [] }
+      : {}),
     updatedAt: toIsoString(settings.updatedAt),
   };
 }

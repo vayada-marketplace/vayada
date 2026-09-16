@@ -117,6 +117,11 @@ async function queryActiveRooms(
             room_type.occupancy_limits AS "occupancyLimits"
      FROM pms.room_types room_type
      WHERE room_type.property_id = $1::uuid AND room_type.active IS TRUE
+       AND NOT EXISTS (
+         SELECT 1 FROM pms.room_type_closures closure
+         WHERE closure.property_id = room_type.property_id
+           AND closure.room_type_id = room_type.id
+       )
      ORDER BY room_type.id ASC`,
     [propertyId],
   );
@@ -145,6 +150,16 @@ async function queryFlexiblePlans(
       AND cancellation_extension.room_type_id = plan.room_type_id
       AND cancellation_extension.pricing_contract_version = plan.pricing_contract_version
      WHERE plan.property_id = $1::uuid AND plan.pricing_contract_version = $2
+       AND EXISTS (
+         SELECT 1 FROM pms.room_types room
+         WHERE room.property_id = plan.property_id
+           AND room.id = plan.room_type_id
+           AND room.active
+           AND NOT EXISTS (
+             SELECT 1 FROM pms.room_type_closures closure
+             WHERE closure.property_id = room.property_id AND closure.room_type_id = room.id
+           )
+       )
      ORDER BY plan.room_type_id ASC`,
     [propertyId, PMS_PRICING_CONTRACT_VERSION],
   );

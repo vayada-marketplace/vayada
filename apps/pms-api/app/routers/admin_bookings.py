@@ -6,6 +6,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.config import settings
 from app.database import AuthDatabase, Database
 from app.dependencies import require_hotel_admin
 from app.models.booking import (
@@ -689,7 +690,7 @@ async def complete_booking_check_in(
             )
 
     pool = await Database.get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
         async with conn.transaction():
             updated = await BookingRepository.complete_check_in(
                 booking_id, data.pending_flags, conn=conn
@@ -773,7 +774,7 @@ async def add_booking_arrival_charge(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     pool = await Database.get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn:
         async with conn.transaction():
             updated = await BookingRepository.add_arrival_charge(booking_id, data.amount, conn=conn)
             if not updated:

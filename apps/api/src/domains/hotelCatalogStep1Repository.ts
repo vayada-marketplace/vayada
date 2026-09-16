@@ -9,6 +9,7 @@ import {
   hotelCatalogAmenityLabel,
   parsePropertyMediaCommandError,
   parseSaveHotelCatalogStep1Response,
+  parseSaveHotelCatalogStep1Request,
   type HotelCatalogAmenityKey,
   type HotelCatalogContentLocale,
   type HotelCatalogStep1ReadModel,
@@ -130,12 +131,11 @@ export function createPgHotelCatalogStep1Repository(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const property = await lockAuthorizedProperty(client, scope);
-        if (!property) {
+        const state = await readLockedHotelCatalogStep1State(client, scope);
+        if (!state) {
           await rollback(client);
           return null;
         }
-        const state = await loadState(client, property);
         await client.query("COMMIT");
         return state;
       } catch (error) {
@@ -391,6 +391,22 @@ export function createPgHotelCatalogStep1Repository(config: {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+/** Read through the Catalog owner within an existing transaction. Holds the canonical property lock. */
+export async function readLockedHotelCatalogStep1State(
+  client: QueryClient,
+  scope: HotelCatalogStep1Scope,
+): Promise<HotelCatalogStep1State | null> {
+  const property = await lockAuthorizedProperty(client, scope);
+  return property ? loadState(client, property) : null;
+}
+
+export async function lockHotelCatalogSetupScope(
+  client: QueryClient,
+  scope: HotelCatalogStep1Scope,
+): Promise<boolean> {
+  return (await lockAuthorizedProperty(client, scope)) !== null;
 }
 
 async function lockAuthorizedProperty(
@@ -649,6 +665,63 @@ async function markPresentHotelComplete(
        AND status = 'active'
        AND retention_expires_at > $3::timestamptz`,
     [command.organizationId, command.propertyId, occurredAt.toISOString()],
+  );
+  // The session update above serializes draft writers. Consume only the exact
+  // draft applied by this command; a different tab's newer input must survive.
+  const source = `profile:${command.request.expectedProfileRevision}`;
+  const drafts = await client.query<{
+    sessionId: string;
+    revision: number;
+    payload: Record<string, unknown>;
+  }>(
+    `SELECT draft.session_id AS "sessionId", draft.revision, draft.payload
+     FROM hotel_catalog.property_setup_step_drafts draft
+     JOIN hotel_catalog.property_setup_sessions session ON session.id = draft.session_id
+     WHERE session.organization_id = $1::uuid AND session.property_id = $2::uuid
+       AND session.status = 'active' AND session.retention_expires_at > $3::timestamptz
+       AND draft.retention_expires_at > $3::timestamptz
+       AND draft.step_id = 'present_hotel' AND draft.base_revisions = $4::jsonb`,
+    [
+      command.organizationId,
+      command.propertyId,
+      occurredAt.toISOString(),
+      JSON.stringify({
+        "hotel_catalog.profile": source,
+        "hotel_catalog.media": source,
+        "hotel_catalog.amenities": source,
+      }),
+    ],
+  );
+  const draft = drafts.rows[0];
+  if (!draft) return;
+  const payload = draft.payload;
+  // Apply the same normalization as the canonical command (e.g. summary trim).
+  const applied = parseSaveHotelCatalogStep1Request({
+    expectedProfileRevision: command.request.expectedProfileRevision,
+    locale: payload["profile.default_locale"],
+    shortDescription: payload["profile.short_description"],
+    amenities: { reviewed: true, keys: payload["profile.amenities"] },
+    media: {
+      coverMediaObjectId: payload["profile.hero_image"],
+      galleryMediaObjectIds: payload["profile.gallery_images"],
+    },
+  });
+  if (
+    Object.keys(payload).length !== 5 ||
+    !applied ||
+    JSON.stringify(applied) !== JSON.stringify(parseSaveHotelCatalogStep1Request(command.request))
+  )
+    return;
+  await client.query(
+    `WITH consumed AS (
+       DELETE FROM hotel_catalog.property_setup_step_drafts
+       WHERE session_id = $1::uuid AND step_id = 'present_hotel' AND revision = $2
+       RETURNING session_id
+     )
+     UPDATE hotel_catalog.property_setup_sessions session
+     SET resume_step_id = NULL
+     FROM consumed WHERE session.id = consumed.session_id AND session.resume_step_id = 'present_hotel'`,
+    [draft.sessionId, draft.revision],
   );
 }
 

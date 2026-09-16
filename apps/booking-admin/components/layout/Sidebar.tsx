@@ -42,7 +42,7 @@ const coreNavItems: NavItem[] = [
 ];
 
 const promoCodesNavItem: NavItem = {
-  label: "Promo Codes",
+  labelKey: "bookingFlow.tabs.promos",
   href: "/promo-codes",
   icon: TicketIcon,
 };
@@ -66,14 +66,12 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { activeModuleIds, hotelId: activationPropertyId } =
     useFeatureModuleActivations(moduleActivationClient);
   const activeFeatureNavItems: NavItem[] = activationPropertyId
-    ? activeNavModules("booking_engine", activeModuleIds).map((module) => module.navItem!)
+    ? activeNavModules("booking_engine", activeModuleIds).map((module) => ({
+        ...module.navItem!,
+        labelKey: `featureHub.module.${module.id}.name`,
+      }))
     : [];
-  const navItems = [
-    ...coreNavItems,
-    ...activeFeatureNavItems,
-    promoCodesNavItem,
-    settingsNavItem,
-  ];
+  const navItems = [...coreNavItems, ...activeFeatureNavItems, promoCodesNavItem, settingsNavItem];
 
   const switchApp = async (
     baseUrl: string,
@@ -99,7 +97,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     try {
       window.location.href = crossAppReauthenticationUrl(baseUrl, targetPath);
     } catch {
-      setSwitchError("We couldn't open that app. Please try again later.");
+      setSwitchError(t("admin.weCouldnTOpenThatAppPleaseTryAgainLater"));
     }
   };
 

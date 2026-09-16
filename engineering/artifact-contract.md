@@ -23,12 +23,18 @@ ECR repositories are created and owned by `vayada-platform` (via `ecr.tf`). The 
 | `apps/pms-web`             | `vayada-pms-frontend`                | ECS Fargate   |
 | `apps/marketplace-api`     | `vayada-creator-marketplace-backend` | ECS Fargate   |
 | `apps/vayada-admin`        | `vayada-admin-frontend`              | ECS Fargate   |
-| `apps/affiliate-dashboard` | `vayada-affiliate-dashboard`         | ECS Fargate   |
 | `apps/landing`             | `vayada-landing`                     | App Runner    |
+
+The affiliate portal source has been retired. Existing `vayada-affiliate-dashboard`
+and `vayada-next-affiliate-dashboard` images/services remain for temporary runtime
+continuity; they are not built from this checkout. Preserve the retained artifacts
+and API contracts until the separate cutover described in
+[Affiliate portal source retirement](affiliate-portal-retirement.md).
 
 ## Image tagging
 
-App CI pushes two tags on every successful main-branch build:
+For services with an active deployment workflow, app CI pushes two tags on
+every successful main-branch build:
 
 - `:latest` — mutable, points to the most recent build
 - `:<git-sha>` — immutable, the full 40-character commit SHA
@@ -63,7 +69,17 @@ client_payload:
 
 Platform CI listens for this event and executes the ECS deploy for the named service using the SHA-pinned image.
 
-**Landing is excluded**: App Runner polls ECR for `:latest` natively and deploys automatically. App CI does not dispatch a trigger for `landing`.
+### Landing deployment
+
+Landing is the exception to the platform dispatch flow:
+[`deploy-landing.yml`](../.github/workflows/deploy-landing.yml) publishes
+`apps/landing` directly to `vayada-landing:latest` and an immutable commit-SHA
+tag. The existing App Runner service watches `latest` and serves it at
+`vayada.com`; it does not receive an ECS deploy trigger.
+
+`vayada.com` is the shared public landing surface, not an application-stack
+cutover hostname. Landing deployment does not repoint or redeploy the separate
+application and API hostnames.
 
 ## Platform CI responsibilities
 

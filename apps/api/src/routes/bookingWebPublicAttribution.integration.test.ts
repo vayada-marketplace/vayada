@@ -1,10 +1,13 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { readBookingAffiliateCreationEvidence } from "../domains/bookingAffiliateCreationEvidence.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
 import type { DirectBookingInventoryReservationPort } from "../platform/inventoryReservation.js";
 import {
   createTargetBookingWebCheckoutAdapter,
+  resolveTargetCheckoutProperty,
   type BookingWebCheckoutCommandContext,
 } from "./bookingWebPublic.js";
 
@@ -46,137 +49,206 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await admin.end();
     });
 
-    it("owns canonical attribution across creation, replay, and rollback", async () => {
+    it("rejects new bookings and replay without changing stored quotes or inventory", async () => {
       const adapter = createAdapter(checkoutPool);
-      const context = command("success");
-      const request = checkoutRequest("VAY-1188-SUCCESS");
-
-      const created = await adapter.createBooking("vay-1188-hotel", request, context);
-      await expect(adapter.createBooking("vay-1188-hotel", request, context)).resolves.toEqual(
-        created,
-      );
-      await admin.query(
-        `UPDATE booking.addon_definitions
-            SET price_amount = 99, ownership_kind = 'property', partner_commission_rate = NULL
-          WHERE id = $1::uuid`,
-        [addonId],
-      );
-
-      const persisted = await admin.query<{
-        bookingChannel: string;
-        directBookingSource: string;
-        sourceSystem: string;
-        totalAmount: string;
-        bookingCount: number;
-        addonCount: number;
-        addonGrossAmount: string;
-        addonOwnership: string;
-        addonCommissionMatches: boolean;
-      }>(
-        `SELECT
-         min(booking_channel) AS "bookingChannel",
-         min(direct_booking_source) AS "directBookingSource",
-         min(source_system) AS "sourceSystem",
-         min(total_amount)::text AS "totalAmount",
-         count(DISTINCT booking.id)::int AS "bookingCount",
-         count(evidence.selection_id)::int AS "addonCount",
-         min(evidence.gross_amount)::text AS "addonGrossAmount",
-         min(evidence.ownership_kind) AS "addonOwnership",
-         bool_and(evidence.partner_commission_rate = 18.75) AS "addonCommissionMatches"
-       FROM booking.guest_bookings booking
-       LEFT JOIN booking.finance_addon_purchase_evidence evidence
-         ON evidence.guest_booking_id = booking.id
-       WHERE booking.property_id = $1::uuid AND booking.quote_session_id = $2::uuid`,
-        [propertyId, successfulQuoteId],
-      );
-      expect(persisted.rows[0]).toEqual({
-        bookingChannel: "direct",
-        directBookingSource: "booking_engine",
-        sourceSystem: "booking",
-        totalAmount: "220.50",
-        bookingCount: 1,
-        addonCount: 1,
-        addonGrossAmount: "20.50",
-        addonOwnership: "partner",
-        addonCommissionMatches: true,
-      });
-      const selection = await admin.query<{
-        addonDefinitionId: string;
-        addonSnapshot: Record<string, unknown>;
-        quantity: number;
-        serviceDate: string;
-      }>(
-        `SELECT addon_definition_id::text AS "addonDefinitionId",
-                addon_snapshot AS "addonSnapshot", quantity,
-                service_date::text AS "serviceDate"
-           FROM booking.booking_addon_selections
-          WHERE guest_booking_id = (
-            SELECT id FROM booking.guest_bookings
-             WHERE property_id = $1::uuid AND quote_session_id = $2::uuid
-          )`,
-        [propertyId, successfulQuoteId],
-      );
-      expect(selection.rows).toMatchObject([
-        {
-          addonDefinitionId: addonId,
-          addonSnapshot: { name: "Partner spa", unitAmount: "10.25", pricingModel: "per_guest" },
-          quantity: 2,
-          serviceDate: "2027-02-01",
-        },
+      for (const reference of ["VAY-1188-SUCCESS", "VAY-1188-ROLLBACK", "VAY-1188-SUCCESS"]) {
+        await expect(
+          adapter.createBooking(
+            "vay-1188-hotel",
+            checkoutRequest(reference),
+            command("unavailable"),
+          ),
+        ).rejects.toMatchObject({ code: "PRICING_UNAVAILABLE", statusCode: 503 });
+      }
+      expect(completedReservationQuoteIds.size).toBe(0);
+      for (const table of [
+        "booking.guest_bookings",
+        "booking.checkout_contexts",
+        "booking.booking_addon_selections",
+        "platform.idempotency_keys",
+      ]) {
+        expect(
+          (
+            await admin.query(
+              `SELECT count(*)::int AS count FROM ${table} WHERE property_id=$1::uuid`,
+              [propertyId],
+            )
+          ).rows,
+        ).toEqual([{ count: 0 }]);
+      }
+      expect(
+        (
+          await admin.query(
+            "SELECT status, totals->>'totalAmount' AS total FROM booking.quote_sessions WHERE property_id=$1 ORDER BY id",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        { status: "active", total: "220.50" },
+        { status: "active", total: "220.50" },
       ]);
+      expect(
+        (
+          await admin.query(
+            "SELECT available_count, assigned_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY stay_date",
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual([
+        { available_count: 2, assigned_count: 0 },
+        { available_count: 2, assigned_count: 0 },
+      ]);
+    });
 
-      await expect(
-        adapter.createBooking(
-          "vay-1188-hotel",
-          checkoutRequest("VAY-1188-ROLLBACK"),
-          command("rollback"),
-        ),
-      ).rejects.toMatchObject({ constraint: "fk_booking_addon_selections_definition_property" });
-      expect(completedReservationQuoteIds).toContain(rollbackQuoteId);
+    it("reads native creation provenance from Booking-owned persistence", async () => {
+      const client = await admin.connect();
+      const bookingId = uuid(7);
+      try {
+        await client.query("BEGIN");
+        const checkout = await client.query<{ id: string }>(
+          `INSERT INTO booking.checkout_contexts
+             (property_id, quote_session_id, currency, status, expires_at)
+           VALUES ($1::uuid, $2::uuid, 'EUR', 'converted', $3::timestamptz)
+           RETURNING id::text`,
+          [propertyId, successfulQuoteId, "2027-01-02T10:00:00.000Z"],
+        );
+        await client.query(
+          `INSERT INTO booking.guest_bookings
+             (id, property_id, quote_session_id, checkout_context_id, public_reference,
+              source_system, booking_channel, direct_booking_source, lifecycle_status,
+              check_in, check_out, currency, created_at, updated_at)
+           VALUES
+             ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'VAY-1505-NATIVE',
+              'booking', 'direct', 'booking_engine', 'confirmed',
+              DATE '2027-02-01', DATE '2027-02-03', 'EUR', $5::timestamptz, $5::timestamptz)`,
+          [bookingId, propertyId, successfulQuoteId, checkout.rows[0]!.id, occurredAt],
+        );
+        await client.query(
+          `INSERT INTO booking.booking_status_events
+             (guest_booking_id, event_type, to_status, actor_type, event_payload, occurred_at)
+           VALUES
+             ($1::uuid, 'guest_booking.created', 'confirmed', 'guest',
+              jsonb_build_object('requestId', 'vay-1505-request',
+                                 'correlationId', 'vay-1505-correlation'),
+              $2::timestamptz)`,
+          [bookingId, occurredAt],
+        );
 
-      const rolledBack = await admin.query<{
-        bookingCount: number;
-        checkoutCount: number;
-        addonCount: number;
-        quoteStatus: string;
-        idempotencyCount: number;
-        inventoryAvailable: number;
-        inventoryAssigned: number;
-        publicAvailable: number;
-      }>(
-        `SELECT
-         (SELECT count(*)::int FROM booking.guest_bookings
-           WHERE property_id = $1::uuid AND quote_session_id = $2::uuid) AS "bookingCount",
-         (SELECT count(*)::int FROM booking.checkout_contexts
-           WHERE property_id = $1::uuid AND quote_session_id = $2::uuid) AS "checkoutCount",
-         (SELECT count(*)::int FROM booking.booking_addon_selections
-           WHERE property_id = $1::uuid AND addon_definition_id = $3::uuid) AS "addonCount",
-         (SELECT status FROM booking.quote_sessions WHERE id = $2::uuid) AS "quoteStatus",
-         (SELECT count(*)::int FROM platform.idempotency_keys
-           WHERE property_id = $1::uuid
-             AND correlation_id = 'vay-1188-rollback-correlation') AS "idempotencyCount",
-         (SELECT min(available_count)::int FROM pms.inventory_days
-           WHERE property_id = $1::uuid) AS "inventoryAvailable",
-         (SELECT min(assigned_count)::int FROM pms.inventory_days
-           WHERE property_id = $1::uuid) AS "inventoryAssigned",
-         (SELECT min(available_rooms)::int FROM distribution.public_room_offer_snapshots
-           WHERE property_id = $1::uuid) AS "publicAvailable"`,
-        [propertyId, rollbackQuoteId, missingAddonId],
+        const input = { propertyId, bookingId };
+        const recorded = await readBookingAffiliateCreationEvidence(client, input, occurredAt);
+        expect(recorded).toMatchObject({
+          status: "recorded",
+          propertyId,
+          bookingId,
+          originalBookedAt: occurredAt.toISOString(),
+          source: "vayada_booking",
+          requestId: "vay-1505-request",
+          correlationId: "vay-1505-correlation",
+        });
+        await expect(
+          readBookingAffiliateCreationEvidence(
+            client,
+            { ...input, propertyId: uuid(999) },
+            occurredAt,
+          ),
+        ).resolves.toEqual({ status: "pending", reason: "scope_unavailable" });
+
+        for (const [sql, reason] of [
+          [
+            "UPDATE booking.guest_bookings SET source_system='migration', source_booking_id='import-1' WHERE id=$1",
+            "unsupported_source",
+          ],
+          [
+            "UPDATE booking.guest_bookings SET created_at=created_at+interval '1 microsecond' WHERE id=$1",
+            "conflicting_creation_evidence",
+          ],
+          [
+            "UPDATE booking.booking_status_events SET from_status='confirmed' WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "conflicting_creation_evidence",
+          ],
+          [
+            "UPDATE booking.booking_status_events SET to_status='canceled' WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "conflicting_creation_evidence",
+          ],
+          [
+            "DELETE FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "creation_evidence_missing",
+          ],
+          [
+            "INSERT INTO booking.booking_status_events(guest_booking_id,event_type,to_status,actor_type,event_payload,occurred_at) SELECT guest_booking_id,event_type,to_status,actor_type,event_payload,occurred_at FROM booking.booking_status_events WHERE guest_booking_id=$1 AND event_type='guest_booking.created'",
+            "conflicting_creation_evidence",
+          ],
+        ] as const) {
+          await client.query("SAVEPOINT evidence_case");
+          await client.query(sql, [bookingId]);
+          await expect(
+            readBookingAffiliateCreationEvidence(client, input, occurredAt),
+          ).resolves.toMatchObject({ reason });
+          await client.query("ROLLBACK TO SAVEPOINT evidence_case");
+        }
+
+        await client.query(
+          "UPDATE booking.guest_bookings SET updated_at=updated_at+interval '1 day' WHERE id=$1",
+          [bookingId],
+        );
+        await expect(
+          readBookingAffiliateCreationEvidence(client, input, occurredAt),
+        ).resolves.toEqual(recorded);
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+        client.release();
+      }
+    });
+
+    it("reads the committed same-day policy after waiting for its property lock", async () => {
+      await admin.query(
+        `INSERT INTO booking.same_day_booking_policies
+           (property_id, enabled, cutoff_local_time)
+         VALUES ($1::uuid, TRUE, '18:00')
+         ON CONFLICT (property_id) DO UPDATE
+         SET enabled = EXCLUDED.enabled, cutoff_local_time = EXCLUDED.cutoff_local_time`,
+        [propertyId],
       );
-      expect(rolledBack.rows[0]).toMatchObject({
-        bookingCount: 0,
-        checkoutCount: 0,
-        addonCount: 0,
-        quoteStatus: "active",
-        idempotencyCount: 0,
-        inventoryAvailable: 1,
-        inventoryAssigned: 1,
-        publicAvailable: 1,
-      });
+      const settings = new pg.Client({ connectionString: TEST_DATABASE_URL! });
+      const checkout = new pg.Client({ connectionString: TEST_DATABASE_URL! });
+      await settings.connect();
+      await checkout.connect();
+      try {
+        await settings.query("BEGIN");
+        await settings.query(
+          `SELECT property.id FROM hotel_catalog.properties property
+           WHERE property.id = $1::uuid FOR UPDATE OF property`,
+          [propertyId],
+        );
+        await settings.query(
+          `UPDATE booking.same_day_booking_policies SET enabled = FALSE
+           WHERE property_id = $1::uuid`,
+          [propertyId],
+        );
+
+        await checkout.query("BEGIN");
+        const pid = await backendPid(checkout);
+        const propertyRead = resolveTargetCheckoutProperty(
+          checkout as never,
+          "vay-1188-hotel",
+          true,
+        );
+        await waitForLockWaiter(admin, pid);
+        await settings.query("COMMIT");
+
+        await expect(propertyRead).resolves.toMatchObject({ sameDayBookingsEnabled: false });
+        await checkout.query("COMMIT");
+      } finally {
+        await settings.query("ROLLBACK").catch(() => undefined);
+        await checkout.query("ROLLBACK").catch(() => undefined);
+        await settings.end();
+        await checkout.end();
+      }
     });
 
     function createAdapter(pool: pg.Pool) {
       return createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
         connectionString: TEST_DATABASE_URL!,
         pool,
         inventoryReservationPort,
@@ -205,6 +277,11 @@ describe.skipIf(!TEST_DATABASE_URL)(
       await admin.query(
         `INSERT INTO hotel_catalog.property_slugs (property_id, slug, purpose, status)
        VALUES ($1::uuid, 'vay-1188-hotel', 'canonical', 'active')`,
+        [propertyId],
+      );
+      await admin.query(
+        `INSERT INTO hotel_catalog.property_locations (property_id, timezone)
+         VALUES ($1::uuid, 'Europe/Athens')`,
         [propertyId],
       );
       await admin.query(
@@ -349,6 +426,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
           "DELETE FROM booking.checkout_contexts WHERE property_id = $1::uuid",
           "DELETE FROM booking.quote_sessions WHERE property_id = $1::uuid",
           "DELETE FROM booking.addon_definitions WHERE property_id = $1::uuid",
+          "DELETE FROM booking.same_day_booking_policies WHERE property_id = $1::uuid",
           "DELETE FROM distribution.public_room_offer_snapshots WHERE property_id = $1::uuid",
           "DELETE FROM pms.inventory_days WHERE property_id = $1::uuid",
           "WITH b AS (DELETE FROM pms.operating_calendar_room_bindings WHERE property_id=$1::uuid) DELETE FROM pms.operating_calendar_revisions WHERE property_id=$1::uuid",
@@ -357,6 +435,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
           "DELETE FROM booking.booking_settings WHERE property_id = $1::uuid",
           "DELETE FROM finance.payment_settings WHERE property_id = $1::uuid",
           "DELETE FROM hotel_catalog.property_slugs WHERE property_id = $1::uuid",
+          "DELETE FROM hotel_catalog.property_locations WHERE property_id = $1::uuid",
           "DELETE FROM hotel_catalog.property_public_profile_read_model WHERE property_id = $1::uuid",
           "DELETE FROM hotel_catalog.properties WHERE id = $1::uuid",
         ]) {
@@ -384,6 +463,23 @@ const inventoryReservationPort: DirectBookingInventoryReservationPort = {
     await realInventoryReservationPort.release(input);
   },
 };
+
+async function backendPid(client: pg.Client): Promise<number> {
+  const result = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+  return result.rows[0]!.pid;
+}
+
+async function waitForLockWaiter(observer: pg.Pool, pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await observer.query<{ waiting: boolean }>(
+      `SELECT wait_event_type = 'Lock' AS waiting FROM pg_stat_activity WHERE pid = $1`,
+      [pid],
+    );
+    if (result.rows[0]?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Timed out waiting for checkout to acquire the property lock");
+}
 
 function checkoutRequest(quoteId: string): Record<string, unknown> {
   return {

@@ -90,6 +90,22 @@ afterEach(() => {
 });
 
 describe("createWorkOSVerifier", () => {
+  it("extracts only a valid signed auth_time; never treats token issue time as fresh authentication", async () => {
+    for (const auth_time of [undefined, "123", -1, 1.5, 123]) {
+      const token = await signWorkOSTestToken({
+        sub: "user",
+        client_id: WORKOS_CLIENT_ID,
+        auth_time,
+      });
+      const result = await createWorkOSVerifier({
+        jwksUrl: WORKOS_JWKS_URL,
+        issuer: WORKOS_ISSUER,
+        audience: WORKOS_CLIENT_ID,
+      })(token);
+      expect(result.authenticatedAt).toBe(auth_time === 123 ? 123 : undefined);
+    }
+  });
+
   it("verifies a WorkOS access token that carries client_id instead of aud", async () => {
     const token = await signWorkOSTestToken({
       sub: "user_workos_hotel_owner",

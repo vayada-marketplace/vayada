@@ -1,4 +1,6 @@
 {
+  "dashboard.reviewNoShow": "Revisar no presentación…",
+  "checkOut.reviewNoShow": "Revisar no presentación…",
   "layout.header.signOut": "Cerrar sesion",
   "layout.header.noProperties": "Sin propiedades",
   "layout.header.user": "Usuario",
@@ -6,7 +8,7 @@
   "layout.header.currency": "Moneda",
   "layout.header.remaining": "restantes",
   "layout.sidebar.propertyManagerDescription": "Operaciones e Inventario",
-  "layout.sidebar.creatorMarketplace": "Mercado Vayada",
+  "layout.sidebar.creatorMarketplace": "Mercado vayada",
   "layout.sidebar.creatorMarketplaceDescription": "Creadores y colaboraciones",
   "layout.sidebar.bookingEngineDescription": "Reservas directas e ingresos",
   "common.save": "Guardar",
@@ -620,5 +622,11 @@
   "channels.installMessagingApp": "Install messaging app",
   "channels.installingMessagingApp": "Installing...",
   "channels.messagingAppInstalledSuccess": "Messaging app installed",
-  "channels.failedToInstallMessagingApp": "Failed to install messaging app"
+  "channels.failedToInstallMessagingApp": "Failed to install messaging app",
+  "dashboard.arrivalsOn": "Llegadas • {date}",
+  "dashboard.departuresOn": "Salidas • {date}",
+  "dashboard.noArrivalsOnDate": "No hay llegadas en esta fecha",
+  "dashboard.noDeparturesOnDate": "No hay salidas en esta fecha",
+  "dashboard.previousDay": "Día anterior",
+  "dashboard.nextDay": "Día siguiente"
 }

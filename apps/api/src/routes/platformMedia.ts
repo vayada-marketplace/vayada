@@ -27,6 +27,7 @@ import {
   PROPERTY_MEDIA_PUBLIC_VARIANT_MAX_DIMENSIONS,
 } from "../platform/propertyMediaVariantContract.js";
 import { enforceRoutePolicy } from "./policy.js";
+import { sendPmsOperationsError, toPmsOperationsAccessError } from "./pmsOperations.js";
 
 export const PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION = "platform-media-upload.v1" as const;
 export const CANONICAL_HOTEL_MEDIA_UPLOAD_CONTRACT_VERSION = "platform-media-upload.v2" as const;
@@ -127,6 +128,7 @@ export type PlatformMediaSessionRecord = {
   effectiveVisibility: PlatformMediaVisibility;
   actorUserId: string;
   ownerOrganizationId: string;
+  platformAdmin?: true;
   resource: PlatformMediaResourceScope;
   target: PlatformMediaResolvedTarget;
   files: Array<
@@ -302,6 +304,8 @@ export type PlatformMediaRepository = {
     request: PlatformMediaUploadSessionRequest;
     policy: PlatformMediaPurposePolicy;
     target: PlatformMediaResolvedTarget;
+    ownerOrganizationId: string;
+    platformAdmin?: boolean;
     uploadTargets: PlatformMediaUploadTarget[];
     now: string;
     expiresAt: string;
@@ -435,7 +439,7 @@ export type PlatformMediaTargetResolver = {
     request: PlatformMediaUploadSessionRequest;
     policy: PlatformMediaPurposePolicy;
   }): Promise<
-    | { ok: true; target: PlatformMediaResolvedTarget }
+    | { ok: true; target: PlatformMediaResolvedTarget; ownerOrganizationId?: string }
     | { ok: false; statusCode: 400 | 403 | 404; code: string; message: string }
   >;
 };
@@ -504,6 +508,11 @@ const heicConversionMessage =
 const publicImageVariants = ["original_safe", "large", "thumbnail", "blur_preview"] as const;
 const providerOriginalVariant = ["provider_original"] as const;
 const defaultMaxImagePixels = 60_000_000;
+const platformAdminMediaPurposes = new Set<PlatformMediaPurpose>([
+  "property.hero_image",
+  "marketplace.offer.media",
+  "marketplace.creator.profile_image",
+]);
 
 export function isAutoApprovedPublicMediaPurpose(purpose: PlatformMediaPurpose): boolean {
   return (
@@ -699,12 +708,9 @@ const targetPurposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePo
   },
   "pms.messaging.attachment": {
     purpose: "pms.messaging.attachment",
-    permission: "pms.operations.manage",
+    permission: "pms.inbox.reply",
     allowedRelationships: ["owner", "operator", "front_desk"],
-    allowedResources: [
-      { product: "pms", resourceType: "pms_property" },
-      { product: "pms", resourceType: "pms_hotel" },
-    ],
+    allowedResources: [{ product: "pms", resourceType: "pms_property" }],
     allowedContentTypes: [
       "image/jpeg",
       "image/png",
@@ -795,6 +801,18 @@ export async function registerPlatformMediaRoutes(
   app.post<{ Body: PlatformMediaUploadSessionRequest }>(
     "/upload-sessions",
     async (request, reply) => {
+      if (hasPmsInboxAttachmentPurpose(request.body)) {
+        try {
+          requireAuthContext(request);
+        } catch (error) {
+          return sendPmsInboxMediaAccessError(
+            reply,
+            request,
+            pmsInboxPropertyId(request.body),
+            error,
+          );
+        }
+      }
       const validation = validateUploadSessionRequest(request.body);
       if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
 
@@ -804,11 +822,35 @@ export async function registerPlatformMediaRoutes(
         return sendMediaError(reply, 400, resourceError.code, resourceError.message);
       }
 
-      const authorization = authorizeMediaResource(request, policy, request.body.resource);
+      let authorization: ReturnType<typeof authorizeMediaResource>;
+      try {
+        authorization = authorizeMediaResource(request, policy, request.body.resource);
+      } catch (error) {
+        if (policy.purpose === "pms.messaging.attachment") {
+          return sendPmsInboxMediaAccessError(
+            reply,
+            request,
+            request.body.resource.resourceId,
+            error,
+          );
+        }
+        throw error;
+      }
       if (!authorization.ok) {
+        if (policy.purpose === "pms.messaging.attachment") {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_resource_access",
+            category: "authorization",
+            message: "Missing PMS property access.",
+          });
+        }
         return sendMediaError(reply, 403, "media_resource_forbidden", authorization.message);
       }
       const context = authorization.context;
+      const isPlatformAdminMedia =
+        context.selectedOrganization.kind === "platform" &&
+        platformAdminMediaPurposes.has(policy.purpose);
       if (policy.actorOwned && request.body.resource.resourceId !== context.actor.internalUserId) {
         return sendMediaError(
           reply,
@@ -885,6 +927,7 @@ export async function registerPlatformMediaRoutes(
             uploadSessionKey,
             request: normalizedRequest,
             target: existingSession.target,
+            ownerOrganizationId: existingSession.ownerOrganizationId,
           },
           signer: options.signer,
           repository: options.repository,
@@ -909,6 +952,17 @@ export async function registerPlatformMediaRoutes(
           resolvedTarget.message,
         );
       }
+      const ownerOrganizationId = isPlatformAdminMedia
+        ? resolvedTarget.ownerOrganizationId
+        : context.selectedOrganization.organizationId;
+      if (!ownerOrganizationId) {
+        return sendMediaError(
+          reply,
+          404,
+          "media_target_not_found",
+          "The requested admin media target is unavailable.",
+        );
+      }
 
       if (existingSession) {
         return sendUploadSessionReplay({
@@ -919,6 +973,7 @@ export async function registerPlatformMediaRoutes(
             uploadSessionKey,
             request: normalizedRequest,
             target: resolvedTarget.target,
+            ownerOrganizationId,
           },
           signer: options.signer,
           repository: options.repository,
@@ -960,6 +1015,8 @@ export async function registerPlatformMediaRoutes(
           request: normalizedRequest,
           policy,
           target: resolvedTarget.target,
+          ownerOrganizationId,
+          platformAdmin: isPlatformAdminMedia,
           uploadTargets,
           now: createdAt,
           expiresAt,
@@ -993,6 +1050,7 @@ export async function registerPlatformMediaRoutes(
           uploadSessionKey,
           request: normalizedRequest,
           target: resolvedTarget.target,
+          ownerOrganizationId,
         })
       ) {
         return sendMediaError(
@@ -1016,6 +1074,7 @@ export async function registerPlatformMediaRoutes(
             uploadSessionKey,
             request: normalizedRequest,
             target: resolvedTarget.target,
+            ownerOrganizationId,
           },
           signer: options.signer,
           repository: options.repository,
@@ -1038,13 +1097,22 @@ export async function registerPlatformMediaRoutes(
   app.post<{ Body: PlatformMediaFinalizeRequest; Params: { sessionId: string } }>(
     "/upload-sessions/:sessionId/finalize",
     async (request, reply) => {
-      const authenticatedContext = requireAuthContext(request);
-      const session = await options.repository.findUploadSessionForActor({
-        sessionId: request.params.sessionId,
-        actorUserId: authenticatedContext.actor.internalUserId,
-        ownerOrganizationId: authenticatedContext.selectedOrganization.organizationId,
-      });
-      if (!session) {
+      let authenticatedContext: RequestContext;
+      try {
+        authenticatedContext = requireAuthContext(request);
+      } catch (error) {
+        return sendPmsInboxMediaAccessError(reply, request, "", error);
+      }
+      const platformOrganizationSelected =
+        authenticatedContext.selectedOrganization.kind === "platform";
+      const session = platformOrganizationSelected
+        ? await options.repository.findUploadSession(request.params.sessionId)
+        : await options.repository.findUploadSessionForActor({
+            sessionId: request.params.sessionId,
+            actorUserId: authenticatedContext.actor.internalUserId,
+            ownerOrganizationId: authenticatedContext.selectedOrganization.organizationId,
+          });
+      if (!session || session.actorUserId !== authenticatedContext.actor.internalUserId) {
         return sendMediaError(reply, 404, "upload_session_not_found", "Upload session not found.");
       }
       const policy = policyForSession(session);
@@ -1052,11 +1120,35 @@ export async function registerPlatformMediaRoutes(
       if (resourceError || !sessionVisibilityMatchesPolicy(session, policy)) {
         return sendNonReusableUploadSession(reply);
       }
-      const authorization = authorizeMediaResource(request, policy, session.resource);
+      let authorization: ReturnType<typeof authorizeMediaResource>;
+      try {
+        authorization = authorizeMediaResource(request, policy, session.resource);
+      } catch (error) {
+        if (policy.purpose === "pms.messaging.attachment") {
+          return sendPmsInboxMediaAccessError(reply, request, session.resource.resourceId, error);
+        }
+        throw error;
+      }
       if (!authorization.ok) {
+        if (policy.purpose === "pms.messaging.attachment") {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_resource_access",
+            category: "authorization",
+            message: "Missing PMS property access.",
+          });
+        }
         return sendMediaError(reply, 403, "media_resource_forbidden", authorization.message);
       }
       const context = authorization.context;
+      if (session.platformAdmin && context.selectedOrganization.kind !== "platform") {
+        return sendMediaError(
+          reply,
+          403,
+          "media_resource_forbidden",
+          "Platform Admin media must be finalized from the platform organization.",
+        );
+      }
       if (policy.actorOwned && session.resource.resourceId !== context.actor.internalUserId) {
         return sendMediaError(
           reply,
@@ -1091,6 +1183,9 @@ export async function registerPlatformMediaRoutes(
       });
       if (
         !currentTarget.ok ||
+        (session.platformAdmin
+          ? currentTarget.ownerOrganizationId
+          : context.selectedOrganization.organizationId) !== session.ownerOrganizationId ||
         JSON.stringify(targetProjection(currentTarget.target)) !==
           JSON.stringify(targetProjection(session.target))
       ) {
@@ -1310,6 +1405,7 @@ type ExpectedUploadSession = {
   uploadSessionKey: string;
   request: PlatformMediaUploadSessionRequest;
   target: PlatformMediaResolvedTarget;
+  ownerOrganizationId: string;
 };
 
 function deterministicUploadSessionId(
@@ -1346,7 +1442,7 @@ function uploadSessionMatchesRequest(
   return (
     session.uploadSessionKey === expected.uploadSessionKey &&
     session.actorUserId === expected.context.actor.internalUserId &&
-    session.ownerOrganizationId === expected.context.selectedOrganization.organizationId &&
+    session.ownerOrganizationId === expected.ownerOrganizationId &&
     session.purpose === expected.request.purpose &&
     session.requestedVisibility === (expected.request.visibility ?? "private") &&
     JSON.stringify(resourceProjection(session.resource)) ===
@@ -1616,7 +1712,8 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
             ? "public"
             : "private",
         actorUserId: input.context.actor.internalUserId,
-        ownerOrganizationId: input.context.selectedOrganization.organizationId,
+        ownerOrganizationId: input.ownerOrganizationId,
+        platformAdmin: input.platformAdmin ? true : undefined,
         resource: input.request.resource,
         target: input.target,
         files: input.request.files.map((file, index) => ({
@@ -1717,7 +1814,8 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
           originalFilename: sessionFile.filename,
           retainedUntil:
             input.session.purpose === "marketplace.collaboration_chat.attachment" ||
-            input.session.purpose === "finance.expense.receipt"
+            input.session.purpose === "finance.expense.receipt" ||
+            input.session.purpose === "pms.messaging.attachment"
               ? new Date(Date.parse(input.now) + 60 * 60 * 1000).toISOString()
               : null,
           variants,
@@ -1876,8 +1974,51 @@ function authorizeMediaResource(
   policy: PlatformMediaPurposePolicy,
   resource: PlatformMediaResourceScope,
 ): { ok: true; context: RequestContext } | { ok: false; message: string } {
+  const authenticatedContext = requireAuthContext(request);
+  if (
+    authenticatedContext.selectedOrganization.kind === "platform" &&
+    platformAdminMediaPurposes.has(policy.purpose)
+  ) {
+    return {
+      ok: true,
+      context: enforceRoutePolicy(request, {
+        permission: "platform.user.suspend",
+        resource: {
+          product: "platform",
+          resourceType: "platform",
+          resourceId: "vayada",
+          allowedRelationships: ["operator"],
+        },
+      }),
+    };
+  }
   if (policy.actorOwned) {
-    return { ok: true, context: requireAuthContext(request) };
+    return { ok: true, context: authenticatedContext };
+  }
+  if (policy.purpose === "pms.messaging.attachment") {
+    const permission = permissionForResource(policy);
+    const requirement = {
+      product: resource.product,
+      resourceType: resource.resourceType,
+      resourceId: resource.resourceId,
+      allowedRelationships: policy.allowedRelationships,
+    };
+    const context = enforceRoutePolicy(request, {
+      permission,
+      resource: requirement,
+      entitlement: {
+        product: "pms",
+        key: "property-management",
+        resource: {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: resource.resourceId,
+        },
+      },
+    });
+    return context.selectedOrganization.kind === "hotel_group"
+      ? { ok: true, context }
+      : { ok: false, message: "Selected organization cannot upload PMS Inbox attachments." };
   }
   if (policy.purpose === "finance.expense.receipt") {
     const permission = permissionForResource(policy);
@@ -2418,7 +2559,8 @@ function serializeSession(session: PlatformMediaSessionRecord): Record<string, u
 function serializeUploadTargets(
   session: Pick<PlatformMediaSessionRecord, "purpose" | "resource" | "uploadTargets">,
 ): Array<Omit<PlatformMediaUploadTarget, "stagingKey"> | PlatformMediaUploadTarget> {
-  if (!isCanonicalHotelMediaSession(session)) return session.uploadTargets;
+  if (!isCanonicalHotelMediaSession(session) && session.purpose !== "pms.messaging.attachment")
+    return session.uploadTargets;
   return session.uploadTargets.map(({ stagingKey: _stagingKey, ...target }) => target);
 }
 
@@ -2426,7 +2568,27 @@ function serializeMediaObject(
   session: Pick<PlatformMediaSessionRecord, "purpose" | "resource">,
   mediaObject: PlatformMediaObjectRecord,
   mediaPathPrefix: string,
-): PlatformMediaObjectRecord | PropertyMediaLibraryItem | FinanceReceiptMediaItem {
+):
+  | PlatformMediaObjectRecord
+  | PropertyMediaLibraryItem
+  | FinanceReceiptMediaItem
+  | PmsInboxAttachmentMediaItem {
+  if (session.purpose === "pms.messaging.attachment") {
+    if (
+      mediaObject.purpose !== session.purpose ||
+      mediaObject.visibility !== "private" ||
+      mediaObject.resourceProduct !== "pms" ||
+      mediaObject.resourceType !== "message_thread"
+    ) {
+      throw new Error("PMS Inbox attachment media cannot expose an invalid object");
+    }
+    return {
+      mediaObjectId: mediaObject.mediaId,
+      purpose: mediaObject.purpose,
+      lifecycleStatus: mediaObject.lifecycleStatus,
+      retainedUntil: mediaObject.retainedUntil ?? null,
+    };
+  }
   if (session.purpose === "finance.expense.receipt") {
     if (mediaObject.purpose !== session.purpose || mediaObject.visibility !== "private") {
       throw new Error("Finance receipt media cannot expose an invalid object");
@@ -2470,6 +2632,36 @@ function serializeMediaObject(
 
 // prettier-ignore
 type FinanceReceiptMediaItem = { mediaObjectId: string; purpose: "finance.expense.receipt"; lifecycleStatus: "staged" | "active"; retainedUntil: string | null };
+
+// prettier-ignore
+type PmsInboxAttachmentMediaItem = { mediaObjectId: string; purpose: "pms.messaging.attachment"; lifecycleStatus: "staged" | "active"; retainedUntil: string | null };
+
+function hasPmsInboxAttachmentPurpose(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "purpose" in value &&
+    value.purpose === "pms.messaging.attachment"
+  );
+}
+
+function pmsInboxPropertyId(value: unknown): string {
+  if (typeof value !== "object" || value === null || !("resource" in value)) return "";
+  const resource = value.resource;
+  if (typeof resource !== "object" || resource === null || !("resourceId" in resource)) return "";
+  return typeof resource.resourceId === "string" ? resource.resourceId : "";
+}
+
+function sendPmsInboxMediaAccessError(
+  reply: FastifyReply,
+  request: FastifyRequest,
+  propertyId: string,
+  error: unknown,
+): FastifyReply {
+  const contractError = toPmsOperationsAccessError(error, request, propertyId);
+  if (!contractError) throw error;
+  return sendPmsOperationsError(reply, contractError);
+}
 
 function reusableCompletedMediaObjects(
   session: PlatformMediaSessionRecord,

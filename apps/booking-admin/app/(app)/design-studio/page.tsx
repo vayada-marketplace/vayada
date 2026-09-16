@@ -16,21 +16,32 @@ import {
   uploadSingleImage,
   uploadSingleImageWithMediaReference,
 } from "@/lib/utils/uploadImage";
-import { headerLogoUploadError } from "@/lib/utils/headerLogo";
+import {
+  headerLogoDimensionsError,
+  headerLogoFileFromUrl,
+  headerLogoUploadError,
+} from "@/lib/utils/headerLogo";
 import { buildBookingPreviewUrl } from "@/lib/utils/bookingPreviewUrl";
 import { useTranslation } from "@/lib/i18n";
+import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 import CustomDomainCard from "@/components/design-studio/CustomDomainCard";
 import MediaTab, { type PropertyGalleryImage } from "@/components/design-studio/MediaTab";
 import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
 
-type Tab = "media" | "colors" | "fonts";
+type Tab = "media" | "colors" | "fonts" | "layout" | "domain";
 
 export default function DesignStudioPage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>("media");
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (["media", "colors", "fonts", "layout", "domain"].includes(tab ?? ""))
+      setActiveTab(tab as Tab);
+  }, []);
   const [saving, setSaving] = useState(false);
+  const [domainBusy, setDomainBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -44,13 +55,21 @@ export default function DesignStudioPage() {
   // Media & Content state
   const [heroImage, setHeroImage] = useState("");
   const [headerLogo, setHeaderLogo] = useState("");
+  const [headerLogoUrl, setHeaderLogoUrl] = useState("");
   const [headerLogoMediaObjectId, setHeaderLogoMediaObjectId] = useState<string | null>(null);
+  const [showContactButton, setShowContactButton] = useState(true);
+  const [showReferAGuestButton, setShowReferAGuestButton] = useState(false);
+  const [referAGuestModuleEnabled, setReferAGuestModuleEnabled] = useState<boolean | null>(null);
+  const [showLanguageSelector, setShowLanguageSelector] = useState(true);
+  const [showCurrencySelector, setShowCurrencySelector] = useState(true);
   const [heroHeading, setHeroHeading] = useState("");
   const [heroSubtext, setHeroSubtext] = useState("");
   const [propertyName, setPropertyName] = useState("");
   const [propertySlug, setPropertySlug] = useState("");
   const [defaultCurrency, setDefaultCurrency] = useState("EUR");
   const [defaultLanguage, setDefaultLanguage] = useState("en");
+  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
+  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
   const [galleryImages, setGalleryImages] = useState<PropertyGalleryImage[]>([]);
   const [galleryOverflowCount, setGalleryOverflowCount] = useState(0);
   const [galleryBusy, setGalleryBusy] = useState(false);
@@ -137,6 +156,7 @@ export default function DesignStudioPage() {
   useEffect(() => {
     setLoadFailed(false);
     setDomainStatus(null);
+    setReferAGuestModuleEnabled(null);
     propertyIdRef.current = null;
     profileRevisionRef.current = null;
     try {
@@ -149,12 +169,20 @@ export default function DesignStudioPage() {
     const hotelId = designHotelIdRef.current;
     settingsService
       .getCustomDomainStatus()
-      .then(setDomainStatus)
-      .catch((error) => {
-        const message =
-          error instanceof Error ? error.message : "Failed to load custom domain status.";
+      .then((status) => {
+        setDomainStatus(status);
+        setDomainInput("");
+      })
+      .catch(() => {
+        const message = "admin.failedToLoadCustomDomainStatus";
         setFeedback({ type: "error", message });
       });
+    moduleActivationClient
+      .list()
+      .then(({ activeModules }) =>
+        setReferAGuestModuleEnabled(activeModules.includes("affiliates")),
+      )
+      .catch(() => setReferAGuestModuleEnabled(null));
     Promise.all([
       settingsService.getDesignSettings(hotelId),
       settingsService.getPropertySettings(hotelId).catch(() => null),
@@ -170,6 +198,10 @@ export default function DesignStudioPage() {
         applyPublicGallery(publicProfile);
         setHeaderLogo(settings.header_logo || "");
         setHeaderLogoMediaObjectId(settings.header_logo_media_object_id);
+        setShowContactButton(settings.show_contact_button);
+        setShowReferAGuestButton(settings.show_refer_a_guest_button);
+        setShowLanguageSelector(settings.show_language_selector);
+        setShowCurrencySelector(settings.show_currency_selector);
         if (settings.hero_image) setHeroImage(settings.hero_image);
         if (settings.hero_heading) setHeroHeading(settings.hero_heading);
         if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
@@ -179,6 +211,8 @@ export default function DesignStudioPage() {
         if (property?.slug) setPropertySlug(property.slug);
         if (property?.default_currency) setDefaultCurrency(property.default_currency);
         if (property?.default_language) setDefaultLanguage(property.default_language);
+        if (property?.supported_currencies) setSupportedCurrencies(property.supported_currencies);
+        if (property?.supported_languages) setSupportedLanguages(property.supported_languages);
       })
       .catch(() => {
         setLoadFailed(true);
@@ -205,8 +239,7 @@ export default function DesignStudioPage() {
       e.target.value = "";
       setFeedback({
         type: "error",
-        message:
-          "The property profile version is unavailable. Refresh Design Studio before uploading a hero image.",
+        message: "admin.thePropertyProfileVersionIsUnavailableRefreshDesignStudioBefore",
       });
       return;
     }
@@ -247,7 +280,7 @@ export default function DesignStudioPage() {
       }
       URL.revokeObjectURL(previewUrl);
       setHeroImage(previousImage);
-      setFeedback({ type: "error", message: "Image upload failed. Please try again." });
+      setFeedback({ type: "error", message: "bookingFlow.addons.feedback.uploadError" });
     } finally {
       setUploading(false);
     }
@@ -265,7 +298,7 @@ export default function DesignStudioPage() {
     const hotelId = designHotelIdRef.current;
     const expectedProfileRevision = profileRevisionRef.current;
     if (!propertyId || !hotelId || expectedProfileRevision === null) {
-      throw new Error("The property gallery version is unavailable. Refresh and try again.");
+      throw new Error(t("admin.thePropertyGalleryVersionIsUnavailableRefreshAndTryAgain"));
     }
     const cover = coverAssignmentRef.current;
     const sortOffset = cover ? 1 : 0;
@@ -310,7 +343,7 @@ export default function DesignStudioPage() {
       published = false;
       setFeedback({
         type: "error",
-        message: "Gallery saved, but the booking preview could not be refreshed. Try again.",
+        message: "admin.gallerySavedButTheBookingPreviewCouldNotBeRefreshed",
       });
     }
     return { published, refreshed };
@@ -326,12 +359,12 @@ export default function DesignStudioPage() {
     if (files.length > remaining) {
       setFeedback({
         type: "error",
-        message: `You can add ${remaining} more ${remaining === 1 ? "photo" : "photos"} to this gallery.`,
+        message: t("admin.youCanAddCountMorePhotosToThisGallery", { count: remaining }),
       });
       return;
     }
     if (files.some((file) => !["image/jpeg", "image/png", "image/webp"].includes(file.type))) {
-      setFeedback({ type: "error", message: "Gallery photos must be JPG, PNG, or WebP files." });
+      setFeedback({ type: "error", message: "admin.galleryPhotosMustBeJPGPNGOrWebPFiles" });
       return;
     }
     if (!beginGalleryWrite()) return;
@@ -354,8 +387,8 @@ export default function DesignStudioPage() {
       if (refreshed) {
         previewUrls.forEach((url) => pendingGalleryPreviewUrlsRef.current.delete(url));
       }
-      if (published) setFeedback({ type: "success", message: "Property gallery updated" });
-    } catch (error) {
+      if (published) setFeedback({ type: "success", message: "admin.propertyGalleryUpdated" });
+    } catch {
       previewUrls.forEach((url) => {
         URL.revokeObjectURL(url);
         pendingGalleryPreviewUrlsRef.current.delete(url);
@@ -363,7 +396,7 @@ export default function DesignStudioPage() {
       await refreshCanonicalGallery().catch(() => undefined);
       setFeedback({
         type: "error",
-        message: error instanceof Error ? error.message : "Gallery upload failed. Try again.",
+        message: "admin.galleryUploadFailedTryAgain",
       });
     } finally {
       endGalleryWrite();
@@ -371,7 +404,7 @@ export default function DesignStudioPage() {
   };
 
   const removeGalleryImage = async (index: number) => {
-    if (!window.confirm("Remove this photo from the property gallery?")) return;
+    if (!window.confirm(t("admin.removeThisPhotoFromThePropertyGallery"))) return;
     if (!beginGalleryWrite()) return;
     const previous = galleryImages;
     const nextGallery = previous.filter((_, photoIndex) => photoIndex !== index);
@@ -379,13 +412,13 @@ export default function DesignStudioPage() {
     setFeedback(null);
     try {
       const { published } = await persistGallery(nextGallery);
-      if (published) setFeedback({ type: "success", message: "Property gallery updated" });
-    } catch (error) {
+      if (published) setFeedback({ type: "success", message: "admin.propertyGalleryUpdated" });
+    } catch {
       setGalleryImages(previous);
       await refreshCanonicalGallery().catch(() => undefined);
       setFeedback({
         type: "error",
-        message: error instanceof Error ? error.message : "Photo could not be removed.",
+        message: "admin.photoCouldNotBeRemoved",
       });
     } finally {
       endGalleryWrite();
@@ -406,13 +439,13 @@ export default function DesignStudioPage() {
     setFeedback(null);
     try {
       const { published } = await persistGallery(nextGallery);
-      if (published) setFeedback({ type: "success", message: "Property gallery order saved" });
-    } catch (error) {
+      if (published) setFeedback({ type: "success", message: "admin.propertyGalleryOrderSaved" });
+    } catch {
       setGalleryImages(previous);
       await refreshCanonicalGallery().catch(() => undefined);
       setFeedback({
         type: "error",
-        message: error instanceof Error ? error.message : "Gallery order could not be saved.",
+        message: "admin.galleryOrderCouldNotBeSaved",
       });
     } finally {
       endGalleryWrite();
@@ -420,7 +453,7 @@ export default function DesignStudioPage() {
   };
 
   const handleLogoUpload = async (file: File) => {
-    const validationError = headerLogoUploadError(file);
+    const validationError = headerLogoUploadError(file) ?? (await headerLogoDimensionsError(file));
     if (validationError) {
       setFeedback({ type: "error", message: validationError });
       if (logoInputRef.current) logoInputRef.current.value = "";
@@ -431,8 +464,7 @@ export default function DesignStudioPage() {
     if (!hotelId) {
       setFeedback({
         type: "error",
-        message:
-          "The Booking property is unavailable. Refresh Design Studio before uploading a logo.",
+        message: "admin.theBookingPropertyIsUnavailableRefreshDesignStudioBeforeUploading",
       });
       if (logoInputRef.current) logoInputRef.current.value = "";
       return;
@@ -464,8 +496,7 @@ export default function DesignStudioPage() {
       } catch {
         setFeedback({
           type: "error",
-          message:
-            "Logo uploaded, but the booking header could not be refreshed. Save to try again.",
+          message: "admin.logoUploadedButTheBookingHeaderCouldNotBeRefreshed",
         });
       }
     } catch (error) {
@@ -473,10 +504,28 @@ export default function DesignStudioPage() {
       URL.revokeObjectURL(previewUrl);
       setHeaderLogo(previousLogo);
       setHeaderLogoMediaObjectId(previousLogoMediaObjectId);
-      setFeedback({ type: "error", message: "Logo upload failed. Please try again." });
+      setFeedback({ type: "error", message: "admin.logoUploadFailedPleaseTryAgain" });
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const addHeaderLogoUrl = async () => {
+    try {
+      setUploadingLogo(true);
+      setFeedback(null);
+      const file = await headerLogoFileFromUrl(headerLogoUrl);
+      setUploadingLogo(false);
+      await handleLogoUpload(file);
+      setHeaderLogoUrl("");
+    } catch {
+      setFeedback({
+        type: "error",
+        message: "admin.theLogoURLCouldNotBeAdded",
+      });
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
@@ -493,48 +542,57 @@ export default function DesignStudioPage() {
 
   const handleConnectDomain = async () => {
     if (!domainInput.trim()) {
-      setFeedback({ type: "error", message: "Enter a custom domain." });
+      setFeedback({ type: "error", message: "admin.enterACustomDomain" });
       return;
     }
 
     try {
       setSaving(true);
+      setDomainBusy(true);
       setFeedback(null);
       const status = await settingsService.connectCustomDomain(domainInput);
       setDomainStatus(status);
       setDomainInput("");
-      setFeedback({ type: "success", message: t("settings.feedback.domainConnected") });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to connect custom domain.";
+      setFeedback({ type: "success", message: "settings.feedback.domainConnected" });
+    } catch {
+      const message = "admin.failedToConnectCustomDomain";
       setFeedback({ type: "error", message });
     } finally {
       setSaving(false);
+      setDomainBusy(false);
     }
   };
 
   const handleDisconnectDomain = async () => {
     try {
       setSaving(true);
+      setDomainBusy(true);
       setFeedback(null);
       await settingsService.disconnectCustomDomain();
       const status = await settingsService.getCustomDomainStatus();
       setDomainStatus(status);
-      setFeedback({ type: "success", message: t("settings.feedback.domainRemoved") });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to remove custom domain.";
+      setDomainInput("");
+      setFeedback({ type: "success", message: "settings.feedback.domainRemoved" });
+    } catch {
+      const message = "admin.failedToRemoveCustomDomain";
       setFeedback({ type: "error", message });
     } finally {
       setSaving(false);
+      setDomainBusy(false);
     }
   };
 
   const handleRefreshDomainStatus = async () => {
     try {
+      setDomainBusy(true);
       const status = await settingsService.getCustomDomainStatus();
       setDomainStatus(status);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to refresh custom domain.";
+      if (!status.configured) setDomainInput("");
+    } catch {
+      const message = "admin.failedToRefreshCustomDomain";
       setFeedback({ type: "error", message });
+    } finally {
+      setDomainBusy(false);
     }
   };
 
@@ -547,6 +605,10 @@ export default function DesignStudioPage() {
       await settingsService.updateDesignSettings(
         {
           header_logo_media_object_id: headerLogoMediaObjectId,
+          show_contact_button: showContactButton,
+          ...(referAGuestModuleEnabled ? { show_refer_a_guest_button: showReferAGuestButton } : {}),
+          show_language_selector: showLanguageSelector,
+          show_currency_selector: showCurrencySelector,
           hero_image: heroImage,
           hero_heading: heroHeading,
           hero_subtext: heroSubtext,
@@ -560,13 +622,13 @@ export default function DesignStudioPage() {
       } catch {
         setFeedback({
           type: "error",
-          message: "Design saved, but the booking preview could not be refreshed. Try again.",
+          message: "admin.designSavedButTheBookingPreviewCouldNotBeRefreshed",
         });
         return;
       }
-      setFeedback({ type: "success", message: "Design settings saved successfully" });
+      setFeedback({ type: "success", message: "designStudio.feedback.saveSuccess" });
     } catch {
-      setFeedback({ type: "error", message: "Failed to save design settings" });
+      setFeedback({ type: "error", message: "designStudio.feedback.saveError" });
     } finally {
       setSaving(false);
     }
@@ -577,9 +639,11 @@ export default function DesignStudioPage() {
   };
 
   const tabs = [
-    { id: "media" as const, label: "Media & Content", icon: MediaIcon },
-    { id: "colors" as const, label: "Colors", icon: ColorsIcon },
-    { id: "fonts" as const, label: "Fonts", icon: FontsIcon },
+    { id: "media" as const, label: t("admin.content"), icon: MediaIcon },
+    { id: "colors" as const, label: t("designStudio.tabs.colors"), icon: ColorsIcon },
+    { id: "fonts" as const, label: t("designStudio.fonts.title"), icon: FontsIcon },
+    { id: "layout" as const, label: t("admin.layout"), icon: LayoutIcon },
+    { id: "domain" as const, label: t("admin.domain"), icon: DomainIcon },
   ];
 
   const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
@@ -598,10 +662,10 @@ export default function DesignStudioPage() {
       <div className="p-4 md:p-6 h-full flex items-center justify-center">
         <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
         <div className="w-full max-w-md text-center">
-          <h1 className="text-xl font-bold text-gray-900">Design Studio</h1>
+          <h1 className="text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
           <FeedbackAlert
             type="error"
-            message="Failed to load design settings. Your saved design has not been changed."
+            message={t("designStudio.loadFailure")}
             className="mt-4 text-left"
           />
           <button
@@ -612,7 +676,7 @@ export default function DesignStudioPage() {
             }}
             className="mt-4 inline-flex items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
           >
-            Try again
+            {t("dashboard.pageViewsModal.retry")}
           </button>
         </div>
       </div>
@@ -624,23 +688,25 @@ export default function DesignStudioPage() {
       <link href={BOOKING_PAGE_FONT_STYLESHEET_URL} rel="stylesheet" />
       <div className="shrink-0 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl md:text-xl font-bold text-gray-900">Design Studio</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Customize your booking engine&apos;s look and feel
-          </p>
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("designStudio.title")}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t("designStudio.subtitle")}</p>
         </div>
         <button
           onClick={() => setPreviewOpen(true)}
           className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
         >
           <EyeIcon className="w-4 h-4" />
-          Preview
+          {t("layout.header.preview")}
         </button>
       </div>
 
       {/* Feedback banner */}
       {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3 shrink-0" />
+        <FeedbackAlert
+          type={feedback.type}
+          message={t(feedback.message)}
+          className="mt-3 shrink-0"
+        />
       )}
 
       {/* Main split layout */}
@@ -648,7 +714,7 @@ export default function DesignStudioPage() {
         {/* LEFT: Controls panel */}
         <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col lg:min-h-0">
           {/* Tab bar */}
-          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0 sticky top-0 z-10 lg:static">
+          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-5 shrink-0 sticky top-0 z-10 lg:static">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -669,42 +735,43 @@ export default function DesignStudioPage() {
           {/* Tab content */}
           <div className="mt-3 space-y-3 lg:flex-1 lg:overflow-y-auto lg:pb-3">
             {activeTab === "media" && (
-              <>
-                <CustomDomainCard
-                  domainInput={domainInput}
-                  domainStatus={domainStatus}
-                  saving={saving}
-                  onConnect={handleConnectDomain}
-                  onDisconnect={handleDisconnectDomain}
-                  onDomainInputChange={setDomainInput}
-                  onRefresh={handleRefreshDomainStatus}
-                />
-                <MediaTab
-                  heroImage={heroImage}
-                  setHeroImage={setHeroImage}
-                  heroHeading={heroHeading}
-                  setHeroHeading={setHeroHeading}
-                  heroSubtext={heroSubtext}
-                  setHeroSubtext={setHeroSubtext}
-                  fileInputRef={fileInputRef}
-                  handleImageUpload={handleImageUpload}
-                  removeHeroImage={removeHeroImage}
-                  headerLogo={headerLogo}
-                  logoInputRef={logoInputRef}
-                  handleLogoUpload={handleLogoUpload}
-                  removeHeaderLogo={removeHeaderLogo}
-                  uploadingLogo={uploadingLogo}
-                  resetContent={resetContent}
-                  galleryImages={galleryImages}
-                  galleryAtCapacity={
-                    galleryImages.length + galleryOverflowCount >= MAX_PROPERTY_GALLERY_PHOTOS
-                  }
-                  galleryBusy={galleryBusy}
-                  addGalleryImages={addGalleryImages}
-                  removeGalleryImage={removeGalleryImage}
-                  reorderGalleryImage={reorderGalleryImage}
-                />
-              </>
+              <MediaTab
+                heroImage={heroImage}
+                setHeroImage={setHeroImage}
+                heroHeading={heroHeading}
+                setHeroHeading={setHeroHeading}
+                heroSubtext={heroSubtext}
+                setHeroSubtext={setHeroSubtext}
+                fileInputRef={fileInputRef}
+                handleImageUpload={handleImageUpload}
+                removeHeroImage={removeHeroImage}
+                headerLogo={headerLogo}
+                headerLogoUrl={headerLogoUrl}
+                logoInputRef={logoInputRef}
+                handleLogoUpload={handleLogoUpload}
+                addHeaderLogoUrl={addHeaderLogoUrl}
+                setHeaderLogoUrl={setHeaderLogoUrl}
+                removeHeaderLogo={removeHeaderLogo}
+                uploadingLogo={uploadingLogo}
+                showContactButton={showContactButton}
+                setShowContactButton={setShowContactButton}
+                showReferAGuestButton={showReferAGuestButton}
+                setShowReferAGuestButton={setShowReferAGuestButton}
+                referAGuestModuleEnabled={referAGuestModuleEnabled}
+                showLanguageSelector={showLanguageSelector}
+                setShowLanguageSelector={setShowLanguageSelector}
+                showCurrencySelector={showCurrencySelector}
+                setShowCurrencySelector={setShowCurrencySelector}
+                resetContent={resetContent}
+                galleryImages={galleryImages}
+                galleryAtCapacity={
+                  galleryImages.length + galleryOverflowCount >= MAX_PROPERTY_GALLERY_PHOTOS
+                }
+                galleryBusy={galleryBusy}
+                addGalleryImages={addGalleryImages}
+                removeGalleryImage={removeGalleryImage}
+                reorderGalleryImage={reorderGalleryImage}
+              />
             )}
 
             {activeTab === "colors" && (
@@ -717,6 +784,28 @@ export default function DesignStudioPage() {
 
             {activeTab === "fonts" && (
               <FontsTab selectedFont={selectedFont} setSelectedFont={setSelectedFont} />
+            )}
+
+            {activeTab === "layout" && (
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <h2 className="text-[13px] font-semibold text-gray-900">{t("admin.layout")}</h2>
+                <p className="mt-1 text-[12px] text-gray-500">
+                  {t("admin.yourResponsiveBookingLayoutIsAppliedAutomatically")}
+                </p>
+              </div>
+            )}
+
+            {activeTab === "domain" && (
+              <CustomDomainCard
+                bookingUrl={propertySlug ? `${propertySlug}.booking.vayada.com` : ""}
+                domainInput={domainInput}
+                domainStatus={domainStatus}
+                saving={domainBusy}
+                onConnect={handleConnectDomain}
+                onDisconnect={handleDisconnectDomain}
+                onDomainInputChange={setDomainInput}
+                onRefresh={handleRefreshDomainStatus}
+              />
             )}
           </div>
 
@@ -738,23 +827,30 @@ export default function DesignStudioPage() {
         >
           {previewOpen && (
             <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-              <h2 className="text-sm font-semibold text-gray-900">Live Preview</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{t("admin.livePreview")}</h2>
               <button
                 onClick={() => setPreviewOpen(false)}
                 className="w-8 h-8 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
-                aria-label="Close preview"
+                aria-label={t("admin.closePreview")}
               >
                 <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
           )}
           <BookingPagePreview
-            bookingUrl={bookingPreviewUrl ?? "Your booking URL"}
+            translate={t}
+            bookingUrl={bookingPreviewUrl ?? t("bookingPreview.yourBookingUrl")}
             className="flex-1 rounded-none border-0 lg:rounded-lg lg:border"
             currency={defaultCurrency}
             defaultLanguage={defaultLanguage}
             font={currentFont}
             headerLogo={headerLogo}
+            showContactButton={showContactButton}
+            showReferAGuestButton={Boolean(referAGuestModuleEnabled && showReferAGuestButton)}
+            showLanguageSelector={showLanguageSelector}
+            showCurrencySelector={showCurrencySelector}
+            supportedLanguages={supportedLanguages}
+            supportedCurrencies={supportedCurrencies}
             heroHeading={heroHeading}
             heroImage={heroImage}
             heroSubtext={heroSubtext}
@@ -788,7 +884,7 @@ export default function DesignStudioPage() {
               />
             </svg>
           )}
-          Save Changes
+          {t("common.save")}
         </button>
       </div>
     </div>
@@ -846,6 +942,36 @@ function FontsIcon({ className }: { className?: string }) {
       <path d="M4 7V4h16v3" />
       <path d="M12 4v16" />
       <path d="M8 20h8" />
+    </svg>
+  );
+}
+
+function LayoutIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M9 9v11" />
+    </svg>
+  );
+}
+
+function DomainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
     </svg>
   );
 }

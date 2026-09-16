@@ -324,6 +324,7 @@ function baseCheckOutCommand(overrides: Partial<PmsCheckOutCommand> = {}): PmsCh
     idempotencyKey: "pms-checkout-001",
     expectedVersion: "reservation-v7",
     inspectionResults: [{ stepId: "minibar", status: "completed" }],
+    fulfilledAddonSelectionIds: [],
     chargesSettled: ["f6855700-0000-0000-0000-000000000001"],
     pendingFlags: [],
     checkoutNotes: "Guest departed at 10:15.",
@@ -399,6 +400,7 @@ function successfulOperationalHandler(status = "assigned"): QueryHandler {
     if (text.includes("INSERT INTO pms.booking_checkin_records")) return ok([], 2);
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
     if (text.includes("UPDATE pms.inventory_days")) return ok([], 1);
+    if (text.includes("JOIN booking.booking_addon_selections selection")) return ok();
     if (text.includes("booking_metadata->>'contractVersion'")) return ok();
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
@@ -572,7 +574,11 @@ function checkoutRecordRow(checkout: Partial<PmsCheckOutRecord> = {}): QueryResu
 }
 
 function successfulCheckoutHandler(
-  options: { assignmentStatus?: string; existingCheckout?: boolean } = {},
+  options: {
+    assignmentStatus?: string;
+    existingCheckout?: boolean;
+    addonSelections?: QueryResultRow[];
+  } = {},
 ): QueryHandler {
   return (text, values) => {
     if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
@@ -581,6 +587,9 @@ function successfulCheckoutHandler(
     if (text.includes("SELECT DISTINCT scope.room_type_id")) return ok([{ roomTypeId }]);
     if (text.includes("pg_advisory_xact_lock")) return ok();
     if (text.includes("room_type_id = ANY") && text.includes("FOR UPDATE")) return ok();
+    if (text.includes("FROM pms.operational_booking_assignments") && text.includes("AS remaining")) {
+      return ok([{ remaining: false }]);
+    }
     if (text.includes("FROM pms.operational_booking_assignments")) {
       return ok(assignmentRows(options.assignmentStatus ?? "in_house"));
     }
@@ -601,6 +610,13 @@ function successfulCheckoutHandler(
       ]);
     }
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
+    if (
+      text.includes("FROM booking.guest_bookings booking") &&
+      text.includes("selection.edit_revision")
+    ) {
+      return ok(options.addonSelections ?? []);
+    }
+    if (text.includes("INSERT INTO booking.addon_revenue_evidence")) return ok([], 1);
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
     throw new Error(`Unhandled SQL: ${text}`);
@@ -638,6 +654,8 @@ describe("target PMS operations command repository", () => {
         ]);
       }
       if (text.includes("WITH booking_update AS")) return ok([{ id: guestBookingId }], 1);
+      if (text.includes('SELECT room_count AS "roomCount"')) return ok([{ roomCount: 1 }]);
+      if (text.includes("FROM booking.nightly_revenue_evidence") && text.includes("GROUP BY room_type_id,line_position")) return ok();
       if (text.includes("WITH booking_scope AS")) return ok();
       if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
       if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
@@ -782,7 +800,7 @@ describe("target PMS operations command repository", () => {
     ).toBe(true);
   });
 
-  it("sends bank details only inside the host acceptance transaction", async () => {
+  it("enqueues bank instructions for private delivery after host acceptance", async () => {
     const { client, repository } = createRepository((text) => {
       if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
       if (text.includes("FROM platform.idempotency_keys")) return ok();
@@ -810,12 +828,14 @@ describe("target PMS operations command repository", () => {
             acceptedMethods: [],
             depositPolicy: {},
             paymentInstructions: {
-              bankTransferDetails: "IBAN: DE89370400440532013000",
+              requiresBankTransferInstructions: true,
             },
           },
         ]);
       }
       if (text.includes("WITH booking_update AS")) return ok([{ id: guestBookingId }], 1);
+      if (text.includes('SELECT room_count AS "roomCount"')) return ok([{ roomCount: 1 }]);
+      if (text.includes("FROM booking.nightly_revenue_evidence") && text.includes("GROUP BY room_type_id,line_position")) return ok();
       if (text.includes("WITH booking_scope AS")) return ok();
       if (text.includes('AS "hostEmail"')) {
         return ok([
@@ -837,6 +857,8 @@ describe("target PMS operations command repository", () => {
           },
         ]);
       }
+      if (text.includes("SELECT binding.destination_id"))
+        return ok([{ destination_id: "destination" }]);
       if (text.includes("INSERT INTO platform.domain_events")) {
         return ok([{ eventId: "f6855900-0000-0000-0000-000000000001" }], 1);
       }
@@ -870,12 +892,47 @@ describe("target PMS operations command repository", () => {
     expect(requiredCall(client, "WITH booking_update AS").values[6]).toBe(
       "2026-08-16T15:45:00.000Z",
     );
+    expect(JSON.stringify(client.calls)).not.toContain("DE89370400440532013000");
     const email = requiredCall(client, "INSERT INTO platform.jobs");
     expect(JSON.parse(String(email.values[8]))).toMatchObject({
       bookingReference: "BK-BANK-001",
-      bankTransferDetails: "IBAN: DE89370400440532013000",
+      requiresBankTransferInstructions: true,
       paymentDeadlineAt: "2026-08-16T15:45:00.000Z",
     });
+  });
+
+  it("returns a specific conflict when the bound bank destination was deleted", async () => {
+    const { client, repository } = createRepository((text) => {
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) return ok();
+      if (text.includes("FROM platform.idempotency_keys")) return ok();
+      if (text.includes("INSERT INTO platform.idempotency_keys")) return ok([{ id: "idem" }], 1);
+      if (text.includes("FROM booking.guest_bookings booking") && text.includes("FOR UPDATE"))
+        return ok([
+          {
+            guestBookingId,
+            propertyId,
+            lifecycleStatus: "pending_payment",
+            paymentStatus: "unpaid",
+            paymentMethod: "bank_transfer",
+          },
+        ]);
+      if (text.includes("SELECT binding.destination_id")) return ok();
+      throw new Error(`Unhandled SQL: ${text}`);
+    });
+    await expect(repository.acceptBooking(baseBookingLifecycleCommand())).resolves.toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "bank_transfer_unavailable",
+    });
+    expect(requiredCall(client, "SELECT binding.destination_id").text).toContain(
+      "FOR SHARE OF destination",
+    );
+    expect(
+      client.calls.some(
+        ({ text }) =>
+          text.includes("WITH booking_update AS") || text.includes("INSERT INTO platform.jobs"),
+      ),
+    ).toBe(false);
   });
 
   it("rejects bank acceptance after the canonical pending-payment deadline", async () => {
@@ -1119,7 +1176,9 @@ describe("target PMS operations command repository", () => {
           ]);
         }
         if (text.includes("WITH booking_update AS")) return ok([{ id: guestBookingId }], 1);
-        if (text.includes("WITH booking_scope AS")) return ok();
+        if (text.includes('SELECT room_count AS "roomCount"')) return ok([{ roomCount: 1 }]);
+      if (text.includes("FROM booking.nightly_revenue_evidence") && text.includes("GROUP BY room_type_id,line_position")) return ok();
+      if (text.includes("WITH booking_scope AS")) return ok();
         if (text.includes('AS "hostEmail"')) {
           return ok([
             {
@@ -1772,6 +1831,76 @@ describe("target PMS operations command repository", () => {
     expect(client.calls.some((call) => call.text.includes("platform.outbox_events"))).toBe(false);
   });
 
+  it("records only explicitly fulfilled active add-ons as revenue", async () => {
+    const fulfilledSelectionId = "f6855600-0000-0000-0000-000000000001";
+    const missingSelectionId = "f6855600-0000-0000-0000-000000000002";
+    const { client, repository } = createRepository(
+      successfulCheckoutHandler({
+        addonSelections: [
+          {
+            selectionId: fulfilledSelectionId,
+            serviceDate: "2026-08-17",
+            checkIn: "2026-08-15",
+            quantity: 2,
+            currency: "EUR",
+            totalAmount: "30.0000",
+            ownershipKind: "property",
+            partnerCommissionRate: null,
+          },
+          {
+            selectionId: missingSelectionId,
+            serviceDate: null,
+            checkIn: "2026-08-15",
+            quantity: 1,
+            currency: "EUR",
+            totalAmount: "50.0000",
+            ownershipKind: "partner",
+            partnerCommissionRate: "12.5000",
+          },
+        ],
+      }),
+    );
+
+    const result = await repository.executeCheckOutCommand(
+      baseCheckOutCommand({ fulfilledAddonSelectionIds: [fulfilledSelectionId] }),
+    );
+
+    expect(result.ok).toBe(true);
+    const inserts = client.calls.filter(({ text }) =>
+      text.includes("INSERT INTO booking.addon_revenue_evidence"),
+    );
+    expect(inserts.map(({ values }) => values.slice(3, 11))).toEqual([
+      ["2026-08-17", 2, "EUR", "30.0000", "property", null, "fulfillment", "exact"],
+      ["2026-08-15", 1, "EUR", null, "partner", "12.5000", "missing_fulfillment", "missing"],
+    ]);
+    expect(client.calls.at(-1)?.text).toBe("COMMIT");
+  });
+
+  it("writes add-on evidence once on the final assignment checkout", async () => {
+    const selectionId = "f6855600-0000-0000-0000-000000000001";
+    let remainingCheck = 0;
+    const fallback = successfulCheckoutHandler({
+      addonSelections: [{ selectionId, serviceDate: "2026-08-17", checkIn: "2026-08-15", quantity: 1, currency: "EUR", totalAmount: "30.0000", ownershipKind: "property", partnerCommissionRate: null }],
+    });
+    const { client, repository } = createRepository((text, values) =>
+      text.includes("AS remaining")
+        ? ok([{ remaining: remainingCheck++ === 0 }])
+        : fallback(text, values),
+    );
+
+    const first = await repository.executeCheckOutCommand(
+      baseCheckOutCommand({ assignmentId: assignmentOneId, chargesSettled: [] }),
+    );
+    const finalCommand = baseCheckOutCommand({ assignmentId: assignmentTwoId, fulfilledAddonSelectionIds: [selectionId] });
+    finalCommand.commandId = "cmd-checkout-002";
+    finalCommand.idempotencyKey = "pms-checkout-002";
+    finalCommand.audit = { ...finalCommand.audit, requestId: "req-checkout-002" };
+    const final = await repository.executeCheckOutCommand(finalCommand);
+
+    expect([first.ok, final.ok]).toEqual([true, true]);
+    expect(client.calls.filter(({ text }) => text.includes("INSERT INTO booking.addon_revenue_evidence"))).toHaveLength(1);
+  });
+
   it("rejects assignment-scoped checkouts that settle another assignment charge", async () => {
     const { client, repository } = createRepository((text) => {
       if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
@@ -1851,7 +1980,7 @@ describe("target PMS operations command repository", () => {
     }
   });
 
-  it("replays same-key checkout commands from idempotency metadata without repeating writes", async () => {
+  it("replays a pre-add-on-field checkout fingerprint without repeating writes", async () => {
     const replayCommand = baseCheckOutCommand();
     const replayMeta: PmsCommandMeta = {
       contractVersion: "pms-operations.v1",
@@ -1946,6 +2075,14 @@ function commandFingerprintHash(
   command: PmsCheckInCommand | PmsCheckOutCommand | PmsManualCancellationCommand,
 ): string {
   const { audit: _audit, ...fingerprint } = command;
+  if ("fulfilledAddonSelectionIds" in fingerprint) {
+    const checkout = fingerprint as Partial<PmsCheckOutCommand>;
+    if (checkout.fulfilledAddonSelectionIds?.length) {
+      checkout.fulfilledAddonSelectionIds = [...checkout.fulfilledAddonSelectionIds].sort();
+    } else {
+      delete checkout.fulfilledAddonSelectionIds;
+    }
+  }
   return sha256(stableJson(fingerprint));
 }
 

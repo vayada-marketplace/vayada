@@ -1,4 +1,15 @@
 {
+  "analyticsConsent": {
+    "settings": "Opciones de privacidad",
+    "title": "Analítica opcional",
+    "description": "Usamos analítica opcional para entender las visitas y los pasos de reserva. Puede reservar sin activarla. Su elección solo se aplica al sitio de reservas de este hotel.",
+    "enabled": "Analítica activada.",
+    "disabled": "Analítica desactivada.",
+    "saveError": "No se pudo guardar su elección. La analítica sigue desactivada.",
+    "reject": "Rechazar analítica",
+    "accept": "Permitir analítica",
+    "close": "Mantener la elección actual"
+  },
   "common": {
     "checkAvailability": "Consultar Disponibilidad",
     "bookNow": "Reservar Ahora",
@@ -32,6 +43,8 @@
     "loading": "Cargando...",
     "qty": "Cant",
     "perPerson": "por persona",
+    "checkInWindow": "Entrada: {time}",
+    "checkOutWindow": "Salida: {time}",
     "checkInFrom": "Check-in desde las {time}",
     "checkOutBy": "Check-out hasta las {time}",
     "pricingUpdating": "Los precios para estas fechas aún se están actualizando. Espera un momento e inténtalo de nuevo."
@@ -50,6 +63,11 @@
     "payment": "Pago"
   },
   "home": {
+    "guestCountUnsupported": "La búsqueda en línea no admite su grupo de {count} huéspedes. Pruebe con menos huéspedes o contáctenos.",
+    "guestCountUnavailable": "Ninguno de nuestros alojamientos disponibles puede acoger a su grupo de {count} huéspedes. Pruebe con menos huéspedes u otras fechas.",
+    "noAvailability": "No hay alojamiento disponible para esta búsqueda. Pruebe otras fechas u opciones.",
+    "availabilityError": "No pudimos comprobar la disponibilidad. Inténtelo de nuevo.",
+    "noMatchingRooms": "Ningún alojamiento coincide con sus filtros. Pruebe a quitar un filtro.",
     "yourStay": "Tu Estancia",
     "addPromo": "Añadir promo",
     "promoTitle": "¿Tienes un código promocional?",
@@ -72,7 +90,7 @@
     "priceHighLow": "Precio: de Mayor a Menor",
     "upToGuests": "Hasta {count} huéspedes",
     "viewDetails": "Ver Detalles",
-    "viewFullAmenities": "Ver todos los servicios ({count} más)",
+    "viewFullAmenities": "Ver todos los servicios ({count})",
     "showLess": "Mostrar menos",
     "rateOptions": "Opciones de Tarifa",
     "selectYourRate": "Selecciona tu Tarifa",
@@ -104,19 +122,6 @@
       "checkingAvailability": "Comprobando disponibilidad",
       "availabilityUnavailable": "No podemos consultar temporalmente la disponibilidad para estas fechas.",
       "availabilityUnavailableTooltip": "No se puede consultar la disponibilidad"
-    },
-    "mobileView": {
-      "list": "Lista",
-      "map": "Mapa"
-    },
-    "roomMap": {
-      "noLocations": "No hay ubicaciones disponibles",
-      "noLocationsDesc": "Los tipos de habitación sin coordenadas guardadas aún aparecen en la lista.",
-      "locations": "{count, plural, one {# ubicación} other {# ubicaciones}}",
-      "perNight": "/ noche",
-      "view": "Ver →",
-      "zoomIn": "Acercar",
-      "zoomOut": "Alejar"
     }
   },
   "rooms": {
@@ -254,6 +259,7 @@
     "xenditTitle": "QRIS / Monedero electrónico / Transferencia bancaria",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay o transferencia bancaria indonesia mediante Xendit",
     "xenditExplanation": "Serás redirigido a una página de pago segura donde podrás pagar con QRIS, OVO, DANA, ShopeePay, GoPay o transferencia bancaria. Revisaremos tu reserva una vez confirmado el pago.",
+    "errorPaymentUnavailable": "Este método de pago ya no está disponible. Actualiza la página y elige un método de pago disponible.",
     "errorSoldOut": "Lamentablemente, esta habitación acaba de agotarse. Elige otra habitación o fechas diferentes.",
     "errorSameDaySoldOut": "Las reservas del mismo día ya no están disponibles para hoy. Por favor, selecciona mañana u otra fecha disponible.",
     "errorGeneric": "Algo salió mal al crear tu reserva. Inténtalo de nuevo o elige otra habitación.",
@@ -405,5 +411,24 @@
     "unableToLoad": "No se pudo cargar el hotel",
     "tryAgainLater": "No pudimos obtener los datos del hotel. Por favor, inténtalo de nuevo más tarde.",
     "retry": "Reintentar"
+  },
+  "roomSelection": {
+    "breakfastIncluded": "Desayuno incluido",
+    "roomOnly": "Solo alojamiento",
+    "accommodation": "Alojamiento para {count} huéspedes",
+    "perRoomTerms": "Las condiciones de cancelación se aplican a cada habitación.",
+    "roomNumber": "Habitación {number}",
+    "totalStay": "Total por {nights} noches",
+    "freeUntil": "Cancelación gratuita hasta el {date} ({timezone}).",
+    "afterDeadline": "Sin reembolso después del plazo o en caso de no presentarse.",
+    "termsUnavailable": "Las condiciones de cancelación no están disponibles.",
+    "unavailable": "Esta selección ya no está disponible. Busca de nuevo.",
+    "choose": "Elegir este alojamiento",
+    "selectedAccommodation": "Alojamiento seleccionado",
+    "partyChanged": "El número de huéspedes ha cambiado. Actualiza los huéspedes de cada habitación o elige otro alojamiento antes de revisar el precio.",
+    "editRequest": "Editar solicitud",
+    "allocateGuests": "Huéspedes en cada habitación",
+    "allocationAdults": "Adultos",
+    "allocationChildren": "Niños"
   }
 }

@@ -33,6 +33,7 @@ import {
 import type {
   AdaptiveHotelSetupStatus,
   CreatePropertyProfileRequest,
+  PreparedHotelImport,
   PropertyProfileContact,
   PropertyProfilePatch,
   PropertyProfileResponse,
@@ -97,6 +98,8 @@ export type SharedFirstRunContinueInput = {
 };
 
 export type SharedFirstRunPropertySetupWizardProps = {
+  initialProfileSuggestions?: PreparedHotelImport["property"];
+  propertyCreateIdempotencyKey?: string;
   api: SharedHotelSetupApi;
   entryProduct: SharedHotelSetupEntryProduct;
   initialPropertyId?: string | null;
@@ -108,6 +111,8 @@ export type SharedFirstRunPropertySetupWizardProps = {
   renderTaskForm: (context: SharedSetupTaskFormContext) => ReactNode;
   propertyLaunchSettingsApi?: PropertyLaunchSettingsApi;
   onPropertySelected?: (propertyId: string) => void | Promise<void>;
+  renderAfterHotelDetails?: (propertyId: string, onEditHotelDetails: () => void) => ReactNode;
+  renderSetupActions?: (propertyId: string) => ReactNode;
   onExit?: (propertyId: string | null) => void;
 };
 
@@ -345,11 +350,16 @@ export default function SharedFirstRunPropertySetupWizard({
   renderTaskForm,
   propertyLaunchSettingsApi,
   onPropertySelected,
+  renderAfterHotelDetails,
+  renderSetupActions,
+  initialProfileSuggestions,
+  propertyCreateIdempotencyKey,
   onExit,
 }: SharedFirstRunPropertySetupWizardProps) {
   const labels = { ...DEFAULT_PRODUCT_LABELS, ...productLabels };
   const [status, setStatus] = useState<AdaptiveHotelSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusReloadToken, setStatusReloadToken] = useState(0);
   const [forceCreateProperty, setForceCreateProperty] = useState(initialAddProperty);
   const [forceTrackSelection, setForceTrackSelection] = useState(false);
   const [editPropertyProfile, setEditPropertyProfile] = useState(false);
@@ -359,7 +369,10 @@ export default function SharedFirstRunPropertySetupWizard({
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<SharedPropertyTypeOption[] | null>(
     null,
   );
-  const [draft, setDraft] = useState<ProfileDraft>(() => newPropertyDraft());
+  const [draft, setDraft] = useState<ProfileDraft>(() => ({
+    ...newPropertyDraft(),
+    ...initialProfileSuggestions,
+  }));
   const [launchSettings, setLaunchSettings] = useState<PropertyLaunchSettings>(() =>
     propertyLaunchSettingsDefaults(""),
   );
@@ -374,6 +387,8 @@ export default function SharedFirstRunPropertySetupWizard({
   const profileHeading = useRef<HTMLHeadingElement>(null);
   const trackCommandKey = useRef<string | null>(null);
   const createPropertyCommandKey = useRef<string | null>(null);
+  const usePreparedProperty =
+    !forceCreateProperty && status?.propertySelection.availableProperties.length === 0;
   const logoUploadKey = useRef<string | null>(null);
   const logoAssignmentKey = useRef<string | null>(null);
   const profileSaveInFlight = useRef(false);
@@ -408,6 +423,7 @@ export default function SharedFirstRunPropertySetupWizard({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setStatus(null);
     setError("");
 
     api
@@ -428,7 +444,7 @@ export default function SharedFirstRunPropertySetupWizard({
     return () => {
       cancelled = true;
     };
-  }, [api, entryProduct, initialPropertyId]);
+  }, [api, entryProduct, initialPropertyId, statusReloadToken]);
 
   useEffect(() => {
     if (view.screen !== "property_profile") return;
@@ -477,7 +493,10 @@ export default function SharedFirstRunPropertySetupWizard({
         setDraft(
           nextProfile
             ? draftFromProfile(nextProfile, publicProfile, unconfirmedPendingLogo)
-            : newPropertyDraft(),
+            : {
+                ...newPropertyDraft(),
+                ...(usePreparedProperty ? initialProfileSuggestions : undefined),
+              },
         );
         setLaunchSettings(
           existingLaunchSettings ??
@@ -499,6 +518,8 @@ export default function SharedFirstRunPropertySetupWizard({
   }, [
     api,
     profileReloadToken,
+    initialProfileSuggestions,
+    usePreparedProperty,
     propertyLaunchSettingsApi,
     view.profileMode,
     view.screen,
@@ -558,7 +579,8 @@ export default function SharedFirstRunPropertySetupWizard({
       } else {
         const profile = createProfileFromDraft(draft);
         const idempotencyKey = (createPropertyCommandKey.current = idempotencyKeyForRetry(
-          createPropertyCommandKey.current,
+          createPropertyCommandKey.current ??
+            (usePreparedProperty ? (propertyCreateIdempotencyKey ?? null) : null),
         ));
         try {
           saved = await api.createPropertyProfile(profile, idempotencyKey);
@@ -568,6 +590,16 @@ export default function SharedFirstRunPropertySetupWizard({
             throw createError;
           }
 
+          if (
+            usePreparedProperty &&
+            propertyCreateIdempotencyKey &&
+            code === "idempotency_key_conflict"
+          ) {
+            setError(
+              "This invitation already created a hotel. Reload setup to review its saved details before making changes.",
+            );
+            return;
+          }
           const createdPropertyId = setupErrorPropertyId(createError);
           if (!createdPropertyId) throw createError;
           saved = await api.getPropertyProfile(createdPropertyId);
@@ -592,9 +624,9 @@ export default function SharedFirstRunPropertySetupWizard({
           normalizedPropertyLaunchSettings(launchSettings),
         );
       }
+      await reloadStatus(saved.propertyId);
       setForceCreateProperty(false);
       setEditPropertyProfile(false);
-      await reloadStatus(saved.propertyId);
       if (view.profileMode === "create") {
         await onPropertySelected?.(saved.propertyId);
       }
@@ -721,11 +753,29 @@ export default function SharedFirstRunPropertySetupWizard({
           >
             {error}
           </div>
+          <button
+            type="button"
+            className="mt-4 rounded-full bg-primary-600 px-5 py-2 font-semibold text-white"
+            onClick={() => setStatusReloadToken((value) => value + 1)}
+          >
+            Retry
+          </button>
         </WizardShell>
       );
     }
 
     return <WizardShell title="Setting up your property" view={view} loading embedded={embedded} />;
+  }
+
+  if (view.screen === "setup_plan" && view.selectedPropertyId && renderAfterHotelDetails) {
+    if (saving)
+      return <WizardShell title="Saving hotel details" view={view} loading embedded={embedded} />;
+    return (
+      <>
+        {renderSetupActions?.(view.selectedPropertyId)}
+        {renderAfterHotelDetails(view.selectedPropertyId, () => setEditPropertyProfile(true))}
+      </>
+    );
   }
 
   return (
@@ -736,6 +786,9 @@ export default function SharedFirstRunPropertySetupWizard({
       mapFirst={view.screen === "property_profile" && profileStep === 1}
       headingRef={view.screen === "property_profile" ? profileHeading : undefined}
     >
+      {view.screen === "setup_plan" &&
+        view.selectedPropertyId &&
+        renderSetupActions?.(view.selectedPropertyId)}
       {error && !(view.screen === "property_profile" && profileLoadFailed) && (
         <div
           className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -750,6 +803,7 @@ export default function SharedFirstRunPropertySetupWizard({
           properties={status.propertySelection.availableProperties}
           onSelect={handleSelectProperty}
           onAdd={() => {
+            createPropertyCommandKey.current = null;
             setDraft(newPropertyDraft());
             setLaunchSettings(propertyLaunchSettingsDefaults(""));
             setLaunchSettingsTouched(false);
@@ -782,7 +836,11 @@ export default function SharedFirstRunPropertySetupWizard({
           propertyTypeOptions={propertyTypeOptions ?? []}
           pageHeadingRef={profileHeading}
           onChange={(nextDraft) => {
-            if (view.profileMode === "create") createPropertyCommandKey.current = null;
+            if (
+              view.profileMode === "create" &&
+              (!usePreparedProperty || !propertyCreateIdempotencyKey)
+            )
+              createPropertyCommandKey.current = null;
             if (nextDraft.logoFile !== draft.logoFile) {
               logoUploadKey.current = null;
               logoAssignmentKey.current = null;
@@ -2040,7 +2098,7 @@ function TrackSelection({
           className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-900"
           role="status"
         >
-          Ask a hotel group owner to choose or add Vayada services.
+          Ask a hotel group owner to choose or add vayada services.
         </div>
       )}
 
@@ -2514,7 +2572,7 @@ function SetupReview({
         Review and next steps
       </h1>
       <p className="mt-3 max-w-2xl text-base leading-7 text-gray-600">
-        Each Vayada service has its own readiness status. You can use ready services while another
+        Each vayada service has its own readiness status. You can use ready services while another
         one is still being reviewed.
       </p>
       {onBack && <SetupBackButton onClick={onBack} />}
@@ -2595,7 +2653,7 @@ function setupTaskStateCopy(task: SetupTask): TaskStateCopy {
   if (task.readiness === "pending_sync") {
     return {
       label: "Syncing",
-      description: "Vayada is checking the latest saved information. No action is needed yet.",
+      description: "vayada is checking the latest saved information. No action is needed yet.",
       tone: "neutral",
     };
   }
@@ -2651,8 +2709,8 @@ function setupTaskStateCopy(task: SetupTask): TaskStateCopy {
 
 function recommendedActionDescription(task: SetupTask): string {
   if (task.actionableBy === "operator") return "You can complete this step now.";
-  if (task.actionableBy === "support") return "Vayada support can complete this step.";
-  if (task.actionableBy === "system") return "Vayada will complete this step automatically.";
+  if (task.actionableBy === "support") return "vayada support can complete this step.";
+  if (task.actionableBy === "system") return "vayada will complete this step automatically.";
   return "A hotel group owner can complete this step now.";
 }
 

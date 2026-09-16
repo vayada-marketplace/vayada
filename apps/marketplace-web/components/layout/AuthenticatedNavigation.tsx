@@ -1,5 +1,8 @@
 "use client";
 
+import { SupportButton } from "@vayada/settings-ui";
+import { vayadaApiClient } from "@/services/api/client";
+
 import { useState, useEffect, createContext, useContext } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -112,7 +115,7 @@ export default function AuthenticatedNavigation() {
   const navLinks = [
     {
       href: ROUTES.MARKETPLACE,
-      label: "Marketplace",
+      label: "vayada Marketplace",
       icon: HotelIcon,
     },
     {
@@ -238,11 +241,19 @@ export default function AuthenticatedNavigation() {
             </button>
             {userType === "hotel" && <HotelSelector />}
             <div className="hidden border-l border-gray-200 pl-3 lg:block">
-              <p className="text-sm font-semibold leading-tight text-gray-950">Marketplace</p>
+              <p className="text-sm font-semibold leading-tight text-gray-950">
+                vayada Marketplace
+              </p>
               <p className="text-[11px] leading-tight text-gray-500">Creator collaborations</p>
             </div>
           </div>
 
+          <SupportButton
+            product="marketplace"
+            submit={(request) =>
+              vayadaApiClient.post("/api/support", request, { signal: AbortSignal.timeout(20000) })
+            }
+          />
           <Link
             href={ROUTES.MARKETPLACE}
             className="text-sm font-semibold text-gray-900 transition-colors hover:text-primary-700"

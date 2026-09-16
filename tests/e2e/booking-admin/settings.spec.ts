@@ -7,8 +7,10 @@ import {
   BOOKING_ADMIN_HOTEL_ID,
   BOOKING_ADMIN_PROPERTY_ID,
   BOOKING_ADMIN_PROPERTY_SETTINGS_PATH,
+  BOOKING_ADMIN_SAME_DAY_PATH,
   defaultBookingAdminPropertySettings,
   defaultCustomDomain,
+  mockBookingAdminDesignSettings,
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
   type BookingAdminCustomDomainFixture,
@@ -19,6 +21,91 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin settings no-legacy guard", () => {
+  test("loads and saves the shared same-day booking cutoff", async ({ page }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+    const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-settings");
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    let failRead = true;
+    let failWrite = false;
+    await page.route(`**${BOOKING_ADMIN_SAME_DAY_PATH}*`, async (route) => {
+      if (route.request().method() === "GET" && failRead) {
+        failRead = false;
+        await route.fulfill({ status: 503, json: { message: "Same-day settings unavailable." } });
+        return;
+      }
+      if (route.request().method() === "PUT" && failWrite) {
+        await route.fulfill({
+          status: 503,
+          json: { message: "Same-day settings were not saved." },
+        });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, (route) =>
+      route.fulfill({
+        json: {
+          contractVersion: "finance-route-contracts.v1",
+          propertyId: BOOKING_ADMIN_PROPERTY_ID,
+          paymentSettings: {
+            paymentsEnabled: false,
+            paymentProvider: "vayada",
+            acceptedMethods: ["pay_at_property", "cash"],
+            defaultCurrency: "EUR",
+            supportedCurrencies: ["EUR"],
+            requiresManualReview: false,
+            providerAccount: {
+              providerAccountId: null,
+              provider: null,
+              status: "not_configured",
+              onboardingStatus: "not_started",
+              chargesEnabled: false,
+              payoutsEnabled: false,
+              capabilities: [],
+            },
+          },
+        },
+      }),
+    );
+
+    await page.goto("/settings?section=booking");
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Same-day booking settings failed to load." }),
+    ).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Allow same-day bookings" })).toHaveCount(0);
+    await expect(page.getByLabel("Same-day booking cutoff")).toHaveCount(0);
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByRole("switch", { name: "Allow same-day bookings" })).toBeChecked();
+    const assertHealthy = watchPageHealth(page, testInfo);
+    const cutoff = page.getByLabel("Same-day booking cutoff");
+    await expect(cutoff).toHaveValue("18:00");
+    await expect(page.getByText(/property timezone \(Europe\/Vienna\)/)).toBeVisible();
+    const sameDayWrite = page.waitForRequest(
+      (request) => request.method() === "PUT" && request.url().endsWith("/same-day-booking"),
+    );
+    await cutoff.selectOption("17:30");
+    const body = (await sameDayWrite).postDataJSON();
+    expect(body).toMatchObject({ enabled: true, cutoffLocalTime: "17:30" });
+    expect(body.idempotencyKey).toBe(body.commandId);
+    const success = page.getByText("Same-day booking settings saved.");
+    await expect(success).toBeVisible();
+    await assertNoLegacyCalls();
+    await assertHealthy();
+
+    failWrite = true;
+    await cutoff.selectOption("17:00");
+    await expect(success).toHaveCount(0);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Same-day booking settings could not be saved." }),
+    ).toBeVisible();
+    await assertNoLegacyCalls();
+  });
+
   test("shows onboarding social links in Property settings and keeps all four editable", async ({
     page,
   }, testInfo) => {
@@ -102,80 +189,46 @@ test.describe("booking-admin settings no-legacy guard", () => {
           },
         }),
     );
-    let financePatchCount = 0;
-    await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
-      if (route.request().method() === "GET") {
-        await route.fulfill({
-          json: {
-            contractVersion: "finance-route-contracts.v1",
-            propertyId: BOOKING_ADMIN_PROPERTY_ID,
-            paymentSettings: {
-              paymentsEnabled: true,
-              paymentProvider: "vayada",
-              acceptedMethods: ["pay_at_property", "cash", "manual_card", "card"],
-              defaultCurrency: "EUR",
-              supportedCurrencies: ["EUR"],
-              requiresManualReview: false,
-              providerAccount: {
-                providerAccountId: null,
-                provider: null,
-                status: "not_configured",
-                onboardingStatus: "not_started",
-                chargesEnabled: false,
-                payoutsEnabled: false,
-                capabilities: [],
-              },
-            },
-          },
-        });
-        return;
-      }
-      financePatchCount += 1;
-      const body = route.request().postDataJSON() as {
-        commandId: string;
-        idempotencyKey: string;
-        paymentSettings: {
-          paymentProvider: string;
-          acceptedMethods: string[];
-        };
-      };
-      expect(body.commandId).toContain("settings-payment-settings");
-      expect(body.idempotencyKey).toBe(body.commandId);
-      expect(body.paymentSettings).toMatchObject({
-        paymentProvider: "vayada",
-        acceptedMethods: ["pay_at_property", "cash", "manual_card", "card"],
-      });
-      await route.fulfill({
+    await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, (route) =>
+      route.fulfill({
         json: {
           contractVersion: "finance-route-contracts.v1",
           propertyId: BOOKING_ADMIN_PROPERTY_ID,
-          paymentSettings: body.paymentSettings,
-          commandMeta: {
-            commandId: body.commandId,
-            idempotencyKey: body.idempotencyKey,
-            sideEffects: ["audit_event"],
-            outboxEvents: [],
-            jobs: [],
+          paymentSettings: {
+            paymentsEnabled: true,
+            paymentProvider: "vayada",
+            acceptedMethods: ["pay_at_property", "cash", "manual_card", "card"],
+            defaultCurrency: "EUR",
+            supportedCurrencies: ["EUR"],
+            requiresManualReview: false,
+            providerAccount: {
+              providerAccountId: null,
+              provider: null,
+              status: "not_configured",
+              onboardingStatus: "not_started",
+              chargesEnabled: false,
+              payoutsEnabled: false,
+              capabilities: [],
+            },
           },
         },
-      });
-    });
+      }),
+    );
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     await page.getByRole("button", { name: "Booking", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Custom Domain" })).toHaveCount(0);
     await expect(page.getByPlaceholder("booking.yourdomain.com")).toHaveCount(0);
-
-    await page.getByRole("button", { name: "Location map", exact: true }).click();
-    await expect(
-      page.getByText("Automatic property map centering is not available on next-api yet."),
-    ).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Enable map view" })).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: '"Refer a Guest" Feature' })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Location map", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Notifications", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Payments", exact: true }).click();
-    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
-    await expect(page.getByText("Payment settings saved").first()).toBeVisible();
-    expect(financePatchCount).toBe(1);
+    await expect(
+      page.getByText("vayada Payments is not available in target checkout yet."),
+    ).toBeVisible();
 
     await assertNoLegacyCalls();
     await assertHealthy();
@@ -192,6 +245,7 @@ test.describe("booking-admin settings no-legacy guard", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingAdminAuthenticatedSession(page);
     await mockBookingAdminShellRoutes(page);
+    const { requests: designRequests } = await mockBookingAdminDesignSettings(page);
     let customDomain: BookingAdminCustomDomainFixture = defaultCustomDomain;
     await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, async (route) => {
       const method = route.request().method();
@@ -229,28 +283,112 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await page.goto("/design-studio");
 
-    const customDomainHeading = page.getByRole("heading", { name: "Custom Domain" });
-    const heroImageHeading = page.getByRole("heading", { name: /Hero Image/ });
+    const canonicalBookingUrl = new URL(page.url()).hostname.endsWith(".localhost")
+      ? `hotel-alpenrose.booking.localhost${new URL(page.url()).port ? `:${new URL(page.url()).port}` : ""}`
+      : "hotel-alpenrose.booking.vayada.com";
+    await expect(page.getByRole("button", { name: "Content" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Colors" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Typography" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Layout" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Domain" })).toBeVisible();
+
     const preview = page.getByLabel("Live booking page preview");
-    await expect(customDomainHeading).toBeVisible();
+    const heroImageHeading = page.getByRole("heading", { name: /Hero Image/ });
     await expect(heroImageHeading).toBeVisible();
-    const mediaHeadings = await page.locator("h2").allTextContents();
-    expect(mediaHeadings.indexOf("Custom Domain")).toBeLessThan(
-      mediaHeadings.findIndex((heading) => heading.startsWith("Hero Image")),
-    );
-    await expect(preview).toContainText("hotel-alpenrose.booking.vayada.com");
+    await expect(page.getByRole("heading", { name: "Custom Domain" })).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: "Contact button" })).toBeChecked();
+    await expect(page.getByRole("switch", { name: "Refer a Guest button" })).toBeDisabled();
+    await expect(page.getByRole("switch", { name: "Language selector" })).toBeChecked();
+    await expect(page.getByRole("switch", { name: "Currency selector" })).toBeChecked();
+
+    await page.getByRole("switch", { name: "Contact button" }).click();
+    await page.getByRole("switch", { name: "Language selector" }).click();
+    await expect(preview).not.toContainText("Contact");
+    await expect(preview).not.toContainText("EN");
+    await expect(preview).toContainText("EUR");
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect
+      .poll(
+        () => designRequests.find((request) => request.method === "PATCH")?.body?.showContactButton,
+      )
+      .toBe(false);
+    await expect
+      .poll(
+        () =>
+          designRequests.find((request) => request.method === "PATCH")?.body?.showLanguageSelector,
+      )
+      .toBe(false);
+    expect(
+      designRequests.find((request) => request.method === "PATCH")?.body?.showCurrencySelector,
+    ).toBe(true);
+
+    await page.getByRole("button", { name: "Domain" }).click();
+    const currentBookingUrl = page
+      .getByRole("heading", { name: "Current booking URL" })
+      .locator("xpath=..");
+    await expect(currentBookingUrl).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Custom Domain" })).toBeVisible();
+    await expect(heroImageHeading).toHaveCount(0);
+    await expect(
+      currentBookingUrl.getByText("hotel-alpenrose.booking.vayada.com", { exact: true }),
+    ).toBeVisible();
+    await expect(preview).toContainText(canonicalBookingUrl);
 
     await page.getByPlaceholder("booking.yourdomain.com").fill("book.alpenrose.example");
     await page.getByRole("button", { name: "Connect Domain" }).click();
 
     await expect(preview).toContainText("book.alpenrose.example");
-    await expect(preview).not.toContainText("hotel-alpenrose.booking.vayada.com");
+    await expect(preview).not.toContainText(canonicalBookingUrl);
     await expect(page.getByText("custom.booking.vayada.com")).toBeVisible();
 
-    await page.getByRole("button", { name: "Remove Domain" }).click();
+    await page.getByRole("button", { name: "Remove domain" }).click();
 
     await expect(page.getByPlaceholder("booking.yourdomain.com")).toBeVisible();
-    await expect(preview).toContainText("hotel-alpenrose.booking.vayada.com");
+    await expect(preview).toContainText(canonicalBookingUrl);
+    await assertHealthy();
+  });
+
+  test("keeps Refer a Guest visible in the mobile Design Studio preview", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !PROD,
+      "Requires a production booking-admin build so the authenticated shell hydrates.",
+    );
+
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
+    await mockBookingAdminDesignSettings(page);
+    await page.route("**/api/pms/properties/*/module-activations", (route) =>
+      route.fulfill({
+        json: {
+          hotelId: BOOKING_ADMIN_PROPERTY_ID,
+          canManage: true,
+          supportedModules: ["affiliates"],
+          activeModules: ["affiliates"],
+          activations: [
+            {
+              moduleId: "affiliates",
+              isActive: true,
+              activatedAt: "2026-06-22T10:00:00.000Z",
+              deactivatedAt: null,
+              updatedAt: "2026-06-22T10:00:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    await page.goto("/design-studio");
+    const referToggle = page.getByRole("switch", { name: "Refer a Guest button" });
+    await expect(referToggle).toBeEnabled();
+    await referToggle.click();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole("button", { name: "Preview" }).click();
+
+    await expect(page.getByTestId("booking-preview-refer")).toBeVisible();
+    await expect(page.getByTestId("booking-preview-refer")).toContainText("Refer");
     await assertHealthy();
   });
 
@@ -307,8 +445,8 @@ test.describe("booking-admin settings no-legacy guard", () => {
     expect(new URL(page.url()).searchParams.get("billing")).toBe("canceled");
     expect(new URL(page.url()).searchParams.get("source")).toBe("email");
 
-    await page.getByRole("button", { name: "Location map", exact: true }).click();
-    await expect.poll(() => new URL(page.url()).searchParams.get("section")).toBe("location");
+    await page.getByRole("button", { name: "Localization", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get("section")).toBe("localization");
 
     await page.goBack();
     await expect(page.getByRole("button", { name: "Booking", exact: true })).toHaveAttribute(
@@ -317,10 +455,18 @@ test.describe("booking-admin settings no-legacy guard", () => {
     );
 
     await page.goForward();
-    await expect(page.getByRole("button", { name: "Location map", exact: true })).toHaveAttribute(
+    await expect(page.getByRole("button", { name: "Localization", exact: true })).toHaveAttribute(
       "aria-current",
       "page",
     );
+
+    for (const section of ["location", "notifications"]) {
+      await page.goto(`/settings?section=${section}`, { waitUntil: "networkidle" });
+      await expect(page.getByRole("button", { name: "Property", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    }
 
     await page.goto("/settings?section=unknown", { waitUntil: "networkidle" });
     await expect(page.getByRole("button", { name: "Property", exact: true })).toHaveAttribute(
@@ -339,10 +485,16 @@ test.describe("booking-admin settings no-legacy guard", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const mobilePropertyButton = page.getByRole("button", { name: "Property", exact: true });
     const mobileBookingButton = page.getByRole("button", { name: "Booking", exact: true });
+    const mobileLocalizationButton = page.getByRole("button", {
+      name: "Localization",
+      exact: true,
+    });
     await expect(mobileBookingButton).toBeVisible();
     await mobilePropertyButton.focus();
     await page.keyboard.press("Tab");
     await expect(mobileBookingButton).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(mobileLocalizationButton).toBeFocused();
 
     await page.goto("/settings?billing=canceled", { waitUntil: "networkidle" });
     await expect(page.getByRole("button", { name: "Billing", exact: true })).toHaveAttribute(
@@ -910,4 +1062,77 @@ test.describe("booking-admin settings no-legacy guard", () => {
     expect(forbiddenSetupRequests).toEqual([]);
     await assertNoLegacyCalls();
   });
+});
+
+test("saves direct-only transfers while retaining an existing hosted provider", async ({
+  page,
+}) => {
+  await mockBookingAdminAuthenticatedSession(page);
+  await mockBookingAdminShellRoutes(page);
+  await page.route(
+    `**/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/bank-transfer-destination`,
+    async (route) => {
+      expect(route.request().method()).toBe("GET");
+      await route.fulfill({
+        json: {
+          destination: {
+            id: BOOKING_ADMIN_PROPERTY_ID,
+            revision: 1,
+            version: 1,
+            enabled: true,
+            deleted: false,
+            maskedAccount: "•••• 3000",
+          },
+        },
+      });
+    },
+  );
+  let write: Record<string, unknown> | null = null;
+  await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+    if (route.request().method() === "PATCH") write = route.request().postDataJSON();
+    await route.fulfill({
+      json: {
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        paymentSettings: {
+          paymentsEnabled: true,
+          paymentProvider: "xendit",
+          acceptedMethods: ["bank_transfer"],
+          defaultCurrency: "EUR",
+          supportedCurrencies: ["EUR"],
+          depositPolicy: {},
+          requiresManualReview: false,
+          providerAccount: {
+            providerAccountId: "provider_saved",
+            provider: "xendit",
+            status: "active",
+            onboardingStatus: "completed",
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/settings?section=billing");
+  const transfer = page
+    .getByRole("heading", { name: "Direct guest bank transfers" })
+    .locator("..")
+    .locator("..");
+  await expect(page.getByText(/Saved account: •••• 3000/)).toBeVisible();
+  const response = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" && response.url().endsWith("/payment-settings"),
+  );
+  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await response;
+  expect(write).toMatchObject({ paymentSettings: { acceptedMethods: ["bank_transfer"] } });
+  expect(write?.paymentSettings).not.toHaveProperty("paymentProvider");
+  await transfer.getByPlaceholder("e.g. HSBC Bank").fill("Partial replacement");
+  await transfer.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Enter the complete bank details, or leave all fields empty to keep the saved account.",
+      { exact: true },
+    ),
+  ).toBeVisible();
 });

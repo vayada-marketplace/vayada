@@ -19,6 +19,29 @@ describe("parsePublicBookabilityProfileProjection", () => {
   });
 
   it.each([
+    { checkInFrom: "15:00", checkInUntil: "14:00" },
+    { checkInFrom: "15:00", checkInUntil: "15:00" },
+    { checkOutFrom: "12:00", checkOutUntil: "11:00" },
+    { checkOutFrom: "11:00", checkOutUntil: "11:00" },
+  ])("rejects unordered windows %j", (policies) => {
+    const profile = JSON.parse(JSON.stringify(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile));
+    profile.hotel.policies = policies;
+    expect(parsePublicBookabilityProfileProjection(profile)).toBeNull();
+  });
+
+  it("preserves midnight as the explicit end-of-arrival-day deadline", () => {
+    const profile = storedProfile();
+    profile.hotel = {
+      ...(profile.hotel as Record<string, unknown>),
+      policies: { checkInFrom: "14:00", checkInUntil: "00:00" },
+    };
+    expect(parsePublicBookabilityProfileProjection(profile)?.hotel.policies).toEqual({
+      checkInFrom: "14:00",
+      checkInUntil: "00:00",
+    });
+  });
+
+  it.each([
     ["unknown root field", (profile: any) => (profile.privateValue = "secret")],
     ["wrong source", (profile: any) => (profile.dataSources[0] = "private")],
     ["object locale", (profile: any) => (profile.hotel.supportedLocales[0] = { value: "en" })],

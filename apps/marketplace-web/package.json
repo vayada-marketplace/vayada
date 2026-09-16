@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "prebuild": "npm --workspace @vayada/domain-booking run build && npm --workspace @vayada/domain-marketplace run build",
+    "prebuild": "npm --workspace @vayada/domain-finance run build && npm --workspace @vayada/domain-booking run build && npm --workspace @vayada/domain-marketplace run build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@vayada/domain-booking": "*",
+    "@vayada/domain-finance": "*",
     "@vayada/domain-hotels": "*",
     "@vayada/domain-marketplace": "*",
     "@vayada/domain-pms": "*",
@@ -28,7 +29,8 @@
     "next": "16.2.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "@vayada/settings-ui": "*"
   },
   "devDependencies": {
     "@types/node": "^20",

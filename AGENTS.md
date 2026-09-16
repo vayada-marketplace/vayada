@@ -19,12 +19,11 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 | `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
 | `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`         |
 | `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`             |
-| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`       |
 | `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`         |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
-`apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/creators`, `/properties`) still use it. Deferred to a domain cutover: infra (ECR `vayada-landing` + service + DNS), domain topology, the app-root redirect target, the marketing `Navigation` links (still point at moved routes), and contact/HCN CORS on the marketplace backend.
+`apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/creators`, `/properties`) still use it. `vayada.com` is the shared public landing surface and is served by the `vayada-landing` App Runner service; the authenticated app and APIs remain on their separate hostnames.
 
 ## Local dev — portless
 
@@ -165,7 +164,6 @@ Before claiming a change is complete:
 | -------------------------- | --------------------------------- | ------------------------------------------- |
 | `apps/landing`             | `npm run e2e:landing`             | `https://landing.localhost`                 |
 | `apps/booking-web`         | `npm run e2e:booking-web`         | `https://hotel-alpenrose.booking.localhost` |
-| `apps/affiliate-dashboard` | `npm run e2e:affiliate-dashboard` | `https://affiliate.localhost`               |
 | `apps/booking-admin`       | `npm run e2e:booking-admin`       | `https://admin.booking.localhost`           |
 | `apps/marketplace-web`     | `npm run e2e:marketplace-web`     | `https://marketplace.localhost`             |
 | `apps/pms-web`             | `npm run e2e:pms-web`             | `https://pms.localhost`                     |

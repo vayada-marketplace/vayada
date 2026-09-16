@@ -1,4 +1,15 @@
 {
+  "analyticsConsent": {
+    "settings": "Privacy choices",
+    "title": "Optional analytics",
+    "description": "We use optional analytics to understand visits and booking steps. Booking works with analytics off. Your choice applies only to this hotel’s booking site.",
+    "enabled": "Analytics is on.",
+    "disabled": "Analytics is off.",
+    "saveError": "Could not save your choice. Analytics stays off.",
+    "reject": "Reject analytics",
+    "accept": "Allow analytics",
+    "close": "Keep current choice"
+  },
   "common": {
     "checkAvailability": "Check Availability",
     "bookNow": "Book Now",
@@ -32,6 +43,8 @@
     "loading": "Loading...",
     "qty": "Qty",
     "perPerson": "per person",
+    "checkInWindow": "Check-in: {time}",
+    "checkOutWindow": "Check-out: {time}",
     "checkInFrom": "Check-in from {time}",
     "checkOutBy": "Check-out by {time}",
     "pricingUpdating": "Pricing is still updating for these dates. Please wait a moment and try again."
@@ -50,6 +63,11 @@
     "payment": "Payment"
   },
   "home": {
+    "guestCountUnsupported": "Online search does not support your group of {count} guests. Try fewer guests or contact us for help.",
+    "guestCountUnavailable": "None of our available accommodations can fit your group of {count} guests. Try fewer guests or different dates.",
+    "noAvailability": "No accommodation is available for this search. Try different dates or search options.",
+    "availabilityError": "We couldn’t check availability. Please try again.",
+    "noMatchingRooms": "No accommodations match your filters. Try removing a filter.",
     "yourStay": "Your Stay",
     "addPromo": "Add promo",
     "promoTitle": "Have a promo code?",
@@ -72,7 +90,7 @@
     "priceHighLow": "Price: High to Low",
     "upToGuests": "Up to {count} guests",
     "viewDetails": "View Details",
-    "viewFullAmenities": "View Full Amenities ({count} more)",
+    "viewFullAmenities": "View Full Amenities ({count})",
     "showLess": "Show less",
     "rateOptions": "Rate Options",
     "selectYourRate": "Select Your Rate",
@@ -104,19 +122,6 @@
       "checkingAvailability": "Checking availability",
       "availabilityUnavailable": "Availability is temporarily unavailable for these dates.",
       "availabilityUnavailableTooltip": "Availability unavailable"
-    },
-    "mobileView": {
-      "list": "List",
-      "map": "Map"
-    },
-    "roomMap": {
-      "noLocations": "No locations available",
-      "noLocationsDesc": "Room types without saved coordinates still appear in the list.",
-      "locations": "{count, plural, one {# location} other {# locations}}",
-      "perNight": "/ night",
-      "view": "View →",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out"
     }
   },
   "rooms": {
@@ -146,7 +151,11 @@
     "pricePerDay": "Price per day",
     "priceLabel": "Price",
     "addedToTrip": "Added to Trip",
-    "addToTrip": "Add to Trip"
+    "addToTrip": "Add to Trip",
+    "pricePerPersonNight": "Price per person / night",
+    "leadTime": "Lead time",
+    "showPhoto": "Show photo {number}",
+    "closeDetails": "Close add-on details"
   },
   "book": {
     "guestInformation": "Guest Information",
@@ -254,6 +263,7 @@
     "xenditTitle": "QRIS / E-Wallet / Bank Transfer",
     "xenditNote": "OVO, DANA, ShopeePay, GoPay, or Indonesian bank transfer via Xendit",
     "xenditExplanation": "You will be redirected to a secure payment page where you can pay with QRIS, OVO, DANA, ShopeePay, GoPay, or bank transfer. We'll review your booking after payment is confirmed.",
+    "errorPaymentUnavailable": "This payment method is no longer available. Please refresh and choose an available payment method.",
     "errorSoldOut": "Unfortunately this room just sold out. Please choose another room or different dates.",
     "errorSameDaySoldOut": "Same-day bookings are no longer available for today. Please select tomorrow or another available date.",
     "errorGeneric": "Something went wrong while creating your booking. Please try again, or pick another room.",
@@ -405,5 +415,24 @@
     "unableToLoad": "Unable to Load Hotel",
     "tryAgainLater": "We couldn't fetch the hotel data. Please try again later.",
     "retry": "Retry"
+  },
+  "roomSelection": {
+    "breakfastIncluded": "Breakfast included",
+    "roomOnly": "Room only",
+    "accommodation": "Accommodation for {count} guests",
+    "perRoomTerms": "Cancellation terms apply to each room.",
+    "roomNumber": "Room {number}",
+    "totalStay": "Total for {nights} nights",
+    "freeUntil": "Free cancellation until {date} ({timezone}).",
+    "afterDeadline": "No refund after the deadline or for a no-show.",
+    "termsUnavailable": "Cancellation terms are unavailable.",
+    "unavailable": "This accommodation selection is no longer available. Please search again.",
+    "choose": "Choose this accommodation",
+    "selectedAccommodation": "Selected accommodation",
+    "partyChanged": "Your guest count has changed. Update the guests in each room or choose other accommodation before reviewing the price.",
+    "editRequest": "Edit request",
+    "allocateGuests": "Guests in each room",
+    "allocationAdults": "Adults",
+    "allocationChildren": "Children"
   }
 }

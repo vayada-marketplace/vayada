@@ -1,3 +1,7 @@
+import {
+  bookedMealDescription,
+  projectBookingRoomSelection,
+} from "./bookingRoomSelectionProjection.js";
 import type { PropertyPlanReadModel } from "@vayada/domain-finance";
 import pg from "pg";
 
@@ -61,6 +65,7 @@ export type PmsRoomTypeMedia = {
 
 export type PmsRoomType = {
   roomTypeId: string;
+  version: string;
   name: string;
   description: string;
   category: string | null;
@@ -176,13 +181,20 @@ export type PmsOperationalReservation = {
     countryCode: string | null;
     specialRequests: string | null;
   };
-  addOns: Array<{ addonId: string; name: string; quantity: number }>;
+  addOns: Array<{
+    selectionId: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   assignments: PmsOperationalAssignment[];
   checkin: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   privateNoteCount: number;
   additionalGuestCount: number;
+  mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
+  roomLines?: ReturnType<typeof projectBookingRoomSelection>["roomLines"];
   roomCount?: number;
   pricing?: { totalAmount: PmsMoney; balanceAmount: PmsMoney };
   payment?: {
@@ -290,12 +302,14 @@ export function createTargetPmsOperationsReadRepository(config: {
            room.floor,
            room.status,
            room.sort_order AS "sortOrder",
-           room.room_metadata AS "metadata"
+           room.room_metadata || jsonb_build_object('roomUnitsRevision', room_type.room_units_revision) AS "metadata"
          FROM pms.rooms room
          JOIN pms.room_types room_type
            ON room_type.id = room.room_type_id
           AND room_type.property_id = room.property_id
          WHERE room.property_id = $1
+           AND room.operational_label_status = 'verified'
+           AND room.room_number IS NOT NULL
          ORDER BY room.sort_order ASC, room.room_number ASC, room.id ASC`,
         [propertyId],
       );
@@ -502,7 +516,7 @@ export function createTargetPmsOperationsReadRepository(config: {
                      receipt.quote_session_id
                  )
              ), 0)) AS units
-             FROM pms.inventory_reservation_receipts receipt
+             FROM pms.active_inventory_reservation_receipts receipt
              JOIN pms.inventory_reservation_statuses reservation_status
                ON reservation_status.receipt_id = receipt.receipt_id
               AND reservation_status.organization_id = receipt.organization_id
@@ -785,6 +799,7 @@ type TargetPmsRoomRow = {
 
 type TargetPmsRoomTypeRow = {
   roomTypeId: string;
+  roomFactsRevision: string | number;
   name: string;
   description: string;
   category: string | null;
@@ -867,6 +882,7 @@ type TargetPmsOperationalReservationRow = {
   privateNoteCount: string | number;
   additionalGuestCount: string | number;
   bookedRoomTypeId: string;
+  selectedRoomOffer?: unknown;
   bookedRoomName: string;
   roomCount: string | number;
   totalAmount: string | number;
@@ -922,15 +938,16 @@ function pmsOperationalReservationSelectSql(canReadGuestContact: boolean): strin
   primary_guest.special_requests AS "primaryGuestSpecialRequests",
   ${BOOKING_HAS_EVER_BEEN_ACCEPTED_SQL} AS "guestContactAccepted",
   COALESCE(
-    NULLIF(quote.selected_offer_snapshot ->> 'roomTypeId', ''),
     NULLIF(booking.booking_metadata #>> '{selectedOffer,roomTypeId}', ''),
+    NULLIF(quote.selected_offer_snapshot ->> 'roomTypeId', ''),
     ''
   ) AS "bookedRoomTypeId",
   COALESCE(
-    NULLIF(quote.selected_offer_snapshot ->> 'roomName', ''),
     NULLIF(booking.booking_metadata #>> '{selectedOffer,roomName}', ''),
+    NULLIF(quote.selected_offer_snapshot ->> 'roomName', ''),
     ''
   ) AS "bookedRoomName",
+  COALESCE(booking.booking_metadata->'selectedOffer',quote.selected_offer_snapshot) AS "selectedRoomOffer",
   booking.room_count AS "roomCount",
   booking.total_amount AS "totalAmount",
   booking.balance_amount AS "balanceAmount",
@@ -1070,21 +1087,19 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT jsonb_agg(
            jsonb_build_object(
-             'addonId', COALESCE(selection.addon_definition_id, selection.id)::text,
-             'name', COALESCE(
-               NULLIF(selection.addon_snapshot ->> 'name', ''),
-               definition.name,
-               'Unavailable add-on'
-             ),
-             'quantity', selection.quantity
-           ) ORDER BY selection.created_at, selection.id
+             'selectionId', item.selection_id::text,
+             'addonId', item.addon_key,
+             'name', item.addon_name,
+             'quantity', item.quantity
+           ) ORDER BY item.created_at, item.selection_id, item.item_ordinality
          ) AS items
-  FROM booking.booking_addon_selections selection
-  LEFT JOIN booking.addon_definitions definition
-    ON definition.id = selection.addon_definition_id
-   AND definition.property_id = selection.property_id
-  WHERE selection.guest_booking_id = booking.id
-    AND selection.property_id = booking.property_id
+  FROM booking.booking_addon_selection_items item
+  JOIN booking.active_booking_addon_selections active_selection
+    ON active_selection.id = item.selection_id
+   AND active_selection.property_id = item.property_id
+   AND active_selection.guest_booking_id = item.guest_booking_id
+  WHERE item.guest_booking_id = booking.id
+    AND item.property_id = booking.property_id
 ) addons ON TRUE
 LEFT JOIN LATERAL (
   SELECT record.completed_at, record.pending_flags
@@ -1132,6 +1147,7 @@ async function listRoomTypes(
   const result = await pool.query<TargetPmsRoomTypeRow>(
     `SELECT
        room_type.id::text AS "roomTypeId",
+       room_type.room_facts_revision AS "roomFactsRevision",
        room_type.name,
        room_type.description,
        room_type.category,
@@ -1248,6 +1264,7 @@ async function listRoomTypes(
          AND room.status <> 'retired'
      ) room_counts ON TRUE
      WHERE room_type.property_id = $1
+       AND room_type.active
        ${roomTypeFilter}
      ORDER BY room_type.sort_order ASC, room_type.name ASC`,
     params,
@@ -1274,6 +1291,7 @@ function toPmsRoom(row: TargetPmsRoomRow): PmsRoom {
 function toPmsRoomType(row: TargetPmsRoomTypeRow): PmsRoomType {
   return {
     roomTypeId: row.roomTypeId,
+    version: `room-type-facts-v${toInteger(row.roomFactsRevision)}`,
     name: row.name,
     description: row.description,
     category: row.category,
@@ -1391,6 +1409,8 @@ function toPmsOperationalReservation(
     ...(bookedRoomTypeId && bookedRoomName
       ? { bookedOffer: { roomTypeId: bookedRoomTypeId, roomName: bookedRoomName } }
       : {}),
+    ...projectBookingRoomSelection(row.selectedRoomOffer),
+    mealDescription: bookedMealDescription(row.selectedRoomOffer),
     roomCount: Math.max(toInteger(row.roomCount), 1),
     pricing: {
       totalAmount: {
@@ -1496,11 +1516,18 @@ function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
 function toBookingAddOns(value: unknown): PmsOperationalReservation["addOns"] {
   return toRecordArray(value)
     .map((item) => ({
+      selectionId: String(item.selectionId ?? ""),
       addonId: String(item.addonId ?? ""),
       name: String(item.name ?? ""),
       quantity: toInteger(Number(item.quantity ?? 0)),
     }))
-    .filter((item) => item.addonId.length > 0 && item.name.length > 0 && item.quantity > 0);
+    .filter(
+      (item) =>
+        item.selectionId.length > 0 &&
+        item.addonId.length > 0 &&
+        item.name.length > 0 &&
+        item.quantity > 0,
+    );
 }
 
 function toOperationalNights(value: unknown): PmsOperationalNight[] {

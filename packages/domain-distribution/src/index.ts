@@ -13,11 +13,13 @@ export const PUBLIC_BOOKABILITY_STATUSES = ["bookable", "unavailable", "stale", 
 
 export const PUBLIC_BOOKABILITY_REASON_CODES = [
   "sold_out",
+  "stay_restricted",
   "payment_disabled",
   "min_stay_not_met",
   "max_stay_exceeded",
   "same_day_cutoff_passed",
   "unsupported_occupancy",
+  "occupancy_unavailable",
   "unpublished",
   "policy_missing",
   "stale_data",
@@ -182,6 +184,8 @@ export type PublicBookabilityPublicContact = {
 
 export type PublicBookabilityPolicies = {
   checkInFrom?: string | null;
+  checkInUntil?: string | null;
+  checkOutFrom?: string | null;
   checkOutUntil?: string | null;
   cancellationSummary?: string | null;
   termsUrl?: string | null;
@@ -209,6 +213,10 @@ export type PublicBookabilitySupportedQuoteParameters = {
 
 export type PublicBookabilityBranding = {
   logoUrl?: string | null;
+  showContactButton?: boolean;
+  showReferAGuestButton?: boolean;
+  showLanguageSelector?: boolean;
+  showCurrencySelector?: boolean;
   heroImage: string | null;
   heroHeading: string | null;
   heroSubtext: string | null;
@@ -270,6 +278,7 @@ export type PublicBookabilityQuoteRequest = {
 };
 
 export type PublicBookabilityMoneyTotals = {
+  promotion?: { name: string; discountAmount: number; discountPercent: number };
   currency: string;
   roomTotal: number;
   taxesAndFees: number;
@@ -277,7 +286,28 @@ export type PublicBookabilityMoneyTotals = {
   grandTotal: number;
 };
 
+/** Public projection of Booking's versioned selection; contains no inventory receipt data. */
+export type PublicBookabilityRoomSelection = {
+  contractVersion: "booking-room-selection.v1";
+  lines: readonly {
+    roomTypeId: string;
+    publicOfferKey: string;
+    guests: readonly { adults: number; children: number }[];
+  }[];
+};
+export type PublicBookabilityRoomLine = PublicBookabilityRoomSelection["lines"][number] & {
+  roomName: string;
+  roomCount: number;
+  ratePlanId: string | null;
+  rateSummary: Record<string, unknown>;
+  policy: Record<string, unknown>;
+  totals: Record<string, string>;
+};
+
 export type PublicBookabilityOffer = {
+  roomSelection?: PublicBookabilityRoomSelection;
+  roomLines?: PublicBookabilityRoomLine[];
+  expiresAt?: string;
   offerId: string;
   roomTypeId: string;
   ratePlanId?: string | null;
@@ -678,10 +708,12 @@ function buildQuoteUnavailableReasons(
     offers.length === 0 &&
     !reasons.some((reason) =>
       [
+        "stay_restricted",
         "min_stay_not_met",
         "max_stay_exceeded",
         "same_day_cutoff_passed",
         "unsupported_occupancy",
+        "occupancy_unavailable",
         "unpublished",
         "policy_missing",
       ].includes(reason.code),
@@ -756,6 +788,8 @@ function sanitizePolicies(policies: PublicBookabilityPolicies): PublicBookabilit
   return {
     checkInFrom: policies.checkInFrom ?? null,
     checkOutUntil: policies.checkOutUntil ?? null,
+    ...(policies.checkInUntil ? { checkInUntil: policies.checkInUntil } : {}),
+    ...(policies.checkOutFrom ? { checkOutFrom: policies.checkOutFrom } : {}),
     cancellationSummary: policies.cancellationSummary ?? null,
     termsUrl: policies.termsUrl ?? null,
   };
@@ -805,6 +839,15 @@ function sanitizeOffer(
       taxesAndFees: offer.totals.taxesAndFees,
       discounts: offer.totals.discounts,
       grandTotal: offer.totals.grandTotal,
+      ...(offer.totals.promotion
+        ? {
+            promotion: {
+              name: offer.totals.promotion.name,
+              discountAmount: offer.totals.promotion.discountAmount,
+              discountPercent: offer.totals.promotion.discountPercent,
+            },
+          }
+        : {}),
     },
     policies: {
       cancellation: policy?.cancellation ?? null,
@@ -886,3 +929,5 @@ function visitPublicBookabilityValue(value: unknown, visitKey: (key: string) => 
     visitPublicBookabilityValue(child, visitKey);
   }
 }
+
+export { calendarStays, type CalendarStayDay } from "./calendarStays.js";

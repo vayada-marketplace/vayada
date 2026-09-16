@@ -1,10 +1,16 @@
 "use client";
 
+import {
+  collaborationToday,
+  collaborationDateError,
+  collaborationAvailabilityError,
+} from "@vayada/domain-marketplace/collaborationDates";
+
 import { useRef, useState } from "react";
 import { Button, Textarea } from "@/components/ui";
 import { MONTHS_ABBR } from "@/lib/constants";
 import { XMarkIcon, CheckIcon } from "@heroicons/react/24/outline";
-import { getMonthAbbr } from "@/lib/utils";
+import { formatFollowersCompact, getMonthAbbr } from "@/lib/utils";
 import { usePlatformDeliverables } from "@/hooks/usePlatformDeliverables";
 import { PlatformDeliverablesSelector } from "./PlatformDeliverablesSelector";
 import { DateMonthPicker } from "./DateMonthPicker";
@@ -21,6 +27,7 @@ interface CollaborationApplicationModalProps {
   isOpen: boolean;
   onClose: () => void;
   listingId: string;
+  propertyTimezone?: string | null;
   onSubmit: (
     data: CollaborationApplicationData,
     options: CollaborationApplicationSubmissionOptions,
@@ -28,6 +35,7 @@ interface CollaborationApplicationModalProps {
   compensationOptions?: CollaborationOffering[];
   creatorPlatforms?: string[];
   isCovered?: boolean;
+  initialData?: CollaborationApplicationData;
 }
 
 export interface CollaborationApplicationData {
@@ -88,21 +96,25 @@ export function CollaborationApplicationModal({
   isOpen,
   onClose,
   listingId,
+  propertyTimezone,
   onSubmit,
   compensationOptions = [],
   creatorPlatforms = [],
   isCovered = false,
+  initialData,
 }: CollaborationApplicationModalProps) {
   const defaultCompensationOptionId =
     compensationOptions.length === 1 ? compensationOptions[0]?.id || "" : "";
   const [selectedCompensationOptionId, setSelectedCompensationOptionId] = useState(
-    defaultCompensationOptionId,
+    initialData?.compensationOptionId ?? defaultCompensationOptionId,
   );
-  const [whyGreatFit, setWhyGreatFit] = useState("");
-  const [travelDateFrom, setTravelDateFrom] = useState("");
-  const [travelDateTo, setTravelDateTo] = useState("");
-  const [preferredMonths, setPreferredMonths] = useState<string[]>([]);
-  const [consent, setConsent] = useState(false);
+  const [whyGreatFit, setWhyGreatFit] = useState(initialData?.whyGreatFit ?? "");
+  const [travelDateFrom, setTravelDateFrom] = useState(initialData?.travelDateFrom ?? "");
+  const [travelDateTo, setTravelDateTo] = useState(initialData?.travelDateTo ?? "");
+  const [preferredMonths, setPreferredMonths] = useState<string[]>(
+    initialData?.preferredMonths ?? [],
+  );
+  const [consent, setConsent] = useState(initialData?.consent ?? false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionRef = useRef<SubmissionIdempotencyState | null>(null);
@@ -119,7 +131,7 @@ export function CollaborationApplicationModal({
     isPlatformSelected,
     getPlatformDeliverables,
     resetDeliverables,
-  } = usePlatformDeliverables();
+  } = usePlatformDeliverables(initialData?.platformDeliverables);
 
   const resetForm = () => {
     setWhyGreatFit("");
@@ -161,6 +173,10 @@ export function CollaborationApplicationModal({
   const minNights = selectedCompensationOption
     ? (selectedCompensationOption.free_stay_min_nights ?? undefined)
     : (fallbackStayOption?.free_stay_min_nights ?? undefined);
+  const availabilityError = collaborationAvailabilityError(
+    availableMonths,
+    collaborationToday(propertyTimezone),
+  );
   const normalizedAvailable = availableMonths.map((m) => getMonthAbbr(m));
 
   const handleMonthToggle = (month: string) => {
@@ -199,6 +215,16 @@ export function CollaborationApplicationModal({
       validPlatformDeliverables.length === 0 ||
       !consent
     ) {
+      return;
+    }
+
+    const dateError = collaborationDateError(
+      travelDateFrom,
+      travelDateTo,
+      collaborationToday(propertyTimezone),
+    );
+    if (dateError || availabilityError) {
+      setErrorMessage(dateError ?? availabilityError);
       return;
     }
 
@@ -307,7 +333,7 @@ export function CollaborationApplicationModal({
         {/* Modal Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <h3 id="collaboration-application-title" className="text-2xl font-bold text-gray-900">
-            Apply for Collaboration
+            {initialData ? "Edit Request" : "Apply for Collaboration"}
           </h3>
           <button
             type="button"
@@ -351,10 +377,16 @@ export function CollaborationApplicationModal({
           </div>
 
           {/* Compensation option */}
-          {compensationOptions.length > 1 && (
+          {compensationOptions.length > 0 && (
             <fieldset>
               <legend className="mb-3 text-base font-medium text-gray-900">
-                Choose your compensation <span className="text-red-500">*</span>
+                {compensationOptions.length > 1 ? (
+                  <>
+                    Choose your compensation <span className="text-red-500">*</span>
+                  </>
+                ) : (
+                  "Your compensation"
+                )}
               </legend>
               <div className="space-y-3">
                 {compensationOptions.map((option) => (
@@ -387,6 +419,11 @@ export function CollaborationApplicationModal({
                     <span className="mt-1 block text-sm text-gray-600">
                       {formatCompensationOption(option)}
                     </span>
+                    {option.min_followers ? (
+                      <span className="mt-1 block text-sm text-gray-600">
+                        Minimum {formatFollowersCompact(option.min_followers)} followers
+                      </span>
+                    ) : null}
                     {option.terms_summary && (
                       <span className="mt-1 block text-sm text-gray-600">
                         {option.terms_summary}
@@ -408,8 +445,15 @@ export function CollaborationApplicationModal({
             </div>
           )}
 
+          {availabilityError && (
+            <p role="alert" className="text-sm text-red-700">
+              {availabilityError}
+            </p>
+          )}
+
           {/* Preferred Travel Dates */}
           <DateMonthPicker
+            minDate={collaborationToday(propertyTimezone) ?? undefined}
             dateFrom={travelDateFrom}
             dateTo={travelDateTo}
             onDateFromChange={(value) => {
@@ -484,13 +528,14 @@ export function CollaborationApplicationModal({
               onClick={handleSubmit}
               isLoading={isSubmitting}
               disabled={
+                Boolean(availabilityError) ||
                 !selectedCompensationOptionId ||
                 !whyGreatFit.trim() ||
                 platformDeliverables.filter((pd) => pd.deliverables.length > 0).length === 0 ||
                 !consent
               }
             >
-              Submit Application
+              {initialData ? "Save Changes" : "Submit Application"}
             </Button>
           </div>
         </div>

@@ -18,6 +18,8 @@ export type ChannexManagementJob = {
 
 export type ChannexManagementProviderSuccess = {
   ok: true;
+  alertRecoveryVerified?: boolean;
+  createdProperty?: { environment: "staging" | "production"; externalPropertyId: string };
   providerRequestId?: string;
   externalPropertyId?: string;
   connectionStatus?: "connected" | "disconnected";
@@ -34,6 +36,7 @@ export type ChannexManagementProviderFailure = {
     | "timeout"
     | "provider_unavailable"
     | "provider_rejected"
+    | "mapping_missing"
     | "invalid_state"
     | "invalid_payload";
   message: string;

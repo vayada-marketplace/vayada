@@ -50,6 +50,7 @@ export function createProductionPmsContext(input: {
   for (const table of ID_TABLES)
     maps.set(table, uniqueRows(rowsByTable.get(table) ?? [], table, blockers));
   const propertyByHotel = propertyMap(input.target.propertyLinks, blockers);
+  const ownerStatusByHotel = ownerStatusMap(input.target.propertyLinks, blockers);
   const targetBookingById = uniqueTargetBookings(input.target, blockers);
   const connectionByHotel = uniqueConnectionByHotel(
     rowsByTable.get("channex_connections") ?? [],
@@ -69,6 +70,7 @@ export function createProductionPmsContext(input: {
     blockers,
     rowsByTable,
     propertyByHotel,
+    ownerStatusByHotel,
     hotelById: maps.get("hotels")!,
     bookingById: maps.get("bookings")!,
     targetBookingById,
@@ -79,6 +81,7 @@ export function createProductionPmsContext(input: {
     userIds: new Set(input.target.userIds.map((id) => id.toLowerCase())),
     mediaIds: new Set(input.target.mediaIds.map((id) => id.toLowerCase())),
     mediaBySource,
+    effectiveRoomTypeActiveById: new Map(),
   };
 }
 
@@ -162,6 +165,16 @@ export function propertyForHotel(context: PmsBuildContext, value: unknown): stri
   return propertyId;
 }
 
+export function ownerStatusForHotel(
+  context: PmsBuildContext,
+  value: unknown,
+): "active" | "suspended" | "archived" {
+  const hotelId = requiredText(value, "hotel_id").toLowerCase();
+  const status = context.ownerStatusByHotel.get(hotelId);
+  if (!status) throw new Error(`no accepted owner status for pms.hotels ${hotelId}`);
+  return status;
+}
+
 export function addPmsBlocker(
   context: Pick<PmsBuildContext, "blockers">,
   code: string,
@@ -202,6 +215,43 @@ function propertyMap(
       });
   }
   return result;
+}
+
+function ownerStatusMap(
+  links: PmsPropertyLink[],
+  blockers: PmsBuildContext["blockers"],
+): Map<string, "active" | "suspended" | "archived"> {
+  const result = new Map<string, "active" | "suspended" | "archived">();
+  for (const link of links) {
+    if (link.status !== "active" || link.relationship !== "operational_input") continue;
+    const sourceId = link.sourceId.toLowerCase();
+    if (!isOwnerStatus(link.ownerStatus)) {
+      blockers.push({
+        code: "INVALID_PMS_OWNER_STATUS",
+        source: "identity.organization_resource_links.pms_hotel",
+        sourceId: link.sourceId,
+        message: "PMS hotel does not have exactly one accepted owner disposition",
+      });
+      continue;
+    }
+    const effectiveStatus =
+      link.migrationDisposition === "private_quarantine" ? "archived" : link.ownerStatus;
+    const prior = result.get(sourceId);
+    if (prior && prior !== effectiveStatus) {
+      result.delete(sourceId);
+      blockers.push({
+        code: "AMBIGUOUS_PMS_OWNER_STATUS",
+        source: "identity.organization_resource_links.pms_hotel",
+        sourceId: link.sourceId,
+        message: "PMS hotel resolves to conflicting owner dispositions",
+      });
+    } else result.set(sourceId, effectiveStatus);
+  }
+  return result;
+}
+
+function isOwnerStatus(value: string | null): value is "active" | "suspended" | "archived" {
+  return value === "active" || value === "suspended" || value === "archived";
 }
 
 function uniqueRows(

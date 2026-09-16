@@ -4,14 +4,18 @@ import type {
   ProductEntitlement,
   RequestContext,
 } from "@vayada/backend-auth";
-import type { FinanceFolioDetailResponse, FinanceFolioListResponse } from "@vayada/domain-finance";
+// prettier-ignore
+import type { FinanceExpenseExportSnapshot, FinanceFolioDetailResponse, FinanceFolioExportSnapshot, FinanceFolioListResponse } from "@vayada/domain-finance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
+import { agencyPropertyAccessRepository } from "./testAuthorization.js";
+import { requestContextFixtureCases } from "./platform/requestContext.fixtures.js";
 import {
   FinanceFolioCursorError,
   FinanceFolioEvidenceError,
 } from "./domains/financeFolioReadRepository.js";
+import { FinanceExpenseEvidenceError } from "./domains/financeExpenseReadModel.js";
 import type { FinanceFolioRoutesOptions } from "./routes/financeFolios.js";
 
 const propertyId = "11320000-0000-4000-8000-000000000001";
@@ -20,11 +24,14 @@ const folioId = "11320000-0000-4000-8000-000000000003";
 const bookingId = "11320000-0000-4000-8000-000000000004";
 const lineId = "11320000-0000-4000-8000-000000000005";
 const paymentId = "11320000-0000-4000-8000-000000000006";
+const exportId = "11320000-0000-4000-8000-000000000012";
 const correctCommandId = "11320000-0000-4000-8000-000000000007";
 const readyCommandId = "11320000-0000-4000-8000-000000000008";
 const archiveCommandId = "11320000-0000-4000-8000-000000000009";
 const now = "2026-08-21T10:00:00.000Z";
+const exportExpiresAt = "2026-08-21T10:01:00.000Z";
 const root = `/api/finance/properties/${propertyId}/financials/folios`;
+const exportRoot = `/api/finance/properties/${propertyId}/financials/exports`;
 const money = { amount: "12.0000", currency: "EUR" };
 const base = {
   contractVersion: "pms-financials.v1" as const,
@@ -51,16 +58,40 @@ const list: FinanceFolioListResponse = {
 };
 // prettier-ignore
 const detail: FinanceFolioDetailResponse = { ...base, item: { ...summary, propertyId, recipient: { name: "Ada Lovelace", email: "ada@example.com" }, currency: "EUR", lines: [{ lineId, position: 1, kind: "room", description: "Stay", quantity: "1.0000", unitAmount: money, total: money, serviceOn: "2026-08-20", source: { type: "booking_night", id: bookingId, revision: 3 } }], paymentRefs: [{ paymentId, amount: money }], sourceDigest: "a".repeat(64), sourceFreshness: { booking: now } } };
+// prettier-ignore
+const exportSnapshot: FinanceFolioExportSnapshot = { formatVersion: "pms-financials-folios.v1", propertyId, currency: "EUR", filters: { state: "ready", sort: "createdAt_desc" }, snapshotAt: now, manifest: [{ folioId, revisionId: readyCommandId, revision: 2, sourceDigest: "a".repeat(64) }] };
+const exportCapture = { envelope: base, snapshot: exportSnapshot };
+// prettier-ignore
+const exportBody = { commandId: folioId, idempotencyKey: "folio-export", tab: "folios", format: "csv", filters: { state: "ready", sort: "createdAt_desc" } };
+// prettier-ignore
+const expenseSnapshot: FinanceExpenseExportSnapshot = { formatVersion: "pms-financials-expenses.v1", propertyId, currency: "EUR", filters: { from: "2026-08-01", to: "2026-08-31", paymentStatus: "unpaid", sort: "incurredOn_desc" }, snapshotAt: now, manifest: [{ expenseId: bookingId, revision: 2, categoryId: lineId, categoryRevision: 1, categoryName: "Utilities", paymentStatus: "unpaid", paidOn: null }] };
+const expenseCapture = {
+  envelope: { ...base, sourceFreshness: { financeExpenses: now } },
+  snapshot: expenseSnapshot,
+};
+// prettier-ignore
+const expenseBody = { commandId: bookingId, idempotencyKey: "expense-export", tab: "expenses", format: "csv", filters: expenseSnapshot.filters };
 
 type Ports = FinanceFolioRoutesOptions["repository"] & {
   list: ReturnType<typeof vi.fn>;
   detail: ReturnType<typeof vi.fn>;
+  captureReadyExport: ReturnType<typeof vi.fn>;
 };
 type Commands = NonNullable<FinanceFolioRoutesOptions["commands"]> & {
   create: ReturnType<typeof vi.fn>;
   correct: ReturnType<typeof vi.fn>;
   ready: ReturnType<typeof vi.fn>;
   archive: ReturnType<typeof vi.fn>;
+};
+// prettier-ignore
+type ExportJobs = NonNullable<FinanceFolioRoutesOptions["exports"]> & { enqueue: ReturnType<typeof vi.fn> };
+type ExportDownloads = NonNullable<FinanceFolioRoutesOptions["exportDownloads"]> & {
+  read: { find: ReturnType<typeof vi.fn> };
+  signer: { signPrivateDownload: ReturnType<typeof vi.fn> };
+  now: ReturnType<typeof vi.fn>;
+};
+type ExpenseExports = NonNullable<FinanceFolioRoutesOptions["expenseExports"]> & {
+  captureExport: ReturnType<typeof vi.fn>;
 };
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
@@ -69,6 +100,7 @@ function ports(): Ports {
   return {
     list: vi.fn(async () => list),
     detail: vi.fn(async () => detail),
+    captureReadyExport: vi.fn(async () => exportCapture),
   } as Ports;
 }
 
@@ -81,11 +113,26 @@ function commands(): Commands {
   } as Commands;
 }
 
-async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands) {
+// prettier-ignore
+function exportJobs(): ExportJobs { return { enqueue: vi.fn(async () => ({ status: "created", exportId, envelope: exportCapture.envelope })) } as ExportJobs; }
+// prettier-ignore
+function exportDownloads(): ExportDownloads { return { read:{find:vi.fn(async()=>({state:"ready",expiresAt:exportExpiresAt,artifact:{mediaId:exportId,bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/pms-financials-folios.v1.csv`,visibility:"private",lifecycleStatus:"active",filename:`pms-financials-folios-${propertyId}.csv`,contentType:"text/csv; charset=utf-8",sizeBytes:42}}))},signer:{signPrivateDownload:vi.fn(async()=>"https://signed.example/folio.csv")},serving:{bucketName:"test-private",cdnBaseUrl:"https://cdn.example",cdnOriginHost:"origin.example",publicPathPrefix:"media",publicCacheControl:"public, max-age=31536000, immutable",privateDownloadTtlSeconds:300,privateDownloadMaxTtlSeconds:900},now:vi.fn(()=>new Date(now))} as ExportDownloads; }
+// prettier-ignore
+function expenseExports(): ExpenseExports { return { captureExport: vi.fn(async () => expenseCapture) } as ExpenseExports; }
+
+// prettier-ignore
+async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads, expenses?: ExpenseExports) {
   const instance = buildApp({
     logger: false,
     browserAllowedOrigins: ["https://pms.example"],
-    financeFolios: { repository, ...(write ? { commands: write } : {}) },
+    financeFolios: {
+      repository,
+      propertyAccessRepository: agencyPropertyAccessRepository,
+      ...(write ? { commands: write } : {}),
+      ...(exports ? { exports } : {}),
+      ...(exportDownloads ? { exportDownloads } : {}),
+      ...(expenses ? { expenseExports: expenses } : {}),
+    },
   });
   instance.decorateRequest("authContext", null);
   instance.addHook("onRequest", async (request) => {
@@ -96,6 +143,25 @@ async function app(repository: Ports, auth: RequestContext | null = context(), w
 }
 
 describe("Financials folio read routes", () => {
+  it("denies unassigned folio reads and commands before ports", async () => {
+    const auth = context({ permissions: ["pms.finance.read", "pms.finance.manage"] });
+    auth.membership.propertyAccess!.assignedPropertyIds = [];
+    const repository = ports(),
+      write = commands();
+    const instance = await app(repository, auth, write);
+    for (const method of ["GET", "POST"] as const) {
+      const response = await instance.inject({
+        method,
+        url: root,
+        ...(method === "POST" ? { payload: writeBody() } : {}),
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ code: "forbidden" });
+    }
+    expect(repository.list).not.toHaveBeenCalled();
+    expect(write.create).not.toHaveBeenCalled();
+  });
+
   it("registers list and detail with canonical query, IDs, and response shapes", async () => {
     const repository = ports();
     const instance = await app(repository);
@@ -158,7 +224,12 @@ describe("Financials folio read routes", () => {
     const financeManager = ports();
     const instance = await app(
       financeManager,
-      context({ links: [{ ...allowed.linkedResources[0]!, relationship: "finance_manager" }] }),
+      context({
+        links: allowed.linkedResources.map((link) => ({
+          ...link,
+          relationship: "finance_manager",
+        })),
+      }),
     );
     expect(await instance.inject({ method: "GET", url: root })).toHaveProperty("statusCode", 200);
   });
@@ -201,6 +272,265 @@ describe("Financials folio read routes", () => {
     const response = await instance.inject({ method: "GET", url: root });
     expect(response).toMatchObject({ statusCode: 500 });
     expect(response.json()).toEqual({ code: "finance_folio_port_contract_violation" });
+  });
+});
+
+describe("Financials folio export route", () => {
+  it("captures a ready snapshot and enqueues an authenticated property-scoped export", async () => {
+    const repository = ports(),
+      jobs = exportJobs();
+    const instance = await app(repository, context(), undefined, jobs);
+    // prettier-ignore
+    const response = await instance.inject({ method: "POST", url: exportRoot, headers: { "idempotency-key": exportBody.idempotencyKey }, payload: exportBody });
+    expect(response.statusCode).toBe(202);
+    // prettier-ignore
+    expect(response.json()).toEqual({ ...exportCapture.envelope, item: { resourceId: exportId, state: "pending" }, outcome: "created" });
+    expect(repository.captureReadyExport).toHaveBeenCalledWith(propertyId, exportBody.filters);
+    expect(jobs.enqueue).toHaveBeenCalledWith({
+      commandId: exportBody.commandId,
+      idempotencyKey: exportBody.idempotencyKey,
+      filters: exportBody.filters,
+      organizationId: "11320000-0000-4000-8000-000000000011",
+      propertyId,
+      currency: "EUR",
+      snapshot: exportSnapshot,
+      envelope: exportCapture.envelope,
+      audit: {
+        actorUserId: "11320000-0000-4000-8000-000000000010",
+        requestId: "request-1",
+        correlationId: "request-1",
+        causationId: folioId,
+        requestedAt: now,
+      },
+    });
+
+    // prettier-ignore
+    repository.captureReadyExport.mockResolvedValueOnce({ envelope: { ...exportCapture.envelope, currency: "USD" }, snapshot: { ...exportSnapshot, currency: "USD" } });
+    // prettier-ignore
+    jobs.enqueue.mockResolvedValueOnce({ status: "replayed", exportId, envelope: exportCapture.envelope });
+    const replay = await instance.inject({ method: "POST", url: exportRoot, payload: exportBody });
+    expect(replay).toMatchObject({ statusCode: 200 });
+    expect(replay.json().currency).toBe("EUR");
+    expect(jobs.enqueue).toHaveBeenLastCalledWith(expect.objectContaining({ currency: "USD" }));
+    jobs.enqueue.mockResolvedValueOnce({ status: "conflict" });
+    // prettier-ignore
+    expect(await instance.inject({ method: "POST", url: exportRoot, payload: exportBody })).toMatchObject({ statusCode: 409 });
+    jobs.enqueue.mockResolvedValueOnce({
+      status: "replayed",
+      exportId,
+      envelope: { ...exportCapture.envelope, secret: "must-not-leak" },
+    } as never);
+    const invalid = await instance.inject({ method: "POST", url: exportRoot, payload: exportBody });
+    expect(invalid.statusCode).toBe(500);
+    expect(JSON.stringify(invalid.json())).not.toContain("must-not-leak");
+  });
+
+  it("captures and enqueues the expenses tab through the canonical export route", async () => {
+    const repository = ports(),
+      jobs = exportJobs(),
+      expenses = expenseExports();
+    jobs.enqueue.mockResolvedValueOnce({
+      status: "created",
+      exportId,
+      envelope: expenseCapture.envelope,
+    });
+    const instance = await app(repository, context(), undefined, jobs, undefined, expenses);
+    const response = await instance.inject({
+      method: "POST",
+      url: exportRoot,
+      payload: expenseBody,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({
+      ...expenseCapture.envelope,
+      item: { resourceId: exportId, state: "pending" },
+      outcome: "created",
+    });
+    expect(expenses.captureExport).toHaveBeenCalledWith(propertyId, expenseBody.filters);
+    expect(repository.captureReadyExport).not.toHaveBeenCalled();
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: expenseBody.commandId,
+        idempotencyKey: expenseBody.idempotencyKey,
+        filters: expenseBody.filters,
+        organizationId: "11320000-0000-4000-8000-000000000011",
+        propertyId,
+        currency: "EUR",
+        snapshot: expenseSnapshot,
+        envelope: expenseCapture.envelope,
+      }),
+    );
+
+    expenses.captureExport.mockRejectedValueOnce(new FinanceExpenseEvidenceError("private"));
+    expect(
+      await instance.inject({ method: "POST", url: exportRoot, payload: expenseBody }),
+    ).toMatchObject({ statusCode: 422 });
+    const malformed = await instance.inject({
+      method: "POST",
+      url: exportRoot,
+      payload: { ...expenseBody, filters: { ...expenseBody.filters, limit: 1 } },
+    });
+    expect(malformed).toMatchObject({ statusCode: 400 });
+    expect(JSON.stringify(malformed.json())).not.toContain("private");
+    expect(expenses.captureExport).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed before snapshot capture for malformed requests or unauthorized callers", async () => {
+    const repository = ports(),
+      jobs = exportJobs();
+    let instance = await app(repository, context(), undefined, jobs);
+    // prettier-ignore
+    expect(await instance.inject({ method: "POST", url: exportRoot, headers: { "idempotency-key": "different" }, payload: exportBody })).toMatchObject({ statusCode: 400 });
+    expect(repository.captureReadyExport).not.toHaveBeenCalled();
+
+    // prettier-ignore
+    repository.captureReadyExport.mockResolvedValueOnce({ envelope: { ...exportCapture.envelope, propertyId: bookingId }, snapshot: exportSnapshot });
+    // prettier-ignore
+    expect(await instance.inject({ method: "POST", url: exportRoot, payload: exportBody })).toMatchObject({ statusCode: 500 });
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+
+    instance = await app(ports(), context({ permissions: [] }), undefined, exportJobs());
+    expect(
+      await instance.inject({ method: "POST", url: exportRoot, payload: { private: true } }),
+    ).toMatchObject({ statusCode: 403 });
+  });
+
+  it("returns scoped export status and a retention-capped private download", async () => {
+    const access = exportDownloads(),
+      instance = await app(ports(), context(), undefined, undefined, access);
+    const response = await instance.inject({
+      method: "GET",
+      url: `${exportRoot}/${exportId.toUpperCase()}`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      contractVersion: "pms-financials-export.v1",
+      propertyId,
+      item: {
+        resourceId: exportId,
+        state: "ready",
+        expiresAt: exportExpiresAt,
+        artifact: {
+          mediaId: exportId,
+          filename: `pms-financials-folios-${propertyId}.csv`,
+          contentType: "text/csv; charset=utf-8",
+          sizeBytes: 42,
+        },
+        download: {
+          method: "GET",
+          url: "https://signed.example/folio.csv",
+          expiresAt: exportExpiresAt,
+        },
+      },
+    });
+    expect(access.read.find).toHaveBeenCalledWith({
+      exportId,
+      organizationId: "11320000-0000-4000-8000-000000000011",
+      propertyId,
+      now: new Date(now),
+    });
+    expect(access.signer.signPrivateDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucketName: "test-private",
+        method: "GET",
+        expiresInSeconds: 60,
+        cacheControl: "private, no-store",
+        responseContentDisposition: `attachment; filename="pms-financials-folios-${propertyId}.csv"`,
+        responseContentType: "text/csv; charset=utf-8",
+      }),
+    );
+
+    for (const state of ["pending", "running", "failed", "expired"] as const) {
+      access.read.find.mockResolvedValueOnce({ state, expiresAt: exportExpiresAt });
+      const status = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+      expect(status.json()).toEqual({
+        contractVersion: "pms-financials-export.v1",
+        propertyId,
+        item: { resourceId: exportId, state, expiresAt: exportExpiresAt },
+      });
+    }
+    expect(access.signer.signPrivateDownload).toHaveBeenCalledTimes(1);
+    access.read.find.mockResolvedValueOnce(null);
+    expect(
+      await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` }),
+    ).toMatchObject({ statusCode: 404 });
+
+    const late = exportDownloads();
+    late.now.mockReturnValueOnce(new Date(now)).mockReturnValueOnce(new Date(exportExpiresAt));
+    const lateResponse = await (
+      await app(ports(), context(), undefined, undefined, late)
+    ).inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(lateResponse.json()).toEqual({
+      contractVersion: "pms-financials-export.v1",
+      propertyId,
+      item: { resourceId: exportId, state: "expired", expiresAt: exportExpiresAt },
+    });
+    expect(late.signer.signPrivateDownload).not.toHaveBeenCalled();
+  });
+
+  it("returns the exact private expense export artifact", async () => {
+    const access = exportDownloads();
+    access.read.find.mockResolvedValueOnce({
+      state: "ready",
+      expiresAt: exportExpiresAt,
+      artifact: {
+        mediaId: exportId,
+        bucketName: "test-private",
+        storageKey: `private/finance/financials-exports/${exportId}/pms-financials-expenses.v1.csv`,
+        visibility: "private",
+        lifecycleStatus: "active",
+        filename: `pms-financials-expenses-${propertyId}.csv`,
+        contentType: "text/csv; charset=utf-8",
+        sizeBytes: 84,
+      },
+    });
+    const response = await (
+      await app(ports(), context(), undefined, undefined, access)
+    ).inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().item.artifact).toEqual({
+      mediaId: exportId,
+      filename: `pms-financials-expenses-${propertyId}.csv`,
+      contentType: "text/csv; charset=utf-8",
+      sizeBytes: 84,
+    });
+    expect(access.signer.signPrivateDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responseContentDisposition: `attachment; filename="pms-financials-expenses-${propertyId}.csv"`,
+      }),
+    );
+  });
+
+  it("authorizes status before lookup and rejects unsafe download evidence", async () => {
+    const denied = exportDownloads(),
+      unauthorized = await app(ports(), context({ permissions: [] }), undefined, undefined, denied);
+    expect(
+      await unauthorized.inject({ method: "GET", url: `${exportRoot}/private` }),
+    ).toMatchObject({ statusCode: 403 });
+    expect(denied.read.find).not.toHaveBeenCalled();
+    const access = exportDownloads(),
+      instance = await app(ports(), context(), undefined, undefined, access);
+    access.signer.signPrivateDownload.mockResolvedValueOnce("http://must-not-leak.example/file");
+    const unsafe = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(unsafe.statusCode).toBe(500);
+    expect(JSON.stringify(unsafe.json())).not.toContain("must-not-leak");
+    access.read.find.mockResolvedValueOnce({
+      state: "ready",
+      expiresAt: exportExpiresAt,
+      artifact: {
+        mediaId: exportId,
+        bucketName: "test-private",
+        storageKey: "private/must-not-leak.csv",
+        visibility: "private",
+        lifecycleStatus: "active",
+        filename: "must-not-leak.csv",
+        contentType: "text/csv; charset=utf-8",
+        sizeBytes: 42,
+      },
+    });
+    const invalid = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
+    expect(invalid.statusCode).toBe(500);
+    expect(JSON.stringify(invalid.json())).not.toContain("must-not-leak");
   });
 });
 
@@ -409,4 +739,42 @@ const resource = { product: "pms" as const, resourceType: "pms_property" as cons
 // prettier-ignore
 const entitlement = (key: string, status: ProductEntitlement["status"] = "active"): ProductEntitlement => ({ product: "pms", key, status, resource });
 // prettier-ignore
-const context = (overrides: Overrides = {}): RequestContext => ({ actor: { internalUserId: "11320000-0000-4000-8000-000000000010" }, selectedOrganization: { organizationId: "11320000-0000-4000-8000-000000000011", kind: overrides.kind ?? "hotel_group" }, membership: { permissions: overrides.permissions ?? ["pms.finance.read"] }, entitlements: overrides.entitlements ?? [entitlement("property-management"), entitlement("module:financials")], linkedResources: overrides.links ?? [{ ...resource, relationship: "owner", status: "active" }], locale: "en", currency: "EUR", audit: { requestId: "request-1", receivedAt: now, source: "api" } } as RequestContext);
+const hotelContext = requestContextFixtureCases.find(({ scope }) => scope === "hotel")!.context;
+function context(overrides: Overrides = {}): RequestContext {
+  return {
+    ...hotelContext,
+    actor: { ...hotelContext.actor, internalUserId: "11320000-0000-4000-8000-000000000010" },
+    selectedOrganization: {
+      ...hotelContext.selectedOrganization,
+      organizationId: "11320000-0000-4000-8000-000000000011",
+      kind: overrides.kind ?? "hotel_group",
+    },
+    membership: {
+      ...hotelContext.membership,
+      propertyAccess: {
+        mode: "assigned",
+        roleKey: "hotel_owner",
+        accessOrigin: "agency",
+        assignedPropertyIds: [propertyId],
+      },
+      permissions: overrides.permissions ?? ["pms.finance.read"],
+    },
+    entitlements: overrides.entitlements ?? [
+      entitlement("property-management"),
+      entitlement("module:financials"),
+    ],
+    linkedResources: overrides.links ?? [
+      { ...resource, relationship: "owner", status: "active" },
+      {
+        product: "hotel_catalog",
+        resourceType: "property",
+        resourceId: propertyId,
+        relationship: "owner",
+        status: "active",
+      },
+    ],
+    locale: "en",
+    currency: "EUR",
+    audit: { requestId: "request-1", receivedAt: now, source: "api" },
+  };
+}

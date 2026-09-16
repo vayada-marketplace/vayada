@@ -1,3 +1,4 @@
+import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
 
@@ -14,7 +15,11 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
+  | "platform-admin"
+  | "booking-admin"
+  | "pms-web"
+  | "affiliate-dashboard"
+  | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -57,9 +62,11 @@ export type ProviderWebhookConfig = {
   stripeSecret?: string;
   xenditSecret?: string;
   channexSecret?: string;
+  resendSecret?: string;
   stripeMode: ProviderWebhookIntakeMode;
   xenditMode: ProviderWebhookIntakeMode;
   channexMode: ProviderWebhookIntakeMode;
+  channexReviewMode?: ProviderWebhookIntakeMode;
 };
 
 export type ChannexManagementMode = "observe_only" | "mutating";
@@ -68,6 +75,10 @@ export type ChannexManagementConfig = {
   apiKey?: string;
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
+  stagingRestrictionsPropertyId?: string;
+  stagingMealsEnabled?: boolean;
+  stagingInventoryEnabled?: boolean;
+  stagingNoShowEnabled?: boolean;
   capabilityModes: {
     connection: ChannexManagementMode;
     provisioning: ChannexManagementMode;
@@ -75,6 +86,7 @@ export type ChannexManagementConfig = {
     bookingSync: ChannexManagementMode;
     markups: ChannexManagementMode;
     messaging: ChannexManagementMode;
+    reviews: ChannexManagementMode;
     iframe: ChannexManagementMode;
   };
 };
@@ -105,6 +117,14 @@ export function stripeSubscriptionRuntimeEnabled(
 export type CreatorPlatformConnectionsConfig = {
   callbackBaseUrl: string;
   webReturnUrl: string;
+  sync: {
+    enabled: boolean;
+    pollIntervalMs: number;
+    recurringIntervalMs: number;
+    batchSize: number;
+    maxAttempts: number;
+    minimumSpacingMs: { meta: number; tiktok: number; google: number };
+  };
   credentialVault:
     | { provider: "aws-secrets-manager"; secretPrefix: string; region?: string }
     | { provider: "memory"; secretPrefix: string };
@@ -132,6 +152,7 @@ export type ApiConfig = {
   host: string;
   port: number;
   apiRuntime: ApiRuntime;
+  backgroundWorkersEnabled: boolean;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   targetDatabaseUrl?: string;
@@ -139,8 +160,11 @@ export type ApiConfig = {
   marketplaceAdminSource: MarketplaceAdminSource;
   marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
+  pmsRoomClosureEnabled: boolean;
+  pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
+  financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
@@ -156,6 +180,7 @@ export type ApiConfig = {
   pmsInventoryPublicOfferRetryIntervalMs: number;
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
+  airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
@@ -250,6 +275,25 @@ function readOptionalCsvEnv(
 
 const KMS_KEY_ARN =
   /^arn:(aws(?:-[a-z]+)?):kms:([a-z0-9-]+):(\d{12}):key\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
+
+function loadBankTransferKms(env: NodeJS.ProcessEnv): ApiConfig["financeBankTransferKms"] {
+  const currentKeyArn = readOptionalEnv(env, "FINANCE_BANK_TRANSFER_KMS_CURRENT_KEY_ARN");
+  const allowed = readOptionalEnv(env, "FINANCE_BANK_TRANSFER_KMS_ALLOWED_KEY_ARNS");
+  if (!currentKeyArn && !allowed) return undefined;
+  const allowedKeyArns = allowed?.split(",") ?? [];
+  const keys = [currentKeyArn, ...allowedKeyArns].map((key) =>
+    key ? KMS_KEY_ARN.exec(key) : null,
+  );
+  if (
+    !currentKeyArn ||
+    !allowedKeyArns.includes(currentKeyArn) ||
+    keys.some((key) => !key) ||
+    keys.some((key) => key!.slice(1, 4).join() !== keys[0]!.slice(1, 4).join())
+  ) {
+    throw new Error("Bank transfer KMS configuration is invalid");
+  }
+  return { currentKeyArn, allowedKeyArns, region: keys[0]![2]! };
+}
 
 function loadFinanceFolioRecipientKmsConfig(
   env: NodeJS.ProcessEnv,
@@ -480,6 +524,7 @@ function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfi
     stripeSecret: readOptionalEnv(env, "STRIPE_WEBHOOK_SECRET"),
     xenditSecret: readOptionalEnv(env, "XENDIT_WEBHOOK_SECRET"),
     channexSecret: readOptionalEnv(env, "CHANNEX_WEBHOOK_SECRET"),
+    resendSecret: readOptionalEnv(env, "RESEND_WEBHOOK_SECRET"),
     stripeMode: readSourceEnv(
       env,
       "STRIPE_WEBHOOK_INTAKE_MODE",
@@ -492,6 +537,14 @@ function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfi
       ["observe_only", "mutating", "ack_only_with_receipt"],
       "observe_only",
     ),
+    channexReviewMode: readOptionalEnv(env, "CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE")
+      ? readSourceEnv(
+          env,
+          "CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE",
+          ["observe_only", "mutating", "ack_only_with_receipt"] as const,
+          "observe_only",
+        )
+      : undefined,
     channexMode: readSourceEnv(
       env,
       "CHANNEX_WEBHOOK_INTAKE_MODE",
@@ -511,10 +564,53 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     bookingSync: mode("PMS_CHANNEX_BOOKING_SYNC_MODE"),
     markups: mode("PMS_CHANNEX_MARKUPS_MODE"),
     messaging: mode("PMS_CHANNEX_MESSAGING_MODE"),
+    reviews: mode("PMS_CHANNEX_REVIEWS_MODE"),
     iframe: mode("PMS_CHANNEX_IFRAME_MODE"),
   };
   const apiBaseUrl = readOptionalEnv(env, "CHANNEX_API_BASE_URL");
   const apiKey = readOptionalEnv(env, "CHANNEX_API_KEY");
+  const stagingRestrictionsPropertyId = readOptionalEnv(
+    env,
+    "PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID",
+  );
+  const stagingNoShowEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_NO_SHOW_ENABLED", false);
+  if (stagingNoShowEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex no-show reporting requires a staging property");
+  }
+  const stagingInventoryEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_STAGING_INVENTORY_ENABLED",
+    false,
+  );
+  if (stagingInventoryEnabled && !stagingRestrictionsPropertyId) {
+    throw new Error("Scoped Channex inventory requires a staging property");
+  }
+  const stagingMealsEnabled = readBooleanEnv(env, "PMS_CHANNEX_STAGING_MEALS_ENABLED", false);
+  if (
+    stagingMealsEnabled &&
+    (!stagingRestrictionsPropertyId || capabilityModes.provisioning !== "mutating")
+  ) {
+    throw new Error("Scoped Channex meals require a staging property and mutating provisioning");
+  }
+  if (
+    stagingRestrictionsPropertyId &&
+    (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      stagingRestrictionsPropertyId,
+    ) ||
+      apiBaseUrl !== "https://staging.channex.io" ||
+      readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true) ||
+      capabilityModes.ariSync !== "mutating" ||
+      Object.entries(capabilityModes).some(
+        ([name, mode]) =>
+          name !== "ariSync" &&
+          !(stagingMealsEnabled && name === "provisioning") &&
+          mode === "mutating",
+      ))
+  ) {
+    throw new Error(
+      "Scoped Channex restrictions require a property UUID, staging URL, disabled background workers, and only ARI mutations",
+    );
+  }
   const legacyBookingMode = (
     readOptionalEnv(env, "CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE") ?? "legacy-owned"
   )
@@ -529,7 +625,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       : "frozen";
   const mutating = Object.values(capabilityModes).includes("mutating");
   const durableCommandsMutating = Object.entries(capabilityModes).some(
-    ([capability, value]) => capability !== "iframe" && value === "mutating",
+    ([capability, value]) =>
+      capability !== "iframe" && capability !== "reviews" && value === "mutating",
   );
   if (mutating && (!apiBaseUrl || !apiKey)) {
     throw new Error(
@@ -537,7 +634,8 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
-  if (durableCommandsMutating && !workerEnabled) {
+  // A validated isolated staging scope may retain queued commands while its worker is paused.
+  if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   }
   if (capabilityModes.bookingSync === "mutating" && bookingMutationOwner !== "target") {
@@ -549,6 +647,10 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     apiBaseUrl,
     apiKey,
     bookingMutationOwner,
+    stagingRestrictionsPropertyId,
+    stagingMealsEnabled,
+    stagingInventoryEnabled,
+    stagingNoShowEnabled,
     workerEnabled,
     capabilityModes,
   };
@@ -631,6 +733,22 @@ function loadCreatorPlatformConnectionsConfig(
   return {
     callbackBaseUrl: callbackBaseUrl!.replace(/\/$/, ""),
     webReturnUrl: webReturnUrl!,
+    sync: {
+      enabled: readBooleanEnv(env, "CREATOR_PLATFORM_SYNC_ENABLED", true),
+      pollIntervalMs: readTimerIntervalEnv(env, "CREATOR_PLATFORM_SYNC_POLL_INTERVAL_MS", 60_000),
+      recurringIntervalMs: readPositiveIntegerEnv(
+        env,
+        "CREATOR_PLATFORM_SYNC_INTERVAL_MS",
+        24 * 60 * 60_000,
+      ),
+      batchSize: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_BATCH_SIZE", 10),
+      maxAttempts: readPositiveIntegerEnv(env, "CREATOR_PLATFORM_SYNC_MAX_ATTEMPTS", 5),
+      minimumSpacingMs: {
+        meta: readTimerIntervalEnv(env, "CREATOR_PLATFORM_META_MINIMUM_SPACING_MS", 1_000),
+        tiktok: readTimerIntervalEnv(env, "CREATOR_PLATFORM_TIKTOK_MINIMUM_SPACING_MS", 2_000),
+        google: readTimerIntervalEnv(env, "CREATOR_PLATFORM_GOOGLE_MINIMUM_SPACING_MS", 1_000),
+      },
+    },
     credentialVault:
       vaultProvider === "memory"
         ? { provider: "memory", secretPrefix: secretPrefix! }
@@ -775,6 +893,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     stripeSubscriptions: loadStripeSubscriptionConfig(env),
     providerWebhooks: loadProviderWebhookConfig(env),
   };
+  if (
+    stripeSubscriptionRuntimeEnabled(prospectiveConfig) &&
+    !authSession?.authSurfaceOrigins["pms-web"]
+  ) {
+    throw new Error(
+      "Stripe subscriptions require AUTH_PMS_WEB_ORIGIN through complete auth session config",
+    );
+  }
   const channexManagement = loadChannexManagementConfig(env);
   if (
     Object.values(channexManagement.capabilityModes).includes("mutating") &&
@@ -791,6 +917,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   return {
     ...server,
     apiRuntime,
+    backgroundWorkersEnabled: readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true),
     auth,
     authSession,
     targetDatabaseUrl,
@@ -803,6 +930,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsSource,
     financeSource,
     financeFolioRecipientKms,
+    pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
+    pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
+    financeBankTransferKms: loadBankTransferKms(env),
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
@@ -850,6 +980,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     creatorPlatformConnections,
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
+    airbnbImport: loadAirbnbImportConfig(env),
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),

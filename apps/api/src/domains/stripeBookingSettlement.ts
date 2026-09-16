@@ -1,5 +1,6 @@
+import { parseBookingRoomSelection } from "@vayada/domain-booking";
 import { createHash } from "node:crypto";
-import { parsePmsInventoryReservationReceipt } from "@vayada/domain-pms";
+import { inventoryReservationReceiptFromBookingMetadata } from "../platform/inventoryReservation.js";
 import type { QueryResult, QueryResultRow } from "pg";
 
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
@@ -65,6 +66,8 @@ export async function authorizeStripeBookingPayment(
        ON booking.id = payment.guest_booking_id
       AND booking.property_id = payment.property_id
      WHERE payment.provider_payment_intent_id = $1
+       AND payment.payment_metadata->>'supersededByEdit' IS DISTINCT FROM 'true'
+       AND (booking.active_card_payment_id IS NULL OR booking.active_card_payment_id=payment.id)
        AND payment.payment_method = 'card'
        AND ($2::text IS NULL OR account.provider_account_id = $2)
      LIMIT 1
@@ -171,6 +174,8 @@ export async function settleStripeBookingPayment(
        ON booking.id = payment.guest_booking_id
       AND booking.property_id = payment.property_id
      WHERE payment.provider_payment_intent_id = $1
+       AND payment.payment_metadata->>'supersededByEdit' IS DISTINCT FROM 'true'
+       AND (booking.active_card_payment_id IS NULL OR booking.active_card_payment_id=payment.id)
        AND payment.payment_method = 'card'
        AND ($2::text IS NULL OR account.provider_account_id = $2)
      LIMIT 1
@@ -294,9 +299,20 @@ export async function settleStripeBookingPayment(
 
   const handoffKey = pmsCreateHandoffKey(row.propertyId, row.guestBookingId);
   const handoffHash = sha256(handoffKey);
-  const inventoryReservation = parsePmsInventoryReservationReceipt(
-    record(row.bookingMetadata)["inventoryReservation"],
+  const parsedReservation = inventoryReservationReceiptFromBookingMetadata(
+    row.bookingMetadata,
+    row.propertyId,
   );
+  const inventoryReservation =
+    parsedReservation?.contractVersion === "pms-inventory-reservation-bundle.v1" ||
+    parsedReservation?.contractVersion === "pms-inventory-reservation-lifecycle.v1"
+      ? parsedReservation
+      : null;
+  if (
+    record(record(row.bookingMetadata)["selectedOffer"])["roomSelection"] !== undefined &&
+    inventoryReservation?.contractVersion !== "pms-inventory-reservation-bundle.v1"
+  )
+    throw new Error("Complete booking inventory evidence is unavailable.");
   await client.query(
     `INSERT INTO platform.jobs (
        job_key, queue_name, job_type, source_domain_event_id, tenant_scope,
@@ -316,6 +332,7 @@ export async function settleStripeBookingPayment(
       handoffHash,
       JSON.stringify({
         operation: "create",
+        bookedOffer: record(row.bookingMetadata)["selectedOffer"],
         contractVersion: "pms-reservation.v1",
         commandId: `cmd_pms_create_${handoffHash.slice(0, 24)}`,
         idempotencyKey: handoffKey,
@@ -431,14 +448,70 @@ export async function captureDirectNightlyRevenueEvidence(
   const offer = record(options.selectedOffer ?? metadata["selectedOffer"]);
   const roomTypeId = text(offer["roomTypeId"]);
   const fingerprint = options.fingerprint ?? text(metadata["requestFingerprint"]);
-  let nights: Array<{ stayDate: string; grossRoomAmount: string }> = [];
+  let nights: Array<{
+    stayDate: string;
+    grossRoomAmount: string;
+    roomTypeId?: string;
+    roomPositions?: number[];
+  }> = [];
   try {
-    if (!options.clear)
-      nights = targetNightlyRoomAmounts(
-        offer["nightlyRoomAmounts"],
-        booking.checkIn,
-        booking.checkOut,
+    if (!options.clear) {
+      const locked = await client.query<{ roomCount: number }>(
+        `SELECT room_count AS "roomCount" FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,
+        [booking.guestBookingId, booking.propertyId],
       );
+      // Read after the lock statement so a waiting transaction sees committed history.
+      const history = await client.query<{ roomTypeId: string; position: number }>(
+        `SELECT room_type_id::text AS "roomTypeId",line_position AS position
+         FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1::uuid AND property_id=$2::uuid
+           AND economic_event='room_night' GROUP BY room_type_id,line_position ORDER BY line_position`,
+        [booking.guestBookingId, booking.propertyId],
+      );
+      let nextPosition = Math.max(0, ...history.rows.map((row) => row.position));
+      const positions = (type: string, count: number | undefined) => {
+        if (count === undefined) return undefined;
+        const allocated = history.rows
+          .filter((row) => row.roomTypeId === type)
+          .map((row) => row.position)
+          .slice(0, count);
+        while (allocated.length < count) allocated.push(++nextPosition);
+        return allocated;
+      };
+      if (offer["roomSelection"] !== undefined) {
+        const selection = parseBookingRoomSelection(offer["roomSelection"]);
+        const lines = offer["roomLines"];
+        if (!selection || !Array.isArray(lines) || lines.length !== selection.lines.length)
+          throw new Error("Mixed nightly revenue evidence is unavailable.");
+        if (
+          selection.lines.reduce((count, line) => count + line.guests.length, 0) !==
+          locked.rows[0]?.roomCount
+        )
+          throw new Error("Mixed nightly revenue evidence does not match.");
+        for (const [index, line] of selection.lines.entries()) {
+          const saved = record(lines[index]);
+          if (
+            saved["roomTypeId"] !== line.roomTypeId ||
+            saved["publicOfferKey"] !== line.publicOfferKey
+          )
+            throw new Error("Mixed nightly revenue evidence does not match.");
+          const roomPositions = positions(line.roomTypeId, line.guests.length);
+          nights.push(
+            ...targetNightlyRoomAmounts(
+              record(saved["offer"])["nightlyRoomAmounts"],
+              booking.checkIn,
+              booking.checkOut,
+            ).map((night) => ({ ...night, roomTypeId: line.roomTypeId, roomPositions })),
+          );
+        }
+      } else {
+        const roomPositions = positions(roomTypeId ?? "", locked.rows[0]?.roomCount);
+        nights = targetNightlyRoomAmounts(
+          offer["nightlyRoomAmounts"],
+          booking.checkIn,
+          booking.checkOut,
+        ).map((night) => ({ ...night, roomPositions }));
+      }
+    }
   } catch (error) {
     if (options.required) throw error;
     return;
@@ -452,35 +525,43 @@ export async function captureDirectNightlyRevenueEvidence(
        SELECT id,property_id,currency,room_count,lifecycle_status FROM booking.guest_bookings
        WHERE id=$1::uuid AND property_id=$2::uuid AND source_system='booking' AND lifecycle_status IN ('confirmed','canceled','no_show') FOR UPDATE
      ), room_scope AS (
-       INSERT INTO booking.nightly_revenue_room_scopes (property_id,room_type_id) SELECT property_id,$3::uuid FROM booking_scope ON CONFLICT DO NOTHING
+       INSERT INTO booking.nightly_revenue_room_scopes (property_id,room_type_id)
+       SELECT DISTINCT scope.property_id,COALESCE(night->>'roomTypeId',$3)::uuid FROM booking_scope scope
+       CROSS JOIN LATERAL jsonb_array_elements($4::jsonb) night ON CONFLICT DO NOTHING
      ), desired AS (
-       SELECT (night->>'stayDate')::date stay_date,(night->>'grossRoomAmount')::numeric amount,room.line_position FROM booking_scope scope
+       SELECT (night->>'stayDate')::date stay_date,(night->>'grossRoomAmount')::numeric amount,
+         COALESCE(night->>'roomTypeId',$3)::uuid room_type_id,
+         room.line_position FROM booking_scope scope
        CROSS JOIN LATERAL jsonb_array_elements($4::jsonb) night
-       CROSS JOIN LATERAL generate_series(1,scope.room_count) room(line_position)
+       CROSS JOIN LATERAL (
+         SELECT value::int line_position FROM jsonb_array_elements_text(night->'roomPositions')
+         UNION ALL SELECT generate_series(1,scope.room_count) WHERE NOT night ? 'roomPositions'
+       ) room
      ), current_state AS (
-       SELECT e.stay_date,e.line_position,SUM(e.gross_room_amount) amount,SUM(e.occupied_room_nights)::int occupied,
+       SELECT e.stay_date,e.line_position,e.room_type_id,SUM(e.gross_room_amount) amount,SUM(e.occupied_room_nights)::int occupied,
          (array_agg(e.id ORDER BY e.source_revision DESC,e.created_at DESC,e.id DESC))[1] target_id
        FROM booking_scope scope JOIN booking.nightly_revenue_evidence e ON e.guest_booking_id=scope.id
-       WHERE e.economic_event<>'retained_charge' GROUP BY e.stay_date,e.line_position
+       WHERE e.economic_event<>'retained_charge' GROUP BY e.stay_date,e.line_position,e.room_type_id
      ), revision AS (
        SELECT COALESCE(MAX(e.source_revision),0)+1 value FROM booking_scope scope LEFT JOIN booking.nightly_revenue_evidence e ON e.guest_booking_id=scope.id
      ), changes AS (
        SELECT COALESCE(d.stay_date,c.stay_date) stay_date,COALESCE(d.line_position,c.line_position) line_position,
+         COALESCE(d.room_type_id,c.room_type_id) room_type_id,
          d.amount desired_amount,c.amount current_amount,c.occupied,c.target_id
-       FROM desired d FULL JOIN current_state c USING (stay_date,line_position)
+       FROM desired d FULL JOIN current_state c USING (stay_date,line_position,room_type_id)
        WHERE (d.stay_date IS NULL AND c.occupied=1) OR (d.stay_date IS NOT NULL AND c.stay_date IS NULL) OR
          (d.stay_date IS NOT NULL AND c.occupied=0) OR (d.stay_date IS NOT NULL AND c.occupied=1 AND d.amount<>c.amount)
      ) INSERT INTO booking.nightly_revenue_evidence
        (property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,
         economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,line_position,corrects_evidence_id,command_key)
-     SELECT scope.property_id,scope.id,$3::uuid,c.stay_date,
+     SELECT scope.property_id,scope.id,c.room_type_id,c.stay_date,
        CASE WHEN c.target_id IS NULL THEN c.stay_date ELSE GREATEST(COALESCE($6::date,c.stay_date),c.stay_date) END,
        scope.currency,CASE WHEN c.target_id IS NULL THEN c.desired_amount WHEN c.desired_amount IS NULL THEN -c.current_amount ELSE c.desired_amount-c.current_amount END,
        CASE WHEN c.target_id IS NULL THEN 1 WHEN c.desired_amount IS NULL THEN -1 WHEN c.occupied=0 THEN 1 ELSE 0 END,
        CASE WHEN c.target_id IS NULL THEN 'room_night' WHEN c.desired_amount IS NULL OR c.occupied=0 THEN 'occupancy_adjustment' ELSE 'correction' END,
        CASE WHEN c.target_id IS NULL THEN 'confirmed' WHEN scope.lifecycle_status IN ('canceled','no_show') THEN scope.lifecycle_status ELSE 'corrected' END,
        'direct','exact',revision.value,c.line_position,c.target_id,
-       'direct:'||$5||':'||c.stay_date::text||':'||c.line_position::text
+       'direct:'||$5||':'||c.stay_date::text||':'||c.line_position::text||':'||c.room_type_id::text
      FROM changes c CROSS JOIN booking_scope scope CROSS JOIN revision`,
     [
       booking.guestBookingId,
@@ -532,7 +613,7 @@ const text = (value: unknown): string | null =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 function dates(from: string, to: string): string[] {
   const result: string[] = [];
-  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`);) {
+  for (let date = new Date(`${from}T00:00:00Z`); date < new Date(`${to}T00:00:00Z`); ) {
     result.push(date.toISOString().slice(0, 10));
     date = new Date(date.getTime() + 86_400_000);
   }
