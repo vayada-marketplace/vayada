@@ -143,7 +143,15 @@ export function validateAdminTransferRequest(
   ) {
     return { ok: false, error: "invalid_former_admin_access" };
   }
-  const requestDigest = createHash("sha256")
+  return { ok: true, request, requestDigest: adminTransferRequestDigest(request, current) };
+}
+
+/** Internal: input must be the detached canonical request returned by the parser. */
+export function adminTransferRequestDigest(
+  request: AdminTransferRequest,
+  current: Pick<AdminTransferValidationContext, "organizationId" | "actorMembershipId">,
+): string {
+  return createHash("sha256")
     .update(
       JSON.stringify({
         version: "account-admin-transfer.v1",
@@ -153,5 +161,4 @@ export function validateAdminTransferRequest(
       }),
     )
     .digest("hex");
-  return { ok: true, request, requestDigest };
 }

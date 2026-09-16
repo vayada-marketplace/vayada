@@ -711,3 +711,18 @@ The caller must keep this PoolClient transaction open through validation, proof
 consumption, membership changes, queued reconciliation and audit. This snapshot
 helper performs no ownership mutation and cannot authorize a transfer outside
 that transaction. Hosted session validity remains a route-level prerequisite.
+
+### Atomic transfer command
+
+The internal command serializes on the organization, obtains the locked snapshot,
+revalidates the exact request, consumes its bound proof and enrolls the account.
+It removes target delegation and both old assignment sets, writes the full explicit
+former-admin configuration and normalizes the new admin, updating both revisions.
+Before/after access audit plus Inbox and provider-role reconciliation jobs commit
+with ownership; any failure rolls back all these effects. An exact retry can read
+only its own bound completed receipt while the original actor remains active.
+
+Provider-role jobs carry a membership ID, so their successor worker must read the
+latest canonical role when reconciling instead of restoring stale payload roles.
+That worker and HTTP/UI registration remain activation prerequisites. No runtime
+route calls this command yet; hosted source-session verification stays mandatory.

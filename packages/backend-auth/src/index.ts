@@ -195,3 +195,5 @@ export {
   type AdminTransferRequest,
   type AdminTransferValidationContext,
 } from "./accountAdminTransferValidation.js";
+
+export { runAdminTransfer } from "./accountAdminTransferCommand.js";
