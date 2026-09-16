@@ -6,7 +6,11 @@ import type {
   PublicQuoteGuestDisclosure,
 } from "@vayada/domain-booking/replacement-pricing";
 import { ApiError } from "@/services/api/client";
-import { acceptPricingQuote, type PricingAcceptanceResult } from "@/services/api/pricingAcceptance";
+import {
+  acceptPricingQuote,
+  type PricingAcceptanceGuest,
+  type PricingAcceptanceResult,
+} from "@/services/api/pricingAcceptance";
 
 const field = "mt-1 block w-full rounded-lg border border-gray-300 bg-white p-3 text-gray-900";
 const button = "rounded-full bg-primary-600 px-5 py-3 font-semibold text-white disabled:opacity-40";
@@ -26,6 +30,7 @@ export default function ReplacementBookingConfirmation({
   const [error, setError] = useState("");
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [result, setResult] = useState<PricingAcceptanceResult | null>(null);
+  const [pendingGuest, setPendingGuest] = useState<PricingAcceptanceGuest | null>(null);
   const supported =
     quote.acceptanceMode === "instant" &&
     quote.paymentMethod === "pay_at_property" &&
@@ -38,20 +43,22 @@ export default function ReplacementBookingConfirmation({
     event.preventDefault();
     if (!ready || !disclosure || loading || result) return;
     const data = new FormData(event.currentTarget);
+    const guest =
+      pendingGuest ??
+      ({
+        firstName: String(data.get("firstName") ?? ""),
+        lastName: String(data.get("lastName") ?? ""),
+        email: String(data.get("email") ?? ""),
+        phone: String(data.get("phone") ?? ""),
+        countryCode: String(data.get("countryCode") ?? ""),
+        arrivalTime: String(data.get("arrivalTime") ?? ""),
+        specialRequests: String(data.get("specialRequests") ?? ""),
+      } satisfies PricingAcceptanceGuest);
+    setPendingGuest(guest);
     setLoading(true);
     setError("");
     try {
-      setResult(
-        await acceptPricingQuote(slug, quote, disclosure, {
-          firstName: String(data.get("firstName") ?? ""),
-          lastName: String(data.get("lastName") ?? ""),
-          email: String(data.get("email") ?? ""),
-          phone: String(data.get("phone") ?? ""),
-          countryCode: String(data.get("countryCode") ?? ""),
-          arrivalTime: String(data.get("arrivalTime") ?? ""),
-          specialRequests: String(data.get("specialRequests") ?? ""),
-        }),
-      );
+      setResult(await acceptPricingQuote(slug, quote, disclosure, guest));
     } catch (failure) {
       const conflict = failure instanceof ApiError && failure.status === 409;
       setRefreshRequired(conflict);
@@ -81,16 +88,35 @@ export default function ReplacementBookingConfirmation({
       <div className="grid gap-4 sm:grid-cols-2">
         <label>
           First name
-          <input className={field} name="firstName" maxLength={100} required />
+          <input
+            className={field}
+            name="firstName"
+            maxLength={100}
+            required
+            disabled={!!pendingGuest}
+          />
         </label>
         <label>
           Last name
-          <input className={field} name="lastName" maxLength={100} required />
+          <input
+            className={field}
+            name="lastName"
+            maxLength={100}
+            required
+            disabled={!!pendingGuest}
+          />
         </label>
       </div>
       <label className="block">
         Email
-        <input className={field} name="email" type="email" maxLength={254} required />
+        <input
+          className={field}
+          name="email"
+          type="email"
+          maxLength={254}
+          required
+          disabled={!!pendingGuest}
+        />
       </label>
       <label className="block">
         Phone {policy?.phoneRequired ? "" : "(optional)"}
@@ -100,6 +126,7 @@ export default function ReplacementBookingConfirmation({
           type="tel"
           maxLength={64}
           required={policy?.phoneRequired}
+          disabled={!!pendingGuest}
         />
       </label>
       <label className="block">
@@ -110,18 +137,25 @@ export default function ReplacementBookingConfirmation({
           maxLength={2}
           pattern="[A-Za-z]{2}"
           placeholder="DE"
+          disabled={!!pendingGuest}
         />
       </label>
       {policy?.arrivalTimeEnabled && (
         <label className="block">
           Expected arrival time (optional)
-          <input className={field} name="arrivalTime" type="time" />
+          <input className={field} name="arrivalTime" type="time" disabled={!!pendingGuest} />
         </label>
       )}
       {policy?.specialRequestsEnabled && (
         <label className="block">
           Special requests (optional)
-          <textarea className={field} name="specialRequests" maxLength={2000} rows={4} />
+          <textarea
+            className={field}
+            name="specialRequests"
+            maxLength={2000}
+            rows={4}
+            disabled={!!pendingGuest}
+          />
         </label>
       )}
       {!supported ? (
