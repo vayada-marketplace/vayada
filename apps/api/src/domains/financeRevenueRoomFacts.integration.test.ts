@@ -74,6 +74,7 @@ describe.skipIf(!DB_URL)("PostgreSQL Finance room-revenue facts", () => {
       { period: "current", channel: "unknown", directSource: null, roomTypeId: ROOM_TWO, grossRoomAmount: "50.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
       { period: "comparison", channel: "direct", directSource: "email", roomTypeId: ROOM, grossRoomAmount: "80.0000", otaCommissionAmount: "0.0000", occupiedRoomNights: 1 },
     ]));
+    expect(result.eligibleBookings).toEqual({ current: 6, comparison: 1 });
     expect(result.sourceFreshness).toEqual({ bookingRevenueThrough: "2026-08-03", financeOtaCommissionAt: "2026-08-04T13:00:00.000Z" });
     expect(result.incompleteEvidence).toEqual([
       { code: "ota_commission_missing", count: 1 },
@@ -85,7 +86,7 @@ describe.skipIf(!DB_URL)("PostgreSQL Finance room-revenue facts", () => {
   });
 
   it("returns a zero state and rejects malformed scope", async () => {
-    await expect(read.read({ propertyId: EMPTY, currency: "EUR", periods: periods() })).resolves.toEqual({ rows: [], sourceFreshness: { bookingRevenueThrough: null, financeOtaCommissionAt: null }, incompleteEvidence: [] });
+    await expect(read.read({ propertyId: EMPTY, currency: "EUR", periods: periods() })).resolves.toEqual({ rows: [], eligibleBookings: { current: 0, comparison: 0 }, sourceFreshness: { bookingRevenueThrough: null, financeOtaCommissionAt: null }, incompleteEvidence: [] });
     await expect(read.read({ propertyId: "bad", currency: "EUR", periods: periods() })).rejects.toBeInstanceOf(TypeError);
     await expect(read.read({ propertyId: P, currency: "eur", periods: periods() })).rejects.toBeInstanceOf(TypeError);
     await expect(read.read({ propertyId: P, currency: "EUR", periods: { current: { from: "2026-08-01", to: "2026-08-03" }, comparison: { from: "2026-07-31", to: "2026-08-01" } } })).rejects.toBeInstanceOf(TypeError);
