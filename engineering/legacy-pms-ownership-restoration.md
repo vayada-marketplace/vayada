@@ -257,6 +257,21 @@ activity, verify current ownership, read replay receipts or write claims/events.
 Its non-executable result must not replace fresh source/owner eligibility,
 approval-expiry rechecks, compensation verification or atomic receipt/audit writes.
 
+`lockLegacyHistoricalBindingOwner` then fences the seven canonical ownership and
+identity relations in sorted order with SHARE NOWAIT in that same bounded READ
+COMMITTED transaction. This rejects busy writers instead of waiting; retained
+locks briefly prevent all writes to these relations, including unrelated owners.
+Use only in the controlled migration transaction, never ordinary request traffic.
+It rejects nonordinary, inherited or policy-filtered relations, rereads exhaustive
+ownership relationships/full-row fingerprints and compares an already verified
+owner session to current database identity bindings. Failure releases only this
+helper's locks; the caller must still abort. No source proof, migration-derived
+restriction disposition, entitlement, property eligibility or approval is inferred.
+Pending/suspended statuses stay explicit in its non-executable result. These
+locks are not provider-session revocation checks or a completed transition.
+Statement/lock timeouts do not bound idle transaction time: the controlled
+executor must enforce prompt completion and an idle-transaction deadline.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.

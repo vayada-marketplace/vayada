@@ -22,7 +22,8 @@ export type VerifiedLegacyOwnerSession = {
  * Check database bindings of an ALREADY verified WorkOS session. This does not
  * validate JWT signatures, issuer/audience, or provider-side session revocation.
  * Caller must use backend-auth verification, authenticated approval evidence,
- * and the same REPEATABLE READ/SERIALIZABLE transaction as ownership checks.
+ * and the same REPEATABLE READ/SERIALIZABLE transaction as ownership checks,
+ * or READ COMMITTED with retained relation fences over all ownership/identity rows.
  * Pending/suspended migration state still needs the separate PMS disposition;
  * identity_matches grants no access and cannot approve Marketplace or a claim.
  */
