@@ -57,6 +57,56 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
+  it("does not retain an old calendar snapshot across an inventory writer", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query(
+        "SELECT pg_advisory_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      // Model the protected append-only calendar publication while the writer owns inventory.
+      await activateCalendarRevision(blocker, f, 2);
+      f.calendarState.currentRevision = 1; // The initial unlocked probe is now stale.
+      await blocker.query(
+        "SELECT pg_advisory_unlock(hashtextextended(concat('pms-inventory:', $1::uuid::text),0))",
+        [f.propertyId],
+      );
+      expect(await f.read()).toMatchObject({
+        kind: "unavailable",
+        reason: "configuration_not_current",
+      });
+    } finally {
+      await blocker.end();
+    }
+  });
+  it("cannot snapshot old room facts while their writer owns the scope", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query(
+        "SELECT pg_advisory_lock(hashtext('pms.room_facts'),hashtext($1::uuid::text))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
+        f.roomTypeId,
+      ]);
+      await blocker.query(
+        "SELECT pg_advisory_unlock(hashtext('pms.room_facts'),hashtext($1::uuid::text))",
+        [f.propertyId],
+      );
+      expect(await f.read()).toMatchObject({
+        kind: "unavailable",
+        reason: "configuration_not_current",
+      });
+    } finally {
+      await blocker.end();
+    }
+  });
   async function dailyFixture(materialize = true) {
     const f = await createFixture(admin, repositories, [2, 1]);
     if (materialize)
