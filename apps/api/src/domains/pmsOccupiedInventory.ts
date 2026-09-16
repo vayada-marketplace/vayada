@@ -8,6 +8,11 @@ export type PmsOccupiedInventorySpan = Readonly<{
   checkOut: string;
 }>;
 
+export type PmsOccupiedInventoryChange = Readonly<{
+  roomTypeId: string;
+  stayDate: string;
+}>;
+
 export type PmsOccupiedInventoryClient = {
   query<Row extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -34,9 +39,9 @@ export async function reconcilePmsOccupiedInventory(
   propertyId: string,
   spans: readonly PmsOccupiedInventorySpan[],
   acceptedAt: string,
-): Promise<void> {
+): Promise<readonly PmsOccupiedInventoryChange[]> {
   const targetDays = occupiedDays(spans);
-  if (targetDays.length === 0) return;
+  if (targetDays.length === 0) return [];
   await lockPmsInventoryMutationScope(client, propertyId);
   const result = await client.query<InventoryDay>(
     `WITH target_days AS (
@@ -133,6 +138,7 @@ export async function reconcilePmsOccupiedInventory(
   if (result.rows.length !== targetDays.length) {
     throw new PmsOccupiedInventoryInvariantError("Canonical inventory coverage is incomplete");
   }
+  const changes: PmsOccupiedInventoryChange[] = [];
   for (const day of result.rows) {
     const total = integer(day.totalCount);
     const blocked = integer(day.blockedCount);
@@ -162,7 +168,9 @@ export async function reconcilePmsOccupiedInventory(
     if (updated.rowCount !== 1) {
       throw new PmsOccupiedInventoryInvariantError("Canonical inventory changed under lock");
     }
+    changes.push({ roomTypeId: day.roomTypeId, stayDate: day.stayDate });
   }
+  return changes;
 }
 
 function occupiedDays(spans: readonly PmsOccupiedInventorySpan[]) {

@@ -1292,10 +1292,12 @@ enqueues an unrestricted `channex.sync_ari` job; rule and calendar-restriction
 triggers continue to enqueue `restrictionsOnly` work.
 
 Manual-booking creation and the manual no-show, cancellation, and stay-correction
-paths still reconcile primary occupied inventory without their own primary-room
-ARI outbox intent. Their linked-room effects are covered independently. Those
-remaining owner paths require a later bounded event slice before availability
-runtime activation.
+paths return the exact primary room-type dates changed by occupied-inventory
+reconciliation. In the owning transaction, those dates are sorted and collapsed
+into contiguous ranges per room type before room-scoped ARI outbox intents are
+written. Command identity and range form stable event keys, so a replay cannot
+multiply intents. A stay correction that moves across room types emits separate
+source and target room intents. Linked-room effects remain covered independently.
 
 The management worker treats a persisted room-availability receipt as bounded
 partial progress, alongside a retained closed-rate receipt. Exact job attempt,
