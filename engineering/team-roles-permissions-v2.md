@@ -695,3 +695,19 @@ any access/revision change. This pure validator performs no writes and does not
 establish active ownership: the transaction layer must lock/revalidate live
 organization, memberships/users, owner count and target delegation eligibility,
 then consume proof, swap complete configurations and audit atomically.
+
+### Locked transfer snapshot
+
+The transfer read locks the active hotel organization first, checks every owner
+row (including inactive history/aliases), then locks both memberships/users and
+the relevant roles, delegation edges, assignments and property links. It checks
+the database actor/provider identity, active users/memberships, unrestricted
+canonical ownership and the reserved admin role. Targets that still delegate
+access are rejected; a valid delegated staff subject can be adopted by the
+successor transaction. Invalid saved target role configuration fails closed.
+
+Both access revisions reuse the ordinary staff editor's exact revision function.
+The caller must keep this PoolClient transaction open through validation, proof
+consumption, membership changes, queued reconciliation and audit. This snapshot
+helper performs no ownership mutation and cannot authorize a transfer outside
+that transaction. Hosted session validity remains a route-level prerequisite.

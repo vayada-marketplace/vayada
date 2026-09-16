@@ -51,7 +51,7 @@ type StaffRosterRow = {
   status: StaffRosterMember["status"];
   last_active_at: Date | null;
 };
-type StaffAccessTargetRow = {
+export type StaffAccessTargetRow = {
   role_definition_id: string | null;
   role_definition: StaffRoleDefinition | null;
   pms_access_enabled: boolean;
@@ -1609,7 +1609,7 @@ function isPropertyScopeError(error: unknown): boolean {
   );
 }
 
-function staffAccessRevision(row: StaffAccessTargetRow): string {
+export function staffAccessRevision(row: StaffAccessTargetRow): string {
   return hash(
     JSON.stringify({
       id: row.id,
