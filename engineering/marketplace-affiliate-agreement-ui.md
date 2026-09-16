@@ -30,11 +30,11 @@ and hotels, including completed or cancelled hosted collaborations when a
 historical affiliate agreement resolves successfully. This keeps affiliate
 history independent from the hosted collaboration lifecycle.
 
-JSON disclosure objects render all top-level entries in stored order. Keys are
-converted to readable labels; scalar values remain unchanged and structured
-values use their complete JSON representation. If the retained disclosure is
-not a JSON object, display the exact string. The UI never substitutes mutable
-legacy collaboration fields for a successful retained agreement.
+The retained disclosure is displayed verbatim in a wrapped terms block. The UI
+does not parse or reserialize it because doing so can change large JSON numbers,
+key order or other exact bytes. A later friendly renderer needs a separately
+versioned structured disclosure contract. The UI never substitutes mutable legacy
+collaboration fields for a successful retained agreement.
 
 Pending copy identifies which decisions are recorded without offering an action
 that the backend does not support. The layout is one column at every viewport

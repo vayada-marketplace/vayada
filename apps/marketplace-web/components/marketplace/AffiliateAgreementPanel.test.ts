@@ -12,7 +12,7 @@ vi.mock("@vayada/marketplace-shared/api/collaborations", async (original) => ({
 }));
 
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
-import { AffiliateAgreementPanel, disclosureEntries } from "./AffiliateAgreementPanel";
+import { AffiliateAgreementPanel } from "./AffiliateAgreementPanel";
 
 const agreement = {
   participationId: "participation-1",
@@ -65,9 +65,9 @@ describe("AffiliateAgreementPanel", () => {
     const output = await render();
 
     expect(output()).toContain("Agreement accepted");
-    expect(output()).toContain("Commission");
+    expect(output()).toContain("commission");
     expect(output()).toContain("12.50%");
-    expect(output()).toContain("Window Days");
+    expect(output()).toContain("windowDays");
     expect(output()).toContain("earning eligibility are checked separately");
     expect(mocks.read).toHaveBeenCalledWith("Existing:QA", {
       signal: expect.any(AbortSignal),
@@ -114,20 +114,16 @@ describe("AffiliateAgreementPanel", () => {
     expect(mocks.read).toHaveBeenCalledTimes(2);
   });
 
-  it("ignores an earlier collaboration response after the panel changes", async () => {
-    let finishEarlier!: (value: typeof agreement) => void;
-    mocks.read
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finishEarlier = resolve;
-          }),
-      )
-      .mockResolvedValueOnce({
-        ...agreement,
-        terms: { ...agreement.terms, disclosure: '{"commission":"20%"}' },
-      });
-    await render();
+  it("hides a ready agreement immediately when the collaboration changes", async () => {
+    let finishLater!: (value: typeof agreement) => void;
+    mocks.read.mockResolvedValueOnce(agreement).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLater = resolve;
+        }),
+    );
+    const output = await render();
+    expect(output()).toContain("12.50%");
 
     await act(async () => {
       view?.update(
@@ -138,23 +134,27 @@ describe("AffiliateAgreementPanel", () => {
         }),
       );
     });
-    await act(async () => finishEarlier(agreement));
+    expect(output()).toContain("Loading affiliate agreement");
+    expect(output()).not.toContain("12.50%");
 
-    const output = JSON.stringify(view?.toJSON());
-    expect(output).toContain("20%");
-    expect(output).not.toContain("12.50%");
-  });
-});
+    await act(async () =>
+      finishLater({
+        ...agreement,
+        terms: { ...agreement.terms, disclosure: '{"commission":"20%"}' },
+      }),
+    );
 
-describe("disclosureEntries", () => {
-  it("keeps every top-level retained field and complete structured values", () => {
-    expect(disclosureEntries('{"commission":"12%","conditions":["direct","mobile"]}')).toEqual([
-      ["Commission", "12%"],
-      ["Conditions", '["direct","mobile"]'],
-    ]);
+    expect(output()).toContain("20%");
+    expect(output()).not.toContain("12.50%");
   });
 
-  it("falls back to the exact retained string when it is not an object", () => {
-    expect(disclosureEntries("Original retained terms")).toBeNull();
+  it("renders the exact retained disclosure without parsing or reordering it", async () => {
+    const exact = '{"minimumRevenueCents":9007199254740993,"cap":null,"2":"second","1":"first"}';
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      terms: { ...agreement.terms, disclosure: exact },
+    });
+    await render();
+    expect(view?.root.findByType("pre").children).toEqual([exact]);
   });
 });

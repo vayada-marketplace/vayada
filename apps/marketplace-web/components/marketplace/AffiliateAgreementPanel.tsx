@@ -10,10 +10,10 @@ import {
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
 
 type AgreementState =
-  | { kind: "loading" }
-  | { kind: "ready"; agreement: MarketplaceAffiliateAssentRead }
-  | { kind: "unavailable" }
-  | { kind: "error" };
+  | { kind: "loading"; collaborationId: string }
+  | { kind: "ready"; collaborationId: string; agreement: MarketplaceAffiliateAssentRead }
+  | { kind: "unavailable"; collaborationId: string }
+  | { kind: "error"; collaborationId: string };
 
 type AffiliateAgreementPanelProps = {
   collaborationId: string;
@@ -26,24 +26,25 @@ export function AffiliateAgreementPanel({
   currentUserType,
   affiliateExpected,
 }: AffiliateAgreementPanelProps) {
-  const [state, setState] = useState<AgreementState>({ kind: "loading" });
+  const [state, setState] = useState<AgreementState>({ kind: "loading", collaborationId });
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let current = true;
-    setState({ kind: "loading" });
+    setState({ kind: "loading", collaborationId });
 
     getMarketplaceCollaborationAffiliateAssent(collaborationId, {
       signal: controller.signal,
     })
       .then((agreement) => {
-        if (current) setState({ kind: "ready", agreement });
+        if (current) setState({ kind: "ready", collaborationId, agreement });
       })
       .catch((error: unknown) => {
         if (!current || controller.signal.aborted) return;
         setState({
           kind: error instanceof ApiErrorResponse && error.status === 404 ? "unavailable" : "error",
+          collaborationId,
         });
       });
 
@@ -53,7 +54,10 @@ export function AffiliateAgreementPanel({
     };
   }, [collaborationId, retry]);
 
-  if (!affiliateExpected && state.kind !== "ready") return null;
+  const currentState: AgreementState =
+    state.collaborationId === collaborationId ? state : { kind: "loading", collaborationId };
+
+  if (!affiliateExpected && currentState.kind !== "ready") return null;
 
   return (
     <section
@@ -63,11 +67,13 @@ export function AffiliateAgreementPanel({
       <h5 id="affiliate-agreement-heading" className="font-bold text-gray-900 mb-3">
         Affiliate agreement
       </h5>
-      {state.kind === "loading" && <AgreementSkeleton />}
-      {state.kind === "unavailable" && <AgreementUnavailable />}
-      {state.kind === "error" && <AgreementError onRetry={() => setRetry((value) => value + 1)} />}
-      {state.kind === "ready" && (
-        <AgreementDetails agreement={state.agreement} currentUserType={currentUserType} />
+      {currentState.kind === "loading" && <AgreementSkeleton />}
+      {currentState.kind === "unavailable" && <AgreementUnavailable />}
+      {currentState.kind === "error" && (
+        <AgreementError onRetry={() => setRetry((value) => value + 1)} />
+      )}
+      {currentState.kind === "ready" && (
+        <AgreementDetails agreement={currentState.agreement} currentUserType={currentUserType} />
       )}
     </section>
   );
@@ -176,22 +182,12 @@ function AgreementDetails({
 }
 
 function Disclosure({ disclosure }: { disclosure: string }) {
-  const entries = disclosureEntries(disclosure);
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Retained terms</p>
-      {entries?.length ? (
-        <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {entries.map(([label, value], index) => (
-            <div key={`${label}-${index}`} className="min-w-0">
-              <dt className="text-xs text-gray-500">{label}</dt>
-              <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : (
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm text-gray-800">{disclosure}</p>
-      )}
+      <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-sm font-medium text-gray-900">
+        {disclosure}
+      </pre>
     </div>
   );
 }
@@ -213,32 +209,6 @@ function Decision({
       </dd>
     </div>
   );
-}
-
-export function disclosureEntries(disclosure: string): Array<[string, string]> | null {
-  try {
-    const parsed: unknown = JSON.parse(disclosure);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return Object.entries(parsed).map(([key, value]) => [readableKey(key), displayValue(value)]);
-  } catch {
-    return null;
-  }
-}
-
-function readableKey(key: string): string {
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
-}
-
-function displayValue(value: unknown): string {
-  if (value === null) return "None";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return JSON.stringify(value);
 }
 
 function formatDecisionDate(timestamp: string): string {
