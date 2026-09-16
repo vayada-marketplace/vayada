@@ -1239,3 +1239,10 @@ same unresolved attempt still owns the exact persisted request without a receipt
 The closure sends once, then retains either the sanitized original response or
 an ambiguous transport failure. It cannot reopen an existing attempt and is not
 wired into the runtime worker by this contract step.
+
+Exact availability readback accepts only the immutable one-room, one-date
+request shape and performs a property-scoped `/api/v1/availability` read for
+that date. It rejects root errors or warnings, malformed metadata, missing room
+or date entries, booleans, fractional/negative counts and noncanonical numeric
+strings. The sanitized observation contains only external property/room IDs,
+date and exact nonnegative count; it is not reconciliation by itself.
