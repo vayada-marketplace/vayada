@@ -224,9 +224,14 @@ or oversized evidence references. Historical duplicate probe bindings therefore 
 block migration, but they cannot be certified or silently collapsed into one successful
 result.
 
-This is only durable storage for the successful synthetic certification half. A later
-authorized verifier command must create it from the completed transport, and readiness
-must separately require a current exact production preflight for the same capability.
+This is only durable storage for the successful synthetic certification half. The internal
+Booking verifier command is its application writer: it reauthorizes current hotel scope,
+locks and rechecks the exact probe/deployment, derives the sole binding, and requires the
+bound booking to remain a zero-value diagnostic draft with no existing Finance journal.
+Binding and Finance-journal inserts take the same database lock, and each rejects the
+other record, so a new diagnostic booking cannot race into earning evidence. The verifier
+accepts evidence references only through server-owned configuration. Readiness must
+separately require a current exact production preflight for the same capability.
 Missing/conflicting run outcomes, other three capabilities, freshness, revocation-aware
 consumption and publication/activation wiring remain later slices. The table alone does
 not make a destination, publication, agreement, click or booking eligible for earnings.
