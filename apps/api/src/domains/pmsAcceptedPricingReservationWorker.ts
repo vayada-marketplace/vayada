@@ -13,6 +13,7 @@ import {
   loadAcceptedPricingReservation,
   type AcceptedPricingReservationReference,
 } from "./pricingPmsAcceptedReservation.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 type Claim = {
   jobId: string;
@@ -77,6 +78,7 @@ export async function processNextPmsAcceptedPricingReservationJob(
     return "dead_lettered";
   }
   try {
+    await lockPmsInventoryMutationScope(client, reference.propertyId);
     const command = await loadAcceptedPricingReservation(client, reference);
     if (!command) throw new PmsAcceptedPricingReservationConflict();
     const result =
