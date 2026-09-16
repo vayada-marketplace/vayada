@@ -41,6 +41,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
     "repository-released",
     "repository-wrong-organization",
     "repository-missing-acceptance",
+    "repository-suspended-entitlement",
   ])("validates complete historical binding: %s", async (scenario) => {
     if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
       throw new Error("test database required");
@@ -317,6 +318,11 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           reservation: bundle,
           occurredAt: new Date("2026-09-01T00:03:00Z"),
         });
+      if (scenario === "repository-suspended-entitlement")
+        await db.query(
+          "UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1",
+          [organizationId],
+        );
       await db.query("SAVEPOINT before_adoption");
       const snapshot = async () => ({
         receipts: (
@@ -327,7 +333,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
         ).rows,
         inventory: (
           await db.query(
-            "SELECT room_type_id,stay_date,available_count,blocked_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY room_type_id,stay_date",
+            "SELECT room_type_id,stay_date,available_count,assigned_count,blocked_count FROM pms.inventory_days WHERE property_id=$1 ORDER BY room_type_id,stay_date",
             [propertyId],
           )
         ).rows,
@@ -451,7 +457,16 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             (r) => r.lifecycle_state === "handed_off" && r.lifecycle_revision === 2,
           ),
         ).toBe(true);
-        expect(after.inventory).toEqual(before.inventory);
+        if (repository) {
+          expect(after.inventory.map(({ available_count }) => available_count)).toEqual(
+            before.inventory.map(({ available_count }) => available_count),
+          );
+          expect(after.inventory.map(({ assigned_count }) => assigned_count)).toEqual([2, 2, 1, 1]);
+          expect(after.effects).toEqual({
+            events: before.effects.events + 2,
+            outbox: before.effects.outbox + 6,
+          });
+        } else expect(after.inventory).toEqual(before.inventory);
         expect(
           after.blocks.every(
             (b) => b.source_assignment_id && b.source_inventory_reservation_receipt_id === null,
@@ -472,13 +487,39 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
             { position: 2, status: "pending", adults: 2, children: 1 },
             { position: 3, status: "pending", adults: 2, children: 1 },
           ]);
-        if (repository)
+        if (repository) {
           expect(await adopt()).toEqual({
             outcome: "replayed",
             guestBookingId: bookingId,
             acceptanceId,
           });
-        else
+          expect(await snapshot()).toEqual(after);
+          await db.query("SAVEPOINT invalid_replay");
+          await db.query("SET LOCAL session_replication_role=replica");
+          await db.query("DELETE FROM booking.pricing_quote_acceptances WHERE id=$1", [
+            acceptanceId,
+          ]);
+          await db.query("SET LOCAL session_replication_role=origin");
+          await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
+          expect(await snapshot()).toEqual(after);
+          await db.query("ROLLBACK TO SAVEPOINT invalid_replay");
+          await db.query("UPDATE booking.guest_bookings SET edit_revision=1 WHERE id=$1", [
+            bookingId,
+          ]);
+          await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
+          expect(await snapshot()).toEqual(after);
+          await db.query("ROLLBACK TO SAVEPOINT invalid_replay");
+          await db.query("SAVEPOINT position_21");
+          await db.query("SET LOCAL session_replication_role=replica");
+          await db.query(
+            `INSERT INTO pms.operational_booking_assignments
+             (property_id,guest_booking_id,room_type_id,position,assignment_status,source,
+              stay_evidence_kind,check_in,check_out,adults,children)
+             VALUES($1,$2,$3,21,'pending','manual','exact',$4,$5,1,0)`,
+            [propertyId, bookingId, types[0], quote.stay.checkIn, quote.stay.checkOut],
+          );
+          await db.query("ROLLBACK TO SAVEPOINT position_21");
+        } else
           await db.query(
             "UPDATE pms.operational_booking_assignments SET updated_at=updated_at WHERE guest_booking_id=$1",
             [bookingId],
@@ -489,6 +530,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           "repository-released",
           "repository-wrong-organization",
           "repository-missing-acceptance",
+          "repository-suspended-entitlement",
         ].includes(scenario)
       ) {
         await expect(adopt()).rejects.toBeInstanceOf(PmsAcceptedPricingReservationConflict);
