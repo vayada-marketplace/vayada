@@ -1189,3 +1189,25 @@ Require a hotel-local admitted initial date. Guard rejection rolls back; neither
 captured mapping nor inventory evidence escapes a failed commit. No provider
 request or durable claim is authorized by this read: the next room-scoped
 claim/dispatch must repeat these checks and retain unresolved ownership.
+
+### Durable room-availability ownership
+
+Before provider IO, retain one immutable attempt for the external property and
+room. Derive its property, connection, binding generation, local room, and
+external identifiers from the active mapping and the persisted `sync_ari` job
+attempt under the same current running lease, worker, property resource and
+five-minute database clock boundary; caller-supplied identity is never
+authoritative. Store the hotel-local date, canonical available count, exact
+inventory source evidence, and bounded provider request body. Attempts are
+append-only except for a single `unresolved` to `reconciled` transition with
+nonempty reconciliation evidence. Retained IDs do not reference mutable
+mapping/room rows, so later retirement cannot erase history or block safe room
+deletion.
+
+Only one unresolved attempt may own an external property/room pair, across all
+dates and binding generations. This provider-resource exclusion survives local
+mapping replacement and job failure. A separate room may progress independently.
+Storage is inert: it grants neither dispatch nor completion. The claim service
+must insert while the current inventory and Channex authority guard is held;
+dispatch must consume that exact unresolved attempt once, and an original
+receipt plus exact room/date readback must reconcile it.
