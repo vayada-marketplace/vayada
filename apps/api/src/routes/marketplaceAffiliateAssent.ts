@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type { AffiliateAssentRepository } from "../domains/marketplaceAffiliateAssentRepository.js";
+import {
+  validAffiliateCollaborationKey,
+  type AffiliateAssentRepository,
+} from "../domains/marketplaceAffiliateAssentRepository.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export async function registerMarketplaceAffiliateAssentRoutes(
@@ -32,6 +35,22 @@ export async function registerMarketplaceAffiliateAssentRoutes(
         return result ?? reply.code(404).send({ code: "scope_unavailable" });
       } catch (error) {
         request.log.error({ err: error }, "Affiliate assent read failed");
+        return reply.code(500).send({ code: "read_unavailable" });
+      }
+    },
+  );
+  app.get<{ Params: { collaborationId: string } }>(
+    "/collaborations/:collaborationId/affiliate-assent",
+    async (request, reply) => {
+      const { collaborationId } = request.params;
+      if (!validAffiliateCollaborationKey(collaborationId))
+        return reply.code(422).send({ code: "invalid_request" });
+      const context = enforceRoutePolicy(request, { permission: "marketplace.collaboration.read" });
+      try {
+        const result = await options.repository.readForCollaboration(context, collaborationId);
+        return result ?? reply.code(404).send({ code: "scope_unavailable" });
+      } catch (error) {
+        request.log.error({ err: error }, "Collaboration affiliate assent read failed");
         return reply.code(500).send({ code: "read_unavailable" });
       }
     },

@@ -186,6 +186,7 @@ jobs:
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
+          src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
           src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
           src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
           src/domains/financeAffiliateEarningJournalStorage.integration.test.ts

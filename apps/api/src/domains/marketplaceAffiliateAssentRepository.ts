@@ -25,13 +25,21 @@ export type AffiliateAssentRead = {
 };
 export type AffiliateAssentRepository = {
   read(context: RequestContext, attemptId: string): Promise<AffiliateAssentRead | null>;
+  readForCollaboration(
+    context: RequestContext,
+    collaborationId: string,
+  ): Promise<AffiliateAssentRead | null>;
   close(): Promise<void>;
 };
 export function createPgMarketplaceAffiliateAssentRepository(
   connectionString: string,
 ): AffiliateAssentRepository {
   const pool = new pg.Pool({ connectionString, max: 3 });
-  return { read: (context, id) => readAffiliateAssent(pool, context, id), close: () => pool.end() };
+  return {
+    read: (context, id) => readAffiliateAssent(pool, context, id),
+    readForCollaboration: (context, id) => readCollaborationAffiliateAssent(pool, context, id),
+    close: () => pool.end(),
+  };
 }
 
 export async function readAffiliateAssent(
@@ -145,4 +153,42 @@ export async function readAffiliateAssent(
     hotelApprovedAt,
     creatorAcceptedAt,
   };
+}
+
+export function validAffiliateCollaborationKey(id: string): boolean {
+  return id.length <= 100 && /^[A-Za-z0-9._~:-]+$/.test(id);
+}
+
+export async function readCollaborationAffiliateAssent(
+  pool: pg.Pool,
+  context: RequestContext,
+  collaborationId: string,
+): Promise<AffiliateAssentRead | null> {
+  requirePermission(context, "marketplace.collaboration.read");
+  const hotel = context.selectedOrganization.kind === "hotel_group";
+  if (
+    !validAffiliateCollaborationKey(collaborationId) ||
+    context.actor.status !== "active" ||
+    context.membership.status !== "active" ||
+    context.selectedOrganization.status !== "active" ||
+    (!hotel && context.selectedOrganization.kind !== "creator_workspace")
+  )
+    return null;
+  const result = await pool.query<{ id: string }>(
+    `WITH candidates AS (
+      SELECT c.*, count(*) OVER () AS matches FROM marketplace.collaborations c
+      WHERE c.source_collaboration_id=$1
+        AND CASE WHEN $3 THEN c.hotel_organization_id ELSE c.creator_organization_id END=$2
+    )
+    SELECT a.id FROM candidates c
+    JOIN marketplace.affiliate_programs p ON p.offer_id=c.offer_id
+      AND p.property_id=c.property_id AND p.organization_id=c.hotel_organization_id
+    JOIN marketplace.affiliate_participations m ON m.program_id=p.id
+      AND m.creator_profile_id=c.creator_profile_id AND m.creator_organization_id=c.creator_organization_id
+    JOIN marketplace.affiliate_participation_attempts a ON a.participation_id=m.id
+    WHERE c.matches=1 ORDER BY a.attempt_number DESC LIMIT 1`,
+    [collaborationId, context.selectedOrganization.organizationId, hotel],
+  );
+  // Reuse exact-version disclosure, persisted-resource and canonical property authorization.
+  return result.rows[0] ? readAffiliateAssent(pool, context, result.rows[0].id) : null;
 }
