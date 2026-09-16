@@ -11,6 +11,10 @@ The authorized September 14 source/target readback confirmed eight historical
 owner/hotel associations and no live Next users under those IDs or snapshot
 emails. Different-ID/different-email accounts remain possible. Earlier WorkOS
 reads are separate observations, not fresh provider evidence for an apply.
+An internal pending row therefore remains non-authoritative: it cannot advance
+to provider creation or ownership restoration until a reviewed current-principal
+resolution binds an authenticated existing principal or independently proves
+absence. Inability to rule out another current principal blocks reconciliation.
 
 The broad `workosBackfill` cannot seed missing internal users. The identity
 migration writer uses timestamp-based upserts, not exact expected-absence
@@ -44,16 +48,23 @@ An exact prior success is replayed from its receipt, not inferred from row shape
 - Bind command version/ID, environment and independently verified database
   identity, exact owner IDs, intended row values, source run/ledger/row hashes,
   fresh current ownership/restriction evidence, expected target absence and
-  expiry to one canonical payload hash. Contact evidence belongs in protected
-  storage; public reports contain neither emails nor reversible payloads.
+  current-principal resolution disposition, observation start/end/source
+  horizon and expiry to one canonical payload hash. Every observation used for
+  a mutation must remain within the diagnostic contract's maximum fifteen-minute
+  window; approval expiry alone is not evidence freshness. Contact and principal
+  evidence belongs in protected storage; public reports contain neither emails
+  nor reversible payloads.
 - Use distinct immutable migration/security authority records under VAY-1320's
   sole-human dual-authority policy, with controlled signer/executor separation.
   The ownership-restoration approval does not authorize this new operation.
   General chat permission and a passed readback are not signed write evidence.
 - Recheck exact-ID, normalized-email and external-identity conflicts under the
-  write transaction. Unknown normalization, ambiguous matches, missing current
-  source evidence, newer restrictions, revoked/expired approval or target drift
-  block. Snapshot freshness must not be relabeled as current ownership.
+  serialized write transaction, together with current ownership, restrictions,
+  target absence and contact/principal disposition. Unknown normalization,
+  ambiguous matches, missing current source evidence, newer restrictions,
+  revoked/expired approval, a different-ID/different-email candidate, inability
+  to prove principal absence or target drift block. Snapshot freshness must not
+  be relabeled as current ownership.
 - Serialize duplicate command IDs and overlapping owner/email keys. Application
   advisory locks alone cannot exclude ordinary signup writers. The storage
   design must prove a database-enforced collision boundary shared with signup,
@@ -76,10 +87,18 @@ with `external_id` equal to that same internal UUID. No email-only linking,
 legacy password import, automatic email verification or existing-user update.
 Do not change ordinary signup or session reconciliation to force this mapping.
 
+Provider creation additionally requires the approval-bound current-principal
+resolution to prove absence within the same maximum fifteen-minute observation
+window. If it instead binds an authenticated current principal, or another
+principal cannot be ruled out, stop for separately reviewed identity
+reconciliation; never create a second principal for the legacy UUID.
+
 Before dispatch, commit a durable intent bound to the exact command, owner,
 contact evidence and provider environment. A provider request must not run while
-a database transaction is held open. On success, record the exact provider ID
-and link it only after fresh identity checks and conditional local persistence.
+a database transaction is held open. Immediately before dispatch, repeat the
+current target/provider/ownership/restriction/contact checks and reject if their
+observation window has expired or drifted. On success, record the exact provider
+ID and link it only after fresh identity checks and conditional local persistence.
 
 | Observed outcome                             | Required recovery                                                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -113,13 +132,16 @@ First specify the shared collision guard and receipt storage, then build the
 internal-only writer with synthetic PostgreSQL16/17 fixtures. Cover explicit
 pending status, exact UUID preservation, extra IDs, email collisions, concurrent
 ordinary signup, duplicate commands, payload drift, revoked/expired approval,
+authenticated-existing-principal and different-ID/different-email candidates,
+unprovable absence, future/malformed or older-than-fifteen-minute observations,
 audit failure, rollback and preserved protected fixtures. Assert zero provider
 calls and no organization/membership/resource/entitlement changes.
 
 Provider intent/adapter/recovery tests come afterward: dispatch failure, timeout,
 duplicate dispatch, provider-success/local-failure, external-ID mismatch, email
-collision, newer local restrictions and no user notifications. Test product
-denials after preparation; login or health alone is not an access test.
+collision, pre-dispatch principal/contact drift, newer local restrictions and no
+user notifications. Test product denials after preparation; login or health
+alone is not an access test.
 
 No existing read approval authorizes either writer. Real isolated rehearsals and
 production execution require their own exact write/recovery approval. This
