@@ -18,6 +18,7 @@ export * from "./creatorProfileModeration.js";
 export * from "./creatorMatchingPreferences.js";
 export * from "./offerMatchingCriteria.js";
 export * from "./matchingEvents.js";
+export * from "./communicationPreferences.js";
 
 import type {
   MarketplaceOfferMatchingCriteria,
