@@ -181,13 +181,15 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     if(replayed){await recordHandled(client,job,revision,"replayed");return true}
     const newest=mappings.reduce<string|null>((latest,row)=>row.insertedAt&&(!latest||row.insertedAt>latest)?row.insertedAt:latest,tombstone?.insertedAt??null);
     if(newest&&revision.insertedAt&&revision.insertedAt<newest){await recordHandled(client,job,revision,"stale");return true}
+    const isAirbnb=canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource)==="airbnb";
     let guestBookingId = mappings[0]?.guestBookingId,alreadyCanceled=false;
     if(!guestBookingId&&revision.amount===null)throw new Failure("invalid_revision",false);
     if(!guestBookingId&&revision.status==="canceled"){await client.query(`INSERT INTO pms.channel_booking_revision_tombstones(connection_id,property_id,binding_generation,external_booking_id,authoritative_revision_id,inserted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::timestamptz) ON CONFLICT(connection_id,binding_generation,external_booking_id) DO UPDATE SET authoritative_revision_id=EXCLUDED.authoritative_revision_id,inserted_at=EXCLUDED.inserted_at,resolved_at=NULL,created_at=now(),retention_expires_at=now()+interval '90 days',updated_at=now()`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId,revision.id,revision.insertedAt]);await recordHandled(client,job,revision,"ignored");return true}
     const isModified=(text(record(record(rawRevision).attributes).status)??text(record(rawRevision).status))?.toLowerCase()==="modified";
     const financialHistory=guestBookingId&&(await client.query(`SELECT 1 FROM finance.airbnb_provider_snapshots WHERE property_id=$1 AND guest_booking_id=$2 LIMIT 1`,[job.propertyId,guestBookingId])).rows.length;
-    if(revision.amount===null&&!financialHistory)throw new Failure("invalid_revision",false);
+    if(revision.amount===null&&!financialHistory&&!isAirbnb)throw new Failure("invalid_revision",false);
     if(financialHistory&&(!applyAlterations||!financeSettings))throw new Failure("alteration_finance_settings_required",false);
+    if(isAirbnb&&applyAlterations&&isModified&&!financeSettings)throw new Failure("alteration_finance_settings_required",false);
     const alterationApplied=Boolean(applyAlterations&&isModified&&guestBookingId&&await applyChannexAlterationRevision(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerPropertyId:job.providerPropertyId},rawRevision,financeSettings?async revisionScope=>captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId!,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope},financeSettings):undefined));
     if(financialHistory&&!alterationApplied&&!isModified&&revision.status!=="canceled")throw new Failure("alteration_finance_lifecycle_unsupported",false);
     if (!guestBookingId) {
@@ -207,26 +209,28 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
         [guestBookingId,revision.firstName??"Guest",revision.lastName??"",revision.email,revision.phone],
       );
     } else {
-      const current=(await client.query<{status:string}>(`SELECT lifecycle_status status FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,[guestBookingId,job.propertyId])).rows[0];
+      const current=(await client.query<{status:string;currency:string}>(`SELECT lifecycle_status status,currency FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,[guestBookingId,job.propertyId])).rows[0];
       if(!current||(current.status!=="confirmed"&&(current.status!=="canceled"||revision.status!=="canceled")))throw new ChannexAssignmentConflict("operational_booking_terminal");
+      if((isAirbnb||financialHistory)&&current.currency!==revision.currency)throw new Failure("alteration_finance_currency_mismatch",false);
       alreadyCanceled=current.status==="canceled";
-      if(financialHistory&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId},true))throw new Failure("alteration_finance_reconciliation_required",false);
+      if((financialHistory||isAirbnb)&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId},true))throw new Failure("alteration_finance_reconciliation_required",false);
       if(!alterationApplied)await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
            adults=$6,children=$7,room_count=$8,currency=$9,total_amount=CASE WHEN $11 THEN total_amount ELSE COALESCE($10::numeric,total_amount) END,
            balance_amount=CASE WHEN NOT $11 AND payment_status='unpaid' THEN COALESCE($10::numeric,balance_amount) ELSE balance_amount END,
            booking_metadata=CASE WHEN $11 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=now()
          WHERE id=$1::uuid AND property_id=$2::uuid`:`UPDATE booking.guest_bookings SET lifecycle_status='canceled',booking_metadata=CASE WHEN $3 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=now() WHERE id=$1::uuid AND property_id=$2::uuid`,
-        revision.roomCount?[guestBookingId,job.propertyId,revision.status,revision.checkIn,revision.checkOut,revision.adults,revision.children,revision.roomCount,revision.currency,revision.amount,Boolean(financialHistory)]:[guestBookingId,job.propertyId,Boolean(financialHistory)],
+        revision.roomCount?[guestBookingId,job.propertyId,revision.status,revision.checkIn,revision.checkOut,revision.adults,revision.children,revision.roomCount,revision.currency,revision.amount,Boolean(financialHistory)||isAirbnb]:[guestBookingId,job.propertyId,Boolean(financialHistory)||isAirbnb],
       );
       if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
     }
+    if(isAirbnb)await client.query(`UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || jsonb_build_object('airbnbMoneyStatus','unverified','airbnbProviderAmount',jsonb_build_object('amount',$3::text,'currency',$4::text,'revisionId',$5::text,'revisionAt',$6::text,'amountBasis',NULL)) WHERE id=$1::uuid AND property_id=$2::uuid`,[guestBookingId,job.propertyId,revision.amount,revision.currency,revision.id,revision.insertedAt]);
     if(!alreadyCanceled&&!alterationApplied)await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms),...(scope?.catalogHash?{stagingCatalogBindingGeneration:scope.bindingGeneration,bootstrapHash:scope.catalogHash}:{})});
     if(financialHistory&&!alterationApplied){
       const rooms=revision.status==="canceled"?[]:(await client.query<{position:number;roomTypeId:string}>(`SELECT position,room_type_id::text AS "roomTypeId" FROM pms.operational_booking_assignments WHERE property_id=$1 AND guest_booking_id=$2 AND assignment_status IN ('pending','assigned') ORDER BY position`,[job.propertyId,guestBookingId])).rows;
       if(revision.status!=="canceled"&&(rooms.length!==revision.rooms.length||rooms.some((room,index)=>room.position!==index+1)))throw new Failure("alteration_finance_room_scope_unavailable",false);
       await captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope:{revisionId:revision.id,providerPropertyId:job.providerPropertyId,providerBookingId:job.channelBookingId,currency:revision.currency,checkIn:revision.checkIn,checkOut:revision.checkOut,rooms:rooms.map((room,index)=>({roomTypeId:room.roomTypeId,providerRoomTypeId:revision.rooms[index]!.externalRoomTypeId}))}},financeSettings!);
     }
-    if(!alterationApplied&&!financialHistory)await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:revision.retainedCharges,rooms:revision.rooms});
+    if(!alterationApplied&&!financialHistory)await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:isAirbnb?[]:revision.retainedCharges,rooms:isAirbnb?revision.rooms.map(room=>({...room,days:null})):revision.rooms,captureEconomics:isAirbnb});
     if(revision.roomCount)await client.query(
       `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,
          external_booking_id,external_revision_id,channel,channel_room_index,sync_status,last_synced_at,mapping_metadata)

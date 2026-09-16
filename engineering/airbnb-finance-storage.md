@@ -211,3 +211,40 @@ These changes do not implement unknown provider-basis storage, an authoritative
 settings resolver, or initial-import canonical unknown money. Generic untracked
 imports retain their prior behavior. All activation gates remain off pending the
 remaining contract and rollout work above.
+
+### Initial import quarantine and downstream consumers
+
+Initial Airbnb imports now carry the same explicit unverified marker. While the
+canonical numeric columns remain non-null for compatibility, their first values
+are the supplied provider amount held as unverified legacy data, **not established
+guest receivables**. No fabricated zero is inserted. Later Airbnb revisions keep
+those original numeric values and replace a small `airbnbProviderAmount` observation
+in metadata (amount, currency, revision ID/time, null amount basis). This observation
+is neither an immutable financial snapshot nor historical settings evidence.
+Missing initial amounts still reject import. A later cancellation can report an
+unknown amount without erasing the stored historical numbers.
+
+Every supported Airbnb generic import sends null nightly gross to the atomic
+Booking/Finance evidence writer, preserving provider slices outside gross revenue.
+It requires current Hotel Catalog timezone/profile provenance matching the operating
+calendar. Existing manual revenue, payments/folios, retained charges or revenue
+without linked commission history remain guarded instead of being reinterpreted.
+Currency changes are rejected rather than relabeling preserved numbers. An enabled
+alteration applier without its Finance coordinator fails before mutation. Replay
+and stale deliveries cannot replace the current observation. A later write
+failure rolls back the booking, marker, observation, inventory and economic evidence.
+
+Consumer rules accompany this import behavior: direct Finance manual settlement
+rejects unverified balances; booking email creation/resend and delivery of previously
+queued monetary emails are blocked; delivery holds a booking share lock through
+sending so a concurrent import cannot commit the marker between the check and send; the direct-booking guest lookup returns its
+existing not-found result for explicitly unverified records. Legacy booking/admin
+read APIs preserve reservation rows but return null monetary values and an explicit
+status, and their screens show Amount unverified. Dashboard booking/occupancy counts
+remain intact; monetary sums and currency selection omit unverified records and report incomplete coverage
+rather than presenting their provider amounts as revenue.
+
+This supersedes the prior statement that all untracked Airbnb imports retain their
+old monetary behavior. Existing unsafe historical revenue is not automatically
+backfilled. Verified-basis snapshots still require their settings evidence port;
+unknown-basis financial snapshot storage and production activation remain separate.

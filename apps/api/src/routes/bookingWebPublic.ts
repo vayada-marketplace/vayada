@@ -3745,6 +3745,7 @@ export async function loadTargetBooking(
        LIMIT 1
      ) card_payment ON TRUE
      WHERE b.property_id = $1::uuid
+       AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
        AND (
          ($3::text IS NOT NULL AND lower(booker.email) = lower($3))

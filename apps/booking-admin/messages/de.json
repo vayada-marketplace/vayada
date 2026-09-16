@@ -1,4 +1,5 @@
 {
+  "reservations.amountUnverified": "Betrag nicht bestätigt",
   "auth.login.sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
   "auth.login.emailLabel": "E-Mail-Adresse",
   "auth.login.emailPlaceholder": "admin@example.com",

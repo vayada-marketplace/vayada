@@ -36,7 +36,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
   });
   afterAll(async () => {
     await pool?.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
     await admin.end();
   });
   const make = (

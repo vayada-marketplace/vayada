@@ -329,10 +329,14 @@ function ReservationRow({ booking }: { booking: BookingReservation }) {
       </TableCell>
       <TableCell>
         <div className="font-semibold text-gray-900">
-          {formatCurrency(booking.totalAmount, booking.currency, locale)}
+          {booking.amountStatus === "unverified" || booking.totalAmount === null
+            ? t("reservations.amountUnverified")
+            : formatCurrency(booking.totalAmount, booking.currency, locale)}
         </div>
         <div className="mt-1 text-[12px] text-gray-500">
-          {t(`reservations.paymentStatus.${booking.paymentStatus ?? "pending"}`)}
+          {booking.amountStatus === "unverified"
+            ? t("reservations.amountUnverified")
+            : t(`reservations.paymentStatus.${booking.paymentStatus ?? "pending"}`)}
         </div>
       </TableCell>
       <TableCell>
