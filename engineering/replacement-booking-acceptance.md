@@ -357,3 +357,22 @@ gate; any SQL, decoder, replay or authority failure requires full rollback,
 including receipt completion. PostgreSQL tests use real storage/replay SQL and
 constraints with prior stages and authority supplied as fixtures. Complete
 orchestration, real-owner integration and winner-commit races remain required.
+
+## Notification job staging
+
+`stagePricingAcceptanceNotifications` reads and decodes the scoped immutable
+acceptance, locks its unchanged confirmed/unpaid booking, and binds totals and
+command metadata before reusing the existing Booking email events/jobs/audit.
+The acceptance ID versions the creation transition for stable retry keys. Guest
+recipient evidence must match the accepted command; a missing host preserves the
+existing explicit missing-recipient audit instead of inventing an address.
+No provider is called. All queued work rolls back with acceptance on any later
+failure; the final quote/Finance gate still follows every blocking write.
+
+Existing emails can use the new booking totals, guests and add-ons. The old
+`selectedOffer` accommodation label is absent; it is not fabricated. PMS handoff
+remains a separate blocker: `enqueuePmsReservationHandoff` still supplies its
+`bookedOffer` from legacy `booking_metadata.selectedOffer`. Inspect and adapt its
+consumer to replacement evidence before composing the complete writer. Do not
+queue a legacy handoff with invented or missing offer evidence or activate public
+submission based on notification coverage alone.
