@@ -9,6 +9,9 @@ import {
   type ReplacementExtrasValue,
 } from "@/services/api/replacementAddonSelection";
 import ReplacementQuoteTerms from "@/components/booking/ReplacementQuoteTerms";
+import type { QuoteTermsAcknowledgement } from "@/components/booking/ReplacementQuoteTerms";
+import ReplacementBookingConfirmation from "@/components/booking/ReplacementBookingConfirmation";
+import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
 import {
@@ -35,6 +38,11 @@ export default function BookPageClient() {
 }
 
 function RoomQuoteForm({ slug }: { slug: string }) {
+  const acceptanceEnabled =
+    process.env.NEXT_PUBLIC_REPLACEMENT_PRICING_ACCEPTANCE_ENABLED === "true";
+  const [termsAcknowledgement, setTermsAcknowledgement] =
+    useState<QuoteTermsAcknowledgement | null>(null);
+  const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [rooms, setRooms] = useState<PricingRoom[] | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -361,6 +369,7 @@ function RoomQuoteForm({ slug }: { slug: string }) {
           <p>Due later: {displayQuoteMoney(quote.dueLaterMinor, quote.currency)}</p>
           <ReplacementQuoteTerms
             quote={quote}
+            onAcknowledgementChange={setTermsAcknowledgement}
             roomNames={Object.fromEntries(
               choices.map((choice) => [
                 choice.selectionId,
@@ -370,11 +379,26 @@ function RoomQuoteForm({ slug }: { slug: string }) {
               ]),
             )}
           />
-          <ReplacementGuestRules key={quote.quoteId} slug={slug} quote={quote} />
-          <p className="text-sm text-gray-600">
-            This is a price preview. No room is reserved and no payment is taken. Online reservation
-            submission is currently unavailable.
-          </p>
+          <ReplacementGuestRules
+            key={quote.quoteId}
+            slug={slug}
+            quote={quote}
+            onAcknowledgementChange={setGuestDisclosure}
+          />
+          {acceptanceEnabled ? (
+            <ReplacementBookingConfirmation
+              key={quote.quoteId}
+              slug={slug}
+              quote={quote}
+              disclosure={guestDisclosure}
+              termsAccepted={termsAcknowledgement?.quoteId === quote.quoteId}
+            />
+          ) : (
+            <p className="text-sm text-gray-600">
+              This is a price preview. No room is reserved and no payment is taken. Online
+              reservation submission is currently unavailable.
+            </p>
+          )}
         </section>
       )}
     </main>

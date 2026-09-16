@@ -29,7 +29,9 @@ const root = createRoot(document.createElement("div"));
 let latest: ReturnType<typeof useReplacementQuote>;
 function Harness({ slug, input }: { slug: string; input: PublicBookingQuoteRequest | null }) {
   const value = useReplacementQuote(slug, input);
-  useEffect(() => { latest = value; });
+  useEffect(() => {
+    latest = value;
+  });
   return null;
 }
 afterEach(async () => {
@@ -60,7 +62,7 @@ it("does not request until submitted, hides changed selections and ignores late 
   expect(latest.quote).toBeUndefined();
   expect(latest.loading).toBe(false);
 });
-it("retires a displayed price at expiry and allows explicit refresh", async () => {
+it("marks a displayed price expired, preserves recovery context and allows explicit refresh", async () => {
   vi.useFakeTimers();
   vi.mocked(requestReplacementQuote).mockImplementation(
     async () =>
@@ -72,7 +74,7 @@ it("retires a displayed price at expiry and allows explicit refresh", async () =
   await act(async () => latest.submit());
   expect(latest.quote).toBeDefined();
   await act(async () => vi.advanceTimersByTime(1001));
-  expect(latest.quote).toBeUndefined();
+  expect(latest.quote).toBeDefined();
   expect(latest.error).toContain("expired");
   await act(async () => latest.submit());
   expect(latest.quote).toBeDefined();

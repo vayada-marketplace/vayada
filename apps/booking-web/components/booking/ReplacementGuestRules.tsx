@@ -9,9 +9,11 @@ import { getQuoteGuestDisclosure } from "@/services/api/quoteGuestDisclosure";
 export default function ReplacementGuestRules({
   slug,
   quote,
+  onAcknowledgementChange,
 }: {
   slug: string;
   quote: PublicBookingQuote;
+  onAcknowledgementChange?: (value: PublicQuoteGuestDisclosure | null) => void;
 }) {
   const [disclosure, setDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);
   const [error, setError] = useState(false);
@@ -34,6 +36,16 @@ export default function ReplacementGuestRules({
     // The quote ID identifies immutable evidence; dates prevent reusing malformed replacements.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, retry]);
+  const current =
+    disclosure?.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > Date.now();
+  const consent = disclosure
+    ? JSON.stringify([identity, disclosure.quoteEvidenceId, disclosure.guestPolicyEvidenceId])
+    : null;
+  const agreed = !!disclosure && current && acknowledged === consent;
+  useEffect(() => {
+    onAcknowledgementChange?.(agreed ? disclosure : null);
+    return () => onAcknowledgementChange?.(null);
+  }, [agreed, disclosure, onAcknowledgementChange]);
   if (error)
     return (
       <p role="alert">
@@ -45,13 +57,6 @@ export default function ReplacementGuestRules({
     );
   if (!disclosure) return <p role="status">Loading guest rules…</p>;
   const rules = disclosure.choices;
-  const current =
-    disclosure.quoteId === quote.quoteId && Date.parse(disclosure.expiresAt) > Date.now();
-  const consent = JSON.stringify([
-    identity,
-    disclosure.quoteEvidenceId,
-    disclosure.guestPolicyEvidenceId,
-  ]);
   return (
     <section aria-label="Guest rules" className="rounded-xl border border-gray-200 p-5 space-y-3">
       <h2 className="text-xl font-semibold">Our guest rules</h2>
