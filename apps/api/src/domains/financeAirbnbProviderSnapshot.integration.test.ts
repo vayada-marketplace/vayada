@@ -27,7 +27,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     await pool.query(
       await readFile(
         new URL(
-          "../../../../packages/backend-migration/migrations/0193_finance_airbnb_provider_snapshots.sql",
+          "../../../../packages/backend-migration/migrations/0216_finance_airbnb_provider_snapshots.sql",
           import.meta.url,
         ),
         "utf8",
