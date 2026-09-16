@@ -248,3 +248,22 @@ This supersedes the prior statement that all untracked Airbnb imports retain the
 old monetary behavior. Existing unsafe historical revenue is not automatically
 backfilled. Verified-basis snapshots still require their settings evidence port;
 unknown-basis financial snapshot storage and production activation remain separate.
+
+### Supported unverified approval contract
+
+The internal `allowUnverifiedAirbnbAlterations` capability is off by default. A
+reviewed composition must supply it consistently to the decision handler, revision
+worker and staff presentation. It is not a request parameter or a verification of
+provider money. It permits operational approval only for a quarantined Channex PMS
+booking with an exact source reference, no verified-basis snapshot history, no
+payments/folios, unpaid payment status, no retained charges and no unsupported revenue evidence. The
+shared preflight runs under the booking lock and requires current canonical property timezone
+provenance. Availability and request/binding freshness checks still apply. An
+unsent unsupported approval releases its intent so Decline remains available.
+
+The authoritative accepted revision updates the stay and inventory and appends
+linked Booking/Finance evidence with unknown gross amounts in one transaction.
+Canonical money stays frozen and unverified; provider observations remain separate.
+Known-basis financial history still requires its verified settings resolver. An
+accepted response alone never changes the booking, and retry/readback never sends
+a second decision. No production registration or activation is implied.

@@ -522,6 +522,7 @@ export interface AirbnbChangeRequestState {
   provider: "airbnb";
   state: "pending" | "queued" | "unknown" | "awaiting_confirmation" | "applied" | "declined" | "withdrawn" | "unavailable";
   allowedActions: Array<"accept" | "decline">;
+  supportsUnverifiedMoney?: boolean;
   refreshAction: "accept" | "decline" | null;
   oldTotal: number | null; newTotal: number | null; priceDifference: number | null; currency: string | null;
   oldAdults: number | null; oldChildren: number | null; requestedAdults: number | null; requestedChildren: number | null;

@@ -8,6 +8,7 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+import { assertChannexUnverifiedAlterationSupport } from "./channexUnverifiedAlterationSupport.js";
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const inputSchema = z.object({
@@ -48,6 +49,8 @@ export async function decideChannexAlteration(
     pool: pg.Pool;
     journalPool: pg.Pool;
     provider: Provider;
+    /** Enable only together with the reviewed unverified-money revision worker. */
+    allowUnverifiedAirbnbAlterations?: boolean;
     assertAvailability?: (
       transaction: pg.PoolClient,
       input: {
@@ -178,10 +181,29 @@ export async function decideChannexAlteration(
         return decision;
       }
       const booking = owned.rows[0]!;
-      if (
-        input.action === "accept" &&
-        (booking.moneyStatus === "unverified" || (await hasBookingFinancialEvidence(client, input)))
-      ) {
+      let financialFailure = false;
+      if (input.action === "accept") {
+        if (booking.moneyStatus === "unverified" && config.allowUnverifiedAirbnbAlterations) {
+          try {
+            await assertChannexUnverifiedAlterationSupport(client, {
+              ...input,
+              providerBookingId: proposal.providerBookingId,
+            });
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              error.message !== "alteration_finance_reconciliation_required"
+            )
+              throw error;
+            financialFailure = true;
+          }
+        } else {
+          financialFailure =
+            booking.moneyStatus === "unverified" ||
+            (await hasBookingFinancialEvidence(client, input));
+        }
+      }
+      if (financialFailure) {
         // No send has started. Release the queued intent so staff can still decline.
         // Commit independently: the booking/binding locks stay held until rollback below.
         const cleared = await config.journalPool.query(

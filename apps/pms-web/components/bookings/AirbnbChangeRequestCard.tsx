@@ -66,7 +66,9 @@ export function AirbnbChangeRequestCard({
           <button
             type="button"
             disabled={
-              busy || amountStatus === "unverified" || !provider.allowedActions.includes("accept")
+              busy ||
+              (amountStatus === "unverified" && provider.supportsUnverifiedMoney !== true) ||
+              !provider.allowedActions.includes("accept")
             }
             onClick={() => onDecide("accept")}
             className="rounded-lg bg-blue-700 px-4 py-2 font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"

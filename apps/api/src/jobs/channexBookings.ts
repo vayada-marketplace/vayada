@@ -1,3 +1,4 @@
+import { assertChannexUnverifiedAlterationSupport } from "../domains/channexUnverifiedAlterationSupport.js";
 import { captureChannexAlterationFinance, type ChannexAirbnbFinanceSettingsPort } from "../domains/channexAlterationFinance.js";
 import { hasBookingFinancialEvidence } from "../domains/financeBookingAlterationGuard.js";
 import { applyChannexAlterationRevision } from "../domains/channexAlterationRevision.js";
@@ -44,7 +45,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
+  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
 ): Promise<Counters> {
   if (options.stagingImport && options.apiBaseUrl !== "https://staging.channex.io") throw new Error("staging_import_required");
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
@@ -73,7 +74,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,options.applyAirbnbAlterations ?? false,()=>active(options),options.stagingImport,options.airbnbFinanceSettings);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,options.applyAirbnbAlterations ?? false,()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
@@ -148,7 +149,7 @@ async function loadRevisions(pool:pg.Pool,job:Job,options:Parameters<typeof runC
 }
 
 // prettier-ignore
-async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort):Promise<boolean>{
+async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknown,applyAlterations:boolean,assertActive:()=>void,scope?:StagingImportScope,financeSettings?:ChannexAirbnbFinanceSettingsPort,allowUnverifiedAirbnbAlterations=false):Promise<boolean>{
   return transaction(pool, async (client) => {
     await fence(client,job);
     await lockPmsInventoryMutationScope(client,job.propertyId);
@@ -189,8 +190,13 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     const financialHistory=guestBookingId&&(await client.query(`SELECT 1 FROM finance.airbnb_provider_snapshots WHERE property_id=$1 AND guest_booking_id=$2 LIMIT 1`,[job.propertyId,guestBookingId])).rows.length;
     if(revision.amount===null&&!financialHistory&&!isAirbnb)throw new Failure("invalid_revision",false);
     if(financialHistory&&(!applyAlterations||!financeSettings))throw new Failure("alteration_finance_settings_required",false);
-    if(isAirbnb&&applyAlterations&&isModified&&!financeSettings)throw new Failure("alteration_finance_settings_required",false);
-    const alterationApplied=Boolean(applyAlterations&&isModified&&guestBookingId&&await applyChannexAlterationRevision(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerPropertyId:job.providerPropertyId},rawRevision,financeSettings?async revisionScope=>captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId!,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope},financeSettings):undefined));
+    const unverifiedAlteration=Boolean(allowUnverifiedAirbnbAlterations&&isAirbnb&&applyAlterations&&isModified&&guestBookingId&&!financialHistory&&!financeSettings);
+    if(isAirbnb&&applyAlterations&&isModified&&!financeSettings&&!unverifiedAlteration)throw new Failure("alteration_finance_settings_required",false);
+    if(unverifiedAlteration){
+      await client.query("SELECT id FROM booking.guest_bookings WHERE id=$1 AND property_id=$2 FOR UPDATE",[guestBookingId,job.propertyId]);
+      await assertChannexUnverifiedAlterationSupport(client,{propertyId:job.propertyId,bookingId:guestBookingId!,providerBookingId:job.channelBookingId});
+    }
+    const alterationApplied=Boolean(applyAlterations&&isModified&&guestBookingId&&await applyChannexAlterationRevision(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerPropertyId:job.providerPropertyId},rawRevision,financeSettings?async revisionScope=>captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId!,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope},financeSettings):unverifiedAlteration?async revisionScope=>appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId!,providerBookingId:revisionScope.providerBookingId,revisionId:revisionScope.revisionId,revisionAt:revision.insertedAt!,canceled:false,retainedCharges:[],captureEconomics:true,rooms:revisionScope.rooms.map(()=>({checkIn:revisionScope.checkIn,checkOut:revisionScope.checkOut,days:null}))}):undefined));
     if(financialHistory&&!alterationApplied&&!isModified&&revision.status!=="canceled")throw new Failure("alteration_finance_lifecycle_unsupported",false);
     if (!guestBookingId) {
       guestBookingId = (

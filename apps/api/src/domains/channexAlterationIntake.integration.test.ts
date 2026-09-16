@@ -885,6 +885,26 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       await adapter.close?.();
     }
   });
+  it("exposes unverified support only from explicit adapter configuration", async () => {
+    await persistChannexAlteration(pool, scope, event());
+    for (const enabled of [false, true]) {
+      const adapter = createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: url!,
+        pool,
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        airbnbAlterations: { allowUnverifiedAirbnbAlterations: enabled, decide: async () => {} },
+      });
+      try {
+        const response = await adapter.findLatestChangeRequest(property, booking);
+        if (enabled)
+          expect(response).toMatchObject({ providerRequest: { supportsUnverifiedMoney: true } });
+        else expect(response).not.toHaveProperty("providerRequest.supportsUnverifiedMoney");
+      } finally {
+        await adapter.close?.();
+      }
+    }
+  });
   async function withFinancialEvidence(kind: string, run: () => Promise<void>) {
     if (kind === "revenue") {
       await pool.query(
@@ -971,6 +991,143 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
             )
           ).rows,
         ).toEqual(before);
+      });
+    },
+  );
+  async function withUnverifiedImport(run: () => Promise<void>) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role=replica");
+      await client.query(
+        `UPDATE booking.guest_bookings SET source_system='pms',source_booking_id=$2,
+         booking_metadata=booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb WHERE id=$1`,
+        [booking, `channex:${property}:${externalBooking}`],
+      );
+      await client.query(
+        "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Athens')",
+        [property],
+      );
+      await client.query(
+        `INSERT INTO pms.operating_calendar_revisions
+         (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at)
+         SELECT gen_random_uuid(),id,1,'pms-operating-calendar.v1',profile_revision,'Europe/Athens','year_round',0,1,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now()
+         FROM hotel_catalog.properties WHERE id=$1`,
+        [property],
+      );
+      await client.query("COMMIT");
+      await run();
+    } finally {
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role=replica");
+      await client.query("DELETE FROM pms.operating_calendar_revisions WHERE property_id=$1", [
+        property,
+      ]);
+      await client.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [
+        property,
+      ]);
+      await client.query(
+        "UPDATE booking.guest_bookings SET source_system='booking',source_booking_id=NULL,payment_status='unpaid',booking_metadata=booking_metadata - 'airbnbMoneyStatus' WHERE id=$1",
+        [booking],
+      );
+      await client.query("COMMIT");
+      client.release();
+    }
+  }
+  it("permits an opted-in quarantined approval without changing the booking or sending twice", async () => {
+    await withUnverifiedImport(async () => {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const config = { ...ports(), allowUnverifiedAirbnbAlterations: true };
+      const before = (
+        await pool.query("SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1", [
+          booking,
+        ])
+      ).rows;
+      const command = input(requestId);
+      expect(await decideChannexAlteration(config, command)).toMatchObject({
+        providerState: "accepted",
+      });
+      expect(await decideChannexAlteration(config, command)).toMatchObject({
+        providerState: "accepted",
+      });
+      expect(config.provider.resolve).toHaveBeenCalledOnce();
+      expect(config.assertAvailability).toHaveBeenCalledOnce();
+      expect(
+        (
+          await pool.query(
+            "SELECT to_jsonb(b) AS value FROM booking.guest_bookings b WHERE id=$1",
+            [booking],
+          )
+        ).rows,
+      ).toEqual(before);
+    });
+  });
+  it.each(["revenue", "payment", "folio"])(
+    "keeps opted-in unverified approval blocked for %s",
+    async (kind) => {
+      await withUnverifiedImport(async () => {
+        const { requestId } = await persistChannexAlteration(pool, scope, event());
+        await withFinancialEvidence(kind, async () => {
+          const config = { ...ports(), allowUnverifiedAirbnbAlterations: true };
+          await expect(decideChannexAlteration(config, input(requestId))).rejects.toThrow(
+            "alteration_finance_reconciliation_required",
+          );
+          expect(config.provider.resolve).not.toHaveBeenCalled();
+          expect(await journal(requestId)).toBeNull();
+          const provider = {
+            ...config.provider,
+            resolve: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+          };
+          expect(
+            await decideChannexAlteration({ ...config, provider }, input(requestId, "decline")),
+          ).toMatchObject({ providerState: "declined" });
+        });
+      });
+    },
+  );
+  it.each(["source", "timezone", "timezone alias", "paid status"])(
+    "rejects an opted-in unverified approval with mismatched %s",
+    async (kind) => {
+      await withUnverifiedImport(async () => {
+        const { requestId } = await persistChannexAlteration(pool, scope, event());
+        if (kind === "source")
+          await pool.query(
+            "UPDATE booking.guest_bookings SET source_booking_id='wrong' WHERE id=$1",
+            [booking],
+          );
+        else if (kind === "paid status")
+          await pool.query("UPDATE booking.guest_bookings SET payment_status='paid' WHERE id=$1", [
+            booking,
+          ]);
+        else if (kind === "timezone alias") {
+          await pool.query(
+            "UPDATE hotel_catalog.property_locations SET timezone='Europe/Belfast' WHERE property_id=$1",
+            [property],
+          );
+          const setup = await pool.connect();
+          try {
+            await setup.query("BEGIN; SET LOCAL session_replication_role=replica");
+            await setup.query(
+              "UPDATE pms.operating_calendar_revisions SET property_time_zone='Europe/Belfast' WHERE property_id=$1",
+              [property],
+            );
+            await setup.query("COMMIT");
+          } finally {
+            setup.release();
+          }
+        } else
+          await pool.query(
+            "UPDATE hotel_catalog.property_locations SET timezone='Europe/Berlin' WHERE property_id=$1",
+            [property],
+          );
+        const config = { ...ports(), allowUnverifiedAirbnbAlterations: true };
+        await expect(decideChannexAlteration(config, input(requestId))).rejects.toThrow(
+          "alteration_finance_reconciliation_required",
+        );
+        expect(config.provider.resolve).not.toHaveBeenCalled();
+        expect(config.assertAvailability).not.toHaveBeenCalled();
+        expect(await journal(requestId)).toBeNull();
       });
     },
   );

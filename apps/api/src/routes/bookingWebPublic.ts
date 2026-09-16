@@ -1273,7 +1273,7 @@ type TargetChangeRequestRow = QueryResultRow & {
 export type PgTargetBookingWebCheckoutAdapterConfig = {
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
-  airbnbAlterations?: { decide(input: {
+  airbnbAlterations?: { allowUnverifiedAirbnbAlterations?: boolean; decide(input: {
     propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
     action: "accept" | "decline"; correlationId: string;
   }): Promise<unknown> };
@@ -1353,7 +1353,7 @@ export function createTargetBookingWebCheckoutAdapter(
     });
 
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
-    serializeChangeRequest(row, config.externalChanges, enabled);
+    serializeChangeRequest(row, config.externalChanges, enabled, config.airbnbAlterations?.allowUnverifiedAirbnbAlterations === true);
 
   async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
     action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
@@ -4182,10 +4182,10 @@ async function insertTargetChangeRequest(
   return changeRequest;
 }
 
-function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false): Record<string, unknown> {
+function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false, allowUnverifiedMoney = false): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
-    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status),
+    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status, allowUnverifiedMoney),
     ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,

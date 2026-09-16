@@ -146,3 +146,45 @@ it("preserves status checking for a previously sent acceptance with unverified a
   expect(onDecide).toHaveBeenCalledWith("accept");
   view.unmount();
 });
+
+it.each([undefined, false, true])(
+  "allows unverified approval only with explicit support %s and permission",
+  (supportsUnverifiedMoney) => {
+    const value = request();
+    value.providerRequest!.allowedActions = ["accept", "decline"];
+    value.providerRequest!.supportsUnverifiedMoney = supportsUnverifiedMoney;
+    value.providerRequest!.newTotal = 450;
+    value.providerRequest!.priceDifference = 150;
+    const onDecide = vi.fn();
+    const view = create(
+      createElement(AirbnbChangeRequestCard, {
+        request: value,
+        amountStatus: "unverified",
+        busy: false,
+        onDecide,
+      }),
+    );
+    const [approve, decline] = view.root.findAllByType("button");
+    expect(approve!.props.disabled).toBe(supportsUnverifiedMoney !== true);
+    expect(decline!.props.disabled).toBe(false);
+    expect(JSON.stringify(view.toJSON())).toContain("Amount unverified");
+    expect(JSON.stringify(view.toJSON())).not.toContain("€450");
+    if (supportsUnverifiedMoney) {
+      act(() => approve!.props.onClick());
+      expect(onDecide).toHaveBeenCalledWith("accept");
+    }
+    value.providerRequest!.allowedActions = ["decline"];
+    act(() =>
+      view.update(
+        createElement(AirbnbChangeRequestCard, {
+          request: value,
+          amountStatus: "unverified",
+          busy: false,
+          onDecide,
+        }),
+      ),
+    );
+    expect(view.root.findAllByType("button")[0]!.props.disabled).toBe(true);
+    view.unmount();
+  },
+);
