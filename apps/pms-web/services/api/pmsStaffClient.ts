@@ -62,6 +62,7 @@ export type PmsAccountAdmin = {
   email: string;
   roleKey: string;
   active: boolean;
+  revision: string;
 };
 export function getPmsAccountAdmins(): Promise<{
   admins: PmsAccountAdmin[];

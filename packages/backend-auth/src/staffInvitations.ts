@@ -19,6 +19,7 @@ import type { RepositoryConfig } from "./repository.js";
 import type { PermissionKey } from "./types.js";
 import { loadManagedStaffAccess, withinStaffManagementScope } from "./staffManagement.js";
 import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
+import { staffAccessRevision, type StaffAccessRevisionRow } from "./staffAccessRevision.js";
 
 type StaffRoleDefinition = TeamRolePolicy & { id: string; name: string; revision: string };
 
@@ -51,20 +52,12 @@ type StaffRosterRow = {
   status: StaffRosterMember["status"];
   last_active_at: Date | null;
 };
-export type StaffAccessTargetRow = {
+export type StaffAccessTargetRow = StaffAccessRevisionRow & {
   role_definition_id: string | null;
   role_definition: StaffRoleDefinition | null;
   pms_access_enabled: boolean;
   booking_access_enabled: boolean;
-  id: string;
   status: "active" | "suspended";
-  access_origin: string;
-  updated_at: string;
-  role_permissions: string[];
-  role_key: string;
-  permission_overrides: unknown;
-  property_access_mode: string;
-  property_ids: string[];
 };
 type StaffStatusTargetRow = {
   user_id: string;
@@ -1607,25 +1600,6 @@ function isPropertyScopeError(error: unknown): boolean {
       "membership_property_assignments_property_id_fkey",
     ].includes(value.constraint ?? "")
   );
-}
-
-export function staffAccessRevision(row: StaffAccessTargetRow): string {
-  return hash(
-    JSON.stringify({
-      id: row.id,
-      roleDefinitionId: row.role_definition_id,
-      roleDefinition: row.role_definition,
-      productAccess: { pms: row.pms_access_enabled, booking: row.booking_access_enabled },
-      role: row.role_key,
-      status: row.status,
-      origin: row.access_origin,
-      updatedAt: row.updated_at,
-      mode: row.property_access_mode,
-      properties: row.property_ids,
-      overrides: row.permission_overrides,
-      rolePermissions: row.role_permissions,
-    }),
-  ).toString("hex");
 }
 
 function resolveSavedStaffPermissions(

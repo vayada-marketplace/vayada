@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsCard, SettingsLayout, SettingsSection } from "@vayada/settings-ui";
 
 import AccountAdminCard from "@/components/settings/team/AccountAdminCard";
+import AdminTransferDialog from "@/components/settings/team/AdminTransferDialog";
 import PropertyAccessMatrix from "@/components/settings/team/PropertyAccessMatrix";
 import MemberAccessDialog from "@/components/settings/team/MemberAccessDialog";
 import RoleEditorDialog from "@/components/settings/team/RoleEditorDialog";
@@ -11,6 +12,11 @@ import TeamRoleCards from "@/components/settings/team/TeamRoleCards";
 import TeamActionDialog, { type TeamAction } from "@/components/settings/team/TeamActionDialog";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
 import { useTranslation } from "@/lib/i18n";
+import {
+  clearPendingAdminTransfer,
+  completePendingAdminTransfer,
+  isTerminalAdminTransferError,
+} from "@/services/auth/adminTransfer";
 import { listPmsProperties, type PmsPropertySummary } from "@/services/api/pmsPropertyClient";
 import {
   getPmsStaffRoster,
@@ -51,6 +57,7 @@ export default function TeamSettingsPage() {
     | { kind: "member"; access?: PmsStaffAccess; name?: string }
     | { kind: "role"; role?: PmsTeamRole }
     | { kind: "action"; action: TeamAction }
+    | { kind: "transfer" }
     | null
   >(null);
   const [members, setMembers] = useState<PmsStaffMember[]>([]);
@@ -63,6 +70,8 @@ export default function TeamSettingsPage() {
     type: "error" | "success";
     message: string;
   } | null>(null);
+  const [transferCompletion, setTransferCompletion] = useState<"idle" | "busy" | "retry">("idle");
+  const handledTransferCallback = useRef(false);
 
   const loadRoster = useCallback(async () => {
     setLoading(true);
@@ -90,6 +99,44 @@ export default function TeamSettingsPage() {
   useEffect(() => {
     void loadRoster();
   }, [loadRoster]);
+
+  const completeTransfer = useCallback(async () => {
+    setTransferCompletion("busy");
+    try {
+      const outcome = await completePendingAdminTransfer();
+      setFeedback(
+        outcome === "missing"
+          ? t("settings.team.adminTransferMissing")
+          : t("settings.team.adminTransferComplete"),
+      );
+      setTransferCompletion("idle");
+      window.history.replaceState({}, "", "/settings/team");
+      if (outcome !== "missing") void loadRoster();
+    } catch (error) {
+      if (isTerminalAdminTransferError(error)) {
+        clearPendingAdminTransfer();
+        setTransferCompletion("idle");
+        setFeedback(t("settings.team.adminTransferError"));
+        window.history.replaceState({}, "", "/settings/team");
+      } else {
+        setTransferCompletion("retry");
+        setFeedback(t("settings.team.adminTransferRetry"));
+      }
+    }
+  }, [loadRoster, t]);
+
+  useEffect(() => {
+    if (handledTransferCallback.current || typeof window === "undefined") return;
+    const result = new URLSearchParams(window.location.search).get("adminTransfer");
+    if (!result) return;
+    handledTransferCallback.current = true;
+    if (result === "verified") void completeTransfer();
+    else {
+      clearPendingAdminTransfer();
+      setFeedback(t("settings.team.adminTransferError"));
+      window.history.replaceState({}, "", "/settings/team");
+    }
+  }, [completeTransfer, t]);
 
   const changeStatus = async (member: PmsStaffMember) => {
     const nextStatus = member.status === "active" ? "deactivated" : "active";
@@ -191,9 +238,21 @@ export default function TeamSettingsPage() {
         description={t("settings.team.description")}
       >
         {feedback && (
-          <p role="status" className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
-            {feedback}
-          </p>
+          <div
+            role={transferCompletion === "retry" ? "alert" : "status"}
+            className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3 text-sm"
+          >
+            <p>{feedback}</p>
+            {transferCompletion === "retry" && (
+              <button
+                type="button"
+                onClick={() => void completeTransfer()}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium"
+              >
+                {t("settings.retry")}
+              </button>
+            )}
+          </div>
         )}
         {!loading && !error && (
           <div className="flex items-center justify-between gap-4">
@@ -215,7 +274,18 @@ export default function TeamSettingsPage() {
             </button>
           </div>
         )}
-        {!loading && !error && <AccountAdminCard admins={admins} />}
+        {!loading && !error && (
+          <AccountAdminCard
+            admins={admins}
+            canTransfer={
+              admins.length === 1 &&
+              admins[0]?.active === true &&
+              admins[0].roleKey === "hotel_owner" &&
+              admins[0].membershipId === actorMembershipId
+            }
+            onTransfer={() => setDialog({ kind: "transfer" })}
+          />
+        )}
         {loading ? (
           <SettingsCard>
             <p role="status" className="text-sm text-gray-500">
@@ -443,6 +513,14 @@ export default function TeamSettingsPage() {
             action={dialog.action}
             onClose={() => setDialog(null)}
             onSaved={saved}
+          />
+        )}
+        {dialog?.kind === "transfer" && (
+          <AdminTransferDialog
+            actorMembershipId={actorMembershipId}
+            members={members}
+            roles={roles}
+            onClose={() => setDialog(null)}
           />
         )}
       </SettingsSection>

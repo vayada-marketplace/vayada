@@ -9,6 +9,7 @@ const admin = {
   email: "owner@example.invalid",
   roleKey: "hotel_owner",
   active: true,
+  revision: "a".repeat(64),
 };
 it("shows the actual owner and flags missing, legacy, multiple or suspended admins", () => {
   const view = create(<AccountAdminCard admins={[admin]} />);

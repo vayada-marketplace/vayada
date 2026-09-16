@@ -383,6 +383,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         email: "owner@example.com",
         roleKey: "hotel_owner",
         active: true,
+        revision: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     ]);
     expect(await repository.listAccountAdmins(otherOrg)).toEqual([

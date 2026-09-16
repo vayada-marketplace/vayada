@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
-import { staffAccessRevision, type StaffAccessTargetRow } from "./staffInvitations.js";
+import type { StaffAccessTargetRow } from "./staffInvitations.js";
+import { staffAccessRevision } from "./staffAccessRevision.js";
 import { parseStaffPermissionOverrides } from "./lifecycle.js";
 import { resolveTeamRolePermissions, type TeamRolePolicy } from "./teamRolePolicy.js";
 
