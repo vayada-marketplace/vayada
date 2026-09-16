@@ -7,7 +7,9 @@ affiliate attempt IDs. Resolve that boundary on the server.
 `GET /api/marketplace/collaborations/:collaborationId/affiliate-assent` returns
 the same model as the existing attempt read. The collaboration ID is an opaque,
 case-sensitive `source_collaboration_id`, 1–100 characters without surrounding
-whitespace or control characters. Never interpret it as the canonical row ID.
+whitespace or control characters. It is restricted to RFC 3986 unreserved
+characters plus `:`, so every accepted key remains one path segment. Never
+interpret it as the canonical row ID.
 Authentication, permission, active identity, no-store and sanitized errors follow
 the existing endpoint for matched routes; malformed keys return 422. Longer
 path parameters are rejected by the existing router as 404 before this handler.
@@ -22,11 +24,13 @@ persisted links, creator ownership, hotel entitlement and assigned property
 scope, and to return the exact pinned terms. Do not fall back to an earlier
 matched attempt when the latest attempt is pending.
 
-Missing collaborations, no affiliate participation/attempt and denied access
-all return 404 `scope_unavailable`. This is deliberately not an eligibility or
-application-readiness endpoint. The UI can show “Affiliate agreement unavailable”
-without claiming that joining is allowed. A success is assent evidence only,
-not activation or earning eligibility.
+Missing or invalid authentication remains 401. Missing permission or inactive
+identity remains 403. Missing collaborations, unavailable collaboration scope,
+no affiliate participation/attempt, and failed persisted-resource or property
+scope checks return 404 `scope_unavailable`. This is deliberately not an
+eligibility or application-readiness endpoint. The UI can show “Affiliate
+agreement unavailable” without claiming that joining is allowed. A success is
+assent evidence only, not activation or earning eligibility.
 
 The lookup selects the most recent attempt visible at lookup time; the existing
 reader returns that immutable attempt with decisions from its own single SQL
