@@ -111,3 +111,23 @@ The executable examples assert agreed minor-unit arithmetic (184.50, 510, 315,
 calendar precedence, promotion eligibility, FX feed, checkout or OTA integration.
 VAY-1542 must run these same expected outcomes against the real evaluator and add
 eligibility, calendar, restriction, child allocation, zero and overflow scenarios.
+
+## Storage (VAY-1540)
+
+Property-scoped heads point to immutable, complete revisions. Each revision owns
+one currency, full validated room configurations, and opaque references to the
+Booking/Finance/FX-owned controls. Room snapshots retain all offer IDs and terms
+revisions. No owner policy is copied into a second domain's mutable tables.
+Drafts are separate; a draft cannot change an accepted revision. Writes replace
+a complete snapshot: callers compose omitted edits from the prior revision;
+empty optional arrays explicitly clear them. No inactive tariff data is revived.
+
+The storage adapter requires a transaction-bound guard that authenticates the
+actor/organization/property scope and locks all relevant source revisions. It
+must return current room/guest/currency and owner policy revisions, or deny.
+The same transaction compares expected sources, inserts the immutable revision,
+advances its head and writes platform audit/domain/outbox evidence. Currency
+changes supply a complete converted snapshot plus FX owner evidence through that
+guard; the adapter never treats a currency label change as conversion. VAY-1541
+owns route authorization, editor patch composition, preview and publish commands.
+No runtime caller is wired by these storage slices.
