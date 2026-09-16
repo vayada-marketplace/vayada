@@ -51,6 +51,13 @@ export async function assessLegacyOwnerBootstrap(
     );
     const control = await workos.organizations.getOrganization(expected.controlOrganizationId);
     if (control.id !== expected.controlOrganizationId) throw Error();
+    const providerBindingCounts = new Map<string, number>();
+    for (const row of target)
+      if (row.providerUserId !== null)
+        providerBindingCounts.set(
+          row.providerUserId,
+          (providerBindingCounts.get(row.providerUserId) ?? 0) + 1,
+        );
     const owners: OwnerBootstrapObservation[] = [];
     for (const owner of source) {
       const matches = target.filter((row) => row.ownerId === owner.ownerId);
@@ -104,18 +111,28 @@ export async function assessLegacyOwnerBootstrap(
             ? "exact"
             : "conflict";
       const providerEmail =
-        page.data.length === 0
+        external === null && page.data.length === 0
           ? "absent"
-          : page.data.length === 1 &&
-              external?.id === page.data[0]!.id &&
+          : external !== null &&
+              typeof external.email === "string" &&
+              external.email.trim().toLowerCase() === email &&
+              page.data.length === 1 &&
+              external.id === page.data[0]!.id &&
               page.data[0]!.externalId === owner.ownerId
             ? "same_identity"
             : "conflict";
+      const targetProviderConflict =
+        targetState === "exact" &&
+        ((matches[0]!.providerUserId === null) !== (external === null) ||
+          (matches[0]!.providerUserId !== null &&
+            (matches[0]!.providerUserId !== external?.id ||
+              matches[0]!.providerEmailMatches !== true ||
+              providerBindingCounts.get(matches[0]!.providerUserId) !== 1)));
       owners.push({
         ownerId: owner.ownerId,
         sourceStatus: owner.sourceStatus,
         sourceOwnership: owner.sourceOwnership,
-        target: targetState,
+        target: targetProviderConflict ? "conflict" : targetState,
         providerExternalId,
         providerEmail,
       });

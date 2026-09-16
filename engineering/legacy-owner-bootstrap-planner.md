@@ -94,6 +94,9 @@ client exposes only read methods. A pinned organization control checks provider
 configuration, not hotel ownership. Lookup pagination/errors/filter mismatch
 fail closed; 404 is absence only for exact external-ID lookup. An email-only
 candidate never authorizes a link. Known source/target blockers skip user lookups.
+For an existing target user, its single sanitized WorkOS provider-user binding
+and email-match flag must agree with the live external-ID lookup. Missing,
+different, malformed or cohort-reused bindings fail closed as identity conflicts.
 
 The result contains only the non-executable planner diagnosis, with no emails,
 provider responses or database errors. Freshness covers the entire assessment,

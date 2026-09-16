@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assessLegacyOwnerBootstrap } from "./legacyOwnerBootstrapAssessment.js";
 import { readLegacyOwnerBootstrapSources } from "./legacyOwnerBootstrapSourceReader.js";
 import { readLegacyOwnerBootstrapTargets } from "./legacyOwnerBootstrapTargetReader.js";
+import { VAY_1350_INVENTORY_REVISION } from "./sourceExtraction.js";
 vi.mock("./legacyOwnerBootstrapSourceReader.js", () => ({
   readLegacyOwnerBootstrapSources: vi.fn(),
 }));
@@ -20,7 +21,7 @@ const input = () => ({
   source: {
     sourceRunId: `vay1351-${"a".repeat(24)}`,
     sourceEnvironment: "preprod",
-    sourceSchemaRevision: "b".repeat(40),
+    sourceSchemaRevision: VAY_1350_INVENTORY_REVISION,
     ledgerSha256: "c".repeat(64),
     owners: source().map((o, i) => ({
       ownerId: o.ownerId,
@@ -76,7 +77,12 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(readLegacyOwnerBootstrapSources).mockResolvedValue(source());
   vi.mocked(readLegacyOwnerBootstrapTargets).mockResolvedValue(
-    source().map((o) => ({ ownerId: o.ownerId, target: "absent" })),
+    source().map((o) => ({
+      ownerId: o.ownerId,
+      target: "absent",
+      providerUserId: null,
+      providerEmailMatches: null,
+    })),
   );
 });
 describe("combined non-executable assessment", () => {
@@ -116,16 +122,77 @@ describe("combined non-executable assessment", () => {
     vi.mocked(readLegacyOwnerBootstrapTargets).mockResolvedValue(
       source()
         .reverse()
-        .map((o) => ({ ownerId: o.ownerId, target: "exact" })),
+        .map((o) => ({
+          ownerId: o.ownerId,
+          target: "exact",
+          providerUserId: "user_" + o.ownerId.replaceAll("-", ""),
+          providerEmailMatches: true,
+        })),
     );
     f.workos.userManagement.getUserByExternalId.mockImplementation(async (ownerId) => ({
       id: "user_" + ownerId.replaceAll("-", ""),
       externalId: ownerId,
+      email: source().find((owner) => owner.ownerId === ownerId)!.email,
     }));
+    f.workos.userManagement.listUsers.mockImplementation(async ({ email }: { email: string }) => {
+      const owner = source().find((candidate) => candidate.email === email)!;
+      return {
+        data: [
+          {
+            id: "user_" + owner.ownerId.replaceAll("-", ""),
+            externalId: owner.ownerId,
+            email,
+          },
+        ],
+        listMetadata: { after: null },
+      };
+    });
     const result = await f.run();
     expect(result.owners.every((o) => o.nextStep === "verify_existing_identity")).toBe(true);
     expect(result.executable).toBe(false);
   });
+  it.each(["stale_target_binding", "provider_email_mismatch", "reused_target_binding"])(
+    "blocks %s identity confusion",
+    async (mode) => {
+      const f = fixture();
+      const target = source().map((owner) => ({
+        ownerId: owner.ownerId,
+        target: "exact" as const,
+        providerUserId: "user_" + owner.ownerId.replaceAll("-", ""),
+        providerEmailMatches: true,
+      }));
+      if (mode === "stale_target_binding") target[0]!.providerUserId = "user_stale";
+      if (mode === "reused_target_binding")
+        target[1]!.providerUserId = target[0]!.providerUserId;
+      vi.mocked(readLegacyOwnerBootstrapTargets).mockResolvedValue(target);
+      f.workos.userManagement.getUserByExternalId.mockImplementation(async (ownerId) => ({
+        id: "user_" + ownerId.replaceAll("-", ""),
+        externalId: ownerId,
+        email:
+          mode === "provider_email_mismatch" && ownerId === source()[0]!.ownerId
+            ? "different@example.invalid"
+            : source().find((owner) => owner.ownerId === ownerId)!.email,
+      }));
+      f.workos.userManagement.listUsers.mockImplementation(async ({ email }: { email: string }) => {
+        const owner = source().find((candidate) => candidate.email === email)!;
+        if (mode === "provider_email_mismatch" && owner.ownerId === source()[0]!.ownerId)
+          return { data: [], listMetadata: { after: null } };
+        return {
+          data: [
+            {
+              id: "user_" + owner.ownerId.replaceAll("-", ""),
+              externalId: owner.ownerId,
+              email,
+            },
+          ],
+          listMetadata: { after: null },
+        };
+      });
+      const result = await f.run();
+      expect(result.outcome).toBe("blocked");
+      expect(result.owners.some((owner) => owner.outcome === "blocked")).toBe(true);
+    },
+  );
   it.each(["source", "target", "control", "pagination", "filter", "network", "cleanup"])(
     "fails closed for %s failure",
     async (mode) => {
