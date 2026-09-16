@@ -44,11 +44,19 @@ export type ChannexManagementProviderFailure = {
   providerRequestId?: string;
 };
 
+export type ChannexManagementProviderProgress =
+  | { ok: false; code: "initial_upload_retained"; attemptId: string }
+  | { ok: false; code: "availability_upload_retained"; attemptId: string };
+
 export type ChannexManagementProvider = {
   execute(
     job: ChannexManagementJob,
-    input?: { onProgress?: () => Promise<void> },
-  ): Promise<ChannexManagementProviderSuccess | ChannexManagementProviderFailure>;
+    input?: { onProgress?: () => Promise<void>; workerId?: string },
+  ): Promise<
+    | ChannexManagementProviderSuccess
+    | ChannexManagementProviderFailure
+    | ChannexManagementProviderProgress
+  >;
 };
 
 export type ChannexManagementWorkerStore = {
@@ -64,11 +72,17 @@ export type ChannexManagementWorkerStore = {
     failure: ChannexManagementProviderFailure,
     input: { workerId: string; now: Date; retryable: boolean; retryAt: Date | null },
   ): Promise<"retry_scheduled" | "dead_lettered">;
+  continueUpload(
+    job: ChannexManagementJob,
+    progress: ChannexManagementProviderProgress,
+    input: { workerId: string; now: Date },
+  ): Promise<void>;
   close?(): Promise<void>;
 };
 
 export type ChannexManagementWorkerResult =
   | { outcome: "idle" }
+  | { outcome: "continued"; jobId: string; operationType: ChannexManagementOperationType }
   | { outcome: "succeeded"; jobId: string; operationType: ChannexManagementOperationType }
   | {
       outcome: "retry_scheduled" | "dead_lettered";
@@ -88,9 +102,13 @@ export async function runPmsChannexManagementWorkerOnce(input: {
   const job = await input.store.claim({ workerId: input.workerId, now });
   if (!job) return { outcome: "idle" };
 
-  let result: ChannexManagementProviderSuccess | ChannexManagementProviderFailure;
+  let result:
+    | ChannexManagementProviderSuccess
+    | ChannexManagementProviderFailure
+    | ChannexManagementProviderProgress;
   try {
     result = await input.provider.execute(job, {
+      workerId: input.workerId,
       onProgress: () => input.store.heartbeat(job, { workerId: input.workerId }),
     });
   } catch (error) {
@@ -103,6 +121,11 @@ export async function runPmsChannexManagementWorkerOnce(input: {
   if (result.ok) {
     await input.store.succeed(job, result, { workerId: input.workerId, now: clock() });
     return { outcome: "succeeded", jobId: job.jobId, operationType: job.input.operationType };
+  }
+
+  if (result.code === "initial_upload_retained" || result.code === "availability_upload_retained") {
+    await input.store.continueUpload(job, result, { workerId: input.workerId, now: clock() });
+    return { outcome: "continued", jobId: job.jobId, operationType: job.input.operationType };
   }
 
   const retryable = channexManagementFailureIsRetryable(result);

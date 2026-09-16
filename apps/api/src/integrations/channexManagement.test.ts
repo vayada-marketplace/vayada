@@ -258,24 +258,22 @@ describe("Channex management provider", () => {
         plans: {
           plan: async () => ({ requests: [channexRequests.listChannels("external-property")] }),
         },
-        fetch: vi
-          .fn<typeof fetch>()
-          .mockResolvedValue(
-            response(200, {
-              data: [
-                {
-                  id,
-                  attributes: {
-                    channel: "Airbnb",
-                    application: "obsolete",
-                    title: "Airbnb",
-                    is_active: true,
-                    settings: settings && { ...settings, access_token: "PRIVATE PROVIDER TOKEN" },
-                  },
+        fetch: vi.fn<typeof fetch>().mockResolvedValue(
+          response(200, {
+            data: [
+              {
+                id,
+                attributes: {
+                  channel: "Airbnb",
+                  application: "obsolete",
+                  title: "Airbnb",
+                  is_active: true,
+                  settings: settings && { ...settings, access_token: "PRIVATE PROVIDER TOKEN" },
                 },
-              ],
-            }),
-          ),
+              },
+            ],
+          }),
+        ),
       });
       const result = await provider.execute(job("provision"));
       expect(result).toMatchObject({
@@ -567,5 +565,70 @@ describe("recovery after canonical stay-rule synchronization", () => {
     expect(
       new URL(String(fetcher.mock.calls[1]![0])).searchParams.get("filter[restrictions]"),
     ).toBe("rate,min_stay_arrival,stop_sell");
+  });
+});
+
+describe("closed upload worker completion", () => {
+  it.each(["capability", "lease", "held", "retry", "foreign", "oversized"])(
+    "stops %s completion before the outgoing plan",
+    async (mode) => {
+      const plan = vi.fn(async () => ({ requests: [] }));
+      const fetcher = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ padding: "x".repeat(65536) })),
+      );
+      const reconcile = vi.fn(async (_lease, get) => {
+        if (mode === "foreign" || mode === "oversized")
+          await get(
+            mode === "foreign" ? "https://example.test/api/v1/tasks/id" : "/api/v1/tasks/id",
+            new AbortController().signal,
+          );
+        return {
+          kind: "unavailable" as const,
+          reason:
+            mode === "retry" ? "reconciliation_batch_pending" : "ari_receipt_history_unavailable",
+        };
+      });
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        plans: { plan },
+        canSyncAri: mode !== "capability",
+        fetch: fetcher,
+        reconcileClosedUploads: reconcile,
+        dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+        reconcileRoomAvailability: async () => ({
+          kind: "pending_availability_reconciled" as const,
+          count: 0,
+        }),
+        prepareRoomAvailability: async () => ({
+          kind: "unavailable" as const,
+          reason: "room_availability_coverage_unavailable",
+        }),
+      });
+      const result = await provider.execute(
+        job("sync_ari"),
+        mode === "lease" ? {} : { workerId: "worker" },
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        code: ["retry", "foreign", "oversized"].includes(mode)
+          ? "provider_unavailable"
+          : "invalid_state",
+      });
+      expect(plan).not.toHaveBeenCalled();
+      if (["capability", "lease"].includes(mode)) expect(reconcile).not.toHaveBeenCalled();
+      if (mode !== "oversized") expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+  it("does not run pricing completion for booking synchronization", async () => {
+    const reconcile = vi.fn();
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      plans: { plan: async () => ({ requests: [] }) },
+      reconcileClosedUploads: reconcile,
+    });
+    await provider.execute(job("sync_bookings"));
+    expect(reconcile).not.toHaveBeenCalled();
   });
 });
