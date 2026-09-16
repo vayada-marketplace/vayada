@@ -1095,3 +1095,47 @@ uncredited attempt before checking exhaustion; the next attempt has a new ID,
 so the old receipt cannot earn another credit. Ambiguous receipts remain held
 by reconciliation and cannot authorize another POST. Coverage of closed dates
 alone still cannot activate a target or report full sync completion.
+
+### Full-horizon worker proof and next room-availability boundary
+
+The PostgreSQL worker regression covers all 549 dates of the inclusive initial
+horizon with fresh worker/provider instances, one failed completion GET and one
+crash after receipt persistence but before continuation credit. It requires one
+closed POST and reconciled attempt per date, monotonic attempts, preserved retry
+budget and no active target pointer or sync-success callback. Provider responses
+are simulated and target-state side effects are mocked: this is queue/receipt/
+reconciliation proof, not real-process, live-provider, room-availability or OTA
+proof. Finishing closed-date coverage leaves full sync unsuccessful: the job
+currently ends with `dead_lettered` / `invalid_state` because activation remains
+unavailable.
+
+The next availability implementation must use a separate room-scoped durable
+owner. All rates sharing an external room share its availability; rate-attempt
+exclusion cannot serialize those writes. Bind immutable attempts to the leased
+property, connection binding generation, canonical room and external property/
+room IDs, hotel-local date, exact available count and current inventory source
+evidence. Exclude unresolved writes by external property/room across dates,
+rate targets and binding generations. The queue's property lock is additional
+serialization, not a substitute for durable unresolved ownership.
+
+The authoritative daily source is PMS materialized inventory with its current
+coverage/readiness and source evidence. Consume `pms.inventory_days` through a
+PMS-owned reader under `lockPmsInventoryMutationScope`; retain inventory/calendar
+and contributing generated/channel/manual/block/booking/linked revisions and
+source freshness. Missing coverage or stale source evidence is unavailable,
+never an inferred zero. Preserve explicit closed/linked-stop-sell semantics and
+canonical available counts; do not recalculate them from room totals, booking
+counts or `pmsRoomInventoryReadModel`'s physical-room count. The implementation
+must establish current readiness, not merely observe non-null revision columns.
+
+Define lock order against materialization, bookings, linked inventory and current
+Channex authority before implementing the reader/claim. Release transaction locks
+before provider IO. Require a fresh one-use sender, original receipt/task
+reconciliation, exact room/date availability readback and current source checks
+before accepting progress. Booking, blocks, capacity, operating-calendar and
+linked-inventory changes invalidate stale availability evidence and must enqueue
+fresh work. Reconciliation of an old write may establish its completion, but
+cannot establish readiness for changed inventory. Full activation must combine
+current room coverage with rate/configuration/guest/meal/channel evidence and the
+existing publication/binding/version compare-and-swap. This section defines the
+next implementation boundary; it grants no sender or activation permission.
