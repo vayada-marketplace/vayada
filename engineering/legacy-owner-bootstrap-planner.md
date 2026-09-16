@@ -44,8 +44,10 @@ The current broad WorkOS backfill must not be run as an eight-owner repair.
 independently authorized, source-bound ID/email pairs, copies them before I/O,
 and requires a read-only session/transaction. One parameterized SELECT matches
 only those IDs or normalized emails in target users, plus associated WorkOS
-identity conflicts. Results contain only owner IDs and target classifications;
-database errors are replaced with a fixed code to avoid parameter disclosure.
+identity conflicts. Results contain owner IDs, target classifications and, for
+one target binding, a format-bounded provider ID plus email-match boolean;
+malformed provider IDs are redacted. Database errors are replaced with a fixed
+code to avoid parameter disclosure.
 This adapter accepts only ASCII email addresses and uses PostgreSQL `C` collation
 for database-side case folding so JavaScript and PostgreSQL cannot disagree;
 any internationalized address fails closed for a separately reviewed path.
@@ -78,7 +80,6 @@ and verifies one PostgreSQL transaction ID spans every read, so matching session
 defaults without `BEGIN` are denied. It also requires verified environment/full
 table visibility. Sixteen exact source rows are
 required; the query caps at seventeen to detect duplicate/extra matches. The
-result includes sensitive email only for in-memory downstream comparison, plus
-a format-bounded provider ID and email-match boolean when one target binding
-exists; malformed provider IDs are redacted. It proves a historical association, not current source ownership or
+result includes sensitive email only for in-memory downstream comparison, not
+reporting. It proves a historical association, not current source ownership or
 production readiness. Protected QA hotel IDs are rejected. No writes occur.
