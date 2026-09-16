@@ -238,6 +238,30 @@ async function readChannexRoomAvailability(
         };
         if (work?.before && !isDeepStrictEqual(work.before, candidate)) return false;
         if (work?.observations) {
+          const inventoryDigest = hash(day);
+          if (
+            work.observations.inventoryEvidenceSha256 !== inventoryDigest ||
+            typeof work.observations.observationsSha256 !== "string"
+          )
+            return false;
+          const attested = await currentClient.query(
+            `INSERT INTO pms.channex_room_availability_reconciliation_attestations
+               (attempt_id,receipt_id,inventory_evidence_sha256,observations_sha256,
+                reconciliation_evidence)
+             SELECT a.id,$2,a.inventory_evidence_sha256,$3,$4::jsonb
+             FROM pms.channex_room_availability_attempts a
+             WHERE a.id=$1 AND a.state='unresolved'
+               AND a.inventory_evidence_sha256=$5
+             ON CONFLICT DO NOTHING RETURNING attempt_id`,
+            [
+              row.attemptId,
+              row.receiptId,
+              work.observations.observationsSha256,
+              JSON.stringify(work.observations),
+              inventoryDigest,
+            ],
+          );
+          if (!attested.rowCount) return false;
           const saved = await currentClient.query(
             `UPDATE pms.channex_room_availability_attempts
              SET state='reconciled',reconciliation_evidence=$2::jsonb
@@ -292,8 +316,8 @@ async function readChannexRoomAvailability(
         await currentClient.query<{ attemptId: string; jobAttemptId: string; workerId: string }>(
           `INSERT INTO pms.channex_room_availability_attempts
              (mapping_id,job_attempt_id,worker_id,service_date,available_count,
-              inventory_evidence,request_body)
-           VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+              inventory_evidence,request_body,inventory_evidence_sha256)
+           VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)
            ON CONFLICT (external_property_id,external_room_type_id) WHERE state='unresolved'
            DO NOTHING
            RETURNING id::text AS "attemptId",job_attempt_id::text AS "jobAttemptId",
@@ -306,6 +330,7 @@ async function readChannexRoomAvailability(
             day.day.availableCount,
             JSON.stringify(day),
             JSON.stringify(request.body),
+            hash(day),
           ],
         )
       ).rows[0];
