@@ -159,7 +159,7 @@ describe.skipIf(!url)("unverified Airbnb alteration worker", () => {
       )
     ).rows[0].id;
   }
-  const run = (optIn = true) =>
+  const run = (optIn = true, propertyIds = [property]) =>
     runChannexBookingJobs(url!, {
       apiBaseUrl: "https://app.channex.io",
       apiKey: "synthetic",
@@ -167,6 +167,7 @@ describe.skipIf(!url)("unverified Airbnb alteration worker", () => {
       limit: 1,
       applyAirbnbAlterations: true,
       allowUnverifiedAirbnbAlterations: optIn,
+      airbnbAlterationPropertyIds: propertyIds,
       fetch: async () => {
         acknowledgements++;
         return new Response(null, { status: 204 });
@@ -175,6 +176,9 @@ describe.skipIf(!url)("unverified Airbnb alteration worker", () => {
   it("preserves quarantined money through accepted alteration, rollback, replay and cancellation", async () => {
     await queue(revision("new", "2026-09-03"));
     expect(await run()).toMatchObject({ succeeded: 1 });
+    // Another property's rollout does not change ordinary booking import behavior.
+    await queue(revision("modified", "2026-09-03"));
+    expect(await run(false, [randomUUID()])).toMatchObject({ succeeded: 1 });
     const booking = (
       await db.query("SELECT id FROM booking.guest_bookings WHERE property_id=$1", [property])
     ).rows[0].id;
@@ -241,6 +245,18 @@ describe.skipIf(!url)("unverified Airbnb alteration worker", () => {
         )
       ).rows[0];
     const before = await snapshot();
+    const paused = await queue(revision());
+    expect(await run(true, [])).toMatchObject({ deadLettered: 1 });
+    expect(acknowledgements).toBe(2);
+    expect(
+      (
+        await db.query(
+          "SELECT job_metadata->>'lastErrorCode' code FROM platform.jobs WHERE id=$1",
+          [paused],
+        )
+      ).rows[0].code,
+    ).toBe("alteration_runtime_disabled");
+    expect(await snapshot()).toEqual(before);
     const disabled = await queue(revision());
     expect(await run(false)).toMatchObject({ deadLettered: 1 });
     expect(
@@ -337,6 +353,6 @@ describe.skipIf(!url)("unverified Airbnb alteration worker", () => {
         )
       ).rows[0].n,
     ).toBe(0);
-    expect(acknowledgements).toBe(4);
+    expect(acknowledgements).toBe(5);
   });
 });

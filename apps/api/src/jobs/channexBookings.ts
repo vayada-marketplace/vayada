@@ -45,7 +45,7 @@ class LeaseLost extends Error{constructor(){super("lease_lost")}}
 // prettier-ignore
 export async function runChannexBookingJobs(
   connectionString: string,
-  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
+  options:{apiBaseUrl:string;apiKey:string;ownsMutation:()=>boolean;fetch?:typeof fetch;workerId?:string;limit?:number;signal?:AbortSignal;applyAirbnbAlterations?:boolean;allowUnverifiedAirbnbAlterations?:boolean;airbnbAlterationPropertyIds?:readonly string[];airbnbFinanceSettings?:ChannexAirbnbFinanceSettingsPort;stagingImport?:StagingImportScope},
 ): Promise<Counters> {
   if (options.stagingImport && options.apiBaseUrl !== "https://staging.channex.io") throw new Error("staging_import_required");
   const pool = new pg.Pool({ connectionString, max: 2, connectionTimeoutMillis: 5_000 }),
@@ -74,7 +74,7 @@ async function processJob(pool:pg.Pool,job:Job,options:Parameters<typeof runChan
     if(job.invalidPayload)throw new Failure("invalid_job_payload",false);
     active(options);
     const loaded = await loadRevisions(pool,job,options);
-    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,options.applyAirbnbAlterations ?? false,()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
+    for(const item of loaded){active(options);if(job.recoveryAlertId)await validateAlertRevision(pool,job,item);const revision=parseRevision(item,job),replayed=await persist(pool,job,revision,item,(options.applyAirbnbAlterations ?? false)&&(!options.airbnbAlterationPropertyIds||options.airbnbAlterationPropertyIds.includes(job.propertyId)),()=>active(options),options.stagingImport,options.airbnbFinanceSettings,options.allowUnverifiedAirbnbAlterations ?? false);await heartbeat(pool,job,options);await providerRequest(options,`/api/v1/booking_revisions/${revision.id}/ack`,"POST",replayed)}
     await finish(pool, job, "succeeded");
     return "succeeded";
   } catch (error) {
@@ -187,6 +187,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     if(!guestBookingId&&revision.amount===null)throw new Failure("invalid_revision",false);
     if(!guestBookingId&&revision.status==="canceled"){await client.query(`INSERT INTO pms.channel_booking_revision_tombstones(connection_id,property_id,binding_generation,external_booking_id,authoritative_revision_id,inserted_at) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::timestamptz) ON CONFLICT(connection_id,binding_generation,external_booking_id) DO UPDATE SET authoritative_revision_id=EXCLUDED.authoritative_revision_id,inserted_at=EXCLUDED.inserted_at,resolved_at=NULL,created_at=now(),retention_expires_at=now()+interval '90 days',updated_at=now()`,[connection[0]!.id,job.propertyId,connection[0]!.bindingGeneration,job.channelBookingId,revision.id,revision.insertedAt]);await recordHandled(client,job,revision,"ignored");return true}
     const isModified=(text(record(record(rawRevision).attributes).status)??text(record(rawRevision).status))?.toLowerCase()==="modified";
+    if(isAirbnb&&isModified&&guestBookingId&&!applyAlterations&&(await client.query(`SELECT 1 FROM booking.booking_change_requests WHERE guest_booking_id=$1 AND status='pending' AND requested_changes ? 'channex' LIMIT 1`,[guestBookingId])).rows.length)throw new Failure("alteration_runtime_disabled",true);
     const financialHistory=guestBookingId&&(await client.query(`SELECT 1 FROM finance.airbnb_provider_snapshots WHERE property_id=$1 AND guest_booking_id=$2 LIMIT 1`,[job.propertyId,guestBookingId])).rows.length;
     if(revision.amount===null&&!financialHistory&&!isAirbnb)throw new Failure("invalid_revision",false);
     if(financialHistory&&(!applyAlterations||!financeSettings))throw new Failure("alteration_finance_settings_required",false);

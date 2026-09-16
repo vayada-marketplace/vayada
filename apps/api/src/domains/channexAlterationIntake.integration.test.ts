@@ -18,7 +18,10 @@ import {
   runChannexAlterationIntake,
 } from "../jobs/channexAlterationIntake.js";
 
-import { createTargetBookingWebCheckoutAdapter } from "../routes/bookingWebPublic.js";
+import {
+  bookingHotelChangeDecisionFingerprint,
+  createTargetBookingWebCheckoutAdapter,
+} from "../routes/bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 
 const url = process.env["TEST_DATABASE_URL"];
@@ -273,6 +276,105 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       }
     },
   );
+  it("filters intake and readback allowlists before their limits and leaves excluded work untouched", async () => {
+    const excludedProperty = randomUUID(),
+      excludedBooking = randomUUID(),
+      excludedRequest = randomUUID(),
+      excludedJob = randomUUID();
+    await pool.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Excluded')",
+      [excludedProperty],
+    );
+    try {
+      await pool.query(
+        "INSERT INTO booking.guest_bookings(id,property_id,public_reference,booking_channel,lifecycle_status,check_in,check_out,currency,total_amount) VALUES($1::uuid,$2,$1::text,'airbnb','confirmed','2026-10-01','2026-10-03','EUR',300)",
+        [excludedBooking, excludedProperty],
+      );
+      await pool.query(
+        `INSERT INTO booking.booking_change_requests(id,guest_booking_id,request_type,requested_by,requested_changes,created_at) VALUES($1,$2,'date_change','guest','{"channex":{}}',now()-interval '1 day')`,
+        [excludedRequest, excludedBooking],
+      );
+      await pool.query(
+        `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,resource_type,resource_id,payload,job_metadata,run_after,created_at) VALUES($1::uuid,$1::text,'pms.channex.webhooks','channex.scan-alterations','property',$2,'pms','channel_connection',$3,$4,'{"page":1}',now()-interval '1 day',now()-interval '1 day')`,
+        [excludedJob, excludedProperty, connection, { ...scope, propertyId: excludedProperty }],
+      );
+      await enqueueChannexAlterationScan(pool, scope, randomUUID());
+      const feed = {
+        list: vi.fn(async () => ({ eventIds: [], hasMore: false })),
+        read: vi.fn(async () => null),
+      };
+      const intake = { pool, provider: feed, ownsMutation: () => true, limit: 1 };
+      expect(await runChannexAlterationIntake({ ...intake, propertyIds: [] })).toEqual({
+        processed: 0,
+        retried: 0,
+        deadLettered: 0,
+      });
+      expect(feed.list).not.toHaveBeenCalled();
+      expect(
+        await runChannexAlterationIntake({ ...intake, propertyIds: [property] }),
+      ).toMatchObject({ processed: 1 });
+      expect(feed.list).toHaveBeenCalledExactlyOnceWith(externalProperty, 1, undefined);
+      expect(
+        (
+          await pool.query("SELECT status,attempts_count FROM platform.jobs WHERE id=$1", [
+            excludedJob,
+          ])
+        ).rows[0],
+      ).toEqual({ status: "pending", attempts_count: 0 });
+      await enqueueChannexAlterationScan(pool, scope, randomUUID());
+      await pool.query(
+        "UPDATE platform.jobs SET payload=jsonb_set(payload,'{propertyId}',to_jsonb($2::text)) WHERE property_id=$1 AND status='pending'",
+        [property, excludedProperty],
+      );
+      expect(
+        await runChannexAlterationIntake({ ...intake, propertyIds: [property] }),
+      ).toMatchObject({ retried: 1 });
+      expect(feed.list).toHaveBeenCalledTimes(1);
+      expect(
+        (
+          await pool.query(
+            "SELECT job_metadata->>'failure' failure FROM platform.jobs WHERE property_id=$1 AND status='pending'",
+            [property],
+          )
+        ).rows[0].failure,
+      ).toBe("alteration_scan_scope_mismatch");
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const provider = {
+        read: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+      };
+      const readback = { pool, provider, ownsMutation: () => true, limit: 1 };
+      expect(await runChannexAlterationReadback({ ...readback, propertyIds: [] })).toEqual({
+        refreshed: 0,
+        deferred: 0,
+        skipped: 0,
+      });
+      expect(provider.read).not.toHaveBeenCalled();
+      expect(
+        await runChannexAlterationReadback({ ...readback, propertyIds: [property] }),
+      ).toMatchObject({ refreshed: 1 });
+      expect(provider.read).toHaveBeenCalledExactlyOnceWith({
+        eventId: scope.eventId,
+        providerPropertyId: externalProperty,
+        kind: "alteration_request",
+      });
+      expect((await readbackRow(requestId)).status).toBe("declined");
+      expect(
+        (
+          await pool.query(
+            "SELECT status,requested_changes FROM booking.booking_change_requests WHERE id=$1",
+            [excludedRequest],
+          )
+        ).rows[0],
+      ).toEqual({ status: "pending", requested_changes: { channex: {} } });
+    } finally {
+      await pool.query("DELETE FROM platform.jobs WHERE id=$1", [excludedJob]);
+      await pool.query("DELETE FROM booking.booking_change_requests WHERE id=$1", [
+        excludedRequest,
+      ]);
+      await pool.query("DELETE FROM booking.guest_bookings WHERE id=$1", [excludedBooking]);
+      await pool.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [excludedProperty]);
+    }
+  });
   async function scanRow() {
     return (
       await pool.query(
@@ -885,6 +987,82 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       await adapter.close?.();
     }
   });
+  it.each(["empty", "other", "included"] as const)(
+    "enforces adapter rollout scope %s on reads and forced decisions",
+    async (kind) => {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const decide = vi.fn(async () => {});
+      const adapter = createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: url!,
+        pool,
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        airbnbAlterations: {
+          propertyIds: kind === "empty" ? [] : [kind === "included" ? property : randomUUID()],
+          allowUnverifiedAirbnbAlterations: true,
+          decide,
+        },
+      });
+      await pool.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || '{"paymentMethod":"cash"}'::jsonb WHERE id=$1`,
+        [booking],
+      );
+      try {
+        const response = await adapter.findLatestChangeRequest(property, booking);
+        if (kind === "included") {
+          expect(response).toMatchObject({
+            providerRequest: {
+              allowedActions: ["accept", "decline"],
+              supportsUnverifiedMoney: true,
+            },
+          });
+          return;
+        }
+        expect(response).toMatchObject({ providerRequest: { allowedActions: [] } });
+        expect(response).not.toHaveProperty("providerRequest.supportsUnverifiedMoney");
+        const before = (
+          await pool.query("SELECT to_jsonb(b) data FROM booking.guest_bookings b WHERE id=$1", [
+            booking,
+          ])
+        ).rows;
+        const beforeRequest = await readbackRow(requestId);
+        await expect(
+          adapter.acceptChangeRequest(property, booking, requestId, {
+            actorUserId: randomUUID(),
+            requestId: "outside-rollout",
+            correlationId: "outside-rollout",
+            idempotencyKey: randomUUID(),
+            fingerprint: bookingHotelChangeDecisionFingerprint({
+              propertyId: property,
+              bookingId: booking,
+              changeRequestId: requestId,
+              decision: "accept",
+              note: null,
+            }),
+            occurredAt: new Date(),
+          }),
+        ).rejects.toMatchObject({
+          statusCode: 409,
+          message: "Airbnb change requests require a provider decision.",
+        });
+        expect(decide).not.toHaveBeenCalled();
+        expect(
+          (
+            await pool.query("SELECT to_jsonb(b) data FROM booking.guest_bookings b WHERE id=$1", [
+              booking,
+            ])
+          ).rows,
+        ).toEqual(before);
+        expect(await readbackRow(requestId)).toEqual(beforeRequest);
+      } finally {
+        await adapter.close?.();
+        await pool.query(
+          "UPDATE booking.guest_bookings SET booking_metadata=booking_metadata-'paymentMethod' WHERE id=$1",
+          [booking],
+        );
+      }
+    },
+  );
   it("exposes unverified support only from explicit adapter configuration", async () => {
     await persistChannexAlteration(pool, scope, event());
     for (const enabled of [false, true]) {

@@ -267,3 +267,28 @@ Canonical money stays frozen and unverified; provider observations remain separa
 Known-basis financial history still requires its verified settings resolver. An
 accepted response alone never changes the booking, and retry/readback never sends
 a second decision. No production registration or activation is implied.
+
+### Property-scoped runtime composition
+
+`AIRBNB_ALTERATIONS_ENABLED` defaults to false. Enabling requires an explicit
+`AIRBNB_ALTERATION_PROPERTY_IDS` allowlist, authenticated target PMS, target booking
+mutation ownership, mutating booking sync/webhooks, background and Channex workers,
+and valid provider credentials. Listing import does not enable request decisions.
+One runtime supplies the same scope to staff actions, webhook promotion, periodic
+intake, status readback and authoritative alteration application. Other properties
+retain ordinary booking import behavior and have no new alteration actions.
+
+The runtime reserves a distinct journal pool using a dedicated application name
+and statement timeout, preserving physical separation under the server pool-sharing
+layer (eight shared general connections plus one journal connection). It prevents overlapping scans,
+and drains in-flight work before closing its pools. A bounded periodic scan finds
+requests missed by webhooks; existing durable pagination/retry and readback cadence
+remain authoritative. Shutdown rejects new decision commands, drains already-started decisions and aborts background work.
+Fastify closes hooks in reverse registration order; runtime shutdown is registered
+after the global pool hook so it drains first. No new
+subscriptions are created automatically. Rollback disables the setting and restarts
+the service; preserve pending/uncertain decision journals and revision jobs for
+reconciliation before a later re-enable. Modified revisions with a pending tracked
+request are held without ACK when its property is disabled, so ordinary ingestion
+cannot consume the revision and strand that request. Never retry a provider POST to resolve an
+uncertain outcome. This wiring does not enable any deployment environment.

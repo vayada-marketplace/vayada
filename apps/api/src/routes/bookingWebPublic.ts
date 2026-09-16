@@ -1273,7 +1273,7 @@ type TargetChangeRequestRow = QueryResultRow & {
 export type PgTargetBookingWebCheckoutAdapterConfig = {
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
-  airbnbAlterations?: { allowUnverifiedAirbnbAlterations?: boolean; decide(input: {
+  airbnbAlterations?: { propertyIds?: readonly string[]; allowUnverifiedAirbnbAlterations?: boolean; decide(input: {
     propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
     action: "accept" | "decline"; correlationId: string;
   }): Promise<unknown> };
@@ -1357,7 +1357,7 @@ export function createTargetBookingWebCheckoutAdapter(
 
   async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
     action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
-    if (!config.airbnbAlterations) return null;
+    if (!config.airbnbAlterations || (config.airbnbAlterations.propertyIds && !config.airbnbAlterations.propertyIds.includes(propertyId))) return null;
     const load = async () => (await pool.query<TargetChangeRequestRow>(
       `SELECT change.id::text AS id,change.guest_booking_id::text AS "guestBookingId",change.status,
        change.requested_changes AS "requestedChanges",change.decision_note AS "decisionNote",
@@ -1467,7 +1467,7 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
-      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations)) : null;
+      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations && (!config.airbnbAlterations.propertyIds || config.airbnbAlterations.propertyIds.includes(propertyId)))) : null;
     },
     async acceptChangeRequest(propertyId, bookingId, changeRequestId, context) {
       const provider = await providerDecision(propertyId, bookingId, changeRequestId, "accept", context);
