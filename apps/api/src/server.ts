@@ -1729,6 +1729,9 @@ const pmsAcceptedPricingReservationWorker =
         warn: (error, message) => app.log.warn(error, message),
       })
     : undefined;
+app.addHook("preClose", async () => {
+  await pmsAcceptedPricingReservationWorker?.close();
+});
 
 const stopPostgresTelemetry = postgresRuntime.startTelemetry(app.log);
 app.addHook("onReady", async () => {
@@ -1765,7 +1768,6 @@ app.addHook("onClose", async () => {
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
-  await pmsAcceptedPricingReservationWorker?.close();
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([
