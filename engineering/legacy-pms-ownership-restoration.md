@@ -284,6 +284,22 @@ These tests add no writer, claim transition, audit receipt, compensation or acce
 release. Current-main migration integration and actual executor-role verification
 remain separate gates.
 
+`storeHistoricalBindingTransition` is an internal storage primitive, not a
+signature verifier or executable command. The future caller must authenticate
+and authorize before even receipt lookup, prove source/disposition/ownership and
+full target evidence under locks, and bind its chosen update timestamp and exact
+claim hashes to the signed aggregate before/after evidence. This primitive checks
+full claim drift, immutable provenance, disconnected retained-pair connections,
+and bounded transaction/visibility conditions; it atomically updates the claim
+and inserts the constrained transition plus restricted audit. Exact input replay
+returns history, never renewed eligibility; compensation uses a new command and
+the original prepare lineage. Savepoint failure restores all three writes, while
+success remains uncommitted. No runtime route/CLI/package-index export is wired;
+commit recovery, approved timestamp construction and full eligibility composition
+remain mandatory before any real execution.
+Compensation must also authenticate the original successful transition; a ledger
+row's existence and valid lineage alone are not authority.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
