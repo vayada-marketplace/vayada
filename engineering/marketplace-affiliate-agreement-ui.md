@@ -19,9 +19,9 @@ earning eligibility are checked separately.
 
 The endpoint deliberately returns the same 404 for missing and inaccessible
 records. The UI must not distinguish those cases. When current collaboration
-terms advertise an affiliate commission, show an unavailable state with no join
-claim. Otherwise a 404 leaves the non-affiliate collaboration unchanged. Other
-failures show a contextual retry action. Loading uses a stable skeleton.
+terms advertise an affiliate commission, show loading, unavailable and retryable
+error states with no join claim. Otherwise only a successful historical agreement
+changes the non-affiliate collaboration surface. Loading uses a stable skeleton.
 
 ## Presentation
 
@@ -30,11 +30,11 @@ and hotels, including completed or cancelled hosted collaborations when a
 historical affiliate agreement resolves successfully. This keeps affiliate
 history independent from the hosted collaboration lifecycle.
 
-JSON disclosure objects render all top-level entries in stored order. Keys are
-converted to readable labels; scalar values remain unchanged and structured
-values use their complete JSON representation. If the retained disclosure is
-not a JSON object, display the exact string. The UI never substitutes mutable
-legacy collaboration fields for a successful retained agreement.
+The retained disclosure is displayed verbatim in a wrapped terms block. The UI
+does not parse or reserialize it because doing so can change large JSON numbers,
+key order or other exact bytes. A later friendly renderer needs a separately
+versioned structured disclosure contract. The UI never substitutes mutable legacy
+collaboration fields for a successful retained agreement.
 
 Pending copy identifies which decisions are recorded without offering an action
 that the backend does not support. The layout is one column at every viewport

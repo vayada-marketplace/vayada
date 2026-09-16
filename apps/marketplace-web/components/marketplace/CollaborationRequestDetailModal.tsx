@@ -1,6 +1,7 @@
 "use client";
 
 import { PendingApplicationActions } from "./PendingApplicationActions";
+import { AffiliateAgreementPanel } from "./AffiliateAgreementPanel";
 import { useState } from "react";
 import Image from "next/image";
 
@@ -341,6 +342,17 @@ export function CollaborationRequestDetailModal({
                   </p>
                 </div>
               </div>
+            )}
+
+            {(currentUserType === "creator" || currentUserType === "hotel") && (
+              <AffiliateAgreementPanel
+                collaborationId={collaboration.id}
+                currentUserType={currentUserType}
+                affiliateExpected={
+                  collaboration.collaborationType === "Affiliate" ||
+                  collaboration.creatorFee != null
+                }
+              />
             )}
 
             {/* Looking For Section (For Creators) */}
