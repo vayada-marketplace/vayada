@@ -77,15 +77,16 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
         availableCount: number;
         inventoryEvidence: unknown;
         requestBody: unknown;
+        digest: string | null;
       }> = {},
     ) =>
       client.query(
         `INSERT INTO pms.channex_room_availability_attempts
            (property_id,connection_id,mapping_id,room_type_id,binding_generation,
             external_property_id,external_room_type_id,job_attempt_id,worker_id,
-            service_date,available_count,inventory_evidence,request_body)
+            service_date,available_count,inventory_evidence,request_body,inventory_evidence_sha256)
          VALUES(gen_random_uuid(),gen_random_uuid(),$1,gen_random_uuid(),gen_random_uuid(),
-           'caller-property','caller-room',$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+           'caller-property','caller-room',$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)
          RETURNING *`,
         [
           values.mappingId ?? mappingId,
@@ -106,6 +107,7 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
               ],
             },
           ),
+          values.digest === undefined ? "0".repeat(64) : values.digest,
         ],
       );
     return {
@@ -137,6 +139,7 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
       job_attempt_id: f.jobAttemptId,
       worker_id: f.workerId,
       available_count: 2,
+      inventory_evidence_sha256: "0".repeat(64),
       state: "unresolved",
       reconciliation_evidence: {},
     });
@@ -144,6 +147,7 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
       "available_count=3",
       "request_body='{}'",
       "inventory_evidence='{}'",
+      `inventory_evidence_sha256='${"f".repeat(64)}'`,
       "service_date='2030-06-15'",
       "mapping_id=gen_random_uuid()",
       "external_room_type_id='changed'",
@@ -175,6 +179,11 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
         [attempt.id],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("requires claim-time evidence digest before an attempt can exist", async () => {
+    const f = await fixture();
+    await expect(f.insert(pool, { digest: null })).rejects.toMatchObject({ code: "23502" });
   });
 
   it("retains one immutable original dispatch receipt", async () => {
@@ -214,10 +223,9 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
       ),
     ).rejects.toMatchObject({ code: "23505" });
     await expect(
-      pool.query(
-        "UPDATE pms.channex_room_availability_receipts SET http_status=201 WHERE id=$1",
-        [receiptId],
-      ),
+      pool.query("UPDATE pms.channex_room_availability_receipts SET http_status=201 WHERE id=$1", [
+        receiptId,
+      ]),
     ).rejects.toMatchObject({ code: "23514" });
     await expect(
       pool.query("DELETE FROM pms.channex_room_availability_receipts WHERE id=$1", [receiptId]),
@@ -247,8 +255,9 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
     await expect(insert("'transport_error',500,NULL,'{}',true,NULL")).rejects.toMatchObject({
       code: "23514",
     });
-    await expect(insert("'invalid_json',500,NULL,ARRAY[gen_random_uuid()],true,NULL"))
-      .rejects.toMatchObject({ code: "23514" });
+    await expect(
+      insert("'invalid_json',500,NULL,ARRAY[gen_random_uuid()],true,NULL"),
+    ).rejects.toMatchObject({ code: "23514" });
     await expect(
       insert("'complete_json',200,NULL,'{}',false,'provider_warnings'"),
     ).rejects.toMatchObject({ code: "23514" });
