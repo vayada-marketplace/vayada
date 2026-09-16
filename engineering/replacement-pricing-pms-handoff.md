@@ -119,6 +119,20 @@ A stale lease cannot publish success. Retry only retryable failures; retain a
 visible terminal outcome for invalid/missing/conflicting evidence. Register the
 consumer with `backgroundWorkersEnabled`, bounded polling and shutdown cleanup.
 
+## Receipt-binding implementation
+
+Migration0211 adds the replacement branch to the existing deferred adoption guard.
+Assignments record `pricingAcceptance` with exactly `acceptanceId`, `selectionId`,
+`offerId` and `childAgesAtCheckIn`. Receipt organization/quote/type and every physical
+position must match immutable acceptance. Initial adoption requires confirmed,
+unchanged bookings; previously adopted receipts retain existing PMS room-move semantics.
+
+The database also previously required physical rooms for direct exact assignments
+(migration0185 only exempted pending channel imports). Migration0211 permits pending
+replacement assignments with a matching acceptance ID; the adoption guard still
+checks the complete evidence. Manual, legacy and migration exemptions are preserved.
+This does not implement a caller, worker or occupied/linked reconciliation port.
+
 ## Required proof before activation
 
 - Real PostgreSQL replacement-quote adoption with mixed types, multiple rooms of
