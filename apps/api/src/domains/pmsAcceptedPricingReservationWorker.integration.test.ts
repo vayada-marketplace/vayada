@@ -13,13 +13,14 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
   const pool = new pg.Pool({ connectionString: url, max: 3 });
   afterAll(() => pool.end());
 
-  it.each(["malformed-payload", "tenant-envelope-mismatch"])(
+  it.each(["malformed-payload", "tenant-envelope-mismatch", "platform-scope"])(
     "lets only one transaction claim a job: %s",
     async (scenario) => {
       if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
         throw new Error("test database required");
       const propertyId = randomUUID();
       const jobId = randomUUID();
+      const tenantScope = scenario === "platform-scope" ? "platform" : "property";
       const payload =
         scenario === "malformed-payload"
           ? {}
@@ -37,14 +38,15 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
         `INSERT INTO platform.jobs
        (id,job_key,queue_name,job_type,tenant_scope,property_id,resource_product,
         resource_type,resource_id,correlation_id,payload)
-       VALUES($1::uuid,$2,$3,$4,'property',$5,'booking',
-         'guest_booking',($1::uuid)::text,$1::text,$6::jsonb)`,
+       VALUES($1::uuid,$2,$3,$4,$5,$6::uuid,'booking',
+         'guest_booking',($1::uuid)::text,$1::text,$7::jsonb)`,
         [
           jobId,
           `pms:pricing-acceptance:${jobId}:create:v1`,
           PMS_ACCEPTED_PRICING_QUEUE,
           PMS_ACCEPTED_PRICING_JOB_TYPE,
-          propertyId,
+          tenantScope,
+          tenantScope === "property" ? propertyId : null,
           JSON.stringify(payload),
         ],
       );
@@ -82,11 +84,18 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
         expect(
           (
             await pool.query(
-              `SELECT reason_code FROM platform.dead_letter_events WHERE job_id=$1`,
+              `SELECT reason_code,tenant_scope,property_id::text AS property_id
+               FROM platform.dead_letter_events WHERE job_id=$1`,
               [jobId],
             )
           ).rows,
-        ).toEqual([{ reason_code: "invalid_payload" }]);
+        ).toEqual([
+          {
+            reason_code: "invalid_payload",
+            tenant_scope: tenantScope,
+            property_id: tenantScope === "property" ? propertyId : null,
+          },
+        ]);
         expect(
           (
             await pool.query(`SELECT action FROM platform.product_audit_events WHERE job_id=$1`, [
