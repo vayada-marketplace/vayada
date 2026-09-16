@@ -627,3 +627,31 @@ Validation: local PostgreSQL invitation/acceptance/edit/status and manager-denia
 flows; mocked provider role mapping; role deletion with revoked/elapsed owner
 invitations; saved-owner resolver/product-veto coverage; API webhook/route tests.
 No real invitation was sent. Independent review's history-cleanup finding is fixed.
+
+### Transfer proof storage and freshness
+
+Migration `0205_account_admin_transfer_proofs.sql` stores a five-minute intent
+bound to actor/target membership, organization, WorkOS user/organization, source
+browser session and a server-computed digest of the complete reviewed transfer
+(including both member revisions, role revision and former-admin configuration).
+Only a SHA-256 digest of the random 256-bit callback state is stored. Verification
+and consumption each use a conditional atomic update; consuming within the
+ownership transaction makes failed transfers roll back proof consumption too.
+
+[WorkOS reauthentication](https://workos.com/docs/authkit/reauthentication) supports
+`provider: "authkit"` with `maxAge: 0`. The verified JWT's `auth_time`, not its
+issue time or refresh time, must be at or after intent creation (to the provider's
+one-second precision), not in the future; its access token must still be valid.
+Missing/malformed freshness fails closed for this flow without breaking ordinary
+sessions. Actor and organization must match the bound intent.
+
+This is an internal storage prerequisite, with no HTTP route or transfer writer
+activated. The successor must authorize and lock the current admin before creating
+an intent, hash the full validated command, use PKCE and session-bound state for
+the code exchange, and pass only its server-exchanged token to proof verification.
+The callback checks the still-live source browser session and does not replace
+it with the separate provider reauthentication session. Transfer must reauthorize
+the source session and ownership, validate all revisions/configuration, and consume
+proof using the same database transaction as the membership swap and audit.
+A provider that invalidates the source session requires restarting this flow;
+do not silently rebind the intent. Expired proof cleanup remains a rollout task.

@@ -7,6 +7,8 @@ export type VerifiedSession = {
   workosOrgId: string | null;
   sessionId: string | null;
   expiresAt: number;
+  /** Signed time of active authentication; absent/malformed values cannot prove freshness. */
+  authenticatedAt?: number;
 };
 
 /** A function that verifies a raw access token and returns the parsed session. */
@@ -58,6 +60,11 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
         workosOrgId: typeof claims["org_id"] === "string" ? claims["org_id"] : null,
         sessionId: typeof claims["sid"] === "string" ? claims["sid"] : null,
         expiresAt: payload.exp,
+        ...(typeof claims["auth_time"] === "number" &&
+        Number.isSafeInteger(claims["auth_time"]) &&
+        claims["auth_time"] > 0
+          ? { authenticatedAt: claims["auth_time"] }
+          : {}),
       };
     } catch (error) {
       if (error instanceof AuthError) throw error;
