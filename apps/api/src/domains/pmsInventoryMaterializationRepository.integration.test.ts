@@ -8,6 +8,8 @@ import {
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -70,11 +72,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
-  async function channelInventoryFixture() {
+  async function channelInventoryFixture(horizonDays = 1, startAtLocalToday = false) {
     const f = await createFixture(admin, repositories, [2]);
-    const date = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const date = startAtLocalToday
+      ? channexPropertyLocalDate("Europe/Berlin", new Date())!
+      : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const through = new Date(`${date}T00:00:00.000Z`);
+    through.setUTCDate(through.getUTCDate() + horizonDays - 1);
     await f.repository.materializeInventory(
-      materializationCommand(f, "channel-inventory", 1, date, date),
+      materializationCommand(f, "channel-inventory", 1, date, through.toISOString().slice(0, 10)),
     );
     await admin.query(
       `INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship)
@@ -137,10 +143,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ) => claimChannexRoomAvailability(channelPool, inventory, lease, selection),
       dispatch: () =>
         prepareChannexRoomAvailabilityDispatch(channelPool, f.repository, lease, selection),
+      next: () => prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
     };
   }
-  async function availabilityReconciliationFixture() {
-    const f = await channelInventoryFixture(),
+  async function availabilityReconciliationFixture(startAtLocalToday = false) {
+    const f = await channelInventoryFixture(1, startAtLocalToday),
       prepared = await f.dispatch(),
       taskId = randomUUID();
     if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
@@ -546,7 +553,107 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         },
       },
     });
+    expect(
+      (
+        await admin.query(
+          `SELECT count(*)::int AS count
+           FROM pms.channex_room_availability_reconciliation_attestations
+           WHERE attempt_id=$1`,
+          [f.prepared.attemptId],
+        )
+      ).rows[0],
+    ).toEqual({ count: 1 });
     expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+  });
+  it("selects the earliest current covered day and creates only a fresh local claim", async () => {
+    const f = await channelInventoryFixture(2, true);
+    const prepared = await f.next();
+    expect(prepared).toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+      attemptId: expect.any(String),
+    });
+    expect(
+      (
+        await admin.query(
+          `SELECT service_date::text AS date,state,
+             (SELECT count(*)::int FROM pms.channex_room_availability_receipts receipt
+               WHERE receipt.attempt_id=attempt.id) AS receipts
+           FROM pms.channex_room_availability_attempts attempt WHERE id=$1`,
+          [prepared.kind === "prepared" ? prepared.attemptId : null],
+        )
+      ).rows[0],
+    ).toEqual({ date: f.selection.date, state: "unresolved", receipts: 0 });
+  });
+  it("skips only exact current reconciled availability evidence", async () => {
+    const f = await availabilityReconciliationFixture(true);
+    await f.reconcile();
+    await expect(
+      admin.query(
+        `UPDATE pms.channex_room_availability_reconciliation_attestations
+         SET observations_sha256=$2 WHERE attempt_id=$1`,
+        [f.prepared.attemptId, "f".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "room_availability_current",
+      from: f.selection.date,
+      through: f.selection.date,
+      roomCount: 1,
+      dayCount: 1,
+    });
+    await admin.query(
+      `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+         booking_source_revision=booking_source_revision+1,
+         inventory_revision=inventory_revision+1
+       WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+      [f.propertyId, f.roomTypeId, f.selection.date],
+    );
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+    });
+  });
+  it("does not treat an arbitrary storage-level reconciliation as current coverage", async () => {
+    const f = await availabilityReconciliationFixture(true);
+    const stored = (
+      await admin.query(
+        `SELECT receipt.id::text AS "receiptId",attempt.inventory_evidence_sha256 AS digest
+         FROM pms.channex_room_availability_attempts attempt
+         JOIN pms.channex_room_availability_receipts receipt ON receipt.attempt_id=attempt.id
+         WHERE attempt.id=$1`,
+        [f.prepared.attemptId],
+      )
+    ).rows[0];
+    await admin.query(
+      `UPDATE pms.channex_room_availability_attempts
+       SET state='reconciled',reconciliation_evidence=$2::jsonb WHERE id=$1`,
+      [
+        f.prepared.attemptId,
+        JSON.stringify({
+          schemaVersion: 1,
+          completionBasis: "finished_task_fifo",
+          originalReceiptId: stored.receiptId,
+          taskCount: 1,
+          observationsSha256: "0".repeat(64),
+          inventoryEvidenceSha256: stored.digest,
+          availability: {
+            kind: "availability_observed",
+            externalPropertyId: f.propertyId,
+            externalRoomTypeId: f.externalRoomTypeId,
+            date: f.selection.date,
+            availableCount: 2,
+          },
+        }),
+      ],
+    );
+    await expect(f.next()).resolves.toMatchObject({
+      kind: "prepared",
+      roomTypeId: f.roomTypeId,
+      date: f.selection.date,
+    });
   });
   it("keeps ownership unresolved when exact provider availability does not match", async () => {
     const f = await availabilityReconciliationFixture();

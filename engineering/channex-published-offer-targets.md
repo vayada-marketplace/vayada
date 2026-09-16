@@ -1258,8 +1258,30 @@ locks. It releases those locks for bounded task completion and exact room/date
 availability readback, then repeats the complete candidate in a fresh current-day
 transaction. Only unchanged PMS source evidence, provider identity, request,
 receipt and authority may perform the single unresolved-to-reconciled transition.
+The same transaction writes an immutable one-to-one reconciliation attestation
+bound to the original receipt, claim-time inventory digest, observation digest,
+and complete terminal evidence. Because availability dispatch is not runtime-wired,
+the digest migration aborts if unexpected attempt history exists instead of
+stranding unprovable rows. Ordinary application writes create the attestation only
+through this authoritative path; direct database writers are privileged and trusted.
 The bounded evidence retains observation digests and the sanitized availability
 result. Reconciliation neither activates a channel nor grants another send.
+
+The room-availability coordinator walks active mapped rooms in canonical local
+room-ID order and dates in ascending order. Its interval starts at the hotel's
+current local date and ends at the authoritative PMS materialization coverage
+boundary. That coverage is at most 366 inclusive dates and is intentionally
+independent from the 549-date closed-rate staging horizon. A missing or malformed
+coverage row or inventory day fails closed; it is never inferred as zero.
+
+A reconciled day is skipped only while its complete current inventory evidence,
+mapping and binding identity, exact one-date request, clean original receipt,
+task count and version-1 reconciliation evidence still match. Any source revision,
+count, configuration, room binding or provider identity change makes the day
+eligible for a new one-use claim. The exact immutable reconciliation attestation
+must also match; directly changing an attempt to terminal state is insufficient.
+Selection and claim do not schedule runtime work, perform provider IO, establish
+full channel readiness or activate sales.
 
 The management worker treats a persisted room-availability receipt as bounded
 partial progress, alongside a retained closed-rate receipt. Exact job attempt,
