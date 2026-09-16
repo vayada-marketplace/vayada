@@ -12,6 +12,8 @@ const rows = () =>
     exactCount: 0,
     restricted: false,
     identityConflict: false,
+    providerUserId: null,
+    providerEmailMatches: null,
   }));
 const client = (query: unknown) => ({ query }) as AdoptionQueryClient;
 describe("scoped target read boundary", () => {

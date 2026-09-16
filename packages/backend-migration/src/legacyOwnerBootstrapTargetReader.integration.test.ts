@@ -32,7 +32,8 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
     expect(migrated.failed).toBeNull();
     expect(migrated.applied).toContain("0192");
     // 1 absent, 2 pending exact, 3 ID/email mismatch, 4 different-ID email,
-    // 5 suspended, 6 foreign provider-email mapping, 7 duplicate provider links, 8 active.
+    // 5 suspended, 6 foreign provider-email mapping, 7 duplicate provider links,
+    // 8 active with one exact provider binding.
     for (const [n, email, status] of [
       [2, "owner2", "pending"],
       [3, "different", "active"],
@@ -50,8 +51,9 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
       ]);
     await client.query(
       `INSERT INTO identity.external_identities(user_id,provider,provider_user_id,provider_email)
-      VALUES($1,'workos','user_other',$3),($2,'workos','user_seven_a',NULL),($2,'workos','user_seven_b',NULL)`,
-      [id(99), id(7), "\u00a0owner6@example.invalid\ufeff"],
+      VALUES($1,'workos','user_other',$3),($2,'workos','user_seven_a',NULL),
+        ($2,'workos','user_seven_b',NULL),($4,'workos','user_ownereight',$5)`,
+      [id(99), id(7), "\u00a0owner6@example.invalid\ufeff", id(8), "owner8@example.invalid"],
     );
   }, 120000);
   afterAll(async () => {
@@ -78,6 +80,17 @@ describe.skipIf(!url)("target reader on fresh migrated PostgreSQL", () => {
         "exact",
       ]);
       expect(result.map((row) => row.ownerId)).toEqual(owners.map((owner) => owner.ownerId));
+      expect(result.map((row) => row.providerUserId)).toEqual([
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        "user_seven_a",
+        "user_ownereight",
+      ]);
+      expect(result[7]!.providerEmailMatches).toBe(true);
       expect(JSON.stringify(result)).not.toContain("@");
       expect(
         (
