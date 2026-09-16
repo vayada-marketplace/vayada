@@ -68,3 +68,39 @@ or fallback to gross-only accounting. These cases need explicit lifecycle suppor
 before activation; they are not silently acknowledged. Untracked bookings retain
 their existing path. Live activation still requires the verified evidence-port
 implementation and a reviewed cutover; this hook alone does not activate it.
+
+## Reconciliation checkpoint — 2026-09-16
+
+The four open PRs (#2213, #2226, #2231, #2239) remain one dependency chain;
+the import hook is already implemented. No superseding implementation was found
+on main `b72b54a57`. Retain these review boundaries rather than adding more PRs
+for scaffolding: reader, storage, writer, and transactional import each have a
+distinct contract. Further import support belongs in the existing import PR.
+
+Two dependencies still prevent a production settings resolver and lifecycle
+activation:
+
+- **Revision-specific settings provenance.** Channex's support reply explains
+  the amount basis but does not attest which settings applied to an individual
+  revision. The channel reader retains current settings only. A persisted copy
+  of that read, an arbitrary receipt reference, or matching revision IDs cannot
+  establish historical applicability. The resolver needs an authoritative
+  revision-specific attestation or a reviewed settings-history guarantee before
+  it can return verified evidence. Do not implement a resolver that silently
+  promotes current settings into that guarantee.
+- **Ordinary changes and cancellations.** For untracked bookings, a confirmed
+  modification without an accepted alteration reaches the ordinary gross-evidence
+  importer. Tracked bookings currently reject this path; future support must
+  instead replace their provider snapshot without
+  routing payout totals into gross revenue. Cancellation ingestion also permits
+  revisions without rooms. Such payloads cannot satisfy the full-stay financial
+  reader, and absence of nights does not establish zero retained revenue, zero
+  commission, a refund, or unchanged financials. The lifecycle contract must
+  specify how unavailable cancellation economics invalidate the current view
+  while preserving audit history before that guard can be removed. This is not
+  permission to create payments, refunds, or inferred accounting entries.
+
+The Finance/add-on and OTA availability owners confirmed no overlapping edits
+at this checkpoint. Real Airbnb validation remains waived; local synthetic tests
+do not resolve either provider-evidence dependency. All runtime and Finance
+activation guards remain required.
