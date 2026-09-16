@@ -158,9 +158,11 @@ type ExpensePaymentWrite = { paymentStatus: "paid"; paidOn: Date } | { paymentSt
 type ExpenseSettlementPatch = ExpensePaymentWrite | { paymentStatus?: never; paidOn?: never };
 type MoneyMetric = { value: Money; absoluteChange: Money; percentChange: Ratio | null };
 type CountMetric = { value: number; absoluteChange: number; percentChange: Ratio | null };
+type IncompleteEvidence = { code: string; count: number } &
+  ({ amount?: Money; currency?: never } | { amount?: never; currency: string });
 type Envelope = { contractVersion: "pms-financials.v1"; propertyId: string; currency: string;
   timeZone: string; generatedAt: string; sourceFreshness: Record<string, string>;
-  incompleteEvidence: Array<{ code: string; count: number; amount?: Money }> };
+  incompleteEvidence: IncompleteEvidence[] };
 type Command = { commandId: string; idempotencyKey: string; expectedRevision?: number };
 type Range = { from: Date; to: Date }; type Cursor = { cursor?: string; limit?: number };
 type DashboardQuery = { asOf?: Date }; type RevenueQuery = Range;
