@@ -68,12 +68,12 @@ export async function readAffiliateAssent(
       SELECT 1 FROM identity.organization_resource_links l WHERE l.organization_id=$2
         AND l.product='marketplace' AND l.status='active'
         AND l.resource_type=CASE WHEN $4 THEN 'hotel_profile' ELSE 'creator_profile' END
-        AND l.resource_id=CASE WHEN $4 THEN p.property_id ELSE m.creator_profile_id END
+        AND l.resource_id=CASE WHEN $4 THEN p.property_id::text ELSE m.creator_profile_id::text END
         AND (l.relationship='owner' OR ($4 AND l.relationship='operator'))
     ) AND (NOT $4 OR EXISTS (
       SELECT 1 FROM identity.organization_resource_links l WHERE l.organization_id=$2
         AND l.product='marketplace' AND l.status='active' AND l.resource_type='marketplace_offer'
-        AND l.resource_id=p.offer_id AND l.relationship IN ('owner','operator')
+        AND l.resource_id=p.offer_id::text AND l.relationship IN ('owner','operator')
     ))`,
     [attemptId, context.selectedOrganization.organizationId, context.actor.internalUserId, hotel],
   );

@@ -14,7 +14,7 @@ export function assentCommandFixture() {
       INSERT INTO hotel_catalog.properties VALUES ('${id(3)}'),('${id(6)}');
       ALTER TABLE marketplace.marketplace_offers ADD COLUMN offer_status TEXT DEFAULT 'verified';
       CREATE TABLE identity.organization_resource_links(id UUID PRIMARY KEY,organization_id UUID,
-        product TEXT,resource_type TEXT,resource_id UUID,relationship TEXT,status TEXT);
+        product TEXT,resource_type TEXT,resource_id TEXT,relationship TEXT,status TEXT);
       INSERT INTO identity.organization_resource_links VALUES
         ('${id(90)}','${id(4)}','marketplace','hotel_profile','${id(3)}','owner','active'),
         ('${id(91)}','${id(80)}','marketplace','creator_profile','${id(82)}','owner','active'),
