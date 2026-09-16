@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readLegacyOwnershipTargetRow } from "./channexAdoptionTargetRows.js";
 import { readLegacyOwnershipDrift } from "./legacyOwnershipEvidenceReader.js";
 import { readLegacyOwnershipTargetEvidence } from "./legacyOwnershipRelationships.js";
+import { lockLegacyHistoricalBindingOwner } from "./legacyHistoricalBindingOwnerLocks.js";
 import {
   verifyLegacyCurrentOwnerIdentity,
   type LegacyOwnerIdentityEvidence,
@@ -37,6 +38,24 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
     workosOrgId: "org_synthetic",
     expiresAt: Math.floor(Date.now() / 1000) + 300,
   });
+  const ownerRequest = () => ({
+    source: {
+      sourceRunId: `vay1351-${"a".repeat(24)}`,
+      sourceEnvironment: "local",
+      sourceSchemaRevision: "synthetic-not-verified-here",
+      sourceEvidenceSha256: "b".repeat(64),
+      legacyHotelId,
+      ownerUserId: identityProof.userId,
+      hotelRowOrdinal: 1,
+      userRowOrdinal: 1,
+    },
+    target: fingerprints,
+    identity: identityProof,
+  });
+  const beginBounded = () =>
+    client.query(
+      "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='5s'",
+    );
   beforeAll(async () => {
     const parsed = new URL(url!);
     if (
@@ -132,6 +151,102 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
       expect(await readLegacyOwnershipDrift(client, fingerprints)).toEqual({
         outcome: "unchanged",
       });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each([
+    ...new Set([...Object.values(LEGACY_OWNERSHIP_ROW_TABLES), "identity.external_identities"]),
+  ])("retains an owner fence against concurrent writes to %s until rollback", async (table) => {
+    const other = new pg.Client({ connectionString: url });
+    await other.connect();
+    await beginBounded();
+    try {
+      expect(
+        await lockLegacyHistoricalBindingOwner(client, ownerRequest(), verifiedSession()),
+      ).toEqual({
+        outcome: "owner_locked_requires_source_and_disposition",
+        executable: false,
+        userStatus: "pending",
+        organizationStatus: "suspended",
+      });
+      await other.query("SET lock_timeout='100ms'");
+      await expect(other.query(`UPDATE ${table} SET id=id`)).rejects.toMatchObject({
+        code: "55P03",
+      });
+      await client.query("ROLLBACK");
+      await other.query("BEGIN");
+      await other.query(`UPDATE ${table} SET id=id`);
+    } finally {
+      await client.query("ROLLBACK");
+      await other.query("ROLLBACK");
+      await other.end();
+    }
+  });
+  it("rejects a busy writer and releases partial relation locks", async () => {
+    const other = new pg.Client({ connectionString: url });
+    await other.connect();
+    await beginBounded();
+    try {
+      await other.query("BEGIN; LOCK TABLE identity.users IN ROW EXCLUSIVE MODE");
+      await expect(
+        lockLegacyHistoricalBindingOwner(client, ownerRequest(), verifiedSession()),
+      ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
+      await other.query("LOCK TABLE hotel_catalog.properties IN ROW EXCLUSIVE MODE NOWAIT");
+    } finally {
+      await client.query("ROLLBACK");
+      await other.query("ROLLBACK");
+      await other.end();
+    }
+  });
+  it.each([
+    "UPDATE identity.users SET status='suspended'",
+    "UPDATE identity.organization_memberships SET user_id='00000000-0000-4000-8000-000000000098'",
+    "ALTER TABLE identity.users FORCE ROW LEVEL SECURITY",
+    "CREATE TABLE identity.owner_test_child () INHERITS (identity.users)",
+    "INSERT INTO identity.external_identities SELECT '00000000-0000-4000-8000-000000000098', user_id, provider, 'another_owner', raw_profile FROM identity.external_identities",
+  ])("rejects ownership or relation drift: %s", async (sql) => {
+    await beginBounded();
+    try {
+      await client.query(sql);
+      await expect(
+        lockLegacyHistoricalBindingOwner(client, ownerRequest(), verifiedSession()),
+      ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each(["expired", "wrong_owner", "wrong_org"])(
+    "rejects %s sessions and releases its locks",
+    async (mode) => {
+      const other = new pg.Client({ connectionString: url });
+      await other.connect();
+      await beginBounded();
+      try {
+        const session = verifiedSession();
+        if (mode === "expired") session.expiresAt = 1;
+        if (mode === "wrong_owner") session.workosUserId = "user_other";
+        if (mode === "wrong_org") session.workosOrgId = "org_other";
+        await expect(
+          lockLegacyHistoricalBindingOwner(client, ownerRequest(), session),
+        ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
+        await other.query("BEGIN; LOCK TABLE identity.users IN ROW EXCLUSIVE MODE NOWAIT");
+      } finally {
+        await client.query("ROLLBACK");
+        await other.query("ROLLBACK");
+        await other.end();
+      }
+    },
+  );
+  it.each([
+    "BEGIN",
+    "BEGIN ISOLATION LEVEL REPEATABLE READ; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='5s'",
+  ])("rejects unbounded or stale-snapshot transactions: %s", async (sql) => {
+    await client.query(sql);
+    try {
+      await expect(
+        lockLegacyHistoricalBindingOwner(client, ownerRequest(), verifiedSession()),
+      ).rejects.toThrow("HISTORICAL_OWNER_LOCK_OR_EVIDENCE_FAILED");
     } finally {
       await client.query("ROLLBACK");
     }
