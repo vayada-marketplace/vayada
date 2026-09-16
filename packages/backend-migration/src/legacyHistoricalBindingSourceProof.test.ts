@@ -51,7 +51,9 @@ describe("source proof transaction boundary", () => {
       await expect(
         read({ connect: async () => ({ query, release }) } as never, request),
       ).rejects.toThrow();
-      expect(query).toHaveBeenNthCalledWith(1, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      expect(query).toHaveBeenNthCalledWith(1, "ROLLBACK");
+      if (!cleanupFails)
+        expect(query).toHaveBeenNthCalledWith(2, "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
       expect(query).toHaveBeenLastCalledWith("ROLLBACK");
       expect(release).toHaveBeenCalledWith(cleanupFails);
     },
@@ -169,6 +171,91 @@ describe.skipIf(!url)("source proof on parent-migrated disposable PostgreSQL", (
       expect(pool.totalCount).toBe(pool.idleCount);
     },
   );
+  it("resets a leaked snapshot before checking a subsequently committed run", async () => {
+    const leaked = await pool.connect();
+    const release = vi.spyOn(leaked, "release").mockImplementation(() => {});
+    try {
+      await leaked.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await leaked.query("SELECT count(*) FROM platform.source_extraction_runs");
+      const expected = await seed();
+      const result = await read({ connect: async () => leaked } as never, expected);
+      expect(result.sourceRunId).toBe(expected.sourceRunId);
+      expect(release).toHaveBeenCalledWith(false);
+    } finally {
+      release.mockRestore();
+      await leaked.query("ROLLBACK");
+      leaked.release();
+    }
+  });
+  it.each(["forced RLS", "inheritance"])("rejects source relations with %s", async (mode) => {
+    const expected = await seed();
+    try {
+      await pool.query(
+        mode === "forced RLS"
+          ? "ALTER TABLE migration_source_pms.snapshot_rows FORCE ROW LEVEL SECURITY"
+          : "CREATE TABLE migration_source_pms.binding_source_test_child () INHERITS (migration_source_pms.snapshot_rows)",
+      );
+      await expect(read(pool, expected)).rejects.toThrow("visibility");
+    } finally {
+      await pool.query(
+        mode === "forced RLS"
+          ? "ALTER TABLE migration_source_pms.snapshot_rows NO FORCE ROW LEVEL SECURITY"
+          : "DROP TABLE IF EXISTS migration_source_pms.binding_source_test_child",
+      );
+    }
+  });
+  it("cannot validate against uncommitted evidence on a leaked write transaction", async () => {
+    const expected = await seed(),
+      leaked = await pool.connect();
+    const release = vi.spyOn(leaked, "release").mockImplementation(() => {});
+    try {
+      await leaked.query("BEGIN");
+      await leaked.query(
+        "UPDATE platform.source_extraction_runs SET environment='staging' WHERE run_id=$1",
+        [expected.sourceRunId],
+      );
+      const ledger = await readSourceLedger(leaked, expected.sourceRunId);
+      const key = (r: (typeof ledger.tables)[number]) =>
+        `${r.source_database}\0${r.source_schema}\0${r.source_table}`;
+      ledger.tables.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+      expected.sourceEnvironment = "staging";
+      expected.sourceEvidenceSha256 = hashSourceLedger(ledger);
+      await expect(read({ connect: async () => leaked } as never, expected)).rejects.toThrow(
+        "ledger mismatch",
+      );
+      expect(
+        (
+          await leaked.query(
+            "SELECT environment FROM platform.source_extraction_runs WHERE run_id=$1",
+            [expected.sourceRunId],
+          )
+        ).rows[0].environment,
+      ).toBe("local");
+    } finally {
+      release.mockRestore();
+      await leaked.query("ROLLBACK");
+      leaked.release();
+    }
+  });
+  it("ignores persisted temporary catalogs that hide source inheritance", async () => {
+    const expected = await seed();
+    const client = await pool.connect();
+    const release = vi.spyOn(client, "release").mockImplementation(() => {});
+    try {
+      await client.query(
+        "CREATE TEMP TABLE pg_inherits (inhrelid oid, inhparent oid); CREATE TABLE migration_source_pms.binding_source_test_child () INHERITS (migration_source_pms.snapshot_rows)",
+      );
+      await expect(read({ connect: async () => client } as never, expected)).rejects.toThrow(
+        "visibility",
+      );
+    } finally {
+      release.mockRestore();
+      await client.query(
+        "ROLLBACK; DROP TABLE IF EXISTS pg_temp.pg_inherits; DROP TABLE IF EXISTS migration_source_pms.binding_source_test_child",
+      );
+      client.release();
+    }
+  });
   it.each(["duplicate", "hotel", "external", "missing", "id", "boolean"])(
     "rejects %s source rows",
     async (mode) => {
