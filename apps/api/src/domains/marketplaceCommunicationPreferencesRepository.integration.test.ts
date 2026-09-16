@@ -209,6 +209,38 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
     }
   });
 
+  it("returns typed command_in_progress when the aggregate lock times out", async () => {
+    const blocker = new pg.Client({ connectionString: TEST_DATABASE_URL! });
+    const shortTimeoutRepository = createPgMarketplaceCommunicationPreferencesRepository({
+      connectionString: TEST_DATABASE_URL!,
+      now: () => new Date(acceptedAt),
+      lockTimeoutMs: 25,
+    });
+    await blocker.connect();
+    await blocker.query("BEGIN");
+    await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `${organizationId}:${userId}`,
+    ]);
+    try {
+      await expect(
+        shortTimeoutRepository.replaceCommunicationPreferences(
+          command("lock-timeout", 0, "off", "off"),
+        ),
+      ).resolves.toEqual({ ok: false, error: { code: "command_in_progress" } });
+      await expect(sideEffectCounts()).resolves.toEqual({
+        aggregate: 0,
+        audit: 0,
+        channel: 0,
+        idempotency: 0,
+        topic: 0,
+      });
+    } finally {
+      await blocker.query("ROLLBACK");
+      await blocker.end();
+      await shortTimeoutRepository.close();
+    }
+  });
+
   function scope(
     launchPolicy: MarketplaceCommunicationLaunchPolicy,
     targetUserId = userId,
