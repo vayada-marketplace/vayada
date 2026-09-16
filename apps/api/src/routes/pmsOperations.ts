@@ -7444,7 +7444,7 @@ function toManualRefundCommand(
       !/^0(?:\.0+)?$/.test(amountDecimal) &&
       currency &&
       /^[A-Z]{3}$/.test(currency)
-      ? { evidenceId, amount: { amountDecimal, currency } }
+      ? { evidenceId: evidenceId.toLowerCase(), amount: { amountDecimal, currency } }
       : null;
   });
   if (

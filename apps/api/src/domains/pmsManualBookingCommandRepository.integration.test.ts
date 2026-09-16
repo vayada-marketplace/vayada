@@ -32,6 +32,7 @@ import type {
 } from "./pmsManualBookingTransactionPorts.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createPmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
+import { appendCheckoutAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const uuid = (suffix: number) => `82000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
@@ -1369,6 +1370,66 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     });
   });
 
+  it("atomically allocates a manual refund to current add-on evidence", async () => {
+    const created = await repository.createManualBooking(
+      command("refund-addon", "paid", "cash", "2026-08-20", true),
+    );
+    const scope = await admin.query<{ payment: string; selection: string }>(
+      `SELECT payment.id::text AS payment,selection.id::text AS selection
+       FROM finance.payments payment JOIN booking.booking_addon_selections selection
+         ON selection.guest_booking_id=payment.guest_booking_id
+       WHERE payment.guest_booking_id=$1::uuid AND payment.payment_kind='manual'`,
+      [created.guestBookingId],
+    );
+    await appendCheckoutAddonRevenueEvidence(admin, {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      fulfilledSelectionIds: [scope.rows[0]!.selection],
+      commandKeyHash: "b".repeat(64),
+    });
+    const target = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='fulfillment'`,
+      [created.guestBookingId],
+    );
+    const refund = {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      commandId: "refund-addon-command",
+      idempotencyKey: "refund-addon-key",
+      paymentEvidenceId: scope.rows[0]!.payment,
+      accountingDate: "2026-08-21",
+      allocations: [
+        {
+          evidenceId: target.rows[0]!.id,
+          amount: { amountDecimal: "5.00", currency: "EUR" },
+        },
+      ],
+      audit: {
+        actor: { kind: "user" as const, userId: actorId, organizationId },
+        requestId: "refund-addon-request",
+        reason: "Refund manual booking add-on",
+        requestedAt: acceptedAt.toISOString(),
+      },
+    };
+    await expect(operations.refundManualBooking!(refund)).resolves.toMatchObject({ ok: true });
+    await expect(operations.refundManualBooking!(refund)).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+    });
+    const evidence = await admin.query(
+      `SELECT economic_event AS event,gross_amount::text AS gross,
+         recognized_on::text AS recognized,corrects_evidence_id::text AS target
+       FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1::uuid
+       ORDER BY source_revision`,
+      [created.guestBookingId],
+    );
+    expect(evidence.rows).toEqual([
+      { event: "fulfillment", gross: "10.0000", recognized: "2026-08-20", target: null },
+      { event: "refund", gross: "-5.0000", recognized: "2026-08-21", target: target.rows[0]!.id },
+    ]);
+  });
+
   it("refunds the current retained-charge tip after a paid cancellation", async () => {
     const created = await repository.createManualBooking(
       command("refund-retained", "paid", "cash", "2026-08-20", false),
@@ -1944,6 +2005,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         "DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id = $1::uuid",
         "DELETE FROM pms.booking_notes_private WHERE property_id = $1::uuid",
         "DELETE FROM pms.operational_booking_assignments WHERE property_id = $1::uuid",
+        "DELETE FROM booking.addon_revenue_evidence WHERE property_id = $1::uuid",
         "DELETE FROM booking.booking_addon_selections WHERE property_id = $1::uuid",
         "DELETE FROM booking.nightly_revenue_evidence WHERE property_id = $1::uuid",
         "DELETE FROM booking.nightly_revenue_room_scopes WHERE property_id = $1::uuid",
