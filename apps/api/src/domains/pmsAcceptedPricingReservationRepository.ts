@@ -52,80 +52,95 @@ export function createPgPmsAcceptedPricingReservationPort(
   return {
     async adoptAcceptedPricingReservation(command) {
       if (!validCommand(command)) throw conflict();
-      await lockPmsInventoryMutationScope(client, command.propertyId);
-      if (!(await ownsVayadaPms(client, command))) throw conflict();
-      const receipts = await lockReceipts(client, command);
-      const byType = receiptByType(command, receipts);
-      if (!byType) throw conflict();
-      const existing = await lockAssignments(client, command);
-      const replayed = existing.length > 0;
-      if (replayed) {
-        if (!exactReplay(command, existing, byType, receipts)) throw conflict();
-        await client.query(
-          `UPDATE pms.operational_booking_assignments SET updated_at=updated_at
+      await client.query("SAVEPOINT pms_accepted_pricing_reservation");
+      try {
+        await lockPmsInventoryMutationScope(client, command.propertyId);
+        if (!(await ownsVayadaPms(client, command))) throw conflict();
+        const receipts = await lockReceipts(client, command);
+        const byType = receiptByType(command, receipts);
+        if (!byType) throw conflict();
+        const existing = await lockAssignments(client, command);
+        const replayed = existing.length > 0;
+        if (replayed) {
+          if (!exactReplay(command, existing, byType, receipts)) throw conflict();
+          await client.query(
+            `UPDATE pms.operational_booking_assignments SET updated_at=updated_at
            WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
-          [command.propertyId, command.guestBookingId],
+            [command.propertyId, command.guestBookingId],
+          );
+        } else {
+          if (receipts.some(({ state, revision }) => state !== "reserved" || revision !== 1))
+            throw conflict();
+          await insertAssignments(client, command, byType);
+        }
+        await client.query(
+          "SET CONSTRAINTS pms.trg_pms_direct_booking_inventory_receipt_handoff IMMEDIATE",
         );
-      } else {
-        if (receipts.some(({ state, revision }) => state !== "reserved" || revision !== 1))
-          throw conflict();
-        await insertAssignments(client, command, byType);
-      }
-      await client.query(
-        "SET CONSTRAINTS trg_pms_direct_booking_inventory_receipt_handoff IMMEDIATE",
-      );
-      await client.query(
-        "SET CONSTRAINTS trg_pms_direct_booking_inventory_receipt_handoff DEFERRED",
-      );
-      if (replayed)
+        await client.query(
+          "SET CONSTRAINTS pms.trg_pms_direct_booking_inventory_receipt_handoff DEFERRED",
+        );
+        if (replayed) {
+          await client.query("RELEASE SAVEPOINT pms_accepted_pricing_reservation");
+          return {
+            outcome: "replayed",
+            guestBookingId: command.guestBookingId,
+            acceptanceId: command.acceptanceId,
+          };
+        }
+        const spans = uniqueSpans(command);
+        const operationalAt = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now"))
+          .rows[0]?.now;
+        if (!(operationalAt instanceof Date)) throw new Error("PMS database clock unavailable");
+        const changedAt = operationalAt.toISOString();
+        await reconcilePmsOccupiedInventory(client, command.propertyId, spans, changedAt);
+        const linked = await reconcilePmsLinkedInventory(
+          client,
+          command.propertyId,
+          changedAt,
+          spans.map(({ roomTypeId, checkIn, checkOut }) => ({
+            roomTypeId,
+            startsOn: checkIn,
+            endsOn: priorDate(checkOut),
+          })),
+        );
+        await enqueuePmsLinkedInventorySideEffects(
+          client,
+          {
+            propertyId: command.propertyId,
+            operation: "accepted_pricing_reservation",
+            commandId: command.acceptanceId,
+            keyHash: command.pricingQuoteId,
+            acceptedAt: changedAt,
+            audit: { requestId: command.acceptanceId },
+          },
+          linked,
+        );
+        await enqueueHostInventoryChanges(
+          client,
+          {
+            propertyId: command.propertyId,
+            previewId: `pricing-acceptance:${command.acceptanceId}`,
+            fingerprint: command.pricingQuoteId,
+            occurredAt: operationalAt,
+          },
+          spans,
+        );
+        await client.query("RELEASE SAVEPOINT pms_accepted_pricing_reservation");
         return {
-          outcome: "replayed",
+          outcome: "adopted",
           guestBookingId: command.guestBookingId,
           acceptanceId: command.acceptanceId,
         };
-      const spans = uniqueSpans(command);
-      const operationalAt = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now"))
-        .rows[0]?.now;
-      if (!(operationalAt instanceof Date)) throw new Error("PMS database clock unavailable");
-      const changedAt = operationalAt.toISOString();
-      await reconcilePmsOccupiedInventory(client, command.propertyId, spans, changedAt);
-      const linked = await reconcilePmsLinkedInventory(
-        client,
-        command.propertyId,
-        changedAt,
-        spans.map(({ roomTypeId, checkIn, checkOut }) => ({
-          roomTypeId,
-          startsOn: checkIn,
-          endsOn: priorDate(checkOut),
-        })),
-      );
-      await enqueuePmsLinkedInventorySideEffects(
-        client,
-        {
-          propertyId: command.propertyId,
-          operation: "accepted_pricing_reservation",
-          commandId: command.acceptanceId,
-          keyHash: command.pricingQuoteId,
-          acceptedAt: changedAt,
-          audit: { requestId: command.acceptanceId },
-        },
-        linked,
-      );
-      await enqueueHostInventoryChanges(
-        client,
-        {
-          propertyId: command.propertyId,
-          previewId: `pricing-acceptance:${command.acceptanceId}`,
-          fingerprint: command.pricingQuoteId,
-          occurredAt: operationalAt,
-        },
-        spans,
-      );
-      return {
-        outcome: "adopted",
-        guestBookingId: command.guestBookingId,
-        acceptanceId: command.acceptanceId,
-      };
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT pms_accepted_pricing_reservation");
+        await client.query("RELEASE SAVEPOINT pms_accepted_pricing_reservation");
+        if (
+          isRecord(error) &&
+          error["constraint"] === "chk_pms_direct_booking_receipt_handoff_scope"
+        )
+          throw conflict();
+        throw error;
+      }
     },
   };
 }
@@ -185,14 +200,14 @@ function validCommand(command: PmsAcceptedPricingReservationCommand) {
 
 async function ownsVayadaPms(client: PoolClient, command: PmsAcceptedPricingReservationCommand) {
   const owner = await client.query(
-    `SELECT DISTINCT organization.id FROM identity.organizations organization
+    `SELECT organization.id FROM identity.organizations organization
      JOIN hotel_catalog.properties property ON property.id=$2::uuid
-     JOIN identity.organization_resource_links link ON link.organization_id=organization.id
-       AND link.product='pms' AND link.resource_type='pms_property'
-       AND link.resource_id=property.id AND link.status='active'
-       AND link.relationship IN ('owner','operator')
      WHERE organization.id=$1::uuid AND organization.kind='hotel_group'
        AND organization.status='active' AND property.profile_status<>'disabled'
+       AND EXISTS(SELECT 1 FROM identity.organization_resource_links link
+         WHERE link.organization_id=organization.id AND link.product='pms'
+           AND link.resource_type='pms_property' AND link.resource_id=property.id::text
+           AND link.status='active' AND link.relationship IN ('owner','operator'))
      FOR UPDATE OF organization`,
     [command.organizationId, command.propertyId],
   );
