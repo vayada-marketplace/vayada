@@ -1376,6 +1376,43 @@ async function enqueueProjectionRefresh(
   );
   const outboxEventId = outbox.rows[0]?.outboxEventId;
   if (!outboxEventId) throw new Error("PMS inventory materialization outbox insert failed");
+  for (const roomTypeId of intent.roomTypeIds) {
+    await client.query(
+      `INSERT INTO platform.outbox_events (
+         domain_event_id, outbox_key, destination, event_type, tenant_scope,
+         organization_id, property_id, resource_product, resource_type,
+         resource_id, correlation_id, idempotency_key_hash, payload, outbox_metadata
+       ) VALUES (
+         $1::uuid, $2, 'pms.channel-manager', 'pms.inventory.ari_changed',
+         'property', NULL, $3::uuid, 'pms', 'room_type', $4, $5, $6,
+         $7::jsonb, $8::jsonb
+       ) ON CONFLICT (destination, outbox_key) DO NOTHING`,
+      [
+        eventId,
+        `pms.channel-manager.inventory.property.${command.propertyId}.room.${roomTypeId}.key.${keyHash}.attempt.${reservation.attempt}.v1`,
+        command.propertyId,
+        roomTypeId,
+        command.audit.correlationId ?? command.audit.requestId,
+        keyHash,
+        JSON.stringify({
+          propertyId: command.propertyId,
+          roomTypeId,
+          coverageFrom: intent.coverageFrom,
+          coverageThroughExclusive: new Date(
+            Date.parse(`${intent.coverageThrough}T00:00:00.000Z`) + DAY_MS,
+          )
+            .toISOString()
+            .slice(0, 10),
+          reason: intent.reason,
+          inventoryVersion: keyHash,
+        }),
+        JSON.stringify({
+          contractVersion: PMS_INVENTORY_MATERIALIZATION_CONTRACT_VERSION,
+          sourceReadRequired: true,
+        }),
+      ],
+    );
+  }
   return Object.freeze({ eventId, outboxEventId });
 }
 

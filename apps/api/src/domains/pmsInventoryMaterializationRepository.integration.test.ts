@@ -1294,6 +1294,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       events: 1,
       outbox: 1,
     });
+    expect(
+      (
+        await admin.query(
+          `SELECT payload FROM platform.outbox_events
+           WHERE property_id=$1 AND destination='pms.channel-manager'
+             AND event_type='pms.inventory.ari_changed'`,
+          [fixture.propertyId],
+        )
+      ).rows,
+    ).toEqual([{ payload: expect.objectContaining({ reason: "full_horizon_apply" }) }]);
 
     const unchanged = await fixture.repository.materializeInventory(
       materializationCommand(fixture, "unchanged", 1, "2026-08-04", "2026-08-06"),

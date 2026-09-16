@@ -654,6 +654,16 @@ async function persistDirectBookingReceipt(
                 jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$4,
                   'coverageThroughExclusive',$5,'reason','reservation_held')
        FROM source,event RETURNING id,domain_event_id
+     ), ari_outbox AS (
+       INSERT INTO platform.outbox_events (
+         domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,
+         resource_product,resource_type,resource_id,correlation_id,idempotency_key_hash,payload
+       ) SELECT event.id,concat('pms.channel-manager.inventory.receipt.',source.receipt_id,
+                  '.held.v1'),'pms.channel-manager','pms.inventory.ari_changed','property',
+                $1::uuid,'pms','inventory_reservation',source.receipt_id::text,$3,$8,
+                jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$4,
+                  'coverageThroughExclusive',$5,'reason','reservation_held')
+       FROM source,event RETURNING id
      ), receipt AS (
        INSERT INTO pms.inventory_reservation_receipts (
          receipt_id,contract_version,receipt_owner,organization_id,property_id,room_type_id,
@@ -663,7 +673,8 @@ async function persistDirectBookingReceipt(
        ) SELECT source.receipt_id,$10,'pms',source.organization_id,$1::uuid,$2::uuid,$4::date,$5::date,
                 $6,$3,$11,source.calendar_revision,source.calendar_revision,$9,claim.id,
                 event.id,outbox.id,$7::timestamptz
-       FROM source,claim,event,outbox RETURNING receipt_id,organization_id,property_id,room_type_id
+       FROM source,claim,event,outbox,ari_outbox
+       RETURNING receipt_id,organization_id,property_id,room_type_id
      ), watermarks AS (
        INSERT INTO pms.inventory_reservation_day_watermarks (
          receipt_id,organization_id,property_id,room_type_id,stay_date,calendar_revision,
@@ -752,11 +763,21 @@ async function releaseDirectBookingReceipt(
                 jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$5,
                   'coverageThroughExclusive',$6,'reason','reservation_released')
        FROM source,event RETURNING id,domain_event_id
+     ), ari_outbox AS (
+       INSERT INTO platform.outbox_events (
+         domain_event_id,outbox_key,destination,event_type,tenant_scope,property_id,
+         resource_product,resource_type,resource_id,correlation_id,idempotency_key_hash,payload
+       ) SELECT event.id,concat('pms.channel-manager.inventory.receipt.',source.receipt_id,
+                  '.released.v1'),'pms.channel-manager','pms.inventory.ari_changed','property',
+                $1::uuid,'pms','inventory_reservation',source.receipt_id::text,$3,$9,
+                jsonb_build_object('propertyId',$1,'roomTypeId',$2,'coverageFrom',$5,
+                  'coverageThroughExclusive',$6,'reason','reservation_released')
+       FROM source,event RETURNING id
      ) UPDATE pms.inventory_reservation_statuses status
        SET lifecycle_state='released',lifecycle_revision=2,release_fingerprint_hash=$11,
            release_idempotency_key_id=claim.id,release_domain_event_id=event.id,
            release_outbox_event_id=outbox.id,released_at=$8::timestamptz
-       FROM source,claim,event,outbox WHERE status.receipt_id=source.receipt_id
+       FROM source,claim,event,outbox,ari_outbox WHERE status.receipt_id=source.receipt_id
        RETURNING status.receipt_id::text AS "receiptId"`,
     [
       reservation.propertyId,

@@ -375,6 +375,18 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     try {
       await client.query("BEGIN");
       const reservation = await port.reserveBundle!({ ...input, transaction: client, quoteSessionId: `change-request:${randomUUID()}` });
+      expect(
+        (
+          await client.query(
+            `SELECT payload->>'roomTypeId' AS room,payload->>'reason' AS reason
+             FROM platform.outbox_events
+             WHERE property_id=$1 AND destination='pms.channel-manager'
+               AND event_type='pms.inventory.ari_changed'
+             ORDER BY room,reason`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual(rooms.map((room) => ({ room, reason: "reservation_held" })));
       const base = { ...input, transaction: client, reservation: { ...reservation, receipts: [...reservation.receipts].reverse() } };
       expect(await port.bundleAvailabilityCredits!(base)).toEqual(new Map(rooms.map((id) => [id, { checkIn: input.checkIn, checkOut: input.checkOut, roomCount: 2 }])));
       expect(await port.bundleAvailabilityCredits!({ ...base, propertyId: randomUUID() })).toBeNull();
@@ -388,6 +400,23 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
       expect(await port.bundleAvailabilityCredits!(base)).toBeNull();
       await client.query("ROLLBACK TO SAVEPOINT duplicate_type");
       await port.release({ ...input, transaction: client, reservation });
+      expect(
+        (
+          await client.query(
+            `SELECT payload->>'roomTypeId' AS room,payload->>'reason' AS reason
+             FROM platform.outbox_events
+             WHERE property_id=$1 AND destination='pms.channel-manager'
+               AND event_type='pms.inventory.ari_changed'
+             ORDER BY room,reason`,
+            [propertyId],
+          )
+        ).rows,
+      ).toEqual(
+        rooms.flatMap((room) => [
+          { room, reason: "reservation_held" },
+          { room, reason: "reservation_released" },
+        ]),
+      );
       expect(await port.bundleAvailabilityCredits!(base)).toBeNull();
     } finally { await client.query("ROLLBACK"); client.release(); }
   });
