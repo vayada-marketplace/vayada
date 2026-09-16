@@ -198,6 +198,7 @@ jobs:
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
+          src/domains/bookingAffiliateReferralProductionPreflightStorage.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
