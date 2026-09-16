@@ -64,7 +64,7 @@ export function createPgPmsAcceptedPricingReservationPort(
         if (replayed) {
           if (!exactReplay(command, existing, byType, receipts)) throw conflict();
           await client.query(
-            `UPDATE pms.operational_booking_assignments SET updated_at=updated_at
+            `UPDATE pms.operational_booking_assignments SET assignment_payload=assignment_payload
            WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
             [command.propertyId, command.guestBookingId],
           );
