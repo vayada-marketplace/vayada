@@ -4,6 +4,7 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 import { runAdminTransfer } from "./accountAdminTransferCommand.js";
 import {
   prepareAdminTransferProof,
+  resolveAdminTransferCommandSource,
   resolveAdminTransferSource,
 } from "./accountAdminTransferPreparation.js";
 import { lockAdminTransferSnapshot } from "./accountAdminTransferSnapshot.js";
@@ -189,6 +190,9 @@ describe.skipIf(!url)("atomic administrator transfer", () => {
     expect(await runAdminTransfer(pool, source, request, proofId)).toEqual({
       outcome: "idempotent_replay",
     });
+    const { actorMembershipId: _, ...sessionSource } = source;
+    expect(await resolveAdminTransferSource(pool, sessionSource)).toBeNull();
+    expect(await resolveAdminTransferCommandSource(pool, sessionSource)).toEqual(source);
     expect(await rows()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

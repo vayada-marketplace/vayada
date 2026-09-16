@@ -20,6 +20,24 @@ export async function resolveAdminTransferSource(
   pool: Pool,
   source: AdminTransferSessionSource,
 ): Promise<AdminTransferSource | null> {
+  return resolveSource(pool, source, true);
+}
+
+/** Resolve the active source membership for final-command receipt replay.
+ * The command itself locks and requires ownership before any new mutation.
+ */
+export async function resolveAdminTransferCommandSource(
+  pool: Pool,
+  source: AdminTransferSessionSource,
+): Promise<AdminTransferSource | null> {
+  return resolveSource(pool, source, false);
+}
+
+async function resolveSource(
+  pool: Pool,
+  source: AdminTransferSessionSource,
+  requireOwner: boolean,
+): Promise<AdminTransferSource | null> {
   if (!source.sessionId) return null;
   const result = await pool.query<{ id: string }>(
     `SELECT membership.id
@@ -31,10 +49,16 @@ export async function resolveAdminTransferSource(
        ON external.user_id = actor.id AND external.provider = 'workos'
      WHERE organization.id = $1 AND organization.kind = 'hotel_group'
        AND organization.status = 'active' AND organization.workos_org_id = $2
-       AND membership.user_id = $3 AND membership.role_key = 'hotel_owner'
+       AND membership.user_id = $3 AND (NOT $5::boolean OR membership.role_key = 'hotel_owner')
        AND membership.status = 'active' AND actor.status = 'active'
        AND external.provider_user_id = $4`,
-    [source.organizationId, source.workosOrgId, source.actorUserId, source.workosUserId],
+    [
+      source.organizationId,
+      source.workosOrgId,
+      source.actorUserId,
+      source.workosUserId,
+      requireOwner,
+    ],
   );
   return result.rowCount === 1 ? { ...source, actorMembershipId: result.rows[0]!.id } : null;
 }

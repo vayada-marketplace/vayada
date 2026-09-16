@@ -199,6 +199,7 @@ export {
 export { runAdminTransfer } from "./accountAdminTransferCommand.js";
 export {
   prepareAdminTransferProof,
+  resolveAdminTransferCommandSource,
   resolveAdminTransferSource,
   type AdminTransferSessionSource,
   type AdminTransferSource,
