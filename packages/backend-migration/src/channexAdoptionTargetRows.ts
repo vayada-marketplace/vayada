@@ -2,6 +2,7 @@ import type pg from "pg";
 
 import { hashTargetRow, type Json } from "./channexAdoptionManifestCrypto.js";
 import { rejectAdoption } from "./channexAdoptionConsumptionError.js";
+import { LEGACY_OWNERSHIP_ROW_TABLES } from "./legacyOwnershipBeforeState.js";
 
 export type AdoptionQueryClient = Pick<pg.ClientBase, "query">;
 export type AdoptionTargetTable =
@@ -27,6 +28,27 @@ export async function readAdoptionTargetRow(
 ): Promise<{ id: string; rowStateSha256: string }> {
   if (!TARGET_TABLES.has(table))
     rejectAdoption("UNSUPPORTED_TARGET_TABLE", "Target table is not allowlisted");
+  return readTargetRow(client, table, id);
+}
+
+/** Separate ownership boundary; the clean-adoption allowlist remains unchanged. */
+export async function readLegacyOwnershipTargetRow(
+  client: AdoptionQueryClient,
+  table: (typeof LEGACY_OWNERSHIP_ROW_TABLES)[keyof typeof LEGACY_OWNERSHIP_ROW_TABLES],
+  id: string,
+): Promise<{ id: string; rowStateSha256: string }> {
+  if (!(Object.values(LEGACY_OWNERSHIP_ROW_TABLES) as readonly string[]).includes(table))
+    rejectAdoption("UNSUPPORTED_TARGET_TABLE");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
+    rejectAdoption("TARGET_ROW_MISMATCH");
+  return readTargetRow(client, table, id);
+}
+
+async function readTargetRow(
+  client: AdoptionQueryClient,
+  table: string,
+  id: string,
+): Promise<{ id: string; rowStateSha256: string }> {
   const [schema, relation] = table.split(".") as [string, string];
   const columns = await client.query<Column>(
     `SELECT column_name AS "columnName", data_type AS "dataType", udt_name AS "udtName"
