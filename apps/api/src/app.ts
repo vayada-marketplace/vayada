@@ -1,3 +1,5 @@
+import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
@@ -372,6 +374,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
+  marketplaceAffiliateAssentRepository?: AffiliateAssentRepository;
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
@@ -616,6 +619,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceAffiliatePolicyRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliatePolicyRepository,
+    });
+  }
+  if (options.marketplaceAffiliateAssentRepository) {
+    app.register(registerMarketplaceAffiliateAssentRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateAssentRepository,
     });
   }
   if (options.marketplaceAffiliateDraftRepository) {

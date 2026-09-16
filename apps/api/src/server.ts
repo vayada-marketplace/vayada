@@ -1,3 +1,4 @@
+import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
@@ -1629,6 +1630,8 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
+  marketplaceAffiliateAssentRepository:
+    createPgMarketplaceAffiliateAssentRepository(targetDatabaseUrl),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
   marketplaceAffiliatePolicyRepository:
