@@ -707,6 +707,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     const created = await repository.createManualBooking(
       command("price-correction", "unpaid", "cash", "2026-08-20", true),
     );
+    const addOn = await admin.query<{ selection: string }>(
+      `SELECT id::text AS selection FROM booking.booking_addon_selections
+       WHERE guest_booking_id=$1::uuid`,
+      [created.guestBookingId],
+    );
+    await appendCheckoutAddonRevenueEvidence(admin, {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      fulfilledSelectionIds: [addOn.rows[0]!.selection],
+      commandKeyHash: "c".repeat(64),
+    });
+    const addOnTarget = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='fulfillment'`,
+      [created.guestBookingId],
+    );
     const targets = await admin.query<{ id: string }>(
       `SELECT id::text FROM booking.nightly_revenue_evidence
        WHERE guest_booking_id=$1::uuid ORDER BY stay_date,line_position,id`,
@@ -725,6 +741,12 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         },
       ],
     });
+    exact.addOns = [
+      {
+        targetEvidenceId: addOnTarget.rows[0]!.id.toUpperCase(),
+        replacementAmount: { amountDecimal: "8.00", currency: "EUR" },
+      },
+    ];
     await expect(operations.correctManualBookingPrices!(exact)).resolves.toMatchObject({
       ok: true,
       commandMeta: { sideEffects: ["audit_event"] },
@@ -777,6 +799,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         { accountingDate: "2026-08-25", reason: "correct nightly prices" },
       ],
     });
+    const addOnEvidence = await admin.query(
+      `SELECT economic_event AS event,gross_amount::text AS gross,
+         recognized_on::text AS recognized,corrects_evidence_id::text AS target
+       FROM booking.addon_revenue_evidence WHERE guest_booking_id=$1::uuid
+       ORDER BY source_revision`,
+      [created.guestBookingId],
+    );
+    expect(addOnEvidence.rows).toEqual([
+      { event: "fulfillment", gross: "10.0000", recognized: "2026-08-20", target: null },
+      {
+        event: "correction",
+        gross: "-2.0000",
+        recognized: "2026-08-25",
+        target: addOnTarget.rows[0]!.id,
+      },
+    ]);
     const projection = await readRepository.findReservationByGuestBookingId(
       propertyId,
       created.guestBookingId,
@@ -794,6 +832,73 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       { amount: "100.50", evidenceQuality: "inferred" },
       { amount: "100.50", evidenceQuality: "inferred" },
     ]);
+  });
+
+  it("records an add-on-only price correction without nightly evidence", async () => {
+    const created = await repository.createManualBooking(
+      command("addon-price-correction", "unpaid", "cash", "2026-08-20", true),
+    );
+    const selection = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.booking_addon_selections WHERE guest_booking_id=$1::uuid`,
+      [created.guestBookingId],
+    );
+    await appendCheckoutAddonRevenueEvidence(admin, {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      fulfilledSelectionIds: [selection.rows[0]!.id],
+      commandKeyHash: "d".repeat(64),
+    });
+    const target = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='fulfillment'`,
+      [created.guestBookingId],
+    );
+    const correction: PmsManualPriceCorrectionCommand = {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      commandId: "addon-price-correction-command",
+      idempotencyKey: "addon-price-correction-key",
+      accountingDate: "2026-08-25",
+      reason: "correct add-on price",
+      addOns: [
+        {
+          targetEvidenceId: target.rows[0]!.id,
+          replacementAmount: { amountDecimal: "7.50", currency: "EUR" },
+        },
+      ],
+      audit: {
+        actor: { kind: "user", userId: actorId, organizationId },
+        requestId: "addon-price-correction-request",
+        reason: "Correct manual booking add-on price",
+        requestedAt: acceptedAt.toISOString(),
+      },
+    };
+    await expect(operations.correctManualBookingPrices!(correction)).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(operations.correctManualBookingPrices!(correction)).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+    });
+    const evidence = await admin.query(
+      `SELECT
+         (SELECT count(*)::int FROM booking.nightly_revenue_evidence
+          WHERE guest_booking_id=$1::uuid AND economic_event='correction') AS nightly,
+         (SELECT jsonb_agg(jsonb_build_object('event',economic_event,'gross',gross_amount::text)
+          ORDER BY source_revision) FROM booking.addon_revenue_evidence
+          WHERE guest_booking_id=$1::uuid) AS addon,
+         (SELECT private_payload->'addOns' FROM platform.product_audit_events
+          WHERE target_resource_id=$1::text AND action='pms.manual_price_correction') AS audit_addons`,
+      [created.guestBookingId],
+    );
+    expect(evidence.rows[0]).toMatchObject({
+      nightly: 0,
+      addon: [
+        { event: "fulfillment", gross: "10.0000" },
+        { event: "correction", gross: "-2.5000" },
+      ],
+      audit_addons: correction.addOns,
+    });
   });
 
   it("serializes competing price corrections against one current tip", async () => {
@@ -1428,6 +1533,34 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       { event: "fulfillment", gross: "10.0000", recognized: "2026-08-20", target: null },
       { event: "refund", gross: "-5.0000", recognized: "2026-08-21", target: target.rows[0]!.id },
     ]);
+    const refundTarget = await admin.query<{ id: string }>(
+      `SELECT id::text FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='refund'`,
+      [created.guestBookingId],
+    );
+    const correction: PmsManualPriceCorrectionCommand = {
+      propertyId,
+      guestBookingId: created.guestBookingId,
+      commandId: "correct-refunded-addon-command",
+      idempotencyKey: "correct-refunded-addon-key",
+      accountingDate: "2026-08-25",
+      addOns: [
+        {
+          targetEvidenceId: refundTarget.rows[0]!.id,
+          replacementAmount: { amountDecimal: "6.00", currency: "EUR" },
+        },
+      ],
+      audit: {
+        actor: { kind: "user", userId: actorId, organizationId },
+        requestId: "correct-refunded-addon-request",
+        reason: "Reject post-refund correction",
+        requestedAt: acceptedAt.toISOString(),
+      },
+    };
+    await expect(operations.correctManualBookingPrices!(correction)).resolves.toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
   });
 
   it("refunds the current retained-charge tip after a paid cancellation", async () => {
@@ -1869,7 +2002,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
   function priceCorrection(
     guestBookingId: string,
     suffix: string,
-    pricing: PmsManualPriceCorrectionCommand["pricing"],
+    pricing: NonNullable<PmsManualPriceCorrectionCommand["pricing"]>,
   ): PmsManualPriceCorrectionCommand {
     return {
       propertyId,

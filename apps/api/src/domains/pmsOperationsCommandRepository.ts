@@ -7082,11 +7082,12 @@ async function recordOperationalCommandAuditEvent(
       command.commandId,
       JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
       JSON.stringify(
-        "pricing" in command
+        "pricing" in command || "addOns" in command
           ? {
               accountingDate: command.accountingDate,
               reason: command.reason ?? null,
               pricing: command.pricing,
+              addOns: command.addOns,
             }
           : "stays" in command
             ? { accountingDate: command.accountingDate, stays: command.stays }
