@@ -1,4 +1,5 @@
 import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
 import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
 import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
 import { createReplacementBookingQuoteIssuer, requirePublicQuoteKey } from "./replacementBookingQuote.js";
@@ -237,6 +238,7 @@ export type BookingWebCheckoutAdapter = {
   ): Promise<void>;
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
+  getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -526,6 +528,17 @@ export async function registerBookingWebPublicRoutes(
     if (!checkoutAdapter.getPricingAddons) throw createHttpError(404, "Pricing extras unavailable.");
     return checkoutAdapter.getPricingAddons(request.params.slug);
   });
+
+  app.get<{ Params: BookingWebHotelParams & { quoteId: string } }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/guest-disclosure",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getQuoteGuestDisclosure)
+        throw createHttpError(404, "Guest rules unavailable.");
+      return checkoutAdapter.getQuoteGuestDisclosure(request.params.slug, request.params.quoteId);
+    },
+  );
 
   app.get<{ Params: BookingWebHotelParams; Querystring: PublicHotelQuoteQuery }>(
     "/hotels/:slug/offers",
@@ -1370,6 +1383,7 @@ export function createTargetBookingWebCheckoutAdapter(
 
   const pricingOffers = createPublicPricingOfferCatalog(pool);
   const pricingAddons = createPublicPricingAddonCatalog(pool);
+  const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
   const issueReplacementQuote = createReplacementBookingQuoteIssuer(createCurrentPricingQuoteStore(pool, 300));
 
   const editCleanupTimer = setInterval(() => {
@@ -1803,6 +1817,18 @@ export function createTargetBookingWebCheckoutAdapter(
         });
         return body;
       });
+    },
+    async getQuoteGuestDisclosure(slug, quoteId) {
+      let disclosure;
+      try {
+        disclosure = await guestDisclosure.read(slug, quoteId);
+      } catch (error) {
+        throw Object.assign(new Error("Guest rules temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
+      return disclosure;
     },
     async getPricingAddons(slug) {
       let addons;
