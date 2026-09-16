@@ -11,7 +11,9 @@ whitespace or control characters. Never interpret it as the canonical row ID.
 Authentication, permission, active identity, no-store and sanitized errors follow
 the existing endpoint; malformed keys return 422.
 
-Resolve only the selected organization's side of the collaboration. Match the
+Resolve only the selected organization's side of the collaboration. Source keys
+are unique per source system, not globally; multiple matching collaborations
+within that side are ambiguous and return 404 instead of choosing one. Match the
 canonical offer, property, hotel organization, creator profile and creator
 organization to the affiliate program and stable participation. Select the
 highest attempt number, then use the existing assent reader to enforce current
