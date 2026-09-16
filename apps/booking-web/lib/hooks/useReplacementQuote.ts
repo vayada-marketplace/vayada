@@ -36,6 +36,7 @@ export function useReplacementQuote(slug: string, request: PublicBookingQuoteReq
             setResult({
               identity,
               attempt,
+              quote,
               error: "This price has expired. Get an updated price.",
             }),
           Math.max(0, Date.parse(quote.expiresAt) - Date.now()),

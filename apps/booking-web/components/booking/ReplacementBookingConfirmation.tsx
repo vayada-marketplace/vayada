@@ -30,21 +30,27 @@ export default function ReplacementBookingConfirmation({
   const [error, setError] = useState("");
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [result, setResult] = useState<PricingAcceptanceResult | null>(null);
-  const [pendingGuest, setPendingGuest] = useState<PricingAcceptanceGuest | null>(null);
+  const [pending, setPending] = useState<{
+    guest: PricingAcceptanceGuest;
+    disclosure: PublicQuoteGuestDisclosure;
+  } | null>(null);
   const supported =
     quote.acceptanceMode === "instant" &&
     quote.paymentMethod === "pay_at_property" &&
     quote.dueNowMinor === "0" &&
     quote.dueLaterMinor === quote.totalMinor;
   const ready =
-    supported && !refreshRequired && termsAccepted && disclosure?.quoteId === quote.quoteId;
+    supported &&
+    !refreshRequired &&
+    (!!pending || (termsAccepted && disclosure?.quoteId === quote.quoteId));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ready || !disclosure || loading || result) return;
+    const acceptedDisclosure = pending?.disclosure ?? disclosure;
+    if (!ready || !acceptedDisclosure || loading || result) return;
     const data = new FormData(event.currentTarget);
     const guest =
-      pendingGuest ??
+      pending?.guest ??
       ({
         firstName: String(data.get("firstName") ?? ""),
         lastName: String(data.get("lastName") ?? ""),
@@ -54,11 +60,20 @@ export default function ReplacementBookingConfirmation({
         arrivalTime: String(data.get("arrivalTime") ?? ""),
         specialRequests: String(data.get("specialRequests") ?? ""),
       } satisfies PricingAcceptanceGuest);
-    setPendingGuest(guest);
+    setPending({ guest, disclosure: acceptedDisclosure });
     setLoading(true);
     setError("");
     try {
-      setResult(await acceptPricingQuote(slug, quote, disclosure, guest));
+      setResult(
+        await acceptPricingQuote(
+          slug,
+          quote,
+          acceptedDisclosure,
+          guest,
+          undefined,
+          pending ? "uncertain-retry" : "fresh",
+        ),
+      );
     } catch (failure) {
       const conflict = failure instanceof ApiError && failure.status === 409;
       setRefreshRequired(conflict);
@@ -88,23 +103,11 @@ export default function ReplacementBookingConfirmation({
       <div className="grid gap-4 sm:grid-cols-2">
         <label>
           First name
-          <input
-            className={field}
-            name="firstName"
-            maxLength={100}
-            required
-            disabled={!!pendingGuest}
-          />
+          <input className={field} name="firstName" maxLength={100} required disabled={!!pending} />
         </label>
         <label>
           Last name
-          <input
-            className={field}
-            name="lastName"
-            maxLength={100}
-            required
-            disabled={!!pendingGuest}
-          />
+          <input className={field} name="lastName" maxLength={100} required disabled={!!pending} />
         </label>
       </div>
       <label className="block">
@@ -115,7 +118,7 @@ export default function ReplacementBookingConfirmation({
           type="email"
           maxLength={254}
           required
-          disabled={!!pendingGuest}
+          disabled={!!pending}
         />
       </label>
       <label className="block">
@@ -126,7 +129,7 @@ export default function ReplacementBookingConfirmation({
           type="tel"
           maxLength={64}
           required={policy?.phoneRequired}
-          disabled={!!pendingGuest}
+          disabled={!!pending}
         />
       </label>
       <label className="block">
@@ -137,13 +140,13 @@ export default function ReplacementBookingConfirmation({
           maxLength={2}
           pattern="[A-Za-z]{2}"
           placeholder="DE"
-          disabled={!!pendingGuest}
+          disabled={!!pending}
         />
       </label>
       {policy?.arrivalTimeEnabled && (
         <label className="block">
           Expected arrival time (optional)
-          <input className={field} name="arrivalTime" type="time" disabled={!!pendingGuest} />
+          <input className={field} name="arrivalTime" type="time" disabled={!!pending} />
         </label>
       )}
       {policy?.specialRequestsEnabled && (
@@ -154,7 +157,7 @@ export default function ReplacementBookingConfirmation({
             name="specialRequests"
             maxLength={2000}
             rows={4}
-            disabled={!!pendingGuest}
+            disabled={!!pending}
           />
         </label>
       )}

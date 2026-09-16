@@ -91,6 +91,7 @@ export async function acceptPricingQuote(
   disclosure: PublicQuoteGuestDisclosure,
   guest: PricingAcceptanceGuest,
   signal?: AbortSignal,
+  mode: "fresh" | "uncertain-retry" = "fresh",
 ): Promise<PricingAcceptanceResult> {
   const verifiedDisclosure = parsePublicQuoteGuestDisclosure(disclosure, quote);
   if (
@@ -99,7 +100,7 @@ export async function acceptPricingQuote(
     quote.dueNowMinor !== "0" ||
     quote.dueLaterMinor !== quote.totalMinor ||
     !verifiedDisclosure ||
-    Date.parse(quote.expiresAt) <= Date.now()
+    (mode === "fresh" && Date.parse(quote.expiresAt) <= Date.now())
   )
     throw new Error("This price cannot be booked online. Please refresh the price.");
 
