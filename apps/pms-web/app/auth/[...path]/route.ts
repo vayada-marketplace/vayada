@@ -63,7 +63,9 @@ async function proxyAuthRequest(request: Request, context: AuthRouteContext): Pr
   }
 
   let upstreamResponse: Response;
-  const upstreamTimeout = AbortSignal.timeout(AUTH_GATEWAY_UPSTREAM_TIMEOUT_MS);
+  const upstreamTimeout = AbortSignal.timeout(
+    path.join("/") === "admin-transfer/callback" ? 20_000 : AUTH_GATEWAY_UPSTREAM_TIMEOUT_MS,
+  );
   try {
     upstreamResponse = await fetch(upstreamUrl, {
       method: request.method,

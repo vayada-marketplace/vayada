@@ -25,6 +25,7 @@ import {
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
   createWorkOSVerifier,
+  verifyAdminTransferProof,
 } from "@vayada/backend-auth";
 import {
   createPgEntitlementRepository,
@@ -94,6 +95,8 @@ import { createWorkOSStaffInvitationProvider } from "./platform/workosStaffInvit
 import { createWorkOSStaffRemovalProvider } from "./platform/workosStaffRemoval.js";
 import { startAdminRoleWorker } from "./platform/adminRoleWorker.js";
 import { createWorkOSAdminRoleProvider } from "./platform/workosAdminRoleProvider.js";
+import { createAdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
+import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import {
@@ -1212,6 +1215,47 @@ const staffInvitationRuntime =
       })()
     : undefined;
 
+const adminTransferPool =
+  config.auth && config.authSession && config.authSession.authFirstPartySurfaces.includes("pms-web")
+    ? new pg.Pool({ connectionString: config.auth.databaseUrl, max: 5 })
+    : undefined;
+const adminTransferRuntime =
+  adminTransferPool && config.auth && config.authSession
+    ? (() => {
+        const verifier = createWorkOSVerifier({
+          jwksUrl: config.auth.workosJwksUrl,
+          issuer: config.auth.workosIssuer,
+          audience: config.auth.workosAudience,
+        });
+        return createAdminTransferCoordinator({
+          pool: adminTransferPool,
+          reauthentication: createWorkOSAdminReauthentication({
+            apiKey: config.authSession.workosApiKey,
+            clientId: config.authSession.workosClientId,
+            callbackUrl: new URL(
+              "/auth/admin-transfer/callback",
+              config.authSession.authSurfaceOrigins["pms-web"],
+            ).toString(),
+            cookieSecret: config.authSession.authCookieSecret,
+            async verifyProof(binding, state, accessToken) {
+              const client = await adminTransferPool.connect();
+              try {
+                return await verifyAdminTransferProof(
+                  client,
+                  binding,
+                  state,
+                  accessToken,
+                  verifier,
+                );
+              } finally {
+                client.release();
+              }
+            },
+          }),
+        });
+      })()
+    : undefined;
+
 const platformAdminDashboardRepository = createTargetPlatformAdminDashboardRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1328,6 +1372,7 @@ const app = buildApp({
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
+          adminTransfer: adminTransferRuntime,
         }
       : undefined,
   workosWebhooks:
@@ -1856,6 +1901,7 @@ app.addHook("onClose", async () => {
     staffInvitationRuntime?.roles.close(),
     staffInvitationRuntime?.deliveryRepository.close(),
     staffInvitationRuntime?.removalJobRepository.close(),
+    adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
     bankTransferRepository?.close(),

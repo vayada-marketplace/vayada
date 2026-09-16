@@ -27,7 +27,11 @@ export function createWorkOSAdminReauthentication(config: Config) {
   if (config.cookieSecret.length < 32)
     throw new Error("Reauthentication cookie secret is too short");
   const key = createHash("sha256").update(purpose).update(config.cookieSecret).digest();
-  const workos = new WorkOS(config.apiKey, { clientId: config.clientId });
+  const workos = new WorkOS(config.apiKey, {
+    clientId: config.clientId,
+    maxRetries: 0,
+    timeout: 10_000,
+  });
   return {
     async start(binding: AdminTransferBinding, state: string, loginHint: string) {
       if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error("Invalid transfer state");
