@@ -655,3 +655,23 @@ the source session and ownership, validate all revisions/configuration, and cons
 proof using the same database transaction as the membership swap and audit.
 A provider that invalidates the source session requires restarting this flow;
 do not silently rebind the intent. Expired proof cleanup remains a rollout task.
+
+### WorkOS reauthentication adapter
+
+The internal API adapter uses AuthKit `maxAge: 0` and S256 PKCE. A five-minute
+AES-GCM encrypted callback cookie carries the database state, exact transfer
+binding and PKCE verifier; only random state and the challenge enter the provider
+URL. The fixed server-configured callback URL is also the cookie audience.
+The callback checks the original active source identity/session before exchanging
+the code and delegates signed freshness and one-use state to proof storage.
+Provider impersonation and all exchange/verification failures return no proof.
+No provider token or new login cookie is returned to the browser.
+
+HTTP registration still depends on the validated transfer command. The route
+must authorize a live Account admin, persist the complete intent first, set this
+cookie Secure/HttpOnly/SameSite=Lax with a callback-only path and 300-second
+lifetime, clear it on either callback outcome, and re-resolve the original live
+session at callback. It must set no-store and return only the proof ID to the
+fixed Team page. Do not expose caller-supplied bindings/digests or activate this
+adapter as a standalone authentication bypass. Actual hosted WorkOS flow testing
+is pending; adapter tests use real SDK URL construction and mocked code exchange.
