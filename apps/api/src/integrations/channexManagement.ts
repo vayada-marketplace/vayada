@@ -1,4 +1,6 @@
 import type { dispatchNextChannexClosedUpload } from "../domains/channexNextClosedUpload.js";
+import type { prepareNextChannexRoomAvailabilityDispatch } from "../domains/channexRoomAvailabilityCoordinator.js";
+import type { reconcilePendingChannexRoomAvailability } from "../domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexResponse } from "./channexResponseBody.js";
 import type { reconcilePendingChannexUploads } from "../domains/channexPendingUploadReconciliation.js";
 import {
@@ -119,6 +121,13 @@ export function createChannexManagementProvider(config: {
     lease: Parameters<typeof reconcilePendingChannexUploads>[1],
     get: Parameters<typeof reconcilePendingChannexUploads>[2],
   ) => ReturnType<typeof reconcilePendingChannexUploads>;
+  reconcileRoomAvailability?: (
+    lease: Parameters<typeof reconcilePendingChannexRoomAvailability>[2],
+    get: Parameters<typeof reconcilePendingChannexRoomAvailability>[3],
+  ) => ReturnType<typeof reconcilePendingChannexRoomAvailability>;
+  prepareRoomAvailability?: (
+    lease: Parameters<typeof prepareNextChannexRoomAvailabilityDispatch>[2],
+  ) => ReturnType<typeof prepareNextChannexRoomAvailabilityDispatch>;
 }): ChannexManagementProvider {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
@@ -128,7 +137,7 @@ export function createChannexManagementProvider(config: {
     signal,
   ) => {
     const url = new URL(path, apiBaseUrl);
-    if (url.origin !== new URL(apiBaseUrl).origin || !url.pathname.startsWith("/api/v1/"))
+    if (!allowedChannexReconciliationRead(url, apiBaseUrl))
       throw new Error("Invalid Channex read scope.");
     signal.throwIfAborted();
     const response = await fetcher(url, {
@@ -157,6 +166,22 @@ export function createChannexManagementProvider(config: {
       if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
         return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
       }
+      const ariContinuationHooks = [
+        config.reconcileClosedUploads,
+        config.dispatchClosedUpload,
+        config.reconcileRoomAvailability,
+        config.prepareRoomAvailability,
+      ];
+      if (
+        job.input.operationType === "sync_ari" &&
+        !job.input.restrictionsOnly &&
+        ariContinuationHooks.some(Boolean) &&
+        !ariContinuationHooks.every(Boolean)
+      )
+        return failure(
+          "invalid_state",
+          new Error("Complete pricing and availability reconciliation bundle required."),
+        );
       if (job.input.operationType === "sync_ari" && config.reconcileClosedUploads) {
         if (!input?.workerId)
           return failure("invalid_state", new Error("Current worker lease required."));
@@ -204,12 +229,84 @@ export function createChannexManagementProvider(config: {
           );
           if (result.kind === "retained")
             return { ok: false, code: "initial_upload_retained", attemptId: result.attemptId };
+          if (result.kind !== "no_closed_upload")
+            return failure(
+              "invalid_state",
+              new Error("Initial Channex preparation does not complete full sync."),
+            );
+        } catch {
+          return failure("provider_unavailable", new Error("Initial Channex upload unavailable."));
+        }
+      }
+      if (job.input.operationType === "sync_ari" && !job.input.restrictionsOnly) {
+        if (Boolean(config.reconcileRoomAvailability) !== Boolean(config.prepareRoomAvailability))
+          return failure(
+            "invalid_state",
+            new Error("Availability dispatch and reconciliation must be configured together."),
+          );
+        if (config.reconcileRoomAvailability && config.prepareRoomAvailability) {
+          if (!input?.workerId)
+            return failure("invalid_state", new Error("Current availability worker lease required."));
+          const lease = {
+            jobId: job.jobId,
+            attemptNumber: job.attemptNumber,
+            workerId: input.workerId,
+          };
+          try {
+            const reconciled = await config.reconcileRoomAvailability(lease, readClosedUpload);
+            if (reconciled.kind !== "pending_availability_reconciled")
+              return failure(
+                "reason" in reconciled &&
+                  reconciled.reason === "availability_reconciliation_batch_pending"
+                  ? "provider_unavailable"
+                  : "invalid_state",
+                new Error("Saved Channex availability still requires reconciliation."),
+              );
+            await input.onProgress?.();
+            const prepared = await config.prepareRoomAvailability(lease);
+            if (prepared.kind === "room_availability_current") {
+              // Continue to the existing plan only after complete current coverage.
+            } else if (prepared.kind === "prepared") {
+              const result = await prepared.dispatch(async (request, signal) => {
+                if (request.method !== "POST" || request.path !== "/api/v1/availability")
+                  throw new Error("Invalid Channex availability scope.");
+                signal.throwIfAborted();
+                return fetcher(new URL(request.path, apiBaseUrl), {
+                  method: "POST",
+                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                  body: JSON.stringify(request.body),
+                  signal,
+                  redirect: "error",
+                });
+              });
+              if (result.kind === "receipt_pending") await result.persist();
+              if (result.kind === "retained" || result.kind === "receipt_pending")
+                return {
+                  ok: false,
+                  code: "availability_upload_retained",
+                  attemptId: result.attemptId,
+                };
+              return failure(
+                "invalid_state",
+                new Error("Channex availability dispatch is unavailable."),
+              );
+            } else {
+              return failure(
+                "invalid_state",
+                new Error("Current Channex availability is unavailable."),
+              );
+            }
+          } catch {
+            return failure(
+              "provider_unavailable",
+              new Error("Channex availability reconciliation or upload unavailable."),
+            );
+          }
+        } else if (config.dispatchClosedUpload) {
           return failure(
             "invalid_state",
             new Error("Initial Channex preparation does not complete full sync."),
           );
-        } catch {
-          return failure("provider_unavailable", new Error("Initial Channex upload unavailable."));
         }
       }
       let plan: ChannexManagementActionPlan;
@@ -797,6 +894,70 @@ function requiredUrl(value: string): string {
     throw new Error("Channex apiBaseUrl must use HTTPS");
   }
   return url.toString().replace(/\/$/, "");
+}
+
+const channexUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function allowedChannexReconciliationRead(url: URL, apiBaseUrl: string): boolean {
+  if (url.origin !== new URL(apiBaseUrl).origin || url.hash || url.username || url.password)
+    return false;
+  if (/^\/api\/v1\/tasks\/[0-9a-f-]{36}$/i.test(url.pathname))
+    return url.search === "" && channexUuid.test(url.pathname.slice("/api/v1/tasks/".length));
+  if (/^\/api\/v1\/properties\/[0-9a-f-]{36}$/i.test(url.pathname))
+    return url.search === "" && channexUuid.test(url.pathname.slice("/api/v1/properties/".length));
+  if (/^\/api\/v1\/room_types\/[0-9a-f-]{36}$/i.test(url.pathname))
+    return url.search === "" && channexUuid.test(url.pathname.slice("/api/v1/room_types/".length));
+  if (/^\/api\/v1\/rate_plans\/[0-9a-f-]{36}$/i.test(url.pathname))
+    return (
+      url.search === "" && channexUuid.test(url.pathname.slice("/api/v1/rate_plans/".length))
+    );
+  const params = url.searchParams,
+    keys = [...params.keys()].sort(),
+    exactKeys = (expected: readonly string[]) =>
+      keys.length === expected.length &&
+      keys.every((key, index) => key === [...expected].sort()[index]) &&
+      expected.every((key) => params.getAll(key).length === 1),
+    uuid = (key: string) => channexUuid.test(params.get(key) ?? ""),
+    date = (key: string) => validChannexDate(params.get(key));
+  if (url.pathname === "/api/v1/rate_plans/options")
+    return exactKeys(["filter[property_id]"]) && uuid("filter[property_id]");
+  if (url.pathname === "/api/v1/availability")
+    return (
+      exactKeys(["filter[property_id]", "filter[date][gte]", "filter[date][lte]"]) &&
+      uuid("filter[property_id]") &&
+      date("filter[date][gte]") &&
+      params.get("filter[date][gte]") === params.get("filter[date][lte]")
+    );
+  if (url.pathname !== "/api/v1/restrictions") return false;
+  const restrictions = params.get("filter[restrictions]");
+  if (restrictions === "rate,stop_sell")
+    return (
+      exactKeys([
+        "filter[property_id]",
+        "filter[rate_plan_id]",
+        "filter[date]",
+        "filter[restrictions]",
+      ]) &&
+      uuid("filter[property_id]") &&
+      uuid("filter[rate_plan_id]") &&
+      date("filter[date]")
+    );
+  return (
+    restrictions ===
+      "min_stay_arrival,min_stay_through,max_stay,closed_to_arrival,closed_to_departure,stop_sell" &&
+    exactKeys(["filter[property_id]", "filter[date]", "filter[restrictions]"]) &&
+    uuid("filter[property_id]") &&
+    date("filter[date]")
+  );
+}
+
+function validChannexDate(value: string | null): value is string {
+  return Boolean(
+    value &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(`${value}T00:00:00Z`)) &&
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value,
+  );
 }
 
 export const channexRequests = {

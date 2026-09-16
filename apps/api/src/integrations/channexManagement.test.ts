@@ -540,6 +540,15 @@ describe("closed upload worker completion", () => {
         canSyncAri: mode !== "capability",
         fetch: fetcher,
         reconcileClosedUploads: reconcile,
+        dispatchClosedUpload: async () => ({ kind: "no_closed_upload" as const }),
+        reconcileRoomAvailability: async () => ({
+          kind: "pending_availability_reconciled" as const,
+          count: 0,
+        }),
+        prepareRoomAvailability: async () => ({
+          kind: "unavailable" as const,
+          reason: "room_availability_coverage_unavailable",
+        }),
       });
       const result = await provider.execute(
         job("sync_ari"),
