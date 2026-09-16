@@ -1040,3 +1040,21 @@ batch does not complete the sync job: provisioning/new pricing dispatch remains
 unavailable until its own coverage, availability and activation paths exist.
 No rates are created, posted or opened by this worker stage. Other operation
 types retain their existing behavior. The dedicated pool closes with the server.
+
+
+### Sequential closed dates after verified completion (VAY-1545)
+
+Replace the initial sender's blanket ban on all prior uploads with an exact
+history gate. Under the current target lock, every earlier upload for the
+provider property/rate must belong to the same identified creation, be reconciled
+with the version1 finished-task attestation, and retain exactly its original
+clean receipt. Missing/late/ambiguous receipts, unclassified storage-only releases
+and other creation generations remain a hold. Repeat this check before each
+preflight and immediately before POST. Current lease/publication/configuration,
+date admission and closed payload checks remain required.
+
+A reconciled date for this creation is not sent again and does not create a new
+attempt. A different admitted date can obtain a fresh one-use claim once the
+history passes. Unresolved exclusion still serializes all dates of the rate.
+This supports initial closed date coverage, not overwriting a completed date,
+recovery of an old sender, activation or a cross-generation ownership transfer.
