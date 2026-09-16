@@ -31,7 +31,7 @@ describe("Finance revenue read model", () => {
     expect(result).toMatchObject({
       propertyId: PROPERTY,
       currency: "EUR",
-      timeZone: "Europe/Berlin",
+      timeZone: "Asia/Kolkata",
       generatedAt: "2026-08-04T14:00:00.000Z",
       sourceFreshness: {
         pmsPricing: "2026-08-04T12:00:00Z",
@@ -185,6 +185,6 @@ const context = () => ({
     entityId: PROPERTY,
     revision: "profile:7",
   },
-  timeZone: "Europe/Berlin",
+  timeZone: "Asia/Kolkata",
   updatedAt: "2026-08-04T13:00:00Z",
 });

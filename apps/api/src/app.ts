@@ -194,6 +194,7 @@ import {
 import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { registerFinanceExpenseRoutes } from "./routes/financeExpenses.js";
 import { registerFinanceFolioRoutes } from "./routes/financeFolios.js";
+import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
   registerAffiliateDashboardRoutes,
@@ -437,6 +438,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeOtaCommissionSettingsRepository?: Parameters<typeof registerOtaSettings>[1]["repository"];
   financeExpenses?: Parameters<typeof registerFinanceExpenseRoutes>[1];
   financeFolios?: Parameters<typeof registerFinanceFolioRoutes>[1];
+  financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
@@ -1028,6 +1030,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.financeFolios,
       propertyAccessRepository:
         options.auth?.propertyAccessRepository ?? options.financeFolios.propertyAccessRepository,
+    });
+  }
+  if (options.financeRevenue) {
+    app.register(registerFinanceRevenueRoutes, {
+      prefix: "/api",
+      ...options.financeRevenue,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ?? options.financeRevenue.propertyAccessRepository,
     });
   }
   if (options.financeBankTransfer) {
