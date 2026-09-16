@@ -47,36 +47,41 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
       changeId = randomUUID();
     const types = [randomUUID(), randomUUID()].sort();
     const f = pricingDraftFixture((q) => {
-      q.quoteId = randomUUID();
-      q.stay.propertyId = propertyId;
+      Object.assign(q, { quoteId: randomUUID() });
+      Object.assign(q.stay, { propertyId });
       const selected = structuredClone(q.stay.rooms[0]!);
       const priced = structuredClone(q.rooms[0]!);
       const term = structuredClone(q.evidence.terms[0]!);
-      q.stay.rooms = [types[0]!, types[1]!, types[0]!].map((roomTypeId, i) => ({
+      const selections = [types[0]!, types[1]!, types[0]!].map((roomTypeId, i) => ({
         ...selected,
         selectionId: `selection-${i}`,
         roomTypeId,
         guests: { adults: 2, childAgesAtCheckIn: [6 + i] },
       }));
-      q.rooms = q.stay.rooms.map((s) => ({ ...priced, selectionId: s.selectionId }));
-      q.evidence.terms = types.map((roomTypeId) => ({ ...term, roomTypeId }));
-      q.evidence.lines = q.stay.rooms.flatMap((s) => [
-        {
-          id: `r-${s.selectionId}`,
-          selectionId: s.selectionId,
-          kind: "room" as const,
-          amountMinor: "30000",
-        },
-        {
-          id: `m-${s.selectionId}`,
-          selectionId: s.selectionId,
-          kind: "meal" as const,
-          amountMinor: "6000",
-        },
-      ]);
-      q.evidence.totalMinor = "108000";
-      q.evidence.dueLaterMinor = "108000";
-      q.evidence.requestKey = replacementStayKey(q.stay);
+      Object.assign(q.stay, { rooms: selections });
+      Object.assign(q, {
+        rooms: selections.map((s) => ({ ...priced, selectionId: s.selectionId })),
+      });
+      Object.assign(q.evidence, {
+        terms: types.map((roomTypeId) => ({ ...term, roomTypeId })),
+        lines: selections.flatMap((s) => [
+          {
+            id: `r-${s.selectionId}`,
+            selectionId: s.selectionId,
+            kind: "room" as const,
+            amountMinor: "30000",
+          },
+          {
+            id: `m-${s.selectionId}`,
+            selectionId: s.selectionId,
+            kind: "meal" as const,
+            amountMinor: "6000",
+          },
+        ]),
+        totalMinor: "108000",
+        dueLaterMinor: "108000",
+        requestKey: replacementStayKey(q.stay),
+      });
     });
     const quote = f.current.quote;
     const { fingerprint, ...acceptedCommand } = f.command;
@@ -170,11 +175,12 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           [propertyId],
         )
       ).rows;
-      const acceptedBundle = structuredClone(bundle);
-      if (scenario === "missing-token") acceptedBundle.receipts.pop();
+      const acceptedReceipts = bundle.receipts.map((receipt) => ({ ...receipt }));
+      const acceptedBundle = { ...bundle, receipts: acceptedReceipts };
+      if (scenario === "missing-token") acceptedReceipts.pop();
       if (scenario === "extra-token")
-        acceptedBundle.receipts.push({ ...bundle.receipts[0]!, receiptId: randomUUID() });
-      if (scenario === "duplicate-token") acceptedBundle.receipts.push(bundle.receipts[0]!);
+        acceptedReceipts.push({ ...bundle.receipts[0]!, receiptId: randomUUID() });
+      if (scenario === "duplicate-token") acceptedReceipts.push(bundle.receipts[0]!);
       let acceptedOrg = organizationId;
       if (scenario === "wrong-organization") {
         acceptedOrg = randomUUID();
