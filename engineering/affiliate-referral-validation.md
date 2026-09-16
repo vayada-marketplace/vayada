@@ -205,3 +205,28 @@ sub-slice: synthetic transport evidence only, not a production route, stable-lin
 capture, quote round-trip, provider certification or live booking. Attribution dispatch
 and its explicit probe exclusion remain unimplemented, so this does not complete
 VAY-1506's remaining acceptance criteria.
+
+## Initial referral transport certification storage
+
+Migration 0215 adds immutable successful adapter-certification evidence for the
+`referral_round_trip` capability. Every certification is pinned through database keys
+to one real diagnostic probe-to-booking binding and to that probe's exact property,
+destination, author organization, local/sandbox environment, connection and adapter
+version. The row retains bounded evidence references, verifier actor/request and server
+completion time. It is permanently marked `capability_validation`; it cannot be stored
+as production preflight, another capability or earning evidence.
+
+Certification insertion locks and rechecks an unexpired, unrevoked probe and requires
+exactly one diagnostic booking binding; zero or multiple deliveries fail as unavailable.
+Binding insertion uses the same probe lock and prevents new second deliveries before or
+after certification. The database supplies completion time and rejects non-string, blank
+or oversized evidence references. Historical duplicate probe bindings therefore do not
+block migration, but they cannot be certified or silently collapsed into one successful
+result.
+
+This is only durable storage for the successful synthetic certification half. A later
+authorized verifier command must create it from the completed transport, and readiness
+must separately require a current exact production preflight for the same capability.
+Missing/conflicting run outcomes, other three capabilities, freshness, revocation-aware
+consumption and publication/activation wiring remain later slices. The table alone does
+not make a destination, publication, agreement, click or booking eligible for earnings.
