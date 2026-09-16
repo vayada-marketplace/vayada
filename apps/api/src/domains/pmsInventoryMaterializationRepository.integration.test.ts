@@ -1,4 +1,7 @@
-import { prepareChannexRoomAvailabilityEvidence } from "./channexRoomAvailabilityEvidence.js";
+import {
+  claimChannexRoomAvailability,
+  prepareChannexRoomAvailabilityEvidence,
+} from "./channexRoomAvailabilityEvidence.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -119,6 +122,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           "getCurrentInventoryDay"
         > = f.repository,
       ) => prepareChannexRoomAvailabilityEvidence(channelPool, inventory, lease, selection),
+      claim: (
+        inventory: Pick<
+          PmsInventoryMaterializationRepository,
+          "getCurrentInventoryDay"
+        > = f.repository,
+      ) => claimChannexRoomAvailability(channelPool, inventory, lease, selection),
     };
   }
   it("binds canonical inventory to the leased property's current Channex room", async () => {
@@ -136,6 +145,86 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         },
       },
     });
+  });
+  it("claims the exact canonical count and source evidence for one provider room", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim();
+    expect(claimed).toMatchObject({
+      kind: "availability_claimed",
+      workerId: f.lease.workerId,
+      request: {
+        method: "POST",
+        path: "/api/v1/availability",
+        body: {
+          values: [
+            {
+              property_id: f.propertyId,
+              room_type_id: f.externalRoomTypeId,
+              date_from: f.selection.date,
+              date_to: f.selection.date,
+              availability: 2,
+            },
+          ],
+        },
+      },
+    });
+    const row = (
+      await admin.query(
+        `SELECT property_id::text AS "propertyId",room_type_id::text AS "roomTypeId",
+          external_property_id AS "externalPropertyId",external_room_type_id AS "externalRoomTypeId",
+          service_date::text AS date,available_count AS "availableCount",
+          inventory_evidence AS "inventoryEvidence",request_body AS "requestBody",state
+         FROM pms.channex_room_availability_attempts WHERE id=$1`,
+        [claimed.kind === "availability_claimed" ? claimed.attemptId : null],
+      )
+    ).rows[0];
+    expect(row).toMatchObject({
+      propertyId: f.propertyId,
+      roomTypeId: f.roomTypeId,
+      externalPropertyId: f.propertyId,
+      externalRoomTypeId: f.externalRoomTypeId,
+      date: f.selection.date,
+      availableCount: 2,
+      state: "unresolved",
+      inventoryEvidence: {
+        day: {
+          propertyId: f.propertyId,
+          roomTypeId: f.roomTypeId,
+          stayDate: f.selection.date,
+          availableCount: 2,
+        },
+      },
+      requestBody: claimed.kind === "availability_claimed" ? claimed.request.body : null,
+    });
+  });
+  it("does not reuse an unresolved provider-room owner", async () => {
+    const f = await channelInventoryFixture();
+    expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+    expect(await f.claim()).toEqual({
+      kind: "unavailable",
+      reason: "availability_reconciliation_required",
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+  });
+  it("writes no owner when current inventory is unavailable", async () => {
+    const f = await channelInventoryFixture();
+    f.selection.date = "2026-01-01";
+    expect(await f.claim()).toMatchObject({ kind: "unavailable" });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
   });
   it.each(["mapping", "binding", "lease", "entitlement"])(
     "holds availability when %s changes before the final guard",
@@ -170,30 +259,66 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ).toMatchObject({ kind: "unavailable", reason: "consumer_authority_unavailable" });
     },
   );
-  it.each(["foreign-room", "restrictions-only", "disabled-mapping", "expired-lease", "past-date"])(
-    "rejects %s availability preparation",
-    async (mode) => {
-      const f = await channelInventoryFixture();
-      if (mode === "foreign-room") f.selection.roomTypeId = randomUUID();
-      if (mode === "restrictions-only")
+  it.each([
+    "foreign-room",
+    "restrictions-only",
+    "disabled-mapping",
+    "expired-lease",
+    "past-date",
+    "degraded-connection",
+    "setup-incomplete-connection",
+    "uncanonical-property",
+  ])("rejects %s availability preparation", async (mode) => {
+    const f = await channelInventoryFixture();
+    if (mode === "foreign-room") f.selection.roomTypeId = randomUUID();
+    if (mode === "restrictions-only")
+      await admin.query(
+        `UPDATE platform.jobs SET payload=payload || '{"restrictionsOnly":true}'::jsonb WHERE id=$1`,
+        [f.lease.jobId],
+      );
+    if (mode === "disabled-mapping")
+      await admin.query(
+        "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+        [f.propertyId],
+      );
+    if (mode === "expired-lease")
+      await admin.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
+        f.lease.jobId,
+      ]);
+    if (mode === "past-date") f.selection.date = "2026-01-01";
+    if (mode === "degraded-connection" || mode === "setup-incomplete-connection")
+      await admin.query("UPDATE pms.channel_connections SET connection_status=$2 WHERE id=$1", [
+        f.connectionId,
+        mode === "degraded-connection" ? "degraded" : "setup_incomplete",
+      ]);
+    if (mode === "uncanonical-property") {
+      await admin.query("BEGIN");
+      try {
+          await admin.query(
+            "UPDATE pms.channel_binding_claims SET external_property_id=$2 WHERE property_id=$1 AND claim_state='active'",
+            [f.propertyId, ` ${f.propertyId} `],
+          );
         await admin.query(
-          `UPDATE platform.jobs SET payload=payload || '{"restrictionsOnly":true}'::jsonb WHERE id=$1`,
-          [f.lease.jobId],
+          "UPDATE pms.channel_connections SET external_property_id=$2 WHERE id=$1",
+          [f.connectionId, ` ${f.propertyId} `],
         );
-      if (mode === "disabled-mapping")
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+    }
+    expect(await f.prepare()).toMatchObject({ kind: "unavailable" });
+    expect(await f.claim()).toMatchObject({ kind: "unavailable" });
+    expect(
+      (
         await admin.query(
-          "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
           [f.propertyId],
-        );
-      if (mode === "expired-lease")
-        await admin.query(
-          "UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1",
-          [f.lease.jobId],
-        );
-      if (mode === "past-date") f.selection.date = "2026-01-01";
-      expect(await f.prepare()).toMatchObject({ kind: "unavailable" });
-    },
-  );
+        )
+      ).rows[0].count,
+    ).toBe(0);
+  });
   it("does not retain an old calendar snapshot across an inventory writer", async () => {
     const f = await dailyFixture(),
       blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -246,11 +371,27 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
   });
   it("does not accept a reader that omits the transaction guard", async () => {
     const f = await channelInventoryFixture();
+    const unguarded = {
+      getCurrentInventoryDay: (
+        request: Parameters<typeof f.repository.getCurrentInventoryDay>[0],
+      ) => f.repository.getCurrentInventoryDay(request),
+    };
+    expect(await f.prepare(unguarded)).toMatchObject({
+      kind: "unavailable",
+      reason: "consumer_authority_unavailable",
+    });
+    expect(await f.claim(unguarded)).toMatchObject({
+      kind: "unavailable",
+      reason: "consumer_authority_unavailable",
+    });
     expect(
-      await f.prepare({
-        getCurrentInventoryDay: (request) => f.repository.getCurrentInventoryDay(request),
-      }),
-    ).toMatchObject({ kind: "unavailable", reason: "consumer_authority_unavailable" });
+      (
+        await admin.query(
+          "SELECT count(*)::int AS count FROM pms.channex_room_availability_attempts WHERE property_id=$1",
+          [f.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(0);
   });
   it("fails promptly on a concurrent mapping lock inside the inventory guard", async () => {
     const f = await channelInventoryFixture(),

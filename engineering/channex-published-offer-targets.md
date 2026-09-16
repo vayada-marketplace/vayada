@@ -1211,3 +1211,11 @@ Storage is inert: it grants neither dispatch nor completion. The claim service
 must insert while the current inventory and Channex authority guard is held;
 dispatch must consume that exact unresolved attempt once, and an original
 receipt plus exact room/date readback must reconcile it.
+
+`claimChannexRoomAvailability` performs the first insert inside the PMS current-day
+transaction after repeating full Channex authority and exact room mapping checks.
+It derives a one-date `/api/v1/availability` body from the committed canonical
+count and retains the complete current-day source evidence used to build it. A
+provider-room conflict returns reconciliation-required and never reuses the
+existing owner. The returned request belongs only to the new attempt; it is not
+a send permit, receipt, readback result, or activation decision.
