@@ -158,6 +158,10 @@ import {
   type MarketplaceHotelCollaborationPreferencesRoutesOptions,
 } from "./routes/marketplaceHotelCollaborationPreferences.js";
 import {
+  registerMarketplaceCommunicationPreferencesRoutes,
+  type MarketplaceCommunicationPreferencesRoutesOptions,
+} from "./routes/marketplaceCommunicationPreferences.js";
+import {
   registerBookingDesignRoutes,
   type BookingDesignRoutesOptions,
 } from "./routes/bookingDesign.js";
@@ -421,6 +425,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
   marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
+  marketplaceCommunicationPreferences?: MarketplaceCommunicationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
   propertySetupDraftCommandRepository?: PropertySetupDraftCommandRepository;
@@ -771,6 +776,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceHotelCollaborationPreferencesRoutes, {
       prefix: "/api/marketplace",
       ...options.marketplaceHotelCollaborationPreferences,
+    });
+  }
+  if (options.marketplaceCommunicationPreferences) {
+    app.register(registerMarketplaceCommunicationPreferencesRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceCommunicationPreferences,
     });
   }
   if (options.bookingDesign) {

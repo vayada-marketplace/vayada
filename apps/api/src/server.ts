@@ -69,6 +69,8 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
+import { createPgMarketplaceCommunicationPreferencesRepository } from "./domains/marketplaceCommunicationPreferencesRepository.js";
+import { MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY } from "@vayada/domain-marketplace";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
@@ -812,6 +814,10 @@ const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository(
 });
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
+    connectionString: targetDatabaseUrl,
+  });
+const marketplaceCommunicationPreferencesRepository =
+  createPgMarketplaceCommunicationPreferencesRepository({
     connectionString: targetDatabaseUrl,
   });
 const bookingDesignRepository = createPgBookingDesignRepository({
@@ -1834,6 +1840,11 @@ const app = buildApp({
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
   },
+  marketplaceCommunicationPreferences: {
+    commandPort: marketplaceCommunicationPreferencesRepository,
+    readPort: marketplaceCommunicationPreferencesRepository,
+    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
+  },
   bookingDesign: {
     commandPort: bookingDesignRepository,
     propertyAccessRepository: bookingPropertyAccessRepository,
@@ -1996,6 +2007,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     marketplaceSubmissionRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
+    marketplaceCommunicationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),

@@ -121,6 +121,15 @@ GET /api/marketplace/communication-preferences
 PUT /api/marketplace/communication-preferences
 ```
 
+Both routes require `marketplace.collaboration.write`, matching v1 recipient
+eligibility. A creator workspace resolves exactly one active Marketplace
+`creator_profile` owner link. A hotel group resolves an active Marketplace
+`hotel_profile` owner or operator link and an active organization-level
+`marketplace-hotel-profile` entitlement. Every resolved actor, organization,
+and membership must be active. Creator workspaces have no separate product
+entitlement source in v1; their creator-profile owner link is the applicable
+resource boundary.
+
 `GET` returns `200` with this complete effective representation:
 
 ```ts
@@ -157,8 +166,12 @@ checked before revision: an exact key/body replay returns the original `200`;
 the same key with another body returns `409 idempotency_conflict`; otherwise a
 stale revision returns `409 preference_conflict`. Errors use
 `{ error: { code } }`: `400 invalid_request`, `401 unauthenticated`, `403
-forbidden`, or the two `409` codes. The server supplies source, policy version,
-consent reference, and timestamps.
+forbidden`, or `409 preference_conflict | idempotency_conflict |
+command_in_progress`. The server supplies source, policy version, consent
+reference, and timestamps. The initial source-controlled runtime policy is
+`disabled`, effective from the v1 contract decision at
+`2026-09-16T13:22:41.000Z`; changing it requires a new audited legal/privacy
+launch decision.
 
 `POST /api/marketplace/communication-unsubscribe` is a separate public
 signed-token mutation. It never requires a session; its exact body and outcomes
