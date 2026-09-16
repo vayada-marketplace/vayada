@@ -13,7 +13,7 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
   const pool = new pg.Pool({ connectionString: url, max: 3 });
   afterAll(() => pool.end());
 
-  it.each(["malformed-payload", "tenant-envelope-mismatch", "platform-scope"])(
+  it.each(["malformed-payload", "tenant-envelope-mismatch", "platform-scope", "sql-transient"])(
     "lets only one transaction claim a job: %s",
     async (scenario) => {
       if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
@@ -27,7 +27,7 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
           : {
               version: "booking.pricing-pms-handoff.v1",
               propertyId,
-              guestBookingId: randomUUID(),
+              guestBookingId: scenario === "tenant-envelope-mismatch" ? randomUUID() : jobId,
               acceptanceId: jobId,
             };
       await pool.query(
@@ -54,9 +54,20 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
       const second = await pool.connect();
       try {
         await first.query("BEGIN");
-        expect(await processNextPmsAcceptedPricingReservationJob(first, "worker:first")).toBe(
-          "dead_lettered",
-        );
+        const workerClient =
+          scenario === "sql-transient"
+            ? ({
+                query: (text: string, values?: readonly unknown[]) =>
+                  text.includes("FROM booking.pricing_quote_acceptances")
+                    ? first.query("SELECT 1/0")
+                    : values
+                      ? first.query(text, [...values])
+                      : first.query(text),
+              } as unknown as pg.PoolClient)
+            : first;
+        expect(
+          await processNextPmsAcceptedPricingReservationJob(workerClient, "worker:first"),
+        ).toBe(scenario === "sql-transient" ? "deferred" : "dead_lettered");
         await second.query("BEGIN");
         expect(await processNextPmsAcceptedPricingReservationJob(second, "worker:second")).toBe(
           "empty",
@@ -74,35 +85,51 @@ describe.skipIf(!url)("accepted-pricing PMS job concurrency", () => {
           ).rows,
         ).toEqual([
           {
-            status: "dead_lettered",
+            status: scenario === "sql-transient" ? "pending" : "dead_lettered",
             attempts_count: 1,
             locked_at: null,
             locked_by: null,
             attempts: 1,
           },
         ]);
-        expect(
-          (
-            await pool.query(
-              `SELECT reason_code,tenant_scope,property_id::text AS property_id
+        if (scenario === "sql-transient") {
+          expect(
+            (
+              await pool.query(
+                `SELECT error_type,retry_after IS NOT NULL AS retrying
+                 FROM platform.job_attempts WHERE job_id=$1`,
+                [jobId],
+              )
+            ).rows,
+          ).toEqual([{ error_type: "transient", retrying: true }]);
+          expect(
+            (await pool.query("SELECT 1 FROM platform.dead_letter_events WHERE job_id=$1", [jobId]))
+              .rows,
+          ).toEqual([]);
+        } else
+          expect(
+            (
+              await pool.query(
+                `SELECT reason_code,tenant_scope,property_id::text AS property_id
                FROM platform.dead_letter_events WHERE job_id=$1`,
-              [jobId],
-            )
-          ).rows,
-        ).toEqual([
-          {
-            reason_code: "invalid_payload",
-            tenant_scope: tenantScope,
-            property_id: tenantScope === "property" ? propertyId : null,
-          },
-        ]);
-        expect(
-          (
-            await pool.query(`SELECT action FROM platform.product_audit_events WHERE job_id=$1`, [
-              jobId,
-            ])
-          ).rows,
-        ).toEqual([{ action: "accepted_pricing_adoption_dead_lettered" }]);
+                [jobId],
+              )
+            ).rows,
+          ).toEqual([
+            {
+              reason_code: "invalid_payload",
+              tenant_scope: tenantScope,
+              property_id: tenantScope === "property" ? propertyId : null,
+            },
+          ]);
+        if (scenario !== "sql-transient")
+          expect(
+            (
+              await pool.query(`SELECT action FROM platform.product_audit_events WHERE job_id=$1`, [
+                jobId,
+              ])
+            ).rows,
+          ).toEqual([{ action: "accepted_pricing_adoption_dead_lettered" }]);
       } finally {
         await first.query("ROLLBACK");
         await second.query("ROLLBACK");
