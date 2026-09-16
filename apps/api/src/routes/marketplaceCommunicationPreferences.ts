@@ -16,7 +16,9 @@ import { enforceRoutePolicy } from "./policy.js";
 
 const PERMISSION = "marketplace.collaboration.write" as const;
 const INVALID_BODY_ERROR_CODES = new Set([
+  "FST_ERR_CTP_BODY_TOO_LARGE",
   "FST_ERR_CTP_EMPTY_JSON_BODY",
+  "FST_ERR_CTP_INVALID_CONTENT_LENGTH",
   "FST_ERR_CTP_INVALID_JSON_BODY",
   "FST_ERR_CTP_INVALID_MEDIA_TYPE",
 ]);
