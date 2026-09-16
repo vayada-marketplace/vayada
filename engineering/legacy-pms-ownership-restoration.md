@@ -272,6 +272,18 @@ locks are not provider-session revocation checks or a completed transition.
 Statement/lock timeouts do not bound idle transaction time: the controlled
 executor must enforce prompt completion and an idle-transaction deadline.
 
+The target-lock integration suite now composes real signed approval records,
+binding fences and owner fences in one transaction on the branch's migrated
+PG16/17 schema. It checks unchanged rows before rollback, retained locks against
+revocation/ownership/connection writes, release on outer rollback, later expiry,
+and a synthetic non-superuser role with complete versus withheld visibility.
+The fixture role's grants are not a reviewed production permission policy.
+Source hashes and before/after aggregate hashes in this guard-only fixture are
+synthetic assertions, not verified source provenance or transition evidence.
+These tests add no writer, claim transition, audit receipt, compensation or access
+release. Current-main migration integration and actual executor-role verification
+remain separate gates.
+
 - Design acceptance first; identity disposition/evidence next; append-only
   transition storage next; signed consumer/replay/rollback next; integration
   rehearsal last. Keep each PR approximately 400 meaningful lines or less.
