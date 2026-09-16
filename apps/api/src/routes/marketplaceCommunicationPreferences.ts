@@ -7,6 +7,7 @@ import {
   type MarketplaceCommunicationPreferenceCommandPort,
   type MarketplaceCommunicationPreferencePolicy,
   type MarketplaceCommunicationPreferenceReadPort,
+  type ReplaceMarketplaceCommunicationPreferencesV1,
   type ReplaceMarketplaceCommunicationPreferencesResult,
 } from "@vayada/domain-marketplace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -89,7 +90,7 @@ export async function registerMarketplaceCommunicationPreferencesRoutes(
       }
 
       const result = parseReplaceMarketplaceCommunicationPreferencesResult(value);
-      if (!validResult(result, scope, body.expectedRevision)) return portViolation(reply);
+      if (!validResult(result, scope, body)) return portViolation(reply);
       return result.ok
         ? reply.status(200).send(result.preferences)
         : sendCommandError(reply, result.error.code);
@@ -176,19 +177,22 @@ function preferenceScope(scope: AuthorizedScope) {
 function validResult(
   result: ReplaceMarketplaceCommunicationPreferencesResult | null,
   scope: AuthorizedScope,
-  expectedRevision: number,
+  request: ReplaceMarketplaceCommunicationPreferencesV1,
 ): result is ReplaceMarketplaceCommunicationPreferencesResult {
   if (!result) return false;
   if (!result.ok) {
     return (
       result.error.code !== "preference_conflict" ||
-      result.error.currentRevision !== expectedRevision
+      result.error.currentRevision !== request.expectedRevision
     );
   }
   return (
     result.preferences.organizationId === scope.context.selectedOrganization.organizationId &&
-    (result.preferences.revision === expectedRevision ||
-      result.preferences.revision === expectedRevision + 1)
+    (result.preferences.revision === request.expectedRevision ||
+      result.preferences.revision === request.expectedRevision + 1) &&
+    result.preferences.email.state === request.email.state &&
+    result.preferences.topics.collaborationActionRequired.cadence ===
+      request.topics.collaborationActionRequired.cadence
   );
 }
 
