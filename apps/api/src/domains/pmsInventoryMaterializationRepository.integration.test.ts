@@ -9,6 +9,7 @@ import {
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
 import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -564,6 +565,75 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ).rows[0],
     ).toEqual({ count: 1 });
     expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+  });
+  it("discovers and reconciles a retained availability write from current lease authority", async () => {
+    const f = await availabilityReconciliationFixture();
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, f.get),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+    expect(await f.state()).toMatchObject({ state: "reconciled" });
+    expect(f.get).toHaveBeenCalledTimes(2);
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, f.get),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 0 });
+    expect(f.get).toHaveBeenCalledTimes(2);
+  });
+  it("isolates pending availability writes by current job lease property", async () => {
+    const owned = await availabilityReconciliationFixture(),
+      foreign = await availabilityReconciliationFixture();
+    await expect(
+      reconcilePendingChannexRoomAvailability(
+        channelPool,
+        owned.repository,
+        { ...owned.lease, workerId: "stale-worker" },
+        owned.get,
+      ),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    expect(owned.get).not.toHaveBeenCalled();
+    await expect(
+      reconcilePendingChannexRoomAvailability(
+        channelPool,
+        owned.repository,
+        owned.lease,
+        owned.get,
+      ),
+    ).resolves.toEqual({ kind: "pending_availability_reconciled", count: 1 });
+    expect(await owned.state()).toMatchObject({ state: "reconciled" });
+    expect(await foreign.state()).toMatchObject({ state: "unresolved" });
+  });
+  it("keeps a discovered availability write unresolved when provider readback fails", async () => {
+    const f = await availabilityReconciliationFixture(),
+      get = vi.fn(async () => {
+        throw new Error("readback unavailable");
+      });
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
+    ).rejects.toThrow("readback unavailable");
+    expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+    expect(get).toHaveBeenCalledOnce();
+  });
+  it("does no provider IO for a discovered non-clean availability receipt", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim(),
+      get = vi.fn();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    await (
+      await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      })
+    )();
+    await expect(
+      reconcilePendingChannexRoomAvailability(channelPool, f.repository, f.lease, get),
+    ).resolves.toEqual({
+      kind: "unavailable",
+      reason: "availability_receipt_history_unavailable",
+    });
+    expect(get).not.toHaveBeenCalled();
   });
   it("selects the earliest current covered day and creates only a fresh local claim", async () => {
     const f = await channelInventoryFixture(2, true);
