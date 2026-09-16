@@ -166,7 +166,14 @@ describe("target PMS reservation stay dates", () => {
                 primaryGuestCountryCode: "GB",
                 primaryGuestSpecialRequests: "Quiet room",
                 guestContactAccepted: false,
-                addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+                addOns: [
+                  {
+                    selectionId: "selection-1",
+                    addonId: "addon-1",
+                    name: "Breakfast",
+                    quantity: 2,
+                  },
+                ],
                 assignments: [],
                 checkinCompletedAt: null,
                 checkinPendingFlags: [],
@@ -248,6 +255,7 @@ describe("target PMS reservation stay dates", () => {
     expect(listQuery).toContain('AS "guestContactAccepted"');
     expect(listQuery).toContain('primary_guest.special_requests AS "primaryGuestSpecialRequests"');
     expect(listQuery).toContain("FROM booking.booking_addon_selection_items item");
+    expect(listQuery).toContain("JOIN booking.active_booking_addon_selections active_selection");
     expect(listQuery).toContain("item.item_ordinality");
     expect(listQuery).toContain("'guest_booking.accepted'");
     expect(listQuery).not.toContain("contact_event.actor_type = 'property_user'");
@@ -276,7 +284,14 @@ describe("target PMS reservation stay dates", () => {
         countryCode: "GB",
         specialRequests: "Quiet room",
       },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+      addOns: [
+        {
+          selectionId: "selection-1",
+          addonId: "addon-1",
+          name: "Breakfast",
+          quantity: 2,
+        },
+      ],
       bookedOffer: {
         roomTypeId: "room-type-1",
         roomName: "Munich Booking Room",

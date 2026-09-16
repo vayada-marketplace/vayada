@@ -181,7 +181,12 @@ export type PmsOperationalReservation = {
     countryCode: string | null;
     specialRequests: string | null;
   };
-  addOns: Array<{ addonId: string; name: string; quantity: number }>;
+  addOns: Array<{
+    selectionId: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   assignments: PmsOperationalAssignment[];
   checkin: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
@@ -1082,12 +1087,17 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT jsonb_agg(
            jsonb_build_object(
+             'selectionId', item.selection_id::text,
              'addonId', item.addon_key,
              'name', item.addon_name,
              'quantity', item.quantity
            ) ORDER BY item.created_at, item.selection_id, item.item_ordinality
          ) AS items
   FROM booking.booking_addon_selection_items item
+  JOIN booking.active_booking_addon_selections active_selection
+    ON active_selection.id = item.selection_id
+   AND active_selection.property_id = item.property_id
+   AND active_selection.guest_booking_id = item.guest_booking_id
   WHERE item.guest_booking_id = booking.id
     AND item.property_id = booking.property_id
 ) addons ON TRUE
@@ -1506,11 +1516,18 @@ function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
 function toBookingAddOns(value: unknown): PmsOperationalReservation["addOns"] {
   return toRecordArray(value)
     .map((item) => ({
+      selectionId: String(item.selectionId ?? ""),
       addonId: String(item.addonId ?? ""),
       name: String(item.name ?? ""),
       quantity: toInteger(Number(item.quantity ?? 0)),
     }))
-    .filter((item) => item.addonId.length > 0 && item.name.length > 0 && item.quantity > 0);
+    .filter(
+      (item) =>
+        item.selectionId.length > 0 &&
+        item.addonId.length > 0 &&
+        item.name.length > 0 &&
+        item.quantity > 0,
+    );
 }
 
 function toOperationalNights(value: unknown): PmsOperationalNight[] {
