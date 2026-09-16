@@ -57,6 +57,93 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await admin.end();
   });
 
+  async function dailyFixture(materialize = true) {
+    const f = await createFixture(admin, repositories, [2, 1]);
+    if (materialize)
+      await f.repository.materializeInventory(
+        materializationCommand(f, "daily-reader", 1, "2026-08-04", "2026-08-06"),
+      );
+    const request = { propertyId: f.propertyId, roomTypeId: f.roomTypeId, stayDate: "2026-08-04" };
+    return { ...f, request, read: () => f.repository.getCurrentInventoryDay(request) };
+  }
+  it("reads canonical daily counts and owner revisions without modifying inventory", async () => {
+    const f = await dailyFixture();
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      materializedRevision: 1,
+      propertyTimeZone: "Europe/Berlin",
+      sourceRoomFactsRevision: 1,
+      sourceRoomUnitsRevision: 1,
+      day: { ...f.request, availableCount: 2, inventoryRevision: 1 },
+    });
+    await consumeAndOverrideFirstDay(admin, f);
+    const before = await readFirstDay(admin, f);
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      day: {
+        availableCount: 0,
+        assignedCount: 2,
+        manualSellableLimitCount: 1,
+        inventoryRevision: 3,
+        sourceRevisions: { booking: 1, manual: 1 },
+      },
+    });
+    expect(await readFirstDay(admin, f)).toEqual(before);
+  });
+  it("returns a verified zero for a linked stop-sell day", async () => {
+    const f = await dailyFixture();
+    await admin.query(
+      `UPDATE pms.inventory_days SET available_count=0,inventory_revision=inventory_revision+1,
+      linked_stop_sell=true,linked_source_revision=1 WHERE property_id=$1 AND room_type_id=$2`,
+      [f.propertyId, f.roomTypeId],
+    );
+    expect(await f.read()).toMatchObject({
+      kind: "available",
+      day: { availableCount: 0, linkedStopSell: true, linkedSourceRevision: 1 },
+    });
+  });
+  it.each([
+    "calendar",
+    "profile",
+    "capacity",
+    "room-facts",
+    "missing-day",
+    "coverage",
+    "foreign-room",
+    "foreign-property",
+    "invalid-date",
+  ])("does not manufacture availability for %s", async (mode) => {
+    const f = await dailyFixture(mode !== "missing-day");
+    if (mode === "calendar") await activateCalendarRevision(admin, f, 2);
+    if (mode === "profile") f.profileState.revision = 2;
+    if (mode === "capacity") f.capacityState.revision = 2;
+    if (mode === "room-facts")
+      await admin.query("UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1", [
+        f.roomTypeId,
+      ]);
+    if (mode === "coverage") f.request.stayDate = "2026-08-07";
+    if (mode === "foreign-room") f.request.roomTypeId = randomUUID();
+    if (mode === "foreign-property") f.request.propertyId = randomUUID();
+    if (mode === "invalid-date") f.request.stayDate = "2026-02-30";
+    expect(await f.read()).toMatchObject({ kind: "unavailable" });
+  });
+  it("does not read across a concurrent inventory mutation", async () => {
+    const f = await dailyFixture(),
+      blocker = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await blocker.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(concat('pms-inventory:', $1::uuid::text), 0))",
+        [f.propertyId],
+      );
+      await expect(f.read()).rejects.toMatchObject({ code: "55P03" });
+      await blocker.query("ROLLBACK");
+      expect(await f.read()).toMatchObject({ kind: "available" });
+    } finally {
+      await blocker.end();
+    }
+  });
   it("rejects captured active-room evidence after closure without writing inventory", async () => {
     const fixture = await createFixture(admin, repositories, [2]);
     await admin.query(
