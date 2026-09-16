@@ -5,13 +5,18 @@ import { parsePricingConfiguration, pricingDate, validPricingGuests, type Pricin
 export type RoomStayPricingRequest = Readonly<{ propertyId: string; roomTypeId: string; offerId: string;
   expectedRevision: number; expectedTermsRevisions: Readonly<Record<string, string>>;
   checkIn: string; checkOut: string; guests: PricingGuests }>;
-export type PricedRoomNight = Readonly<{ date: string; roomMinor: string; mealMinor: string; totalMinor: string;
+export type RoomNightProjectionRequest = Omit<RoomStayPricingRequest, "checkIn" | "checkOut"> & Readonly<{ date: string }>;
+export type PricedRoomNight = Readonly<{ restrictions: PricingRestrictions; restrictionOfferId: string; date: string; roomMinor: string; mealMinor: string; totalMinor: string;
   sources: readonly Readonly<{ offerId: string; kind: "date" | "season" | "month" | "base" | "weekday" | "linked" }>[] }>;
 export type RoomStayPricingResult = Readonly<{ kind: "priced"; version: "pricing.v2"; propertyId: string;
   roomTypeId: string; offerId: string; revision: number; currency: string; guests: PricingGuests;
   termsRevisions: Readonly<Record<string, string>>; nights: readonly PricedRoomNight[];
   roomMinor: string; mealMinor: string; totalMinor: string }> | Readonly<{ kind: "unavailable";
   reason: "invalid_configuration" | "invalid_request" | "invalid_guests" | "stale" | "missing_terms" | "missing_price" | "restriction" | "overflow" }>;
+export type RoomNightProjectionResult = Extract<RoomStayPricingResult, { kind: "unavailable" }> |
+  Readonly<Omit<Extract<RoomStayPricingResult, { kind: "priced" }>, "kind" | "nights" | "roomMinor" | "mealMinor" | "totalMinor"> &
+    { kind: "projected"; night: PricedRoomNight }>;
+type PricingPeriod = { kind: "stay"; checkIn: string; checkOut: string } | { kind: "night"; date: string };
 type Reason = Extract<RoomStayPricingResult, { kind: "unavailable" }>["reason"];
 class Unavailable extends Error { constructor(readonly reason: Reason) { super(reason); } }
 const fail = (reason: Reason): never => { throw new Unavailable(reason); };
@@ -31,9 +36,21 @@ const inSeason = (day: string, from: string, through: string) => from <= through
   ? day >= from && day <= through : day >= from || day <= through;
 /** Pure PMS room-night evaluation. Expected revisions must originate from trusted owner reads. */
 export function calculateReplacementRoomStay(configuration: unknown, request: RoomStayPricingRequest): RoomStayPricingResult {
+  return evaluateRoomPricing(configuration, request, { kind: "stay", checkIn: request?.checkIn, checkOut: request?.checkOut });
+}
+/** One calendar night's tariff and restrictions, not a stay quote or an availability decision. */
+export function projectReplacementRoomNight(configuration: unknown, request: RoomNightProjectionRequest): RoomNightProjectionResult {
+  const result = evaluateRoomPricing(configuration, request, { kind: "night", date: request?.date });
+  if (result.kind === "unavailable") return result;
+  const { kind: _kind, nights, roomMinor: _room, mealMinor: _meal, totalMinor: _total, ...evidence } = result;
+  return { ...evidence, kind: "projected", night: nights[0] };
+}
+function evaluateRoomPricing(configuration: unknown, request: Omit<RoomStayPricingRequest, "checkIn" | "checkOut">,
+  period: PricingPeriod): RoomStayPricingResult {
   const config = parsePricingConfiguration(configuration);
   if (!config) return { kind: "unavailable", reason: "invalid_configuration" };
-  if (!request || !pricingDate(request.checkIn) || !pricingDate(request.checkOut) || request.checkOut <= request.checkIn ||
+  const firstDate = period.kind === "stay" ? period.checkIn : period.date;
+  if (!request || !pricingDate(firstDate) || (period.kind === "stay" && (!pricingDate(period.checkOut) || period.checkOut <= firstDate)) ||
       !pricingInteger(request.expectedRevision, 1) || request.propertyId !== config.propertyId || request.roomTypeId !== config.roomTypeId ||
       !pricingObject(request.expectedTermsRevisions)) return { kind: "unavailable", reason: "invalid_request" };
   if (request.expectedRevision !== config.revision) return { kind: "unavailable", reason: "stale" };
@@ -61,9 +78,9 @@ export function calculateReplacementRoomStay(configuration: unknown, request: Ro
       return policy.dates.find((r) => r.date === date)?.rules ??
         policy.seasons.find((r) => inSeason(date.slice(5), r.from, r.through))?.rules ?? policy.rules;
     };
-    const stayLength = (Date.parse(request.checkOut) - Date.parse(request.checkIn)) / 86400000;
-    const arrival = restrictions(request.checkIn);
-    if (arrival.closedToArrival || arrival.minArrivalNights > stayLength || restrictions(request.checkOut).closedToDeparture) return fail("restriction");
+    const stayLength = period.kind === "stay" ? (Date.parse(period.checkOut) - Date.parse(firstDate)) / 86400000 : null;
+    const arrival = restrictions(firstDate);
+    if (period.kind === "stay" && (arrival.closedToArrival || arrival.minArrivalNights > stayLength! || restrictions(period.checkOut).closedToDeparture)) return fail("restriction");
     const young = request.guests.childAgesAtCheckIn.filter((age) => age < config.children.adultFromAge);
     const adults = request.guests.adults + request.guests.childAgesAtCheckIn.length - young.length;
     const bands = young.map((age) => config.children.bands.findIndex((b) => age >= b.fromAge && age <= b.throughAge));
@@ -73,9 +90,9 @@ export function calculateReplacementRoomStay(configuration: unknown, request: Ro
       bands.reduce((sum, index) => sum + BigInt(charge.childBandAmountsMinor[index]), 0n));
     const nights: PricedRoomNight[] = [];
     let roomTotal = 0n, mealTotal = 0n;
-    for (let time = Date.parse(request.checkIn); time < Date.parse(request.checkOut); time += 86400000) {
+    for (let time = Date.parse(firstDate), last = period.kind === "stay" ? Date.parse(period.checkOut) - 86400000 : time; time <= last; time += 86400000) {
       const date = new Date(time).toISOString().slice(0, 10), rule = restrictions(date);
-      if (rule.stopSell || (rule.maxStayNights !== null && stayLength > rule.maxStayNights)) return fail("restriction");
+      if (stayLength !== null && (rule.stopSell || (rule.maxStayNights !== null && stayLength > rule.maxStayNights))) return fail("restriction");
       let amount = 0n; let sources: Array<PricedRoomNight["sources"][number]> = [];
       const lastOverride = chain.findLastIndex((o) => (o.price.kind === "linked" ? o.price.dateOverrides : o.price.calendar.dates).some((r) => r.date === date));
       for (const offer of chain.slice(Math.max(0, lastOverride))) {
@@ -94,7 +111,7 @@ export function calculateReplacementRoomStay(configuration: unknown, request: Ro
         if (weekday) { amount = adjust(amount, weekday.adjustment); sources.push({ offerId: offer.id, kind: "weekday" }); }
       }
       roomTotal = bound(roomTotal + amount); mealTotal = bound(mealTotal + meal);
-      nights.push({ date, roomMinor: amount.toString(), mealMinor: meal.toString(), totalMinor: bound(amount + meal).toString(), sources });
+      nights.push({ date, restrictions: rule, restrictionOfferId: restrictionOwner.id, roomMinor: amount.toString(), mealMinor: meal.toString(), totalMinor: bound(amount + meal).toString(), sources });
     }
     return { kind: "priced", version: "pricing.v2", propertyId: config.propertyId, roomTypeId: config.roomTypeId,
       offerId: selected.id, revision: config.revision, currency: config.currency, guests: structuredClone(request.guests), termsRevisions: terms,

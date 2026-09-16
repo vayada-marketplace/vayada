@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateReplacementRoomStay, type RoomStayPricingRequest } from "./replacementPricingCalculator.js";
+import { calculateReplacementRoomStay, projectReplacementRoomNight, type RoomNightProjectionRequest, type RoomStayPricingRequest } from "./replacementPricingCalculator.js";
 import { type PricingConfiguration, type PricingOffer, type PricingCalendar } from "./replacementPricingConfiguration.js";
 const own = (): PricingOffer["restrictions"] => ({ kind: "own", rules: { minArrivalNights: 1, maxStayNights: null,
   closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] });
@@ -143,5 +143,66 @@ describe("replacement room-night calculator", () => {
     expect(calculateReplacementRoomStay(fixture(), { ...request(2, "nr"), expectedTermsRevisions: { nr: "t2" } })).toMatchObject({ reason: "missing_terms" });
     expect(calculateReplacementRoomStay(fixture(), { ...request(), checkOut: "2026-07-31" })).toMatchObject({ reason: "invalid_request" });
     expect(calculateReplacementRoomStay(fixture(), { ...request(), guests: { adults: 1, childAgesAtCheckIn: [NaN] } })).toMatchObject({ reason: "invalid_guests" });
+  });
+});
+const nightRequest = (r = request()): RoomNightProjectionRequest => {
+  const { checkIn, checkOut: _out, ...scope } = r; return { ...scope, date: checkIn };
+};
+const project = (c: PricingConfiguration, r = nightRequest()) => {
+  const result = projectReplacementRoomNight(c, r); expect(result.kind).toBe("projected");
+  if (result.kind !== "projected") throw new Error(result.reason); return result;
+};
+describe("nightly projection independent of Booking eligibility", () => {
+  it("projects EUR120 with minimum3 while one-night Booking fails and three nights cost EUR360", () => {
+    const c = calendar({ base: { mode: "flat", amountMinor: "12000" } }), policy = own(); if (policy.kind !== "own") throw new Error("fixture");
+    const restricted = { ...c, offers: [{ ...c.offers[0], restrictions: { ...policy, rules: { ...policy.rules, minArrivalNights: 3 } } }] };
+    const before = structuredClone(restricted);
+    expect(project(restricted)).toMatchObject({ kind: "projected", propertyId: "property", roomTypeId: "room", offerId: "flex", revision: 1,
+      termsRevisions: { flex: "t1" }, currency: "EUR", guests: request().guests,
+      night: { date: "2026-07-31", roomMinor: "12000", mealMinor: "0", totalMinor: "12000", restrictions: { minArrivalNights: 3 }, restrictionOfferId: "flex" } });
+    expect(calculateReplacementRoomStay(restricted, { ...request(), ...{ date: "2026-07-31" } })).toMatchObject({ reason: "restriction" });
+    expect(total(restricted, { ...request(), checkOut: "2026-08-03" }).totalMinor).toBe("36000");
+    expect(restricted).toEqual(before);
+  });
+  it("returns date/season/base restrictions independently of linked price ownership", () => {
+    const c = fixture(), policy = own(); if (policy.kind !== "own") throw new Error("fixture");
+    const rules = { ...policy.rules, minArrivalNights: 3, maxStayNights: 5, closedToArrival: true, closedToDeparture: true, stopSell: true };
+    const restrictions = { ...policy, seasons: [{ from: "07-01", through: "08-31", rules }], dates: [{ date: "2026-07-31", rules: { ...rules, minArrivalNights: 4 } }] };
+    const inherited = { ...c, offers: [{ ...c.offers[0], restrictions }, c.offers[1]] };
+    const r = nightRequest(request(2, "nr"));
+    expect(project(inherited, r).night).toMatchObject({ totalMinor: "11700", restrictions: { ...rules, minArrivalNights: 4 }, restrictionOfferId: "flex" });
+    expect(project(inherited, { ...r, date: "2026-08-01" }).night.restrictions).toEqual(rules);
+    expect(project(inherited, { ...r, date: "2026-09-01" }).night.restrictions).toEqual(policy.rules);
+    expect(project({ ...inherited, offers: [inherited.offers[0], { ...c.offers[1], restrictions: policy }] }, r).night).toMatchObject({ restrictionOfferId: "nr", restrictions: policy.rules });
+    expect(calculateReplacementRoomStay(inherited, request(2, "nr"))).toMatchObject({ reason: "restriction" });
+  });
+  it("shares each room mode, child/meal arithmetic, weekday and linked rounding with valid stays", () => {
+    const bases: PricingCalendar["base"][] = [{ mode: "flat", amountMinor: "10001" }, { mode: "per_person", unitMinor: "6001" },
+      { mode: "occupancy", amountsMinor: ["10001", "13001", "15501"] }, { mode: "included_guests", baseGuests: 2, baseMinor: "13001", adjustments: [
+        { kind: "fixed", deltaMinor: "-3000" }, { kind: "fixed", deltaMinor: "0" }, { kind: "percentage", basisPoints: 2500 }] }];
+    for (const base of bases) {
+      const c = calendar({ base, weekdays: [{ day: 4, adjustment: { kind: "percentage", basisPoints: 1500 } }] });
+      const config: PricingConfiguration = { ...c, offers: [c.offers[0], { ...c.offers[1], meal: { kind: "breakfast", charge: { kind: "person", adultMinor: "1500", childBandAmountsMinor: ["0", "500"] } } }] };
+      const r = { ...request(2, "nr"), guests: { adults: 2, childAgesAtCheckIn: [8] } };
+      expect(project(config, nightRequest(r)).night).toEqual(total(config, r).nights[0]);
+      expect(project(config, nightRequest(r)).night.mealMinor).toBe("3500");
+    }
+  });
+  it("uses a linked final date override despite parent price gaps and keeps restrictions", () => {
+    const c = calendar({ base: null }), child = c.offers[1]; if (child.price.kind !== "linked") throw new Error("fixture");
+    const config = { ...c, offers: [c.offers[0], { ...child, price: { ...child.price, dateOverrides: [{ date: "2026-07-31", price: { mode: "flat" as const, amountMinor: "12000" } }] } }] };
+    const r = nightRequest({ ...request(2, "nr"), guests: { adults: 2, childAgesAtCheckIn: [8] } });
+    expect(project(config, r).night).toMatchObject({ totalMinor: "14000", restrictionOfferId: "flex", sources: [{ offerId: "nr", kind: "date" }] });
+    expect(projectReplacementRoomNight(config, { ...r, date: "2026-08-01" })).toMatchObject({ reason: "missing_price" });
+  });
+  it("rejects malformed, scoped, stale, missing-term and overflow inputs without fallback", () => {
+    const r = nightRequest(request(2, "nr"));
+    for (const [patch, reason] of [[{ date: "2026-02-30" }, "invalid_request"], [{ propertyId: "other" }, "invalid_request"],
+      [{ roomTypeId: "other" }, "invalid_request"], [{ expectedRevision: 2 }, "stale"], [{ expectedTermsRevisions: { nr: "t2" } }, "missing_terms"],
+      [{ expectedTermsRevisions: { nr: "t2", flex: "changed" } }, "stale"], [{ guests: { adults: 4, childAgesAtCheckIn: [] } }, "invalid_guests"]] as const)
+      expect(projectReplacementRoomNight(fixture(), { ...r, ...patch })).toEqual({ kind: "unavailable", reason });
+    expect(projectReplacementRoomNight(null, r)).toMatchObject({ reason: "invalid_configuration" });
+    expect(projectReplacementRoomNight(calendar({ base: { mode: "per_person", unitMinor: "999999999999999999" } }), r)).toMatchObject({ reason: "overflow" });
+    expect(project(fixture(), { ...r, date: "2024-02-29" }).night.date).toBe("2024-02-29");
   });
 });
