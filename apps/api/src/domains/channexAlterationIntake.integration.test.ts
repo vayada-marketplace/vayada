@@ -974,6 +974,79 @@ describe.skipIf(!url)("Airbnb alteration intake (PostgreSQL)", () => {
       });
     },
   );
+  it.each([false, true])(
+    "releases unverified-money acceptance (previously queued: %s) and allows decline",
+    async (queued) => {
+      const { requestId } = await persistChannexAlteration(pool, scope, event());
+      const config = ports();
+      const command = input(requestId);
+      if (queued) {
+        config.assertAvailability.mockRejectedValueOnce(new Error("unavailable"));
+        await expect(decideChannexAlteration(config, command)).rejects.toThrow("unavailable");
+        expect(await journal(requestId)).toMatchObject({ sendStartedAt: null });
+        config.assertAvailability.mockClear();
+      }
+      await pool.query(
+        `UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb WHERE id=$1`,
+        [booking],
+      );
+      try {
+        await expect(decideChannexAlteration(config, command)).rejects.toThrow(
+          "alteration_finance_reconciliation_required",
+        );
+        expect(config.provider.resolve).not.toHaveBeenCalled();
+        expect(config.assertAvailability).not.toHaveBeenCalled();
+        expect(await journal(requestId)).toBeNull();
+        expect((await readbackRow(requestId)).status).toBe("pending");
+        const provider = {
+          ...config.provider,
+          resolve: vi.fn(async () => ({ ok: true as const, state: "declined" as const })),
+        };
+        expect(
+          await decideChannexAlteration({ ...config, provider }, input(requestId, "decline")),
+        ).toMatchObject({ providerState: "declined" });
+        expect(provider.resolve).toHaveBeenCalledOnce();
+      } finally {
+        await pool.query(
+          "UPDATE booking.guest_bookings SET booking_metadata=booking_metadata - 'airbnbMoneyStatus' WHERE id=$1",
+          [booking],
+        );
+      }
+    },
+  );
+  it("reads back an already sent acceptance even when money becomes unverified", async () => {
+    const { requestId } = await persistChannexAlteration(pool, scope, event());
+    const config = ports();
+    const command = input(requestId);
+    config.provider.resolve.mockRejectedValueOnce(new Error("uncertain"));
+    await expect(decideChannexAlteration(config, command)).rejects.toThrow("uncertain");
+    const sent = await journal(requestId);
+    await pool.query(
+      `UPDATE booking.guest_bookings SET booking_metadata=booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb WHERE id=$1`,
+      [booking],
+    );
+    try {
+      const provider = {
+        ...config.provider,
+        read: vi.fn(async () => ({ ok: true as const, state: "accepted" as const })),
+      };
+      const decision = await decideChannexAlteration({ ...config, provider }, command);
+      expect(decision).toMatchObject({
+        sendStartedAt: sent.sendStartedAt,
+        deliveryState: "resolved",
+        providerState: "accepted",
+      });
+      expect(provider.resolve).toHaveBeenCalledOnce();
+      expect(provider.read).toHaveBeenCalledOnce();
+      expect(await decideChannexAlteration({ ...config, provider }, command)).toEqual(decision);
+      expect(provider.read).toHaveBeenCalledOnce();
+    } finally {
+      await pool.query(
+        "UPDATE booking.guest_bookings SET booking_metadata=booking_metadata - 'airbnbMoneyStatus' WHERE id=$1",
+        [booking],
+      );
+    }
+  });
   it("checks new financial evidence again when retrying an unsent intent", async () => {
     const { requestId } = await persistChannexAlteration(pool, scope, event());
     const config = ports(),

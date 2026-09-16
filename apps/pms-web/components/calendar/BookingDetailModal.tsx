@@ -366,6 +366,7 @@ export default function BookingDetailModal({
       : null;
   const hasCompleteRateEvidence = Boolean(
     booking &&
+    booking.amountStatus !== "unverified" &&
     movingStay &&
     moveNights !== null &&
     moveNights > 0 &&
@@ -1319,7 +1320,11 @@ export default function BookingDetailModal({
 
           {booking.numberOfRooms > 1 && (
             <div className="mb-6">
-              <BookingStaySummary stays={booking.stays} expectedCount={booking.numberOfRooms} />
+              <BookingStaySummary
+                amountStatus={booking.amountStatus}
+                stays={booking.stays}
+                expectedCount={booking.numberOfRooms}
+              />
             </div>
           )}
 
@@ -1505,7 +1510,7 @@ export default function BookingDetailModal({
               {t("bookings.modal.paymentDetails")}
             </h3>
             <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-              {booking.numberOfRooms <= 1 && (
+              {booking.amountStatus !== "unverified" && booking.numberOfRooms <= 1 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">
                     {formatCurrency(booking.nightlyRate, booking.currency)} x{" "}
@@ -1542,7 +1547,9 @@ export default function BookingDetailModal({
               <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
                 <span className="font-medium text-gray-900">{t("bookings.modal.totalAmount")}</span>
                 <span className="font-bold text-gray-900">
-                  {formatCurrency(booking.totalAmount, booking.currency)}
+                  {booking.amountStatus === "unverified"
+                    ? t("bookings.detail.amountUnverified")
+                    : formatCurrency(booking.totalAmount, booking.currency)}
                 </span>
               </div>
             </div>
@@ -1592,7 +1599,9 @@ export default function BookingDetailModal({
                 <p className="text-xs text-red-600 mt-1">
                   {booking.guestFirstName} {booking.guestLastName} &middot; {booking.checkIn} &rarr;{" "}
                   {booking.checkOut} &middot;{" "}
-                  {formatCurrency(booking.totalAmount, booking.currency)}
+                  {booking.amountStatus === "unverified"
+                    ? t("bookings.detail.amountUnverified")
+                    : formatCurrency(booking.totalAmount, booking.currency)}
                 </p>
               </div>
               <div className="flex gap-2">

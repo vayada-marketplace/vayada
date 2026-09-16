@@ -69,6 +69,7 @@ export interface Booking {
   children: number;
   nightlyRate: number;
   numberOfRooms: number;
+  amountStatus?: "recorded" | "unverified";
   totalAmount: number;
   depositRequired: boolean;
   depositPercentage: number | null;
@@ -346,7 +347,11 @@ type PmsOperationalReservation = {
     rateSummary: Record<string, unknown>;
   }>;
   roomCount?: number;
-  pricing?: { totalAmount: PmsOperationsMoney; balanceAmount: PmsOperationsMoney };
+  pricing?: {
+    amountStatus?: "recorded" | "unverified";
+    totalAmount: PmsOperationsMoney;
+    balanceAmount: PmsOperationsMoney;
+  };
   payment?: {
     method: string | null;
     expectedMethod?: BookingExpectedPaymentMethod;
@@ -1162,6 +1167,7 @@ function toBooking(
     nightlyRate,
     numberOfRooms,
     totalAmount,
+    amountStatus: reservation.pricing?.amountStatus,
     depositRequired: false,
     depositPercentage: null,
     depositAmount: 0,

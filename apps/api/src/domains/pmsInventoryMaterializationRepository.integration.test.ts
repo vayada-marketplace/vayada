@@ -961,6 +961,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       expect(
         (
           await admin.query(
+            "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual({ total_amount: "0.00", balance_amount: "0.00", money_status: null });
+      expect(
+        (
+          await admin.query(
             "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
             [bookingId],
           )
@@ -1073,6 +1081,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         ).rows[0].code,
       ).toBe("alteration_finance_settings_required");
     }
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "0.00", balance_amount: "0.00", money_status: "unverified" });
     // Restore the untracked synthetic fixture for the existing generic lifecycle regressions.
     await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
     await admin.query("DELETE FROM finance.ota_commission_evidence WHERE guest_booking_id=$1", [
@@ -1086,6 +1102,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ]);
     await admin.query("COMMIT");
     financeEnabled = false;
+    await admin.query(
+      "UPDATE booking.guest_bookings SET total_amount=37.5,balance_amount=37.5,booking_metadata=booking_metadata-'airbnbMoneyStatus' WHERE id=$1",
+      [bookingId],
+    );
     providerRevision.id = appliedProviderRevision;
     expect(
       (
@@ -1485,6 +1505,14 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(
       (
         await admin.query(
+          "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50", money_status: "unverified" });
+    expect(
+      (
+        await admin.query(
           "SELECT count(*)::int AS count FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
           [bookingId],
         )
@@ -1552,7 +1580,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           bookingId,
         ])
       ).rows[0].total_amount,
-    ).toBe("40.00");
+    ).toBe("37.50");
     expect(
       (
         await admin.query("SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1", [
@@ -1602,7 +1630,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0],
-    ).toEqual({ total_amount: "40.00", balance_amount: "40.00" });
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50" });
     expect(
       (
         await admin.query(

@@ -4,10 +4,12 @@ import { useTranslation } from "@/lib/i18n";
 
 export function AirbnbChangeRequestCard({
   request,
+  amountStatus,
   busy,
   onDecide,
 }: {
   request: BookingChangeRequest;
+  amountStatus?: "recorded" | "unverified";
   busy: boolean;
   onDecide: (action: "accept" | "decline") => void;
 }) {
@@ -15,11 +17,13 @@ export function AirbnbChangeRequestCard({
   const provider = request.providerRequest;
   if (!provider) return null;
   const money = (amount: number | null) =>
-    amount === null || !provider.currency
-      ? t("bookings.airbnb.unknown")
-      : new Intl.NumberFormat(locale, { style: "currency", currency: provider.currency }).format(
-          amount,
-        );
+    amountStatus === "unverified"
+      ? t("bookings.detail.amountUnverified")
+      : amount === null || !provider.currency
+        ? t("bookings.airbnb.unknown")
+        : new Intl.NumberFormat(locale, { style: "currency", currency: provider.currency }).format(
+            amount,
+          );
   const guests = (adults: number | null, children: number | null) =>
     adults === null || children === null
       ? t("bookings.airbnb.unknown")
@@ -53,13 +57,17 @@ export function AirbnbChangeRequestCard({
         </div>
       </div>
       <p className="mb-4 font-medium">
-        {t("bookings.detail.priceDifference", { difference: money(provider.priceDifference) })}
+        {amountStatus === "unverified"
+          ? t("bookings.detail.amountUnverified")
+          : t("bookings.detail.priceDifference", { difference: money(provider.priceDifference) })}
       </p>
       {(provider.state === "pending" || provider.state === "queued") && (
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            disabled={busy || !provider.allowedActions.includes("accept")}
+            disabled={
+              busy || amountStatus === "unverified" || !provider.allowedActions.includes("accept")
+            }
             onClick={() => onDecide("accept")}
             className="rounded-lg bg-blue-700 px-4 py-2 font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
           >

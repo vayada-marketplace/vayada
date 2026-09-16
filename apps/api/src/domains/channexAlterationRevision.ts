@@ -313,8 +313,9 @@ export async function applyChannexAlterationRevision(
     }
   }
   await client.query(
-    `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=$7::numeric,
-    balance_amount=CASE WHEN payment_status='unpaid' AND total_amount<>$7::numeric THEN $7::numeric ELSE balance_amount END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
+    `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=CASE WHEN $10 THEN total_amount ELSE $7::numeric END,
+    balance_amount=CASE WHEN NOT $10 AND payment_status='unpaid' AND total_amount<>$7::numeric THEN $7::numeric ELSE balance_amount END,
+    booking_metadata=CASE WHEN $10 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
     [
       scope.bookingId,
       scope.propertyId,
@@ -325,6 +326,7 @@ export async function applyChannexAlterationRevision(
       revision.amount,
       updatedAt,
       desired.length,
+      Boolean(captureFinancials),
     ],
   );
   await reconcilePmsOccupiedInventory(

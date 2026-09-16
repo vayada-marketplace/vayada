@@ -49,10 +49,9 @@ export async function appendFinanceAirbnbProviderSnapshot(
       checkOut: string;
       roomCount: number;
       status: string;
-      amountMatches: boolean;
     }>(
       `SELECT txid_current()::text AS "transactionId",check_in::text AS "checkIn",check_out::text AS "checkOut",
-       room_count AS "roomCount",lifecycle_status AS status,total_amount=$5::numeric AS "amountMatches" FROM booking.guest_bookings
+       room_count AS "roomCount",lifecycle_status AS status FROM booking.guest_bookings
      WHERE id=$1 AND property_id=$2 AND source_system='pms' AND source_booking_id=$3
        AND booking_channel='airbnb' AND currency=$4 FOR UPDATE`,
       [
@@ -60,7 +59,6 @@ export async function appendFinanceAirbnbProviderSnapshot(
         command.propertyId,
         `channex:${command.propertyId}:${snapshot.providerBookingId}`,
         snapshot.currency,
-        snapshot.providerBookingAmount,
       ],
     )
   ).rows[0];
@@ -101,7 +99,6 @@ export async function appendFinanceAirbnbProviderSnapshot(
     snapshot.replacement === "cancellation"
       ? booking.status !== "canceled"
       : booking.status !== "confirmed" ||
-        !booking.amountMatches ||
         booking.checkIn !== snapshot.checkIn ||
         booking.checkOut !== snapshot.checkOut ||
         booking.roomCount !== snapshot.rooms.length

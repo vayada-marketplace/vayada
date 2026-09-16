@@ -181,3 +181,33 @@ unavailable. It still needs deliberate runtime composition and rollout verificat
 this document does not turn on subscriptions, workers or staff actions. Neither
 alternative removes the current payment/folio guards or constitutes a merged,
 deployed or live-provider-tested feature.
+
+### Implemented monetary separation and display contract
+
+The supported tracked Airbnb alteration/import path preserves canonical
+`total_amount` and `balance_amount`, and writes
+`booking_metadata.airbnbMoneyStatus = "unverified"` in the same transaction as
+provider snapshots and inventory changes. These retained numbers are historical
+stored values, not newly verified receivables. The snapshot writer validates
+provider identity, currency and updated stay independently of the canonical total.
+
+The operational reservation API adds `pricing.amountStatus` with values `recorded`
+and `unverified`. `recorded` means ordinary existing storage semantics, not an
+additional verification guarantee. Only explicitly marked records are projected as `unverified`, regardless of
+channel. Older/untracked records retain existing `recorded` semantics; this does
+not establish that their provider amounts are verified receivables. Initial-import
+classification remains a separate activation prerequisite. Numeric fields remain for
+wire compatibility; updated PMS consumers must suppress payable/total calculations
+when the status is unverified, and show an amount-unverified explanation.
+
+An explicit unverified marker blocks a new staff acceptance with the existing
+finance-reconciliation error and releases unsent intent so Decline remains possible.
+The manual Mark paid command also rejects explicitly unverified money before
+writing a payment or clearing the balance. Already-sent decisions still reconcile
+through provider readback. This does not
+establish readiness for unmarked bookings or allow unsupported financial histories.
+
+These changes do not implement unknown provider-basis storage, an authoritative
+settings resolver, or initial-import canonical unknown money. Generic untracked
+imports retain their prior behavior. All activation gates remain off pending the
+remaining contract and rollout work above.

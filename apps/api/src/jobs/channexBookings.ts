@@ -212,10 +212,11 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       alreadyCanceled=current.status==="canceled";
       if(financialHistory&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId},true))throw new Failure("alteration_finance_reconciliation_required",false);
       if(!alterationApplied)await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
-           adults=$6,children=$7,room_count=$8,currency=$9,total_amount=COALESCE($10::numeric,total_amount),
-           balance_amount=CASE WHEN payment_status='unpaid' THEN COALESCE($10::numeric,balance_amount) ELSE balance_amount END,updated_at=now()
-         WHERE id=$1::uuid AND property_id=$2::uuid`:`UPDATE booking.guest_bookings SET lifecycle_status='canceled',updated_at=now() WHERE id=$1::uuid AND property_id=$2::uuid`,
-        revision.roomCount?[guestBookingId,job.propertyId,revision.status,revision.checkIn,revision.checkOut,revision.adults,revision.children,revision.roomCount,revision.currency,revision.amount]:[guestBookingId,job.propertyId],
+           adults=$6,children=$7,room_count=$8,currency=$9,total_amount=CASE WHEN $11 THEN total_amount ELSE COALESCE($10::numeric,total_amount) END,
+           balance_amount=CASE WHEN NOT $11 AND payment_status='unpaid' THEN COALESCE($10::numeric,balance_amount) ELSE balance_amount END,
+           booking_metadata=CASE WHEN $11 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=now()
+         WHERE id=$1::uuid AND property_id=$2::uuid`:`UPDATE booking.guest_bookings SET lifecycle_status='canceled',booking_metadata=CASE WHEN $3 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=now() WHERE id=$1::uuid AND property_id=$2::uuid`,
+        revision.roomCount?[guestBookingId,job.propertyId,revision.status,revision.checkIn,revision.checkOut,revision.adults,revision.children,revision.roomCount,revision.currency,revision.amount,Boolean(financialHistory)]:[guestBookingId,job.propertyId,Boolean(financialHistory)],
       );
       if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
     }

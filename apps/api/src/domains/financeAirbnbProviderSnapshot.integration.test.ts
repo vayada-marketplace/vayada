@@ -23,7 +23,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
         booking_channel text,currency text,check_in date,check_out date,room_count int,lifecycle_status text,total_amount numeric,
         PRIMARY KEY(id,property_id));
       INSERT INTO booking.guest_bookings VALUES('${id(1)}','${id(2)}','pms','channex:${id(2)}:${id(3)}',
-        'airbnb','EUR','2026-09-01','2026-09-04',1,'confirmed',120)`);
+        'airbnb','EUR','2026-09-01','2026-09-04',1,'confirmed',200)`);
     await pool.query(
       await readFile(
         new URL(
@@ -134,9 +134,6 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
 
   it("atomically replaces nightly evidence and commission; exact old replays cannot revive removed nights", async () => {
     const original = make();
-    await expect(
-      run({ ...original, rawRevision: { ...original.rawRevision, amount: "121.00" } }),
-    ).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
     expect((await run(original)).outcome).toBe("appended");
     expect((await run(original)).outcome).toBe("replayed");
     const next = make("revision-2", "revision-1", "2026-09-14T10:00:00.000002Z");
@@ -146,7 +143,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     Reflect.deleteProperty(next.rawRevision.rooms[0]!.days, "2026-09-03");
     await expect(run(next)).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
     const changeStay = (client: pg.PoolClient) =>
-      client.query("UPDATE booking.guest_bookings SET check_out='2026-09-03',total_amount=80");
+      client.query("UPDATE booking.guest_bookings SET check_out='2026-09-03'");
     const invalid = { ...next, previousRevisionId: "wrong" };
     await expect(run(invalid, changeStay)).rejects.toThrow(
       "airbnb_finance_previous_revision_conflict",
@@ -154,8 +151,12 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     expect(
       (await pool.query("SELECT check_out::text,total_amount::text FROM booking.guest_bookings"))
         .rows[0],
-    ).toEqual({ check_out: "2026-09-04", total_amount: "120" });
+    ).toEqual({ check_out: "2026-09-04", total_amount: "200" });
     expect((await run(next, changeStay)).outcome).toBe("appended");
+    expect(
+      (await pool.query("SELECT total_amount::text FROM booking.guest_bookings")).rows[0]
+        .total_amount,
+    ).toBe("200");
     expect((await run(original)).outcome).toBe("replayed");
     expect(
       (

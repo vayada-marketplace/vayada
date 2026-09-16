@@ -698,10 +698,11 @@ export default function CheckOutPage() {
                 <div className="grid gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm">
                   <TotalRow
                     label={t("checkOut.baseBookingSettled")}
-                    value={formatCurrency(
-                      booking.totalAmount - additionalCharges,
-                      booking.currency,
-                    )}
+                    value={
+                      booking.amountStatus === "unverified"
+                        ? t("bookings.detail.amountUnverified")
+                        : formatCurrency(booking.totalAmount - additionalCharges, booking.currency)
+                    }
                   />
                   <TotalRow
                     label={t("checkOut.additionalCharges")}
@@ -714,10 +715,11 @@ export default function CheckOutPage() {
                   />
                   <TotalRow
                     label={t("checkOut.grandTotal")}
-                    value={formatCurrency(
-                      booking.totalAmount + additionalCharges,
-                      booking.currency,
-                    )}
+                    value={
+                      booking.amountStatus === "unverified"
+                        ? t("bookings.detail.amountUnverified")
+                        : formatCurrency(booking.totalAmount + additionalCharges, booking.currency)
+                    }
                     strong
                   />
                 </div>

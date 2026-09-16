@@ -5612,6 +5612,9 @@ async function applyBookingMarkPaidCommandMutation(
 ): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const booking = await loadBookingPaymentLifecycle(client, command);
   if (!booking) return reservationNotFound(command.guestBookingId);
+  if (jsonObject(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") {
+    return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
+  }
   const isPayPalPending =
     booking.paymentMethod === "paypal" && booking.lifecycleStatus === "pending_payment";
   const isAcceptedBankTransfer =

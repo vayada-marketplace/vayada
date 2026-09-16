@@ -196,7 +196,11 @@ export type PmsOperationalReservation = {
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomLines?: ReturnType<typeof projectBookingRoomSelection>["roomLines"];
   roomCount?: number;
-  pricing?: { totalAmount: PmsMoney; balanceAmount: PmsMoney };
+  pricing?: {
+    totalAmount: PmsMoney;
+    balanceAmount: PmsMoney;
+    amountStatus?: "recorded" | "unverified";
+  };
   payment?: {
     method: string | null;
     expectedMethod?: PmsExpectedPaymentMethod;
@@ -885,6 +889,7 @@ type TargetPmsOperationalReservationRow = {
   selectedRoomOffer?: unknown;
   bookedRoomName: string;
   roomCount: string | number;
+  amountStatus?: "recorded" | "unverified";
   totalAmount: string | number;
   balanceAmount: string | number;
   currency: string;
@@ -949,6 +954,8 @@ function pmsOperationalReservationSelectSql(canReadGuestContact: boolean): strin
   ) AS "bookedRoomName",
   COALESCE(booking.booking_metadata->'selectedOffer',quote.selected_offer_snapshot) AS "selectedRoomOffer",
   booking.room_count AS "roomCount",
+  CASE WHEN booking.booking_metadata->>'airbnbMoneyStatus'='unverified'
+    THEN 'unverified' ELSE 'recorded' END AS "amountStatus",
   booking.total_amount AS "totalAmount",
   booking.balance_amount AS "balanceAmount",
   booking.currency,
@@ -1413,6 +1420,7 @@ function toPmsOperationalReservation(
     mealDescription: bookedMealDescription(row.selectedRoomOffer),
     roomCount: Math.max(toInteger(row.roomCount), 1),
     pricing: {
+      amountStatus: row.amountStatus ?? "recorded",
       totalAmount: {
         amountDecimal: toDecimalString(row.totalAmount),
         currency: row.currency,
