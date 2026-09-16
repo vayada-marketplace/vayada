@@ -28,7 +28,7 @@ import { createElement } from "react";
 import { create } from "react-test-renderer";
 import MobileCalendar, { calendarLaneTop } from "../../components/calendar/MobileCalendar";
 // prettier-ignore
-import { bookingSettlementLabel, expectedPaymentMethodLabel } from "../../components/bookings/BookingStaySummary";
+import BookingStaySummary, { bookingSettlementLabel, expectedPaymentMethodLabel } from "../../components/bookings/BookingStaySummary";
 
 const reservation = {
   guestBookingId: "booking-1",
@@ -84,16 +84,86 @@ describe("PMS target booking projection", () => {
     });
   });
 
+  it("preserves unverified pricing and never labels it paid or outstanding", async () => {
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types")
+        ? { items: [] }
+        : reservationPage({
+            ...reservation,
+            pricing: { ...reservation.pricing, amountStatus: "unverified" },
+          }),
+    );
+    const booking = (await bookingsService.list()).bookings[0]!;
+    expect(booking.amountStatus).toBe("unverified");
+    expect(bookingSettlementLabel(booking)).toBe("Amount unverified");
+    expect(bookingSettlementLabel({ ...booking, balanceAmount: 0, paymentStatus: "paid" })).toBe(
+      "Amount unverified",
+    );
+  });
+
+  it("shows unverified instead of applied nightly prices in stay summaries", () => {
+    const view = create(
+      createElement(BookingStaySummary, {
+        amountStatus: "unverified",
+        expectedCount: 1,
+        stays: [
+          {
+            position: 0,
+            roomName: "Double",
+            ratePlanName: null,
+            roomNumber: "101",
+            checkIn: "2026-09-10",
+            checkOut: "2026-09-11",
+            adults: 1,
+            children: 0,
+            nightly: [{ appliedAmount: 155, currency: "EUR", evidenceQuality: "exact" }],
+          },
+        ],
+      }),
+    );
+    expect(JSON.stringify(view.toJSON())).toContain("Amount unverified");
+    expect(JSON.stringify(view.toJSON())).not.toContain("€155");
+    view.unmount();
+  });
+
   it("keeps all selected room names and guest allocations before PMS assignment", async () => {
-    const mixed = { ...reservation, roomCount: 3, roomLines: [
-      { roomTypeId: "type-1", roomName: "Double", roomCount: 2, guests: [{ adults: 2, children: 0 }, { adults: 1, children: 1 }], rateSummary: { name: "Flexible" } },
-      { roomTypeId: "type-2", roomName: "Twin", roomCount: 1, guests: [{ adults: 2, children: 0 }], rateSummary: { name: "Non-refundable" } },
-    ] };
-    mocks.get.mockImplementation(async (endpoint: string) => endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(mixed));
+    const mixed = {
+      ...reservation,
+      roomCount: 3,
+      roomLines: [
+        {
+          roomTypeId: "type-1",
+          roomName: "Double",
+          roomCount: 2,
+          guests: [
+            { adults: 2, children: 0 },
+            { adults: 1, children: 1 },
+          ],
+          rateSummary: { name: "Flexible" },
+        },
+        {
+          roomTypeId: "type-2",
+          roomName: "Twin",
+          roomCount: 1,
+          guests: [{ adults: 2, children: 0 }],
+          rateSummary: { name: "Non-refundable" },
+        },
+      ],
+    };
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: roomTypes } : reservationPage(mixed),
+    );
     const result = (await bookingsService.list()).bookings[0]!;
     expect(result.roomName).toBe("2 × Double + 1 × Twin");
     expect(result.stays).toMatchObject([
-      { position: 0, roomName: "Double", adults: 2, children: 0, ratePlanName: "Flexible", roomNumber: null },
+      {
+        position: 0,
+        roomName: "Double",
+        adults: 2,
+        children: 0,
+        ratePlanName: "Flexible",
+        roomNumber: null,
+      },
       { position: 1, roomName: "Double", adults: 1, children: 1 },
       { position: 2, roomName: "Twin", adults: 2, children: 0, ratePlanName: "Non-refundable" },
     ]);
@@ -121,7 +191,10 @@ describe("PMS target booking projection", () => {
     const detailed = {
       ...reservation,
       primaryGuest: { ...reservation.primaryGuest, specialRequests: "Quiet room" },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+      addOns: [
+        { selectionId: "selection-1", addonId: "addon-1", name: "Breakfast", quantity: 2 },
+        { selectionId: "selection-1", addonId: "addon-2", name: "Coffee", quantity: 1 },
+      ],
     };
     mocks.get.mockImplementation(async (endpoint: string) =>
       endpoint.endsWith("/room-types") ? { items: [] } : { item: detailed },
@@ -129,10 +202,33 @@ describe("PMS target booking projection", () => {
 
     await expect(bookingsService.get("booking-1")).resolves.toMatchObject({
       specialRequests: "Quiet room",
-      addonIds: ["addon-1"],
-      addonNames: ["Breakfast"],
-      addonQuantities: { "addon-1": 2 },
+      addonIds: ["addon-1", "addon-2"],
+      addonNames: ["Breakfast", "Coffee"],
+      addonQuantities: { "addon-1": 2, "addon-2": 1 },
+      addonSelections: [
+        {
+          selectionId: "selection-1",
+          addonId: "addon-1",
+          name: "Breakfast, Coffee",
+          quantity: 3,
+        },
+      ],
     });
+  });
+
+  it("submits the explicitly fulfilled add-on selections at check-out", async () => {
+    mocks.post.mockResolvedValue({});
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : { item: reservation },
+    );
+
+    await bookingsService.completeCheckOut("booking-1", [], [], undefined, ["selection-1"]);
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/pms/properties/property-1/reservations/booking-1/check-out",
+      expect.objectContaining({ fulfilledAddonSelectionIds: ["selection-1"] }),
+      expect.anything(),
+    );
   });
 
   it("defaults additive booking evidence while an older API instance rolls out", async () => {

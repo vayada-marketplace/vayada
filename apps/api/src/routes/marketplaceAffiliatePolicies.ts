@@ -69,6 +69,10 @@ export async function registerMarketplaceAffiliatePolicyRoutes(
     authorize(request);
   });
   const path = "/properties/:propertyId/affiliate-policies";
+  app.get<{ Params: Params }>(path, async (request) => {
+    const context = authorize(request);
+    return repository.list(request.params.propertyId, context.selectedOrganization.organizationId);
+  });
   app.get<{ Params: Params }>(`${path}/:policyVersionId`, async (request, reply) => {
     authorize(request);
     const result = await repository.resolve({

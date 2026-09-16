@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { lockCurrentQuoteGuestDisclosure } from "../domains/currentQuoteGuestDisclosure.js";
 import {
@@ -67,6 +68,7 @@ async function mount(available = true, acceptance = false) {
   app = Fastify({ logger: false });
   const checkoutAdapter = available
     ? createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
         connectionString: "postgresql://unused",
         inventoryReservationPort: {} as never,
         replacementPricingAcceptanceEnabled: acceptance,

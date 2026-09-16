@@ -69,6 +69,7 @@ export type BookingLifecycleEmailInput = {
     adults?: number;
     children?: number;
     specialRequests?: string | null;
+    bookingMetadata?: unknown;
   };
 };
 
@@ -105,6 +106,8 @@ export async function enqueueBookingLifecycleEmailJob(
   queryable: Queryable,
   input: BookingLifecycleEmailInput,
 ): Promise<BookingLifecycleEmailEnqueueResult> {
+  if (record(input.booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified")
+    throw new Error("booking_amount_unverified");
   const recipientRole = input.recipient?.role ?? "guest";
   const to = normalizeEmail(input.recipient ? input.recipient.email : input.booking.guestEmail);
 
@@ -369,6 +372,7 @@ export async function enqueueBookingTransitionNotifications(
 ): Promise<BookingLifecycleEmailEnqueueResult[]> {
   const booking = await loadBookingNotificationSnapshot(queryable, input);
   if (!booking) throw new Error("Booking notification snapshot was not found.");
+  if (record(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") return [];
 
   const notifications = notificationsForTransition(input.transition, booking);
   const enqueued: BookingLifecycleEmailEnqueueResult[] = [];

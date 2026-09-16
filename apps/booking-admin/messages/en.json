@@ -1,4 +1,5 @@
 {
+  "reservations.amountUnverified": "Amount unverified",
   "auth.login.sessionExpired": "Your session has expired. Please login again.",
   "auth.login.emailLabel": "Email address",
   "auth.login.emailPlaceholder": "admin@example.com",
@@ -138,6 +139,7 @@
   "dashboard.timeRange.month": "Last 30 days",
   "dashboard.stats.revenue": "Revenue",
   "dashboard.stats.newBookings": "New Bookings",
+  "dashboard.stats.incompleteAmounts": "Some booking amounts are unverified. Revenue and average rates exclude them; booking counts still include them. Financial comparisons are unavailable.",
   "dashboard.stats.avgNightlyRate": "Avg. Nightly Rate",
   "dashboard.stats.pageViews": "Page Views",
   "dashboard.stats.nextArrival": "Next arrival:",

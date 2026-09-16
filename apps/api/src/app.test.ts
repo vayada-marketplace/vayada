@@ -2727,7 +2727,9 @@ function buildAuthenticatedApp(
       ? agencyPropertyAccessRepository
       : {
           async findMembershipPropertyScope() {
-            return options.propertyScope ?? null;
+            return options.propertyScope
+              ? { productAccess: { pms: true, booking: true }, ...options.propertyScope }
+              : null;
           },
         });
 
@@ -2788,6 +2790,10 @@ function buildAuthenticatedApp(
           return (
             options.permissions ?? [
               "booking.settings.manage",
+              "booking.addons.read",
+              "booking.addons.manage",
+              "booking.promos.read",
+              "booking.promos.manage",
               "booking.reservation.read",
               "pms.guest_contact.read",
             ]
@@ -4223,6 +4229,7 @@ describe("vayada-api", () => {
               accessOrigin: "agency",
               assignedPropertyIds: [],
               permissionOverrides,
+              productAccess: { pms: true, booking: true },
             };
           },
           async recordInvalidPermissionOverride(_context, issueCodes) {
@@ -5952,6 +5959,36 @@ describe("vayada-api", () => {
       addonItems: [bookingAddonItem],
       propertyPlan: commissionPropertyPlan,
     });
+  });
+
+  it.each([
+    ["addon-items", "booking.addons.read"],
+    ["promo-codes", "booking.promos.read"],
+  ] as const)("separates %s View from writes and general Settings", async (path, permission) => {
+    app = buildAuthenticatedApp({ permissions: [permission] });
+    const url = `/api/booking/hotels/booking_hotel_alpenrose/${path}`;
+    const headers = { authorization: "Bearer valid-token" };
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
+    for (const method of ["POST", "PATCH", "DELETE"] as const) {
+      expect(
+        (
+          await app.inject({
+            method,
+            url: method === "POST" ? url : `${url}/target`,
+            headers,
+            ...(method === "DELETE" ? {} : { payload: {} }),
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    await app.close();
+    app = buildAuthenticatedApp({ permissions: ["booking.settings.manage"] });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+    await app.close();
+    app = buildAuthenticatedApp({
+      permissions: [path === "addon-items" ? "booking.promos.read" : "booking.addons.read"],
+    });
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
   });
 
   it("returns the booking add-on item read-model not-found contract", async () => {
@@ -13511,7 +13548,7 @@ describe("vayada-api", () => {
             {
               propertyId: input.propertyId,
               threadId: input.idempotencyKey === "bad-result" ? "foreign-thread" : input.threadId,
-              action: "booking_com_no_reply_needed" as const,
+              action: input.action ?? "booking_com_no_reply_needed",
               jobId,
               acceptedAt: "2026-09-03T11:00:00.000Z",
               attentionStateChanged: false as const,
@@ -13529,10 +13566,10 @@ describe("vayada-api", () => {
       pmsOperationsAllowedOrigins: ["https://pms.localhost"],
     });
     const url = `/api/pms/properties/${pmsPropertyId}/messaging/threads/${threadId}/provider-actions/no-reply-needed`;
-    const post = (key?: string, payload?: unknown) =>
+    const post = (key?: string, payload: unknown = { expectedVersion: 4 }, closure = false) =>
       injectJson(app!, {
         method: "POST",
-        url,
+        url: closure ? url.replace("no-reply-needed", "close") : url,
         headers: {
           authorization: "Bearer valid-token",
           ...(key ? { "idempotency-key": key } : {}),
@@ -13564,6 +13601,10 @@ describe("vayada-api", () => {
     ] as const)
       await expect(post(key)).resolves.toMatchObject({ statusCode, body: { code } });
 
+    await expect(post("closure", { expectedVersion: 4 }, true)).resolves.toMatchObject({
+      statusCode: 202,
+      body: { action: "channex_close" },
+    });
     const beforeInvalid = calls.length;
     await expect(post()).resolves.toMatchObject({
       statusCode: 400,
@@ -13644,6 +13685,16 @@ describe("vayada-api", () => {
         payload: "{",
       });
       expect(response.statusCode, candidate.name).toBe(candidate.status);
+      const closure = await app.inject({
+        method: "POST",
+        url: `/api/pms/properties/${"propertyId" in candidate ? candidate.propertyId : pmsPropertyId}/messaging/threads/13736000-0000-4000-8000-000000000001/provider-actions/close`,
+        headers: {
+          ...(candidate.name === "missing auth" ? {} : { authorization: "Bearer valid-token" }),
+          "idempotency-key": "closure",
+        },
+        payload: { expectedVersion: 4 },
+      });
+      expect(closure.statusCode, candidate.name).toBe(candidate.status);
       await app.close();
       app = null;
     }
@@ -13931,7 +13982,7 @@ describe("vayada-api", () => {
     const base = `/api/pms/properties/${pmsPropertyId}/messaging`;
     for (const [path, payload] of [
       ["messages", { expectedThreadVersion: 4, text: "Test", attachmentMediaIds: [] }],
-      ["provider-actions/no-reply-needed", {}],
+      ["provider-actions/no-reply-needed", { expectedVersion: 4 }],
     ] as const) {
       for (const authorization of [undefined, "Bearer invalid-token", "Bearer valid-token"]) {
         const response = await injectJson(app, {
@@ -17366,7 +17417,10 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: checkoutCase.request.method ?? "POST",
       url: checkoutCase.request.path,
-      payload: checkoutCase.request.body,
+      payload: {
+        ...checkoutCase.request.body,
+        fulfilledAddonSelectionIds: ["F6855600-0000-0000-0000-000000000001"],
+      },
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -17400,6 +17454,9 @@ describe("vayada-api", () => {
       expect.arrayContaining(["finance_reconciliation", "payout_dispatch"]),
     );
     expect(commandRepository.checkOutCommands).toHaveLength(1);
+    expect(commandRepository.checkOutCommands[0]?.fulfilledAddonSelectionIds).toEqual([
+      "f6855600-0000-0000-0000-000000000001",
+    ]);
     expect(commandRepository.auditEvents).toContain(
       "checkout_completed:f6855a00-0000-0000-0000-000000000001",
     );
@@ -17448,7 +17505,14 @@ describe("vayada-api", () => {
     ]);
   });
 
-  it("rejects malformed PMS check-out settled charge ids before dispatch", async () => {
+  it.each([
+    [{ chargesSettled: [123] }, "chargesSettled entries must be UUIDs."],
+    [{ fulfilledAddonSelectionIds: null }, "fulfilledAddonSelectionIds entries must be unique UUIDs."],
+    [
+      { fulfilledAddonSelectionIds: ["f6855600-0000-0000-0000-000000000001", "F6855600-0000-0000-0000-000000000001"] },
+      "fulfilledAddonSelectionIds entries must be unique UUIDs.",
+    ],
+  ])("rejects malformed PMS check-out input before dispatch", async (patch, message) => {
     const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
     const commandRepository = createPmsOperationsCommandRepository();
     app = buildAuthenticatedApp({
@@ -17468,7 +17532,7 @@ describe("vayada-api", () => {
       url: checkoutCase.request.path,
       payload: {
         ...checkoutCase.request.body,
-        chargesSettled: [123],
+        ...patch,
       },
       headers: {
         authorization: "Bearer valid-token",
@@ -17478,7 +17542,7 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toMatchObject({
       code: "invalid_body",
-      message: "chargesSettled entries must be UUIDs.",
+      message,
     });
     expect(commandRepository.checkOutCommands).toEqual([]);
   });

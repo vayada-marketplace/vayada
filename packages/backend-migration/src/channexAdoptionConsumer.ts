@@ -174,14 +174,20 @@ async function consumeVerifiedManifest(
 }
 
 async function acquireAdvisoryLock(client: TransactionClient, key: string): Promise<void> {
-  const result = await client.query<{ acquired: boolean }>(
-    "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired",
-    [key],
-  );
-  if (!result.rows[0]?.acquired) {
-    throw Object.assign(new Error("Channex adoption lock is unavailable; retry later"), {
-      code: "55P03",
-    });
+  await client.query("BEGIN");
+  let acquired = false;
+  try {
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [key]);
+    acquired = true;
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (acquired)
+      await client
+        .query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [key])
+        .catch(() => undefined);
+    throw error;
   }
 }
 

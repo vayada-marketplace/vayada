@@ -20,6 +20,7 @@ const endpoints = [
 async function setup(mutate: (c: RequestContext) => void = () => {}, authFailure = false) {
   const app = Fastify();
   const repository = {
+    list: vi.fn<AffiliatePolicyRepository["list"]>().mockResolvedValue({ policies: [] }),
     save: vi
       .fn<AffiliatePolicyRepository["save"]>()
       .mockResolvedValue({ ok: true, policyVersionId: versionId, replayed: false }),
@@ -94,6 +95,10 @@ describe("Marketplace affiliate policy HTTP", () => {
       expect(result.statusCode).toBe(409);
       expect(result.json().reason).toBe("not_approved");
       expect(repository.resolve).toHaveBeenCalledWith({ propertyId, policyVersionId: versionId });
+      expect((await app.inject({ method: "GET", url: path, headers })).json()).toEqual({
+        policies: [],
+      });
+      expect(repository.list).toHaveBeenCalledWith(propertyId, "hotel-org");
     } finally {
       await app.close();
     }
@@ -102,7 +107,7 @@ describe("Marketplace affiliate policy HTTP", () => {
   it("keeps upstream authentication infrastructure failures uncached", async () => {
     const { app } = await setup(undefined, true);
     try {
-      for (const endpoint of endpoints) {
+      for (const endpoint of [...endpoints, { method: "GET" as const, url: path }]) {
         const response = await app.inject({ ...endpoint, headers });
         expect(response.statusCode).toBe(500);
         expect(response.headers["cache-control"]).toBe("no-store");
@@ -115,7 +120,7 @@ describe("Marketplace affiliate policy HTTP", () => {
     const { app, repository } = await setup();
     try {
       for (const authorization of [undefined, "Bearer invalid"])
-        for (const endpoint of endpoints) {
+        for (const endpoint of [...endpoints, { method: "GET" as const, url: path }]) {
           const result = await app.inject({
             ...endpoint,
             headers: authorization ? { authorization } : {},
@@ -126,6 +131,7 @@ describe("Marketplace affiliate policy HTTP", () => {
       expect(repository.save).not.toHaveBeenCalled();
       expect(repository.approve).not.toHaveBeenCalled();
       expect(repository.resolve).not.toHaveBeenCalled();
+      expect(repository.list).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -162,11 +168,12 @@ describe("Marketplace affiliate policy HTTP", () => {
     ]) {
       const { app, repository } = await setup(mutate);
       try {
-        for (const endpoint of endpoints)
+        for (const endpoint of [...endpoints, { method: "GET" as const, url: path }])
           expect((await app.inject({ ...endpoint, headers })).statusCode).toBe(403);
         expect(repository.save).not.toHaveBeenCalled();
         expect(repository.approve).not.toHaveBeenCalled();
         expect(repository.resolve).not.toHaveBeenCalled();
+        expect(repository.list).not.toHaveBeenCalled();
       } finally {
         await app.close();
       }
@@ -202,6 +209,7 @@ describe("Marketplace affiliate policy HTTP", () => {
       expect(repository.save).not.toHaveBeenCalled();
       expect(repository.approve).not.toHaveBeenCalled();
       expect(repository.resolve).not.toHaveBeenCalled();
+      expect(repository.list).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

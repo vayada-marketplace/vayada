@@ -1,3 +1,4 @@
+import { readBookingAffiliateDestinations } from "./bookingAffiliateDestinationRepository.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import { requireActiveEntitlement, requireResourceAccess } from "@vayada/backend-authorization";
@@ -6,6 +7,7 @@ import {
   parseMarketplaceAffiliateOfferTerms,
 } from "@vayada/domain-marketplace";
 import type pg from "pg";
+import { resolvePgFinanceAffiliatePercentagePolicy } from "./financeAffiliatePercentagePolicyResolver.js";
 
 type SaveDraft = {
   context: RequestContext;
@@ -19,7 +21,13 @@ type Result =
   | { ok: true; draftId: string; revision: number; replayed: boolean }
   | {
       ok: false;
-      code: "invalid_request" | "scope_unavailable" | "revision_conflict" | "idempotency_conflict";
+      code:
+        | "invalid_request"
+        | "scope_unavailable"
+        | "revision_conflict"
+        | "idempotency_conflict"
+        | "policy_unavailable"
+        | "destination_unavailable";
     };
 const operation = "marketplace.affiliate_offer_draft.save";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -115,6 +123,32 @@ export async function saveMarketplaceAffiliateDraft(
     if (latest.rows[0].revision !== expectedRevision) {
       await client.query("ROLLBACK");
       return { ok: false, code: "revision_conflict" };
+    }
+    const commission = await resolvePgFinanceAffiliatePercentagePolicy(client, {
+      propertyId,
+      policyVersionId: terms.terms.financePolicyVersionId,
+    });
+    if (commission.status !== "available") {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "policy_unavailable" };
+    }
+    const property = await client.query(
+      "SELECT id FROM hotel_catalog.properties WHERE id=$1 AND profile_status <> 'disabled' FOR SHARE",
+      [propertyId],
+    );
+    if (!property.rowCount) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "destination_unavailable" };
+    }
+    const destinations = await readBookingAffiliateDestinations(
+      client,
+      propertyId,
+      organizationId,
+      terms.terms.bookingDestinationId,
+    );
+    if (!destinations.length) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "destination_unavailable" };
     }
     const draftId = randomUUID();
     const revision = expectedRevision + 1;

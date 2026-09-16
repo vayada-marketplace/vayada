@@ -42,7 +42,10 @@ describe("booking email delivery", () => {
           "postgres://unused",
           { send },
           {
-            pool: pool as never,
+            pool: {
+              ...pool,
+              connect: async () => ({ query: pool.query, release: vi.fn() }),
+            } as never,
             limit: 1,
             workerId: "worker-1",
           },
@@ -97,7 +100,14 @@ describe("booking email delivery", () => {
             Promise.reject(new Error("provider unavailable for guest@example.test")),
           ),
         },
-        { pool: pool as never, limit: 1, workerId: "worker-1" },
+        {
+          pool: {
+            ...pool,
+            connect: async () => ({ query: pool.query, release: vi.fn() }),
+          } as never,
+          limit: 1,
+          workerId: "worker-1",
+        },
       ),
     ).resolves.toEqual({ processed: 0, failed: 1 });
 
@@ -113,7 +123,14 @@ describe("booking email delivery", () => {
     const failureUpdate = queries.find((sql) => sql.includes("delivery_failed"));
     expect(failureUpdate).toContain("worker_id = $6");
     expect(failureUpdate).toContain("locked_by = $6");
-    expect(queries.every((sql) => !sql.includes("booking.guest_bookings"))).toBe(true);
+    expect(
+      queries.every(
+        (sql) =>
+          !/UPDATE booking\.guest_bookings|INSERT INTO booking\.guest_bookings|DELETE FROM booking\.guest_bookings/.test(
+            sql,
+          ),
+      ),
+    ).toBe(true);
     expect(queries.every((sql) => !sql.includes("pms-reservation-handoff"))).toBe(true);
   });
 
@@ -146,7 +163,10 @@ describe("booking email delivery", () => {
         "postgres://unused",
         { send },
         {
-          pool: pool as never,
+          pool: {
+            ...pool,
+            connect: async () => ({ query: pool.query, release: vi.fn() }),
+          } as never,
           limit: 1,
           workerId: "worker-1",
         },
@@ -183,7 +203,14 @@ describe("booking email delivery", () => {
       runBookingEmailDeliveryJobs(
         "postgres://unused",
         { send: vi.fn(async () => undefined) },
-        { pool: pool as never, limit: 1, workerId: "worker-old" },
+        {
+          pool: {
+            ...pool,
+            connect: async () => ({ query: pool.query, release: vi.fn() }),
+          } as never,
+          limit: 1,
+          workerId: "worker-old",
+        },
       ),
     ).resolves.toEqual({ processed: 0, failed: 0 });
 

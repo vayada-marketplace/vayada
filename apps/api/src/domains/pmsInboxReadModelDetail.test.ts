@@ -141,8 +141,13 @@ function recordingPool(options: { threadRows?: QueryResultRow[] } = {}) {
   return { pool, calls };
 }
 
-function createRead(pool: PmsInboxReadPool, attachmentMediaAccessEnabled = true) {
+function createRead(
+  pool: PmsInboxReadPool,
+  attachmentMediaAccessEnabled = true,
+  providerMutationEnabled = true,
+) {
   return createPgPmsInboxReadPort({
+    providerMutationEnabled,
     connectionString: "",
     attachmentMediaAccessEnabled,
     pool,
@@ -155,6 +160,38 @@ function createRead(pool: PmsInboxReadPool, attachmentMediaAccessEnabled = true)
 }
 
 describe("PostgreSQL PMS Inbox thread detail read model", () => {
+  it.each(["other", null])("hides provider actions for unsupported channel %s", async (channel) => {
+    const { pool, calls } = recordingPool({
+      threadRows: [{ ...thread, providerChannel: channel, providerActionAvailable: false }],
+    });
+    const result = await createRead(pool).getThread({
+      propertyId: PROPERTY,
+      threadId: THREAD,
+      canReadGuestContact: false,
+      messageLimit: 2,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { availableProviderActions: [] },
+    });
+    expect(calls[0]![0]).toContain("'bookingcom', 'airbnb', 'expedia'");
+  });
+
+  it("hides disabled provider mutations while preserving recorded outcomes", async () => {
+    const outcome = { action: "channex_close", state: "confirmed", reason: null, threadVersion: 4 };
+    const { pool } = recordingPool({ threadRows: [{ ...thread, providerActions: [outcome] }] });
+    const result = await createRead(pool, true, false).getThread({
+      propertyId: PROPERTY,
+      threadId: THREAD,
+      canReadGuestContact: false,
+      messageLimit: 2,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { availableProviderActions: [], providerActions: [outcome] },
+    });
+  });
+
   it("returns a property-scoped chronological page with safe attachments and cursor", async () => {
     const { pool, calls } = recordingPool();
     const read = createRead(pool);
@@ -170,7 +207,7 @@ describe("PostgreSQL PMS Inbox thread detail read model", () => {
       value: {
         propertyId: PROPERTY,
         thread: { id: THREAD, guest: { displayName: "Ada Lovelace" } },
-        availableProviderActions: ["booking_com_no_reply_needed"],
+        availableProviderActions: ["channex_close", "booking_com_no_reply_needed"],
         timeline: [
           { item: { kind: "internal_note", note: { text: "Prepare late arrival." } } },
           {
@@ -203,7 +240,7 @@ describe("PostgreSQL PMS Inbox thread detail read model", () => {
     }
     expect(calls[1]![0]).toContain('ORDER BY "occurredAtValue" DESC, kind DESC, id DESC');
     expect(calls[0]![0]).toContain("pms.inbox.provider-action.deliver");
-    expect(calls[0]![0]).toContain("provider_action_job.source_domain_event_id IS NOT NULL");
+    expect(calls[0]![0]).toContain("job.source_domain_event_id IS NOT NULL");
     expect(calls[1]![0]).toContain("timeline_thread.source IN ('channex', 'migration')");
     expect(calls[1]![0]).toContain(
       'message.latest_provider_receipt_at AS "providerAcknowledgedAt"',
@@ -267,6 +304,7 @@ describe("PostgreSQL PMS Inbox thread detail read model", () => {
     const { pool, calls } = recordingPool({ threadRows: [] });
     const emailCalls: unknown[] = [];
     const read = createPgPmsInboxReadPort({
+      providerMutationEnabled: true,
       connectionString: "",
       attachmentMediaAccessEnabled: true,
       pool,

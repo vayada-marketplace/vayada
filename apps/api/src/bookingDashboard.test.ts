@@ -563,6 +563,7 @@ describe("target Booking dashboard metrics read port", () => {
             propertyFound: true,
             revenueAmount: "3600.00",
             bookingCount: "10",
+            unverifiedBookingCount: "2",
             roomNightCount: "30",
             currency: "EUR",
             nextArrivalDate: "2026-07-04",
@@ -638,6 +639,8 @@ describe("target Booking dashboard metrics read port", () => {
       windowEnd: "2026-06-30",
     });
 
+    expect(metrics?.current.unverifiedBookingCount).toBe(2);
+    expect(metrics?.current.bookingCount).toBe(10);
     expect(metrics?.current.totalRevenue.amountDecimal).toBe("3600.00");
     expect(metrics?.current.avgNightlyRate.amountDecimal).toBe("120.00");
     expect(metrics?.current.pageViewCount).toBe(28);

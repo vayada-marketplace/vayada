@@ -331,6 +331,47 @@ retention deadline. Rerun the dry run with the same ID after apply and require u
 checksums/counts. Booking success still does not authorize legacy shutdown:
 VAY-1356 through VAY-1363 and the rollback window remain mandatory gates.
 
+## Booking Nightly Revenue Backfill
+
+VAY-1181 reconstructs Booking-owned nightly room revenue from retained target
+evidence. It never calls Booking.com or another provider, and it excludes any
+booking with producer-owned base room-night evidence. Exact nightly evidence is
+preferred; missing amounts stay explicit. Equal allocation from a retained
+booking total is disabled unless the operator opts in.
+
+Start with a dry run (the default):
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<24 lowercase hex characters> \
+  --recognized-on <YYYY-MM-DD> \
+  --dry-run
+```
+
+Review every exception and the planned reconciliation by property, stay date,
+currency, source, and evidence quality. Add
+`--allow-inferred-equal-allocation` only after approving that policy. Apply the
+same reviewed run with its exact guard:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+npm --workspace @vayada/backend-migration run target:booking-nightly-revenue:backfill:dist -- \
+  --run-id vay1181-<same 24 lowercase hex characters> \
+  --recognized-on <same YYYY-MM-DD> \
+  --apply \
+  --confirm nightly-revenue-backfill:vay1181-<same 24 lowercase hex characters>
+```
+
+Each page is verified before its independent transaction commits. After an
+interruption, rerun with the same immutable run ID and arguments: committed
+pages replay, while uncaptured or backfill-owned corrected bookings append the
+next revision. Never mint a new run ID merely to resume. `--recognized-on` is
+the correction recognition date; base room-night rows retain their stay date.
+The JSON report includes every page checkpoint, exception, planned totals, and
+applied ledger totals. Any exception sets exit code 2 after printing the report;
+an execution or verification failure sets exit code 1 and rolls back that page.
+
 ## Production PMS Migration
 
 VAY-1356 consumes PMS rooms and rate configuration, exact 366-day inventory,
@@ -367,6 +408,67 @@ repeatable-read transaction, verifies exact write/provenance counts, and rereads
 the target before commit. Rerun the same dry run and require unchanged parity.
 PMS success does not authorize legacy shutdown: VAY-1357 through VAY-1363,
 the rollback window, and the final human cutover approval remain mandatory.
+
+### Signed Channex adoption
+
+VAY-1963 consumes the VAY-1962 proof artifact only through a one-off migration
+runner. It rereads source and target evidence, then reserves the exact target
+property and Channex property as `verified_non_active`. It does not call
+Channex, create or activate a connection, schedule work, import bookings, or
+change the legacy runtime owner.
+
+The deployment-controlled JSON config has exactly these fields:
+
+```json
+{
+  "environment": "staging",
+  "allowedExecutionPrincipals": ["iam:approved-migration-runner"],
+  "verificationKeys": [
+    {
+      "id": "migration-staging-2026-01",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+      "principal": "kms:controlled-manifest-signer"
+    }
+  ],
+  "approvalPrincipals": {
+    "00000000-0000-4000-8000-000000000001": "user:flamur-maliqi"
+  },
+  "singleHumanDualAuthority": {
+    "actorUserId": "00000000-0000-4000-8000-000000000001",
+    "principal": "user:flamur-maliqi",
+    "decisionId": "VAY-1320@2026-09-12"
+  }
+}
+```
+
+The manifest still contains one immutable `migration_owner` record and one
+immutable `security_owner` record. Both may name the same registry-authorized
+target user; the restricted audit records
+`single_human_dual_authority.v1` together with the exact VAY-1320 decision ID.
+Set `singleHumanDualAuthority` to `null` when two independent humans approve.
+The signer and runner remain distinct machine principals and cannot satisfy
+either human authority.
+
+Consume reviewed files without putting the signature or manifest in command
+arguments:
+
+```bash
+TARGET_DATABASE_URL=<target database> \
+CHANNEX_ADOPTION_EXECUTION_PRINCIPAL=<runtime IAM principal> \
+npm run target:channex:adopt -- consume \
+  --config <deployment config.json> \
+  --manifest-file <manifest.json> \
+  --signature-file <manifest.sig>
+```
+
+Rollback requires two fresh, unrevoked migration/security authority records
+bound to the original manifest, exact claim, reason hash, environment, and new
+expiry. Rollback validates the same approval policy as consumption. Both records
+may name the same human only when `singleHumanDualAuthority` matches that actor
+and principal and carries the exact `VAY-1320@2026-09-12` decision; otherwise
+two independent humans are required.
+Supply the reviewed reason through a file. Successful rollback only changes the
+matching adoption claim from `verified_non_active` to retained `released`.
 
 ## Production Marketplace Migration
 

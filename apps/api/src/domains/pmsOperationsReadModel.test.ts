@@ -141,176 +141,198 @@ describe("target PMS linked calendar blocks", () => {
 });
 
 describe("target PMS reservation stay dates", () => {
-  it("reads DATE columns as text so the calendar date is preserved", async () => {
-    const queries: string[] = [];
-    const pool: PmsOperationsReadPool = {
-      async query<T extends QueryResultRow = QueryResultRow>(
-        text: string,
-      ): Promise<QueryResult<T>> {
-        queries.push(text);
-        const rows = text.includes("SELECT COUNT(*)::text AS total")
-          ? [{ total: "1" }]
-          : [
-              {
-                guestBookingId: "booking-1",
-                bookingReference: "VAY-1",
-                status: "confirmed",
-                source: "direct_booking",
-                checkIn: "2026-07-23",
-                checkOut: "2026-07-24",
-                adults: 2,
-                children: 0,
-                primaryGuestDisplayName: "Ada Lovelace",
-                primaryGuestEmail: "ada@example.com",
-                primaryGuestPhone: null,
-                primaryGuestCountryCode: "GB",
-                primaryGuestSpecialRequests: "Quiet room",
-                guestContactAccepted: false,
-                addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
-                assignments: [],
-                checkinCompletedAt: null,
-                checkinPendingFlags: [],
-                checkoutCompletedAt: null,
-                checkoutPendingFlags: [],
-                privateNoteCount: 0,
-                additionalGuestCount: 0,
-                bookedRoomTypeId: "room-type-1",
-                bookedRoomName: "Munich Booking Room",
-                roomCount: 1,
-                totalAmount: "155.00",
-                balanceAmount: "155.00",
-                currency: "EUR",
-                paymentMethod: null,
-                expectedPaymentMethod: "unknown",
-                paymentStatus: "unpaid",
-                paymentBreakdown: {
-                  grossAmount: { amountDecimal: "100.00", currency: "EUR" },
-                  stripeFee: { amountDecimal: "3.20", currency: "EUR" },
-                  vayadaCommission: { amountDecimal: "5.00", currency: "EUR" },
-                  netPayout: { amountDecimal: "91.80", currency: "EUR" },
+  it.each(["recorded", "unverified"] as const)(
+    "preserves stay dates and %s monetary status",
+    async (amountStatus) => {
+      const queries: string[] = [];
+      const pool: PmsOperationsReadPool = {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+        ): Promise<QueryResult<T>> {
+          queries.push(text);
+          const rows = text.includes("SELECT COUNT(*)::text AS total")
+            ? [{ total: "1" }]
+            : [
+                {
+                  guestBookingId: "booking-1",
+                  bookingReference: "VAY-1",
+                  status: "confirmed",
+                  source: "direct_booking",
+                  checkIn: "2026-07-23",
+                  checkOut: "2026-07-24",
+                  adults: 2,
+                  children: 0,
+                  primaryGuestDisplayName: "Ada Lovelace",
+                  primaryGuestEmail: "ada@example.com",
+                  primaryGuestPhone: null,
+                  primaryGuestCountryCode: "GB",
+                  primaryGuestSpecialRequests: "Quiet room",
+                  guestContactAccepted: false,
+                  addOns: [
+                    {
+                      selectionId: "selection-1",
+                      addonId: "addon-1",
+                      name: "Breakfast",
+                      quantity: 2,
+                    },
+                  ],
+                  assignments: [],
+                  checkinCompletedAt: null,
+                  checkinPendingFlags: [],
+                  checkoutCompletedAt: null,
+                  checkoutPendingFlags: [],
+                  privateNoteCount: 0,
+                  additionalGuestCount: 0,
+                  bookedRoomTypeId: "room-type-1",
+                  bookedRoomName: "Munich Booking Room",
+                  roomCount: 1,
+                  amountStatus,
+                  totalAmount: "155.00",
+                  balanceAmount: "155.00",
+                  currency: "EUR",
+                  paymentMethod: null,
+                  expectedPaymentMethod: "unknown",
+                  paymentStatus: "unpaid",
+                  paymentBreakdown: {
+                    grossAmount: { amountDecimal: "100.00", currency: "EUR" },
+                    stripeFee: { amountDecimal: "3.20", currency: "EUR" },
+                    vayadaCommission: { amountDecimal: "5.00", currency: "EUR" },
+                    netPayout: { amountDecimal: "91.80", currency: "EUR" },
+                  },
                 },
-              },
-            ];
+              ];
 
-        return {
-          command: "SELECT",
-          rowCount: rows.length,
-          oid: 0,
-          fields: [],
-          rows: rows as unknown as T[],
-        };
-      },
-    };
-    const repository = createTargetPmsOperationsReadRepository({
-      connectionString: "postgresql://pms-operations-read",
-      pool,
-    });
+          return {
+            command: "SELECT",
+            rowCount: rows.length,
+            oid: 0,
+            fields: [],
+            rows: rows as unknown as T[],
+          };
+        },
+      };
+      const repository = createTargetPmsOperationsReadRepository({
+        connectionString: "postgresql://pms-operations-read",
+        pool,
+      });
 
-    const result = await repository.listReservationsByPropertyId("property-1", {
-      search: "Ada",
-      canReadGuestContact: false,
-      limit: 25,
-      offset: 0,
-    });
-    const allowedResult = await repository.listReservationsByPropertyId("property-1", {
-      search: "ada@example.com",
-      canReadGuestContact: true,
-      limit: 25,
-      offset: 0,
-    });
-    const deniedOverlap = await repository.listReservationsOverlappingStayRangeByPropertyId!(
-      "property-1",
-      { from: "2026-07-23", to: "2026-07-24", canReadGuestContact: false },
-    );
-    const deniedDetail = await repository.findReservationByGuestBookingId(
-      "property-1",
-      "booking-1",
-      false,
-    );
+      const result = await repository.listReservationsByPropertyId("property-1", {
+        search: "Ada",
+        canReadGuestContact: false,
+        limit: 25,
+        offset: 0,
+      });
+      const allowedResult = await repository.listReservationsByPropertyId("property-1", {
+        search: "ada@example.com",
+        canReadGuestContact: true,
+        limit: 25,
+        offset: 0,
+      });
+      const deniedOverlap = await repository.listReservationsOverlappingStayRangeByPropertyId!(
+        "property-1",
+        { from: "2026-07-23", to: "2026-07-24", canReadGuestContact: false },
+      );
+      const deniedDetail = await repository.findReservationByGuestBookingId(
+        "property-1",
+        "booking-1",
+        false,
+      );
 
-    const listQuery = queries.find(
-      (query) => query.includes('NULL::text AS "primaryGuestEmail"') && query.includes("LIMIT $"),
-    );
-    const allowedListQuery = queries.find(
-      (query) =>
-        query.includes('primary_guest.email AS "primaryGuestEmail"') && query.includes("LIMIT $"),
-    );
-    const deniedOverlapQuery = queries.find((query) => query.includes("booking.check_in < $2"));
-    const countQueries = queries.filter((query) =>
-      query.includes("SELECT COUNT(*)::text AS total"),
-    );
-    const detailQuery = queries.find((query) => query.includes("booking.id = $2"));
-    const deniedSql = [listQuery, countQueries[0], deniedOverlapQuery, detailQuery].join("\n");
-    expect(listQuery).toContain('booking.check_in::text AS "checkIn"');
-    expect(listQuery).toContain('booking.check_out::text AS "checkOut"');
-    expect(listQuery).toContain("quote.selected_offer_snapshot ->> 'roomName'");
-    expect(listQuery).toContain("booking.booking_metadata #>> '{selectedOffer,roomName}'");
-    expect(listQuery).toContain('AS "guestContactAccepted"');
-    expect(listQuery).toContain('primary_guest.special_requests AS "primaryGuestSpecialRequests"');
-    expect(listQuery).toContain("FROM booking.booking_addon_selection_items item");
-    expect(listQuery).toContain("item.item_ordinality");
-    expect(listQuery).toContain("'guest_booking.accepted'");
-    expect(listQuery).not.toContain("contact_event.actor_type = 'property_user'");
-    expect(listQuery).toContain("booking.booking_metadata ->> 'acceptedPaymentDeadlineAt'");
-    expect(listQuery).toContain('booking.expected_payment_method AS "expectedPaymentMethod"');
-    expect(listQuery).toContain("FROM booking.nightly_revenue_evidence evidence");
-    expect(listQuery).toContain("payment.payment_metadata ->> 'chargeType' = 'direct'");
-    expect(listQuery).toContain("payment.processor_fee_breakdown ->> 'status' = 'available'");
-    expect(deniedSql).not.toContain("guest.email");
-    expect(deniedSql).not.toContain("guest.phone");
-    expect(allowedListQuery).toContain("guest.email");
-    expect(allowedListQuery).toContain("guest.phone");
-    expect(countQueries[1]).toContain("guest.email");
-    expect(countQueries[1]).toContain("guest.phone");
-    expect(result.items[0]?.stay).toEqual({
-      checkIn: "2026-07-23",
-      checkOut: "2026-07-24",
-      adults: 2,
-      children: 0,
-    });
-    expect(result.items[0]).toMatchObject({
-      primaryGuest: {
-        displayName: "Ada Lovelace",
+      const listQuery = queries.find(
+        (query) => query.includes('NULL::text AS "primaryGuestEmail"') && query.includes("LIMIT $"),
+      );
+      const allowedListQuery = queries.find(
+        (query) =>
+          query.includes('primary_guest.email AS "primaryGuestEmail"') && query.includes("LIMIT $"),
+      );
+      const deniedOverlapQuery = queries.find((query) => query.includes("booking.check_in < $2"));
+      const countQueries = queries.filter((query) =>
+        query.includes("SELECT COUNT(*)::text AS total"),
+      );
+      const detailQuery = queries.find((query) => query.includes("booking.id = $2"));
+      const deniedSql = [listQuery, countQueries[0], deniedOverlapQuery, detailQuery].join("\n");
+      expect(listQuery).toContain('booking.check_in::text AS "checkIn"');
+      expect(listQuery).toContain('booking.check_out::text AS "checkOut"');
+      expect(listQuery).toContain("quote.selected_offer_snapshot ->> 'roomName'");
+      expect(listQuery).toContain("booking.booking_metadata #>> '{selectedOffer,roomName}'");
+      expect(listQuery).toContain('AS "guestContactAccepted"');
+      expect(listQuery).toContain(
+        'primary_guest.special_requests AS "primaryGuestSpecialRequests"',
+      );
+      expect(listQuery).toContain("FROM booking.booking_addon_selection_items item");
+      expect(listQuery).toContain("JOIN booking.active_booking_addon_selections active_selection");
+      expect(listQuery).toContain("item.item_ordinality");
+      expect(listQuery).toContain("'guest_booking.accepted'");
+      expect(listQuery).not.toContain("contact_event.actor_type = 'property_user'");
+      expect(listQuery).toContain("booking.booking_metadata ->> 'acceptedPaymentDeadlineAt'");
+      expect(listQuery).toContain('booking.expected_payment_method AS "expectedPaymentMethod"');
+      expect(listQuery).toContain("FROM booking.nightly_revenue_evidence evidence");
+      expect(listQuery).toContain("payment.payment_metadata ->> 'chargeType' = 'direct'");
+      expect(listQuery).toContain("payment.processor_fee_breakdown ->> 'status' = 'available'");
+      expect(deniedSql).not.toContain("guest.email");
+      expect(deniedSql).not.toContain("guest.phone");
+      expect(allowedListQuery).toContain("guest.email");
+      expect(allowedListQuery).toContain("guest.phone");
+      expect(countQueries[1]).toContain("guest.email");
+      expect(countQueries[1]).toContain("guest.phone");
+      expect(result.items[0]?.stay).toEqual({
+        checkIn: "2026-07-23",
+        checkOut: "2026-07-24",
+        adults: 2,
+        children: 0,
+      });
+      expect(result.items[0]).toMatchObject({
+        primaryGuest: {
+          displayName: "Ada Lovelace",
+          email: "Hidden until you accept",
+          phone: "Hidden until you accept",
+          countryCode: "GB",
+          specialRequests: "Quiet room",
+        },
+        addOns: [
+          {
+            selectionId: "selection-1",
+            addonId: "addon-1",
+            name: "Breakfast",
+            quantity: 2,
+          },
+        ],
+        bookedOffer: {
+          roomTypeId: "room-type-1",
+          roomName: "Munich Booking Room",
+        },
+        roomCount: 1,
+        pricing: {
+          amountStatus,
+          totalAmount: { amountDecimal: "155.00", currency: "EUR" },
+          balanceAmount: { amountDecimal: "155.00", currency: "EUR" },
+        },
+        payment: {
+          method: null,
+          expectedMethod: "unknown",
+          status: "unpaid",
+          breakdown: {
+            grossAmount: { amountDecimal: "100.00", currency: "EUR" },
+            stripeFee: { amountDecimal: "3.20", currency: "EUR" },
+            vayadaCommission: { amountDecimal: "5.00", currency: "EUR" },
+            netPayout: { amountDecimal: "91.80", currency: "EUR" },
+          },
+        },
+      });
+      expect(allowedResult.items[0]?.primaryGuest).toMatchObject({
         email: "Hidden until you accept",
         phone: "Hidden until you accept",
-        countryCode: "GB",
-        specialRequests: "Quiet room",
-      },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
-      bookedOffer: {
-        roomTypeId: "room-type-1",
-        roomName: "Munich Booking Room",
-      },
-      roomCount: 1,
-      pricing: {
-        totalAmount: { amountDecimal: "155.00", currency: "EUR" },
-        balanceAmount: { amountDecimal: "155.00", currency: "EUR" },
-      },
-      payment: {
-        method: null,
-        expectedMethod: "unknown",
-        status: "unpaid",
-        breakdown: {
-          grossAmount: { amountDecimal: "100.00", currency: "EUR" },
-          stripeFee: { amountDecimal: "3.20", currency: "EUR" },
-          vayadaCommission: { amountDecimal: "5.00", currency: "EUR" },
-          netPayout: { amountDecimal: "91.80", currency: "EUR" },
-        },
-      },
-    });
-    expect(allowedResult.items[0]?.primaryGuest).toMatchObject({
-      email: "Hidden until you accept",
-      phone: "Hidden until you accept",
-    });
-    expect(deniedOverlap.items[0]?.primaryGuest).toMatchObject({
-      email: "Hidden until you accept",
-      phone: "Hidden until you accept",
-    });
-    expect(deniedDetail?.primaryGuest).toMatchObject({
-      email: "Hidden until you accept",
-      phone: "Hidden until you accept",
-    });
-  });
+      });
+      expect(deniedOverlap.items[0]?.primaryGuest).toMatchObject({
+        email: "Hidden until you accept",
+        phone: "Hidden until you accept",
+      });
+      expect(deniedDetail?.primaryGuest).toMatchObject({
+        email: "Hidden until you accept",
+        phone: "Hidden until you accept",
+      });
+    },
+  );
 
   it.each([
     { bookedRoomTypeId: "", bookedRoomName: "Munich Booking Room" },

@@ -30,10 +30,10 @@ as commissionable accommodation revenue.
 
 Implemented layers cover policy validation, immutable storage and authorized save
 and approval commands, plus persisted exact-version resolution. HTTP adapters and the
-hotel editor follow. Refund/no-show handling, discount
-allocation, payer, platform fees, currency conversion, rounding of earned amounts
-and payout scheduling remain outside this contract; no settlement calculator or
-earning activation is introduced. Existing accepted agreements must retain their
+hotel editor are described below. The accepted cancellation/refund, payer and payout
+cadence rules are now recorded in [earning and settlement](affiliate-earning-settlement.md).
+Detailed evidence allocation, currency/rounding, exact scheduling and pricing remain
+separately scoped there; no settlement calculator or earning activation is introduced. Existing accepted agreements must retain their
 original policy version when a hotel later changes its rate.
 
 ## Immutable storage
@@ -101,3 +101,21 @@ created or 200 for replay; invalid requests are 422, unavailable scope 404 and
 conflicts (including already-approved) 409. GET `/:policyVersionId` returns the
 exact approved policy (200), missing/wrong-property reference (404), or an unavailable
 unapproved/invalid policy (409). Database failures remain server errors.
+
+The editor's authorized GET collection returns the 20 most recently recorded policy
+versions for the exact property and selected authoring organization, with rate basis
+points, timestamp and approval state. This is editing history, not an active-rate
+selector: no version becomes effective merely because it is newest. Existing offer
+references and agreements retain their exact version. Empty history returns an empty
+list. The same route permission, entitlement and property checks apply.
+
+## Hotel commission editor
+
+The hotel profile Offers tab now includes an explicit percentage input, recent
+draft/approved rates, and review-before-approval for each immutable version. It uses
+the authenticated target API and canonical profile property ID, remounting when
+the selected property changes. Failed writes retain their retry key within the
+current editor session. Loading and recoverable failures are visible; refreshing
+reads stored history. Approval does not attach a policy to an offer, select an
+active rate or activate links. Offer-term association remains a subsequent step.
+The old collaboration-offering form also no longer invents a 5% commission.

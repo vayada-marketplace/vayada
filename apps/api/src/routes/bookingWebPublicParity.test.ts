@@ -1,3 +1,4 @@
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import {
   buildPublicBookabilityQuoteProjection,
   findForbiddenPublicBookabilityKeys,
@@ -945,7 +946,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1202,7 +1203,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1310,7 +1311,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1363,6 +1364,7 @@ describe("Booking Web public bootstrap parity", () => {
     const guestBookingId = "b9fccec2-eb4c-4c35-bfd3-02a748c2e951";
     const calls: string[] = [];
     let inventoryWriteValues: readonly unknown[] | undefined;
+    let addOnEvidenceValues: readonly unknown[] | undefined;
     let lifecycleStatus = "confirmed";
     let policySnapshot: Record<string, unknown> = {
       type: "free_until_days_before_arrival",
@@ -1425,6 +1427,26 @@ describe("Booking Web public bootstrap parity", () => {
         if (text.includes("INSERT INTO platform.idempotency_keys")) {
           return { rows: [{ id: "999e6c2a-95f8-47f2-8bf1-c2d18e3d7a66" }] };
         }
+        if (text.includes("JOIN booking.booking_addon_selections selection")) {
+          return {
+            rows: [
+              {
+                selectionId: "c9fccec2-eb4c-4c35-bfd3-02a748c2e951",
+                serviceDate: "2026-09-13",
+                checkIn: "2026-09-12",
+                quantity: 1,
+                currency: "EUR",
+                totalAmount: "25.00",
+                ownershipKind: "property",
+                partnerCommissionRate: null,
+              },
+            ],
+          };
+        }
+        if (text.includes("INSERT INTO booking.addon_revenue_evidence")) {
+          addOnEvidenceValues = values;
+          return { rows: [] };
+        }
         if (text.includes("FROM booking.guest_bookings b")) {
           return { rows: [booking()] };
         }
@@ -1437,7 +1459,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1593,6 +1615,14 @@ describe("Booking Web public bootstrap parity", () => {
     );
     expect(promoReversals).toHaveLength(1);
     expect(promoReversals[0]).toContain("current_uses = GREATEST(promo.current_uses - 1, 0)");
+    expect(addOnEvidenceValues?.slice(6, 12)).toEqual([
+      null,
+      "property",
+      null,
+      "missing_fulfillment",
+      "missing",
+      `guest-cancel:${context.fingerprint}:addon:c9fccec2-eb4c-4c35-bfd3-02a748c2e951:v1`,
+    ]);
   });
 
   it("rejects paid inventory-releasing guest mutations until refunds are integrated", async () => {
@@ -1642,7 +1672,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,
@@ -1722,7 +1752,7 @@ describe("Booking Web public bootstrap parity", () => {
       },
       async end() {},
     };
-    const adapter = createTargetBookingWebCheckoutAdapter({
+    const adapter = createTargetBookingWebCheckoutAdapter({ externalChanges: externalBookingChanges,
       connectionString: "postgres://unused",
       inventoryReservationPort: createTargetPmsInventoryReservationPort(),
       pool: pool as never,

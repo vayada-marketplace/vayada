@@ -220,3 +220,65 @@ terms acceptance, property authorization and the chosen evidence path are ready.
 
 This draft does not complete VAY-1505 or unblock unresolved commercial behavior.
 No product routes, schema migrations, provider connections or payment effects change.
+
+## Accepted completed-stay authority — 2026-09-10
+
+Flamur accepted an explicit authenticated hotel/PMS check-out as completed-stay
+evidence, retaining that it is a hotel assertion and its audit/command causation.
+The same rule applies to Vayada and external PMSs. Scheduled departure, payment
+or reservation confirmation alone do not qualify; no extra manual approval is
+required solely because the authenticated hotel recorded the check-out.
+
+The first PMS-owned internal read requires a fresh Marketplace hotel-management
+context and entitlement, a persisted active owner/operator property link, one exact
+booking/stay item, current checked-out state and an explicit matching check-out
+plus user audit record. Missing, conflicting or ambiguous evidence remains pending.
+Check-out records must retain the exact stay-item reference. A null reference
+remains pending even for a current single-item booking: assignment deletion can
+clear that reference, so current item counts cannot prove original scope. Recorded action time is not invented actual
+departure time. Pending operational flags are retained as a boolean signal; their
+financial effect is not decided here. Guest PII and private notes are excluded.
+
+This read is not a connection capability test, public route or automatic update
+to destination tracking readiness. It does not establish referral matching or
+commissionable revenue, publish terms or authorize payment. External adapters must
+supply equally scoped authenticated provenance through their owning boundary; no
+provider is selected by this policy decision. Remaining intake, retention, money
+and evidence-conflict policy gates above remain open.
+
+## Hotel completion evidence HTTP read
+
+`GET /api/marketplace/properties/:propertyId/bookings/:bookingId/stay-items/:stayItemId/affiliate-completion`
+now calls the PMS-owned completion read through the configured application repository.
+Fresh hotel-management permission, property owner/operator link and active Marketplace
+entitlement are required; creators and front-desk-only contexts cannot read provenance.
+Canonical UUIDs are required. Missing/revoked property or booking/item scope returns
+404 without disclosing a record; authorized unconfirmed completion returns 200 pending.
+Confirmed evidence returns its exact audit/actor/source references. Invalid IDs return
+422 and authentication/authorization failures remain 401/403. Success and error responses
+are no-store, including infrastructure failures. Database errors never become completion.
+There is no verification POST or state mutation, no UI control, background processor,
+attribution decision or Finance handoff in this slice. Destination readiness stays pending.
+
+## Native Booking creation provenance read
+
+The Booking-owned `readBookingAffiliateCreationEvidence` reuses the actual direct
+checkout persistence: a native booking and its single `guest_booking.created` status
+event are inserted atomically using the same server occurrence time and request/
+correlation metadata. The reader requires exact property/booking scope, an enabled
+property, native Booking/direct source, quote/checkout references and a single guest
+creation event whose timestamp exactly matches booking creation (SQL precision).
+The creation event must have no prior lifecycle status and must enter a valid initial
+Booking status (`draft`, `pending_payment` or `confirmed`).
+Imported/external records remain unsupported; missing provenance stays pending;
+duplicate, inconsistent or future-dated provenance requires review. Update events
+and updated_at cannot replace the original creation time.
+
+This is an internal source read for an already authorized caller; a later resolver
+must enforce fresh property access before invocation. No public read route, guest
+identity, raw referral data or automatic scope authorization is added. `recorded`
+means native creation evidence only, not a trusted creator match or an earning.
+Validation exercises the Booking-owned persisted row shape on isolated PostgreSQL,
+with synthetic booking fixtures and rolled-back negative cases. It is not
+deployed-account evidence or proof of referral round-trip, completion, net revenue
+or overall destination readiness. No publication/journal entries or payments result.

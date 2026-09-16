@@ -179,8 +179,19 @@ jobs:
           npm --workspace vayada-api run test --
           --no-file-parallelism
           src/marketplaceCollaborations.test.ts
+          src/marketplaceAffiliateDestinationRoutes.test.ts
+          src/domains/bookingAffiliateDestinationSave.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
+          src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
+          src/domains/marketplaceAffiliateAssentRead.integration.test.ts
+          src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
+          src/domains/pmsAffiliateCompletionEvidence.integration.test.ts
           src/domains/financeAffiliatePercentagePolicySave.integration.test.ts
+          src/domains/financeAffiliateEarningJournalStorage.integration.test.ts
+          src/domains/financeAffiliateEarningJournal.integration.test.ts
           src/domains/financeAffiliatePercentagePolicyResolver.test.ts
           src/marketplaceAffiliatePolicyRoutes.test.ts
           src/domains/pmsLinkedInventoryGroupRepository.integration.test.ts
@@ -192,6 +203,7 @@ jobs:
           src/domains/pmsRoomPublicationCommandRepository.integration.test.ts
           src/domains/pmsCalendarAutoOpenSettingsRepository.integration.test.ts
           src/jobs/pmsChannexScheduler.integration.test.ts
+          src/domains/pmsInboxProviderActionCommand.integration.test.ts
           src/domains/channexOperationalAlerts.integration.test.ts
           src/pmsChannexManagementRoutes.test.ts
           src/integrations/channexManagement.test.ts
@@ -208,6 +220,7 @@ jobs:
           src/domains/financeExpenseReadModel.integration.test.ts
           src/domains/financeFolioCommandRepository.integration.test.ts
           src/domains/financeFolioReadRepository.integration.test.ts
+          src/domains/financeFolioExportRepository.integration.test.ts
           src/domains/financeProviderFeeEvidence.integration.test.ts
           src/domains/financeProviderFeeExpenseProjection.integration.test.ts
           src/domains/stripeProviderAccountReconciliation.integration.test.ts
@@ -216,8 +229,13 @@ jobs:
           src/jobs/financeExpenseGeneration.integration.test.ts
           src/jobs/pmsChannexBookingRevisionTombstones.integration.test.ts
           src/jobs/channexAssignmentRepair.integration.test.ts
+          src/domains/channexStagingCatalogAdoption.integration.test.ts
+          src/domains/pmsChannexStagingDay.integration.test.ts
+          src/domains/channexStagingCatalogEvidence.test.ts
+          src/domains/channexStagingCatalogScope.test.ts
           src/jobs/channexBookings.integration.test.ts
           src/jobs/channexStagingImport.integration.test.ts
+          src/domains/channexStagingAlertRecovery.integration.test.ts
           src/routes/bookingWebPublicAttribution.integration.test.ts
           src/jobs/financeSubscriptions.integration.test.ts
           src/platform/postgresRuntime.integration.test.ts
@@ -243,6 +261,8 @@ jobs:
           src/financeFolioRecipientCiphertextMigration.integration.test.ts
           src/channexBookingRevisionTombstonesMigration.integration.test.ts
           src/channexAdoptionManifestFoundation.integration.test.ts
+          src/channexAdoptionConsumer.integration.test.ts
+          src/channexAdoptionEvidence.integration.test.ts
           src/stripeWebhookReceiptRetention.integration.test.ts
           src/productionMediaMigration.integration.test.ts
           src/productionCatalogWriters.integration.test.ts
@@ -255,7 +275,10 @@ jobs:
       - name: Verify Finance OTA commission migration
         run: >-
           npm --workspace @vayada/backend-migration run test --
-          src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts && npm --workspace vayada-api run test -- src/domains/financeOtaCommissionEvidence.integration.test.ts
+          src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
+          src/airbnbProviderSnapshots.test.ts && npm --workspace vayada-api run test --
+          src/domains/financeOtaCommissionEvidence.integration.test.ts
+          src/domains/financeAirbnbProviderSnapshot.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

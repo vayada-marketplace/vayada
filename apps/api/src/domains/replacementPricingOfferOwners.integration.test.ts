@@ -1,24 +1,41 @@
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { parsePublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
 import { createReplacementBookingQuoteIssuer } from "../routes/replacementBookingQuote.js";
 import Fastify from "fastify";
-import { createTargetBookingWebCheckoutAdapter, registerBookingWebPublicRoutes } from "../routes/bookingWebPublic.js";
+import {
+  createTargetBookingWebCheckoutAdapter,
+  registerBookingWebPublicRoutes,
+} from "../routes/bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "./pmsInventoryReservation.js";
 import { createReplacementPricingPublicationReader } from "./replacementPricingPublicationReader.js";
 import { createPmsBookingPublicationSource } from "./pmsBookingPublicationSource.js";
 import { pricingEvidence } from "../bookingGuestPolicyTestFixtures.js";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
-import { buildBookingPublicContent, parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
+import {
+  buildBookingPublicContent,
+  parseBookingPublicContent,
+} from "@vayada/domain-distribution/booking-publication";
 import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { lockCurrentPricingPublication } from "./currentPricingPublication.js";
 import { createBookingGuestChoiceStore } from "./bookingGuestChoiceStore.js";
 import { lockCurrentQuoteGuestDisclosure } from "./currentQuoteGuestDisclosure.js";
-import { bookingQuoteAcceptanceRequirements, parseBookingQuoteAcceptanceInput } from "./bookingQuoteAcceptanceInput.js";
-import { redeemCurrentQuotePromo, redeemLockedCurrentQuotePromo } from "./currentQuotePromoRedemption.js";
+import {
+  bookingQuoteAcceptanceRequirements,
+  parseBookingQuoteAcceptanceInput,
+} from "./bookingQuoteAcceptanceInput.js";
+import {
+  redeemCurrentQuotePromo,
+  redeemLockedCurrentQuotePromo,
+} from "./currentQuotePromoRedemption.js";
 import { lockCurrentQuoteRevalidation } from "./currentQuoteRevalidation.js";
 import { createCurrentPricingQuoteStore } from "./currentPricingQuoteStore.js";
 import { lockCurrentPricingQuote } from "./currentPricingQuote.js";
-import { parsePublicPricingSelection, parseStoredPricingQuote, storedPricingQuoteStatus } from "@vayada/domain-booking";
+import {
+  parsePublicPricingSelection,
+  parseStoredPricingQuote,
+  storedPricingQuoteStatus,
+} from "@vayada/domain-booking";
 import { lockPublicPricingPaymentAmounts } from "./publicPricingPaymentAmounts.js";
 import { createFixedChargePolicyStore } from "./fixedChargePolicyStore.js";
 import type { FixedChargePolicy } from "./replacementFixedCharges.js";
@@ -29,283 +46,732 @@ import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { createBookingPricingOfferTermsStore, lockBookingPricingTermsSource } from "./bookingPricingOfferTerms.js";
+import {
+  createBookingPricingOfferTermsStore,
+  lockBookingPricingTermsSource,
+} from "./bookingPricingOfferTerms.js";
 import { lockFinanceReplacementPricingReadiness } from "./financeReplacementPricingReadiness.js";
 import { lockFinanceReplacementPricingSource } from "./financeReplacementPricingSource.js";
 import { lockPmsReplacementPricingRoomSource } from "./pmsReplacementPricingRoomSource.js";
 import { lockReplacementPricingAuthorization } from "./replacementPricingAuthorization.js";
 import { lockReplacementPricingOfferOwners as verify } from "./replacementPricingOfferOwners.js";
-import { createReplacementChargeDeclarationStore, replacementChargeFingerprint } from "./replacementChargeDeclarations.js";
+import {
+  createReplacementChargeDeclarationStore,
+  replacementChargeFingerprint,
+} from "./replacementChargeDeclarations.js";
 import type { PricingStorageSnapshot, PricingStorageSources } from "./replacementPricingStore.js";
 import { createReplacementPricingStore } from "./replacementPricingStore.js";
 import { createReplacementPricingStorageGuard } from "./replacementPricingStorageGuard.js";
 import { createBookingPricingAuthorityStore } from "./bookingPricingAuthority.js";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingRoomStay, publicPricingOfferBindings } from "./publicPricingRoomStay.js";
-type TermsSetup = (terms: Omit<ReplacementOfferTerms, "revision">) => Omit<ReplacementOfferTerms, "revision">;
+type TermsSetup = (
+  terms: Omit<ReplacementOfferTerms, "revision">,
+) => Omit<ReplacementOfferTerms, "revision">;
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("live replacement pricing offer owners", () => {
   const pool = new pg.Pool({ connectionString: url, max: 5 });
   afterAll(() => pool.end());
-  async function fixture(configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, configureTerms?: TermsSetup, enableCard = false) {
-    if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1))) throw new Error("test database required");
-    const actorUserId = randomUUID(), organizationId = randomUUID(), propertyId = randomUUID(), roomTypeId = randomUUID(), membershipId = randomUUID();
-    const roleKey = `terms_test_${randomUUID()}`, scope = { actorUserId, organizationId, propertyId };
-    await pool.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Terms test')", [actorUserId, `${actorUserId}@example.test`]);
-    await pool.query("INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Terms test',$2)", [organizationId, organizationId]);
-    await pool.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Terms test')", [propertyId]);
-    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Terms room')", [roomTypeId, propertyId]);
-    await pool.query(`INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin)
-      VALUES($1,$2,$3,$4,'all','agency')`, [membershipId, organizationId, actorUserId, roleKey]);
-    for (const permission of ["pms.rooms_rates.read", "pms.rooms_rates.manage"]) await pool.query(`INSERT INTO identity.role_permission_grants
-      (organization_kind,role_key,permission_key) VALUES('hotel_group',$1,$2)`, [roleKey, permission]);
-    for (const [product, type] of [["pms", "pms_property"], ["hotel_catalog", "property"]]) await pool.query(`INSERT INTO identity.organization_resource_links
-      (organization_id,product,resource_type,resource_id,relationship) VALUES($1,$2,$3,$4,'owner')`, [organizationId, product, type, propertyId]);
-    await pool.query("INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')", [organizationId]);
+  async function fixture(
+    configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
+    configureTerms?: TermsSetup,
+    enableCard = false,
+  ) {
+    if (!url || !/(^|[_-])test([_-]|$)/i.test(new URL(url).pathname.slice(1)))
+      throw new Error("test database required");
+    const actorUserId = randomUUID(),
+      organizationId = randomUUID(),
+      propertyId = randomUUID(),
+      roomTypeId = randomUUID(),
+      membershipId = randomUUID();
+    const roleKey = `terms_test_${randomUUID()}`,
+      scope = { actorUserId, organizationId, propertyId };
+    await pool.query("INSERT INTO identity.users(id,email,name) VALUES($1,$2,'Terms test')", [
+      actorUserId,
+      `${actorUserId}@example.test`,
+    ]);
+    await pool.query(
+      "INSERT INTO identity.organizations(id,kind,name,slug) VALUES($1,'hotel_group','Terms test',$2)",
+      [organizationId, organizationId],
+    );
+    await pool.query(
+      "INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1::uuid,$1::text,'Terms test')",
+      [propertyId],
+    );
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Terms room')", [
+      roomTypeId,
+      propertyId,
+    ]);
+    await pool.query(
+      `INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin)
+      VALUES($1,$2,$3,$4,'all','agency')`,
+      [membershipId, organizationId, actorUserId, roleKey],
+    );
+    for (const permission of ["pms.rooms_rates.read", "pms.rooms_rates.manage"])
+      await pool.query(
+        `INSERT INTO identity.role_permission_grants
+      (organization_kind,role_key,permission_key) VALUES('hotel_group',$1,$2)`,
+        [roleKey, permission],
+      );
+    for (const [product, type] of [
+      ["pms", "pms_property"],
+      ["hotel_catalog", "property"],
+    ])
+      await pool.query(
+        `INSERT INTO identity.organization_resource_links
+      (organization_id,product,resource_type,resource_id,relationship) VALUES($1,$2,$3,$4,'owner')`,
+        [organizationId, product, type, propertyId],
+      );
+    await pool.query(
+      "INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key) VALUES($1,'pms','property-management')",
+      [organizationId],
+    );
     const context: RequestContext = {
-      actor: { internalUserId: actorUserId, email: "terms@example.test", status: "active", providerIdentity: { provider: "workos", providerUserId: "test-user" } },
+      actor: {
+        internalUserId: actorUserId,
+        email: "terms@example.test",
+        status: "active",
+        providerIdentity: { provider: "workos", providerUserId: "test-user" },
+      },
       selectedOrganization: { organizationId, kind: "hotel_group", status: "active" },
-      membership: { membershipId, roleKey, status: "active", permissions: ["pms.rooms_rates.read", "pms.rooms_rates.manage"], workosRoleSlugs: [] },
-      linkedResources: [{ product: "pms", resourceType: "pms_property", resourceId: propertyId, relationship: "owner", status: "active" }],
+      membership: {
+        membershipId,
+        roleKey,
+        status: "active",
+        permissions: ["pms.rooms_rates.read", "pms.rooms_rates.manage"],
+        workosRoleSlugs: [],
+      },
+      linkedResources: [
+        {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: propertyId,
+          relationship: "owner",
+          status: "active",
+        },
+      ],
       entitlements: [{ product: "pms", key: "property-management", status: "active" }],
-      locale: "en", currency: "EUR", audit: { requestId: randomUUID(), source: "web", receivedAt: new Date().toISOString() },
+      locale: "en",
+      currency: "EUR",
+      audit: { requestId: randomUUID(), source: "web", receivedAt: new Date().toISOString() },
     };
-    const booking = createBookingPricingOfferTermsStore(pool), secondRoomId = randomUUID();
-    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Second room')", [secondRoomId, propertyId]);
-    const termsInput: Omit<ReplacementOfferTerms, "revision"> = { roomTypeId, offerId: "flex", cancellation: { kind: "non_refundable" }, payment: { kind: "full" } };
+    const booking = createBookingPricingOfferTermsStore(pool),
+      secondRoomId = randomUUID();
+    await pool.query(
+      "INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'Second room')",
+      [secondRoomId, propertyId],
+    );
+    const termsInput: Omit<ReplacementOfferTerms, "revision"> = {
+      roomTypeId,
+      offerId: "flex",
+      cancellation: { kind: "non_refundable" },
+      payment: { kind: "full" },
+    };
     const terms: ReplacementOfferTerms[] = [];
-    for (const [room, offerId] of [[roomTypeId, "flex"], [roomTypeId, "other"], [secondRoomId, "flex"]])
-      terms.push(await booking.save(context, scope, { requestId: randomUUID(), expectedRevision: null, terms: configureTerms ? configureTerms({ ...termsInput, roomTypeId: room!, offerId: offerId! }) : { ...termsInput, roomTypeId: room, offerId } }));
-    await pool.query(`INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
-      VALUES($1,true,ARRAY['pay_at_property'],'EUR')`, [propertyId]);
+    for (const [room, offerId] of [
+      [roomTypeId, "flex"],
+      [roomTypeId, "other"],
+      [secondRoomId, "flex"],
+    ])
+      terms.push(
+        await booking.save(context, scope, {
+          requestId: randomUUID(),
+          expectedRevision: null,
+          terms: configureTerms
+            ? configureTerms({ ...termsInput, roomTypeId: room!, offerId: offerId! })
+            : { ...termsInput, roomTypeId: room, offerId },
+        }),
+      );
+    await pool.query(
+      `INSERT INTO finance.payment_settings(property_id,payments_enabled,accepted_methods,default_currency)
+      VALUES($1,true,ARRAY['pay_at_property'],'EUR')`,
+      [propertyId],
+    );
     if (enableCard) {
-      const accountId = randomUUID(), evidenceId = randomUUID();
-      await pool.query(`INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,onboarding_status,
+      const accountId = randomUUID(),
+        evidenceId = randomUUID();
+      await pool.query(
+        `INSERT INTO finance.payment_provider_accounts(id,property_id,account_scope,provider,provider_account_id,status,onboarding_status,
         charges_enabled,payouts_enabled,capabilities,card_capability_revision,account_metadata)
         VALUES($1,$2,'property','stripe',$3,'active','completed',true,true,ARRAY['card_payments'],1,'{"detailsSubmitted":true,"cardPaymentsStatus":"active"}')`,
-        [accountId, propertyId, `acct_synthetic_${accountId}`]);
-      await pool.query("UPDATE finance.payment_settings SET provider_account_id=$2,accepted_methods=ARRAY['card','pay_at_property'] WHERE property_id=$1", [propertyId, accountId]);
-      await pool.query(`INSERT INTO finance.online_card_execution_evidence
+        [accountId, propertyId, `acct_synthetic_${accountId}`],
+      );
+      await pool.query(
+        "UPDATE finance.payment_settings SET provider_account_id=$2,accepted_methods=ARRAY['card','pay_at_property'] WHERE property_id=$1",
+        [propertyId, accountId],
+      );
+      await pool.query(
+        `INSERT INTO finance.online_card_execution_evidence
         (id,property_id,provider_account_id,contract_version,test_suite,provider_capability_revision,property_readiness_revision,
          evidence_fingerprint_hash,executed_at,accepted_at,accepted_by_organization_id,accepted_by_user_id)
         SELECT $1,s.property_id,s.provider_account_id,'finance-online-card-execution-evidence.v1','onb-25a',a.card_capability_revision,
           s.online_card_readiness_revision,$2,now(),now(),$3,$4 FROM finance.payment_settings s
         JOIN finance.payment_provider_accounts a ON a.id=s.provider_account_id WHERE s.property_id=$5`,
-        [evidenceId, evidenceId.replaceAll("-", "").repeat(2), organizationId, actorUserId, propertyId]);
+        [
+          evidenceId,
+          evidenceId.replaceAll("-", "").repeat(2),
+          organizationId,
+          actorUserId,
+          propertyId,
+        ],
+      );
     }
     const client = await pool.connect();
     let finance, roomSource, termsSource, financeSource;
     try {
       await client.query("BEGIN");
-      expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(true);
+      expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(
+        true,
+      );
       roomSource = await lockPmsReplacementPricingRoomSource(client, propertyId);
       termsSource = await lockBookingPricingTermsSource(client, propertyId);
       financeSource = await lockFinanceReplacementPricingSource(client, propertyId);
-      finance = await lockFinanceReplacementPricingReadiness(client, { propertyId, currency: "EUR", pricingRevision: 1, terms });
-    } finally { await client.query("ROLLBACK"); client.release(); }
-    if (finance.kind !== "ready" || !roomSource || !termsSource || !financeSource) throw new Error("fixture requires owner evidence");
-    let snapshot: PricingStorageSnapshot = { currency: "EUR", ownerReferences: { finance: finance.evidenceId },
+      finance = await lockFinanceReplacementPricingReadiness(client, {
+        propertyId,
+        currency: "EUR",
+        pricingRevision: 1,
+        terms,
+      });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    if (finance.kind !== "ready" || !roomSource || !termsSource || !financeSource)
+      throw new Error("fixture requires owner evidence");
+    let snapshot: PricingStorageSnapshot = {
+      currency: "EUR",
+      ownerReferences: { finance: finance.evidenceId },
       rooms: [roomTypeId, secondRoomId].map((id) => ({
-        version: "pricing.v2", propertyId, roomTypeId: id, revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
-        children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
-        offers: terms.filter((t) => t.roomTypeId === id).map((t) => ({ id: t.offerId, termsRevision: t.revision,
-          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
-          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
-          restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
-        })),
-      })) };
+        version: "pricing.v2",
+        propertyId,
+        roomTypeId: id,
+        revision: 1,
+        currency: "EUR",
+        capacity: { total: 2, adults: 2, children: 0 },
+        children: {
+          adultFromAge: 12,
+          bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }],
+        },
+        offers: terms
+          .filter((t) => t.roomTypeId === id)
+          .map((t) => ({
+            id: t.offerId,
+            termsRevision: t.revision,
+            meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+            price: {
+              kind: "independent",
+              calendar: {
+                base: { mode: "flat", amountMinor: "10000" },
+                months: [],
+                seasons: [],
+                weekdays: [],
+                dates: [],
+              },
+            },
+            restrictions: {
+              kind: "own",
+              rules: {
+                minArrivalNights: 1,
+                maxStayNights: null,
+                closedToArrival: false,
+                closedToDeparture: false,
+                stopSell: false,
+              },
+              seasons: [],
+              dates: [],
+            },
+          })),
+      })),
+    };
     if (configure) snapshot = configure(snapshot);
     // Source evidence is proposal-independent; ownerReferences.finance is separate readiness evidence.
-    const sources = { room: roomSource, terms: termsSource, finance: financeSource }, draftId = randomUUID();
+    const sources = { room: roomSource, terms: termsSource, finance: financeSource },
+      draftId = randomUUID();
     // Seed the draft boundary, then create evidence through the real authorized declaration writer.
     await pool.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1)", [propertyId]);
-    await pool.query(`INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
-      VALUES($1,$2,1,0,$3,$4,$5)`, [propertyId, draftId, sources, snapshot, actorUserId]);
+    await pool.query(
+      `INSERT INTO pms.pricing_v2_drafts(property_id,draft_id,draft_revision,base_revision,source_revisions,snapshot,actor_user_id)
+      VALUES($1,$2,1,0,$3,$4,$5)`,
+      [propertyId, draftId, sources, snapshot, actorUserId],
+    );
     const charges = await createReplacementChargeDeclarationStore(pool).confirm(context, scope, {
-      draftId, expectedDraftRevision: 1, claimedFingerprint: replacementChargeFingerprint(propertyId, snapshot, sources)!,
-      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
+      draftId,
+      expectedDraftRevision: 1,
+      claimedFingerprint: replacementChargeFingerprint(propertyId, snapshot, sources)!,
+      declaration: "all_mandatory_charges_included",
+      requestId: randomUUID(),
     });
-    const declared = { ...snapshot, ownerReferences: { ...snapshot.ownerReferences, charges: charges.id } };
-    async function read(proposed: unknown = declared, auth: RequestContext | null = context, currentSources: PricingStorageSources = sources) {
+    const declared = {
+      ...snapshot,
+      ownerReferences: { ...snapshot.ownerReferences, charges: charges.id },
+    };
+    async function read(
+      proposed: unknown = declared,
+      auth: RequestContext | null = context,
+      currentSources: PricingStorageSources = sources,
+    ) {
       const client = await pool.connect();
-      try { await client.query("BEGIN"); return await verify(client, auth, scope, proposed, currentSources); }
-      finally { await client.query("ROLLBACK"); client.release(); }
+      try {
+        await client.query("BEGIN");
+        return await verify(client, auth, scope, proposed, currentSources);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     }
     async function currentTermsSource() {
       const client = await pool.connect();
       try {
-        await client.query("BEGIN"); expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(true);
+        await client.query("BEGIN");
+        expect(await lockReplacementPricingAuthorization(client, context, scope, "manage")).toBe(
+          true,
+        );
         const source = await lockBookingPricingTermsSource(client, propertyId);
         expect(await lockBookingPricingTermsSource(client, propertyId.toUpperCase())).toBe(source);
         return source!;
-      } finally { await client.query("ROLLBACK"); client.release(); }
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     }
-    return { scope, context, membershipId, snapshot: declared, read, booking, terms, termsInput, finance, charges, sources, draftId, currentTermsSource };
+    return {
+      scope,
+      context,
+      membershipId,
+      snapshot: declared,
+      read,
+      booking,
+      terms,
+      termsInput,
+      finance,
+      charges,
+      sources,
+      draftId,
+      currentTermsSource,
+    };
   }
   it("verifies every offer across rooms with exact current Finance evidence", async () => {
     const f = await fixture();
-    expect(await f.read()).toEqual({ kind: "verified", terms: f.terms, finance: f.finance, charges: f.charges });
-    expect(await f.read({ ...f.snapshot, rooms: [...f.snapshot.rooms].reverse() })).toMatchObject({ kind: "verified" });
-    expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0]] })).toMatchObject({ reason: "finance_unavailable", financeReason: "stale" });
-    expect((await pool.query("SELECT count(*)::int AS n FROM platform.domain_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(4); // terms + declaration writers only
+    expect(await f.read()).toEqual({
+      kind: "verified",
+      terms: f.terms,
+      finance: f.finance,
+      charges: f.charges,
+    });
+    expect(await f.read({ ...f.snapshot, rooms: [...f.snapshot.rooms].reverse() })).toMatchObject({
+      kind: "verified",
+    });
+    expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0]] })).toMatchObject({
+      reason: "finance_unavailable",
+      financeReason: "stale",
+    });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM platform.domain_events WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].n,
+    ).toBe(4); // terms + declaration writers only
   });
   it("denies missing or revoked authorization and foreign or inactive room scope", async () => {
-    const f = await fixture(), other = await fixture();
+    const f = await fixture(),
+      other = await fixture();
     expect(await f.read(f.snapshot, null)).toMatchObject({ reason: "denied" });
     expect(await f.read(f.snapshot, other.context)).toMatchObject({ reason: "denied" });
     const foreignRoom = { ...f.snapshot.rooms[1], roomTypeId: other.snapshot.rooms[0].roomTypeId };
-    expect(await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0], foreignRoom] })).toMatchObject({ reason: "room_unavailable" });
-    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [f.snapshot.rooms[1].roomTypeId]);
+    expect(
+      await f.read({ ...f.snapshot, rooms: [f.snapshot.rooms[0], foreignRoom] }),
+    ).toMatchObject({ reason: "room_unavailable" });
+    await pool.query("UPDATE pms.room_types SET active=false WHERE id=$1", [
+      f.snapshot.rooms[1].roomTypeId,
+    ]);
     expect(await f.read()).toMatchObject({ reason: "room_unavailable" });
-    await pool.query("UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1", [f.membershipId]);
+    await pool.query(
+      "UPDATE identity.organization_memberships SET status='suspended' WHERE id=$1",
+      [f.membershipId],
+    );
     expect(await f.read()).toMatchObject({ reason: "denied" });
   });
   it("rejects malformed, duplicate, mixed-revision and cross-property configurations", async () => {
-    const f = await fixture(), first = f.snapshot.rooms[0];
-    for (const input of [null, { ...f.snapshot, rooms: [] }, { ...f.snapshot, ownerReferences: {} },
-      { ...f.snapshot, rooms: [first, first] }, { ...f.snapshot, rooms: [first, { ...f.snapshot.rooms[1], revision: 2 }] },
+    const f = await fixture(),
+      first = f.snapshot.rooms[0];
+    for (const input of [
+      null,
+      { ...f.snapshot, rooms: [] },
+      { ...f.snapshot, ownerReferences: {} },
+      { ...f.snapshot, rooms: [first, first] },
+      { ...f.snapshot, rooms: [first, { ...f.snapshot.rooms[1], revision: 2 }] },
       { ...f.snapshot, rooms: [{ ...first, roomTypeId: "not-a-uuid" }] },
       { ...f.snapshot, rooms: [{ ...first, propertyId: randomUUID() }] },
       { ...f.snapshot, currency: "USD" },
-    ]) expect(await f.read(input)).toMatchObject({ reason: "invalid" });
+    ])
+      expect(await f.read(input)).toMatchObject({ reason: "invalid" });
   });
   it("rejects stale and foreign terms on any selected offer", async () => {
-    const f = await fixture(), other = await fixture();
+    const f = await fixture(),
+      other = await fixture();
     for (const index of [0, 1]) {
       const rooms = [...f.snapshot.rooms];
-      rooms[0] = { ...rooms[0], offers: rooms[0].offers.map((o, i) => i === index ? { ...o, termsRevision: other.terms[0].revision } : o) };
+      rooms[0] = {
+        ...rooms[0],
+        offers: rooms[0].offers.map((o, i) =>
+          i === index ? { ...o, termsRevision: other.terms[0].revision } : o,
+        ),
+      };
       expect(await f.read({ ...f.snapshot, rooms })).toMatchObject({ reason: "terms_stale" });
     }
     const last = f.terms[2];
-    await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: last.revision,
-      terms: { ...f.termsInput, roomTypeId: last.roomTypeId, offerId: last.offerId } });
+    await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: last.revision,
+      terms: { ...f.termsInput, roomTypeId: last.roomTypeId, offerId: last.offerId },
+    });
     expect(await f.read()).toMatchObject({ reason: "terms_stale" });
   });
   it("rejects foreign/stale Finance evidence, disabled payments and requested deposits", async () => {
-    const f = await fixture(), other = await fixture();
-    expect(await f.read({ ...f.snapshot, ownerReferences: { finance: other.finance.evidenceId } })).toMatchObject({ financeReason: "stale" });
-    expect(await f.read({ ...f.snapshot, rooms: f.snapshot.rooms.map((r) => ({ ...r, revision: 2 })) })).toMatchObject({ financeReason: "stale" });
-    expect(await f.read({ ...f.snapshot, currency: "USD", rooms: f.snapshot.rooms.map((r) => ({ ...r, currency: "USD" })) })).toMatchObject({ financeReason: "currency_mismatch" });
-    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+    const f = await fixture(),
+      other = await fixture();
+    expect(
+      await f.read({ ...f.snapshot, ownerReferences: { finance: other.finance.evidenceId } }),
+    ).toMatchObject({ financeReason: "stale" });
+    expect(
+      await f.read({ ...f.snapshot, rooms: f.snapshot.rooms.map((r) => ({ ...r, revision: 2 })) }),
+    ).toMatchObject({ financeReason: "stale" });
+    expect(
+      await f.read({
+        ...f.snapshot,
+        currency: "USD",
+        rooms: f.snapshot.rooms.map((r) => ({ ...r, currency: "USD" })),
+      }),
+    ).toMatchObject({ financeReason: "currency_mismatch" });
+    await pool.query(
+      "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
     expect(await f.read()).toMatchObject({ financeReason: "payments_disabled" });
-    await pool.query("UPDATE finance.payment_settings SET payments_enabled=true WHERE property_id=$1", [f.scope.propertyId]);
-    const saved = await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.terms[0].revision,
-      terms: { ...f.termsInput, payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 } } });
+    await pool.query(
+      "UPDATE finance.payment_settings SET payments_enabled=true WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    const saved = await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: f.terms[0].revision,
+      terms: {
+        ...f.termsInput,
+        payment: { kind: "deposit", basisPoints: 3000, balanceDaysBeforeArrival: 7 },
+      },
+    });
     const rooms = [...f.snapshot.rooms];
-    rooms[0] = { ...rooms[0], offers: rooms[0].offers.map((o, i) => i === 0 ? { ...o, termsRevision: saved.revision } : o) };
-    expect(await f.read({ ...f.snapshot, rooms }, f.context, { ...f.sources, terms: await f.currentTermsSource() })).toMatchObject({ financeReason: "deposit_execution_unavailable" });
+    rooms[0] = {
+      ...rooms[0],
+      offers: rooms[0].offers.map((o, i) =>
+        i === 0 ? { ...o, termsRevision: saved.revision } : o,
+      ),
+    };
+    expect(
+      await f.read({ ...f.snapshot, rooms }, f.context, {
+        ...f.sources,
+        terms: await f.currentTermsSource(),
+      }),
+    ).toMatchObject({ financeReason: "deposit_execution_unavailable" });
   });
   it("holds live owner locks until transaction end, then rejects the replaced terms", async () => {
-    const f = await fixture(), client = await pool.connect(), writer = new pg.Pool({ connectionString: url, max: 1 });
-    const command = { requestId: randomUUID(), expectedRevision: f.terms[0].revision, terms: f.termsInput };
+    const f = await fixture(),
+      client = await pool.connect(),
+      writer = new pg.Pool({ connectionString: url, max: 1 });
+    const command = {
+      requestId: randomUUID(),
+      expectedRevision: f.terms[0].revision,
+      terms: f.termsInput,
+    };
     try {
       await writer.query("SET lock_timeout='150ms'");
-      await client.query("BEGIN"); expect(await verify(client, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({ kind: "verified" });
-      await expect(createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command)).rejects.toMatchObject({ code: "55P03" });
-      await expect(writer.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId])).rejects.toMatchObject({ code: "55P03" });
+      await client.query("BEGIN");
+      expect(await verify(client, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({
+        kind: "verified",
+      });
+      await expect(
+        createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await expect(
+        writer.query(
+          "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+          [f.scope.propertyId],
+        ),
+      ).rejects.toMatchObject({ code: "55P03" });
       await client.query("COMMIT");
       await createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command);
       expect(await f.read()).toMatchObject({ reason: "terms_stale" });
-    } finally { await client.query("ROLLBACK"); client.release(); await writer.end(); }
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+      await writer.end();
+    }
   });
   it("requires the exact property declaration and rejects changed pricing or source evidence", async () => {
-    const f = await fixture(), other = await fixture();
+    const f = await fixture(),
+      other = await fixture();
     for (const id of [undefined, "unconfirmed", randomUUID(), other.charges.id]) {
       const ownerReferences: Record<string, string> = { finance: f.finance.evidenceId };
       if (id !== undefined) ownerReferences.charges = id;
-      expect(await f.read({ ...f.snapshot, ownerReferences })).toMatchObject({ reason: "charges_stale" });
+      expect(await f.read({ ...f.snapshot, ownerReferences })).toMatchObject({
+        reason: "charges_stale",
+      });
     }
-    const first = f.snapshot.rooms[0], offer = first.offers[0];
+    const first = f.snapshot.rooms[0],
+      offer = first.offers[0];
     const changes = [
-      { ...first, children: { ...first.children, bands: first.children.bands.map((b) => ({ ...b, nightlyMinor: "500" })) } },
-      { ...first, offers: [{ ...offer, meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "1500" } } }, first.offers[1]] },
-      { ...first, offers: [{ ...offer, price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "11000" }, months: [], seasons: [], weekdays: [], dates: [] } } }, first.offers[1]] },
+      {
+        ...first,
+        children: {
+          ...first.children,
+          bands: first.children.bands.map((b) => ({ ...b, nightlyMinor: "500" })),
+        },
+      },
+      {
+        ...first,
+        offers: [
+          { ...offer, meal: { kind: "breakfast", charge: { kind: "room", amountMinor: "1500" } } },
+          first.offers[1],
+        ],
+      },
+      {
+        ...first,
+        offers: [
+          {
+            ...offer,
+            price: {
+              kind: "independent",
+              calendar: {
+                base: { mode: "flat", amountMinor: "11000" },
+                months: [],
+                seasons: [],
+                weekdays: [],
+                dates: [],
+              },
+            },
+          },
+          first.offers[1],
+        ],
+      },
     ];
     for (const changed of changes)
-      expect(await f.read({ ...f.snapshot, rooms: [changed, f.snapshot.rooms[1]] })).toMatchObject({ reason: "charges_stale" });
-    expect(await f.read(f.snapshot, f.context, { ...f.sources, finance: "changed" })).toMatchObject({ reason: "finance_source_stale" });
+      expect(await f.read({ ...f.snapshot, rooms: [changed, f.snapshot.rooms[1]] })).toMatchObject({
+        reason: "charges_stale",
+      });
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, finance: "changed" })).toMatchObject(
+      { reason: "finance_source_stale" },
+    );
     // Only the declaration's own reference is excluded from the fingerprint.
-    expect(await f.read(f.snapshot, f.context, { ...f.sources, charges: f.charges.id })).toMatchObject({ kind: "verified", charges: f.charges });
-    expect((await pool.query("SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1", [f.scope.propertyId])).rows[0].n).toBe(4);
+    expect(
+      await f.read(f.snapshot, f.context, { ...f.sources, charges: f.charges.id }),
+    ).toMatchObject({ kind: "verified", charges: f.charges });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM platform.outbox_events WHERE property_id=$1",
+          [f.scope.propertyId],
+        )
+      ).rows[0].n,
+    ).toBe(4);
   });
   it("rejects missing, forged and stale complete-room sources before charge approval", async () => {
     const f = await fixture();
     for (const sources of [{ finance: f.finance.evidenceId }, { ...f.sources, room: "forged" }])
-      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "room_source_stale" });
+      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({
+        reason: "room_source_stale",
+      });
     const forged = { ...f.sources, room: "forged" };
-    await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
-      draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
-      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    })).rejects.toMatchObject({ code: "stale" });
+    await pool.query(
+      "UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1",
+      [f.scope.propertyId, forged],
+    );
+    await expect(
+      createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+        draftId: f.draftId,
+        expectedDraftRevision: 2,
+        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
+        declaration: "all_mandatory_charges_included",
+        requestId: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "stale" });
     // A matching declaration is still insufficient when its saved source was never authoritative.
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "room_source_stale" });
-    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'New room')", [randomUUID(), f.scope.propertyId]);
+    expect(
+      await f.read(
+        {
+          ...f.snapshot,
+          ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id },
+        },
+        f.context,
+        forged,
+      ),
+    ).toMatchObject({ reason: "room_source_stale" });
+    await pool.query("INSERT INTO pms.room_types(id,property_id,name) VALUES($1,$2,'New room')", [
+      randomUUID(),
+      f.scope.propertyId,
+    ]);
     expect(await f.read()).toMatchObject({ reason: "room_source_stale" });
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      expect(await lockReplacementPricingAuthorization(client, f.context, f.scope, "manage")).toBe(true);
+      expect(await lockReplacementPricingAuthorization(client, f.context, f.scope, "manage")).toBe(
+        true,
+      );
       const room = await lockPmsReplacementPricingRoomSource(client, f.scope.propertyId);
-      expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, room: room! })).toMatchObject({ reason: "charges_stale" });
-    } finally { await client.query("ROLLBACK"); client.release(); }
+      expect(
+        await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, room: room! }),
+      ).toMatchObject({ reason: "charges_stale" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
   it("binds the complete Booking terms set and rejects forged-source confirmation", async () => {
-    const f = await fixture(), other = await fixture();
+    const f = await fixture(),
+      other = await fixture();
     expect(await f.currentTermsSource()).toBe(f.sources.terms);
     expect(await other.currentTermsSource()).not.toBe(f.sources.terms);
-    for (const sources of [{ room: f.sources.room, finance: f.finance.evidenceId }, { ...f.sources, terms: other.sources.terms }])
-      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "terms_source_stale" });
+    for (const sources of [
+      { room: f.sources.room, finance: f.finance.evidenceId },
+      { ...f.sources, terms: other.sources.terms },
+    ])
+      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({
+        reason: "terms_source_stale",
+      });
     const forged = { ...f.sources, terms: "forged" };
-    await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
-      draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
-      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    })).rejects.toMatchObject({ code: "stale" });
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "terms_source_stale" });
-    await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: null, terms: { ...f.termsInput, offerId: "unselected" } });
+    await pool.query(
+      "UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1",
+      [f.scope.propertyId, forged],
+    );
+    await expect(
+      createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+        draftId: f.draftId,
+        expectedDraftRevision: 2,
+        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
+        declaration: "all_mandatory_charges_included",
+        requestId: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "stale" });
+    expect(
+      await f.read(
+        {
+          ...f.snapshot,
+          ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id },
+        },
+        f.context,
+        forged,
+      ),
+    ).toMatchObject({ reason: "terms_source_stale" });
+    await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      terms: { ...f.termsInput, offerId: "unselected" },
+    });
     expect(await f.read()).toMatchObject({ reason: "terms_source_stale" });
-    const changed = await f.currentTermsSource(); expect(changed).not.toBe(f.sources.terms);
-    expect(await f.read(f.snapshot, f.context, { ...f.sources, terms: changed })).toMatchObject({ reason: "charges_stale" });
-    const updated = await f.booking.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.terms[0].revision, terms: f.termsInput });
+    const changed = await f.currentTermsSource();
+    expect(changed).not.toBe(f.sources.terms);
+    expect(await f.read(f.snapshot, f.context, { ...f.sources, terms: changed })).toMatchObject({
+      reason: "charges_stale",
+    });
+    const updated = await f.booking.save(f.context, f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: f.terms[0].revision,
+      terms: f.termsInput,
+    });
     expect(updated.revision).not.toBe(f.terms[0].revision);
     expect(await f.currentTermsSource()).not.toBe(changed);
   });
   it("holds the complete terms source against new offers through the real Booking writer", async () => {
-    const f = await fixture(), reader = await pool.connect(), writer = new pg.Pool({ connectionString: url, max: 1 });
-    const command = { requestId: randomUUID(), expectedRevision: null, terms: { ...f.termsInput, offerId: "concurrent-new" } };
+    const f = await fixture(),
+      reader = await pool.connect(),
+      writer = new pg.Pool({ connectionString: url, max: 1 });
+    const command = {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      terms: { ...f.termsInput, offerId: "concurrent-new" },
+    };
     try {
       await writer.query("SET lock_timeout='150ms'");
-      await reader.query("BEGIN"); expect(await verify(reader, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({ kind: "verified" });
-      await expect(createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command)).rejects.toMatchObject({ code: "55P03" });
+      await reader.query("BEGIN");
+      expect(await verify(reader, f.context, f.scope, f.snapshot, f.sources)).toMatchObject({
+        kind: "verified",
+      });
+      await expect(
+        createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command),
+      ).rejects.toMatchObject({ code: "55P03" });
       await reader.query("COMMIT");
       await createBookingPricingOfferTermsStore(writer).save(f.context, f.scope, command);
       expect(await f.read()).toMatchObject({ reason: "terms_source_stale" });
-    } finally { await reader.query("ROLLBACK"); reader.release(); await writer.end(); }
+    } finally {
+      await reader.query("ROLLBACK");
+      reader.release();
+      await writer.end();
+    }
   });
   it("requires independent Finance sources even with matching declaration or readiness evidence", async () => {
     const f = await fixture();
-    for (const sources of [{ room: f.sources.room, terms: f.sources.terms }, { ...f.sources, finance: f.finance.evidenceId }])
-      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({ reason: "finance_source_stale" });
+    for (const sources of [
+      { room: f.sources.room, terms: f.sources.terms },
+      { ...f.sources, finance: f.finance.evidenceId },
+    ])
+      expect(await f.read(f.snapshot, f.context, sources)).toMatchObject({
+        reason: "finance_source_stale",
+      });
     const forged = { ...f.sources, finance: "forged" };
-    await pool.query("UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1", [f.scope.propertyId, forged]);
-    await expect(createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
-      draftId: f.draftId, expectedDraftRevision: 2, claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
-      declaration: "all_mandatory_charges_included", requestId: randomUUID(),
-    })).rejects.toMatchObject({ code: "stale" });
-    expect(await f.read({ ...f.snapshot, ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id } }, f.context, forged)).toMatchObject({ reason: "finance_source_stale" });
+    await pool.query(
+      "UPDATE pms.pricing_v2_drafts SET source_revisions=$2,draft_revision=2 WHERE property_id=$1",
+      [f.scope.propertyId, forged],
+    );
+    await expect(
+      createReplacementChargeDeclarationStore(pool).confirm(f.context, f.scope, {
+        draftId: f.draftId,
+        expectedDraftRevision: 2,
+        claimedFingerprint: replacementChargeFingerprint(f.scope.propertyId, f.snapshot, forged)!,
+        declaration: "all_mandatory_charges_included",
+        requestId: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "stale" });
+    expect(
+      await f.read(
+        {
+          ...f.snapshot,
+          ownerReferences: { ...f.snapshot.ownerReferences, charges: f.charges.id },
+        },
+        f.context,
+        forged,
+      ),
+    ).toMatchObject({ reason: "finance_source_stale" });
     // Tax policy is source state but does not change method capability; readiness alone is insufficient.
-    await pool.query("UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1", [f.scope.propertyId]);
+    await pool.query(
+      "UPDATE finance.payment_settings SET tax_policy='{\"version\":2}'::jsonb WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
     expect(await f.read()).toMatchObject({ reason: "finance_source_stale" });
     const client = await pool.connect();
     try {
-      await client.query("BEGIN"); expect(await lockReplacementPricingAuthorization(client, f.context, f.scope, "manage")).toBe(true);
-      await lockPmsReplacementPricingRoomSource(client, f.scope.propertyId); await lockBookingPricingTermsSource(client, f.scope.propertyId);
+      await client.query("BEGIN");
+      expect(await lockReplacementPricingAuthorization(client, f.context, f.scope, "manage")).toBe(
+        true,
+      );
+      await lockPmsReplacementPricingRoomSource(client, f.scope.propertyId);
+      await lockBookingPricingTermsSource(client, f.scope.propertyId);
       const finance = await lockFinanceReplacementPricingSource(client, f.scope.propertyId);
-      expect(await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! })).toMatchObject({ reason: "charges_stale" });
-    } finally { await client.query("ROLLBACK"); client.release(); }
+      expect(
+        await verify(client, f.context, f.scope, f.snapshot, { ...f.sources, finance: finance! }),
+      ).toMatchObject({ reason: "charges_stale" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
-  async function publicFixture(publish = true, configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot, policy?: FixedChargePolicy, configureTerms?: TermsSetup, enableCard = false) {
+  async function publicFixture(
+    publish = true,
+    configure?: (snapshot: PricingStorageSnapshot) => PricingStorageSnapshot,
+    policy?: FixedChargePolicy,
+    configureTerms?: TermsSetup,
+    enableCard = false,
+  ) {
     const f = await fixture(configure, configureTerms, enableCard),
       propertyId = f.scope.propertyId;
     await pool.query(
@@ -352,7 +818,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
     if (policy) {
       const saved = await createFixedChargePolicyStore(pool).save(f.context, f.scope, {
-        requestId: randomUUID(), expectedRevision: null, policy,
+        requestId: randomUUID(),
+        expectedRevision: null,
+        policy,
       });
       f.snapshot.ownerReferences.charges = "booking.fixed-charge-policy.v1:" + saved.revision;
     }
@@ -373,17 +841,32 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const f = await publicFixture(false);
     const readOwner = async (scope: { propertyId: string; organizationId: string } = f.scope) => {
       const client = await pool.connect();
-      try { await client.query("BEGIN"); return await lockCurrentPricingPublication(client, scope); }
-      finally { await client.query("ROLLBACK"); client.release(); }
+      try {
+        await client.query("BEGIN");
+        return await lockCurrentPricingPublication(client, scope);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     };
     expect(await readOwner()).toBeNull(); // A draft cannot satisfy publication.
     await f.publishPrices();
     const before = await f.readPublic();
     expect((await readOwner())?.pmsSourceRevision).toBe(before?.pmsSourceRevision);
-    await pool.query("DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id=$1", [f.scope.propertyId]);
-    await pool.query("UPDATE hotel_catalog.properties SET profile_status='incomplete' WHERE id=$1", [f.scope.propertyId]);
+    await pool.query(
+      "DELETE FROM distribution.public_hotel_bookability_profiles WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    await pool.query(
+      "UPDATE hotel_catalog.properties SET profile_status='incomplete' WHERE id=$1",
+      [f.scope.propertyId],
+    );
     expect(await f.readPublic()).toBeNull();
-    expect(await readOwner()).toMatchObject({ publication: { revision: 1, currency: "EUR" }, terms: before!.terms, charges: before!.charges });
+    expect(await readOwner()).toMatchObject({
+      publication: { revision: 1, currency: "EUR" },
+      terms: before!.terms,
+      charges: before!.charges,
+    });
     expect(await readOwner({ ...f.scope, organizationId: randomUUID() })).toBeNull();
     expect(await readOwner({ ...f.scope, propertyId: "malformed" })).toBeNull();
     for (const sql of [
@@ -393,22 +876,39 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     ]) {
       const client = await pool.connect();
       try {
-        await client.query("BEGIN"); await client.query(sql, [f.scope.organizationId]);
+        await client.query("BEGIN");
+        await client.query(sql, [f.scope.organizationId]);
         expect(await lockCurrentPricingPublication(client, f.scope)).toBeNull();
-      } finally { await client.query("ROLLBACK"); client.release(); }
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     }
     const external = await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(), expectedRevision: f.choice.revision, authority: "external",
+      requestId: randomUUID(),
+      expectedRevision: f.choice.revision,
+      authority: "external",
     });
     expect(await readOwner()).toBeNull();
     await f.authority.save(f.context, f.scope, {
-      requestId: randomUUID(), expectedRevision: external.revision, authority: "vayada",
+      requestId: randomUUID(),
+      expectedRevision: external.revision,
+      authority: "vayada",
     });
     expect(await readOwner()).not.toBeNull();
-    await pool.query("UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1", [f.scope.organizationId]);
+    await pool.query(
+      "UPDATE identity.product_entitlements SET status='suspended' WHERE organization_id=$1",
+      [f.scope.organizationId],
+    );
     expect(await readOwner()).toBeNull();
-    await pool.query("UPDATE identity.product_entitlements SET status='active' WHERE organization_id=$1", [f.scope.organizationId]);
-    await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+    await pool.query(
+      "UPDATE identity.product_entitlements SET status='active' WHERE organization_id=$1",
+      [f.scope.organizationId],
+    );
+    await pool.query(
+      "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
     expect(await readOwner()).toBeNull();
   });
 
@@ -427,14 +927,28 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(result?.terms).toHaveLength(3);
     const mapped = mapReplacementPublicOffers(result!);
     expect(mapped).toHaveLength(2);
-    const offers = mapped!.flatMap(room => room.offers);
+    const offers = mapped!.flatMap((room) => room.offers);
     expect(offers).toHaveLength(3);
-    expect(new Set(offers.map(offer => offer.ratePlanId)).size).toBe(3);
-    expect(offers.map(offer => offer.ratePlanId)).toEqual(publicPricingOfferBindings(result!).map(binding => binding.publicOfferKey));
-    expect(offers.every(offer => offer.pricing.kind === "quote_required" && offer.pricing.publicationRevision === 1)).toBe(true);
-    expect(offers.every(offer => !Object.hasOwn(offer, "baseNightlyAmount") && !Object.hasOwn(offer, "paymentTiming"))).toBe(true);
+    expect(new Set(offers.map((offer) => offer.ratePlanId)).size).toBe(3);
+    expect(offers.map((offer) => offer.ratePlanId)).toEqual(
+      publicPricingOfferBindings(result!).map((binding) => binding.publicOfferKey),
+    );
+    expect(
+      offers.every(
+        (offer) =>
+          offer.pricing.kind === "quote_required" && offer.pricing.publicationRevision === 1,
+      ),
+    ).toBe(true);
+    expect(
+      offers.every(
+        (offer) =>
+          !Object.hasOwn(offer, "baseNightlyAmount") && !Object.hasOwn(offer, "paymentTiming"),
+      ),
+    ).toBe(true);
     expect(mapReplacementPublicOffers({ ...result!, terms: [] })).toBeNull();
-    expect(mapReplacementPublicOffers({ ...result!, terms: [...result!.terms, result!.terms[0]!] })).toBeNull();
+    expect(
+      mapReplacementPublicOffers({ ...result!, terms: [...result!.terms, result!.terms[0]!] }),
+    ).toBeNull();
     expect(result?.pmsSourceRevision).toMatch(/^booking\.pms\.publication\.v2:[a-f0-9]{64}$/);
     await pool.query(
       "UPDATE pms.pricing_v2_drafts SET draft_revision=draft_revision+1 WHERE property_id=$1",
@@ -444,104 +958,249 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await f.readPublic(randomUUID())).toBeNull();
   });
   it("publishes current database offers through PMS and final Distribution content", async () => {
-    const f = await publicFixture(), scope = f.scope;
+    const f = await publicFixture(),
+      scope = f.scope;
     const single = new pg.Pool({ connectionString: url, max: 1 });
     try {
       const pricing = createReplacementPricingPublicationReader(single);
       const current = await pricing.getCurrentPricingOffers(scope);
-      expect(await pricing.getCurrentPricingOffers({ ...scope, organizationId: randomUUID() })).toBeNull();
+      expect(
+        await pricing.getCurrentPricingOffers({ ...scope, organizationId: randomUUID() }),
+      ).toBeNull();
       expect(await pricing.getCurrentPricingOffers({ ...scope, propertyId: "invalid" })).toBeNull();
       expect(current?.rooms).toHaveLength(2);
-      const roomTypeIds = current!.rooms.map(room => room.roomTypeId);
-      const source = { ownerDomain: "pms" as const, entityType: "pms_operating_calendar.v1", entityId: scope.propertyId, revision: "calendar:1" };
+      const roomTypeIds = current!.rooms.map((room) => room.roomTypeId);
+      const source = {
+        ownerDomain: "pms" as const,
+        entityType: "pms_operating_calendar.v1",
+        entityId: scope.propertyId,
+        revision: "calendar:1",
+      };
       const roomTemplate = pricingEvidence().roomPublication.rooms[0]!;
       const pms = createPmsBookingPublicationSource({
         pricing,
-        rooms: { async getRoomPublicationSnapshot() {
-          return { ...pricingEvidence().roomPublication, propertyId: scope.propertyId, rooms: roomTypeIds.map(roomTypeId => ({
-            ...roomTemplate, propertyId: scope.propertyId, roomTypeId,
-            facts: { ...roomTemplate.facts, beds: [{ type: "king" as (typeof roomTemplate.facts.beds)[number]["type"], quantity: 1 }] },
-            media: [{ mediaObjectId: randomUUID(), altText: "Suite", sortOrder: 0, publicVariants: [{ variantName: "original_safe" as const, publicUrl: "https://cdn.example.test/suite.webp" }] }],
-          })) };
-        } },
-        operatingCalendar: {
-          async getCurrentOperatingCalendarConfiguration() { return { sourceStatus: "current", configuration: {
-            propertyId: scope.propertyId, source, updatedAt: "2026-06-06T11:00:00.000Z",
-            sourceInputs: { propertyTimeZone: "Etc/UTC", propertyProfile: { ownerDomain: "hotel_catalog", entityType: "property_profile", entityId: scope.propertyId, revision: "profile:1" } },
-          } } as any; },
-          async getOperatingCalendarConfigurationBySource() { return null; },
+        rooms: {
+          async getRoomPublicationSnapshot() {
+            return {
+              ...pricingEvidence().roomPublication,
+              propertyId: scope.propertyId,
+              rooms: roomTypeIds.map((roomTypeId) => ({
+                ...roomTemplate,
+                propertyId: scope.propertyId,
+                roomTypeId,
+                facts: {
+                  ...roomTemplate.facts,
+                  beds: [
+                    {
+                      type: "king" as (typeof roomTemplate.facts.beds)[number]["type"],
+                      quantity: 1,
+                    },
+                  ],
+                },
+                media: [
+                  {
+                    mediaObjectId: randomUUID(),
+                    altText: "Suite",
+                    sortOrder: 0,
+                    publicVariants: [
+                      {
+                        variantName: "original_safe" as const,
+                        publicUrl: "https://cdn.example.test/suite.webp",
+                      },
+                    ],
+                  },
+                ],
+              })),
+            };
+          },
         },
-        inventory: { async getInventoryLaunchReadiness({ requiredCoverage }) { return {
-          ready: true, blockers: [], requiredCoverage, snapshot: { configuration: { source }, coverage: {
-            coverageFrom: requiredCoverage.from, coverageThrough: requiredCoverage.through,
-            expectedDayCount: 732, materializedDayCount: 732, gaps: [], roomTypeIds,
-          } },
-        } as any; } },
+        operatingCalendar: {
+          async getCurrentOperatingCalendarConfiguration() {
+            return {
+              sourceStatus: "current",
+              configuration: {
+                propertyId: scope.propertyId,
+                source,
+                updatedAt: "2026-06-06T11:00:00.000Z",
+                sourceInputs: {
+                  propertyTimeZone: "Etc/UTC",
+                  propertyProfile: {
+                    ownerDomain: "hotel_catalog",
+                    entityType: "property_profile",
+                    entityId: scope.propertyId,
+                    revision: "profile:1",
+                  },
+                },
+              },
+            } as any;
+          },
+          async getOperatingCalendarConfigurationBySource() {
+            return null;
+          },
+        },
+        inventory: {
+          async getInventoryLaunchReadiness({ requiredCoverage }) {
+            return {
+              ready: true,
+              blockers: [],
+              requiredCoverage,
+              snapshot: {
+                configuration: { source },
+                coverage: {
+                  coverageFrom: requiredCoverage.from,
+                  coverageThrough: requiredCoverage.through,
+                  expectedDayCount: 732,
+                  materializedDayCount: 732,
+                  gaps: [],
+                  roomTypeIds,
+                },
+              },
+            } as any;
+          },
+        },
         now: () => new Date("2026-06-06T11:00:00.000Z"),
       });
       const evidence = await pms.getBookingLaunchEvidence(scope);
       if (evidence.outcome !== "evidence") throw new Error("PMS evidence required");
-      expect(evidence.entities.flatMap(entity => entity.blockers)).toEqual([]);
+      expect(evidence.entities.flatMap((entity) => entity.blockers)).toEqual([]);
       const hash = `sha256:${"a".repeat(64)}` as const;
-      const request = { ...scope, sourceManifestHash: hash, sourceManifest: { contractVersion: "onboarding-source-manifest.v1" as const, propertyId: scope.propertyId, sources: evidence.sources } };
+      const request = {
+        ...scope,
+        sourceManifestHash: hash,
+        sourceManifest: {
+          contractVersion: "onboarding-source-manifest.v1" as const,
+          propertyId: scope.propertyId,
+          sources: evidence.sources,
+        },
+      };
       const snapshot = await pms.getSnapshot(request);
       if (snapshot.outcome !== "snapshot") throw new Error("PMS snapshot required");
       const profile = structuredClone(PUBLIC_BOOKABILITY_FIXTURES[0]!.profile);
       profile.hotel.propertyId = scope.propertyId;
       profile.hotel.slug = scope.propertyId;
       const built = buildBookingPublicContent({
-        sourceManifestHash: hash, readinessHash: hash, profile,
-        rooms: snapshot.content.rooms, calendar: snapshot.content.calendar,
-        finance: { defaultCurrency: "EUR", supportedCurrencies: ["EUR"], onlinePayment: true, payAtProperty: true, readyPaymentMethods: ["card", "pay_at_property"] },
+        sourceManifestHash: hash,
+        readinessHash: hash,
+        profile,
+        rooms: snapshot.content.rooms,
+        calendar: snapshot.content.calendar,
+        finance: {
+          defaultCurrency: "EUR",
+          supportedCurrencies: ["EUR"],
+          onlinePayment: true,
+          payAtProperty: true,
+          readyPaymentMethods: ["card", "pay_at_property"],
+        },
       });
       expect(built).not.toBeNull();
       expect(parseBookingPublicContent(built?.publicContent)).toEqual(built?.publicContent);
-      expect(built?.publicContent.rooms.flatMap(room => room.rates)).toEqual(current!.rooms.flatMap(room => room.offers));
+      expect(built?.publicContent.rooms.flatMap((room) => room.rates)).toEqual(
+        current!.rooms.flatMap((room) => room.offers),
+      );
       const catalog = createPublicPricingOfferCatalog(single);
       expect(await catalog.read(scope.propertyId)).toBeNull(); // Approved pricing alone is not published content.
       let revisionNumber = 0;
       const publishContent = async (content: unknown) => {
         const revision = randomUUID();
-        await pool.query(`INSERT INTO distribution.public_booking_content_revisions
+        await pool.query(
+          `INSERT INTO distribution.public_booking_content_revisions
           (id,property_id,revision_number,readiness_contract_version,source_manifest,source_manifest_hash,readiness_hash,readiness_product,readiness_status,public_content,built_by_user_id)
           VALUES($1,$2,$3,'onboarding-product-readiness.v1',$4,$5,$5,'booking','ready',$6,$7)`,
-          [revision, scope.propertyId, ++revisionNumber, request.sourceManifest, hash, content, scope.actorUserId]);
-        await pool.query(`INSERT INTO distribution.active_public_booking_revision(property_id,content_revision_id,activated_by_user_id)
+          [
+            revision,
+            scope.propertyId,
+            ++revisionNumber,
+            request.sourceManifest,
+            hash,
+            content,
+            scope.actorUserId,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO distribution.active_public_booking_revision(property_id,content_revision_id,activated_by_user_id)
           VALUES($1,$2,$3) ON CONFLICT(property_id) DO UPDATE SET content_revision_id=EXCLUDED.content_revision_id`,
-          [scope.propertyId, revision, scope.actorUserId]);
+          [scope.propertyId, revision, scope.actorUserId],
+        );
       };
       await publishContent(built!.publicContent);
       const offers = await catalog.read(scope.propertyId);
       expect(offers?.version).toBe("public-pricing-offers.v1");
-      expect(offers?.rooms.flatMap(room => room.offers.map(offer => offer.publicOfferKey))).toEqual(current!.rooms.flatMap(room => room.offers.map(offer => offer.ratePlanId)));
-      expect(offers?.rooms.every(room => room.name === "Suite" && room.images.length === 1)).toBe(true);
-      expect(JSON.stringify(offers)).not.toMatch(/baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/);
+      expect(
+        offers?.rooms.flatMap((room) => room.offers.map((offer) => offer.publicOfferKey)),
+      ).toEqual(current!.rooms.flatMap((room) => room.offers.map((offer) => offer.ratePlanId)));
+      expect(offers?.rooms.every((room) => room.name === "Suite" && room.images.length === 1)).toBe(
+        true,
+      );
+      expect(JSON.stringify(offers)).not.toMatch(
+        /baseNightlyAmount|termsRevision|publicationRevision|ownerReferences|sourceRevision/,
+      );
       expect(await catalog.read(randomUUID())).toBeNull();
       const app = Fastify({ logger: false });
-      await app.register(registerBookingWebPublicRoutes, { profileRepository: { async findProfileBySlug() { return null; } },
-        checkoutAdapter: createTargetBookingWebCheckoutAdapter({ connectionString: url!, pool: single, inventoryReservationPort: createTargetPmsInventoryReservationPort() }) });
+      await app.register(registerBookingWebPublicRoutes, {
+        profileRepository: {
+          async findProfileBySlug() {
+            return null;
+          },
+        },
+        checkoutAdapter: createTargetBookingWebCheckoutAdapter({
+          externalChanges: externalBookingChanges,
+          connectionString: url!,
+          pool: single,
+          inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+        }),
+      });
       try {
-        const response = await app.inject({ method: "GET", url: `/hotels/${scope.propertyId}/pricing-offers` });
+        const response = await app.inject({
+          method: "GET",
+          url: `/hotels/${scope.propertyId}/pricing-offers`,
+        });
         expect(response.statusCode).toBe(200);
         expect(response.headers["cache-control"]).toBe("no-store");
         expect(response.json()).toEqual(offers);
-        expect((await app.inject({ method: "GET", url: `/hotels/${randomUUID()}/pricing-offers` })).statusCode).toBe(404);
-      } finally { await app.close(); }
+        expect(
+          (await app.inject({ method: "GET", url: `/hotels/${randomUUID()}/pricing-offers` }))
+            .statusCode,
+        ).toBe(404);
+      } finally {
+        await app.close();
+      }
       for (const change of [
-        (content: NonNullable<typeof built>["publicContent"]) => { content.profile.hotel.propertyId = randomUUID(); },
-        (content: NonNullable<typeof built>["publicContent"]) => { (content.rooms as unknown[]).pop(); },
-        (content: NonNullable<typeof built>["publicContent"]) => { (content.rooms[0]!.rates as unknown[])[0] = { ratePlanId: "old", currency: "EUR", baseNightlyAmount: "100.00", refundable: true, paymentTiming: "pay_at_property" }; },
+        (content: NonNullable<typeof built>["publicContent"]) => {
+          content.profile.hotel.propertyId = randomUUID();
+        },
+        (content: NonNullable<typeof built>["publicContent"]) => {
+          (content.rooms as unknown[]).pop();
+        },
+        (content: NonNullable<typeof built>["publicContent"]) => {
+          (content.rooms[0]!.rates as unknown[])[0] = {
+            ratePlanId: "old",
+            currency: "EUR",
+            baseNightlyAmount: "100.00",
+            refundable: true,
+            paymentTiming: "pay_at_property",
+          };
+        },
       ]) {
-        const invalid = structuredClone(built!.publicContent); change(invalid);
+        const invalid = structuredClone(built!.publicContent);
+        change(invalid);
         await publishContent(invalid);
         expect(await catalog.read(scope.propertyId)).toBeNull();
       }
       await publishContent(built!.publicContent);
-      await f.authority.save(f.context, f.scope, { requestId: randomUUID(), expectedRevision: f.choice.revision, authority: "vayada" });
+      await f.authority.save(f.context, f.scope, {
+        requestId: randomUUID(),
+        expectedRevision: f.choice.revision,
+        authority: "vayada",
+      });
       expect(await catalog.read(scope.propertyId)).toBeNull(); // Previously published keys cannot survive a new authority revision.
-      await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [scope.propertyId]);
+      await pool.query(
+        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+        [scope.propertyId],
+      );
       expect(await pms.getSnapshot(request)).toEqual({ outcome: "unavailable", owner: "pms" });
-    } finally { await single.end(); }
+    } finally {
+      await single.end();
+    }
   });
   it("changes the source identity after a new authority choice and refuses external or hidden properties", async () => {
     const f = await publicFixture(),
@@ -940,7 +1599,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }),
     ).toBeNull();
   });
-  async function componentsFixture(policy?: FixedChargePolicy, configureTerms?: TermsSetup, enableCard = false) {
+  async function componentsFixture(
+    policy?: FixedChargePolicy,
+    configureTerms?: TermsSetup,
+    enableCard = false,
+  ) {
     const f = await stayFixture(familyPrices, policy, configureTerms, enableCard),
       id = randomUUID();
     await pool.query(
@@ -1034,9 +1697,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const result = await f.components();
     expect(result?.subtotalMinor).toBe("17000"); // 200 rooms +20 meals +40 extras -40 LM -50 one code
     expect(result?.discounts.codeMinor).toBe("5000");
-    expect((await f.components({ ...f.selection, promoCode: null, addons: [] }))?.subtotalMinor).toBe(
-      "18000",
-    );
+    expect(
+      (await f.components({ ...f.selection, promoCode: null, addons: [] }))?.subtotalMinor,
+    ).toBe("18000");
     expect(await f.components({ ...f.selection, promoCode: "MISSING" })).toBeNull();
   });
   it("rejects unavailable current owners and preserves old component snapshots after owner changes", async () => {
@@ -1047,9 +1710,13 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(changed?.subtotalMinor).toBe("21800");
     expect(changed?.componentSources.addons).not.toBe(before?.componentSources.addons);
     expect(before?.subtotalMinor).toBe("20000");
-    await pool.query("UPDATE booking.addon_definitions SET public_visible=false WHERE id=$1", [f.id]);
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=false WHERE id=$1", [
+      f.id,
+    ]);
     expect(await f.components()).toBeNull();
-    await pool.query("UPDATE booking.addon_definitions SET public_visible=true WHERE id=$1", [f.id]);
+    await pool.query("UPDATE booking.addon_definitions SET public_visible=true WHERE id=$1", [
+      f.id,
+    ]);
     await pool.query("DELETE FROM booking.booking_settings WHERE property_id=$1", [
       f.scope.propertyId,
     ]);
@@ -1279,7 +1946,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const card = await paymentAmounts(f, "card"),
       property = await paymentAmounts(f);
     expect(card).toMatchObject({ totalMinor: "20600", dueNowMinor: "20000", dueLaterMinor: "600" });
-    expect(property).toMatchObject({ totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
+    expect(property).toMatchObject({
+      totalMinor: "20600",
+      dueNowMinor: "0",
+      dueLaterMinor: "20600",
+    });
     expect(card?.paymentEvidenceId).not.toBe(property?.paymentEvidenceId);
     await pool.query(
       "UPDATE finance.payment_provider_accounts SET charges_enabled=false WHERE property_id=$1",
@@ -1354,7 +2025,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       "terms",
     ]);
     expect(quote.evidence.revisions.fx).toMatch(/^booking.no-conversion.v1:/);
-    expect(record?.calculation.charges.charges[0]).toMatchObject({ amountMinor: "600", quantity: 2 });
+    expect(record?.calculation.charges.charges[0]).toMatchObject({
+      amountMinor: "600",
+      quantity: 2,
+    });
     expect(record?.calculation.addons.lines[0].definition).toHaveProperty("id", f.id);
     expect(
       storedPricingQuoteStatus(
@@ -1413,7 +2087,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(first.quote.evidence.totalMinor).toBe("20600");
     expect(next.quote.quoteId).not.toBe(first.quote.quoteId);
     await expect(
-      store.issue(f.scope.propertyId, { ...command, selection: { ...f.selection, promoCode: null } }),
+      store.issue(f.scope.propertyId, {
+        ...command,
+        selection: { ...f.selection, promoCode: null },
+      }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
     await expect(
       store.issue(f.scope.propertyId, { ...command, paymentMethod: "card" }),
@@ -1431,55 +2108,188 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms);
     const app = Fastify({ logger: false });
     await app.register(registerBookingWebPublicRoutes, {
-      profileRepository: { async findProfileBySlug() { return null; } },
-      checkoutAdapter: createTargetBookingWebCheckoutAdapter({ connectionString: url!, pool, inventoryReservationPort: createTargetPmsInventoryReservationPort() }),
+      profileRepository: {
+        async findProfileBySlug() {
+          return null;
+        },
+      },
+      checkoutAdapter: createTargetBookingWebCheckoutAdapter({
+        externalChanges: externalBookingChanges,
+        connectionString: url!,
+        pool,
+        inventoryReservationPort: createTargetPmsInventoryReservationPort(),
+      }),
     });
     try {
       const path = `/hotels/${f.scope.propertyId}/bookings/quote`;
-      const payload = { version: "public-booking-quote-request.v1", selection: parsePublicPricingSelection(f.selection)!, paymentMethod: "pay_at_property" } as const;
-      const failed = createReplacementBookingQuoteIssuer({ async issue() { throw new Error("private database details"); } });
-      await expect(failed(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 503, message: "Quote temporarily unavailable." });
+      const payload = {
+        version: "public-booking-quote-request.v1",
+        selection: parsePublicPricingSelection(f.selection)!,
+        paymentMethod: "pay_at_property",
+      } as const;
+      const failed = createReplacementBookingQuoteIssuer({
+        async issue() {
+          throw new Error("private database details");
+        },
+      });
+      await expect(failed(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({
+        statusCode: 503,
+        message: "Quote temporarily unavailable.",
+      });
       const headers = { "Idempotency-Key": randomUUID() };
-      const post = (body: unknown = payload, key = headers) => app.inject({ method: "POST", url: path, headers: key, payload: body as Record<string, unknown> });
+      const post = (body: unknown = payload, key = headers) =>
+        app.inject({
+          method: "POST",
+          url: path,
+          headers: key,
+          payload: body as Record<string, unknown>,
+        });
       const first = await post();
       expect(first.statusCode).toBe(200);
       expect(first.headers["cache-control"]).toBe("no-store");
       const body = first.json();
       expect(parsePublicBookingQuote(body, payload)).toEqual(body);
-      expect(body).toMatchObject({ version: "public-booking-quote.v1", acceptanceMode: "instant", replayed: false, currency: "EUR", totalMinor: "20600", dueNowMinor: "0", dueLaterMinor: "20600" });
+      expect(body).toMatchObject({
+        version: "public-booking-quote.v1",
+        acceptanceMode: "instant",
+        replayed: false,
+        currency: "EUR",
+        totalMinor: "20600",
+        dueNowMinor: "0",
+        dueLaterMinor: "20600",
+      });
       expect(body.rooms).toHaveLength(f.selection.rooms.length);
-      expect(Object.keys(body).sort()).toEqual(["version", "quoteId", "replayed", "checkIn", "checkOut", "currency", "paymentMethod", "acceptanceMode", "issuedAt", "expiresAt", "totalMinor", "dueNowMinor", "dueLaterMinor", "lines", "rooms"].sort());
-      expect(body.rooms.every((room: Record<string, unknown>) => Object.keys(room).sort().join(",") === "cancellation,mealPlan,payment,selectionId")).toBe(true);
-      const stored = await createCurrentPricingQuoteStore(pool, 300).read(f.scope.propertyId, body.quoteId);
+      expect(Object.keys(body).sort()).toEqual(
+        [
+          "version",
+          "quoteId",
+          "replayed",
+          "checkIn",
+          "checkOut",
+          "currency",
+          "paymentMethod",
+          "acceptanceMode",
+          "issuedAt",
+          "expiresAt",
+          "totalMinor",
+          "dueNowMinor",
+          "dueLaterMinor",
+          "lines",
+          "rooms",
+        ].sort(),
+      );
+      expect(
+        body.rooms.every(
+          (room: Record<string, unknown>) =>
+            Object.keys(room).sort().join(",") === "cancellation,mealPlan,payment,selectionId",
+        ),
+      ).toBe(true);
+      const stored = await createCurrentPricingQuoteStore(pool, 300).read(
+        f.scope.propertyId,
+        body.quoteId,
+      );
       expect(stored?.quote.evidence.totalMinor).toBe(body.totalMinor);
       const oldQuote = structuredClone(stored!.quote);
       Reflect.deleteProperty(oldQuote, "acceptanceMode");
-      const oldIssuer = createReplacementBookingQuoteIssuer({ async issue() { return { ...stored!, quote: oldQuote, replayed: true }; } });
-      await expect(oldIssuer(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({ statusCode: 409, code: "QUOTE_REFRESH_REQUIRED" });
+      const oldIssuer = createReplacementBookingQuoteIssuer({
+        async issue() {
+          return { ...stored!, quote: oldQuote, replayed: true };
+        },
+      });
+      await expect(oldIssuer(f.scope.propertyId, payload, randomUUID())).rejects.toMatchObject({
+        statusCode: 409,
+        code: "QUOTE_REFRESH_REQUIRED",
+      });
       const refreshApp = Fastify();
       try {
         refreshApp.post("/quote", async () => oldIssuer(f.scope.propertyId, payload, randomUUID()));
-        expect((await refreshApp.inject({method: "POST", url: "/quote"})).json().code).toBe("QUOTE_REFRESH_REQUIRED");
-      } finally { await refreshApp.close(); }
-      await pool.query("UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1", [f.scope.propertyId]);
-      expect((await post(payload, { "Idempotency-Key": randomUUID() })).json().acceptanceMode).toBe("request");
+        expect((await refreshApp.inject({ method: "POST", url: "/quote" })).json().code).toBe(
+          "QUOTE_REFRESH_REQUIRED",
+        );
+      } finally {
+        await refreshApp.close();
+      }
+      await pool.query(
+        "UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
+      expect((await post(payload, { "Idempotency-Key": randomUUID() })).json().acceptanceMode).toBe(
+        "request",
+      );
       expect((await post()).json()).toEqual({ ...body, replayed: true });
-      expect((await post({ ...payload, selection: { ...f.selection, promoCode: null } })).statusCode).toBe(409);
-      for (const invalid of [{}, { ...payload, propertyId: randomUUID() }, { ...payload, totalMinor: "1" }, { ...payload, paymentMethod: "cash" }, { ...payload, selection: { ...f.selection, rooms: [] } }]) expect((await post(invalid)).statusCode).toBe(400);
+      expect(
+        (await post({ ...payload, selection: { ...f.selection, promoCode: null } })).statusCode,
+      ).toBe(409);
+      for (const invalid of [
+        {},
+        { ...payload, propertyId: randomUUID() },
+        { ...payload, totalMinor: "1" },
+        { ...payload, paymentMethod: "cash" },
+        { ...payload, selection: { ...f.selection, rooms: [] } },
+      ])
+        expect((await post(invalid)).statusCode).toBe(400);
       for (const key of [undefined, "", "a,b", "x".repeat(201)]) {
-        const response = await app.inject({ method: "POST", url: path, headers: key === undefined ? {} : { "Idempotency-Key": key }, payload });
+        const response = await app.inject({
+          method: "POST",
+          url: path,
+          headers: key === undefined ? {} : { "Idempotency-Key": key },
+          payload,
+        });
         expect(response.statusCode).toBe(400);
         expect(response.headers["cache-control"]).toBe("no-store");
       }
-      expect((await app.inject({ method: "POST", url: path, headers: { "Idempotency-Key": ["one", "two"] }, payload })).statusCode).toBe(400);
-      expect((await app.inject({ method: "POST", url: path, headers: { ...headers, "content-type": "application/json" }, payload: " ".repeat(65537) })).statusCode).toBe(413);
-      expect((await app.inject({ method: "POST", url: path, headers: { ...headers, "content-type": "application/json" }, payload: "{" })).statusCode).toBe(400);
-      expect((await app.inject({ method: "POST", url: `/hotels/${randomUUID()}/bookings/quote`, headers, payload })).statusCode).toBe(404);
-      await pool.query("UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1", [f.scope.propertyId]);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: path,
+            headers: { "Idempotency-Key": ["one", "two"] },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: path,
+            headers: { ...headers, "content-type": "application/json" },
+            payload: " ".repeat(65537),
+          })
+        ).statusCode,
+      ).toBe(413);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: path,
+            headers: { ...headers, "content-type": "application/json" },
+            payload: "{",
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/hotels/${randomUUID()}/bookings/quote`,
+            headers,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(404);
+      await pool.query(
+        "UPDATE finance.payment_settings SET payments_enabled=false WHERE property_id=$1",
+        [f.scope.propertyId],
+      );
       expect((await post(payload, { "Idempotency-Key": randomUUID() })).statusCode).toBe(404);
-      await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [f.scope.propertyId]);
+      await pool.query("UPDATE hotel_catalog.properties SET profile_status='private' WHERE id=$1", [
+        f.scope.propertyId,
+      ]);
       expect((await post()).statusCode).toBe(404); // Historical retry still needs public authority.
-    } finally { await app.close(); }
+    } finally {
+      await app.close();
+    }
   });
   it("serializes concurrent quote issuance and enforces append-only storage", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
@@ -1510,7 +2320,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       other = await componentsFixture(fixedPolicy(), propertyTerms);
     const store = createCurrentPricingQuoteStore(pool, 300),
-      command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+      command = {
+        requestId: randomUUID(),
+        selection: f.selection,
+        paymentMethod: "pay_at_property",
+      };
     const first = await store.issue(f.scope.propertyId, command);
     expect(await store.read(other.scope.propertyId, first.quote.quoteId)).toBeNull();
     expect(await store.read(f.scope.propertyId, randomUUID())).toBeNull();
@@ -1519,7 +2333,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       f.scope.propertyId,
     ]);
     expect(await store.read(f.scope.propertyId, first.quote.quoteId)).toBeNull();
-    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({ code: "denied" });
+    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({
+      code: "denied",
+    });
   });
   it("rejects unavailable or malformed issuance without leaving a stored quote", async () => {
     const f = await componentsFixture(fixedPolicy()),
@@ -1529,14 +2345,18 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       selection: f.selection,
       paymentMethod: "pay_at_property",
     };
-    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({ code: "denied" });
+    await expect(store.issue(f.scope.propertyId, command)).rejects.toMatchObject({
+      code: "denied",
+    });
     for (const input of [
       { ...command, requestId: " " },
       { ...command, extra: true },
       { ...command, selection: {} },
       { ...command, paymentMethod: "cash" },
     ])
-      await expect(store.issue(f.scope.propertyId, input)).rejects.toMatchObject({ code: "invalid" });
+      await expect(store.issue(f.scope.propertyId, input)).rejects.toMatchObject({
+        code: "invalid",
+      });
     expect(
       (
         await pool.query(
@@ -1550,7 +2370,11 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("returns expired historical quotes on retry without extending their lifetime", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms);
     const store = createCurrentPricingQuoteStore(pool, 1);
-    const command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+    const command = {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    };
     const first = await store.issue(f.scope.propertyId, command);
     await pool.query("SELECT pg_sleep(1.1)");
     const replay = await store.issue(f.scope.propertyId, command);
@@ -1573,15 +2397,25 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   it("freezes acceptance mode through settings edits, replay and revalidation", async () => {
     const f = await componentsFixture(fixedPolicy(), propertyTerms),
       store = createCurrentPricingQuoteStore(pool, 300);
-    const command = { requestId: randomUUID(), selection: f.selection, paymentMethod: "pay_at_property" };
+    const command = {
+      requestId: randomUUID(),
+      selection: f.selection,
+      paymentMethod: "pay_at_property",
+    };
     const first = await store.issue(f.scope.propertyId, command);
     expect(first.quote.acceptanceMode).toBe("instant");
-    await pool.query("UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1", [f.scope.propertyId]);
+    await pool.query(
+      "UPDATE booking.booking_settings SET acceptance_mode='request' WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
     expect((await store.issue(f.scope.propertyId, command)).quote).toEqual(first.quote);
     expect((await revalidate(f, first.quote.quoteId))?.quote.acceptanceMode).toBe("instant");
     const second = await store.issue(f.scope.propertyId, { ...command, requestId: randomUUID() });
     expect(second.quote.acceptanceMode).toBe("request");
-    await pool.query("UPDATE booking.booking_settings SET acceptance_mode='instant' WHERE property_id=$1", [f.scope.propertyId]);
+    await pool.query(
+      "UPDATE booking.booking_settings SET acceptance_mode='instant' WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
     expect((await revalidate(f, second.quote.quoteId))?.quote.acceptanceMode).toBe("request");
   });
   it("revalidates exact stored prices without issuing a new quote or extending expiry", async () => {
@@ -1610,9 +2444,10 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await revalidate(other, original.quote.quoteId)).toBeNull();
     expect(await revalidate(f, randomUUID())).toBeNull();
     expect(await revalidate(f, "invalid")).toBeNull();
-    await pool.query("UPDATE booking.addon_definitions SET name='Changed description' WHERE id=$1", [
-      f.id,
-    ]);
+    await pool.query(
+      "UPDATE booking.addon_definitions SET name='Changed description' WHERE id=$1",
+      [f.id],
+    );
     expect(await revalidate(f, original.quote.quoteId)).toBeNull(); // Source changes count even at the same total.
     expect((await store.read(f.scope.propertyId, original.quote.quoteId))?.quote).toEqual(
       original.quote,
@@ -1804,20 +2639,46 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-      const current = await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, r.quote.quoteId);
+      const current = await lockCurrentQuoteRevalidation(
+        client,
+        r.f.scope.propertyId,
+        r.quote.quoteId,
+      );
       expect(current).not.toBeNull();
-      const first = await redeemLockedCurrentQuotePromo(client, r.f.scope.propertyId, current!, r.id);
+      const first = await redeemLockedCurrentQuotePromo(
+        client,
+        r.f.scope.propertyId,
+        current!,
+        r.id,
+      );
       expect(first).toMatchObject({ kind: "applied", discountMinor: "2000", replayed: false });
-      expect((await client.query("SELECT current_uses FROM booking.promo_definitions WHERE property_id=$1", [r.f.scope.propertyId])).rows[0].current_uses).toBe(1);
+      expect(
+        (
+          await client.query(
+            "SELECT current_uses FROM booking.promo_definitions WHERE property_id=$1",
+            [r.f.scope.propertyId],
+          )
+        ).rows[0].current_uses,
+      ).toBe(1);
       // A full re-read now rejects the command's own consumed final use.
-      expect(await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, r.quote.quoteId)).toBeNull();
-      expect(await redeemLockedCurrentQuotePromo(client, r.f.scope.propertyId, current!, r.id)).toEqual({ ...first, replayed: true });
+      expect(
+        await lockCurrentQuoteRevalidation(client, r.f.scope.propertyId, r.quote.quoteId),
+      ).toBeNull();
+      expect(
+        await redeemLockedCurrentQuotePromo(client, r.f.scope.propertyId, current!, r.id),
+      ).toEqual({ ...first, replayed: true });
     } finally {
       await client.query("ROLLBACK");
       client.release();
     }
     expect(await r.uses()).toBe(0);
-    expect((await pool.query("SELECT id FROM booking.promo_applications WHERE guest_booking_id=$1", [r.id])).rows).toEqual([]);
+    expect(
+      (
+        await pool.query("SELECT id FROM booking.promo_applications WHERE guest_booking_id=$1", [
+          r.id,
+        ])
+      ).rows,
+    ).toEqual([]);
   });
   it("rejects another booking using a redeemed quote and rejects mismatched booking evidence", async () => {
     const r = await redemptionFixture();
@@ -2020,18 +2881,41 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       try {
         await client.query("BEGIN");
         return await lockCurrentQuoteGuestDisclosure(client, f.scope.propertyId, f.quote.quoteId);
-      } finally { await client.query("ROLLBACK"); client.release(); }
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     };
     expect(await read()).toBeNull();
-    const store = createBookingGuestChoiceStore(pool, () => ({ async authorizeGuestPolicyScope(scope) {
-      expect(scope).toMatchObject(f.scope); return true;
-    } }));
-    const saved = await store.save(f.scope, { requestId: randomUUID(), expectedRevision: null, confirmed: true, choices: f.policy.choices });
+    const store = createBookingGuestChoiceStore(pool, () => ({
+      async authorizeGuestPolicyScope(scope) {
+        expect(scope).toMatchObject(f.scope);
+        return true;
+      },
+    }));
+    const saved = await store.save(f.scope, {
+      requestId: randomUUID(),
+      expectedRevision: null,
+      confirmed: true,
+      choices: f.policy.choices,
+    });
     const disclosure = await read();
     expect(disclosure!.policy.sourceRevision).toBe(`guest-choices:${saved.revision}`);
     expect(disclosure!.disclosure.choices).toEqual(f.policy.choices);
     expect(disclosure!.quote).toEqual(f.quote);
-    expect(parseBookingQuoteAcceptanceInput({ ...f.input, acceptance: { accepted: true, quoteEvidenceId: disclosure!.quoteEvidenceId, guestPolicyEvidenceId: disclosure!.guestPolicyEvidenceId } }, disclosure!.quote, disclosure!.policy)).not.toBeNull();
+    expect(
+      parseBookingQuoteAcceptanceInput(
+        {
+          ...f.input,
+          acceptance: {
+            accepted: true,
+            quoteEvidenceId: disclosure!.quoteEvidenceId,
+            guestPolicyEvidenceId: disclosure!.guestPolicyEvidenceId,
+          },
+        },
+        disclosure!.quote,
+        disclosure!.policy,
+      ),
+    ).not.toBeNull();
   });
-
 });

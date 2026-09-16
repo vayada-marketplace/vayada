@@ -27,20 +27,27 @@ export const settlementLabel = (paid: boolean, amount: number, currency: string,
 export const bookingSettlementLabel = (
   booking: Pick<
     Booking,
-    "balanceAmount" | "currency" | "depositRequired" | "paymentStatus" | "totalAmount"
+    | "amountStatus"
+    | "balanceAmount"
+    | "currency"
+    | "depositRequired"
+    | "paymentStatus"
+    | "totalAmount"
   >,
   t?: Translate,
 ) =>
-  settlementLabel(
-    booking.depositRequired
-      ? booking.balanceAmount <= 0
-      : ["captured", "paid", "refunded", "partially_refunded"].includes(
-          booking.paymentStatus || "",
-        ),
-    booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
-    booking.currency,
-    t,
-  );
+  booking.amountStatus === "unverified"
+    ? t?.("bookings.detail.amountUnverified") || "Amount unverified"
+    : settlementLabel(
+        booking.depositRequired
+          ? booking.balanceAmount <= 0
+          : ["captured", "paid", "refunded", "partially_refunded"].includes(
+              booking.paymentStatus || "",
+            ),
+        booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+        booking.currency,
+        t,
+      );
 
 function guestsLabel(stay: BookingStay, t: Translate): string {
   if (stay.adults == null || stay.children == null) {
@@ -84,9 +91,11 @@ const Fact = ({ label, value }: { label: string; value: string }) => (
 export default function BookingStaySummary({
   stays,
   expectedCount,
+  amountStatus,
 }: {
   stays: BookingStay[];
   expectedCount: number;
+  amountStatus?: Booking["amountStatus"];
 }) {
   const { t } = useTranslation();
 
@@ -125,7 +134,14 @@ export default function BookingStaySummary({
               label={t("bookings.detail.ratePlan")}
               value={stay.ratePlanName || t("bookings.detail.ratePlanUnavailable")}
             />
-            <Fact label={t("bookings.detail.appliedPricing")} value={pricingLabel(stay, t)} />
+            <Fact
+              label={t("bookings.detail.appliedPricing")}
+              value={
+                amountStatus === "unverified"
+                  ? t("bookings.detail.amountUnverified")
+                  : pricingLabel(stay, t)
+              }
+            />
           </dl>
         </article>
       ))}

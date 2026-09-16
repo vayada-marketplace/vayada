@@ -86,3 +86,93 @@ Creation returns 201, replay 200, malformed input 422, unavailable scope 404 and
 revision/key conflicts 409. Authentication/authorization failures remain 401/403.
 The server mounts this draft-only adapter; it exposes no publication command and
 does not make terms creator-visible. The Marketplace editing interface is next.
+
+## Approved commission association
+
+New draft revisions must resolve their exact Finance policy version in the offer's
+canonical property scope and find approval before persistence. The command calls
+the Finance-owned resolver inside the offer transaction; it does not copy a client
+percentage or select the newest policy. Missing, wrong-property and unapproved
+references return `policy_unavailable` (HTTP 409), without storing a draft or retry
+key. Database failures remain server errors. Existing authorized, completed retry
+keys still replay their original result, including historical unresolved drafts.
+
+The hotel draft read adds `draft.commission`, the Finance resolution for the stored
+reference, including rate, basis and eligibility when available. Historical missing
+or unapproved references remain explicitly unavailable; they are not backfilled.
+Changing the selected rate creates a new draft revision and preserves all previous
+references. Destination readiness, creator-visible published terms and accepted
+agreement creation remain separate publication work; this association alone does
+not certify a booking destination, publish terms or activate earning links.
+
+## Editing an existing hotel draft
+
+Expanded Affiliate offers in the hotel profile expose approved rate selection and
+an explicit attribution window. The editor loads the existing draft and approved
+policy history, preserving its exact current approved rate even beyond the history
+limit. Saving uses the loaded revision and a retry key bound to the exact payload;
+the booking destination reference is preserved. A successful write reloads the
+server record, and a failed reload does not leave the stale form editable.
+
+An offer without an initial draft shows setup required and cannot save. This editor
+does not invent a destination, window or rate. Destination configuration/validation
+and creator-visible publication are not implemented here. Draft terms remain
+hotel-only and separate from the existing descriptive collaboration offer fields.
+
+## Saved booking-page association
+
+Each new draft revision resolves its exact Booking destination version against the
+canonical property, authoring organization and enabled property through the Booking
+read boundary inside the offer transaction. New saves hold a shared property-row
+lock until commit so concurrent disablement cannot pass the enabled-property check.
+Missing, malformed or out-of-scope
+references return `destination_unavailable` (HTTP 409), without a draft or retry key.
+Storage failures propagate as server errors. Authorized completed retries still
+return their original result. GET adds `draft.destination`: the exact saved
+configuration with `trackingStatus: not_validated`, or null for unavailable historical
+references. No current destination is silently substituted, including beyond the
+20-version configuration history. Saving a new version preserves prior revisions.
+This configuration check is not tracking verification or permission to publish.
+
+## Initial hotel setup and destination selection
+
+The offer editor now supports a missing draft with explicit saved booking-page,
+approved commission and attribution-window selections; no values are defaulted.
+Initial setup uses expected revision zero. Existing drafts show their exact saved
+page even beyond recent history, or require a replacement if unavailable. The
+selected URL is plain text with tracking not validated; the browser never follows it.
+Changing a page appends a draft revision and cannot alter earlier terms. Missing
+configuration directs the hotel to setup above and a reload. Save/retry and failed
+reload protections also apply to initial setup. This supersedes the earlier
+existing-draft-only UI limitation and does not publish or activate an affiliate offer.
+
+## Last eligible click selection
+
+The pure Marketplace selector accepts only trusted, booking-correlated candidates
+with exact creator/link/agreement/accepted-terms references, explicit attribution
+window, source click instant, test marker and resolved eligibility. Caller-owned
+reads must authorize scope, prove the booking/referral match, resolve accepted
+agreement terms and eligibility, and establish that the candidate set is complete.
+A hotel form or unsigned callback cannot supply these assertions. No candidate
+collection, identity matching, consent or retention mechanism is introduced.
+
+Selection uses the latest eligible click at or before the original booking instant
+within that candidate's accepted terms window. The exact window boundary is included
+(elapsed time <= days \* 86400000); milliseconds, not hotel calendar dates, determine
+the window. Each occurrence carries its trusted monotonic history position, and the
+selector excludes positions after the inclusive cutoff atomically bound to the original
+booking even when a late occurrence claims an earlier source time. Source times must be
+explicit UTC instants. The selector has no clock
+or defaults and never substitutes latest terms. Other properties/bookings, known
+test clicks and ineligible clicks cannot win. Identical click duplicates collapse;
+conflicting duplicates and tied latest clicks require review. Unknown eligibility
+within a relevant window requires review; incomplete candidate evidence stays pending.
+Only complete evidence with no eligible candidate returns unattributed.
+
+This is a pure decision building block, not a durable attribution processor or
+published agreement/link API. It remains internal to the domain package and is not
+exported from the package root; a later application operation must obtain trusted
+evidence through owner-domain reads before invoking it. Historical reprocessing must use the same accepted
+terms and original booking time. Repeat-booking eligibility, identity/referral
+matching, consent/retention and evidence authority remain application/policy gates.
+No PMS name, stay-completion state, money, guest data or payout belongs in this selector.

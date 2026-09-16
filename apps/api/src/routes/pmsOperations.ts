@@ -415,7 +415,7 @@ export type PmsManualPriceCorrectionCommand = {
   expectedVersion?: string;
   accountingDate: string;
   reason?: string;
-  pricing:
+  pricing?:
     | {
         kind: "exact";
         nights: Array<{ targetEvidenceId: string; replacementAmount: PmsMoney }>;
@@ -425,6 +425,7 @@ export type PmsManualPriceCorrectionCommand = {
         targetEvidenceIds: string[];
         replacementTotal: PmsMoney;
       };
+  addOns?: Array<{ targetEvidenceId: string; replacementAmount: PmsMoney }>;
   audit: PmsOperationsCommandAudit;
 };
 
@@ -444,6 +445,7 @@ export type PmsCheckOutCommand = {
   expectedVersion?: string;
   assignmentId?: string;
   inspectionResults: unknown[];
+  fulfilledAddonSelectionIds: string[];
   chargesSettled: string[];
   pendingFlags: string[];
   checkoutNotes?: string;
@@ -1136,6 +1138,7 @@ type PmsCheckOutCommandBody = {
   expectedVersion?: unknown;
   assignmentId?: unknown;
   inspectionResults?: unknown;
+  fulfilledAddonSelectionIds?: unknown;
   chargesSettled?: unknown;
   pendingFlags?: unknown;
   checkoutNotes?: unknown;
@@ -1281,6 +1284,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/messaging/threads/:threadId/notes",
     "/properties/:propertyId/messaging/threads/:threadId/assist",
     "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
+    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/close",
     "/properties/:propertyId/messaging/quick-replies",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/update",
     "/properties/:propertyId/messaging/quick-replies/:quickReplyId/archive",
@@ -2362,7 +2366,9 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
           thread: redactInboxGuestContact(result.value.thread, canReadGuestContact),
-          availableProviderActions: result.value.availableProviderActions,
+          availableProviderActions:
+            options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
+          providerActions: result.value.providerActions ?? [],
           timeline: result.value.timeline.map((item) => item.item),
           previousCursor: result.value.previousCursor,
         };
@@ -2603,47 +2609,54 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
-    "/properties/:propertyId/messaging/threads/:threadId/provider-actions/no-reply-needed",
-    { onRequest: inboxStaffCommandAuthorization(options) },
-    async (request, reply) => {
-      const input = parseInboxProviderAction(request);
-      if ("error" in input) return sendPmsOperationsError(reply, input.error);
-      if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
-      if (!options.inboxProviderActionPort)
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      const { propertyId, threadId } = request.params;
-      try {
-        const result = await options.inboxProviderActionPort.noReplyNeeded({
-          propertyId,
-          threadId,
-          ...inboxCommandActor(request.authContext!),
-          idempotencyKey: input.value.idempotencyKey,
-        });
-        if (!result.ok) return sendInboxProviderActionError(reply, result.error);
-        if (!validInboxProviderAction(result.value, propertyId, threadId))
-          throw new Error("Inbox provider-action scope mismatch");
-        return reply.code(202).send({
-          contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
-          propertyId: result.value.propertyId,
-          threadId: result.value.threadId,
-          action: result.value.action,
-          jobId: result.value.jobId,
-          acceptedAt: result.value.acceptedAt,
-          attentionStateChanged: result.value.attentionStateChanged,
-        });
-      } catch {
-        request.log.error("PMS Inbox provider action failed");
-        return sendPmsOperationsError(
-          reply,
-          readModelUnavailable("PMS Inbox provider actions are unavailable."),
-        );
-      }
-    },
-  );
+  for (const providerAction of ["no-reply-needed", "close"] as const)
+    app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
+      `/properties/:propertyId/messaging/threads/:threadId/provider-actions/${providerAction}`,
+      { onRequest: inboxStaffCommandAuthorization(options) },
+      async (request, reply) => {
+        const input = parseInboxProviderAction(request);
+        if ("error" in input) return sendPmsOperationsError(reply, input.error);
+        if (options.inboxSendingEnabled === false) return sendInboxSendingPaused(reply);
+        if (!options.inboxProviderActionPort)
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        const { propertyId, threadId } = request.params;
+        try {
+          const result = await options.inboxProviderActionPort.noReplyNeeded({
+            propertyId,
+            threadId,
+            expectedVersion: input.value.expectedVersion,
+            action: providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed",
+            ...inboxCommandActor(request.authContext!),
+            idempotencyKey: input.value.idempotencyKey,
+          });
+          if (!result.ok) return sendInboxProviderActionError(reply, result.error);
+          if (
+            !validInboxProviderAction(result.value, propertyId, threadId) ||
+            result.value.action !==
+              (providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed")
+          )
+            throw new Error("Inbox provider-action scope mismatch");
+          return reply.code(202).send({
+            contractVersion: NATIVE_GUEST_INBOX_CONTRACT_VERSION,
+            propertyId: result.value.propertyId,
+            threadId: result.value.threadId,
+            action: result.value.action,
+            jobId: result.value.jobId,
+            acceptedAt: result.value.acceptedAt,
+            attentionStateChanged: result.value.attentionStateChanged,
+          });
+        } catch {
+          request.log.error("PMS Inbox provider action failed");
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS Inbox provider actions are unavailable."),
+          );
+        }
+      },
+    );
 
   app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
     "/properties/:propertyId/messaging/threads/:threadId/read",
@@ -6299,14 +6312,19 @@ function parseInboxAssistance(request: FastifyRequest<{ Body: unknown }>):
 
 function parseInboxProviderAction(
   request: FastifyRequest<{ Body: unknown }>,
-): { value: { idempotencyKey: string } } | { error: PmsOperationsError } {
+): { value: { idempotencyKey: string; expectedVersion: number } } | { error: PmsOperationsError } {
   const idempotencyKey = singleIdempotencyKey(request);
   const body = request.body === undefined ? {} : objectBody(request.body);
-  if (!idempotencyKey || !body || Object.keys(body).length > 0)
+  if (
+    !idempotencyKey ||
+    !body ||
+    Object.keys(body).some((key) => key !== "expectedVersion") ||
+    !validInboxVersion(body.expectedVersion)
+  )
     return {
       error: invalidInboxStaffCommand("Inbox provider-action request is invalid."),
     };
-  return { value: { idempotencyKey } };
+  return { value: { idempotencyKey, expectedVersion: body.expectedVersion as number } };
 }
 
 function normalizedInboxQuickReplyFields(
@@ -6593,7 +6611,9 @@ function sendInboxProviderActionError(
   const statusCode =
     error.code === "thread_not_found"
       ? 404
-      : error.code === "provider_action_unavailable" || error.code === "idempotency_conflict"
+      : error.code === "thread_version_conflict" ||
+          error.code === "provider_action_unavailable" ||
+          error.code === "idempotency_conflict"
         ? 409
         : 400;
   return sendPmsOperationsError(reply, {
@@ -6786,7 +6806,7 @@ function validInboxProviderAction(
   return (
     value.propertyId === propertyId &&
     value.threadId === threadId &&
-    value.action === "booking_com_no_reply_needed" &&
+    ["booking_com_no_reply_needed", "channex_close"].includes(value.action) &&
     isUuid(value.jobId) &&
     isCanonicalInboxInstant(value.acceptedAt) &&
     value.attentionStateChanged === false
@@ -7198,6 +7218,20 @@ function toCheckOutCommand(
   if (!Array.isArray(raw.chargesSettled)) {
     return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
   }
+  const fulfilledAddonSelectionIds = raw.fulfilledAddonSelectionIds === undefined ? [] : raw.fulfilledAddonSelectionIds;
+  if (
+    !Array.isArray(fulfilledAddonSelectionIds) ||
+    !fulfilledAddonSelectionIds.every(
+      (selectionId): selectionId is string =>
+        typeof selectionId === "string" && isUuid(selectionId.trim()),
+    ) ||
+    new Set(fulfilledAddonSelectionIds.map((selectionId) => selectionId.trim().toLowerCase())).size !==
+      fulfilledAddonSelectionIds.length
+  ) {
+    return {
+      error: invalidBody("fulfilledAddonSelectionIds entries must be unique UUIDs."),
+    };
+  }
   if (
     !raw.chargesSettled.every(
       (chargeId): chargeId is string => typeof chargeId === "string" && isUuid(chargeId.trim()),
@@ -7217,6 +7251,9 @@ function toCheckOutCommand(
       ...metadata.value,
       assignmentId,
       inspectionResults: raw.inspectionResults,
+      fulfilledAddonSelectionIds: fulfilledAddonSelectionIds.map((selectionId) =>
+        selectionId.trim().toLowerCase(),
+      ),
       chargesSettled,
       pendingFlags: toStringArray(raw.pendingFlags),
       checkoutNotes,
@@ -7408,7 +7445,7 @@ function toManualRefundCommand(
       !/^0(?:\.0+)?$/.test(amountDecimal) &&
       currency &&
       /^[A-Z]{3}$/.test(currency)
-      ? { evidenceId, amount: { amountDecimal, currency } }
+      ? { evidenceId: evidenceId.toLowerCase(), amount: { amountDecimal, currency } }
       : null;
   });
   if (
@@ -7583,20 +7620,24 @@ function toManualPriceCorrectionCommand(
           "accountingDate",
           "reason",
           "pricing",
+          "addOns",
         ].includes(key),
     )
   )
     return { error: invalidBody("Price-correction command contains unknown or invalid fields.") };
   const accountingDate = stringField(raw.accountingDate);
   const reason = optionalStringField(raw.reason);
-  const pricing = objectBody(raw.pricing);
+  const pricing = raw.pricing === undefined ? undefined : objectBody(raw.pricing);
   const parsed = pricing && parseManualPriceCorrectionPricing(pricing);
+  const addOns = raw.addOns === undefined ? undefined : parseManualAddonPriceCorrections(raw.addOns);
   if (
     !accountingDate ||
     !isDateOnly(accountingDate) ||
     (raw.reason !== undefined && reason === undefined) ||
     (reason?.length ?? 0) > 1000 ||
-    !parsed
+    (raw.pricing !== undefined && !parsed) ||
+    (raw.addOns !== undefined && !addOns) ||
+    (!parsed && !addOns)
   )
     return { error: invalidBody("Price-correction pricing evidence is invalid.") };
   return {
@@ -7606,7 +7647,8 @@ function toManualPriceCorrectionCommand(
       ...metadata.value,
       accountingDate,
       reason,
-      pricing: parsed,
+      ...(parsed ? { pricing: parsed } : {}),
+      ...(addOns ? { addOns } : {}),
       audit: pmsOperationsCommandAudit(
         request,
         metadata.value.commandId,
@@ -7637,7 +7679,7 @@ function parseManualPriceCorrectionPricing(
       const targetEvidenceId = stringField(night.targetEvidenceId);
       const replacementAmount = parsePriceCorrectionMoney(night.replacementAmount);
       return targetEvidenceId && isUuid(targetEvidenceId) && replacementAmount
-        ? { targetEvidenceId, replacementAmount }
+        ? { targetEvidenceId: targetEvidenceId.toLowerCase(), replacementAmount }
         : null;
     });
     if (
@@ -7657,13 +7699,38 @@ function parseManualPriceCorrectionPricing(
     pricing.targetEvidenceIds.length > 20 * 366
   )
     return null;
-  const targetEvidenceIds = pricing.targetEvidenceIds.map(stringField);
+  const targetEvidenceIds = pricing.targetEvidenceIds.map((value) =>
+    stringField(value)?.toLowerCase(),
+  );
   const replacementTotal = parsePriceCorrectionMoney(pricing.replacementTotal);
   return targetEvidenceIds.every((id) => id && isUuid(id)) &&
     new Set(targetEvidenceIds).size === targetEvidenceIds.length &&
     replacementTotal
     ? { kind: "equal_inferred", targetEvidenceIds: targetEvidenceIds as string[], replacementTotal }
     : null;
+}
+
+function parseManualAddonPriceCorrections(
+  value: unknown,
+): NonNullable<PmsManualPriceCorrectionCommand["addOns"]> | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20 * 366) return null;
+  const addOns = value.map((item) => {
+    const addOn = objectBody(item);
+    if (
+      !addOn ||
+      Object.keys(addOn).some((key) => !["targetEvidenceId", "replacementAmount"].includes(key))
+    )
+      return null;
+    const targetEvidenceId = stringField(addOn.targetEvidenceId);
+    const replacementAmount = parsePriceCorrectionMoney(addOn.replacementAmount);
+    return targetEvidenceId && isUuid(targetEvidenceId) && replacementAmount
+      ? { targetEvidenceId: targetEvidenceId.toLowerCase(), replacementAmount }
+      : null;
+  });
+  return addOns.some((addOn) => !addOn) ||
+    new Set(addOns.map((addOn) => addOn?.targetEvidenceId)).size !== addOns.length
+    ? null
+    : (addOns as NonNullable<PmsManualPriceCorrectionCommand["addOns"]>);
 }
 
 function parsePriceCorrectionMoney(value: unknown): PmsMoney | null {

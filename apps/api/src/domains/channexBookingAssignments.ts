@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { resolveStagingCatalogReference } from "./channexStagingCatalogReference.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
 import { reconcilePmsLinkedInventory } from "./pmsLinkedInventoryReconciler.js";
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
@@ -12,7 +13,11 @@ export type ChannexRoomStay = {
   adults: number;
   children: number;
 };
-type Stay = ChannexRoomStay & { roomTypeId: string; ratePlanId: string };
+type Stay = ChannexRoomStay & {
+  roomTypeId: string;
+  ratePlanId: string | null;
+  stagingCatalogReferenceId?: string;
+};
 type Assignment = Stay & {
   id: string;
   position: number;
@@ -36,6 +41,8 @@ export async function persistChannexAssignments(
     canceled: boolean;
     rooms: readonly ChannexRoomStay[];
     repair?: boolean;
+    stagingCatalogBindingGeneration?: string;
+    bootstrapHash?: string;
   },
 ) {
   const { propertyId, bookingId } = input;
@@ -49,7 +56,10 @@ export async function persistChannexAssignments(
        (source='channel' AND assignment_status IN ('pending','assigned')
          AND COALESCE(assignment_payload->>'operationalStatus','confirmed')='confirmed') AS cancelable
      FROM pms.operational_booking_assignments
-     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid ORDER BY position FOR UPDATE`,
+     WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+       AND NOT (source='channel' AND assignment_status='released'
+         AND assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
+       ORDER BY position FOR UPDATE`,
       [propertyId, bookingId],
     )
   ).rows;
@@ -69,13 +79,17 @@ export async function persistChannexAssignments(
     await client.query(
       `UPDATE pms.operational_booking_assignments SET assignment_status='canceled',room_id=NULL,assigned_at=NULL,
         assignment_payload=assignment_payload||jsonb_build_object('version',$3::text,'operationalStatus','canceled'),updated_at=now()
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid`,
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND assignment_status<>'released'`,
       [propertyId, bookingId, input.revisionId],
     );
   } else {
     const stays: Stay[] = [];
     for (const room of input.rooms) {
-      const mapped = (
+      let mapped: {
+        roomTypeId: string;
+        ratePlanId: string | null;
+        stagingCatalogReferenceId?: string;
+      }[] = (
         await client.query<{ roomTypeId: string; ratePlanId: string }>(
           `SELECT r.id::text AS "roomTypeId",rate.id::text AS "ratePlanId"
          FROM pms.channel_room_type_mappings rm
@@ -92,6 +106,15 @@ export async function persistChannexAssignments(
           [propertyId, input.connectionId, room.externalRoomTypeId, room.externalRatePlanId],
         )
       ).rows;
+      if (
+        (input.bootstrapHash || (mapped.length === 0 && input.repair)) &&
+        input.stagingCatalogBindingGeneration
+      )
+        mapped = await resolveStagingCatalogReference(client, {
+          ...input,
+          ...room,
+          bindingGeneration: input.stagingCatalogBindingGeneration,
+        });
       if (mapped.length !== 1)
         throw new ChannexAssignmentConflict("operational_mapping_unavailable");
       stays.push({ ...room, ...mapped[0]! });
@@ -116,7 +139,7 @@ export async function persistChannexAssignments(
       if (closed.rowCount) throw new ChannexAssignmentConflict("operational_inventory_closed");
     }
     await client.query(
-      "DELETE FROM pms.operational_booking_assignments WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND position>$3",
+      "DELETE FROM pms.operational_booking_assignments WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid AND position>$3 AND assignment_status<>'released'",
       [propertyId, bookingId, stays.length],
     );
     for (const [index, stay] of stays.entries()) {
@@ -124,6 +147,9 @@ export async function persistChannexAssignments(
         contractVersion: "channex-operational-assignment.v1",
         channexStay: input.rooms[index],
         channexRevision: input.revisionId,
+        ...(stay.stagingCatalogReferenceId
+          ? { stagingCatalogReferenceId: stay.stagingCatalogReferenceId }
+          : {}),
         version: input.revisionId,
       };
       await client.query(
@@ -131,7 +157,8 @@ export async function persistChannexAssignments(
           position,assignment_status,channel,source,assignment_payload,stay_evidence_kind,check_in,check_out,adults,children,external_reservation_id)
          VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,'pending',$6,'channel',$7::jsonb,'exact',$8::date,$9::date,$10,$11,$12)
          ON CONFLICT(guest_booking_id,position) DO UPDATE SET room_type_id=EXCLUDED.room_type_id,rate_plan_id=EXCLUDED.rate_plan_id,
-          assignment_payload=pms.operational_booking_assignments.assignment_payload||EXCLUDED.assignment_payload,
+          assignment_payload=(pms.operational_booking_assignments.assignment_payload-'channexAlterationReleased')||EXCLUDED.assignment_payload,
+          assignment_status='pending',room_id=NULL,assigned_at=NULL,
           check_in=EXCLUDED.check_in,check_out=EXCLUDED.check_out,adults=EXCLUDED.adults,children=EXCLUDED.children,updated_at=now()`,
         [
           propertyId,

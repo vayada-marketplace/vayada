@@ -1,4 +1,5 @@
 "use client";
+import { AirbnbChangeRequestCard } from "@/components/bookings/AirbnbChangeRequestCard";
 
 import { NoShowReporting } from "@/components/bookings/NoShowReporting";
 import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
@@ -1390,6 +1391,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setDecideOpen(null);
     } catch (err) {
       setError(errMessage(err, t("bookings.detail.failedToApproveChange")));
+      if (changeRequest?.providerRequest) {
+        try {
+          setChangeRequest(await bookingsService.getChangeRequest(id));
+        } catch {
+          /* Keep the original action error visible. */
+        }
+      }
     } finally {
       setDecidingChange(false);
     }
@@ -1409,12 +1417,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       setDecideOpen(null);
     } catch (err) {
       setError(errMessage(err, t("bookings.detail.failedToDeclineChange")));
+      if (changeRequest?.providerRequest) {
+        try {
+          setChangeRequest(await bookingsService.getChangeRequest(id));
+        } catch {
+          /* Keep the original action error visible. */
+        }
+      }
     } finally {
       setDecidingChange(false);
     }
   };
 
   const handleMarkPaid = () => {
+    if (booking?.amountStatus === "unverified") return;
     if (paymentDeadlineExpired) return;
     const methodLabel =
       booking?.paymentMethod === "bank_transfer"
@@ -1674,7 +1690,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   // ── Pricing math (ticket §2: must reconcile) ───────────────────────
   const pricingBreakdown = useMemo(() => {
-    if (!booking) return null;
+    if (!booking || booking.amountStatus === "unverified") return null;
     const roomsCost = booking.nightlyRate * booking.nights * booking.numberOfRooms;
     const addonsCost = booking.addonTotal || 0;
     const computed = roomsCost + addonsCost;
@@ -1897,7 +1913,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {changeRequest && changeRequest.status === "pending" && (
+      {changeRequest?.providerRequest && (
+        <AirbnbChangeRequestCard
+          amountStatus={booking.amountStatus}
+          request={changeRequest}
+          busy={decidingChange}
+          onDecide={(action) => {
+            if (action === "accept") void handleApproveChange();
+            else void handleDeclineChange();
+          }}
+        />
+      )}
+      {changeRequest && !changeRequest.providerRequest && changeRequest.status === "pending" && (
         <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
           <div className="mb-3">
             <p className="text-sm font-semibold text-blue-900">
@@ -1977,7 +2004,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {changeRequest && changeRequest.status !== "pending" && (
+      {changeRequest && !changeRequest.providerRequest && changeRequest.status !== "pending" && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
           {t("bookings.detail.lastChangeRequestWas")}{" "}
           <span className="font-medium text-gray-800">
@@ -2043,7 +2070,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
           {hasHeterogeneousStays && (
             <div className="mb-6">
-              <BookingStaySummary stays={booking.stays} expectedCount={booking.numberOfRooms} />
+              <BookingStaySummary
+                amountStatus={booking.amountStatus}
+                stays={booking.stays}
+                expectedCount={booking.numberOfRooms}
+              />
             </div>
           )}
 
@@ -2200,66 +2231,75 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {/* Pricing sub-section */}
-          <div className="mb-6">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              {t("bookings.detail.pricing")}
+          {booking.amountStatus === "unverified" ? (
+            <p className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {t("bookings.detail.amountUnverified")}
             </p>
-            <div className="space-y-1.5 text-sm">
-              {!hasHeterogeneousStays && (
-                <div className="flex justify-between text-gray-700">
-                  <span>
-                    {roomRows.length} {t(roomRows.length === 1 ? "common.room" : "common.rooms")} ×{" "}
-                    {booking.nights} {t(booking.nights === 1 ? "common.night" : "common.nights")} ×{" "}
-                    {formatCurrency(booking.nightlyRate, booking.currency)}
-                  </span>
-                  <span className="font-medium text-gray-900">
-                    {formatCurrency(pricingBreakdown?.roomsCost ?? 0, booking.currency)}
-                  </span>
-                </div>
-              )}
-              {(pricingBreakdown?.addonsCost ?? 0) > 0 && (
-                <div className="flex justify-between text-gray-700">
-                  <span>{t("bookings.detail.addons")}</span>
-                  <span className="font-medium text-gray-900">
-                    {formatCurrency(pricingBreakdown!.addonsCost, booking.currency)}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between pt-2 mt-1 border-t border-gray-100">
-                <span className="font-semibold text-gray-900">{t("bookings.tableTotal")}</span>
-                <span className="font-bold text-gray-900">
-                  {formatCurrency(booking.totalAmount, booking.currency)}
-                </span>
-              </div>
-              {!hasHeterogeneousStays && pricingBreakdown?.mismatch && (
-                <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                  {t("bookings.detail.pricingMismatch", {
-                    charged: formatCurrency(booking.totalAmount, booking.currency),
-                    computed: formatCurrency(pricingBreakdown.computed, booking.currency),
-                  })}
+          ) : (
+            <>
+              {/* Pricing sub-section */}
+              <div className="mb-6">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  {t("bookings.detail.pricing")}
                 </p>
-              )}
-              {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
-                <div className="flex justify-between text-xs text-gray-500 pt-1">
-                  <span>{t("bookings.detail.platformFee")}</span>
-                  <span>-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
-                </div>
-              )}
-              {booking.propertyPayoutAmount != null &&
-                booking.propertyPayoutAmount !== booking.totalAmount && (
-                  <div className="flex justify-between text-sm pt-2 border-t border-gray-100">
-                    <span className="font-medium text-gray-700">
-                      {t("bookings.detail.propertyPayout")}
-                    </span>
-                    <span className="font-bold text-green-700">
-                      {formatCurrency(booking.propertyPayoutAmount, booking.currency)}
+                <div className="space-y-1.5 text-sm">
+                  {!hasHeterogeneousStays && (
+                    <div className="flex justify-between text-gray-700">
+                      <span>
+                        {roomRows.length}{" "}
+                        {t(roomRows.length === 1 ? "common.room" : "common.rooms")} ×{" "}
+                        {booking.nights}{" "}
+                        {t(booking.nights === 1 ? "common.night" : "common.nights")} ×{" "}
+                        {formatCurrency(booking.nightlyRate, booking.currency)}
+                      </span>
+                      <span className="font-medium text-gray-900">
+                        {formatCurrency(pricingBreakdown?.roomsCost ?? 0, booking.currency)}
+                      </span>
+                    </div>
+                  )}
+                  {(pricingBreakdown?.addonsCost ?? 0) > 0 && (
+                    <div className="flex justify-between text-gray-700">
+                      <span>{t("bookings.detail.addons")}</span>
+                      <span className="font-medium text-gray-900">
+                        {formatCurrency(pricingBreakdown!.addonsCost, booking.currency)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-2 mt-1 border-t border-gray-100">
+                    <span className="font-semibold text-gray-900">{t("bookings.tableTotal")}</span>
+                    <span className="font-bold text-gray-900">
+                      {formatCurrency(booking.totalAmount, booking.currency)}
                     </span>
                   </div>
-                )}
-            </div>
-          </div>
-
+                  {!hasHeterogeneousStays && pricingBreakdown?.mismatch && (
+                    <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      {t("bookings.detail.pricingMismatch", {
+                        charged: formatCurrency(booking.totalAmount, booking.currency),
+                        computed: formatCurrency(pricingBreakdown.computed, booking.currency),
+                      })}
+                    </p>
+                  )}
+                  {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
+                    <div className="flex justify-between text-xs text-gray-500 pt-1">
+                      <span>{t("bookings.detail.platformFee")}</span>
+                      <span>-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
+                    </div>
+                  )}
+                  {booking.propertyPayoutAmount != null &&
+                    booking.propertyPayoutAmount !== booking.totalAmount && (
+                      <div className="flex justify-between text-sm pt-2 border-t border-gray-100">
+                        <span className="font-medium text-gray-700">
+                          {t("bookings.detail.propertyPayout")}
+                        </span>
+                        <span className="font-bold text-green-700">
+                          {formatCurrency(booking.propertyPayoutAmount, booking.currency)}
+                        </span>
+                      </div>
+                    )}
+                </div>
+              </div>
+            </>
+          )}
           {/* Payment sub-section */}
           <div className="mb-6">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -2282,7 +2322,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div>
                 <p className="text-xs text-gray-500">{t("bookings.tableStatus")}</p>
-                {booking.paymentStatus ? (
+                {booking.amountStatus === "unverified" ? (
+                  <p>{t("bookings.detail.amountUnverified")}</p>
+                ) : booking.paymentStatus ? (
                   <span
                     className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || "bg-gray-100 text-gray-600"}`}
                   >
@@ -2355,7 +2397,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 </p>
               </div>
             )}
-            {booking.depositRequired && (
+            {booking.amountStatus !== "unverified" && booking.depositRequired && (
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <div>
@@ -2438,7 +2480,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   ) : null}
                   <button
                     onClick={handleMarkPaid}
-                    disabled={updating || paymentDeadlineExpired}
+                    disabled={
+                      updating || paymentDeadlineExpired || booking.amountStatus === "unverified"
+                    }
                     className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
                     <CheckCircleIcon className="h-4 w-4" />
@@ -2919,7 +2963,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               {booking.paymentMethod === "paypal" ? (
                 <button
                   onClick={handleMarkPaid}
-                  disabled={updating || paymentDeadlineExpired}
+                  disabled={
+                    updating || paymentDeadlineExpired || booking.amountStatus === "unverified"
+                  }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <CheckCircleIcon className="w-4 h-4" />
@@ -2928,7 +2974,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               ) : (
                 <button
                   onClick={handleAccept}
-                  disabled={updating || paymentDeadlineExpired}
+                  disabled={
+                    updating || paymentDeadlineExpired || booking.amountStatus === "unverified"
+                  }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
                 >
                   <CheckCircleIcon className="w-4 h-4" />
@@ -2938,7 +2986,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         )}
-        {isPending && !booking.hostResponseDeadline && (
+        {isPending && booking.amountStatus !== "unverified" && !booking.hostResponseDeadline && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <p className="mb-2 text-xs text-gray-500">
               {booking.paymentMethod === "paypal"

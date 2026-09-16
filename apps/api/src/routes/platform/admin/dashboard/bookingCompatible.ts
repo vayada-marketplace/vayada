@@ -27,7 +27,8 @@ export type PlatformAdminBookingRow = {
   checkIn: string;
   checkOut: string;
   nights: number;
-  totalAmount: number;
+  totalAmount: number | null;
+  amountStatus?: "recorded" | "unverified";
   currency: string;
   status: PlatformAdminBookingStatus;
   rawStatus: string;
@@ -492,7 +493,7 @@ function metric(
 function mapBookingRow(row: PlatformAdminBookingDbRow): PlatformAdminBookingRow {
   return {
     ...row,
-    totalAmount: Number(row.totalAmount ?? 0),
+    totalAmount: row.amountStatus === "unverified" ? null : Number(row.totalAmount ?? 0),
     requestedAt: toIsoString(row.requestedAt),
     respondedAt: row.respondedAt ? toIsoString(row.respondedAt) : null,
   };
@@ -549,6 +550,7 @@ const TARGET_PLATFORM_BOOKINGS_SQL = `WITH booking_rows AS (
     booking.check_out::text AS "checkOut",
     GREATEST(booking.check_out - booking.check_in, 1) AS nights,
     booking.total_amount::text AS "totalAmount",
+    CASE WHEN booking.booking_metadata->>'airbnbMoneyStatus'='unverified' THEN 'unverified' ELSE 'recorded' END AS "amountStatus",
     booking.currency,
     ${TARGET_BOOKING_STATUS_SQL} AS status,
     booking.lifecycle_status AS "rawStatus",

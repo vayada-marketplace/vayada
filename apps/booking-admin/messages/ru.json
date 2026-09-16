@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Сумма не проверена",
+  "dashboard.stats.incompleteAmounts": "Некоторые суммы бронирований не проверены. Они исключены из выручки и средних тарифов, но сами бронирования учитываются в общем количестве. Финансовые сравнения недоступны.",
   "auth.login.sessionExpired": "Ваша сессия истекла. Пожалуйста, войдите снова.",
   "auth.login.emailLabel": "Электронная почта",
   "auth.login.emailPlaceholder": "admin@example.com",

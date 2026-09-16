@@ -1,10 +1,15 @@
 import { getTimezone } from "countries-and-timezones";
+import { createHash } from "node:crypto";
 
 import {
   appendExternalNightlyRevenueEvidence,
   type ExternalRevenueEvidenceClient,
   type ExternalRevenueEvidenceLine,
 } from "./bookingExternalNightlyRevenueEvidence.js";
+import {
+  appendAddonRevenueCorrectionEvidence,
+  loadAddonRevenueCorrectionTargets,
+} from "./bookingAddonRevenueEvidence.js";
 
 type Money = { amountDecimal: string; currency: string };
 export type ManualPriceCorrectionPricing =
@@ -22,7 +27,8 @@ type Command = {
   guestBookingId: string;
   idempotencyKey: string;
   accountingDate: string;
-  pricing: ManualPriceCorrectionPricing;
+  pricing?: ManualPriceCorrectionPricing;
+  addOns?: readonly { targetEvidenceId: string; replacementAmount: Money }[];
 };
 type BookingScope = {
   sourceBookingReference: string;
@@ -79,12 +85,14 @@ export async function correctBookingPmsManualPrices(
       "Manual booking prices cannot be corrected",
       scope?.lifecycleStatus ?? "missing",
     );
-  const refunded = await transaction.query(
-    `SELECT 1 FROM booking.nightly_revenue_evidence
-     WHERE guest_booking_id=$1::uuid AND economic_event='refund' LIMIT 1`,
+  const refunded = await transaction.query<{ refunded: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM booking.nightly_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='refund')
+      OR EXISTS (SELECT 1 FROM booking.addon_revenue_evidence
+       WHERE guest_booking_id=$1::uuid AND economic_event='refund') AS refunded`,
     [command.guestBookingId],
   );
-  if (refunded.rowCount)
+  if (refunded.rows[0]?.refunded)
     throw new ManualPriceCorrectionEvidenceError(
       "Manual booking prices cannot be corrected after a refund",
     );
@@ -97,8 +105,9 @@ export async function correctBookingPmsManualPrices(
       "Manual price correction accounting date is invalid",
     );
 
-  const tips = await loadCurrentTips(transaction, command);
-  const replacements = resolveReplacements(command.pricing, tips, scope.currency);
+  const replacements = command.pricing
+    ? resolveReplacements(await loadCurrentTips(transaction, command), command.pricing, scope.currency)
+    : [];
   if (
     replacements.some(
       ({ occupied, manual, recognizedOn, amount }) =>
@@ -128,16 +137,52 @@ export async function correctBookingPmsManualPrices(
           },
         ];
   });
-  if (lines.length === 0 && !options.allowNoChange)
+  const addOnInputs = command.addOns ?? [];
+  const addOnTargets =
+    addOnInputs.length === 0
+      ? []
+      : await loadAddonRevenueCorrectionTargets(transaction, {
+          propertyId: command.propertyId,
+          guestBookingId: command.guestBookingId,
+          currency: scope.currency,
+          evidenceIds: addOnInputs.map(({ targetEvidenceId }) => targetEvidenceId.toLowerCase()),
+        });
+  if (addOnTargets.length !== addOnInputs.length)
+    throw new ManualPriceCorrectionEvidenceError("Manual add-on correction targets are unavailable");
+  const addOnById = new Map(addOnTargets.map((target) => [target.evidenceId, target]));
+  const corrections = addOnInputs.flatMap(({ targetEvidenceId, replacementAmount }) => {
+    const target = addOnById.get(targetEvidenceId.toLowerCase());
+    const replacement = units(normalizeMoney(replacementAmount, scope.currency));
+    if (
+      !target ||
+      command.accountingDate < target.recognizedOn ||
+      replacement > units(normalizeStored(target.purchasedAmount)!)
+    )
+      throw new ManualPriceCorrectionEvidenceError(
+        "Manual add-on correction targets are unavailable",
+      );
+    const delta = replacement - units(normalizeStored(target.availableAmount)!);
+    return delta === 0n
+      ? []
+      : [{ targetEvidenceId: target.evidenceId, grossAmount: amount(delta) }];
+  });
+  if (lines.length === 0 && corrections.length === 0 && !options.allowNoChange)
     throw new ManualPriceCorrectionEvidenceError("Manual price correction has no price change");
-  if (lines.length === 0) return;
-  await appendExternalNightlyRevenueEvidence(transaction, {
+  if (lines.length > 0)
+    await appendExternalNightlyRevenueEvidence(transaction, {
+      propertyId: command.propertyId,
+      guestBookingId: command.guestBookingId,
+      sourceKind: "manual",
+      sourceBookingReference: scope.sourceBookingReference,
+      idempotencyKey: `pms-price-correction:${command.idempotencyKey}:v1`,
+      lines,
+    });
+  await appendAddonRevenueCorrectionEvidence(transaction, {
     propertyId: command.propertyId,
     guestBookingId: command.guestBookingId,
-    sourceKind: "manual",
-    sourceBookingReference: scope.sourceBookingReference,
-    idempotencyKey: `pms-price-correction:${command.idempotencyKey}:v1`,
-    lines,
+    recognizedOn: command.accountingDate,
+    commandKeyHash: createHash("sha256").update(command.idempotencyKey).digest("hex"),
+    corrections,
   });
 }
 
@@ -163,23 +208,24 @@ async function loadCurrentTips(
 }
 
 function resolveReplacements(
-  pricing: ManualPriceCorrectionPricing,
   tips: readonly CurrentTip[],
+  pricing: ManualPriceCorrectionPricing,
   currency: string,
 ): Replacement[] {
   const byId = new Map(tips.map((tip) => [tip.id, tip]));
   if (pricing.kind === "exact") {
-    const ids = pricing.nights.map(({ targetEvidenceId }) => targetEvidenceId);
+    const ids = pricing.nights.map(({ targetEvidenceId }) => targetEvidenceId.toLowerCase());
     if (!validTargets(ids, byId)) throw unavailable();
     return pricing.nights.map(({ targetEvidenceId, replacementAmount }) => ({
-      ...byId.get(targetEvidenceId)!,
+      ...byId.get(targetEvidenceId.toLowerCase())!,
       replacement: normalizeMoney(replacementAmount, currency),
       evidenceQuality: "exact",
     }));
   }
-  if (!validTargets(pricing.targetEvidenceIds, byId)) throw unavailable();
+  const ids = pricing.targetEvidenceIds.map((id) => id.toLowerCase());
+  if (!validTargets(ids, byId)) throw unavailable();
   const total = units(normalizeMoney(pricing.replacementTotal, currency));
-  const selected = pricing.targetEvidenceIds.map((id) => byId.get(id)!).sort(compareTips);
+  const selected = ids.map((id) => byId.get(id)!).sort(compareTips);
   const quotient = total / BigInt(selected.length),
     remainder = total % BigInt(selected.length);
   return selected.map((tip, index) => ({

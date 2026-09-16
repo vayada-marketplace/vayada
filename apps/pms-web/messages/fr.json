@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Montant non vérifié",
   "dashboard.reviewNoShow": "Examiner la non-présentation…",
   "checkOut.reviewNoShow": "Examiner la non-présentation…",
   "layout.header.signOut": "Se deconnecter",

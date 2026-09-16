@@ -189,7 +189,9 @@ export default function BookingsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-900 font-medium">
-                    {formatAmount(b.totalAmount, b.currency)}
+                    {b.amountStatus === "unverified" || b.totalAmount === null
+                      ? "Amount unverified"
+                      : formatAmount(b.totalAmount, b.currency)}
                   </td>
                   <td className="px-4 py-3">
                     <span

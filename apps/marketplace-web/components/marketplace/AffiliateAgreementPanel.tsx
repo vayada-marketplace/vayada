@@ -1,0 +1,220 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
+
+import {
+  getMarketplaceCollaborationAffiliateAssent,
+  type MarketplaceAffiliateAssentRead,
+} from "@vayada/marketplace-shared/api/collaborations";
+import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
+
+type AgreementState =
+  | { kind: "loading"; collaborationId: string }
+  | { kind: "ready"; collaborationId: string; agreement: MarketplaceAffiliateAssentRead }
+  | { kind: "unavailable"; collaborationId: string }
+  | { kind: "error"; collaborationId: string };
+
+type AffiliateAgreementPanelProps = {
+  collaborationId: string;
+  currentUserType: "creator" | "hotel";
+  affiliateExpected: boolean;
+};
+
+export function AffiliateAgreementPanel({
+  collaborationId,
+  currentUserType,
+  affiliateExpected,
+}: AffiliateAgreementPanelProps) {
+  const [state, setState] = useState<AgreementState>({ kind: "loading", collaborationId });
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let current = true;
+    setState({ kind: "loading", collaborationId });
+
+    getMarketplaceCollaborationAffiliateAssent(collaborationId, {
+      signal: controller.signal,
+    })
+      .then((agreement) => {
+        if (current) setState({ kind: "ready", collaborationId, agreement });
+      })
+      .catch((error: unknown) => {
+        if (!current || controller.signal.aborted) return;
+        setState({
+          kind: error instanceof ApiErrorResponse && error.status === 404 ? "unavailable" : "error",
+          collaborationId,
+        });
+      });
+
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [collaborationId, retry]);
+
+  const currentState: AgreementState =
+    state.collaborationId === collaborationId ? state : { kind: "loading", collaborationId };
+
+  if (!affiliateExpected && currentState.kind !== "ready") return null;
+
+  return (
+    <section
+      aria-labelledby="affiliate-agreement-heading"
+      className="border-t border-gray-200 pt-6"
+    >
+      <h5 id="affiliate-agreement-heading" className="font-bold text-gray-900 mb-3">
+        Affiliate agreement
+      </h5>
+      {currentState.kind === "loading" && <AgreementSkeleton />}
+      {currentState.kind === "unavailable" && <AgreementUnavailable />}
+      {currentState.kind === "error" && (
+        <AgreementError onRetry={() => setRetry((value) => value + 1)} />
+      )}
+      {currentState.kind === "ready" && (
+        <AgreementDetails agreement={currentState.agreement} currentUserType={currentUserType} />
+      )}
+    </section>
+  );
+}
+
+function AgreementSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading affiliate agreement"
+      className="rounded-xl border border-gray-200 p-4 space-y-3"
+    >
+      <div className="h-4 w-40 rounded bg-gray-200 animate-pulse" />
+      <div className="h-3 w-full rounded bg-gray-100 animate-pulse" />
+      <div className="h-3 w-2/3 rounded bg-gray-100 animate-pulse" />
+    </div>
+  );
+}
+
+function AgreementUnavailable() {
+  return (
+    <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <p className="font-semibold text-amber-950">Affiliate agreement unavailable</p>
+      <p className="mt-1 text-sm leading-relaxed text-amber-900">
+        This collaboration advertises affiliate terms, but this screen cannot verify a retained
+        agreement or earning eligibility.
+      </p>
+    </div>
+  );
+}
+
+function AgreementError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4">
+      <p className="font-semibold text-red-950">Could not load affiliate agreement</p>
+      <p className="mt-1 text-sm leading-relaxed text-red-900">
+        Try again before relying on the displayed collaboration terms.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-800 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
+function AgreementDetails({
+  agreement,
+  currentUserType,
+}: {
+  agreement: MarketplaceAffiliateAssentRead;
+  currentUserType: "creator" | "hotel";
+}) {
+  const matched = agreement.assentState === "matched";
+  const currentSideComplete =
+    currentUserType === "creator" ? agreement.creatorAcceptedAt : agreement.hotelApprovedAt;
+  const otherSideComplete =
+    currentUserType === "creator" ? agreement.hotelApprovedAt : agreement.creatorAcceptedAt;
+  const pendingTitle = currentSideComplete
+    ? `Waiting for ${currentUserType === "creator" ? "hotel approval" : "creator acceptance"}`
+    : currentUserType === "creator"
+      ? "Your acceptance is pending"
+      : "Your approval is pending";
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-5">
+      <div className="flex items-start gap-3">
+        {matched ? (
+          <CheckCircleIcon className="mt-0.5 h-5 w-5 flex-none text-green-700" aria-hidden="true" />
+        ) : (
+          <ClockIcon className="mt-0.5 h-5 w-5 flex-none text-amber-700" aria-hidden="true" />
+        )}
+        <div>
+          <p className="font-semibold text-gray-900">
+            {matched ? "Agreement accepted" : pendingTitle}
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-gray-600">
+            {matched
+              ? "Both sides accepted the same retained terms. Link activation and earning eligibility are checked separately."
+              : otherSideComplete
+                ? "The other side has recorded its decision. This agreement is not active from assent alone."
+                : "Review the retained terms below. This screen does not record approval or acceptance."}
+          </p>
+        </div>
+      </div>
+
+      <Disclosure disclosure={agreement.terms.disclosure} />
+
+      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Decision
+          label="Hotel approval"
+          timestamp={agreement.hotelApprovedAt}
+          completeLabel="Approved"
+        />
+        <Decision
+          label="Creator acceptance"
+          timestamp={agreement.creatorAcceptedAt}
+          completeLabel="Accepted"
+        />
+      </dl>
+    </div>
+  );
+}
+
+function Disclosure({ disclosure }: { disclosure: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Retained terms</p>
+      <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-sm font-medium text-gray-900">
+        {disclosure}
+      </pre>
+    </div>
+  );
+}
+
+function Decision({
+  label,
+  timestamp,
+  completeLabel,
+}: {
+  label: string;
+  timestamp: string | null;
+  completeLabel: string;
+}) {
+  return (
+    <div>
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium text-gray-900">
+        {timestamp ? `${completeLabel} ${formatDecisionDate(timestamp)}` : "Not recorded"}
+      </dd>
+    </div>
+  );
+}
+
+function formatDecisionDate(timestamp: string): string {
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(timestamp));
+}

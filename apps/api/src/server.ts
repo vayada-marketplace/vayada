@@ -2,9 +2,16 @@ import { createReplacementPricingPublicationReader } from "./domains/replacement
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
+import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
+import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
+import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
+import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
 import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -19,10 +26,12 @@ import {
   createPgStaffInvitationAcceptanceRepository,
   createPgStaffInvitationDeliveryRepository,
   createPgStaffInvitationRepository,
+  createPgTeamRoleRepository,
   createPgStaffRemovalJobRepository,
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
   createWorkOSVerifier,
+  verifyAdminTransferProof,
 } from "@vayada/backend-auth";
 import {
   createPgEntitlementRepository,
@@ -64,6 +73,10 @@ import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/finance
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
+import {
+  createKmsFinanceFolioExportSearchDigest,
+  createPgFinanceFolioExportJobRepository,
+} from "./domains/financeFolioExportRepository.js";
 import { createAwsFinanceFolioKms } from "./domains/financeFolioKms.js";
 import { createPgFinanceFolioReadRepository } from "./domains/financeFolioReadRepository.js";
 import {
@@ -74,6 +87,7 @@ import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
+import { createS3FinanceFolioExportArtifactWriter } from "./platform/financeFolioExportArtifacts.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgMarketplaceOfferIdentityAccessCommandPort } from "./platform/marketplaceOfferIdentityAccess.js";
 import { createTargetPublicBookabilityPublicationCommandPort } from "./platform/publicBookabilityPublication.js";
@@ -85,6 +99,10 @@ import { composePlatformMediaRuntime } from "./platform/platformMediaRuntime.js"
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import { createWorkOSStaffInvitationProvider } from "./platform/workosStaffInvitations.js";
 import { createWorkOSStaffRemovalProvider } from "./platform/workosStaffRemoval.js";
+import { startAdminRoleWorker } from "./platform/adminRoleWorker.js";
+import { createWorkOSAdminRoleProvider } from "./platform/workosAdminRoleProvider.js";
+import { createAdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
+import { createWorkOSAdminReauthentication } from "./platform/workosAdminReauthentication.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import {
@@ -103,6 +121,7 @@ import { createTargetPmsInventoryReservationPort } from "./domains/pmsInventoryR
 import { createTargetPmsRoomInventoryReadPort } from "./domains/pmsRoomInventoryReadModel.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import { createPgPmsChannexManagementReadRepository } from "./domains/pmsChannexManagementReadModel.js";
+import { stagingAlertProperty } from "./domains/channexStagingAlertRecovery.js";
 import { createPgPmsChannexManagementCommandPort } from "./domains/pmsChannexManagementCommandStore.js";
 import { createPgPmsChannexIframeSessionPort } from "./domains/pmsChannexIframeSession.js";
 import { createPgHotelSetupTrackCommandRepository } from "./domains/hotelSetupTrackCommandRepository.js";
@@ -192,7 +211,11 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
-import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
+import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
+import {
+  createChannexThreadAction,
+  createChannexMessageDelivery,
+} from "./integrations/channexMessageDelivery.js";
 import { createResendPmsInboxDelivery } from "./integrations/resendPmsInboxDelivery.js";
 import { createPgChannexManagementPlanPort } from "./integrations/channexManagementPlans.js";
 import { runPmsChannexManagementWorkerOnce } from "./jobs/pmsChannexManagementWorker.js";
@@ -207,6 +230,7 @@ import {
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
+import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
   createPgPropertySetupDraftRetentionStore,
@@ -410,7 +434,13 @@ const bankTransferBookings = bankTransferCodec
   ? createBankTransferBookingOperations(targetDatabaseUrl, bankTransferCodec)
   : undefined;
 
+const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
+  config,
+  connectionString: targetDatabaseUrl,
+});
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  airbnbAlterations: airbnbAlterationRuntime?.adapter,
+  externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
@@ -431,7 +461,10 @@ const pmsOperationsRepository =
     : undefined;
 
 const pmsChannexManagementRepository = pmsOperationsRepository
-  ? createPgPmsChannexManagementReadRepository({ connectionString: targetDatabaseUrl })
+  ? createPgPmsChannexManagementReadRepository({
+      connectionString: targetDatabaseUrl,
+      stagingAlertPropertyId: stagingAlertProperty(config),
+    })
   : undefined;
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
   ([capability, mode]) =>
@@ -445,9 +478,13 @@ const noShowReportingEnabled =
   (config.channexManagement.stagingNoShowEnabled ||
     (config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.backgroundWorkersEnabled));
-const pmsChannexManagementCommandPort = channexCommandsMutating
-  ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
-  : undefined;
+const pmsChannexManagementCommandPort =
+  channexCommandsMutating || stagingAlertProperty(config)
+    ? createPgPmsChannexManagementCommandPort({
+        connectionString: targetDatabaseUrl,
+        stagingAlertPropertyId: stagingAlertProperty(config),
+      })
+    : undefined;
 const pmsChannexIframeSessionPort =
   config.channexManagement.capabilityModes.iframe === "mutating"
     ? createPgPmsChannexIframeSessionPort({
@@ -633,11 +670,23 @@ const financeFolioRuntime =
           recipientEncoder,
           recipientDecoder,
         });
+        const exportJobs = createPgFinanceFolioExportJobRepository({
+          connectionString: targetDatabaseUrl,
+          searchDigest: createKmsFinanceFolioExportSearchDigest({
+            kms: kms.write,
+            keyArn: config.financeFolioRecipientKms.fingerprintKeyArn,
+          }),
+        });
         return {
-          routes: { repository, commands },
+          routes: { repository, commands, exports: exportJobs },
           async close() {
             try {
-              await Promise.all([repository.close(), commands.close(), propertyContext.close()]);
+              await Promise.all([
+                repository.close(),
+                commands.close(),
+                exportJobs.close(),
+                propertyContext.close(),
+              ]);
             } finally {
               kms.close();
             }
@@ -648,6 +697,22 @@ const financeFolioRuntime =
 const financeExpenseGenerationPool =
   config.financeSource === "target"
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+    : undefined;
+const financeFolioExportWorker =
+  config.backgroundWorkersEnabled &&
+  financeFolioRuntime &&
+  financeExpenseRuntime &&
+  config.platformMediaServing
+    ? {
+        pool: new pg.Pool({
+          connectionString: targetDatabaseUrl,
+          max: 2,
+          connectionTimeoutMillis: 5_000,
+        }),
+        writer: createS3FinanceFolioExportArtifactWriter({
+          bucketName: config.platformMediaServing.bucketName,
+        }),
+      }
     : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
@@ -731,6 +796,10 @@ const bookingWebAffiliateHotelResolver =
 const hotelCatalogStep1Repository = createPgHotelCatalogStep1Repository({
   connectionString: targetDatabaseUrl,
 });
+const marketplaceSubmissionRepository = createPgMarketplaceSubmissionRepository({
+  connectionString: targetDatabaseUrl,
+  sources: marketplaceSubmissionTransactionSources,
+});
 const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
     connectionString: targetDatabaseUrl,
@@ -773,6 +842,9 @@ const pmsInboxRuntime = pmsOperationsRepository
   ? createPmsInboxProductionRuntime({
       connectionString: targetDatabaseUrl,
       attachmentMediaAccessEnabled: Boolean(platformMediaRuntime),
+      providerMutationEnabled:
+        config.channexManagement.capabilityModes.messaging === "mutating" &&
+        Boolean(config.channexManagement.apiBaseUrl && config.channexManagement.apiKey),
     })
   : undefined;
 
@@ -1140,6 +1212,7 @@ const staffInvitationRuntime =
         });
         return {
           repository,
+          roles: createPgTeamRoleRepository({ connectionString: config.auth.databaseUrl }),
           deliveryRepository,
           removalJobRepository,
           delivery: createStaffInvitationDeliveryCoordinator({
@@ -1155,6 +1228,47 @@ const staffInvitationRuntime =
             }),
           }),
         };
+      })()
+    : undefined;
+
+const adminTransferPool =
+  config.auth && config.authSession && config.authSession.authFirstPartySurfaces.includes("pms-web")
+    ? new pg.Pool({ connectionString: config.auth.databaseUrl, max: 5 })
+    : undefined;
+const adminTransferRuntime =
+  adminTransferPool && config.auth && config.authSession
+    ? (() => {
+        const verifier = createWorkOSVerifier({
+          jwksUrl: config.auth.workosJwksUrl,
+          issuer: config.auth.workosIssuer,
+          audience: config.auth.workosAudience,
+        });
+        return createAdminTransferCoordinator({
+          pool: adminTransferPool,
+          reauthentication: createWorkOSAdminReauthentication({
+            apiKey: config.authSession.workosApiKey,
+            clientId: config.authSession.workosClientId,
+            callbackUrl: new URL(
+              "/auth/admin-transfer/callback",
+              config.authSession.authSurfaceOrigins["pms-web"],
+            ).toString(),
+            cookieSecret: config.authSession.authCookieSecret,
+            async verifyProof(binding, state, accessToken) {
+              const client = await adminTransferPool.connect();
+              try {
+                return await verifyAdminTransferProof(
+                  client,
+                  binding,
+                  state,
+                  accessToken,
+                  verifier,
+                );
+              } finally {
+                client.release();
+              }
+            },
+          }),
+        });
       })()
     : undefined;
 
@@ -1274,6 +1388,7 @@ const app = buildApp({
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
+          adminTransfer: adminTransferRuntime,
         }
       : undefined,
   workosWebhooks:
@@ -1301,6 +1416,7 @@ const app = buildApp({
           channex: config.providerWebhooks.channexMode,
         },
         channexReviewMode: config.providerWebhooks.channexReviewMode,
+        ...airbnbAlterationRuntime?.webhookOptions,
         channexBookingPromotionEnabled:
           config.channexManagement.capabilityModes.bookingSync === "mutating" &&
           config.channexManagement.bookingMutationOwner === "target",
@@ -1490,7 +1606,21 @@ const app = buildApp({
           : {}),
       }
     : undefined,
-  financeFolios: financeFolioRuntime?.routes,
+  financeFolios: financeFolioRuntime
+    ? {
+        ...financeFolioRuntime.routes,
+        expenseExports: financeExpenseRuntime!.routes.read,
+        ...(platformMediaRuntime
+          ? {
+              exportDownloads: {
+                read: financeFolioRuntime.routes.exports,
+                signer: platformMediaRuntime.privateDownloads.signer,
+                serving: platformMediaRuntime.privateDownloads.serving,
+              },
+            }
+          : {}),
+      }
+    : undefined,
   pmsInboxAttachmentMedia:
     pmsInboxRuntime && platformMediaRuntime
       ? {
@@ -1573,10 +1703,16 @@ const app = buildApp({
     connectionString: targetDatabaseUrl,
   }),
   marketplaceAffiliateAdminRepository,
+  marketplaceAffiliateAssentRepository:
+    createPgMarketplaceAffiliateAssentRepository(targetDatabaseUrl),
   marketplaceAffiliateDraftRepository:
     createPgMarketplaceAffiliateDraftRepository(targetDatabaseUrl),
   marketplaceAffiliatePolicyRepository:
     createPgFinanceAffiliatePercentagePolicyRepository(targetDatabaseUrl),
+  marketplaceAffiliateDestinationRepository:
+    createPgBookingAffiliateDestinationRepository(targetDatabaseUrl),
+  marketplaceAffiliateCompletionRepository:
+    createPgPmsAffiliateCompletionRepository(targetDatabaseUrl),
   financeAffiliateCommissions: {
     repository: financeAffiliateCommissionRepository,
   },
@@ -1620,6 +1756,16 @@ const app = buildApp({
         mediaCommands: platformMediaRuntime.propertyMediaCommands,
       }
     : undefined,
+  marketplaceSubmission: { repository: marketplaceSubmissionRepository },
+  marketplacePublicHotel: {
+    read: async (propertyId) => {
+      if (!bookingDesignMediaAdapter) throw new Error("Public media resolver unavailable");
+      return marketplaceSubmissionRepository.getPublicHotel(
+        propertyId,
+        createHotelMediaResolutionPort(bookingDesignMediaAdapter),
+      );
+    },
+  },
   marketplaceHotelCollaborationPreferences: {
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
@@ -1695,6 +1841,18 @@ const creatorPlatformSyncWorker =
       })
     : undefined;
 
+const adminRoleWorker =
+  config.backgroundWorkersEnabled && config.auth && config.authSession
+    ? startAdminRoleWorker({
+        connectionString: config.auth.databaseUrl,
+        provider: createWorkOSAdminRoleProvider(config.authSession.workosApiKey),
+        warn: () =>
+          app.log.warn(
+            "Account-admin role reconciliation worker failed; durable lease recovery will retry",
+          ),
+      })
+    : undefined;
+
 const staffRemovalWorker =
   config.backgroundWorkersEnabled && staffInvitationRuntime
     ? startStaffRemovalWorker({
@@ -1765,22 +1923,25 @@ const bookingGuestPolicyProjectionWorker =
 
 app.addHook("onClose", async () => {
   await creatorPlatformSyncWorker?.close();
+  await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
   await bookingPublicationWorker?.close();
   await bookingPublicationRuntime?.close();
   await Promise.all([
+    marketplaceSubmissionRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),
     staffInvitationRuntime?.repository.close(),
+    staffInvitationRuntime?.roles.close(),
     staffInvitationRuntime?.deliveryRepository.close(),
     staffInvitationRuntime?.removalJobRepository.close(),
+    adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
-    financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -1799,6 +1960,24 @@ app.addHook("onClose", async () => {
     pmsInboxRuntime?.close(),
     ...(!platformMediaRuntime ? [hotelCatalogStep1Repository.close()] : []),
   ]);
+});
+
+const runAirbnbAlterations = () => {
+  void airbnbAlterationRuntime
+    ?.tick()
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Airbnb alteration intake/readback failed"),
+    );
+};
+const airbnbAlterationTimer = airbnbAlterationRuntime
+  ? setInterval(runAirbnbAlterations, 30_000)
+  : undefined;
+airbnbAlterationTimer?.unref();
+if (airbnbAlterationRuntime) runAirbnbAlterations();
+// Fastify executes close hooks in reverse registration order: drain before global pool closure.
+app.addHook("onClose", async () => {
+  if (airbnbAlterationTimer) clearInterval(airbnbAlterationTimer);
+  await airbnbAlterationRuntime?.close();
 });
 
 let activeChannexReviewBatch: Promise<void> | undefined;
@@ -1831,6 +2010,7 @@ const runChannexBookings = () => {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
     signal: channexBookingAbort.signal,
+    ...airbnbAlterationRuntime?.bookingWorkerOptions,
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.channexManagement.bookingMutationOwner === "target",
@@ -2134,6 +2314,45 @@ app.addHook("onClose", async () => {
   await financeExpenseGenerationPool?.end();
 });
 
+let activeFinanceFolioExports: Promise<void> | undefined;
+const runFinanceFolioExports = () => {
+  if (!financeFolioExportWorker || activeFinanceFolioExports) return;
+  activeFinanceFolioExports = runFinanceFolioExportJobs(
+    financeFolioExportWorker.pool,
+    {
+      exportReady: financeFolioRuntime!.routes.repository.exportReady,
+      exportCsv: financeExpenseRuntime!.routes.read.exportCsv,
+    },
+    financeFolioExportWorker.writer,
+  )
+    .then((result) => {
+      if (result.deadLettered > 0 || result.retryScheduled > 0)
+        app.log.warn(result, "Finance folio export processing completed with attention required");
+      else if (result.succeeded > 0) app.log.info(result, "Finance folio exports completed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Finance folio export processing failed"),
+    )
+    .finally(() => {
+      activeFinanceFolioExports = undefined;
+    });
+};
+const financeFolioExportTimer = financeFolioExportWorker
+  ? setInterval(runFinanceFolioExports, 5_000)
+  : undefined;
+financeFolioExportTimer?.unref();
+if (financeFolioExportWorker) runFinanceFolioExports();
+app.addHook("onClose", async () => {
+  if (financeFolioExportTimer) clearInterval(financeFolioExportTimer);
+  await activeFinanceFolioExports;
+  try {
+    financeFolioExportWorker?.writer.close?.();
+    await financeFolioExportWorker?.pool.end();
+  } finally {
+    await financeFolioRuntime?.close();
+  }
+});
+
 let activeRetryBatch: Promise<void> | undefined;
 let pmsPublicOfferRetryTimer: NodeJS.Timeout | undefined;
 
@@ -2290,7 +2509,18 @@ const pmsInboxDeliveryWorker =
           ...(pmsInboxChannexDelivery ? { channex: pmsInboxChannexDelivery } : {}),
           ...(pmsInboxEmailDelivery ? { resend: pmsInboxEmailDelivery } : {}),
         },
-        relay: () => relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool }),
+        relay: async () => {
+          await relayPmsInboxDeliveryOutbox(targetDatabaseUrl, { pool: pmsInboxDeliveryPool });
+          await runPmsInboxProviderActions(
+            pmsInboxDeliveryPool,
+            pmsInboxChannexDelivery
+              ? createChannexThreadAction({
+                  apiBaseUrl: config.channexManagement.apiBaseUrl!,
+                  apiKey: config.channexManagement.apiKey!,
+                })
+              : undefined,
+          );
+        },
         warn: (details, message) => app.log.warn(details, message),
       })
     : undefined;

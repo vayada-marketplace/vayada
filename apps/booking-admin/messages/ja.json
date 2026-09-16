@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "金額未確認",
+  "dashboard.stats.incompleteAmounts": "一部の予約金額は未確認です。売上と平均料金の計算には含まれませんが、予約件数には含まれます。財務データの比較は利用できません。",
   "auth.login.sessionExpired": "セッションが期限切れになりました。再度ログインしてください。",
   "auth.login.emailLabel": "メールアドレス",
   "auth.login.emailPlaceholder": "admin@example.com",

@@ -324,6 +324,7 @@ function baseCheckOutCommand(overrides: Partial<PmsCheckOutCommand> = {}): PmsCh
     idempotencyKey: "pms-checkout-001",
     expectedVersion: "reservation-v7",
     inspectionResults: [{ stepId: "minibar", status: "completed" }],
+    fulfilledAddonSelectionIds: [],
     chargesSettled: ["f6855700-0000-0000-0000-000000000001"],
     pendingFlags: [],
     checkoutNotes: "Guest departed at 10:15.",
@@ -399,6 +400,7 @@ function successfulOperationalHandler(status = "assigned"): QueryHandler {
     if (text.includes("INSERT INTO pms.booking_checkin_records")) return ok([], 2);
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
     if (text.includes("UPDATE pms.inventory_days")) return ok([], 1);
+    if (text.includes("JOIN booking.booking_addon_selections selection")) return ok();
     if (text.includes("booking_metadata->>'contractVersion'")) return ok();
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
@@ -572,7 +574,11 @@ function checkoutRecordRow(checkout: Partial<PmsCheckOutRecord> = {}): QueryResu
 }
 
 function successfulCheckoutHandler(
-  options: { assignmentStatus?: string; existingCheckout?: boolean } = {},
+  options: {
+    assignmentStatus?: string;
+    existingCheckout?: boolean;
+    addonSelections?: QueryResultRow[];
+  } = {},
 ): QueryHandler {
   return (text, values) => {
     if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
@@ -581,6 +587,9 @@ function successfulCheckoutHandler(
     if (text.includes("SELECT DISTINCT scope.room_type_id")) return ok([{ roomTypeId }]);
     if (text.includes("pg_advisory_xact_lock")) return ok();
     if (text.includes("room_type_id = ANY") && text.includes("FOR UPDATE")) return ok();
+    if (text.includes("FROM pms.operational_booking_assignments") && text.includes("AS remaining")) {
+      return ok([{ remaining: false }]);
+    }
     if (text.includes("FROM pms.operational_booking_assignments")) {
       return ok(assignmentRows(options.assignmentStatus ?? "in_house"));
     }
@@ -601,6 +610,13 @@ function successfulCheckoutHandler(
       ]);
     }
     if (text.includes("UPDATE pms.operational_booking_assignments")) return ok([], 2);
+    if (
+      text.includes("FROM booking.guest_bookings booking") &&
+      text.includes("selection.edit_revision")
+    ) {
+      return ok(options.addonSelections ?? []);
+    }
+    if (text.includes("INSERT INTO booking.addon_revenue_evidence")) return ok([], 1);
     if (text.includes("INSERT INTO platform.product_audit_events")) return ok([], 1);
     if (text.includes("UPDATE platform.idempotency_keys")) return ok([], 1);
     throw new Error(`Unhandled SQL: ${text}`);
@@ -1028,6 +1044,41 @@ describe("target PMS operations command repository", () => {
     expect(client.calls.some(({ text }) => text.includes("INSERT INTO finance.payments"))).toBe(
       false,
     );
+  });
+
+  it.each([
+    { paymentMethod: "paypal", lifecycleStatus: "pending_payment" },
+    { paymentMethod: "bank_transfer", lifecycleStatus: "confirmed" },
+    { paymentMethod: "pay_at_property", lifecycleStatus: "confirmed" },
+  ])("rejects unverified $paymentMethod amounts before any financial write", async (row) => {
+    const { client, repository } = createRepository((text) => {
+      if (text === "BEGIN" || text === "ROLLBACK") return ok();
+      if (text.includes("FROM platform.idempotency_keys")) return ok();
+      if (text.includes("INSERT INTO platform.idempotency_keys")) return ok([{ id: "idem" }], 1);
+      if (text.includes("FROM booking.guest_bookings booking") && text.includes("FOR UPDATE")) {
+        return ok([{
+          ...row,
+          guestBookingId,
+          propertyId,
+          paymentStatus: "unpaid",
+          totalAmount: "600.00",
+          balanceAmount: "600.00",
+          currency: "EUR",
+          pendingExpiresAt: null,
+          acceptedPaymentDeadlineAt: null,
+          bookingMetadata: { airbnbMoneyStatus: "unverified" },
+        }]);
+      }
+      throw new Error(`Unexpected SQL after unverified amount: ${text}`);
+    });
+    await expect(repository.markBookingPaid(baseBookingLifecycleCommand())).resolves.toMatchObject({
+      ok: false,
+      code: "invalid_status_transition",
+      message: "Cannot transition PMS reservation from booking_amount_unverified to confirmed/paid.",
+    });
+    expect(client.calls.some(({ text }) => text.includes("INSERT INTO finance.payments"))).toBe(false);
+    expect(client.calls.some(({ text }) => text.includes("WITH booking_update AS"))).toBe(false);
+    expect(client.calls.some(({ text }) => text === "ROLLBACK")).toBe(true);
   });
 
   it.each([
@@ -1815,6 +1866,76 @@ describe("target PMS operations command repository", () => {
     expect(client.calls.some((call) => call.text.includes("platform.outbox_events"))).toBe(false);
   });
 
+  it("records only explicitly fulfilled active add-ons as revenue", async () => {
+    const fulfilledSelectionId = "f6855600-0000-0000-0000-000000000001";
+    const missingSelectionId = "f6855600-0000-0000-0000-000000000002";
+    const { client, repository } = createRepository(
+      successfulCheckoutHandler({
+        addonSelections: [
+          {
+            selectionId: fulfilledSelectionId,
+            serviceDate: "2026-08-17",
+            checkIn: "2026-08-15",
+            quantity: 2,
+            currency: "EUR",
+            totalAmount: "30.0000",
+            ownershipKind: "property",
+            partnerCommissionRate: null,
+          },
+          {
+            selectionId: missingSelectionId,
+            serviceDate: null,
+            checkIn: "2026-08-15",
+            quantity: 1,
+            currency: "EUR",
+            totalAmount: "50.0000",
+            ownershipKind: "partner",
+            partnerCommissionRate: "12.5000",
+          },
+        ],
+      }),
+    );
+
+    const result = await repository.executeCheckOutCommand(
+      baseCheckOutCommand({ fulfilledAddonSelectionIds: [fulfilledSelectionId] }),
+    );
+
+    expect(result.ok).toBe(true);
+    const inserts = client.calls.filter(({ text }) =>
+      text.includes("INSERT INTO booking.addon_revenue_evidence"),
+    );
+    expect(inserts.map(({ values }) => values.slice(3, 11))).toEqual([
+      ["2026-08-17", 2, "EUR", "30.0000", "property", null, "fulfillment", "exact"],
+      ["2026-08-15", 1, "EUR", null, "partner", "12.5000", "missing_fulfillment", "missing"],
+    ]);
+    expect(client.calls.at(-1)?.text).toBe("COMMIT");
+  });
+
+  it("writes add-on evidence once on the final assignment checkout", async () => {
+    const selectionId = "f6855600-0000-0000-0000-000000000001";
+    let remainingCheck = 0;
+    const fallback = successfulCheckoutHandler({
+      addonSelections: [{ selectionId, serviceDate: "2026-08-17", checkIn: "2026-08-15", quantity: 1, currency: "EUR", totalAmount: "30.0000", ownershipKind: "property", partnerCommissionRate: null }],
+    });
+    const { client, repository } = createRepository((text, values) =>
+      text.includes("AS remaining")
+        ? ok([{ remaining: remainingCheck++ === 0 }])
+        : fallback(text, values),
+    );
+
+    const first = await repository.executeCheckOutCommand(
+      baseCheckOutCommand({ assignmentId: assignmentOneId, chargesSettled: [] }),
+    );
+    const finalCommand = baseCheckOutCommand({ assignmentId: assignmentTwoId, fulfilledAddonSelectionIds: [selectionId] });
+    finalCommand.commandId = "cmd-checkout-002";
+    finalCommand.idempotencyKey = "pms-checkout-002";
+    finalCommand.audit = { ...finalCommand.audit, requestId: "req-checkout-002" };
+    const final = await repository.executeCheckOutCommand(finalCommand);
+
+    expect([first.ok, final.ok]).toEqual([true, true]);
+    expect(client.calls.filter(({ text }) => text.includes("INSERT INTO booking.addon_revenue_evidence"))).toHaveLength(1);
+  });
+
   it("rejects assignment-scoped checkouts that settle another assignment charge", async () => {
     const { client, repository } = createRepository((text) => {
       if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return ok();
@@ -1894,7 +2015,7 @@ describe("target PMS operations command repository", () => {
     }
   });
 
-  it("replays same-key checkout commands from idempotency metadata without repeating writes", async () => {
+  it("replays a pre-add-on-field checkout fingerprint without repeating writes", async () => {
     const replayCommand = baseCheckOutCommand();
     const replayMeta: PmsCommandMeta = {
       contractVersion: "pms-operations.v1",
@@ -1989,6 +2110,14 @@ function commandFingerprintHash(
   command: PmsCheckInCommand | PmsCheckOutCommand | PmsManualCancellationCommand,
 ): string {
   const { audit: _audit, ...fingerprint } = command;
+  if ("fulfilledAddonSelectionIds" in fingerprint) {
+    const checkout = fingerprint as Partial<PmsCheckOutCommand>;
+    if (checkout.fulfilledAddonSelectionIds?.length) {
+      checkout.fulfilledAddonSelectionIds = [...checkout.fulfilledAddonSelectionIds].sort();
+    } else {
+      delete checkout.fulfilledAddonSelectionIds;
+    }
+  }
   return sha256(stableJson(fingerprint));
 }
 

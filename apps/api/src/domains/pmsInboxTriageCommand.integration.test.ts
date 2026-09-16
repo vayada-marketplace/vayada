@@ -42,6 +42,20 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox triage transaction", () => {
     await admin.end();
   });
 
+  it("rejects a read-only role's triage command", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Inbox viewer', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+      [MEMBERSHIP, ORGANIZATION],
+    );
+    await admin.query(
+      `UPDATE identity.organization_memberships SET role_key = 'front_desk', role_definition_id = $1 WHERE id = $1`,
+      [MEMBERSHIP],
+    );
+    await expect(triage.transition(command("read-only", { action: "done" }))).rejects.toThrow(
+      "PMS Inbox triage command failed",
+    );
+  });
+
   it("marks a thread done once and preserves complete evidence on replay", async () => {
     const input = command("done-once", { action: "done" });
     const first = await triage.transition(input);
@@ -374,6 +388,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox triage transaction", () => {
         "DELETE FROM identity.product_entitlements WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_resource_links WHERE organization_id = $1::uuid",
         "DELETE FROM identity.organization_memberships WHERE organization_id = $1::uuid",
+        "DELETE FROM identity.organization_roles WHERE organization_id = $1::uuid",
       ])
         await admin.query(statement, [ORGANIZATION]);
       await admin.query("DELETE FROM hotel_catalog.properties WHERE id = ANY($1::uuid[])", [

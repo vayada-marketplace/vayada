@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { consumeSignedChannexAdoptionManifest } from "./channexAdoptionConsumer.js";
+import { rollbackChannexAdoption } from "./channexAdoptionRollback.js";
 import * as manifestModule from "./channexAdoptionManifest.js";
 import type { ParsedChannexAdoptionManifest } from "./channexAdoptionManifest.js";
 
@@ -138,18 +139,52 @@ describe("Channex adoption consumer boundary", () => {
     },
   );
 
+  it("preserves a rollback rejection when advisory unlock also fails", async () => {
+    const cleanupFailure = new Error("unlock failed");
+    const query = vi.fn(async (text: string) => {
+      if (text.includes("pg_advisory_unlock")) throw cleanupFailure;
+      return { rows: [] };
+    });
+    const release = vi.fn();
+
+    let caught: unknown;
+    try {
+      await rollbackChannexAdoption(
+        { connect: async () => ({ query, release }) } as never,
+        {
+          manifestId: uuid("1"),
+          reason: "test rollback",
+          expiresAt: "2026-09-13T10:00:00.000Z",
+          approvalRecordIds: [uuid("4"), uuid("5")],
+        },
+        config,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({ code: "ROLLBACK_MANIFEST_MISMATCH" });
+    expect(caught).not.toBe(cleanupFailure);
+    expect(release).toHaveBeenCalledWith(cleanupFailure);
+  });
+
   it.each([
     ["manifest", 0],
     ["first binding", 1],
     ["second binding", 2],
   ] as const)(
-    "fails %s lock contention as retryable without storing evidence",
+    "fails a %s lock timeout as retryable without storing evidence",
     async (_, successes) => {
       vi.spyOn(manifestModule, "verifyChannexAdoptionManifest").mockReturnValue(parsedManifest());
+      const lockTimeout = Object.assign(new Error("canceling statement due to lock timeout"), {
+        code: "55P03",
+      });
       let lockAttempts = 0;
       const query = vi.fn(async (text: string) => {
-        if (text.includes("pg_try_advisory_lock"))
-          return { rows: [{ acquired: lockAttempts++ < successes }] };
+        if (text.includes("pg_advisory_lock")) {
+          if (lockAttempts++ === successes) throw lockTimeout;
+          return { rows: [] };
+        }
         if (text.includes("channex_adoption_manifest_consumptions")) return { rows: [] };
         return { rows: [] };
       });
@@ -161,11 +196,13 @@ describe("Channex adoption consumer boundary", () => {
           { raw: "{}", detachedSignature: "signature" },
           config,
         ),
-      ).rejects.toMatchObject({ code: "55P03" });
+      ).rejects.toBe(lockTimeout);
 
       const statements = query.mock.calls.map(([text]) => text);
+      expect(statements).toContain("SET LOCAL lock_timeout = '5s'");
       expect(statements.some((text) => text === "BEGIN ISOLATION LEVEL SERIALIZABLE")).toBe(false);
       expect(statements.some((text) => text.includes("INSERT INTO"))).toBe(false);
+      expect(lockAttempts).toBe(successes + 1);
       expect(release).toHaveBeenCalledWith(undefined);
     },
   );

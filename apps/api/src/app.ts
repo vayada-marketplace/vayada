@@ -1,12 +1,32 @@
-import { registerBookingGuestChoiceRoutes, type BookingGuestChoiceRoutesOptions } from "./routes/bookingGuestChoices.js";
-import { registerReplacementPricingRoutes, type ReplacementPricingRoutesOptions } from "./routes/replacementPricing.js";
+import {
+  registerBookingGuestChoiceRoutes,
+  type BookingGuestChoiceRoutesOptions,
+} from "./routes/bookingGuestChoices.js";
+import {
+  registerReplacementPricingRoutes,
+  type ReplacementPricingRoutesOptions,
+} from "./routes/replacementPricing.js";
+import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
+import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
 import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
 } from "./routes/airbnbImports.js";
+import {
+  registerMarketplacePublicHotelRoutes,
+  type MarketplacePublicHotelRoutesOptions,
+} from "./routes/marketplacePublicHotel.js";
+import {
+  registerMarketplaceSubmissionRoutes,
+  type MarketplaceSubmissionRoutesOptions,
+} from "./routes/marketplaceSubmission.js";
 import type { PmsRoomClosureRepository } from "./domains/pmsRoomClosureCommandRepository.js";
 import { registerPreparedHotelImportRoutes } from "./routes/preparedHotelImports.js";
 import type { PreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
+import type { AffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
+import { registerMarketplaceAffiliateCompletionRoutes } from "./routes/marketplaceAffiliateCompletion.js";
+import type { AffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import { registerMarketplaceAffiliateDestinationRoutes } from "./routes/marketplaceAffiliateDestinations.js";
 import { registerBookingHostActionRoutes } from "./routes/bookingHostActions.js";
 import type { BookingHostActions } from "./domains/bookingHostActions.js";
 import { registerPmsConfirmationEmailRoutes } from "./routes/pmsConfirmationEmails.js";
@@ -364,8 +384,11 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   hotelAccountInvites?: Omit<HotelAccountInviteRoutesOptions, "trackCommandRepository">;
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
   marketplaceHotelSelfServiceRepository?: MarketplaceHotelSelfServiceRepository;
+  marketplaceAffiliateAssentRepository?: AffiliateAssentRepository;
   marketplaceAffiliateDraftRepository?: AffiliateDraftRepository;
   marketplaceAffiliatePolicyRepository?: AffiliatePolicyRepository;
+  marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
+  marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
@@ -389,6 +412,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
     repository: HotelCatalogStep1Repository;
     mediaCommands: Pick<PropertyMediaCommandRepository, "replacePresentation">;
   };
+  marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
+  marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
@@ -588,10 +613,28 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.marketplaceAffiliateAdminRepository,
     });
   }
+  if (options.marketplaceAffiliateCompletionRepository) {
+    app.register(registerMarketplaceAffiliateCompletionRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateCompletionRepository,
+    });
+  }
+  if (options.marketplaceAffiliateDestinationRepository) {
+    app.register(registerMarketplaceAffiliateDestinationRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateDestinationRepository,
+    });
+  }
   if (options.marketplaceAffiliatePolicyRepository) {
     app.register(registerMarketplaceAffiliatePolicyRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceAffiliatePolicyRepository,
+    });
+  }
+  if (options.marketplaceAffiliateAssentRepository) {
+    app.register(registerMarketplaceAffiliateAssentRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAffiliateAssentRepository,
     });
   }
   if (options.marketplaceAffiliateDraftRepository) {
@@ -705,6 +748,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.hotelCatalogStep1,
     });
   }
+  if (options.marketplacePublicHotel) {
+    app.register(registerMarketplacePublicHotelRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplacePublicHotel,
+    });
+  }
+  if (options.marketplaceSubmission) {
+    app.register(registerMarketplaceSubmissionRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceSubmission,
+    });
+  }
   if (options.marketplaceHotelCollaborationPreferences) {
     app.register(registerMarketplaceHotelCollaborationPreferencesRoutes, {
       prefix: "/api/marketplace",
@@ -780,7 +835,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     customDomainRepository: options.bookingCustomDomainRepository,
     changeRequestRepository: options.bookingChangeRequestRepository,
   });
-  if (options.bookingGuestChoices) app.register(registerBookingGuestChoiceRoutes, { prefix: "/api/booking", ...options.bookingGuestChoices });
+  if (options.bookingGuestChoices)
+    app.register(registerBookingGuestChoiceRoutes, {
+      prefix: "/api/booking",
+      ...options.bookingGuestChoices,
+    });
   if (options.bookingGuestPolicy) {
     app.register(registerBookingGuestPolicyRoutes, {
       prefix: "/api/booking",
@@ -855,7 +914,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
-  if (options.replacementPricing) app.register(registerReplacementPricingRoutes, { prefix: "/api/pms", ...options.replacementPricing });
+  if (options.replacementPricing)
+    app.register(registerReplacementPricingRoutes, {
+      prefix: "/api/pms",
+      ...options.replacementPricing,
+    });
   if (options.pmsPricing) {
     app.register(registerPmsPricingRoutes, {
       prefix: "/api/pms",

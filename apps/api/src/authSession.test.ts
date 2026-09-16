@@ -25,6 +25,7 @@ import type {
 } from "./platform/authSessionHandoffs.js";
 import type { ApprovedPublicProfileImageRepository } from "./routes/platformMedia.js";
 import type { HotelAccountInviteRepository } from "./routes/hotelAccountInvites.js";
+import type { AdminTransferCoordinator } from "./platform/adminTransferCoordinator.js";
 
 const user: IdentityUser = {
   userId: "user_platform_admin",
@@ -90,6 +91,127 @@ describe("AuthKit session routes", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("binds administrator transfer reauthentication to the live first-party PMS session", async () => {
+    const hotelSession: AuthKitSession = {
+      ...session,
+      sealedSession: "hotel-sealed-session",
+      organizationId: "org_workos_hotel",
+      user: { ...session.user, id: "user_workos_hotel", email: "owner@example.test" },
+    };
+    const adminTransfer = {
+      start: vi.fn(async () => ({
+        outcome: "prepared" as const,
+        authorizationUrl: "https://auth.workos.test/reauthenticate",
+        flowCookie: "encrypted-flow",
+      })),
+      completeReauthentication: vi.fn(async () => ({ proofId: "proof-id", binding: {} })),
+      transfer: vi.fn(async () => ({ outcome: "transferred" as const })),
+    } as unknown as AdminTransferCoordinator;
+    app = buildAuthSessionApp({
+      adminTransfer,
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return hotelSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(hotelSession),
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel",
+          workosOrgId: "org_workos_hotel",
+          name: "Hotel",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_owner",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_owner",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            organizationId: "org_hotel",
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: "property",
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+          firstPartySession: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+    const baseCookie =
+      "vayada_fp_workos_session=hotel-sealed-session; vayada_fp_auth_csrf=csrf; vayada_fp_pms_selected_org=org_workos_hotel";
+    const denied = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/start",
+      headers: { origin: "https://pms.localhost", cookie: baseCookie },
+      payload: { transfer: { complete: true } },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(adminTransfer.start).not.toHaveBeenCalled();
+    const start = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/start",
+      headers: { origin: "https://pms.localhost", "x-vayada-csrf": "csrf", cookie: baseCookie },
+      payload: { transfer: { complete: true } },
+    });
+    expect(start.statusCode).toBe(200);
+    expect(start.json()).toEqual({ authorizationUrl: "https://auth.workos.test/reauthenticate" });
+    const flowCookie = cookieHeader(start, "vayada_fp_admin_transfer_flow");
+    expect(start.headers["set-cookie"]?.toString()).toContain("Path=/auth/admin-transfer/callback");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: "/auth/admin-transfer/callback?state=state&code=code",
+      headers: { cookie: `${baseCookie}; ${flowCookie}` },
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe(
+      "https://pms.localhost/settings/team?adminTransfer=verified",
+    );
+    const proofCookie = cookieHeader(callback, "vayada_fp_admin_transfer_proof");
+    expect(callback.headers["set-cookie"]?.toString()).toContain(
+      "Path=/auth/admin-transfer/complete",
+    );
+
+    const complete = await app.inject({
+      method: "POST",
+      url: "/auth/admin-transfer/complete",
+      headers: {
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf",
+        cookie: `${baseCookie}; ${proofCookie}`,
+      },
+      payload: { transfer: { complete: true } },
+    });
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json()).toEqual({ outcome: "transferred" });
+    expect(complete.headers["set-cookie"]).toBeUndefined();
+    expect(adminTransfer.start).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_hotel", sessionId: "session_workos" }),
+      { complete: true },
+      "f.maliqi@vayada.com",
+    );
+    expect(adminTransfer.transfer).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: "user_platform_admin" }),
+      { complete: true },
+      "proof-id",
+    );
   });
 
   it("logs in with email and password through WorkOS and creates the AuthKit browser session", async () => {
@@ -5450,6 +5572,7 @@ function buildAuthSessionApp(
     hotelAccountInviteOnboarding?: Pick<HotelAccountInviteRepository, "resolveForOnboarding">;
     handoffRepository?: AuthSessionHandoffRepository;
     propertyAccessRepository?: PropertyAccessRepository;
+    adminTransfer?: AdminTransferCoordinator;
   } = {},
 ) {
   const compatibilityCallbackOrigin =
@@ -5491,6 +5614,7 @@ function buildAuthSessionApp(
           };
         },
       },
+      adminTransfer: options.adminTransfer,
     },
   });
 }

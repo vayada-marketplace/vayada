@@ -36,26 +36,80 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   badge?: number;
   unavailable?: boolean;
+  requiredAny: string[];
 }
 
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
-  { label: "Pricing", href: "/pricing", icon: RoomsIcon },
-  { labelKey: "layout.sidebar.dashboard", href: "/dashboard", icon: DashboardIcon },
-  { labelKey: "layout.sidebar.calendar", href: "/calendar", icon: CalendarIcon },
-  { labelKey: "layout.sidebar.reservations", href: "/bookings", icon: ReservationsIcon },
-  { labelKey: "layout.sidebar.inbox", href: "/inbox", icon: ChatBubbleLeftRightIcon },
-  { labelKey: "layout.sidebar.reviews", href: "/reviews", icon: StarIcon },
-  { labelKey: "layout.sidebar.roomsAndRates", href: "/rooms", icon: RoomsIcon },
+  {
+    label: "Pricing",
+    href: "/pricing",
+    icon: RoomsIcon,
+    requiredAny: ["pms.rooms_rates.read"],
+  },
+  {
+    labelKey: "layout.sidebar.dashboard",
+    href: "/dashboard",
+    icon: DashboardIcon,
+    requiredAny: ["pms.dashboard.read"],
+  },
+  {
+    labelKey: "layout.sidebar.calendar",
+    href: "/calendar",
+    icon: CalendarIcon,
+    requiredAny: ["pms.calendar.read"],
+  },
+  {
+    labelKey: "layout.sidebar.reservations",
+    href: "/bookings",
+    icon: ReservationsIcon,
+    requiredAny: ["pms.reservation.read"],
+  },
+  {
+    labelKey: "layout.sidebar.inbox",
+    href: "/inbox",
+    icon: ChatBubbleLeftRightIcon,
+    requiredAny: ["pms.inbox.read"],
+  },
+  {
+    labelKey: "layout.sidebar.reviews",
+    href: "/reviews",
+    icon: StarIcon,
+    requiredAny: ["pms.operations.read"],
+  },
+  {
+    labelKey: "layout.sidebar.roomsAndRates",
+    href: "/rooms",
+    icon: RoomsIcon,
+    requiredAny: ["pms.room_status.read", "pms.rooms_rates.read"],
+  },
   {
     labelKey: "layout.sidebar.channelManager",
     href: "/channel-manager",
     icon: ChannelsIcon,
     unavailable: true,
+    requiredAny: ["pms.channel_manager.read"],
   },
-  { labelKey: "layout.sidebar.settings", href: "/settings", icon: SettingsIcon },
+  {
+    labelKey: "layout.sidebar.settings",
+    href: "/settings",
+    icon: SettingsIcon,
+    requiredAny: ["pms.settings.read", "pms.settings.manage", "identity.staff.manage"],
+  },
 ];
 
-export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function visiblePmsNavigation(permissions: readonly string[]) {
+  return CORE_NAV_ITEMS.filter((item) =>
+    item.requiredAny.some((permission) => permissions.includes(permission)),
+  );
+}
+
+export default function Sidebar({
+  onNavigate,
+  permissions,
+}: {
+  onNavigate?: () => void;
+  permissions: readonly string[];
+}) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -154,7 +208,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     };
   }, []);
 
-  const navItems: NavItem[] = CORE_NAV_ITEMS.map((item) =>
+  const navItems: NavItem[] = visiblePmsNavigation(permissions).map((item) =>
     item.href === "/inbox" && inboxUnread > 0 ? { ...item, badge: inboxUnread } : item,
   );
 
@@ -380,8 +434,14 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   href={item.href}
                   onClick={(event) => {
                     // Document entry lets the pricing editor protect Back/Forward with beforeunload.
-                    if (item.href === "/pricing" && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-                      event.preventDefault(); window.location.assign(item.href);
+                    if (
+                      item.href === "/pricing" &&
+                      !event.metaKey &&
+                      !event.ctrlKey &&
+                      !event.shiftKey
+                    ) {
+                      event.preventDefault();
+                      window.location.assign(item.href);
                     } else onNavigate?.();
                   }}
                   className={cn(

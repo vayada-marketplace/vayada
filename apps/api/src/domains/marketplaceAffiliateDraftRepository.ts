@@ -1,13 +1,21 @@
+import { readBookingAffiliateDestinations } from "./bookingAffiliateDestinationRepository.js";
 import {
   parseMarketplaceAffiliateOfferTerms,
   type MarketplaceAffiliateOfferTerms,
 } from "@vayada/domain-marketplace";
 import pg from "pg";
+import type { FinanceAffiliatePolicyResolution } from "@vayada/domain-finance";
+import { resolvePgFinanceAffiliatePercentagePolicy } from "./financeAffiliatePercentagePolicyResolver.js";
 import { saveMarketplaceAffiliateDraft } from "./marketplaceAffiliateDraftCommand.js";
 
 export type AffiliateDraftRead = {
   revision: number;
-  draft: { id: string; terms: MarketplaceAffiliateOfferTerms } | null;
+  draft: {
+    id: string;
+    terms: MarketplaceAffiliateOfferTerms;
+    commission: FinanceAffiliatePolicyResolution;
+    destination: Awaited<ReturnType<typeof readBookingAffiliateDestinations>>[number] | null;
+  } | null;
 };
 export type AffiliateDraftRepository = {
   save(
@@ -50,7 +58,25 @@ export function createPgMarketplaceAffiliateDraftRepository(
         attributionWindowDays: row.attribution_window_days,
       });
       if (!parsed.ok) throw new Error("Stored affiliate draft is invalid");
-      return { revision: row.revision, draft: { id: row.id, terms: parsed.terms } };
+      const commission = await resolvePgFinanceAffiliatePercentagePolicy(pool, {
+        propertyId,
+        policyVersionId: parsed.terms.financePolicyVersionId,
+      });
+      const destinations = await readBookingAffiliateDestinations(
+        pool,
+        propertyId,
+        organizationId,
+        parsed.terms.bookingDestinationId,
+      );
+      return {
+        revision: row.revision,
+        draft: {
+          id: row.id,
+          terms: parsed.terms,
+          commission,
+          destination: destinations[0] ?? null,
+        },
+      };
     },
     close: () => pool.end(),
   };

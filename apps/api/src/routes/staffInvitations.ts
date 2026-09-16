@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
   UnauthorizedError,
+  requireAuthContext,
   validateStaffInviteAccess,
+  validProductAccess,
   type CreateStaffInviteCommand,
   type RemoveStaffCommand,
   type UpdateStaffAccessCommand,
   type UpdateStaffStatusCommand,
+  type TeamRoleCreateCommand,
+  type TeamRoleChangeCommand,
   createPgStaffInvitationRepository,
+  createPgTeamRoleRepository,
   createStaffInvitationDeliveryCoordinator,
   createStaffRemovalCoordinator,
 } from "@vayada/backend-auth";
@@ -17,7 +22,15 @@ import { enforceRoutePolicy } from "./policy.js";
 
 type StaffInvitationRepository = Pick<
   ReturnType<typeof createPgStaffInvitationRepository>,
-  "listRoster" | "persist" | "remove" | "updateAccess" | "updateStatus"
+  | "getAccess"
+  | "listAccountAdmins"
+  | "prepareInvitation"
+  | "getInvitation"
+  | "listRoster"
+  | "persist"
+  | "remove"
+  | "updateAccess"
+  | "updateStatus"
 >;
 type StaffInvitationDelivery = Pick<
   ReturnType<typeof createStaffInvitationDeliveryCoordinator>,
@@ -27,34 +40,70 @@ type StaffRemoval = Pick<ReturnType<typeof createStaffRemovalCoordinator>, "revo
 
 export type StaffInvitationRoutesOptions = {
   repository: StaffInvitationRepository;
+  roles: Pick<ReturnType<typeof createPgTeamRoleRepository>, "list" | "create" | "change">;
   delivery: StaffInvitationDelivery;
   removal: StaffRemoval;
 };
 
-type StaffInvitationRequest = Omit<
-  CreateStaffInviteCommand["payload"],
-  "organizationId" | "propertyAccessMode"
->;
+type StaffInvitationRequest = Omit<CreateStaffInviteCommand["payload"], "organizationId">;
 type StaffAccessRequest = Omit<
   UpdateStaffAccessCommand["payload"],
-  "organizationId" | "membershipId" | "propertyAccessMode"
+  "organizationId" | "membershipId"
 >;
 
 const invitationBodyKeys = new Set([
+  "expectedInvitationId",
+  "roleDefinitionId",
+  "expectedRoleRevision",
+  "propertyAccessMode",
   "email",
   "name",
   "roleKey",
   "propertyIds",
   "permissionOverrides",
   "configurationRevision",
+  "productAccess",
 ]);
-const accessBodyKeys = new Set(["roleKey", "propertyIds", "permissionOverrides"]);
+const accessBodyKeys = new Set([
+  "roleDefinitionId",
+  "expectedRoleRevision",
+  "propertyAccessMode",
+  "roleKey",
+  "propertyIds",
+  "permissionOverrides",
+  "expectedRevision",
+  "membershipStatus",
+  "productAccess",
+]);
 
 export async function registerStaffInvitationRoutes(
   app: FastifyInstance,
   options: StaffInvitationRoutesOptions,
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, ReturnType<typeof enforceRoutePolicy>>();
+  app.get("/self-access", async (request, reply) => {
+    try {
+      const context = requireAuthContext(request);
+      if (
+        context.actor.status !== "active" ||
+        context.selectedOrganization.kind !== "hotel_group" ||
+        context.selectedOrganization.status !== "active" ||
+        context.membership.status !== "active"
+      )
+        throw new AuthorizationError();
+      reply.header("Cache-Control", "private, no-store");
+      return reply.send({
+        membershipId: context.membership.membershipId,
+        roleKey: context.membership.roleKey,
+        permissions: context.membership.permissions,
+      });
+    } catch (error) {
+      if (error instanceof UnauthorizedError)
+        return reply.status(401).send({ code: "unauthenticated" });
+      if (error instanceof AuthorizationError) return reply.status(403).send({ code: "forbidden" });
+      throw error;
+    }
+  });
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const context = enforceRoutePolicy(request, { permission: "identity.staff.manage" });
@@ -78,6 +127,140 @@ export async function registerStaffInvitationRoutes(
     }
   };
 
+  app.post<{ Body: { email?: unknown } }>(
+    "/invitations/prepare",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const email = request.body?.email;
+      if (
+        typeof email !== "string" ||
+        email.length > 320 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      )
+        return reply.status(400).send({ code: "invalid_email" });
+      const context = authorized.get(request)!;
+      reply.header("Cache-Control", "no-store");
+      const prepared = await options.repository.prepareInvitation(
+        context.selectedOrganization.organizationId,
+        email,
+      );
+      return prepared
+        ? reply.send(prepared)
+        : reply.status(409).send({ code: "invitation_pending" });
+    },
+  );
+
+  app.get("/account-admins", { onRequest: authorize }, async (request, reply) => {
+    const context = authorized.get(request)!;
+    reply.header("Cache-Control", "no-store");
+    const admins = await options.repository.listAccountAdmins(
+      context.selectedOrganization.organizationId,
+    );
+    return reply.send({ admins, actorMembershipId: context.membership.membershipId });
+  });
+
+  app.get("/roles", { onRequest: authorize }, async (request, reply) => {
+    const context = authorized.get(request);
+    if (!context) throw new Error("Team role authorization was not resolved");
+    reply.header("Cache-Control", "no-store");
+    try {
+      const roles = await options.roles.list(context.selectedOrganization.organizationId);
+      return reply.send({ roles, canManageRoles: context.membership.roleKey === "hotel_owner" });
+    } catch {
+      return reply.status(500).send({ code: "team_roles_read_failed" });
+    }
+  });
+
+  app.get<{ Params: { invitationId: string } }>(
+    "/invitations/:invitationId",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const context = authorized.get(request);
+      if (!context) throw new Error("Invitation authorization was not resolved");
+      reply.header("Cache-Control", "no-store");
+      try {
+        const invitation = await options.repository.getInvitation(
+          context.selectedOrganization.organizationId,
+          request.params.invitationId,
+        );
+        return invitation
+          ? reply.send(invitation)
+          : reply.status(404).send({ code: "invitation_not_found" });
+      } catch {
+        return reply.status(500).send({ code: "invitation_read_failed" });
+      }
+    },
+  );
+
+  for (const method of ["POST", "PATCH", "DELETE"] as const) {
+    app.route<{ Params: { roleId: string }; Body: unknown }>({
+      method,
+      url: method === "POST" ? "/roles" : "/roles/:roleId",
+      onRequest: async (request, reply) => {
+        await authorize(request, reply);
+        const context = authorized.get(request);
+        if (context && context.membership.roleKey !== "hotel_owner")
+          return reply.status(403).send({ code: "forbidden" });
+      },
+      handler: async (request, reply) => {
+        const context = authorized.get(request);
+        if (!context) throw new Error("Team role authorization was not resolved");
+        reply.header("Cache-Control", "no-store");
+        const key = readIdempotencyKey(request);
+        const body = parseRoleBody(request.body, method);
+        if (!key || !body || (method !== "POST" && !roleUuid(request.params.roleId)))
+          return reply.status(400).send({ code: "invalid_request" });
+        const common = {
+          commandId: randomUUID(),
+          idempotencyKey: `hotel:${context.selectedOrganization.organizationId}:${key}`,
+          audit: {
+            actor: {
+              kind: "user" as const,
+              userId: context.actor.internalUserId,
+              organizationId: context.selectedOrganization.organizationId,
+            },
+            source: context.audit.source,
+            requestId: context.audit.requestId,
+            correlationId: context.audit.correlationId,
+            requestedAt: context.audit.receivedAt,
+            reason: `${method === "POST" ? "Create" : method === "PATCH" ? "Update" : "Delete"} team role`,
+          },
+        };
+        try {
+          const result =
+            method === "POST"
+              ? await options.roles.create({
+                  ...common,
+                  payload: { organizationId: context.selectedOrganization.organizationId, ...body },
+                } as TeamRoleCreateCommand)
+              : await options.roles.change({
+                  ...common,
+                  payload: {
+                    organizationId: context.selectedOrganization.organizationId,
+                    roleId: request.params.roleId,
+                    operation: method === "PATCH" ? "update" : "delete",
+                    ...body,
+                  },
+                } as TeamRoleChangeCommand);
+          if (result.outcome === "rejected") {
+            const status =
+              result.reason === "forbidden"
+                ? 403
+                : result.reason === "invalid_source_role"
+                  ? 404
+                  : ["invalid_command", "invalid_permissions"].includes(result.reason)
+                    ? 400
+                    : 409;
+            return reply.status(status).send({ code: result.reason });
+          }
+          return reply.status(result.outcome === "created" ? 201 : 200).send(result);
+        } catch {
+          return reply.status(500).send({ code: "team_role_write_failed" });
+        }
+      },
+    });
+  }
+
   app.get("/members", { onRequest: authorize }, async (request, reply) => {
     const context = authorized.get(request);
     if (!context) throw new Error("Staff roster authorization was not resolved");
@@ -90,6 +273,26 @@ export async function registerStaffInvitationRoutes(
       return reply.status(500).send({ code: "staff_roster_failed" });
     }
   });
+
+  app.get<{ Params: { membershipId: string } }>(
+    "/members/:membershipId/access",
+    { onRequest: authorize },
+    async (request, reply) => {
+      const context = authorized.get(request);
+      if (!context) throw new Error("Staff access authorization was not resolved");
+      reply.header("Cache-Control", "no-store");
+      try {
+        const access = await options.repository.getAccess(
+          context.selectedOrganization.organizationId,
+          request.params.membershipId,
+        );
+        if (!access) return reply.status(404).send({ code: "staff_member_not_found" });
+        return reply.send(access);
+      } catch {
+        return reply.status(500).send({ code: "staff_access_read_failed" });
+      }
+    },
+  );
 
   app.patch<{ Params: { membershipId: string }; Body: unknown }>(
     "/members/:membershipId",
@@ -119,7 +322,6 @@ export async function registerStaffInvitationRoutes(
         payload: {
           organizationId: context.selectedOrganization.organizationId,
           membershipId: request.params.membershipId,
-          propertyAccessMode: "assigned",
           ...body,
         },
       };
@@ -264,7 +466,6 @@ export async function registerStaffInvitationRoutes(
       payload: {
         organizationId: context.selectedOrganization.organizationId,
         ...body,
-        propertyAccessMode: "assigned",
       },
     };
 
@@ -290,17 +491,64 @@ export async function registerStaffInvitationRoutes(
   });
 }
 
+const roleUuid = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+function parseRoleBody(
+  value: unknown,
+  method: "POST" | "PATCH" | "DELETE",
+): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  const keys =
+    method === "DELETE"
+      ? ["expectedRevision"]
+      : method === "POST"
+        ? ["name", "description", "defaultPermissions", "sourceRoleId"]
+        : ["name", "description", "defaultPermissions", "expectedRevision"];
+  if (Object.keys(body).some((key) => !keys.includes(key))) return null;
+  if (
+    method !== "POST" &&
+    (typeof body.expectedRevision !== "string" || !/^[1-9][0-9]*$/.test(body.expectedRevision))
+  )
+    return null;
+  if (
+    method !== "DELETE" &&
+    (typeof body.name !== "string" ||
+      body.name.trim().length < 1 ||
+      body.name.trim().length > 80 ||
+      typeof body.description !== "string" ||
+      body.description.length > 1000 ||
+      !Array.isArray(body.defaultPermissions) ||
+      !body.defaultPermissions.every((key) => typeof key === "string"))
+  )
+    return null;
+  if (method === "POST" && body.sourceRoleId !== undefined && !roleUuid(body.sourceRoleId))
+    return null;
+  return body;
+}
+
 function parseRequest(value: unknown): StaffInvitationRequest | null {
   if (!plainRecord(value) || Object.keys(value).some((key) => !invitationBodyKeys.has(key)))
     return null;
   const email = typeof value["email"] === "string" ? value["email"].trim().toLowerCase() : "";
   const name = typeof value["name"] === "string" ? value["name"].trim() : undefined;
-  const access = parseStaffAccess(value);
+  const productAccess = value["productAccess"];
+  const roleDefinitionId = value["roleDefinitionId"];
+  const expectedRoleRevision = value["expectedRoleRevision"];
+  const access = parseStaffAccess(value, roleDefinitionId !== undefined);
   if (
     email.length > 320 ||
+    (value["expectedInvitationId"] !== undefined && !roleUuid(value["expectedInvitationId"])) ||
     !/^[^\s@]+@[^\s@]+$/.test(email) ||
     (value["name"] !== undefined && (!name || name.length > 200)) ||
     !access ||
+    ((roleDefinitionId !== undefined || expectedRoleRevision !== undefined) &&
+      (!roleUuid(roleDefinitionId) ||
+        typeof expectedRoleRevision !== "string" ||
+        !/^[1-9][0-9]*$/.test(expectedRoleRevision))) ||
+    (productAccess !== undefined && !validProductAccess(productAccess)) ||
     !Number.isSafeInteger(value["configurationRevision"]) ||
     (value["configurationRevision"] as number) < 1 ||
     (value["configurationRevision"] as number) > 2_147_483_647
@@ -312,13 +560,64 @@ function parseRequest(value: unknown): StaffInvitationRequest | null {
     ...(name ? { name } : {}),
     ...access,
     configurationRevision: value["configurationRevision"] as number,
+    ...(value["expectedInvitationId"] === undefined
+      ? {}
+      : { expectedInvitationId: value["expectedInvitationId"] as string }),
+    ...(roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: roleDefinitionId as string,
+          expectedRoleRevision: expectedRoleRevision as string,
+        }),
+    ...(productAccess === undefined
+      ? {}
+      : { productAccess: productAccess as { pms: boolean; booking: boolean } }),
   };
 }
 
 function parseStaffAccessRequest(value: unknown): StaffAccessRequest | null {
   if (!plainRecord(value) || Object.keys(value).some((key) => !accessBodyKeys.has(key)))
     return null;
-  return parseStaffAccess(value);
+  const access = parseStaffAccess(value, value["roleDefinitionId"] !== undefined);
+  const roleDefinitionId = value["roleDefinitionId"];
+  const expectedRoleRevision = value["expectedRoleRevision"];
+  const expectedRevision = value["expectedRevision"];
+  const membershipStatus = value["membershipStatus"];
+  const productAccess = value["productAccess"];
+  if (
+    !access ||
+    ((roleDefinitionId !== undefined || expectedRoleRevision !== undefined) &&
+      (typeof roleDefinitionId !== "string" ||
+        !roleUuid(roleDefinitionId) ||
+        typeof expectedRoleRevision !== "string" ||
+        !/^[1-9][0-9]*$/.test(expectedRoleRevision) ||
+        expectedRevision === undefined)) ||
+    (expectedRevision !== undefined &&
+      (typeof expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(expectedRevision))) ||
+    (membershipStatus !== undefined &&
+      (expectedRevision === undefined ||
+        (membershipStatus !== "active" && membershipStatus !== "suspended"))) ||
+    (value["propertyAccessMode"] !== undefined && expectedRevision === undefined) ||
+    (productAccess !== undefined &&
+      (expectedRevision === undefined || !validProductAccess(productAccess)))
+  )
+    return null;
+  return {
+    ...access,
+    ...(roleDefinitionId === undefined
+      ? {}
+      : {
+          roleDefinitionId: roleDefinitionId as string,
+          expectedRoleRevision: expectedRoleRevision as string,
+        }),
+    ...(productAccess === undefined
+      ? {}
+      : { productAccess: productAccess as { pms: boolean; booking: boolean } }),
+    ...(expectedRevision === undefined ? {} : { expectedRevision: expectedRevision as string }),
+    ...(membershipStatus === undefined
+      ? {}
+      : { membershipStatus: membershipStatus as "active" | "suspended" }),
+  };
 }
 
 function parseStaffStatusRequest(value: unknown): "active" | "deactivated" | null {
@@ -326,7 +625,10 @@ function parseStaffStatusRequest(value: unknown): "active" | "deactivated" | nul
   return value["status"] === "active" || value["status"] === "deactivated" ? value["status"] : null;
 }
 
-function parseStaffAccess(value: Record<string, unknown>): StaffAccessRequest | null {
+function parseStaffAccess(
+  value: Record<string, unknown>,
+  savedRole = false,
+): StaffAccessRequest | null {
   const propertyIds = value["propertyIds"];
   const overrides = value["permissionOverrides"];
   if (
@@ -341,13 +643,21 @@ function parseStaffAccess(value: Record<string, unknown>): StaffAccessRequest | 
   }
   const access = {
     roleKey: value["roleKey"],
-    propertyAccessMode: "assigned",
+    propertyAccessMode:
+      value["propertyAccessMode"] === undefined ? "assigned" : value["propertyAccessMode"],
     propertyIds,
     permissionOverrides: { grant: overrides["grant"], deny: overrides["deny"] },
   };
-  if (validateStaffInviteAccess(access).length) return null;
+  if (
+    typeof access.propertyAccessMode !== "string" ||
+    validateStaffInviteAccess({ ...access, propertyAccessMode: access.propertyAccessMode }).filter(
+      (issue) => !savedRole || issue !== "missing_required_permission",
+    ).length
+  )
+    return null;
   return {
     roleKey: access.roleKey as StaffAccessRequest["roleKey"],
+    propertyAccessMode: access.propertyAccessMode as "assigned" | "all",
     propertyIds,
     permissionOverrides: access.permissionOverrides as StaffAccessRequest["permissionOverrides"],
   };
@@ -387,6 +697,8 @@ function sendRejection(reply: FastifyReply, reason: string) {
 }
 
 function sendAccessUpdateRejection(reply: FastifyReply, reason: string) {
+  if (reason === "revision_conflict")
+    return reply.status(409).send({ code: "staff_access_revision_conflict" });
   if (reason === "inviter_not_authorized") return reply.status(403).send({ code: "forbidden" });
   if (reason === "target_not_found") {
     return reply.status(404).send({ code: "staff_member_not_found" });

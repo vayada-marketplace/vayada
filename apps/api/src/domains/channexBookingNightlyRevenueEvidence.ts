@@ -1,4 +1,8 @@
-import type { PoolClient } from "pg";
+import type { ExternalRevenueEvidenceClient } from "./bookingExternalNightlyRevenueEvidence.js";
+import {
+  appendExternalNightlyRevenueEconomics,
+  type FinancePropertyTimezoneEvidence,
+} from "./financeOtaCommissionEvidence.js";
 
 import {
   appendExternalNightlyRevenueEvidence,
@@ -10,17 +14,47 @@ export type ChannexRevenueRoom={checkIn:string;checkOut:string;days:Readonly<Rec
 // prettier-ignore
 type CurrentNight={id:string;roomTypeId:string;stayDate:string;recognizedOn:string;amount:string|null;occupied:number;linePosition:number;evidenceQuality:"exact"|"inferred"|"missing"};
 // prettier-ignore
-type Input={propertyId:string;bookingId:string;providerBookingId:string;revisionId:string;revisionAt:string;canceled:boolean;retainedCharges:readonly{roomIndex:number|null;amount:string}[];rooms:readonly ChannexRevenueRoom[]};
+type Input={propertyId:string;bookingId:string;providerBookingId:string;revisionId:string;revisionAt:string;canceled:boolean;retainedCharges:readonly{roomIndex:number|null;amount:string}[];rooms:readonly ChannexRevenueRoom[];captureEconomics?:boolean};
 type CurrentCharge = Omit<CurrentNight, "occupied" | "evidenceQuality">;
 
 export class ChannexRevenueEvidenceConflict extends Error {}
 
-export async function appendChannexNightlyRevenueEvidence(client: PoolClient, input: Input) {
+export async function appendChannexNightlyRevenueEvidence(
+  client: ExternalRevenueEvidenceClient,
+  input: Input,
+) {
+  let timezone: FinancePropertyTimezoneEvidence | undefined;
+  if (input.captureEconomics) {
+    const profile = (
+      await client.query<{ timeZone: string; revision: string }>(
+        `SELECT location.timezone AS "timeZone",property.profile_revision::text AS revision
+       FROM hotel_catalog.properties property JOIN hotel_catalog.property_locations location ON location.property_id=property.id
+       WHERE property.id=$1 AND EXISTS(SELECT 1 FROM pms.operating_calendar_revisions calendar
+         WHERE calendar.property_id=property.id AND calendar.calendar_revision=(SELECT max(calendar_revision) FROM pms.operating_calendar_revisions WHERE property_id=property.id)
+         AND calendar.property_profile_revision=property.profile_revision AND calendar.property_time_zone=location.timezone)
+       FOR SHARE OF property,location`,
+        [input.propertyId],
+      )
+    ).rows[0];
+    if (!profile) throw conflict();
+    timezone = {
+      source: {
+        ownerDomain: "hotel_catalog",
+        entityType: "property_profile",
+        entityId: input.propertyId,
+        revision: `profile:${profile.revision}`,
+      },
+      timeZone: profile.timeZone,
+    };
+  }
   const assignments = (
     await client.query<{ roomTypeId: string; position: number }>(
       `SELECT room_type_id::text AS "roomTypeId",position
        FROM pms.operational_booking_assignments
-       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid ORDER BY position`,
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND NOT (source='channel' AND assignment_status='released'
+           AND assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
+         ORDER BY position`,
       [input.propertyId, input.bookingId],
     )
   ).rows;
@@ -47,6 +81,7 @@ export async function appendChannexNightlyRevenueEvidence(client: PoolClient, in
   );
   const current = await loadCurrent(client, input),
     retained = await loadRetained(client, input);
+  if (input.captureEconomics && retained.length) throw conflict();
   const desired = new Map<string, ExternalRevenueEvidenceLine>();
   if (!input.canceled)
     input.rooms.forEach((room, index) => {
@@ -127,7 +162,7 @@ export async function appendChannexNightlyRevenueEvidence(client: PoolClient, in
   retainedLines(input, revisionDate, assignments, current, retained).forEach((line) =>
     lines.push(line),
   );
-  await appendLines(client, input, "primary", lines);
+  await appendLines(client, input, "primary", lines, timezone);
   if (!secondPhase.length) return;
   const tips = new Map(
     (await loadCurrent(client, input)).map((night) => [
@@ -150,6 +185,7 @@ export async function appendChannexNightlyRevenueEvidence(client: PoolClient, in
         correctsEvidenceId: tip.id,
       };
     }),
+    timezone,
   );
 }
 
@@ -172,7 +208,10 @@ function deactivate(
   };
 }
 
-async function loadCurrent(client: PoolClient, input: Input): Promise<CurrentNight[]> {
+async function loadCurrent(
+  client: ExternalRevenueEvidenceClient,
+  input: Input,
+): Promise<CurrentNight[]> {
   return (
     await client.query<CurrentNight>(
       `WITH RECURSIVE retained AS (
@@ -200,7 +239,10 @@ async function loadCurrent(client: PoolClient, input: Input): Promise<CurrentNig
   ).rows;
 }
 
-async function loadRetained(client: PoolClient, input: Input): Promise<CurrentCharge[]> {
+async function loadRetained(
+  client: ExternalRevenueEvidenceClient,
+  input: Input,
+): Promise<CurrentCharge[]> {
   return (
     await client.query<CurrentCharge>(
       `WITH RECURSIVE chain AS (
@@ -290,7 +332,7 @@ function retainedLines(
 }
 
 // prettier-ignore
-async function appendLines(client:PoolClient,input:Input,phase:string,lines:readonly ExternalRevenueEvidenceLine[]){for(let offset=0;offset<lines.length;offset+=1_000)await appendExternalNightlyRevenueEvidence(client,{propertyId:input.propertyId,guestBookingId:input.bookingId,sourceKind:"ota",sourceBookingReference:`channex:${input.propertyId}:${input.providerBookingId}`,idempotencyKey:`channex:${input.providerBookingId}:${input.revisionId}:nightly-revenue:${phase}:${offset/1_000}:v1`,lines:lines.slice(offset,offset+1_000)})}
+async function appendLines(client:ExternalRevenueEvidenceClient,input:Input,phase:string,lines:readonly ExternalRevenueEvidenceLine[],timezone?:FinancePropertyTimezoneEvidence){for(let offset=0;offset<lines.length;offset+=1_000){const command={propertyId:input.propertyId,guestBookingId:input.bookingId,sourceKind:"ota" as const,sourceBookingReference:`channex:${input.propertyId}:${input.providerBookingId}`,idempotencyKey:`channex:${input.providerBookingId}:${input.revisionId}:nightly-revenue:${phase}:${offset/1_000}:v1`,lines:lines.slice(offset,offset+1_000)};if(timezone)await appendExternalNightlyRevenueEconomics(client,command,timezone);else await appendExternalNightlyRevenueEvidence(client,command)}}
 
 // prettier-ignore
 function stayDates(checkIn:string,checkOut:string):string[]{const dates:string[]=[],cursor=new Date(`${checkIn}T00:00:00Z`),end=new Date(`${checkOut}T00:00:00Z`);while(cursor<end){dates.push(cursor.toISOString().slice(0,10));cursor.setUTCDate(cursor.getUTCDate()+1)}return dates}

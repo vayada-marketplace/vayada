@@ -77,6 +77,11 @@ import {
   refundPmsManualBooking,
 } from "./bookingPmsManualRefundNightlyRevenueEvidence.js";
 import {
+  appendCheckoutAddonRevenueEvidence,
+  appendMissingAddonRevenueEvidence,
+  BookingAddonRevenueEvidenceError,
+} from "./bookingAddonRevenueEvidence.js";
+import {
   ManualStayCorrectionEvidenceError,
   ManualStayCorrectionStateError,
 } from "./bookingPmsManualStayCorrection.js";
@@ -1766,6 +1771,21 @@ async function executeCheckOutCommand(
       unsettledPaidChargeIds,
     });
     await updateAssignmentsOperationalStatus(client, command, sources, "checked_out");
+    const finalCheckOut =
+      !command.assignmentId || !(await hasRemainingActiveAssignments(client, command));
+    if (!finalCheckOut && command.fulfilledAddonSelectionIds.length > 0) {
+      throw new BookingAddonRevenueEvidenceError(
+        "Add-on fulfillment is only accepted on the final reservation check-out.",
+      );
+    }
+    if (finalCheckOut) {
+      await appendCheckoutAddonRevenueEvidence(client, {
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        fulfilledSelectionIds: command.fulfilledAddonSelectionIds,
+        commandKeyHash: keyHash,
+      });
+    }
     await insertCheckOutAuditEvent(client, command, checkout, commandMeta, keyHash);
     await completeCheckOutCommandIdempotency(
       client,
@@ -1781,6 +1801,9 @@ async function executeCheckOutCommand(
     return checkOutResultForCommand(config, command, commandMeta, checkout, charges, false);
   } catch (error) {
     await rollbackQuietly(client);
+    if (error instanceof BookingAddonRevenueEvidenceError) {
+      return checkOutInvalidBody(error.message);
+    }
     if (error instanceof PmsRoomScopeChangedError) {
       return checkOutVersionConflict("Reservation room scope changed. Retry check-out.");
     }
@@ -1796,6 +1819,21 @@ async function executeCheckOutCommand(
   } finally {
     client.release();
   }
+}
+
+async function hasRemainingActiveAssignments(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+): Promise<boolean> {
+  const result = await client.query<{ remaining: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pms.operational_booking_assignments
+       WHERE property_id=$1::uuid AND guest_booking_id=$2::uuid
+         AND assignment_status NOT IN ('checked_out','canceled','released')
+     ) AS remaining`,
+    [command.propertyId, command.guestBookingId],
+  );
+  return result.rows[0]?.remaining ?? false;
 }
 
 async function listCheckoutCharges(
@@ -4331,8 +4369,10 @@ function checkOutActorUserId(command: PmsCheckOutCommand): string | null {
 }
 
 function checkOutCommandFingerprint(command: PmsCheckOutCommand): unknown {
-  const { audit: _audit, ...fingerprint } = command;
-  return fingerprint;
+  const { audit: _audit, fulfilledAddonSelectionIds, ...fingerprint } = command;
+  return fulfilledAddonSelectionIds.length
+    ? { ...fingerprint, fulfilledAddonSelectionIds: [...fulfilledAddonSelectionIds].sort() }
+    : fingerprint;
 }
 
 async function executeOperationalCommand<TCommand extends PmsOperationalCommand>(
@@ -5572,6 +5612,9 @@ async function applyBookingMarkPaidCommandMutation(
 ): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
   const booking = await loadBookingPaymentLifecycle(client, command);
   if (!booking) return reservationNotFound(command.guestBookingId);
+  if (jsonObject(booking.bookingMetadata)["airbnbMoneyStatus"] === "unverified") {
+    return invalidStatusTransition("booking_amount_unverified", "confirmed/paid");
+  }
   const isPayPalPending =
     booking.paymentMethod === "paypal" && booking.lifecycleStatus === "pending_payment";
   const isAcceptedBankTransfer =
@@ -5901,6 +5944,11 @@ async function applyNoShowCommandMutation(
     ],
   );
   await appendPmsManualNoShowNightlyRevenueEvidence(client, command, acceptedAt);
+  await appendMissingAddonRevenueEvidence(client, {
+    propertyId: command.propertyId,
+    guestBookingId: command.guestBookingId,
+    commandKey: `pms-no-show:${sha256(command.idempotencyKey)}`,
+  });
   await reconcilePmsOccupiedInventory(client, command.propertyId, sources, acceptedAt);
   return { ok: true };
 }
@@ -5939,6 +5987,11 @@ async function applyManualCancellationCommandMutation(
   );
   try {
     await cancelPmsManualBooking(client, command, acceptedAt);
+    await appendMissingAddonRevenueEvidence(client, {
+      propertyId: command.propertyId,
+      guestBookingId: command.guestBookingId,
+      commandKey: `pms-cancel:${sha256(command.idempotencyKey)}`,
+    });
   } catch (error) {
     if (error instanceof ManualCancellationEvidenceError)
       return operationalInvalidBody(error.message);
@@ -6350,6 +6403,8 @@ async function findAssignmentsForOperationalCommand(
       AND booking.property_id = assignment.property_id
      WHERE assignment.property_id = $1::uuid
        AND assignment.guest_booking_id = $2::uuid
+       AND NOT (assignment.assignment_status = 'released'
+         AND assignment.assignment_payload @> '{"channexAlterationReleased":true}'::jsonb)
        AND (
          ($3::uuid IS NOT NULL AND assignment.id = $3::uuid)
          OR ($3::uuid IS NULL)
@@ -7030,11 +7085,12 @@ async function recordOperationalCommandAuditEvent(
       command.commandId,
       JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
       JSON.stringify(
-        "pricing" in command
+        "pricing" in command || "addOns" in command
           ? {
               accountingDate: command.accountingDate,
               reason: command.reason ?? null,
               pricing: command.pricing,
+              addOns: command.addOns,
             }
           : "stays" in command
             ? { accountingDate: command.accountingDate, stays: command.stays }

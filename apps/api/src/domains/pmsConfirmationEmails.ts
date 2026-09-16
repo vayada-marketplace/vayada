@@ -19,6 +19,15 @@ export function createPmsConfirmationEmails(connectionString: string) {
           `confirmation:${propertyId}:${guestBookingId}`,
         ]);
         const jobKey = `booking.confirmation.resend:${propertyId}:${guestBookingId}:${createHash("sha256").update(key).digest("hex")}`;
+        const money = await client.query(
+          `SELECT id FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid
+           AND booking_metadata->>'airbnbMoneyStatus'='unverified'`,
+          [guestBookingId, propertyId],
+        );
+        if (money.rows.length) {
+          await client.query("ROLLBACK");
+          return { error: "The booking amount is unverified. Confirmation email cannot be sent." };
+        }
         const existing = await client.query<{ jobId: string }>(
           `SELECT id::text AS "jobId" FROM platform.jobs
            WHERE queue_name = $1 AND property_id = $2::uuid AND resource_id = $3

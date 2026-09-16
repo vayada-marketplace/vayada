@@ -15,6 +15,7 @@ import {
 } from "../platform/inventoryReservation.js";
 import { captureDirectNightlyRevenueEvidence } from "./stripeBookingSettlement.js";
 import { enqueueBookingTransitionNotifications } from "../jobs/bookingEmails.js";
+import { appendMissingAddonRevenueEvidence } from "./bookingAddonRevenueEvidence.js";
 
 export type HostActionRequest = {
   action: HostBookingAction;
@@ -344,13 +345,19 @@ export function createBookingHostActions(config: {
           };
           await bookingOwner.reversePromo(client, scope.propertyId, scope.bookingId, at);
         }
-        if (!state.dates)
+        if (!state.dates) {
           await config.guards.cancelAssignments(client, {
             ...scope,
             previewId,
             fingerprint: context.fingerprint,
             occurredAt: at,
           });
+          await appendMissingAddonRevenueEvidence(client, {
+            propertyId: scope.propertyId,
+            guestBookingId: scope.bookingId,
+            commandKey: `host-${updated.lifecycleStatus}:${context.fingerprint}`,
+          });
+        }
         await captureDirectNightlyRevenueEvidence(client, updated, {
           ...(state.dates ? { selectedOffer: state.newOffer } : { clear: true }),
           fingerprint: context.fingerprint,

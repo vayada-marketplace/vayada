@@ -1,5 +1,5 @@
 -- Replacement pricing accepts up to 99 ordered room selections and migration
--- 0211 validates complete bundles to that same bound. Keep PMS assignment
+-- 0312 validates complete bundles to that same bound. Keep PMS assignment
 -- positions aligned so every accepted room can be adopted atomically.
 ALTER TABLE pms.operational_booking_assignments
   DROP CONSTRAINT chk_pms_operational_assignments_position,

@@ -1,3 +1,4 @@
+import { mockSetupExitHandoff } from "../support/setupExitHandoff";
 import {
   createPropertySetupRouteMock,
   mockPropertySetupRoute,
@@ -641,7 +642,7 @@ test.describe("marketplace-web shared setup activation", () => {
       "Step 2 of 9: Describe your hotel",
     );
     await expect(setupProgress.locator('[data-state="reached"]')).toHaveCount(2);
-    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(6);
+    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(7);
     await expect(page.getByText("Step 2 of 9", { exact: true })).toBeVisible();
     await expect(page.locator("aside")).toHaveCount(0);
     const currentStep = page.locator('section[aria-labelledby="current-setup-step-title"]');
@@ -1395,7 +1396,7 @@ test.describe("marketplace-web shared setup activation", () => {
     const setupProgress = page.getByRole("progressbar", { name: "Hotel setup progress" });
     await expect(setupProgress).toHaveAttribute("aria-valuemax", "7");
     await expect(setupProgress.locator('[data-state="reached"]')).toHaveCount(2);
-    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(4);
+    await expect(setupProgress.locator('[data-state="upcoming"]')).toHaveCount(5);
     await expect(page.getByRole("heading", { name: "Add your first room type" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Describe your hotel" })).toHaveCount(0);
     await expect(
@@ -1419,7 +1420,7 @@ test.describe("marketplace-web shared setup activation", () => {
       requestedProductCanOpen: false,
     },
   ] as const) {
-    test(`exits to the exact ${returnCase.source} path independently of the requested product`, async ({
+    test(`exits a ${returnCase.source} entry through the scoped incomplete PMS handoff`, async ({
       page,
       baseURL,
     }) => {
@@ -1431,23 +1432,12 @@ test.describe("marketplace-web shared setup activation", () => {
       );
       await mockOperationsApis(page);
 
-      const expectedReturnUrl = new URL(
-        returnCase.returnTo,
-        productAppOrigin(returnCase.returnProduct),
-      ).toString();
+      const expectedReturnUrl = await mockSetupExitHandoff(page, baseURL, propertyId);
       await page.route(/\/__before-canonical-setup$/, (route) =>
         route.fulfill({
           contentType: "text/html",
           body: "<!doctype html><title>Before setup</title><h1>Before setup</h1>",
         }),
-      );
-      await page.route(
-        (url) => url.toString() === expectedReturnUrl,
-        (route) =>
-          route.fulfill({
-            contentType: "text/html",
-            body: `<!doctype html><title>${returnCase.source}</title><h1>${returnCase.source} return</h1>`,
-          }),
       );
 
       await page.goto("/__before-canonical-setup");
@@ -1461,9 +1451,7 @@ test.describe("marketplace-web shared setup activation", () => {
       await page.getByRole("button", { name: "Exit setup" }).click();
 
       await expect.poll(() => page.url()).toBe(expectedReturnUrl);
-      await expect(
-        page.getByRole("heading", { name: `${returnCase.source} return` }),
-      ).toBeVisible();
+      await expect(page).toHaveTitle("PMS handoff");
       await page.goBack();
       await expect(page.getByRole("heading", { name: "Before setup" })).toBeVisible();
     });
@@ -1871,6 +1859,7 @@ test.describe("marketplace-web shared setup activation", () => {
     await mockAuthSession(page);
     await mockSharedSetupStatus(page, sharedSetupStatus(["marketplaceOffer"]));
     await mockMarketplaceProfileApis(page, []);
+    const destination = await mockSetupExitHandoff(page, baseURL, propertyId);
 
     await page.goto(setupUrl(baseURL));
     await expect(
@@ -1903,7 +1892,7 @@ test.describe("marketplace-web shared setup activation", () => {
 
     page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "Exit setup" }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/marketplace");
+    await expect(page).toHaveURL(destination);
   });
 
   test("restores a hotel offer draft after a reload and asks only for local photos again", async ({
@@ -2033,26 +2022,41 @@ test.describe("marketplace-web shared setup activation", () => {
     expect(loadedMarketplaceProfile).toBe(false);
   });
 
-  test("rejects property and organization hints on a Marketplace task URL", async ({
+  test("denies a foreign activation property despite an organization hint", async ({
     page,
     baseURL,
   }) => {
-    test.skip(!baseURL, "Playwright base URL is required.");
     await primeBrowserState(page, true);
     await mockAuthSession(page);
-    await mockSharedSetupStatus(page, sharedSetupStatus(["publicProfile"]));
+    const foreignPropertyId = "99999999-9999-4999-8999-999999999999";
+    let authorizedScopeChecked = false;
+    await page.route(/\/api\/hotel-setup\/status(?:\?|$)/, async (route) => {
+      if (route.request().method() === "OPTIONS") return fulfillCorsPreflight(route);
+      const requestUrl = new URL(route.request().url());
+      expect(requestUrl.searchParams.get("propertyId")).toBe(foreignPropertyId);
+      expect(requestUrl.searchParams.has("organizationId")).toBe(false);
+      authorizedScopeChecked = true;
+      await route.fulfill({
+        status: 403,
+        headers: corsHeaders(route),
+        json: { code: "missing_resource_access" },
+      });
+    });
     let loadedMarketplaceProfile = false;
     await page.route(/\/api\/marketplace\/properties\/.*\/(?:profile|offers)/, async (route) => {
       loadedMarketplaceProfile = true;
       await route.abort();
     });
-
     const url = new URL(profileActivationUrl(baseURL), baseURL);
-    url.searchParams.set("propertyId", propertyId);
+    url.searchParams.set("propertyId", foreignPropertyId);
     url.searchParams.set("organizationId", "untrusted");
     await page.goto(url.toString());
-
-    await expect(page).toHaveURL(new RegExp("/setup\\?"));
+    await expect(
+      page.getByText("Failed to load Marketplace setup. Please refresh and try again.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(authorizedScopeChecked).toBe(true);
     expect(loadedMarketplaceProfile).toBe(false);
   });
 
@@ -2207,20 +2211,6 @@ function productSetupUrl(
   return url.toString();
 }
 
-function productAppOrigin(product: "booking" | "pms"): string {
-  const startServers = process.env.CI === "true" || process.env.E2E_START_SERVERS === "1";
-  if (product === "booking") {
-    return (
-      process.env.E2E_BOOKING_ADMIN_BASE_URL ||
-      (startServers ? "http://admin.booking.localhost:3003" : "https://admin.booking.localhost")
-    );
-  }
-  return (
-    process.env.E2E_PMS_BASE_URL ||
-    (startServers ? "http://pms.localhost:3004" : "https://pms.localhost")
-  );
-}
-
 function profileActivationUrl(baseURL: string | undefined) {
   const url = new URL(baseURL ?? "https://marketplace.localhost");
   if (url.hostname === "127.0.0.1" && url.port === "3000") {
@@ -2231,6 +2221,7 @@ function profileActivationUrl(baseURL: string | undefined) {
   url.pathname = "/profile/complete";
   url.search = new URLSearchParams({
     activation: "marketplace",
+    propertyId,
     taskId: "creator_offer",
     destinationRouteKey: "marketplace.creator_offer",
     planRevision: "e2e-plan-1",

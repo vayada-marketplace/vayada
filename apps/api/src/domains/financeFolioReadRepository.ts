@@ -13,6 +13,7 @@ import {
   type FinanceFolioDetailResponse,
   type FinanceFolioExportFilters,
   type FinanceFolioExportSnapshot,
+  type FinanceFolioEnvelope,
   type FinanceFolioListResponse,
   type FinanceFolioQuery,
   type FinanceFolioSummary,
@@ -30,15 +31,18 @@ export type FinanceFolioReadRepository = {
   detail(propertyId: string, folioId: string): Promise<FinanceFolioDetailResponse | null>;
   captureReadyExport(
     propertyId: string,
-    currency: string,
     filters: FinanceFolioExportFilters,
-  ): Promise<FinanceFolioExportSnapshot | null>;
+  ): Promise<FinanceFolioExportCapture | null>;
   exportReady(
     propertyId: string,
     currency: string,
     snapshot: FinanceFolioExportSnapshot,
   ): Promise<FinanceFolioCsvArtifact | null>;
   close(): Promise<void>;
+};
+export type FinanceFolioExportCapture = {
+  envelope: FinanceFolioEnvelope;
+  snapshot: FinanceFolioExportSnapshot;
 };
 export class FinanceFolioCursorError extends TypeError {
   readonly code = "invalid_cursor";
@@ -109,10 +113,10 @@ export function createPgFinanceFolioReadRepository(config: { connectionString?: 
       const item = await hydrate(row, evidence, config.recipientDecoder);
       return { ...envelope(evidence, instant(row.createdAt)), item };
     },
-    async captureReadyExport(propertyId, currency, rawFilters) {
+    async captureReadyExport(propertyId, rawFilters) {
       const filters = parseFinanceFolioExportFilters(rawFilters); if (!filters) throw new TypeError("Finance folio export filters are malformed");
       const evidence = await meta(propertyId); if (!evidence) return null;
-      if (currency !== evidence.currency) throw new FinanceFolioEvidenceError("Folio export currency changed");
+      const currency = evidence.currency;
       const values: unknown[] = [evidence.propertyId, currency]; const where = [`f.property_id=$1::uuid`, `r.currency=$2`, `r.state='ready'`, `NOT EXISTS (SELECT 1 FROM finance.folio_revisions later WHERE later.folio_id=r.folio_id AND later.revision>r.revision)`];
       const add = (sql: string, value: unknown) => { values.push(value); where.push(sql.replace("?", `$${values.length}`)); };
       if (filters.from) add(`r.service_from>=?::date`, filters.from); if (filters.to) add(`r.service_from<=?::date`, filters.to);
@@ -120,7 +124,8 @@ export function createPgFinanceFolioReadRepository(config: { connectionString?: 
       const column = filters.sort === "amount_desc" ? "r.total_amount" : filters.sort === "serviceFrom_desc" ? "r.service_from" : "r.created_at";
       const row = (await pool.query<{ snapshotAt: string; manifest: unknown }>(`SELECT to_char(date_trunc('milliseconds',statement_timestamp()) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "snapshotAt",COALESCE(jsonb_agg(jsonb_build_object('folioId',s."folioId",'revisionId',s."revisionId",'revision',s.revision,'sourceDigest',s."sourceDigest") ORDER BY s.ordinal),'[]') AS manifest FROM (SELECT f.id::text AS "folioId",r.id::text AS "revisionId",r.revision::int AS revision,r.source_digest::text AS "sourceDigest",row_number() OVER(ORDER BY ${column} DESC,r.id ASC) AS ordinal FROM finance.folios f JOIN finance.folio_revisions r ON r.folio_id=f.id AND r.property_id=f.property_id WHERE ${where.join(" AND ")}) s`, values)).rows[0]!;
       const snapshot = parseFinanceFolioExportSnapshot({ formatVersion: FINANCE_FOLIO_CSV_VERSION, propertyId: evidence.propertyId, currency, filters, ...row });
-      if (!snapshot) throw new FinanceFolioEvidenceError("Folio export manifest is invalid"); return snapshot;
+      if (!snapshot) throw new FinanceFolioEvidenceError("Folio export manifest is invalid");
+      return { envelope: envelope(evidence), snapshot };
     },
     async exportReady(propertyId, currency, rawSnapshot) {
       const snapshot = parseFinanceFolioExportSnapshot(rawSnapshot); if (!snapshot || snapshot.propertyId !== uuid(propertyId) || snapshot.currency !== currency) throw new FinanceFolioEvidenceError("Folio export manifest scope changed");

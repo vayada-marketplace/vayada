@@ -52,6 +52,8 @@ export type BookingMoney = PmsMoney;
 export type BookingRevenueStats = {
   totalRevenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };
@@ -61,6 +63,8 @@ export type BookingSourceMixItem = {
   source: string;
   revenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   /** Revenue share as 0–100, rounded to one decimal place */
   revenueSharePercent: number;
 };
@@ -80,6 +84,8 @@ export type BookingSparklinePoint = {
   bucketEnd: BookingDate;
   revenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };
@@ -139,24 +145,25 @@ export type BookingDashboardMetricsPeriodInput = {
  * Implemented by the Booking domain; consumed by Booking API dashboard routes.
  * Must never open PMS_DATABASE_URL — see engineering/booking-pms-coupling-audit.md C04.
  */
-export type BookingDashboardMetricsReadPort = import("./conversionFunnel.js").BookingConversionFunnelReadPort & {
-  getDashboardMetrics(
-    input: BookingDashboardMetricsPeriodInput,
-  ): Promise<BookingDashboardMetricsReadModel | null>;
-  getSourceMix(
-    input: Omit<BookingDashboardMetricsPeriodInput, "previousPeriodStart" | "previousPeriodEnd">,
-  ): Promise<BookingSourceMixReadModel>;
-  getSparklines(input: {
-    propertyId: string;
-    windowStart: BookingDate;
-    windowEnd: BookingDate;
-  }): Promise<BookingSparklineReadModel>;
-  getPageViewTimeline(input: {
-    propertyId: string;
-    windowStart: BookingDate;
-    windowEnd: BookingDate;
-  }): Promise<BookingPageViewTimelineReadModel | null>;
-};
+export type BookingDashboardMetricsReadPort =
+  import("./conversionFunnel.js").BookingConversionFunnelReadPort & {
+    getDashboardMetrics(
+      input: BookingDashboardMetricsPeriodInput,
+    ): Promise<BookingDashboardMetricsReadModel | null>;
+    getSourceMix(
+      input: Omit<BookingDashboardMetricsPeriodInput, "previousPeriodStart" | "previousPeriodEnd">,
+    ): Promise<BookingSourceMixReadModel>;
+    getSparklines(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingSparklineReadModel>;
+    getPageViewTimeline(input: {
+      propertyId: string;
+      windowStart: BookingDate;
+      windowEnd: BookingDate;
+    }): Promise<BookingPageViewTimelineReadModel | null>;
+  };
 
 // ─── Booking reservations read model ────────────────────────────────────────
 // Owner: Booking/checkout read model. The HTTP route may keep legacy response
@@ -191,10 +198,11 @@ export type BookingReservationReadModel = {
   nights: number;
   adults: number;
   children: number;
-  nightlyRate: number;
+  nightlyRate: number | null;
   numberOfRooms: number;
   totalRoomCapacity: number;
-  totalAmount: number;
+  amountStatus?: "recorded" | "unverified";
+  totalAmount: number | null;
   currency: string;
   status: string;
   roomId: string | null;
@@ -206,7 +214,7 @@ export type BookingReservationReadModel = {
   depositRequired: boolean;
   depositPercentage: number | null;
   depositAmount: number;
-  balanceAmount: number;
+  balanceAmount: number | null;
   checkInPendingFlags: string[];
   checkedInAt: BookingUtcDateTime | null;
   checkedOutAt: BookingUtcDateTime | null;
@@ -664,3 +672,4 @@ export * from "./replacementPricingEvidence.js";
 export * from "./publicPricingSelection.js";
 
 export * from "./storedPricingQuote.js";
+export * from "./affiliateBookingDestination.js";

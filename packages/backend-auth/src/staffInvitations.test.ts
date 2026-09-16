@@ -1,3 +1,4 @@
+import { createPgTeamRoleRepository } from "./teamRoles.js";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -273,6 +274,25 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
 
   beforeEach(async () => {
     await client.query("DELETE FROM identity.staff_invitations");
+    await client.query("BEGIN");
+    await client.query(
+      "DELETE FROM identity.membership_delegations WHERE subject_membership_id = $1",
+      [staffMembership],
+    );
+    await client.query(
+      "UPDATE identity.organization_memberships SET access_origin = 'agency', role_definition_id = NULL WHERE id = $1",
+      [staffMembership],
+    );
+    await client.query(
+      `UPDATE identity.organization_memberships SET role_key = 'hotel_owner', access_origin = 'agency', property_access_mode = 'all',
+      role_definition_id = NULL, pms_access_enabled = true, booking_access_enabled = true WHERE id = $1`,
+      [membership],
+    );
+    await client.query(
+      "DELETE FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'agency_manager'",
+      [org],
+    );
+    await client.query("COMMIT");
     await client.query(
       "DELETE FROM identity.organization_memberships WHERE organization_id = $1 AND user_id = $2",
       [otherOrg, staffUser],
@@ -296,6 +316,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       UPDATE identity.organization_memberships
       SET status = 'active', role_key = 'housekeeping', permission_overrides = NULL,
           property_access_mode = 'assigned', workos_membership_id = 'om_staff_acceptance',
+          pms_access_enabled = true, booking_access_enabled = true,
           invited_at = NULL
       WHERE id = '${staffMembership}';
       UPDATE identity.organization_memberships
@@ -354,6 +375,37 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(count.rows[0]?.count).toBe(0);
   });
 
+  it("reads actual account owners within the organization without choosing among anomalies", async () => {
+    expect(await repository.listAccountAdmins(org)).toEqual([
+      {
+        membershipId: membership,
+        name: "Owner Example",
+        email: "owner@example.com",
+        roleKey: "hotel_owner",
+        active: true,
+        revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    ]);
+    expect(await repository.listAccountAdmins(otherOrg)).toEqual([
+      expect.objectContaining({ membershipId: otherMembership }),
+    ]);
+    await client.query(
+      "UPDATE identity.organization_memberships SET role_key = 'owner', property_access_mode = 'all' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.listAccountAdmins(org)).toHaveLength(2);
+    await client.query("UPDATE identity.users SET status = 'suspended' WHERE id = $1", [owner]);
+    expect(
+      (await repository.listAccountAdmins(org)).find((row) => row.membershipId === membership)
+        ?.active,
+    ).toBe(false);
+    await client.query(
+      "UPDATE identity.organization_memberships SET status = 'inactive' WHERE id = ANY($1::uuid[])",
+      [[membership, staffMembership]],
+    );
+    expect(await repository.listAccountAdmins(org)).toEqual([]);
+  });
+
   it("lists active, pending, and deactivated staff but hides removed memberships", async () => {
     await client.query(
       `INSERT INTO identity.membership_property_assignments (membership_id, property_id)
@@ -381,6 +433,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         name: "Staff Example",
         email: "staff@example.com",
         roleKey: "housekeeping",
+        roleDefinitionId: null,
+        roleName: null,
+        propertyAccessMode: "assigned",
         propertyIds: [property],
         status: "active",
         lastActiveAt: "2026-08-24T12:00:00.000Z",
@@ -390,6 +445,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         name: "Staff Example",
         email: "pending@example.com",
         roleKey: "front_desk",
+        roleDefinitionId: null,
+        roleName: null,
+        propertyAccessMode: "assigned",
         propertyIds: [property],
         status: "pending",
         lastActiveAt: null,
@@ -424,6 +482,730 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       [org, property],
     );
     expect(await repository.listRoster(org)).toEqual([]);
+  });
+
+  it.each(["expired", "revoked"])(
+    "prepares a fresh revision after a %s invitation and rejects concurrent reuse",
+    async (status) => {
+      expect(await repository.prepareInvitation(org, "STAFF@example.com")).toEqual({
+        configurationRevision: 1,
+      });
+      const first = await repository.persist(command());
+      if (first.outcome !== "created") throw new Error("expected invitation");
+      expect(await repository.prepareInvitation(org, "staff@example.com")).toBeNull();
+      await client.query(
+        "UPDATE identity.staff_invitations SET status = $2, delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = 'synthetic-old-invitation', expires_at = now() - interval '1 minute' WHERE id = $1",
+        [first.invitationId, status],
+      );
+      const prepared = await repository.prepareInvitation(org, "staff@example.com");
+      expect(prepared).toEqual({ configurationRevision: 2 });
+      expect(await repository.prepareInvitation(otherOrg, "staff@example.com")).toEqual({
+        configurationRevision: 1,
+      });
+      const replacement = command({
+        revision: prepared!.configurationRevision,
+        idempotencyKey: "replacement",
+        commandId: "replacement-command",
+      });
+      expect(await repository.persist(replacement)).toMatchObject({ outcome: "created" });
+      expect(
+        await repository.persist({ ...replacement, idempotencyKey: "competing" }),
+      ).toMatchObject({ outcome: "rejected", reason: "configuration_conflict" });
+      expect(await repository.persist(replacement)).toMatchObject({ outcome: "idempotent_replay" });
+    },
+  );
+
+  it("shows live saved-role names and all-property invitation scope", async () => {
+    const invite = command({ email: "all-roster@example.com" });
+    invite.payload.propertyAccessMode = "all";
+    invite.payload.propertyIds = [];
+    const pending = await repository.persist(invite);
+    if (pending.outcome !== "created") throw new Error("expected invitation");
+    const definition = await client.query(
+      "SELECT id FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'front_desk'",
+      [org],
+    );
+    const roleId = definition.rows[0].id;
+    await client.query(
+      "UPDATE identity.staff_invitations SET role_definition_id = $2 WHERE id = $1",
+      [pending.invitationId, roleId],
+    );
+    expect(
+      (await repository.listRoster(org)).find((row) => row.id === pending.invitationId),
+    ).toMatchObject({
+      roleDefinitionId: roleId,
+      roleName: "Front desk",
+      propertyAccessMode: "all",
+      propertyIds: [property, secondProperty],
+    });
+    await client.query(
+      "UPDATE identity.organization_resource_links SET status = 'suspended' WHERE organization_id = $1 AND resource_id = $2",
+      [org, secondProperty],
+    );
+    expect(
+      (await repository.listRoster(org)).find((row) => row.id === pending.invitationId)
+        ?.propertyIds,
+    ).toEqual([property]);
+  });
+
+  it("normalizes absent overrides and rejects unsupported delegated scope", async () => {
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      permissionOverrides: { grant: [], deny: [] },
+    });
+    await client.query("BEGIN");
+    await client.query(
+      "UPDATE identity.organization_memberships SET role_key = 'external_owner', property_access_mode = 'assigned' WHERE id = $1",
+      [membership],
+    );
+    await client.query(
+      "UPDATE identity.organization_memberships SET access_origin = 'external_owner' WHERE id = $1",
+      [staffMembership],
+    );
+    await client.query(
+      `INSERT INTO identity.membership_delegations
+      (organization_id, subject_membership_id, delegator_membership_id, created_by_membership_id)
+      VALUES ($1, $2, $3, $3)`,
+      [org, staffMembership, membership],
+    );
+    await client.query("COMMIT");
+    try {
+      await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+        "Staff access configuration is unavailable",
+      );
+    } finally {
+      await client.query("BEGIN");
+      await client.query(
+        "DELETE FROM identity.membership_delegations WHERE subject_membership_id = $1",
+        [staffMembership],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET access_origin = 'agency' WHERE id = $1",
+        [staffMembership],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', property_access_mode = 'all' WHERE id = $1",
+        [membership],
+      );
+      await client.query("COMMIT");
+    }
+  });
+
+  it("reads saved overrides and scope without replacing them with role defaults", async () => {
+    const edit = updateCommand();
+    await repository.updateAccess(edit);
+    expect(await repository.getAccess(org, staffMembership)).toEqual({
+      membershipId: staffMembership,
+      roleDefinitionId: null,
+      roleDefinition: null,
+      configuredPermissions: expect.arrayContaining(["pms.inbox.read", "pms.inbox.reply"]),
+      revision: expect.stringMatching(/^[a-f0-9]{64}$/),
+      productAccess: { pms: true, booking: true },
+      roleKey: "front_desk",
+      status: "active",
+      propertyAccessMode: "assigned",
+      propertyIds: [property],
+      permissionOverrides: edit.payload.permissionOverrides,
+    });
+    await client.query(
+      "UPDATE identity.organization_memberships SET property_access_mode = 'all', status = 'suspended' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "all",
+      status: "suspended",
+      propertyIds: [property],
+    });
+  });
+
+  it("reads saved role defaults and invalidates the access revision when the role changes", async () => {
+    await repository.updateAccess(updateCommand());
+    const roleId = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1, $2, 'Saved front desk', 'staff', 'front_desk', '["pms.inbox.read"]')`,
+        [roleId, org],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = $2,
+         permission_overrides = '{"grant":["pms.inbox.reply"],"deny":[]}' WHERE id = $1`,
+        [staffMembership, roleId],
+      );
+      const before = (await repository.getAccess(org, staffMembership))!;
+      expect(before).toMatchObject({
+        roleDefinitionId: roleId,
+        roleDefinition: { id: roleId, name: "Saved front desk", baseRoleKey: "front_desk" },
+        configuredPermissions: ["pms.inbox.read", "pms.inbox.reply"],
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.inbox.read","pms.calendar.read"]' WHERE id = $1`,
+        [roleId],
+      );
+      const after = (await repository.getAccess(org, staffMembership))!;
+      expect(after.revision).not.toBe(before.revision);
+      expect(after.configuredPermissions).toEqual([
+        "pms.calendar.read",
+        "pms.inbox.read",
+        "pms.inbox.reply",
+      ]);
+      expect(await repository.updateAccess(updateCommand())).toEqual({
+        outcome: "rejected",
+        reason: "invalid_command",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(after);
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["identity.staff.manage"]' WHERE id = $1`,
+        [roleId],
+      );
+      await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+        "Staff access configuration is unavailable",
+      );
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
+  });
+
+  it("assigns a saved worker role atomically with role and member revision checks", async () => {
+    const invitation = await deliveredInvitation(55);
+    const roleId = randomUUID(),
+      replacementId = randomUUID();
+    try {
+      for (const id of [roleId, replacementId])
+        await client.query(
+          `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1::uuid, $2, $1::text, 'staff', 'hotel_custom', '["pms.inbox.read"]')`,
+          [id, org],
+        );
+      const before = (await repository.getAccess(org, staffMembership))!;
+      const edit = updateCommand();
+      edit.payload = {
+        ...edit.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: roleId,
+        expectedRoleRevision: "1",
+        expectedRevision: before.revision,
+        permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      };
+      for (const patch of [
+        { expectedRoleRevision: "2" },
+        { roleDefinitionId: randomUUID() },
+        { roleKey: "front_desk" as const },
+        { expectedRevision: "0".repeat(64) },
+        {
+          permissionOverrides: { grant: [], deny: ["pms.inbox.read"] as const },
+          roleDefinitionId: undefined,
+        },
+      ]) {
+        const invalid = { ...updateCommand(), payload: { ...edit.payload, ...patch } };
+        expect(await repository.updateAccess(invalid)).toMatchObject({ outcome: "rejected" });
+        expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+      }
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager', booking_access_enabled = false WHERE id = $1",
+        [membership],
+      );
+      expect(await repository.updateAccess(edit)).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', booking_access_enabled = true WHERE id = $1",
+        [membership],
+      );
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+      const saved = (await repository.getAccess(org, staffMembership))!;
+      await expectAcceptance(invitation, { outcome: "rejected", reason: "membership_protected" });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(saved);
+      expect(saved).toMatchObject({
+        roleDefinitionId: roleId,
+        configuredPermissions: ["pms.inbox.read", "pms.inbox.reply"],
+      });
+      const switchRole = {
+        ...updateCommand(),
+        payload: {
+          ...edit.payload,
+          roleDefinitionId: replacementId,
+          expectedRevision: saved.revision,
+        },
+      };
+      expect(await repository.updateAccess(switchRole)).toMatchObject({ outcome: "updated" });
+      const jobs = await client.query(
+        "SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1",
+        [switchRole.commandId],
+      );
+      expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "role_permissions_changed" } }]);
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+      expect((await repository.getAccess(org, staffMembership))!.roleDefinitionId).toBe(
+        replacementId,
+      );
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner' WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = ANY($1::uuid[])", [
+        [roleId, replacementId],
+      ]);
+    }
+  });
+
+  it("allows bounded manager status changes and rejects broader workers before removal", async () => {
+    const managerRole = randomUUID(),
+      workerRole = randomUUID(),
+      cloneRole = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions)
+        VALUES ($1, $3, 'Bounded manager', 'staff', 'hotel_manager', 'agency_manager', '["identity.staff.manage","pms.calendar.read"]'),
+               ($2, $3, 'Bounded worker', 'staff', 'hotel_custom', NULL, '["pms.calendar.read"]')`,
+        [managerRole, workerRole, org],
+      );
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+        VALUES ($1, $2, 'Manager clone without authority', 'staff', 'hotel_manager', '["pms.calendar.read"]')`,
+        [cloneRole, org],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2, property_access_mode = 'assigned' WHERE id = $1`,
+        [membership, managerRole],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_custom', role_definition_id = $2 WHERE id = $1`,
+        [staffMembership, workerRole],
+      );
+      await client.query(
+        `INSERT INTO identity.membership_property_assignments (membership_id, property_id) VALUES ($1, $3), ($2, $3)`,
+        [membership, staffMembership, property],
+      );
+      const beforeAccess = (await repository.getAccess(org, staffMembership))!;
+      const edit = updateCommand();
+      edit.payload = {
+        ...edit.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: workerRole,
+        expectedRoleRevision: "1",
+        expectedRevision: beforeAccess.revision,
+        permissionOverrides: { grant: [], deny: [] },
+        membershipStatus: "suspended",
+      };
+      for (const patch of [
+        { permissionOverrides: { grant: ["pms.calendar.manage"] as const, deny: [] } },
+        { propertyIds: [secondProperty] },
+        { propertyAccessMode: "all" as const, propertyIds: [] },
+        { roleDefinitionId: managerRole, roleKey: "hotel_manager" as const },
+      ]) {
+        expect(
+          await repository.updateAccess({
+            ...updateCommand(),
+            payload: { ...edit.payload, ...patch },
+          }),
+        ).toMatchObject({ outcome: "rejected" });
+        expect(await repository.getAccess(org, staffMembership)).toEqual(beforeAccess);
+      }
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+      expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+      expect(
+        await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+      ).toMatchObject({ outcome: "updated" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = NULL,
+        permission_overrides = '{"grant":["pms.calendar.read"],"deny":[]}' WHERE id = $1`,
+        [staffMembership],
+      );
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+      expect(
+        await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+      ).toMatchObject({ outcome: "updated" });
+      const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+      invite.payload = {
+        ...invite.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: workerRole,
+        expectedRoleRevision: "1",
+        permissionOverrides: { grant: [], deny: [] },
+      };
+      for (const patch of [
+        { propertyIds: [secondProperty] },
+        { roleKey: "hotel_manager" as const, roleDefinitionId: managerRole },
+        { permissionOverrides: { grant: ["pms.calendar.manage"] as const, deny: [] } },
+      ]) {
+        expect(
+          await repository.persist({ ...invite, payload: { ...invite.payload, ...patch } }),
+        ).toMatchObject({ outcome: "rejected" });
+      }
+      const created = await repository.persist(invite);
+      if (created.outcome !== "created") throw new Error("Expected bounded invitation");
+      const resend = command({
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        revision: 2,
+      });
+      resend.payload = {
+        ...invite.payload,
+        configurationRevision: 2,
+        expectedInvitationId: created.invitationId,
+        propertyIds: [secondProperty],
+      };
+      expect(await repository.persist(resend)).toMatchObject({ outcome: "rejected" });
+      expect(await repository.getInvitation(org, created.invitationId)).not.toBeNull();
+      await client.query(
+        `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(),
+        provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
+        [created.invitationId, `invitation_${created.invitationId}`],
+      );
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["identity.staff.manage"]' WHERE id = $1`,
+        [managerRole],
+      );
+      const event = acceptanceEvent(`invitation_${created.invitationId}`);
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({
+        outcome: "rejected",
+        reason: "invitation_access_invalid",
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["identity.staff.manage","pms.calendar.read"]' WHERE id = $1`,
+        [managerRole],
+      );
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({ outcome: "accepted" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2,
+        permission_overrides = NULL WHERE id = $1`,
+        [staffMembership, cloneRole],
+      );
+      expect(
+        await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+      ).toMatchObject({ outcome: "updated" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_custom', role_definition_id = $2 WHERE id = $1`,
+        [staffMembership, workerRole],
+      );
+      expect(
+        await repository.updateStatus(statusCommand({ membershipId: membership })),
+      ).toMatchObject({ outcome: "rejected" });
+      await client.query(
+        `UPDATE identity.organization_memberships SET booking_access_enabled = false WHERE id = $1`,
+        [membership],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.organization_memberships SET booking_access_enabled = true WHERE id = $1`,
+        [membership],
+      );
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read","pms.calendar.manage"]' WHERE id = $1`,
+        [workerRole],
+      );
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read"]' WHERE id = $1`,
+        [workerRole],
+      );
+      await client.query(
+        `UPDATE identity.membership_property_assignments SET property_id = $2 WHERE membership_id = $1`,
+        [staffMembership, secondProperty],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      await client.query(
+        `UPDATE identity.membership_property_assignments SET property_id = $2 WHERE membership_id = $1`,
+        [staffMembership, property],
+      );
+      expect(await repository.remove(removalCommand())).toMatchObject({ outcome: "removed" });
+    } finally {
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = ANY($1::uuid[])`,
+        [[membership, staffMembership]],
+      );
+      await client.query(
+        `UPDATE identity.organization_memberships SET role_key = 'hotel_owner', property_access_mode = 'all', booking_access_enabled = true WHERE id = $1`,
+        [membership],
+      );
+      await client.query(
+        `DELETE FROM identity.membership_property_assignments WHERE membership_id = $1`,
+        [membership],
+      );
+      await client.query(
+        `UPDATE identity.staff_invitations SET role_definition_id = NULL WHERE role_definition_id = ANY($1::uuid[])`,
+        [[managerRole, workerRole, cloneRole]],
+      );
+      await client.query(`DELETE FROM identity.organization_roles WHERE id = ANY($1::uuid[])`, [
+        [managerRole, workerRole, cloneRole],
+      ]);
+    }
+  });
+
+  it("rejects managers whose live permissions do not cover the worker", async () => {
+    const roleId = randomUUID();
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions)
+         VALUES ($1, $2, 'Agency manager test', 'staff', 'hotel_manager', 'agency_manager', '["identity.staff.manage"]')`,
+        [roleId, org],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2 WHERE id = $1",
+        [membership, roleId],
+      );
+      expect(await repository.persist(command())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.updateAccess(updateCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.updateStatus(statusCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', role_definition_id = NULL WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
+  });
+
+  it("saves dynamic scope without assignment rows and returns safely to selected properties", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      propertyAccessMode: "all",
+      propertyIds: [],
+      expectedRevision: before.revision,
+    };
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+    const all = (await repository.getAccess(org, staffMembership))!;
+    expect(all).toMatchObject({ propertyAccessMode: "all", propertyIds: [] });
+    const restrict = updateCommand();
+    restrict.payload.expectedRevision = all.revision;
+    expect(await repository.updateAccess(restrict)).toMatchObject({ outcome: "updated" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "assigned",
+      propertyIds: [property],
+    });
+    const jobs = await client.query(
+      `SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1`,
+      [restrict.commandId],
+    );
+    expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "property_access_removed" } }]);
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "idempotent_replay" });
+    expect((await repository.getAccess(org, staffMembership))!.propertyAccessMode).toBe("assigned");
+  });
+
+  it("rejects all-property saves without revisions or with snapshot property IDs", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    for (const propertyIds of [[], [property]]) {
+      const edit = updateCommand();
+      edit.payload = {
+        ...edit.payload,
+        propertyAccessMode: "all",
+        propertyIds,
+        ...(propertyIds.length ? { expectedRevision: before.revision } : {}),
+      };
+      expect(await repository.updateAccess(edit)).toEqual({
+        outcome: "rejected",
+        reason: "invalid_command",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    }
+  });
+
+  it("hides foreign, admin, missing and removed access targets", async () => {
+    for (const [tenant, target] of [
+      [otherOrg, staffMembership],
+      [org, membership],
+      [org, "invalid"],
+    ]) {
+      expect(await repository.getAccess(tenant!, target!)).toBeNull();
+    }
+    await client.query(
+      "UPDATE identity.organization_memberships SET status = 'inactive' WHERE id = $1",
+      [staffMembership],
+    );
+    expect(await repository.getAccess(org, staffMembership)).toBeNull();
+  });
+
+  it("rejects malformed overrides and unlinked assignments without exposing their values", async () => {
+    await client.query(
+      "UPDATE identity.organization_memberships SET permission_overrides = $2 WHERE id = $1",
+      [staffMembership, { grant: ["private.permission"], deny: [] }],
+    );
+    await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+      "Staff access configuration is unavailable",
+    );
+    await client.query(
+      "UPDATE identity.organization_memberships SET permission_overrides = NULL WHERE id = $1",
+      [staffMembership],
+    );
+    await client.query(
+      "INSERT INTO identity.membership_property_assignments (membership_id, property_id) VALUES ($1, $2)",
+      [staffMembership, property],
+    );
+    await client.query(
+      "UPDATE identity.organization_resource_links SET status = 'suspended' WHERE organization_id = $1 AND resource_id = $2",
+      [org, property],
+    );
+    await expect(repository.getAccess(org, staffMembership)).rejects.toThrow(
+      "Staff access configuration is unavailable",
+    );
+  });
+
+  it("saves access and status atomically and rejects competing stale saves", async () => {
+    const access = await repository.getAccess(org, staffMembership);
+    const first = updateCommand();
+    first.payload = {
+      ...first.payload,
+      expectedRevision: access!.revision,
+      membershipStatus: "suspended",
+      productAccess: { pms: false, booking: true },
+    };
+    const second = updateCommand();
+    second.payload = { ...second.payload, expectedRevision: access!.revision };
+    const results = await Promise.all([
+      repository.updateAccess(first),
+      repository.updateAccess(second),
+    ]);
+    expect(results.filter((result) => result.outcome === "updated")).toHaveLength(1);
+    expect(results).toContainEqual({ outcome: "rejected", reason: "revision_conflict" });
+    const winner = results[0]?.outcome === "updated" ? first : second;
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      roleKey: winner.payload.roleKey,
+      status: winner.payload.membershipStatus ?? "active",
+      permissionOverrides: winner.payload.permissionOverrides,
+      productAccess: winner.payload.productAccess ?? { pms: true, booking: true },
+    });
+    expect(await repository.updateAccess(winner)).toMatchObject({ outcome: "idempotent_replay" });
+  });
+
+  it("cannot reactivate a globally suspended user through combined access saves", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    await client.query("UPDATE identity.users SET status = 'suspended' WHERE id = $1", [staffUser]);
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      membershipStatus: "active",
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "target_not_found",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    const sideEffects = await client.query(
+      `SELECT (SELECT count(*)::int FROM platform.idempotency_keys WHERE idempotency_metadata->>'commandId' = $1) AS keys,
+              (SELECT count(*)::int FROM platform.product_audit_events WHERE causation_id = $1) AS audits`,
+      [edit.commandId],
+    );
+    expect(sideEffects.rows[0]).toEqual({ keys: 0, audits: 0 });
+  });
+
+  it("preserves product flags for legacy saves and includes them in revisions and audit", async () => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      productAccess: { pms: false, booking: true },
+    };
+    expect(await repository.updateAccess(edit)).toMatchObject({ outcome: "updated" });
+    const saved = (await repository.getAccess(org, staffMembership))!;
+    expect(saved.productAccess).toEqual({ pms: false, booking: true });
+    const jobs = await client.query(
+      `SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1 AND job_type = 'pms.inbox.assignment.reconcile'`,
+      [edit.commandId],
+    );
+    expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "product_access_removed" } }]);
+    expect(saved.revision).not.toBe(before.revision);
+    const audit = await client.query(
+      `SELECT private_payload FROM platform.product_audit_events WHERE causation_id = $1`,
+      [edit.commandId],
+    );
+    expect(audit.rows[0].private_payload).toMatchObject({
+      previous: { productAccess: { pms: true, booking: true } },
+      next: { productAccess: { pms: false, booking: true } },
+    });
+    expect(await repository.updateAccess(updateCommand())).toMatchObject({ outcome: "updated" });
+    expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual(
+      saved.productAccess,
+    );
+    const current = (await repository.getAccess(org, staffMembership))!;
+    await client.query(
+      `UPDATE identity.organization_memberships SET booking_access_enabled = false WHERE id = $1`,
+      [staffMembership],
+    );
+    expect((await repository.getAccess(org, staffMembership))!.revision).not.toBe(current.revision);
+  });
+
+  it.each([
+    null,
+    { pms: true },
+    { pms: "true", booking: false },
+    { pms: true, booking: true, extra: true },
+  ])("rejects malformed product flags %j without changing access", async (productAccess) => {
+    const before = (await repository.getAccess(org, staffMembership))!;
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: before.revision,
+      productAccess: productAccess as never,
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "invalid_command",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+  });
+
+  it("invalidates a revision after status changes and rolls back failed combined saves", async () => {
+    const initial = (await repository.getAccess(org, staffMembership))!;
+    await repository.updateStatus(statusCommand());
+    const edit = updateCommand();
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: initial.revision,
+      membershipStatus: "active",
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "revision_conflict",
+    });
+    const current = (await repository.getAccess(org, staffMembership))!;
+    edit.payload = {
+      ...edit.payload,
+      expectedRevision: current.revision,
+      propertyIds: [foreignProperty],
+      productAccess: { pms: false, booking: false },
+    };
+    expect(await repository.updateAccess(edit)).toEqual({
+      outcome: "rejected",
+      reason: "property_scope_invalid",
+    });
+    expect(await repository.getAccess(org, staffMembership)).toEqual(current);
   });
 
   it("atomically updates, audits, and replays staff access", async () => {
@@ -1204,14 +1986,20 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     expect(provider.sendInvitation).not.toHaveBeenCalled();
   });
 
-  async function deliveredInvitation(revision = 1) {
-    const created = await repository.persist(
-      command({
-        commandId: `accept-command-${revision}`,
-        idempotencyKey: `accept-key-${revision}`,
-        revision,
-      }),
-    );
+  async function deliveredInvitation(
+    revision = 1,
+    productAccess?: { pms: boolean; booking: boolean },
+    propertyAccessMode: "assigned" | "all" = "assigned",
+  ) {
+    const invite = command({
+      commandId: `accept-command-${revision}`,
+      idempotencyKey: `accept-key-${revision}`,
+      revision,
+    });
+    if (productAccess !== undefined) invite.payload.productAccess = productAccess;
+    invite.payload.propertyAccessMode = propertyAccessMode;
+    if (propertyAccessMode === "all") invite.payload.propertyIds = [];
+    const created = await repository.persist(invite);
     if (created.outcome !== "created") throw new Error("expected invitation creation");
     const providerInvitationId = `invitation_${created.invitationId}`;
     await client.query(
@@ -1224,6 +2012,302 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     return { ...created, providerInvitationId };
   }
 
+  it("reads saved invitation settings and rejects stale replacement requests", async () => {
+    const invite = command();
+    const first = await repository.persist(invite);
+    if (first.outcome !== "created") throw new Error("Expected invitation");
+    expect(await repository.getInvitation(otherOrg, first.invitationId)).toBeNull();
+    expect(await repository.getInvitation(org, "invalid")).toBeNull();
+    expect(await repository.getInvitation(org, first.invitationId)).toMatchObject({
+      id: first.invitationId,
+      email: invite.payload.email.trim().toLowerCase(),
+      configurationRevision: 1,
+      propertyIds: [property],
+      permissionOverrides: invite.payload.permissionOverrides,
+      roleDefinitionId: null,
+      deliveryState: "ready",
+    });
+    const replacement = command({
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      revision: 2,
+    });
+    replacement.payload.expectedInvitationId = first.invitationId;
+    const second = await repository.persist(replacement);
+    expect(second).toMatchObject({
+      outcome: "created",
+      supersededInvitationId: first.invitationId,
+    });
+    expect(await repository.getInvitation(org, first.invitationId)).toBeNull();
+    expect(await repository.persist(replacement)).toMatchObject({ outcome: "idempotent_replay" });
+    const stale = command({ commandId: randomUUID(), idempotencyKey: randomUUID(), revision: 3 });
+    stale.payload.expectedInvitationId = first.invitationId;
+    expect(await repository.persist(stale)).toMatchObject({
+      outcome: "rejected",
+      reason: "configuration_conflict",
+    });
+    if (second.outcome !== "created") throw new Error("Expected replacement");
+    expect(await repository.getInvitation(org, second.invitationId)).not.toBeNull();
+  });
+
+  it.each(["revoked", "elapsed"])(
+    "deletes unused owner roles after %s invitation history",
+    async (state) => {
+      const roles = createPgTeamRoleRepository({ connectionString: TEST_DATABASE_URL! });
+      const roleId = randomUUID();
+      try {
+        await client.query(
+          "INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions) VALUES ($1, $2, 'Historical owner', 'external_owner', 'external_owner', '[\"pms.calendar.read\"]')",
+          [roleId, org],
+        );
+        const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+        invite.payload = {
+          ...invite.payload,
+          roleKey: "external_owner",
+          roleDefinitionId: roleId,
+          expectedRoleRevision: "1",
+          permissionOverrides: { grant: [], deny: [] },
+        };
+        const created = await repository.persist(invite);
+        if (created.outcome !== "created") throw new Error(JSON.stringify(created));
+        await client.query(
+          "UPDATE identity.staff_invitations SET status = $2, delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = id::text, expires_at = now() - interval '1 day' WHERE id = $1",
+          [created.invitationId, state === "revoked" ? "revoked" : "pending"],
+        );
+        expect(
+          await roles.change({
+            ...invite,
+            commandId: randomUUID(),
+            idempotencyKey: randomUUID(),
+            payload: { organizationId: org, roleId, expectedRevision: "1", operation: "delete" },
+          }),
+        ).toMatchObject({ outcome: "deleted" });
+        expect(
+          (
+            await client.query(
+              "SELECT status, role_definition_id FROM identity.staff_invitations WHERE id = $1",
+              [created.invitationId],
+            )
+          ).rows[0],
+        ).toEqual({
+          status: state === "revoked" ? "revoked" : "expired",
+          role_definition_id: null,
+        });
+      } finally {
+        await client.query("DELETE FROM identity.staff_invitations WHERE role_definition_id = $1", [
+          roleId,
+        ]);
+        await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+        await roles.close();
+      }
+    },
+  );
+
+  it("invites a saved external owner with assigned read-only access and protects the member from replacement", async () => {
+    const role = (
+      await client.query(
+        "SELECT id, revision::text FROM identity.organization_roles WHERE organization_id = $1 AND preset_key = 'property_owner'",
+        [org],
+      )
+    ).rows[0];
+    const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+    invite.payload = {
+      ...invite.payload,
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      expectedRoleRevision: role.revision,
+      permissionOverrides: { grant: [], deny: [] },
+    };
+    for (const patch of [
+      { propertyAccessMode: "all" as const, propertyIds: [] },
+      { roleDefinitionId: undefined, expectedRoleRevision: undefined },
+      { permissionOverrides: { grant: ["identity.staff.manage" as const], deny: [] } },
+      { permissionOverrides: { grant: ["pms.settings.manage" as const], deny: [] } },
+    ])
+      expect(
+        await repository.persist({ ...invite, payload: { ...invite.payload, ...patch } }),
+      ).toMatchObject({ outcome: "rejected" });
+    const created = await repository.persist(invite);
+    if (created.outcome !== "created") throw new Error(JSON.stringify(created));
+    expect(await repository.getInvitation(org, created.invitationId)).toMatchObject({
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      propertyAccessMode: "assigned",
+    });
+    const sendInvitation = vi.fn(async (claim: StaffInvitationDeliveryClaim) =>
+      providerResponse(claim),
+    );
+    const delivery = createStaffInvitationDeliveryCoordinator({
+      repository: deliveryRepository,
+      provider: { sendInvitation },
+    });
+    expect(await delivery.deliver(created.invitationId)).toMatchObject({ outcome: "delivered" });
+    expect(sendInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({ roleSlug: "hotel_member" }),
+    );
+    expect(
+      await acceptanceRepository.reconcile(acceptanceEvent(`invitation_${created.invitationId}`)),
+    ).toMatchObject({ outcome: "accepted", membershipId: staffMembership });
+    const saved = (await repository.getAccess(org, staffMembership))!;
+    expect(saved.roleKey).toBe("external_owner");
+    expect(saved.configuredPermissions.every((key) => key.endsWith(".read"))).toBe(true);
+    expect(saved.configuredPermissions).not.toContain("pms.guest_contact.read");
+    expect(
+      (await repository.listRoster(org)).find((member) => member.id === staffMembership)?.roleKey,
+    ).toBe("external_owner");
+    expect(await repository.getAccess(otherOrg, staffMembership)).toBeNull();
+    const update = updateCommand({ idempotencyKey: randomUUID() });
+    update.payload = {
+      ...update.payload,
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      expectedRoleRevision: role.revision,
+      expectedRevision: saved.revision,
+      propertyIds: saved.propertyIds,
+      permissionOverrides: { grant: [], deny: [] },
+      productAccess: { pms: false, booking: true },
+    };
+    expect(await repository.updateAccess(update)).toMatchObject({ outcome: "updated" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      productAccess: { pms: false, booking: true },
+    });
+    const replacement = await deliveredInvitation(2);
+    expect(
+      await acceptanceRepository.reconcile(acceptanceEvent(replacement.providerInvitationId)),
+    ).toMatchObject({ outcome: "rejected", reason: "membership_protected" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      roleKey: "external_owner",
+      roleDefinitionId: role.id,
+      productAccess: { pms: false, booking: true },
+    });
+    expect(await repository.updateStatus(statusCommand())).toMatchObject({ outcome: "updated" });
+    expect(
+      await repository.updateStatus(statusCommand({ membershipStatus: "active" })),
+    ).toMatchObject({ outcome: "updated" });
+    const managerRole = randomUUID();
+    try {
+      await client.query(
+        "INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, preset_key, default_permissions) SELECT $1, organization_id, 'Owner ceiling manager', 'staff', 'hotel_manager', 'agency_manager', default_permissions || '[\"identity.staff.manage\"]'::jsonb FROM identity.organization_roles WHERE id = $2",
+        [managerRole, role.id],
+      );
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_manager', role_definition_id = $2 WHERE id = $1",
+        [membership, managerRole],
+      );
+      const before = await repository.getAccess(org, staffMembership);
+      expect(
+        await repository.updateStatus(statusCommand({ idempotencyKey: randomUUID() })),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(await repository.remove(removalCommand())).toMatchObject({
+        outcome: "rejected",
+        reason: "inviter_not_authorized",
+      });
+      expect(
+        await repository.updateAccess({
+          ...update,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          payload: { ...update.payload, expectedRevision: before!.revision },
+        }),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(
+        await repository.persist({
+          ...invite,
+          commandId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          payload: { ...invite.payload, email: "new-owner@example.com" },
+        }),
+      ).toMatchObject({ outcome: "rejected", reason: "inviter_not_authorized" });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(before);
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_key = 'hotel_owner', role_definition_id = NULL WHERE id = $1",
+        [membership],
+      );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [managerRole]);
+    }
+  });
+
+  it("validates invitation role revisions and applies live defaults on acceptance", async () => {
+    const roleId = randomUUID();
+    let invitationId: string | undefined;
+    try {
+      await client.query(
+        `INSERT INTO identity.organization_roles (id, organization_id, name, security_class, base_role_key, default_permissions)
+         VALUES ($1, $2, 'Invitation role', 'staff', 'hotel_custom', '["pms.inbox.read"]')`,
+        [roleId, org],
+      );
+      const invite = command({ commandId: randomUUID(), idempotencyKey: randomUUID() });
+      invite.payload = {
+        ...invite.payload,
+        roleKey: "hotel_custom",
+        roleDefinitionId: roleId,
+        expectedRoleRevision: "1",
+        permissionOverrides: { grant: ["pms.inbox.reply"], deny: [] },
+      };
+      for (const patch of [
+        { expectedRoleRevision: "2" },
+        { roleDefinitionId: randomUUID() },
+        { roleKey: "front_desk" as const },
+        { expectedRoleRevision: undefined },
+      ]) {
+        expect(
+          await repository.persist({ ...invite, payload: { ...invite.payload, ...patch } }),
+        ).toMatchObject({ outcome: "rejected" });
+      }
+      const created = await repository.persist(invite);
+      expect(created.outcome).toBe("created");
+      if (created.outcome !== "created") throw new Error("Expected saved role invitation");
+      invitationId = created.invitationId;
+      expect(await repository.getInvitation(org, invitationId)).toMatchObject({
+        roleDefinitionId: roleId,
+        roleDefinition: { id: roleId, revision: "1" },
+      });
+      await client.query(
+        `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
+        [invitationId, `invitation_${invitationId}`],
+      );
+      await client.query(
+        `UPDATE identity.organization_roles SET default_permissions = '["pms.calendar.read","pms.inbox.read"]' WHERE id = $1`,
+        [roleId],
+      );
+      expect(await repository.persist(invite)).toMatchObject({
+        outcome: "idempotent_replay",
+        invitationId,
+      });
+      const event = acceptanceEvent(`invitation_${invitationId}`);
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({
+        outcome: "accepted",
+        membershipId: staffMembership,
+      });
+      const saved = (await repository.getAccess(org, staffMembership))!;
+      expect(saved).toMatchObject({
+        roleDefinitionId: roleId,
+        configuredPermissions: ["pms.calendar.read", "pms.inbox.read", "pms.inbox.reply"],
+      });
+      expect(await acceptanceRepository.reconcile(event)).toMatchObject({
+        outcome: "idempotent_replay",
+      });
+      expect(await repository.getAccess(org, staffMembership)).toEqual(saved);
+      const jobs = await client.query(
+        "SELECT job_metadata FROM platform.jobs WHERE job_metadata->>'commandId' = $1",
+        [event.providerEventId],
+      );
+      expect(jobs.rows).toMatchObject([{ job_metadata: { reason: "role_permissions_changed" } }]);
+    } finally {
+      await client.query(
+        "UPDATE identity.organization_memberships SET role_definition_id = NULL WHERE id = $1",
+        [staffMembership],
+      );
+      if (invitationId)
+        await client.query(
+          "UPDATE identity.staff_invitations SET role_definition_id = NULL WHERE id = $1",
+          [invitationId],
+        );
+      await client.query("DELETE FROM identity.organization_roles WHERE id = $1", [roleId]);
+    }
+  });
+
   async function expectAcceptance(
     invitation: Awaited<ReturnType<typeof deliveredInvitation>>,
     expected: object,
@@ -1233,6 +2317,38 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       await acceptanceRepository.reconcile(acceptanceEvent(invitation.providerInvitationId, patch)),
     ).toMatchObject(expected);
   }
+
+  it("acceptance waits for the organization before locking its invitation", async () => {
+    const invitation = await deliveredInvitation();
+    await client.query("BEGIN");
+    await client.query("SELECT id FROM identity.organizations WHERE id = $1 FOR UPDATE", [org]);
+    const accepting = acceptanceRepository.reconcile(
+      acceptanceEvent(invitation.providerInvitationId),
+    );
+    let result;
+    try {
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        await client.query("SELECT pg_stat_clear_snapshot()");
+        waiting = (
+          await client.query<{ waiting: boolean }>(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE OF organization%'
+        ) AS waiting`)
+        ).rows[0]!.waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      await client.query(
+        "SELECT id FROM identity.staff_invitations WHERE id = $1 FOR UPDATE NOWAIT",
+        [invitation.invitationId],
+      );
+    } finally {
+      await client.query("ROLLBACK");
+      result = await accepting;
+    }
+    expect(result).toMatchObject({ outcome: "accepted" });
+  });
 
   it("atomically replaces staff access and leaves later edits intact on replay", async () => {
     await client.query(
@@ -1287,6 +2403,120 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
         ])
       ).rows[0]?.role_key,
     ).toBe("housekeeping");
+  });
+
+  it("accepts a dynamic property invitation without materializing assignments", async () => {
+    const invitation = await deliveredInvitation(1, undefined, "all");
+    await expectAcceptance(invitation, { outcome: "accepted" });
+    expect(await repository.getAccess(org, staffMembership)).toMatchObject({
+      propertyAccessMode: "all",
+      propertyIds: [],
+    });
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+    [false, false],
+    [true, true],
+  ])(
+    "copies invitation PMS=%s Booking=%s over existing member flags and preserves later edits on replay",
+    async (pms, booking) => {
+      const invitation = await deliveredInvitation(1, { pms, booking });
+      const stored = await client.query(
+        `SELECT pms_access_enabled, booking_access_enabled FROM identity.staff_invitations WHERE id = $1`,
+        [invitation.invitationId],
+      );
+      expect(stored.rows[0]).toEqual({ pms_access_enabled: pms, booking_access_enabled: booking });
+      await client.query(
+        `UPDATE identity.organization_memberships SET pms_access_enabled = $2, booking_access_enabled = $3 WHERE id = $1`,
+        [staffMembership, !pms, !booking],
+      );
+      await expectAcceptance(invitation, { outcome: "accepted" });
+      expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual({
+        pms,
+        booking,
+      });
+      await client.query(
+        `UPDATE identity.organization_memberships SET pms_access_enabled = $2, booking_access_enabled = $3 WHERE id = $1`,
+        [staffMembership, !pms, !booking],
+      );
+      await expectAcceptance(invitation, { outcome: "idempotent_replay" });
+      expect((await repository.getAccess(org, staffMembership))!.productAccess).toEqual({
+        pms: !pms,
+        booking: !booking,
+      });
+    },
+  );
+
+  it("includes invitation product flags in the normalized idempotency fingerprint", async () => {
+    const invite = command();
+    invite.payload.productAccess = { pms: false, booking: true };
+    expect(await repository.persist(invite)).toMatchObject({ outcome: "created" });
+    invite.payload.productAccess = { booking: true, pms: false };
+    expect(await repository.persist(invite)).toMatchObject({ outcome: "idempotent_replay" });
+    invite.payload.productAccess.pms = true;
+    expect(await repository.persist(invite)).toEqual({
+      outcome: "rejected",
+      reason: "idempotency_conflict",
+    });
+  });
+
+  it("creates a new membership with the invitation product restriction", async () => {
+    const newUser = randomUUID();
+    const newEmail = `${newUser}@example.test`;
+    let invitationId: string | undefined;
+    let newMembership: string | undefined;
+    try {
+      await client.query(
+        "INSERT INTO identity.users (id, email, status) VALUES ($1, $2, 'active')",
+        [newUser, newEmail],
+      );
+      await client.query(
+        `INSERT INTO identity.external_identities (user_id, provider, provider_user_id, provider_email, provider_email_verified) VALUES ($1, 'workos', $2, $3, true)`,
+        [newUser, newUser, newEmail],
+      );
+      const invite = command({ email: newEmail });
+      invite.payload.productAccess = { pms: false, booking: true };
+      const created = await repository.persist(invite);
+      if (created.outcome !== "created") throw new Error("expected new invitation");
+      invitationId = created.invitationId;
+      await client.query(
+        `UPDATE identity.staff_invitations SET delivery_state = 'delivered', delivery_attempted_at = now(), provider_invitation_id = $2, expires_at = now() + interval '7 days' WHERE id = $1`,
+        [invitationId, newUser],
+      );
+      const accepted = await acceptanceRepository.reconcile(
+        acceptanceEvent(newUser, { providerUserId: newUser, invitationEmail: newEmail }),
+      );
+      if (accepted.outcome !== "accepted") throw new Error("expected new membership");
+      newMembership = accepted.membershipId;
+      expect((await repository.getAccess(org, newMembership))!.productAccess).toEqual({
+        pms: false,
+        booking: true,
+      });
+    } finally {
+      await client.query("BEGIN; SET LOCAL session_replication_role = replica");
+      await client.query("DELETE FROM platform.product_audit_events WHERE actor_user_id = $1", [
+        newUser,
+      ]);
+      await client.query(
+        "DELETE FROM identity.staff_invitation_property_assignments WHERE invitation_id = $1",
+        [invitationId ?? null],
+      );
+      await client.query("DELETE FROM identity.staff_invitations WHERE id = $1", [
+        invitationId ?? null,
+      ]);
+      await client.query(
+        "DELETE FROM identity.membership_property_assignments WHERE membership_id = $1",
+        [newMembership ?? null],
+      );
+      await client.query("DELETE FROM identity.organization_memberships WHERE user_id = $1", [
+        newUser,
+      ]);
+      await client.query("DELETE FROM identity.external_identities WHERE user_id = $1", [newUser]);
+      await client.query("DELETE FROM identity.users WHERE id = $1", [newUser]);
+      await client.query("COMMIT");
+    }
   });
 
   it("fails closed across provider, identity, membership, expiry, and access denials", async () => {
@@ -1355,7 +2585,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     await client.query("COMMIT");
     await expectAcceptance(
       invitation,
-      { outcome: "rejected", reason: "membership_protected" },
+      { outcome: "rejected", reason: "invitation_access_invalid" },
       { providerEventId: "event_external_owner_origin" },
     );
     await client.query("BEGIN");

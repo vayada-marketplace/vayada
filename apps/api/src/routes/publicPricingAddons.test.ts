@@ -3,6 +3,7 @@ import { buildApp } from "../app.js";
 import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 import { createTargetBookingWebCheckoutAdapter } from "./bookingWebPublic.js";
 import { createTargetPmsInventoryReservationPort } from "../domains/pmsInventoryReservation.js";
+import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import type { Pool } from "pg";
 
 it("serves explicit add-on metadata through the public no-store route", async () => {
@@ -51,6 +52,7 @@ it("does not expose an unconfigured catalogue or underlying database errors", as
     },
   } as unknown as Pool;
   const adapter = createTargetBookingWebCheckoutAdapter({
+    externalChanges: externalBookingChanges,
     connectionString: "postgresql://unused",
     pool,
     inventoryReservationPort: createTargetPmsInventoryReservationPort(),
