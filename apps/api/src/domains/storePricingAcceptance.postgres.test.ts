@@ -161,19 +161,32 @@ describe.skipIf(!url)("pricing acceptance persistence PostgreSQL", () => {
         expect(
           (
             await db.query(
-              `SELECT job_type,payload->>'contractVersion' AS version,
-                payload->'command'->>'acceptanceId' AS acceptance
+              `SELECT queue_name,job_type,resource_product,resource_type,resource_id,
+                payload->>'version' AS version,payload->>'acceptanceId' AS acceptance,
+                payload->>'guestBookingId' AS booking,payload->>'propertyId' AS property
                FROM platform.jobs WHERE id=$1`,
               [staged.jobId],
             )
           ).rows,
         ).toEqual([
           {
+            queue_name: "pms-reservation-handoff",
             job_type: PMS_ACCEPTED_PRICING_JOB_TYPE,
-            version: "pms-accepted-pricing-job.v1",
+            resource_product: "booking",
+            resource_type: "guest_booking",
+            resource_id: bookingId,
+            version: "booking.pricing-pms-handoff.v1",
             acceptance: result.acceptanceId,
+            booking: bookingId,
+            property: propertyId,
           },
         ]);
+        await db.query("UPDATE platform.jobs SET resource_type='wrong_booking' WHERE id=$1", [
+          staged.jobId,
+        ]);
+        await expect(
+          stagePmsAcceptedPricingReservationJob(client, "hotel", result),
+        ).rejects.toThrow("PMS accepted-pricing job conflict");
         const { fingerprint, ...input } = f.command;
         void fingerprint;
         expect(await replayPricingAcceptance(client, "hotel", input)).toEqual({

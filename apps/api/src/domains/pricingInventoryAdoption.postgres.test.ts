@@ -385,18 +385,21 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
           await db.query(
             `INSERT INTO platform.jobs
              (job_key,queue_name,job_type,tenant_scope,property_id,resource_product,
-              resource_type,resource_id,payload)
-             VALUES($1,$2,$3,'property',$4,'pms','accepted_pricing_reservation',$5,$6)
+              resource_type,resource_id,correlation_id,payload)
+             VALUES($1,$2,$3,'property',$4,'booking','guest_booking',$5,$6,$7)
              ON CONFLICT(queue_name,job_key) DO NOTHING`,
             [
-              `worker:${acceptanceId}`,
+              `pms:pricing-acceptance:${acceptanceId}:create:v1`,
               PMS_ACCEPTED_PRICING_QUEUE,
               PMS_ACCEPTED_PRICING_JOB_TYPE,
               propertyId,
               bookingId,
+              acceptanceId,
               {
-                contractVersion: PMS_ACCEPTED_PRICING_JOB_VERSION,
-                command: acceptedPricingCommand,
+                version: PMS_ACCEPTED_PRICING_JOB_VERSION,
+                propertyId,
+                guestBookingId: bookingId,
+                acceptanceId,
               },
             ],
           );
@@ -516,7 +519,7 @@ describe.skipIf(!url)("replacement PMS inventory adoption PostgreSQL", () => {
               await db.query(
                 `SELECT status,attempts_count,job_metadata->>'outcome' AS outcome
                  FROM platform.jobs WHERE job_key=$1`,
-                [`worker:${acceptanceId}`],
+                [`pms:pricing-acceptance:${acceptanceId}:create:v1`],
               )
             ).rows,
           ).toEqual([{ status: "succeeded", attempts_count: 1, outcome: "adopted" }]);
