@@ -136,6 +136,7 @@ export function expireCheckoutIdempotencyKeyAt(
   operation: string,
   identity: string,
   expiresAt: string | undefined,
+  expectedKey?: string,
 ): void {
   if (!expiresAt) return;
   const timestamp = new Date(expiresAt).getTime();
@@ -143,7 +144,7 @@ export function expireCheckoutIdempotencyKeyAt(
   const state = checkoutAttemptState();
   const binding = `${operation}:${identity}`;
   const existing = state.keys[binding];
-  if (!existing) return;
+  if (!existing || (expectedKey !== undefined && existing.key !== expectedKey)) return;
   state.keys[binding] = { ...existing, expiresAt: timestamp };
   safeSet(CHECKOUT_ATTEMPT_KEY, JSON.stringify(state));
 }

@@ -731,6 +731,8 @@ function HomePageContent() {
             </div>
           )}
 
+        <a href={`/${locale}/book?${new URLSearchParams({ checkIn, checkOut })}`} className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white">Choose rooms and get a price</a>
+
         {/* Room Cards */}
         <div>
           <div className="space-y-6">

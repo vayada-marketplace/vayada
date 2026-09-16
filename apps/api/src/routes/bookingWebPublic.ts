@@ -1,3 +1,15 @@
+import { createPublicPricingOfferCatalog } from "../domains/publicPricingOfferCatalog.js";
+import { createPublicQuoteGuestDisclosure } from "../domains/publicQuoteGuestDisclosure.js";
+import { createPublicPricingAddonCatalog } from "../domains/publicPricingAddonCatalog.js";
+import { createCurrentPricingQuoteStore } from "../domains/currentPricingQuoteStore.js";
+import {
+  PricingAcceptanceError,
+  writePricingAcceptance,
+} from "../domains/pricingAcceptanceWriter.js";
+import {
+  createReplacementBookingQuoteIssuer,
+  requirePublicQuoteKey,
+} from "./replacementBookingQuote.js";
 import type { ExternalChangePresentationPort } from "../domains/booking/externalChangePresentation.js";
 import { pmsRoomStayRestrictionReason } from "../domains/pmsRoomSelectionConflicts.js";
 import {
@@ -36,7 +48,6 @@ import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import {
   allocateMixedQuoteDiscount,
-  createTargetMixedCheckoutQuote,
   mixedSelectionOffer,
   mixedSelectionPromotion,
 } from "./bookingWebMixedSnapshot.js";
@@ -234,6 +245,10 @@ export type BookingWebCheckoutAdapter = {
     clientAddressHash: string,
     context: BookingWebCheckoutCommandContext,
   ): Promise<void>;
+  getPricingOffers?(slug: string): Promise<unknown>;
+  getPricingAddons?(slug: string): Promise<unknown>;
+  getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
+  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -510,6 +525,67 @@ export async function registerBookingWebPublicRoutes(
     return response;
   });
 
+  app.get<{ Params: BookingWebHotelParams }>(
+    "/hotels/:slug/pricing-offers",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getPricingOffers)
+        throw createHttpError(404, "Pricing offers unavailable.");
+      return checkoutAdapter.getPricingOffers(request.params.slug);
+    },
+  );
+
+  app.get<{ Params: BookingWebHotelParams }>(
+    "/hotels/:slug/pricing-addons",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getPricingAddons)
+        throw createHttpError(404, "Pricing extras unavailable.");
+      return checkoutAdapter.getPricingAddons(request.params.slug);
+    },
+  );
+
+  app.get<{ Params: BookingWebHotelParams & { quoteId: string } }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/guest-disclosure",
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Robots-Tag", "noindex");
+      if (!checkoutAdapter.getQuoteGuestDisclosure)
+        throw createHttpError(404, "Guest rules unavailable.");
+      return checkoutAdapter.getQuoteGuestDisclosure(request.params.slug, request.params.quoteId);
+    },
+  );
+
+  app.post<{
+    Params: BookingWebHotelParams & { quoteId: string };
+    Body: BookingWebCheckoutRequest;
+  }>(
+    "/hotels/:slug/bookings/quotes/:quoteId/accept",
+    {
+      bodyLimit: 64 * 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      if (!checkoutAdapter.acceptPricingQuote)
+        throw createHttpError(404, "Quote acceptance unavailable.");
+      if (
+        body.quoteId !== request.params.quoteId ||
+        body.requestId !== request.headers["idempotency-key"]
+      )
+        throw createHttpError(400, "Invalid quote acceptance request.");
+      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
+      return response;
+    },
+  );
+
   app.get<{ Params: BookingWebHotelParams; Querystring: PublicHotelQuoteQuery }>(
     "/hotels/:slug/offers",
     async (request, reply) => {
@@ -586,6 +662,14 @@ export async function registerBookingWebPublicRoutes(
 
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings/quote",
+    {
+      bodyLimit: 64 * 1024,
+      async onRequest(request, reply) {
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Robots-Tag", "noindex");
+        requirePublicQuoteKey(request);
+      },
+    },
     async (request, reply) => {
       const body = request.body ?? {};
       const response = await checkoutAdapter.quoteBooking(
@@ -1271,12 +1355,22 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Keep false until replacement acceptance is ready for public checkout traffic. */
+  replacementPricingAcceptanceEnabled?: boolean;
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
-  airbnbAlterations?: { decide(input: {
-    propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
-    action: "accept" | "decline"; correlationId: string;
-  }): Promise<unknown> };
+  airbnbAlterations?: {
+    propertyIds?: readonly string[];
+    allowUnverifiedAirbnbAlterations?: boolean;
+    decide(input: {
+      propertyId: string;
+      bookingId: string;
+      changeRequestId: string;
+      actorUserId: string;
+      action: "accept" | "decline";
+      correlationId: string;
+    }): Promise<unknown>;
+  };
   /** Enable only after all mixed selection consumers have passed cutover validation. */
   mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
@@ -1352,40 +1446,76 @@ export function createTargetBookingWebCheckoutAdapter(
       max: config.max,
     });
 
+  const pricingOffers = createPublicPricingOfferCatalog(pool);
+  const pricingAddons = createPublicPricingAddonCatalog(pool);
+  const guestDisclosure = createPublicQuoteGuestDisclosure(pool);
+  const issueReplacementQuote = createReplacementBookingQuoteIssuer(
+    createCurrentPricingQuoteStore(pool, 300),
+  );
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
-    serializeChangeRequest(row, config.externalChanges, enabled);
+    serializeChangeRequest(
+      row,
+      config.externalChanges,
+      enabled,
+      config.airbnbAlterations?.allowUnverifiedAirbnbAlterations === true,
+    );
 
-  async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
-    action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
-    if (!config.airbnbAlterations) return null;
-    const load = async () => (await pool.query<TargetChangeRequestRow>(
-      `SELECT change.id::text AS id,change.guest_booking_id::text AS "guestBookingId",change.status,
+  async function providerDecision(
+    propertyId: string,
+    bookingId: string,
+    changeRequestId: string,
+    action: "accept" | "decline",
+    context: BookingHotelChangeDecisionContext,
+  ) {
+    if (
+      !config.airbnbAlterations ||
+      (config.airbnbAlterations.propertyIds &&
+        !config.airbnbAlterations.propertyIds.includes(propertyId))
+    )
+      return null;
+    const load = async () =>
+      (
+        await pool.query<TargetChangeRequestRow>(
+          `SELECT change.id::text AS id,change.guest_booking_id::text AS "guestBookingId",change.status,
        change.requested_changes AS "requestedChanges",change.decision_note AS "decisionNote",
        change.decided_at AS "decidedAt",change.created_at AS "createdAt"
        FROM booking.booking_change_requests change JOIN booking.guest_bookings booking
          ON booking.id=change.guest_booking_id
        WHERE booking.property_id=$1::uuid AND (booking.id::text=$2 OR booking.public_reference=$2)
-         AND change.id=$3::uuid AND change.request_type='date_change'`,[propertyId,bookingId,changeRequestId],
-    )).rows[0];
+         AND change.id=$3::uuid AND change.request_type='date_change'`,
+          [propertyId, bookingId, changeRequestId],
+        )
+      ).rows[0];
     const request = await load();
     if (!request || !config.externalChanges.isManaged(request.requestedChanges)) return null;
     try {
-      await config.airbnbAlterations.decide({propertyId,bookingId:request.guestBookingId,
-        changeRequestId,actorUserId:context.actorUserId,action,correlationId:context.correlationId ?? context.requestId});
+      await config.airbnbAlterations.decide({
+        propertyId,
+        bookingId: request.guestBookingId,
+        changeRequestId,
+        actorUserId: context.actorUserId,
+        action,
+        correlationId: context.correlationId ?? context.requestId,
+      });
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
       if (code !== "alteration_decision_in_progress") {
-        const message = code === "alteration_rooms_unavailable" ? "The requested rooms are no longer available."
-          : code === "alteration_finance_reconciliation_required" ? "This booking has financial records that Vayada cannot update automatically. No approval was sent. You can still decline the request."
-          : code === "alteration_decision_conflict" ? "A different decision has already been recorded."
-          : code === "alteration_linked_inventory_unsupported" ? "This change involves linked rooms and needs to be handled in Airbnb."
-          : "The Airbnb decision could not be confirmed. Refresh the request before trying again.";
-        throw createHttpError(409,message);
+        const message =
+          code === "alteration_rooms_unavailable"
+            ? "The requested rooms are no longer available."
+            : code === "alteration_finance_reconciliation_required"
+              ? "This booking has financial records that Vayada cannot update automatically. No approval was sent. You can still decline the request."
+              : code === "alteration_decision_conflict"
+                ? "A different decision has already been recorded."
+                : code === "alteration_linked_inventory_unsupported"
+                  ? "This change involves linked rooms and needs to be handled in Airbnb."
+                  : "The Airbnb decision could not be confirmed. Refresh the request before trying again.";
+        throw createHttpError(409, message);
       }
     }
     const updated = await load();
-    if (!updated) throw createHttpError(409,"The Airbnb change request is no longer available.");
-    return serializeTargetChangeRequest(updated,true);
+    if (!updated) throw createHttpError(409, "The Airbnb change request is no longer available.");
+    return serializeTargetChangeRequest(updated, true);
   }
 
   const editCleanupTimer = setInterval(() => {
@@ -1467,10 +1597,25 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
-      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations)) : null;
+      return result
+        ? serializeTargetChangeRequest(
+            result,
+            Boolean(
+              config.airbnbAlterations &&
+              (!config.airbnbAlterations.propertyIds ||
+                config.airbnbAlterations.propertyIds.includes(propertyId)),
+            ),
+          )
+        : null;
     },
     async acceptChangeRequest(propertyId, bookingId, changeRequestId, context) {
-      const provider = await providerDecision(propertyId, bookingId, changeRequestId, "accept", context);
+      const provider = await providerDecision(
+        propertyId,
+        bookingId,
+        changeRequestId,
+        "accept",
+        context,
+      );
       if (provider) return provider;
       return withTargetCheckoutTransaction(pool, async (client) => {
         const decision = await reserveTargetBookingChangeDecision(client, {
@@ -1601,7 +1746,13 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async declineChangeRequest(propertyId, bookingId, changeRequestId, note, context) {
-      const provider = await providerDecision(propertyId, bookingId, changeRequestId, "decline", context);
+      const provider = await providerDecision(
+        propertyId,
+        bookingId,
+        changeRequestId,
+        "decline",
+        context,
+      );
       if (provider) return provider;
       return withTargetCheckoutTransaction(pool, async (client) => {
         const decision = await reserveTargetBookingChangeDecision(client, {
@@ -1826,37 +1977,65 @@ export function createTargetBookingWebCheckoutAdapter(
         return body;
       });
     },
+    async getQuoteGuestDisclosure(slug, quoteId) {
+      let disclosure;
+      try {
+        disclosure = await guestDisclosure.read(slug, quoteId);
+      } catch (error) {
+        throw Object.assign(new Error("Guest rules temporarily unavailable.", { cause: error }), {
+          statusCode: 503,
+        });
+      }
+      if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
+      return disclosure;
+    },
+    async acceptPricingQuote(slug, request) {
+      if (!config.replacementPricingAcceptanceEnabled)
+        throw createHttpError(404, "Quote acceptance unavailable.");
+      try {
+        return await writePricingAcceptance(pool, { slug, command: request });
+      } catch (error) {
+        const statusCode =
+          error instanceof PricingAcceptanceError
+            ? error.code === "conflict"
+              ? 409
+              : error.code === "storage"
+                ? 503
+                : 500
+            : 500;
+        throw Object.assign(new Error("Quote acceptance unavailable.", { cause: error }), {
+          statusCode,
+        });
+      }
+    },
+    async getPricingAddons(slug) {
+      let addons;
+      try {
+        addons = await pricingAddons.read(slug);
+      } catch (error) {
+        throw Object.assign(
+          new Error("Pricing extras temporarily unavailable.", { cause: error }),
+          { statusCode: 503 },
+        );
+      }
+      if (!addons) throw createHttpError(404, "Pricing extras unavailable.");
+      return addons;
+    },
+    async getPricingOffers(slug) {
+      let offers;
+      try {
+        offers = await pricingOffers.read(slug);
+      } catch (error) {
+        throw Object.assign(
+          new Error("Pricing offers temporarily unavailable.", { cause: error }),
+          { statusCode: 503 },
+        );
+      }
+      if (!offers) throw createHttpError(404, "Pricing offers unavailable.");
+      return offers;
+    },
     async quoteBooking(slug, request, context) {
-      const action = async (executor: BookingWebQueryExecutor) => {
-        const property = await resolveTargetCheckoutProperty(executor, slug, true);
-        if (context) {
-          const reservation = await reserveTargetCheckoutCommand(
-            executor,
-            property.propertyId,
-            context,
-          );
-          if (reservation.status === "replay") return reservation.body;
-        }
-        if (request["roomSelection"] !== undefined && !config.mixedRoomSelectionsEnabled)
-          throw createHttpError(400, "Room selection checkout is not available.");
-        const quote = await (
-          request["roomSelection"] !== undefined
-            ? createTargetMixedCheckoutQuote
-            : createTargetCheckoutQuote
-        )(executor, property, request, context?.occurredAt ?? config.now?.() ?? new Date());
-        const body = serializeTargetCheckoutQuote(quote);
-        if (context) {
-          await recordTargetCheckoutCommand(executor, {
-            propertyId: property.propertyId,
-            context,
-            resourceType: "checkout_quote",
-            resourceId: quote.publicQuoteReference,
-            body,
-          });
-        }
-        return body;
-      };
-      return context ? withTargetCheckoutTransaction(pool, action) : action(pool);
+      return issueReplacementQuote(slug, request, context?.idempotencyKey);
     },
     async confirmAuthorization(slug, handle, context) {
       if (!context) throw createHttpError(400, "Checkout command context is required.");
@@ -3745,6 +3924,7 @@ export async function loadTargetBooking(
        LIMIT 1
      ) card_payment ON TRUE
      WHERE b.property_id = $1::uuid
+       AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
        AND (
          ($3::text IS NOT NULL AND lower(booker.email) = lower($3))
@@ -4181,10 +4361,20 @@ async function insertTargetChangeRequest(
   return changeRequest;
 }
 
-function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false): Record<string, unknown> {
+function serializeChangeRequest(
+  row: TargetChangeRequestRow,
+  externalChanges: ExternalChangePresentationPort,
+  providerEnabled = false,
+  allowUnverifiedMoney = false,
+): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
-    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status),
+    providerRequest: externalChanges.project(
+      snapshot,
+      providerEnabled && row.status === "pending",
+      row.status,
+      allowUnverifiedMoney,
+    ),
     ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,
@@ -4768,7 +4958,8 @@ export async function redeemTargetPromo(
       JSON.stringify({ quoteReference: quote.publicQuoteReference }),
     ],
   );
-  if (redemption.rows.length !== 1) throw createHttpError(409, "Promo redemption changed. Please refresh.");
+  if (redemption.rows.length !== 1)
+    throw createHttpError(409, "Promo redemption changed. Please refresh.");
 }
 
 export async function reverseTargetPromoRedemption(

@@ -42,9 +42,10 @@ export interface BookingReservation {
   nights: number;
   adults: number;
   children: number;
-  nightlyRate: number;
+  nightlyRate: number | null;
   numberOfRooms: number;
-  totalAmount: number;
+  totalAmount: number | null;
+  amountStatus?: "recorded" | "unverified";
   currency: string;
   status: string;
   roomId: string | null;
@@ -56,7 +57,7 @@ export interface BookingReservation {
   depositRequired: boolean;
   depositPercentage: number | null;
   depositAmount: number;
-  balanceAmount: number;
+  balanceAmount: number | null;
   checkInPendingFlags: string[];
   checkedInAt: string | null;
   checkedOutAt: string | null;

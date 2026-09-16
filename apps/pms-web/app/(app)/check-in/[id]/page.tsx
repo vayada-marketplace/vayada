@@ -95,6 +95,7 @@ function guestsLabel(
 }
 
 function isPaid(b: Booking) {
+  if (b.amountStatus === "unverified") return false;
   if (b.depositRequired) return b.balanceAmount <= 0;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
@@ -521,7 +522,11 @@ export default function CheckInPage() {
           <div className="space-y-4">
             <Card title={t("checkIn.stay")}>
               {booking.numberOfRooms > 1 && (
-                <BookingStaySummary stays={booking.stays} expectedCount={booking.numberOfRooms} />
+                <BookingStaySummary
+                  amountStatus={booking.amountStatus}
+                  stays={booking.stays}
+                  expectedCount={booking.numberOfRooms}
+                />
               )}
               <div hidden={booking.numberOfRooms > 1} className="grid gap-3 text-sm md:grid-cols-3">
                 <Info
@@ -633,19 +638,20 @@ export default function CheckInPage() {
                 >
                   {bookingSettlementLabel(booking, t)}
                 </p>
-                {(!booking.depositRequired || booking.balanceAmount > 0) && (
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={markPaid}
-                      disabled={!LEGACY_BOOKING_WRITES_AVAILABLE || actionLoading !== null}
-                      title={t("checkIn.paymentChangesUnavailable")}
-                      className="cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-400"
-                    >
-                      {t("checkIn.markPaidUnavailable")}
-                    </button>
-                  </div>
-                )}
+                {booking.amountStatus !== "unverified" &&
+                  (!booking.depositRequired || booking.balanceAmount > 0) && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={markPaid}
+                        disabled={!LEGACY_BOOKING_WRITES_AVAILABLE || actionLoading !== null}
+                        title={t("checkIn.paymentChangesUnavailable")}
+                        className="cursor-not-allowed rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-400"
+                      >
+                        {t("checkIn.markPaidUnavailable")}
+                      </button>
+                    </div>
+                  )}
               </div>
             </Card>
 

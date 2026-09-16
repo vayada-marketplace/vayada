@@ -1,18 +1,17 @@
 import { createHash } from "node:crypto";
 
 import {
-  BOOKING_GUEST_POLICY_ABSENT_SOURCE_REVISION,
   createBookingDesignSourceRevision,
   parseBookingDesignRevision,
-  parseBookingGuestPolicyCurrentSourceRevision,
+  parseBookingGuestPolicyChoices,
   type BookingDesignReadPort,
-  type BookingGuestPolicyCurrentOwnerEvidencePort,
 } from "@vayada/domain-booking";
 import {
   isPropertySetupBaseRevisionManifest,
   parseHotelCatalogStep1ReadModel,
 } from "@vayada/domain-hotels";
 
+import type { createBookingGuestChoiceStore } from "../domains/bookingGuestChoiceStore.js";
 import type { HotelCatalogStep1Repository } from "../domains/hotelCatalogStep1Repository.js";
 import type {
   PropertySetupOwnerStateProviderPort,
@@ -23,10 +22,7 @@ import type {
 export type PropertySetupBookingStateOptions = Readonly<{
   design: BookingDesignReadPort;
   catalog: Pick<HotelCatalogStep1Repository, "getState">;
-  guestPolicy?: Pick<
-    BookingGuestPolicyCurrentOwnerEvidencePort,
-    "getCurrentGuestPolicyOwnerEvidence"
-  >;
+  guestRules?: Pick<ReturnType<typeof createBookingGuestChoiceStore>, "read">;
 }>;
 
 export function createPropertySetupBookingStateProvider(
@@ -73,8 +69,8 @@ async function readSnapshot(
 ) {
   const wantsDesign = request.stepIds.includes("booking_design");
   const wantsGuestPolicy = request.stepIds.includes("guest_experience");
-  if (wantsGuestPolicy && !options.guestPolicy) return null;
-  const [rawDesign, catalogState, guestPolicy] = await Promise.all([
+  if (wantsGuestPolicy && !options.guestRules) return null;
+  const [rawDesign, catalogState, guestRules] = await Promise.all([
     wantsDesign
       ? options.design.getCurrentDesign({
           organizationId: request.organizationId,
@@ -89,7 +85,8 @@ async function readSnapshot(
         })
       : null,
     wantsGuestPolicy
-      ? options.guestPolicy!.getCurrentGuestPolicyOwnerEvidence({
+      ? options.guestRules!.read({
+          actorUserId: request.actorUserId,
           organizationId: request.organizationId,
           propertyId: request.propertyId,
         })
@@ -98,31 +95,26 @@ async function readSnapshot(
   const design = rawDesign === null ? null : parseBookingDesignRevision(rawDesign);
   const catalog = catalogState && parseHotelCatalogStep1ReadModel(catalogState.readModel);
   const guestPolicySource =
-    guestPolicy?.outcome === "available"
-      ? parseBookingGuestPolicyCurrentSourceRevision(
-          {
-            ownerDomain: "booking",
-            entityType: "guest_policy_revision",
-            entityId: request.propertyId,
-            revision: guestPolicy.currentBaseRevisions["booking.guest_experience"],
-          },
-          request.propertyId,
-        )
-      : null;
+    guestRules === null
+      ? "guest-choices:absent"
+      : guestRules &&
+          typeof guestRules.revision === "string" &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            guestRules.revision,
+          ) &&
+          parseBookingGuestPolicyChoices(guestRules.choices)
+        ? `guest-choices:${guestRules.revision}`
+        : null;
+  const guestPolicyBaseRevisions = guestPolicySource
+    ? Object.freeze({ "booking.guest_experience": guestPolicySource })
+    : null;
   if (
     (wantsDesign && rawDesign !== null && !design) ||
     (design && design.propertyId !== request.propertyId) ||
     (wantsDesign && (!catalog || catalog.propertyId !== request.propertyId)) ||
     (wantsGuestPolicy &&
-      (!guestPolicy ||
-        guestPolicy.outcome !== "available" ||
-        guestPolicy.organizationId !== request.organizationId ||
-        guestPolicy.propertyId !== request.propertyId ||
-        !isPropertySetupBaseRevisionManifest(
-          "guest_experience",
-          guestPolicy.currentBaseRevisions,
-        ) ||
-        !guestPolicySource))
+      (!guestPolicySource ||
+        !isPropertySetupBaseRevisionManifest("guest_experience", guestPolicyBaseRevisions)))
   ) {
     return null;
   }
@@ -137,21 +129,17 @@ async function readSnapshot(
         "hotel_catalog.media": catalog!.baseRevisions["hotel_catalog.media"],
       })
     : null;
-  const guestPolicyBaseRevisions =
-    guestPolicy?.outcome === "available"
-      ? Object.freeze({ ...guestPolicy.currentBaseRevisions })
-      : null;
   return Object.freeze({
     designRevision,
     designBaseRevisions,
     guestPolicyState:
-      guestPolicySource?.revision === BOOKING_GUEST_POLICY_ABSENT_SOURCE_REVISION
+      guestPolicySource === "guest-choices:absent"
         ? ("not_started" as const)
         : guestPolicySource
           ? ("complete" as const)
           : null,
     guestPolicyBaseRevisions,
-    identity: digest({ designRevision, designBaseRevisions, guestPolicyBaseRevisions }),
+    identity: digest({ designRevision, designBaseRevisions, guestPolicyBaseRevisions, guestRules }),
   });
 }
 

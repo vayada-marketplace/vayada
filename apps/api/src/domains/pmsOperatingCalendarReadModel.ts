@@ -222,38 +222,13 @@ async function readCurrentWithOwnerEvidence(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await lockPmsRoomFactsMutationScope(client, propertyId);
-    const revision = await latestRevision(client, propertyId);
-    if (revision === null) {
-      await client.query("COMMIT");
-      return null;
-    }
-    const configuration = await loadPmsOperatingCalendarConfigurationByRevision(
+    const result = await lockPmsOperatingCalendarWithOwnerEvidence(
       client,
       propertyId,
-      revision,
+      profileEvidence,
       registry,
+      roomEvidence,
     );
-    if (!configuration) throw new Error("PMS operating-calendar current revision disappeared");
-    const operatingIds = new Set(
-      (await readPmsRoomOperatingEligibility(client, propertyId))
-        .filter((room) => room.state === "operating")
-        .map((room) => room.roomTypeId),
-    );
-    const facts = (await readRoomFacts(roomEvidence, propertyId)).filter((room) =>
-      operatingIds.has(room.roomTypeId),
-    );
-    const lockIds = sortedUnique([
-      ...facts
-        .filter(({ lifecycle }) => lifecycle === "active")
-        .map(({ roomTypeId }) => roomTypeId),
-      ...configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId),
-    ]);
-    for (const roomTypeId of lockIds) {
-      await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, roomTypeId);
-    }
-    const capacities = await readActiveCapacities(roomEvidence, propertyId, facts);
-    const result = currentResult(configuration, profileEvidence, facts, capacities, registry);
     await client.query("COMMIT");
     return result;
   } catch (error) {
@@ -262,6 +237,44 @@ async function readCurrentWithOwnerEvidence(
   } finally {
     client.release();
   }
+}
+
+/** Caller owns the transaction and must supply owner evidence guarded for its lifetime. */
+export async function lockPmsOperatingCalendarWithOwnerEvidence(
+  client: Queryable,
+  inputPropertyId: string,
+  profileEvidence: PmsOperatingCalendarPropertyProfileEvidenceResult,
+  registry: PmsOperatingCalendarCanonicalTimeZoneRegistry,
+  roomEvidence: PmsOperatingCalendarRoomEvidencePorts,
+): Promise<PmsOperatingCalendarCurrentReadResult | null> {
+  const propertyId = readUuid(inputPropertyId);
+  await lockPmsRoomFactsMutationScope(client, propertyId);
+  const revision = await latestRevision(client, propertyId);
+  if (revision === null) return null;
+  const configuration = await loadPmsOperatingCalendarConfigurationByRevision(
+    client,
+    propertyId,
+    revision,
+    registry,
+  );
+  if (!configuration) throw new Error("PMS operating-calendar current revision disappeared");
+  const operatingIds = new Set(
+    (await readPmsRoomOperatingEligibility(client, propertyId))
+      .filter((room) => room.state === "operating")
+      .map((room) => room.roomTypeId),
+  );
+  const facts = (await readRoomFacts(roomEvidence, propertyId)).filter((room) =>
+    operatingIds.has(room.roomTypeId),
+  );
+  const lockIds = sortedUnique([
+    ...facts.filter(({ lifecycle }) => lifecycle === "active").map(({ roomTypeId }) => roomTypeId),
+    ...configuration.sourceInputs.roomBindings.map(({ roomTypeId }) => roomTypeId),
+  ]);
+  for (const roomTypeId of lockIds) {
+    await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, roomTypeId);
+  }
+  const capacities = await readActiveCapacities(roomEvidence, propertyId, facts);
+  return currentResult(configuration, profileEvidence, facts, capacities, registry);
 }
 
 function currentResult(

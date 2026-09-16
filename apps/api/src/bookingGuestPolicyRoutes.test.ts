@@ -1,3 +1,7 @@
+import {
+  registerBookingGuestChoiceRoutes,
+  type BookingGuestChoiceRoutesOptions,
+} from "./routes/bookingGuestChoices.js";
 import type {
   LinkedResource,
   OrganizationKind,
@@ -36,6 +40,91 @@ describe("protected Booking guest-policy routes", () => {
   afterEach(async () => {
     await app?.close();
     app = null;
+  });
+
+  it("routes guest-rule reads/writes with authenticated scope and rejects posted authority", async () => {
+    const store = {
+      read: vi.fn(async () => null),
+      save: vi.fn(async () => ({ revision: propertyId, replayed: false })),
+    };
+    app = await routeApp(
+      routeApplication(revisionFixture(), compositionFixture(), firstVisitReadiness(), []),
+      {},
+      store,
+    );
+    const url = `/properties/${propertyId}/guest-rules`;
+    const headers = { authorization: "Bearer valid-token", "idempotency-key": "rules-save" };
+    expect((await app.inject({ method: "GET", url, headers })).json()).toEqual({ current: null });
+    const payload = { expectedRevision: null, confirmed: true, choices };
+    expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(200);
+    expect(store.save).toHaveBeenCalledWith(
+      { propertyId, organizationId, actorUserId },
+      { ...payload, requestId: "rules-save" },
+    );
+    for (const extra of [{ organizationId }, { actorUserId }, { requestId: "body-key" }])
+      expect(
+        (await app.inject({ method: "PUT", url, headers, payload: { ...payload, ...extra } }))
+          .statusCode,
+      ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url,
+          headers: { authorization: headers.authorization },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(400);
+    for (const [code, status] of [
+      ["invalid_guest_choices", 400],
+      ["guest_choices_denied", 403],
+      ["guest_choices_stale", 409],
+      ["guest_choices_idempotency_conflict", 409],
+    ] as const) {
+      store.save.mockRejectedValueOnce(new Error(code));
+      expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(status);
+    }
+  });
+  it("denies guest-rule access before owner reads or writes across the authorization matrix", async () => {
+    for (const auth of [
+      { authenticated: false },
+      { permissions: [] },
+      { entitlements: [] },
+      { entitlements: [entitlement("suspended")] },
+      { links: [] },
+      { links: [link({ status: "suspended" })] },
+      {
+        propertyScope: {
+          mode: "assigned",
+          roleKey: "hotel_manager",
+          accessOrigin: "agency",
+          assignedPropertyIds: [],
+        },
+      },
+    ] as AuthOptions[]) {
+      const store = {
+        read: vi.fn(async () => null),
+        save: vi.fn(async () => ({ revision: propertyId, replayed: false })),
+      };
+      app = await routeApp(
+        routeApplication(revisionFixture(), compositionFixture(), firstVisitReadiness(), []),
+        auth,
+        store,
+      );
+      for (const method of ["GET", "PUT"] as const) {
+        const response = await app.inject({
+          method,
+          url: `/properties/${propertyId}/guest-rules`,
+          headers: { authorization: "Bearer valid-token" },
+        });
+        expect(response.statusCode).toBe(auth.authenticated === false ? 401 : 403);
+      }
+      expect(store.read).not.toHaveBeenCalled();
+      expect(store.save).not.toHaveBeenCalled();
+      await app.close();
+      app = null;
+    }
   });
 
   it("rejects incomplete and reversed arrival windows before any policy write", async () => {
@@ -347,7 +436,11 @@ type AuthOptions = {
   propertyScope?: MembershipPropertyScope | null;
 };
 
-async function routeApp(application: BookingGuestPolicyApplicationPort, auth: AuthOptions = {}) {
+async function routeApp(
+  application: BookingGuestPolicyApplicationPort,
+  auth: AuthOptions = {},
+  guestStore?: BookingGuestChoiceRoutesOptions["store"],
+) {
   const app = Fastify({ logger: false });
   app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => {
@@ -388,6 +481,11 @@ async function routeApp(application: BookingGuestPolicyApplicationPort, auth: Au
     application,
     propertyAccessRepository: propertyAccessRepository(auth.propertyScope),
   });
+  if (guestStore)
+    await app.register(registerBookingGuestChoiceRoutes, {
+      store: guestStore,
+      propertyAccessRepository: propertyAccessRepository(auth.propertyScope),
+    });
   return app;
 }
 

@@ -44,8 +44,9 @@ describe.skipIf(!databaseUrl)("Airbnb provider snapshots migration", () => {
     revision: string,
     at: string,
     days: string[],
-    amount: string,
+    amount: string | null,
     commission: string,
+    replacement?: "cancellation",
   ) =>
     client.query(
       `INSERT INTO finance.airbnb_provider_snapshots(property_id,guest_booking_id,provider_property_id,
@@ -60,6 +61,7 @@ describe.skipIf(!databaseUrl)("Airbnb provider snapshots migration", () => {
         amount,
         commission,
         JSON.stringify({
+          replacement,
           nights: days.map((stayDate) => ({
             roomTypeId: "82000000-0000-4000-8000-000000000006",
             linePosition: 1,
@@ -139,5 +141,21 @@ describe.skipIf(!databaseUrl)("Airbnb provider snapshots migration", () => {
     await expect(
       insert("revision-3", "2026-09-14T10:00:00.000002Z", ["2026-09-01"], "40", "4"),
     ).rejects.toMatchObject({ code: "23505" });
+  });
+  it("permits an unknown total only for a cancellation with no current nights", async () => {
+    await expect(
+      insert("unknown-invalid", "2026-09-15T00:00:00Z", [], null, "0"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      insert("unknown-nights", "2026-09-15T00:00:00Z", ["2026-09-01"], null, "0", "cancellation"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await insert("unknown-cancel", "2026-09-15T00:00:00Z", [], null, "0", "cancellation");
+    expect(
+      (
+        await client.query(
+          "SELECT provider_booking_amount FROM finance.airbnb_current_provider_amounts",
+        )
+      ).rows[0].provider_booking_amount,
+    ).toBeNull();
   });
 });

@@ -44,8 +44,10 @@ The current broad WorkOS backfill must not be run as an eight-owner repair.
 independently authorized, source-bound ID/email pairs, copies them before I/O,
 and requires a read-only session/transaction. One parameterized SELECT matches
 only those IDs or normalized emails in target users, plus associated WorkOS
-identity conflicts. Results contain only owner IDs and target classifications;
-database errors are replaced with a fixed code to avoid parameter disclosure.
+identity conflicts. Results contain owner IDs, target classifications and, for
+one target binding, a format-bounded provider ID plus email-match boolean;
+malformed provider IDs are redacted. Database errors are replaced with a fixed
+code to avoid parameter disclosure.
 This adapter accepts only ASCII email addresses and uses PostgreSQL `C` collation
 for database-side case folding so JavaScript and PostgreSQL cannot disagree;
 any internationalized address fails closed for a separately reviewed path.
@@ -60,3 +62,45 @@ Caller must independently verify the DB environment and full table visibility
 lifetime. This helper does not prove source ownership or provider state and does
 not set planner completeness. No production runner is wired; provider reads,
 source verification and organization/membership dependency checks remain pending.
+
+## Bounded source prerequisite
+
+`readLegacyOwnerBootstrapSources` reads only the eight approved owner/hotel pairs
+from a completed immutable source run. The independently approved request must
+bind ledger SHA256 and each row's ID, ordinal and checksum. The reader rehashes
+the selected PostgreSQL JSON in SQL and checks snapshot-identifier provenance;
+it does not replace full extraction/parity validation with a partial table scan.
+Ledger hash approval must follow that full validation. Unrelated row payloads
+are never returned; metadata for the run is read to verify the ledger hash.
+The reader also revalidates the exact four-source/table inventory, fingerprint
+parity and aggregate counts/checksums; a signed but incomplete ledger is denied.
+
+Requires a caller-owned REPEATABLE READ or SERIALIZABLE read-only transaction
+and verifies one PostgreSQL transaction ID spans every read, so matching session
+defaults without `BEGIN` are denied. It also requires verified environment/full
+table visibility. Sixteen exact source rows are
+required; the query caps at seventeen to detect duplicate/extra matches. The
+result includes sensitive email only for in-memory downstream comparison, not
+reporting. It proves a historical association, not current source ownership or
+production readiness. Protected QA hotel IDs are rejected. No writes occur.
+
+## Combined diagnostic assessment
+
+`assessLegacyOwnerBootstrap` composes the scoped source reader, scoped target
+reader and WorkOS exact external-ID/email GET lookups. Each database read uses
+its own REPEATABLE READ, READ ONLY transaction, rolled back and released before
+provider calls. Cleanup failure blocks and discards the connection. The provider
+client exposes only read methods. A pinned organization control checks provider
+configuration, not hotel ownership. Lookup pagination/errors/filter mismatch
+fail closed; 404 is absence only for exact external-ID lookup. An email-only
+candidate never authorizes a link. Known source/target blockers skip user lookups.
+For an existing target user, its single sanitized WorkOS provider-user binding
+and email-match flag must agree with the live external-ID lookup. Missing,
+different, malformed or cohort-reused bindings fail closed as identity conflicts.
+
+The result contains only the non-executable planner diagnosis, with no emails,
+provider responses or database errors. Freshness covers the entire assessment,
+not just its last request. This is not an atomic snapshot across systems and
+does not prove current source ownership: source evidence remains historical.
+The caller must verify environments and source approvals; no production runner,
+approval validator, identity writer, membership planner or user contact is wired.

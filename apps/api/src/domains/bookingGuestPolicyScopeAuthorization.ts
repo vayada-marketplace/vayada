@@ -26,7 +26,8 @@ export function createPgBookingGuestPolicyScopeAuthorizationPort(options: {
         !UUID_PATTERN.test(input.organizationId) ||
         !UUID_PATTERN.test(input.propertyId) ||
         !UUID_PATTERN.test(input.actorUserId) ||
-        input.permission !== BOOKING_GUEST_POLICY_AUTHORIZATION.permission ||
+        (input.permission !== BOOKING_GUEST_POLICY_AUTHORIZATION.permission &&
+          input.permission !== "booking.settings.read") ||
         input.entitlement.product !== BOOKING_GUEST_POLICY_AUTHORIZATION.entitlement.product ||
         input.entitlement.key !== BOOKING_GUEST_POLICY_AUTHORIZATION.entitlement.key ||
         input.resource.product !== BOOKING_GUEST_POLICY_AUTHORIZATION.resource.product ||

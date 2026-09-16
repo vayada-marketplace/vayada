@@ -2,11 +2,42 @@ import pg from "pg";
 import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
+import { createAirbnbAlterationRuntime } from "../airbnbAlterationRuntime.js";
+import { loadConfig } from "../config.js";
 import { createPgFinanceExpenseCategoryRepository } from "../domains/financeExpenseCategoryRepository.js";
 import { createPgFinanceManualExpenseRepository } from "../domains/financeManualExpenseRepository.js";
 import { installPostgresPoolRuntime, isPostgresUnavailableError } from "./postgresRuntime.js";
 
 describe("PostgreSQL runtime capacity", () => {
+  it("keeps the Airbnb decision journal physically separate under server pool sharing", async () => {
+    const OriginalPool = pg.Pool;
+    const pools = installPostgresPoolRuntime(pg);
+    const base = loadConfig({});
+    const runtime = createAirbnbAlterationRuntime({
+      connectionString: "postgresql://example/target",
+      config: {
+        ...base,
+        airbnbAlterations: { propertyIds: ["10090000-0000-4000-8000-000000000001"] },
+        channexManagement: {
+          ...base.channexManagement,
+          apiBaseUrl: "https://staging.channex.io",
+          apiKey: "synthetic",
+        },
+      },
+    })!;
+    try {
+      expect(pools.snapshot()).toMatchObject({ physicalPoolCount: 2, maxConnections: 9 });
+      await runtime.close();
+      expect(pools.snapshot().physicalPoolCount).toBe(0);
+    } finally {
+      await pools.close();
+      Object.defineProperty(pg, "Pool", {
+        configurable: true,
+        writable: true,
+        value: OriginalPool,
+      });
+    }
+  });
   it("shares and bounds equivalent pools while preserving client-specific timeouts", async () => {
     const postgres = { Pool: pg.Pool };
     const runtime = installPostgresPoolRuntime(postgres);

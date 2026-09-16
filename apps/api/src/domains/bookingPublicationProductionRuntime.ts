@@ -1,11 +1,11 @@
+import type { ReplacementPricingPublicationReader } from "./replacementPricingPublicationReader.js";
+import type { BookingGuestChoicePublicationReader } from "./bookingGuestChoicePublication.js";
 import {
   createBookingLaunchReadinessProvider,
   type BookingPublicationAuditContext,
   type BookingPublicationCommandPort,
   type BookingPublicationOperation,
   type BookingDesignReadinessPort,
-  type BookingGuestPolicyReadPort,
-  type BookingMandatoryChargeConfirmationEvidencePort,
   type ReadyBookingPublicationEvidence,
 } from "@vayada/domain-booking";
 import { createBookingPublicationBuilder } from "@vayada/domain-distribution/booking-publication-builder";
@@ -13,8 +13,6 @@ import type { HotelMediaResolutionPort } from "@vayada/domain-hotels";
 import type {
   PmsInventoryLaunchReadinessReadPort,
   PmsOperatingCalendarReadPort,
-  PmsPricingReadPort,
-  PmsRecurringPricingReadPort,
   RoomPublicationSnapshotPort,
 } from "@vayada/domain-pms";
 import type { FinancePaymentReadinessReadPort } from "@vayada/domain-finance";
@@ -144,13 +142,11 @@ export function createBookingPublicationProductionRuntime(config: {
   bookingHostBase?: string;
   mediaResolver: HotelMediaResolutionPort;
   design: BookingDesignReadinessPort;
-  guestPolicy: Pick<BookingGuestPolicyReadPort, "getCurrentGuestPolicy">;
+  guestRules: BookingGuestChoicePublicationReader;
   rooms: RoomPublicationSnapshotPort;
-  pricing: Pick<PmsPricingReadPort, "getPricingSourceSnapshot">;
-  recurringPricing: Pick<PmsRecurringPricingReadPort, "getRecurringPricingBookingEvidence">;
+  pricing: ReplacementPricingPublicationReader;
   operatingCalendar: PmsOperatingCalendarReadPort;
   inventory: PmsInventoryLaunchReadinessReadPort;
-  mandatoryChargeConfirmation: BookingMandatoryChargeConfirmationEvidencePort;
   finance: FinancePaymentReadinessReadPort;
 }): BookingPublicationProductionRuntime {
   const catalog = createHotelCatalogBookingPublicationSource({
@@ -160,15 +156,13 @@ export function createBookingPublicationProductionRuntime(config: {
   const booking = createBookingBookingPublicationSource({
     connectionString: config.connectionString,
     design: config.design,
-    guestPolicy: config.guestPolicy,
+    guestRules: config.guestRules,
   });
   const pms = createPmsBookingPublicationSource({
     rooms: config.rooms,
     pricing: config.pricing,
-    recurringPricing: config.recurringPricing,
     operatingCalendar: config.operatingCalendar,
     inventory: config.inventory,
-    mandatoryChargeConfirmation: config.mandatoryChargeConfirmation,
   });
   const financeEvidence = createFinanceBookingLaunchEvidenceAdapter({
     financeReadPort: config.finance,

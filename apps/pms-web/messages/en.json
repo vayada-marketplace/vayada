@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Amount unverified",
   "dashboard.reviewNoShow": "Review no-show…",
   "checkOut.reviewNoShow": "Review no-show…",
   "bookings.detail.canceledRefreshFailed": "Booking canceled. Reload the page to refresh reservation details.",

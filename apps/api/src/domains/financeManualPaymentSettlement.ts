@@ -45,6 +45,7 @@ type BookingSettlementRow = {
   paymentStatus: string;
   billingPlanSnapshot: string | null;
   commissionTermsSnapshot: unknown;
+  airbnbMoneyStatus: string | null;
 };
 
 type PaymentWriteRow = {
@@ -192,7 +193,8 @@ async function loadBookingSettlement(
        booking.lifecycle_status AS "lifecycleStatus",
        booking.payment_status AS "paymentStatus",
        booking.billing_plan_snapshot AS "billingPlanSnapshot",
-       booking.commission_terms_snapshot AS "commissionTermsSnapshot"
+       booking.commission_terms_snapshot AS "commissionTermsSnapshot",
+       booking.booking_metadata->>'airbnbMoneyStatus' AS "airbnbMoneyStatus"
      FROM booking.guest_bookings booking
      LEFT JOIN LATERAL (
        SELECT COALESCE(sum(payment.amount - payment.refunded_amount), 0) AS amount_paid
@@ -215,6 +217,9 @@ function validateSettlement(
   command: FinanceBookingManualPaymentSettlementCommand,
   booking: BookingSettlementRow,
 ): Extract<FinanceManualPaymentSettlementResult, { ok: false }> | null {
+  if (booking.airbnbMoneyStatus === "unverified") {
+    return invalidCommand("Booking amount is unverified and cannot accept manual payments.");
+  }
   if (booking.paymentStatus === "paid") {
     return invalidCommand("Paid bookings cannot accept manual payments.");
   }

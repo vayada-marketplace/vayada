@@ -21,6 +21,8 @@ type CapturedShellProps = {
 };
 
 const mocks = vi.hoisted(() => ({
+  guestLoad: vi.fn(),
+  guestSave: vi.fn(),
   getRoute: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
@@ -32,6 +34,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useSearchParams: () => mocks.searchParams,
 }));
+
+vi.mock("@/services/api/bookingGuestRulesClient", () => ({
+  bookingGuestRulesClient: { load: mocks.guestLoad, save: mocks.guestSave },
+  guestRulesErrorMessage: (error: Error) => error.message,
+}));
+import { GuestExperienceStep } from "./final/GuestExperienceStep";
 
 vi.mock("next/image", () => ({ default: () => null }));
 
@@ -58,6 +66,8 @@ const propertyId = "22222222-2222-4222-8222-222222222222";
 
 describe("AdaptiveHotelSetupController", () => {
   beforeEach(() => {
+    mocks.guestLoad.mockReset();
+    mocks.guestSave.mockReset();
     mocks.getRoute.mockReset();
     mocks.push.mockReset();
     mocks.replace.mockReset();
@@ -402,6 +412,99 @@ describe("AdaptiveHotelSetupController", () => {
     renderer?.unmount();
   });
 
+  it.each(["none", "before", "during"] as const)(
+    "rechecks guest rules before a refresh retry (edited: %s)",
+    async (edited) => {
+      const choices = {
+        defaultGuestLanguage: "en",
+        childrenEnabled: false,
+        adultAgeThreshold: null,
+        phoneRequired: true,
+        arrivalTimeEnabled: false,
+        specialRequestsEnabled: true,
+        checkInTime: "15:00",
+        checkOutTime: "11:00",
+      };
+      mocks.guestLoad.mockResolvedValue({ revision: propertyId, choices });
+      mocks.guestSave.mockResolvedValue({ revision: organizationId, choices });
+      mocks.searchParams = setupSearchParams("guest_experience");
+      mocks.getRoute
+        .mockReset()
+        .mockResolvedValueOnce(operationsRoute("guest_experience"))
+        .mockRejectedValueOnce(new Error("Progress unavailable"))
+        .mockResolvedValue(operationsRoute("guest_experience"));
+      let leave: (() => Promise<void>) | undefined;
+      const registerBeforeLeave = (callback: () => Promise<void>) => {
+        leave = callback;
+        return () => {
+          leave = undefined;
+        };
+      };
+      const StepForm = (context: AdaptiveSetupStepRenderContext) =>
+        createElement(GuestExperienceStep, {
+          ...context,
+          propertyId,
+          registerBeforeLeave,
+        });
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(
+          createElement(AdaptiveHotelSetupController, {
+            propertyId,
+            requestedStepId: "guest_experience",
+            onExit: vi.fn(),
+            beforeLeave: () => leave?.(),
+            StepForm,
+          }),
+        );
+      });
+      await act(async () =>
+        renderer.root
+          .findAllByType("input")
+          .filter((i) => i.props.type === "checkbox")
+          .at(-1)!
+          .props.onChange({ target: { checked: true } }),
+      );
+      await act(async () =>
+        renderer.root.findByType("form").props.onSubmit({ preventDefault() {} }),
+      );
+      expect(currentShell().routeError).toBe("Progress unavailable");
+      if (edited !== "none") {
+        let finish: ((value: unknown) => void) | undefined;
+        if (edited === "during") {
+          mocks.getRoute.mockReturnValueOnce(
+            new Promise((resolve) => {
+              finish = resolve;
+            }),
+          );
+          await act(async () => {
+            currentShell().onRetry?.();
+          });
+        }
+        await act(async () =>
+          renderer.root.findAllByType("select")[0].props.onChange({ target: { value: "de" } }),
+        );
+        if (finish) await act(async () => finish!(operationsRoute("guest_experience")));
+        else await act(async () => currentShell().onRetry?.());
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(mocks.getRoute).toHaveBeenCalledTimes(edited === "during" ? 3 : 2);
+        expect(mocks.guestSave).toHaveBeenCalledOnce();
+        expect(currentShell().routeError).toContain("Save your guest rules");
+        renderer.unmount();
+        return;
+      }
+      expect(mocks.push).not.toHaveBeenCalled();
+      expect(mocks.guestSave).toHaveBeenCalledOnce();
+      await act(async () => currentShell().onRetry?.());
+      expect(mocks.guestSave).toHaveBeenCalledOnce();
+      expect(mocks.getRoute).toHaveBeenCalledTimes(3);
+      expect(mocks.push).toHaveBeenLastCalledWith(expect.stringContaining("step=payments"), {
+        scroll: false,
+      });
+      renderer.unmount();
+    },
+  );
+
   it("restores and coalesces repeated browser Back events until the draft is preserved", async () => {
     const beforeLeave = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const browserBack = vi.fn();
@@ -517,7 +620,7 @@ function setupSearchParams(stepId: string): URLSearchParams {
   });
 }
 
-function operationsRoute(resumeStepId: "pricing" | "payments" | "review") {
+function operationsRoute(resumeStepId: "pricing" | "payments" | "guest_experience" | "review") {
   return {
     ...buildPropertySetupRoute({
       organizationId,

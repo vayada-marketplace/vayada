@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Montant non vérifié",
+  "dashboard.stats.incompleteAmounts": "Certains montants de réservation ne sont pas vérifiés. Ils sont exclus du chiffre d’affaires et des tarifs moyens, mais les réservations restent incluses dans le décompte. Les comparaisons financières ne sont pas disponibles.",
   "auth.login.sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
   "auth.login.emailLabel": "Adresse e-mail",
   "auth.login.emailPlaceholder": "admin@example.com",

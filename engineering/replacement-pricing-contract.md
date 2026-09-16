@@ -7,8 +7,8 @@ no runtime fallback, routes, persistence, evaluator or provider activation here.
 ## Money and room modes (VAY-1554)
 
 All amounts are canonical integer minor-unit strings, never JS floating-point
-money. Currency vocabulary/scale comes from the runtime ISO/ICU currency data;
-unknown codes fail. Store currency alongside amount. Scale-0 JPY, scale-2 IDR,
+money. Currency vocabulary comes from runtime ICU; scales use ISO accounting
+overrides where ICU display-rounding defaults differ (VAY-1925). Unknown codes fail. Store currency alongside amount. Scale-0 JPY, scale-2 IDR,
 and scale-3 KWD are representable; provider support is a separate adapter gate.
 Amounts are bounded to 18 digits for validation; calculation overflow must fail.
 Do not pass these objects to old scale-2 interfaces without explicit conversion.
@@ -111,3 +111,473 @@ The executable examples assert agreed minor-unit arithmetic (184.50, 510, 315,
 calendar precedence, promotion eligibility, FX feed, checkout or OTA integration.
 VAY-1542 must run these same expected outcomes against the real evaluator and add
 eligibility, calendar, restriction, child allocation, zero and overflow scenarios.
+
+## Storage (VAY-1540)
+
+Property-scoped heads point to immutable, complete revisions. Each revision owns
+one currency, full validated room configurations, and opaque references to the
+Booking/Finance/FX-owned controls. Room snapshots retain all offer IDs and terms
+revisions. No owner policy is copied into a second domain's mutable tables.
+Drafts are separate; a draft cannot change an accepted revision. Writes replace
+a complete snapshot: callers compose omitted edits from the prior revision;
+empty optional arrays explicitly clear them. No inactive tariff data is revived.
+
+The storage adapter requires a transaction-bound guard that authenticates the
+actor/organization/property scope and locks all relevant source revisions. It
+must return current room/guest/currency and owner policy revisions, or deny.
+The same transaction compares expected sources, inserts the immutable revision,
+advances its head and writes platform audit/domain/outbox evidence. Currency
+changes supply a complete converted snapshot plus FX owner evidence through that
+guard; the adapter never treats a currency label change as conversion. VAY-1541
+owns route authorization, editor patch composition, preview and publish commands.
+No runtime caller is wired by these storage slices.
+
+## Draft publication binding (VAY-1559)
+
+Editor publication must pass `save.draft` with the saved draft ID and revision,
+in addition to its complete snapshot, base revision and source revisions. Storage
+compares all five under the same property lock as the active-head/effects write.
+A changed or missing draft fails stale without publishing. A successful retry
+replays the recorded result even if the draft or active head later changes; it
+is a receipt for the original publication, not a claim of current freshness.
+The draft binding participates in the request hash. Draft reads expose their
+saved source revisions so callers need not substitute newly read evidence.
+
+The unbound save remains an internal complete-snapshot primitive; editor routes
+must never omit the draft binding. Concrete owner/auth/FX guard adapters and
+preview orchestration remain VAY-1541 prerequisites before any runtime wiring.
+
+## Live identity authorization (VAY-1560)
+
+`lockReplacementPricingAuthorization` consumes trusted RequestContext and the
+same property/organization/actor scope as storage, within its transaction. Read
+uses `pms.rooms_rates.read`; mutations use `pms.rooms_rates.manage`, following
+the current staff-access contract rather than broad compatibility permissions.
+It rechecks active identity records, canonical and PMS property links, assigned
+property scope, role grants and validated staff overrides. Disabled catalog
+profiles deny; incomplete/private profiles remain editable. The canonical PMS
+inventory lock comes first. Authorization row locks remain until transaction
+end; the organization lock also serializes new FK-backed entitlement rows.
+Entitlement applicability is evaluated using the database clock after locking.
+
+This helper supplies only the identity portion of the required storage guard.
+It does not validate room configurations, Booking terms, Finance readiness,
+mandatory charges or FX evidence. Those owner adapters and route-policy checks
+remain mandatory before exposing pricing commands. No routes are wired here.
+
+## Booking offer terms owner (VAY-1561)
+
+The planned editor transition in
+[Offer terms stay in draft until pricing approval](pricing-offer-terms-drafts.md)
+(VAY-1996) extends this immediate-head writer with staged terms and atomic pricing
+activation. Until implemented, saving terms advances the current source before
+pricing approval; adding another offer also changes the property-wide source.
+
+Booking owns immutable replacement offer terms and a current pointer scoped by
+property, room and offer. This is the single writer for replacement commercial
+terms, independent of retired pricing-shaped guest-policy bundles. Preserve the
+full cancellation policy and requested payment/deposit schedule from the agreed
+`ReplacementOfferTerms` contract. These settings express the offer's requested
+schedule; Finance still owns capability and deposit readiness approval. Saving
+terms cannot authorize payment execution or imply publication readiness.
+
+The command uses real transaction-bound identity authorization and a PMS-owned
+room-scope adapter, then compares the expected current revision. Server-issued
+revision IDs, request identity, current pointer and audit/outbox effects commit
+together. Old terms remain immutable when an offer changes. The Booking read
+port accepts exact property/room/offer/revision references derived from the
+complete proposed pricing snapshot, under the caller's authorized property
+transaction. Missing or superseded references fail; callers cannot replace
+those references with an empty client-supplied list. Accepted bookings continue
+using their frozen evidence rather than requiring current policy versions.
+
+No HTTP route, editor, Finance approval or complete publication guard is wired
+by this owner-storage slice. Replacement preview/publication consumes this owner
+port together with all other required owner evidence before becoming available.
+
+## Finance method readiness adapter (VAY-1541)
+
+`lockFinanceReplacementPricingReadiness` reads existing Finance-owned settings,
+provider capability and accepted execution evidence in the caller's authorized
+property transaction. It binds the result to the proposed replacement pricing
+revision, currency and exact verified Booking terms revisions. It does not read
+old PMS prices or invent a v1 currency revision. Settings, the selected provider
+and accepted execution evidence remain locked until transaction end.
+
+Pay-at-property can be available independently of card. Card requires Finance's
+existing currency gate and exact current provider/property execution evidence;
+revocation or capability changes suppress it. Unsupported selected methods do
+not become aliases for supported methods. At least one verified method is
+required. Currency mismatch fails without relabeling settings or converting data.
+
+Deposit schedules return `deposit_execution_unavailable`: the current execution
+contract does not prove split-payment support. VAY-1543 must implement and verify
+that execution before Finance can approve deposits. The evidence ID covers the
+locked sources; consumers must compare it on reuse. This is method capability,
+not proof of checkout, collection timing or complete publication readiness.
+The caller verifies terms through Booking and pricing through PMS before use;
+the adapter is not a parser for client-supplied approval evidence. No new Finance
+settings writer, HTTP endpoint or complete pricing guard is wired in this slice.
+
+## Mandatory-charge inclusion declarations (VAY-1667)
+
+`createReplacementChargeDeclarationStore.confirm` records the explicit PMS
+declaration `all_mandatory_charges_included` against the commercial contents of
+a saved replacement draft. It reads the draft under live authorization and PMS
+locks, checks draft/base revisions, active property-owned rooms and current
+Booking offer terms, then atomically writes immutable evidence, audit and outbox.
+No missing declaration is interpreted as zero charges or calculated tax evidence.
+
+The fingerprint includes currency, complete room pricing configurations (including
+pricing and terms revisions), owner references and source revisions. Only the
+`charges` key in owner references and source revisions is excluded so attaching
+the declaration does not invalidate itself. Other price/source changes require a
+new explicit confirmation. The stored draft ID/revision records the confirmation's
+origin; exact idempotent replay returns that historical receipt, not renewed validity.
+`lockReplacementChargeDeclaration` verifies the exact property, ID and commercial
+fingerprint inside a caller-authorized transaction.
+
+This evidence states that no extra mandatory collection is needed; it does not
+calculate taxes or additive charges. The full publication guard must still validate
+live non-charge owners, Finance readiness and FX evidence. Routes, additive charge
+configuration and publication wiring remain follow-up work. Integration tests seed
+the saved-draft boundary and exercise real local PostgreSQL authorization, Booking
+terms and charge confirmation; they do not represent a deployed hotel confirmation.
+
+## Complete PMS currency conversion (VAY-1878)
+
+`convertPricingConfigurationCurrency` converts a complete validated room snapshot
+with explicit `PricingConversionRate` evidence. Rates express target minor units
+per source minor unit (including scale differences); integer arithmetic rounds
+half-up per component, symmetrically for negative fixed adjustments. Evidence
+uses canonical UTC ISO timestamps (`Date.toISOString()` format), a positive
+bounded ratio, matching distinct supported currencies and a valid window at the
+trusted caller-supplied time. An explicitly observed 1:1 ratio is legal; missing
+FX never becomes 1:1. Overflow and positive tariffs rounded to zero fail.
+
+Conversion covers all four room modes, all calendar layers, fixed adjustments,
+linked date overrides, child supplements and both meal charging models. It keeps
+percentages, restrictions, dates, terms, links, capacities and identities and
+advances the pricing revision once without mutating the source.
+`isCompletePricingCurrencyConversion` verifies the complete same-property room
+set and exact converted contents; missing rooms, relabels, partial conversions,
+revision mismatches and unrelated policy edits fail.
+
+These functions prove PMS arithmetic only. They do not authenticate FX provenance
+or caller scope, convert separately owned amounts, mutate settings or authorize
+`PricingStorageGuard.allowCurrencyChange` alone. The authoritative FX adapter,
+Booking/add-on/charge/Finance conversion and atomic publication remain required.
+Production Python and accepted booking evidence are unchanged. Unlike Python's
+mixed-room failure path, the new conversion never returns a relabeled room after
+a missing exchange-rate failure; approved exact minor units also replace Python's
+floating arithmetic and legacy IDR scale convention.
+
+## Trusted FX observations (VAY-1925)
+
+`createReplacementPricingFxReader` is a server-owned reader for the same
+ExchangeRate-API open endpoint used by Python. It uses a fixed HTTPS origin,
+rejects redirects and bounds requests to 10 seconds and 128 KiB. A successful
+response must match the provider/base currency, contain an explicit requested
+pair, and remain inside its observation/update/EOL window at consumption. Validity
+is capped at 24 hours after observation. Errors return unavailable, never 1:1.
+
+Node 24+ JSON reviver source text preserves numeric tokens before binary floating
+rounding. Decimal/exponent rates become reduced BigInt ratios including source
+and target minor-unit scales; ratios exceeding the existing 18-digit bounds fail.
+A stable evidence ID binds provider, pair, exact ratio and observation/expiry.
+The reader caches by base until expiry, coalesces requests, and cools down failed
+fetches for one hour. It never returns stale evidence during an outage.
+
+SIX List One (published 2026-01-01) exposed 16 ICU display-scale differences. The
+shared pricing helper now explicitly uses ISO accounting scales for these codes,
+including IDR=2 and IQD=3; the others are recorded with regression tests. This
+corrects the previously documented scale promise rather than changing its meaning.
+
+Fetch observations outside property database locks. This adapter does not persist
+FX history, authenticate property access, convert separately owned amounts or
+authorize publication. The final transaction must still validate observation expiry
+and exact evidence references together with all other owners. Future consuming UI
+must show `REPLACEMENT_FX_ATTRIBUTION`; raw-rate redistribution is not exposed.
+Provider reference: https://www.exchangerate-api.com/docs/free. ISO reference:
+https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml.
+
+## Immutable FX ledger (VAY-1926)
+
+`createReplacementPricingFxStore.observe(from, to)` fetches through the trusted
+server adapter before acquiring a database connection, then records the exact
+observation in `finance.pricing_v2_fx_observations`. This global reference ledger
+stores provider, stable ID, pair, exact ratio, currency scales, observation/expiry
+and database receipt time. Concurrent or repeated collection deduplicates by ID;
+update, deletion and truncation are prohibited. The immutable record is the
+observation audit trail, not a pricing publication event.
+
+`lockReplacementPricingFxObservation` verifies an exact ID and pair inside the
+caller's authorized transaction. It checks current currency scales, recomputes
+content identity and uses `clock_timestamp()` for freshness. Immutable rows need
+no row lock; transaction-start time must not extend their validity. Expired
+observations remain available as historical database records but cannot approve
+new pricing. The content hash detects mismatches; it is not a signature or a
+replacement for the server-owned ingestion boundary.
+
+The writer accepts currency pairs rather than arbitrary rate payloads. Both
+insertion and verification use database wall time, so application clock skew
+cannot admit future or expired observations. A rate that expires after insertion
+can remain in history even if the final lookup correctly returns unavailable.
+The publication caller must recheck expiry at the mutation boundary and verify
+property scope, complete conversion and every other owner. Collection alone does
+not authorize a currency change, rewrite accepted bookings or publish prices.
+
+## Currency conversion at the storage publication boundary (VAY-1927)
+
+When an existing pricing revision changes currency, `createReplacementPricingStore.save`
+now requires the proposed `ownerReferences.fx` to identify an exact, currently valid
+persisted observation for the old/new pair. It checks every prior PMS room against
+the complete conversion using database wall time, then requires the additional
+`allowCurrencyChange` owner guard. Valid PMS arithmetic alone cannot approve amounts
+owned by other domains. The complete live source/authorization guard remains required
+before wiring routes; injected test guards are not evidence of that integration.
+
+After revision, room, head, audit and outbox writes, storage rechecks the immutable FX
+observation immediately before returning to commit. Expiry during those writes rolls
+back the whole publication and preserves its draft. This is validity at the final
+transaction check, not a promise about elapsed time during PostgreSQL commit. Exact
+successful request replay returns its historical receipt without a new conversion or
+new effects, even after expiry. Draft binding, source/base concurrency checks and
+same-currency writes retain their existing behavior. Provider fetching stays outside
+this transaction; there is no refresh or substitute rate inside publication.
+
+## Authorization and proposed-owner validation ordering (VAY-1928)
+
+`PricingStorageGuard.lock(client, scope)` now rechecks current access and locks
+current source revisions without inspecting a proposed snapshot. It runs for all
+operations, including historical publication retries. The separate required
+`validate(client, scope, proposed)` checks the selected room/owner/terms references
+and holds their owner locks for each new publication and every draft save.
+There is no default allow for either operation.
+
+Publication checks an existing request receipt after authorization and before
+proposed-owner validation. Exact retries return the historical result even when
+the accepted proposal's terms or other owner evidence have since changed. Changed
+reuse of that request ID still conflicts; revoked access still denies the retry.
+For a new request, exact draft binding and current source/base checks precede owner
+validation, followed by the existing currency-conversion checks and atomic writes.
+This supersedes the earlier combined `lock(client, scope, proposed)` interface.
+Concrete live owner integration and route wiring remain required; fixture guards
+establish ordering coverage only.
+
+## Live room, terms and payment owner composition (VAY-1929)
+
+`lockReplacementPricingOfferOwners` runs inside the caller's database transaction
+with trusted RequestContext and a complete proposed snapshot. It rechecks live
+manage authorization, active PMS room ownership and the exact current Booking
+terms of every offer, then invokes Finance readiness with those verified terms,
+the proposed currency/revision and exact `ownerReferences.finance` evidence ID.
+Malformed or mixed-scope/revision snapshots fail. Existing owner locks remain held
+until the caller commits or rolls back; provider capability rules are not copied.
+
+The result reports verified terms/Finance evidence or a specific unavailable
+component, including Finance's reason. It does not validate other owner references,
+complete source revisions, mandatory-charge declarations, FX or separately owned
+amount conversion. It must be composed with those checks for publication; a
+`verified` result here alone never authorizes publication or checkout. No route or
+active pricing mutation is exposed by this owner-composition port.
+
+## Charge declaration in the combined owner check (VAY-1930)
+
+`lockReplacementPricingOfferOwners` now also requires source revisions from the
+caller's current, transaction-locked owner reads and an explicit
+`ownerReferences.charges` declaration. After live access, PMS, Booking and Finance
+verification, it calls the charge owner with the same complete proposal and source
+snapshot. The verified result includes the declaration; missing, foreign or changed
+evidence returns `charges_stale`. There is no implicit confirmation or zero-charge
+fallback. Inputs used for declaration binding are copied before asynchronous owner
+reads so this operation checks one proposal.
+
+Attaching the declaration's own reference remains valid. Price, child/meal or
+non-self source changes require a new declaration. This supersedes VAY-1929's
+exclusion of charge verification, but does not establish the provenance/freshness
+of supplied source tokens: the complete source guard must still collect and lock
+them. FX and separately owned conversion, command wiring and routes remain separate
+obligations before publication is available.
+
+## Authoritative PMS room-facts source (VAY-1931)
+
+`lockPmsReplacementPricingRoomSource` reads the property's complete room-type set,
+including inactive rows, under the existing PMS room-facts mutation lock and row
+share locks. Its deterministic token binds property identity, room IDs, active
+state, fact revisions, occupancy limits and room attributes. Room creation/removal
+and fact changes invalidate it. Canonical identity and JSON ordering keep equivalent
+reads stable. It does not use retired price/currency fields or substitute physical
+unit revisions for room facts; inventory/availability evidence remains separate.
+
+The combined owner verifier reads this source after live authorization, checks
+selected room scope and requires exact `sources.room` equality before proceeding.
+Missing or changed evidence returns `room_source_stale`; substituting a newly read
+room token also invalidates any older charge declaration bound to the previous
+sources. The reader requires a caller-authorized transaction; it is not an access
+check. Other source owners and complete publication wiring remain required.
+
+## Authoritative Booking terms source (VAY-1932)
+
+`lockBookingPricingTermsSource` reads every current room/offer/terms-revision head
+for the property. It uses the same property mutation lock as the Booking writer,
+plus row share locks, so newly created heads cannot escape the transaction's source
+set. Its stable token includes normalized property identity and ordered tuples;
+immutable historical terms rows are not current sources. This reader requires a
+caller-authorized transaction and does not itself establish access.
+
+Combined verification requires exact `sources.terms` equality after validating
+selected term references. Creating an unselected offer also changes the complete
+source; refreshing that token requires a new charge declaration. A declaration
+matching a forged aggregate token cannot substitute for the live owner read.
+
+Room and Booking aggregate tokens are now owner-read. Finance readiness is still
+bound to a proposed currency/revision/selected terms set; it is not a generic
+settings revision. A proposal-independent Finance source remains required for
+the complete storage guard, along with remaining currency/owner obligations and
+publication command/route integration.
+
+## Independent Finance source (VAY-1933)
+
+`lockFinanceReplacementPricingSource` describes payment settings/policies, the
+selected provider account and its current execution evidence without a pricing
+proposal. Missing or disabled settings are valid source states, not readiness
+approval. Property and selected-account UPDATE locks protect missing-row insertion;
+settings/current-evidence share locks retain the observed state through transaction
+end. Call inside the existing authorized transaction, in property/settings/account/
+evidence order. No provider network requests or capability rules are added.
+
+The token includes property identity and exact JSONB state, excludes incidental
+created/updated timestamps and uses epoch text for execution/acceptance times so
+session timezone does not affect identity. Combined verification compares this
+token with `sources.finance` independently of the proposal-specific
+`ownerReferences.finance` readiness ID. A newly observed policy/source state also
+requires a new charge declaration; a declaration cannot validate a forged source.
+
+PMS room, Booking terms and Finance source inputs in the combined checks are now
+owner-read. Complete storage guard/command composition, remaining currency/owner
+obligations and publication routes are still required before runtime publication.
+
+## Concrete storage guard and pending draft charges (VAY-1934)
+
+`createReplacementPricingStorageGuard` binds a trusted request context to live
+read/manage authorization and the proposal-independent PMS/Booking/Finance sources.
+Storage passes read intent for reads and manage intent for writes, including
+historical publication retries. Source collection never requires old proposal
+readiness to remain current. New writes still validate current proposed owners.
+
+Draft validation may return `awaiting_charge_confirmation` only when the charge
+reference is absent and all other owner checks pass. A supplied declaration must
+match. This permits saving the draft, confirming charges through their owner,
+saving the declaration reference into that draft, then publishing its exact saved
+version. Publication never accepts pending confirmation.
+
+The concrete guard accepts only Finance/charge owner references and the three
+implemented source keys. Currency changes fail closed until separate owner
+conversion obligations are implemented. This is storage integration, not HTTP
+publication/editor wiring or deployed provider evidence.
+
+## Trusted preparation and publication commands (VAY-1935)
+
+`createReplacementPricingCommands` binds a trusted server context and derives the
+actor/organization scope from it. Callers supply only the property ID. Preparation
+parses complete room configurations, gathers locked current owner sources and
+selected Booking terms, and derives Finance readiness. It returns a snapshot with
+that readiness reference, without writes or automatic charge confirmation. All
+returned evidence must still pass live checks when a draft/publication is saved.
+
+Draft operations and explicit charge confirmation use their existing owners.
+Publication requires a saved draft binding at runtime and retains the caller's
+complete original command for exact historical retries. It does not reload a
+possibly edited/deleted draft before storage checks its accepted receipt. Storage
+continues to enforce snapshot/source/base/draft identity for new publications.
+HTTP route policy enforcement, editor wiring and currency approval remain pending.
+
+## Protected replacement pricing HTTP API (VAY-1936)
+
+Target PMS runtime registers these routes under
+`/api/pms/properties/:propertyId/pricing-v2` using its existing target pool:
+
+| Method/path suffix | Request | Successful response |
+| --- | --- | --- |
+| GET root | None | Current stored revision, sources and stale flag |
+| POST `/prepare` | currency, rooms | Current sources and snapshot with Finance readiness |
+| GET `/drafts/:draftId` | None | Saved draft snapshot/version/base/sources/stale flag |
+| PUT `/drafts/:draftId` | expectedDraftRevision, baseRevision, sources, snapshot | `{ revision }` |
+| POST `/charges` | draftId, expectedDraftRevision, claimedFingerprint, declaration | Immutable charge declaration |
+| POST `/publish` | expectedRevision, sources, snapshot, draft `{ id, revision }` | `{ revision, replayed }` |
+
+Charges/publication require exactly one nonblank `Idempotency-Key` header (maximum
+200 characters; comma-joined values are rejected). Body fields are exact; no request identity or requestId is accepted.
+Reads require `pms.rooms_rates.read`; all other routes require
+`pms.rooms_rates.manage`. Route checks require hotel-group scope, active PMS
+entitlement and an owner/operator property link before body handling. Existing
+commands independently recheck live database authorization, including retries.
+
+Responses: malformed input400, unauthenticated401, permission/owner denial403,
+missing read404, stale/idempotency/currency conflict409, unexpected backend failure
+503 with no internal error detail. Preparation does not approve publication or
+confirm charges. Currency changes remain blocked. Local HTTP/database tests use
+synthetic identities; no editor, deployed/provider or public-booking evidence is
+implied. Route registration does not schedule a publication/outbox consumer.
+
+## Offer editing and saved charge review (VAY-1937)
+
+Under the existing pricing-v2 HTTP root, GET/PUT
+`/rooms/:roomTypeId/offers/:offerId/terms` delegate to the Booking owner. PUT takes
+exactly expectedRevision (UUID or null for creation), cancellation and payment,
+plus Idempotency-Key. Path identity cannot be overridden by body fields. Booking
+keeps revision CAS, immutable history and retry/effect semantics; saving deposit
+terms still does not approve Finance deposit execution.
+
+GET `/drafts/:draftId/charge-review` returns the exact saved snapshot/sources,
+draft/base revisions, a server-calculated fingerprint and the explicit
+`all_mandatory_charges_included` declaration. Missing drafts return404; stale source
+or base returns409. Reading never confirms charges. The editor must present this
+saved data and send its revision/fingerprint for explicit confirmation; any later
+edit is still rejected by the existing owner fingerprint/version checks.
+
+For every new charge confirmation, the charge owner now locks current PMS room,
+Booking terms and Finance sources and compares them with saved draft sources in
+the same transaction. A source change after review therefore returns stale before
+creating a declaration. Historical confirmation receipt lookup remains ahead of
+freshness checks, following current authorization, so an accepted retry survives
+later source changes without creating another declaration.
+
+## PMS browser draft client (VAY-1938)
+
+The replacement browser client binds one canonical property and uses the existing
+PMS authenticated target transport with no-store/omitted legacy hotel context.
+The browser-safe domain-pms/replacement-pricing export checks response pricing data, property/currency/revision,
+source/owner keys and saved review identity. Only the expected not_found404 is
+mapped to a missing read; authorization/conflict/network errors remain visible.
+
+Reads, preparation and draft saves never confirm or publish. The editor creates
+an explicit confirmation or publication action from verified saved data; each
+action captures an independent copy and one idempotency key. Re-executing that
+same action retries the exact command after a lost response, regardless of later
+editor changes. These closures are in-memory only; durable/reload recovery and
+visual editor integration are separate work. No pricing UI uses this client yet.
+
+Browser transport options use plain header records required by the existing API
+client, retaining idempotency keys through fetch. Successful null/empty responses
+are malformed; a private sentinel distinguishes the expected not_found404. The
+client itself is bundled with browser platform resolution to catch Node imports.
+
+## Pure room-night evaluation (VAY-1542)
+
+The calculator receives one scoped configuration, allocated guests, stay dates,
+expected configuration revision and expected terms revisions for the selected
+plan and its ancestors. These expectations come from trusted owner reads; the
+pure calculator cannot establish database freshness itself. It returns nightly
+room and meal amounts separately with source/adjustment provenance.
+
+A date RoomPrice replaces the adult-equivalent tariff and bypasses that plan's
+weekday/link adjustment. Child-band nightly supplements still apply once; they
+are a separate explicit policy. Normal weekday and linked adjustments apply to
+the whole room component including those supplements, before the selected meal.
+A linked final date price resets the room component; clearing it restores the
+parent calculation. Parents' meals never propagate to a child plan. Restrictions
+are resolved separately, including departure-day CTD. Booking promotions, taxes,
+add-ons, FX conversion and payments remain owner orchestration outside this PMS
+calculator. No runtime endpoint or provider write is activated by this module.

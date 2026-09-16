@@ -247,7 +247,7 @@ export interface BookingGuestPolicyScopeAuthorizationPort {
       organizationId: string;
       propertyId: string;
       actorUserId: string;
-      permission: typeof BOOKING_GUEST_POLICY_AUTHORIZATION.permission;
+      permission: typeof BOOKING_GUEST_POLICY_AUTHORIZATION.permission | "booking.settings.read";
       entitlement: typeof BOOKING_GUEST_POLICY_AUTHORIZATION.entitlement;
       resource: typeof BOOKING_GUEST_POLICY_AUTHORIZATION.resource;
       checkedAt: string;

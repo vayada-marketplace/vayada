@@ -1047,6 +1047,41 @@ describe("target PMS operations command repository", () => {
   });
 
   it.each([
+    { paymentMethod: "paypal", lifecycleStatus: "pending_payment" },
+    { paymentMethod: "bank_transfer", lifecycleStatus: "confirmed" },
+    { paymentMethod: "pay_at_property", lifecycleStatus: "confirmed" },
+  ])("rejects unverified $paymentMethod amounts before any financial write", async (row) => {
+    const { client, repository } = createRepository((text) => {
+      if (text === "BEGIN" || text === "ROLLBACK") return ok();
+      if (text.includes("FROM platform.idempotency_keys")) return ok();
+      if (text.includes("INSERT INTO platform.idempotency_keys")) return ok([{ id: "idem" }], 1);
+      if (text.includes("FROM booking.guest_bookings booking") && text.includes("FOR UPDATE")) {
+        return ok([{
+          ...row,
+          guestBookingId,
+          propertyId,
+          paymentStatus: "unpaid",
+          totalAmount: "600.00",
+          balanceAmount: "600.00",
+          currency: "EUR",
+          pendingExpiresAt: null,
+          acceptedPaymentDeadlineAt: null,
+          bookingMetadata: { airbnbMoneyStatus: "unverified" },
+        }]);
+      }
+      throw new Error(`Unexpected SQL after unverified amount: ${text}`);
+    });
+    await expect(repository.markBookingPaid(baseBookingLifecycleCommand())).resolves.toMatchObject({
+      ok: false,
+      code: "invalid_status_transition",
+      message: "Cannot transition PMS reservation from booking_amount_unverified to confirmed/paid.",
+    });
+    expect(client.calls.some(({ text }) => text.includes("INSERT INTO finance.payments"))).toBe(false);
+    expect(client.calls.some(({ text }) => text.includes("WITH booking_update AS"))).toBe(false);
+    expect(client.calls.some(({ text }) => text === "ROLLBACK")).toBe(true);
+  });
+
+  it.each([
     {
       method: "paypal",
       lifecycleStatus: "pending_payment",

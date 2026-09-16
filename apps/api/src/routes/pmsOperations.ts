@@ -415,7 +415,7 @@ export type PmsManualPriceCorrectionCommand = {
   expectedVersion?: string;
   accountingDate: string;
   reason?: string;
-  pricing:
+  pricing?:
     | {
         kind: "exact";
         nights: Array<{ targetEvidenceId: string; replacementAmount: PmsMoney }>;
@@ -425,6 +425,7 @@ export type PmsManualPriceCorrectionCommand = {
         targetEvidenceIds: string[];
         replacementTotal: PmsMoney;
       };
+  addOns?: Array<{ targetEvidenceId: string; replacementAmount: PmsMoney }>;
   audit: PmsOperationsCommandAudit;
 };
 
@@ -7619,20 +7620,24 @@ function toManualPriceCorrectionCommand(
           "accountingDate",
           "reason",
           "pricing",
+          "addOns",
         ].includes(key),
     )
   )
     return { error: invalidBody("Price-correction command contains unknown or invalid fields.") };
   const accountingDate = stringField(raw.accountingDate);
   const reason = optionalStringField(raw.reason);
-  const pricing = objectBody(raw.pricing);
+  const pricing = raw.pricing === undefined ? undefined : objectBody(raw.pricing);
   const parsed = pricing && parseManualPriceCorrectionPricing(pricing);
+  const addOns = raw.addOns === undefined ? undefined : parseManualAddonPriceCorrections(raw.addOns);
   if (
     !accountingDate ||
     !isDateOnly(accountingDate) ||
     (raw.reason !== undefined && reason === undefined) ||
     (reason?.length ?? 0) > 1000 ||
-    !parsed
+    (raw.pricing !== undefined && !parsed) ||
+    (raw.addOns !== undefined && !addOns) ||
+    (!parsed && !addOns)
   )
     return { error: invalidBody("Price-correction pricing evidence is invalid.") };
   return {
@@ -7642,7 +7647,8 @@ function toManualPriceCorrectionCommand(
       ...metadata.value,
       accountingDate,
       reason,
-      pricing: parsed,
+      ...(parsed ? { pricing: parsed } : {}),
+      ...(addOns ? { addOns } : {}),
       audit: pmsOperationsCommandAudit(
         request,
         metadata.value.commandId,
@@ -7673,7 +7679,7 @@ function parseManualPriceCorrectionPricing(
       const targetEvidenceId = stringField(night.targetEvidenceId);
       const replacementAmount = parsePriceCorrectionMoney(night.replacementAmount);
       return targetEvidenceId && isUuid(targetEvidenceId) && replacementAmount
-        ? { targetEvidenceId, replacementAmount }
+        ? { targetEvidenceId: targetEvidenceId.toLowerCase(), replacementAmount }
         : null;
     });
     if (
@@ -7693,13 +7699,38 @@ function parseManualPriceCorrectionPricing(
     pricing.targetEvidenceIds.length > 20 * 366
   )
     return null;
-  const targetEvidenceIds = pricing.targetEvidenceIds.map(stringField);
+  const targetEvidenceIds = pricing.targetEvidenceIds.map((value) =>
+    stringField(value)?.toLowerCase(),
+  );
   const replacementTotal = parsePriceCorrectionMoney(pricing.replacementTotal);
   return targetEvidenceIds.every((id) => id && isUuid(id)) &&
     new Set(targetEvidenceIds).size === targetEvidenceIds.length &&
     replacementTotal
     ? { kind: "equal_inferred", targetEvidenceIds: targetEvidenceIds as string[], replacementTotal }
     : null;
+}
+
+function parseManualAddonPriceCorrections(
+  value: unknown,
+): NonNullable<PmsManualPriceCorrectionCommand["addOns"]> | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20 * 366) return null;
+  const addOns = value.map((item) => {
+    const addOn = objectBody(item);
+    if (
+      !addOn ||
+      Object.keys(addOn).some((key) => !["targetEvidenceId", "replacementAmount"].includes(key))
+    )
+      return null;
+    const targetEvidenceId = stringField(addOn.targetEvidenceId);
+    const replacementAmount = parsePriceCorrectionMoney(addOn.replacementAmount);
+    return targetEvidenceId && isUuid(targetEvidenceId) && replacementAmount
+      ? { targetEvidenceId: targetEvidenceId.toLowerCase(), replacementAmount }
+      : null;
+  });
+  return addOns.some((addOn) => !addOn) ||
+    new Set(addOns.map((addOn) => addOn?.targetEvidenceId)).size !== addOns.length
+    ? null
+    : (addOns as NonNullable<PmsManualPriceCorrectionCommand["addOns"]>);
 }
 
 function parsePriceCorrectionMoney(value: unknown): PmsMoney | null {

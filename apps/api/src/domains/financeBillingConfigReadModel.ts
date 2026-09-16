@@ -85,7 +85,7 @@ export function createTargetFinanceBillingConfigReadPort(config: {
   };
 }
 
-function toBillingConfig(propertyId: string, row: BillingConfigRow): BillingConfigReadModel {
+export function toBillingConfig(propertyId: string, row: BillingConfigRow): BillingConfigReadModel {
   const metadata = jsonObject(row.ruleMetadata);
   const bookingEngineFeePercent = numberValue(row.percentageRate);
   return {

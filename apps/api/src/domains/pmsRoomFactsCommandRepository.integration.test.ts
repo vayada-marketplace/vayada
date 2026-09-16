@@ -44,6 +44,7 @@ const invalidRecurringSourceId = "16800000-0000-4000-8000-000000000028";
 const nonRefundableRecurringSourceId = "16800000-0000-4000-8000-000000000029";
 const recurringMaterializationReceiptId = "16800000-0000-4000-8000-000000000030";
 const linkedInventoryGroupId = "16800000-0000-4000-8000-000000000031";
+const lastMinuteRevisionId = "16800000-0000-4000-8000-000000000032";
 const acceptedAt = "2026-08-03T13:00:00.000Z";
 const roleKey = "vay1068_room_facts_integration";
 const unexpectedReferenceTable = "pms.vay1068_unexpected_room_reference";
@@ -447,6 +448,79 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-facts command repositor
     ).resolves.toMatchObject({
       ok: true,
       response: { outcome: "deleted", roomTypeId, deletedRevision: 2, lifecycle: "inactive" },
+    });
+  });
+
+  it("blocks deletion while replacement pricing or last-minute policy references the room", async () => {
+    const created = await repository.createRoomTypeFacts(
+      createCommand("create-replacement-pricing-reference", "pricing-draft", facts("Priced Room")),
+    );
+    if (!created.ok) throw new Error("Expected pricing-reference fixture room to be created");
+    const roomTypeId = created.response.roomType.roomTypeId;
+    const configuration = {
+      version: "pricing.v2",
+      propertyId,
+      roomTypeId,
+      revision: 1,
+      currency: "EUR",
+      capacity: { adults: 2, total: 2, children: 0 },
+      offers: [{ price: { mode: "flat", amountMinor: "10000" } }],
+    };
+
+    await admin.query("BEGIN");
+    try {
+      await admin.query("INSERT INTO pms.pricing_v2_heads(property_id) VALUES($1::uuid)", [
+        propertyId,
+      ]);
+      await admin.query(
+        `INSERT INTO pms.pricing_v2_revisions (
+           property_id, revision, room_count, currency, source_revisions,
+           owner_references, request_id, request_hash, actor_user_id
+         ) VALUES ($1::uuid, 1, 1, 'EUR', '{}'::jsonb, '{}'::jsonb, $2, $3, $4::uuid)`,
+        [propertyId, "replacement-pricing-reference", "a".repeat(64), actorUserId],
+      );
+      await admin.query(
+        `INSERT INTO pms.pricing_v2_rooms (
+           property_id, revision, room_type_id, currency, configuration
+         ) VALUES ($1::uuid, 1, $2::uuid, 'EUR', $3::jsonb)`,
+        [propertyId, roomTypeId, JSON.stringify(configuration)],
+      );
+      await admin.query(
+        "UPDATE pms.pricing_v2_heads SET revision = 1 WHERE property_id = $1::uuid",
+        [propertyId],
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    await admin.query(
+      `INSERT INTO booking.room_last_minute_revisions (
+         property_id, room_type_id, revision, policy, organization_id,
+         actor_user_id, request_id, request_hash
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, '{}'::jsonb, $4::uuid, $5::uuid, $6, $7)`,
+      [
+        propertyId,
+        roomTypeId,
+        lastMinuteRevisionId,
+        organizationId,
+        actorUserId,
+        "last-minute-reference",
+        "b".repeat(64),
+      ],
+    );
+
+    await expect(
+      repository.safeDeleteRoomType(
+        safeDeleteCommand("delete-replacement-pricing-reference", roomTypeId, 1),
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "room_type_delete_blocked",
+        currentRevision: 1,
+        blockers: [{ code: "rate_plan_or_rule", affectedCount: 2 }],
+      },
     });
   });
 
@@ -1165,6 +1239,15 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS room-facts command repositor
     try {
       await admin.query("SET LOCAL session_replication_role = replica");
       const deletes: Array<[string, string[]]> = [
+        ["DELETE FROM booking.room_last_minute_heads WHERE property_id = $1::uuid", [propertyId]],
+        [
+          "DELETE FROM booking.room_last_minute_revisions WHERE property_id = $1::uuid",
+          [propertyId],
+        ],
+        ["DELETE FROM pms.pricing_v2_rooms WHERE property_id = $1::uuid", [propertyId]],
+        ["DELETE FROM pms.pricing_v2_revisions WHERE property_id = $1::uuid", [propertyId]],
+        ["DELETE FROM pms.pricing_v2_drafts WHERE property_id = $1::uuid", [propertyId]],
+        ["DELETE FROM pms.pricing_v2_heads WHERE property_id = $1::uuid", [propertyId]],
         [
           "DELETE FROM pms.recurring_pricing_materialized_rows WHERE property_id = $1::uuid",
           [propertyId],

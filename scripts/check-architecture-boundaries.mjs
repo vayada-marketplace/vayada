@@ -329,7 +329,8 @@ function isPmsOrChannelImport(specifier, context) {
 
 function isPmsImplementationImport(specifier, context) {
   const normalized = normalizeSpecifier(specifier);
-  if (normalized === "@vayada/domain-pms") {
+  // Public parser-only contract entrypoints; all implementation subpaths remain forbidden.
+  if (normalized === "@vayada/domain-pms" || normalized === "@vayada/domain-pms/replacement-pricing") {
     return false;
   }
 

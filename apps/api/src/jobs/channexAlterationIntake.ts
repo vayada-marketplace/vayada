@@ -140,10 +140,20 @@ export async function runChannexAlterationIntake(options: {
   pool: pg.Pool;
   provider: ReturnType<typeof createChannexAlterationFeed>;
   ownsMutation: () => boolean;
+  propertyIds?: readonly string[];
   signal?: AbortSignal;
   limit?: number;
 }) {
   const counts = { processed: 0, retried: 0, deadLettered: 0 };
+  const properties =
+    options.propertyIds === undefined
+      ? null
+      : z
+          .array(z.uuid())
+          .max(100)
+          .parse(options.propertyIds)
+          .map((id) => id.toLowerCase());
+  if (properties?.length === 0) return counts;
   const limit = z
     .number()
     .int()
@@ -168,8 +178,9 @@ export async function runChannexAlterationIntake(options: {
            attempts_count AS attempts,max_attempts AS "maxAttempts"
          FROM platform.jobs WHERE queue_name=$1 AND job_type=$2 AND status='pending'
            AND run_after<=now() AND attempts_count<max_attempts
+           AND ($3::uuid[] IS NULL OR property_id=ANY($3::uuid[]))
          ORDER BY run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,
-          [queue, type],
+          [queue, type, properties],
         )
       ).rows[0];
       if (!job) break;
@@ -180,7 +191,11 @@ export async function runChannexAlterationIntake(options: {
       try {
         const scope = scopeSchema.parse(job.payload);
         page = z.number().int().min(1).max(10_000).parse(job.page);
-        if (scope.propertyId !== job.propertyId) throw new Error("alteration_scan_scope_mismatch");
+        if (
+          scope.propertyId !== job.propertyId ||
+          (properties && !properties.includes(scope.propertyId.toLowerCase()))
+        )
+          throw new Error("alteration_scan_scope_mismatch");
         await assertBinding(client, scope);
         if (!active()) break;
         const result = await options.provider.list(scope.providerPropertyId, page, options.signal);

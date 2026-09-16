@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "金額未確認",
   "dashboard.reviewNoShow": "ノーショーを確認…",
   "checkOut.reviewNoShow": "ノーショーを確認…",
   "layout.header.signOut": "ログアウト",

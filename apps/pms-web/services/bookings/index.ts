@@ -69,6 +69,7 @@ export interface Booking {
   children: number;
   nightlyRate: number;
   numberOfRooms: number;
+  amountStatus?: "recorded" | "unverified";
   totalAmount: number;
   depositRequired: boolean;
   depositPercentage: number | null;
@@ -346,7 +347,11 @@ type PmsOperationalReservation = {
     rateSummary: Record<string, unknown>;
   }>;
   roomCount?: number;
-  pricing?: { totalAmount: PmsOperationsMoney; balanceAmount: PmsOperationsMoney };
+  pricing?: {
+    amountStatus?: "recorded" | "unverified";
+    totalAmount: PmsOperationsMoney;
+    balanceAmount: PmsOperationsMoney;
+  };
   payment?: {
     method: string | null;
     expectedMethod?: BookingExpectedPaymentMethod;
@@ -517,6 +522,7 @@ export interface AirbnbChangeRequestState {
   provider: "airbnb";
   state: "pending" | "queued" | "unknown" | "awaiting_confirmation" | "applied" | "declined" | "withdrawn" | "unavailable";
   allowedActions: Array<"accept" | "decline">;
+  supportsUnverifiedMoney?: boolean;
   refreshAction: "accept" | "decline" | null;
   oldTotal: number | null; newTotal: number | null; priceDifference: number | null; currency: string | null;
   oldAdults: number | null; oldChildren: number | null; requestedAdults: number | null; requestedChildren: number | null;
@@ -1162,6 +1168,7 @@ function toBooking(
     nightlyRate,
     numberOfRooms,
     totalAmount,
+    amountStatus: reservation.pricing?.amountStatus,
     depositRequired: false,
     depositPercentage: null,
     depositAmount: 0,

@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Importe sin verificar",
   "dashboard.reviewNoShow": "Revisar no presentación…",
   "checkOut.reviewNoShow": "Revisar no presentación…",
   "layout.header.signOut": "Cerrar sesion",

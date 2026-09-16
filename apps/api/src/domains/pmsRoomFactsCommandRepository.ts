@@ -55,9 +55,7 @@ export type PmsRoomFactsCommandRepository = RoomFactsCommandPort & {
 };
 
 type AnyCommand =
-  | CreateRoomTypeFactsCommand
-  | UpdateRoomTypeFactsCommand
-  | SafeDeleteRoomTypeCommand;
+  CreateRoomTypeFactsCommand | UpdateRoomTypeFactsCommand | SafeDeleteRoomTypeCommand;
 type AnyResult = CreateRoomTypeFactsResult | UpdateRoomTypeFactsResult | SafeDeleteRoomTypeResult;
 
 type IdempotencyRow = {
@@ -122,6 +120,7 @@ const MANAGE_PERMISSION = "pms.operations.manage";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const EXPECTED_INBOUND_FOREIGN_KEYS = new Set([
+  "booking.room_last_minute_revisions:room_last_minute_revisions_room_type_id_property_id_fkey:pms.room_types",
   "pms.channex_staging_catalog_references:fk_pms_staging_catalog_room_property:pms.room_types",
   "pms.room_type_closures:room_type_closures_room_type_id_property_id_fkey:pms.room_types",
   "pms.rooms:fk_pms_rooms_room_type_property:pms.room_types",
@@ -134,6 +133,7 @@ const EXPECTED_INBOUND_FOREIGN_KEYS = new Set([
   "pms.room_blocks:fk_pms_room_blocks_room_type_property:pms.room_types",
   "pms.room_blocks:fk_pms_room_blocks_source_room_type_property:pms.room_types",
   "pms.operational_booking_assignments:fk_pms_operational_assignments_room_type_property:pms.room_types",
+  "pms.pricing_v2_rooms:pricing_v2_rooms_room_type_id_property_id_fkey:pms.room_types",
   "pms.channel_room_type_mappings:fk_pms_channel_room_mappings_room_type_property:pms.room_types",
   "pms.channel_rate_plan_mappings:fk_pms_channel_rate_mappings_room_type_property:pms.room_types",
   "pms.room_type_media:fk_pms_room_type_media_room_property:pms.room_types",
@@ -970,6 +970,7 @@ async function inspectDeleteReferences(
        booking.booking_publication_attempts,
        booking.guest_bookings,
        booking.quote_sessions,
+       booking.room_last_minute_revisions,
        distribution.active_public_booking_revision,
        distribution.public_booking_content_revisions,
        distribution.public_room_offer_snapshots,
@@ -979,6 +980,7 @@ async function inspectDeleteReferences(
        pms.inventory_days,
        pms.non_refundable_rate_plan_source_rooms,
        pms.operational_booking_assignments,
+       pms.pricing_v2_rooms,
        pms.rate_plans,
        pms.rate_rules,
        pms.recurring_pricing_materialized_rows,
@@ -1101,6 +1103,14 @@ async function inspectDeleteReferences(
          (SELECT count(*) FROM pms.recurring_pricing_materialized_rows materialized_row
           WHERE materialized_row.property_id = $1::uuid
             AND materialized_row.room_type_id = $2::uuid)
+         +
+         (SELECT count(*) FROM pms.pricing_v2_rooms pricing_room
+          WHERE pricing_room.property_id = $1::uuid
+            AND pricing_room.room_type_id = $2::uuid)
+         +
+         (SELECT count(*) FROM booking.room_last_minute_revisions last_minute
+          WHERE last_minute.property_id = $1::uuid
+            AND last_minute.room_type_id = $2::uuid)
        )::bigint AS "rateReferenceCount",
        (SELECT count(*) FROM pms.inventory_days inventory
         WHERE inventory.property_id = $1::uuid AND inventory.room_type_id = $2::uuid)::bigint

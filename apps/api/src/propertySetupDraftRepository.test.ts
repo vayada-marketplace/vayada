@@ -281,6 +281,47 @@ describe.skipIf(!TEST_DATABASE_URL)("property setup draft PostgreSQL repository"
     });
   });
 
+  it("excludes retired guest drafts and resume markers while keeping other setup drafts", async () => {
+    await insertSession(["hotel_operations"], "2026-09-30T12:00:00.000Z");
+    await insertDraft({
+      stepId: "guest_experience",
+      payload: {},
+      dirtyFields: [],
+      revision: 1,
+      baseRevisions: {
+        "booking.guest_experience": "guest-policy:1",
+        "pms.pricing_settings": "pricing:1",
+        "pms.rate_plans": "rates:1",
+        "pms.room_types": "rooms:1",
+        "hotel_catalog.location": "location:1",
+        "hotel_catalog.policy": "policy:1",
+      },
+    });
+    await insertDraft({
+      stepId: "present_hotel",
+      payload: { "profile.default_locale": "de-DE" },
+      dirtyFields: ["profile.default_locale"],
+      baseRevisions: { "hotel_catalog.profile": "profile:1", "hotel_catalog.media": "profile:1" },
+      revision: 1,
+    });
+    await client.query(
+      "UPDATE hotel_catalog.property_setup_sessions SET resume_step_id='guest_experience',completed_step_ids=ARRAY['guest_experience']::text[] WHERE id=$1::uuid",
+      [sessionId],
+    );
+    await expect(
+      repository.getActiveSession({
+        ...scope,
+        authorizedStepIds: scope.authorizedStepIds.filter(
+          (stepId) => stepId !== "guest_experience",
+        ),
+      }),
+    ).resolves.toMatchObject({
+      resumeStepId: null,
+      completedStepIds: [],
+      drafts: [{ stepId: "present_hotel" }],
+    });
+  });
+
   it("never derives access from a stored session or draft", async () => {
     await insertSession(["creator_marketplace"], "2026-09-30T12:00:00.000Z");
     await insertDraft({

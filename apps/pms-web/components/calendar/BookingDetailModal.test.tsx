@@ -38,6 +38,42 @@ describe("cross-room-type move picker", () => {
     mocks.moveRoom.mockResolvedValue(booking);
   });
 
+  it("hides unverified totals and nightly pricing in the calendar detail", async () => {
+    mocks.get.mockResolvedValue({
+      ...booking,
+      amountStatus: "unverified",
+      numberOfRooms: 1,
+      paymentStatus: "paid",
+      stays: [
+        {
+          ...booking.stays[0],
+          nightly: [
+            { serviceDate: "2026-09-10", appliedAmount: 200, currency: "EUR" },
+            { serviceDate: "2026-09-11", appliedAmount: 200, currency: "EUR" },
+          ],
+        },
+      ],
+    });
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      view = create(
+        <BookingDetailModal
+          bookingId="booking-1"
+          onClose={vi.fn()}
+          onStatusChange={vi.fn()}
+          rooms={rooms}
+          bookings={bookings}
+        />,
+      );
+    });
+    const rendered = JSON.stringify(view!.toJSON());
+    expect(rendered).toContain("Amount unverified");
+    expect(rendered).not.toContain("€200");
+    expect(rendered).not.toContain("€100");
+    expect(rendered).not.toContain("Payment recorded");
+    view!.unmount();
+  });
+
   it("groups all rooms and keeps sibling assignments occupied", async () => {
     let view: ReturnType<typeof create>;
     await act(async () => {
@@ -110,6 +146,40 @@ describe("cross-room-type move picker", () => {
       "Difference unavailable because this stay does not have complete nightly rates.",
     );
     expect(radios[1]!.props.disabled).toBe(true);
+    view!.unmount();
+  });
+
+  it("does not compare room-move rates for unverified amounts even with historical nightly evidence", async () => {
+    mocks.get.mockResolvedValue({
+      ...booking,
+      amountStatus: "unverified",
+      stays: [
+        {
+          ...booking.stays[0],
+          nightly: [
+            { appliedAmount: 100, currency: "EUR", evidenceQuality: "exact" },
+            { appliedAmount: 120, currency: "EUR", evidenceQuality: "exact" },
+          ],
+        },
+      ],
+    });
+    let view: ReturnType<typeof create>;
+    await act(async () => {
+      view = create(
+        <BookingDetailModal
+          bookingId="booking-1"
+          sourceAssignmentSelector={{ assignmentId: "a-1" }}
+          onClose={vi.fn()}
+          onStatusChange={vi.fn()}
+          rooms={rooms}
+          bookings={bookings}
+        />,
+      );
+    });
+    await selectCrossTypeRoom(view!);
+    expect(JSON.stringify(view!.toJSON())).not.toContain("€110");
+    expect(JSON.stringify(view!.toJSON())).toContain("Difference unavailable");
+    expect(view!.root.findAllByProps({ type: "radio" })[1]!.props.disabled).toBe(true);
     view!.unmount();
   });
 

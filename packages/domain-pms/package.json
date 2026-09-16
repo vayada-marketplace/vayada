@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./replacement-pricing": {
+      "types": "./dist/replacementPricingBrowser.d.ts",
+      "default": "./dist/replacementPricingBrowser.js"
     }
   },
   "scripts": {

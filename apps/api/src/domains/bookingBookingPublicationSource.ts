@@ -1,14 +1,11 @@
+import type { BookingGuestChoicePublicationReader } from "./bookingGuestChoicePublication.js";
 import { createHash } from "node:crypto";
 
 import {
   BOOKING_LAUNCH_DERIVED_BINDING_SOURCE_ENTITY_TYPE,
-  createBookingGuestPolicyAbsentSourceRevision,
-  createBookingGuestPolicyPublicProjection,
-  createBookingGuestPolicySourceRevision,
   parseBookingDesignReadinessResult,
-  parseBookingGuestPolicyRevision,
+  parseBookingGuestPolicyChoices,
   type BookingDesignReadinessPort,
-  type BookingGuestPolicyReadPort,
   type BookingLaunchConfigurationEvidencePort,
   type BookingLaunchOwnerBlocker,
   type BookingLaunchSourceRevision,
@@ -48,7 +45,6 @@ type LoadedBooking = {
   pageSource: BookingSource;
   guestSource: BookingSource;
   pageBindings: BookingLaunchSourceRevision[];
-  guestBindings: BookingLaunchSourceRevision[];
   blockers: { page: BookingLaunchOwnerBlocker[]; guest: BookingLaunchOwnerBlocker[] };
   content: BookingPublicationSnapshotContent["booking"] | null;
 };
@@ -56,7 +52,7 @@ type LoadedBooking = {
 export function createBookingBookingPublicationSource(config: {
   connectionString: string;
   design: BookingDesignReadinessPort;
-  guestPolicy: Pick<BookingGuestPolicyReadPort, "getCurrentGuestPolicy">;
+  guestRules: BookingGuestChoicePublicationReader;
   pool?: BookingPool;
 }): BookingLaunchConfigurationEvidencePort &
   BookingPublicationOwnerSnapshotPort<"booking"> & { close(): Promise<void> } {
@@ -74,7 +70,7 @@ export function createBookingBookingPublicationSource(config: {
     owner: "booking",
     async getBookingLaunchEvidence(request) {
       try {
-        const loaded = await load(pool, config.design, config.guestPolicy, request);
+        const loaded = await load(pool, config.design, config.guestRules, request);
         if (!loaded) return unavailableEvidence();
         return deepFreeze({
           outcome: "evidence",
@@ -94,7 +90,6 @@ export function createBookingBookingPublicationSource(config: {
               owningStepId: "guest_experience",
               source: loaded.guestSource,
               blockers: loaded.blockers.guest,
-              ...(loaded.guestBindings.length ? { bindings: bindings(loaded.guestBindings) } : {}),
             },
           ],
         });
@@ -104,7 +99,7 @@ export function createBookingBookingPublicationSource(config: {
     },
     async getSnapshot(request) {
       try {
-        const loaded = await load(pool, config.design, config.guestPolicy, {
+        const loaded = await load(pool, config.design, config.guestRules, {
           organizationId: request.organizationId,
           propertyId: request.propertyId,
         });
@@ -143,18 +138,29 @@ export function createBookingBookingPublicationSource(config: {
 async function load(
   pool: BookingPool,
   designPort: BookingDesignReadinessPort,
-  policyPort: Pick<BookingGuestPolicyReadPort, "getCurrentGuestPolicy">,
+  policyPort: BookingGuestChoicePublicationReader,
   scope: { organizationId: string; propertyId: string },
 ): Promise<LoadedBooking | null> {
   const [settingsResult, rawDesign, rawPolicy] = await Promise.all([
     pool.query<SettingsRow>(SETTINGS_SQL, [scope.organizationId, scope.propertyId]),
     designPort.getBookingDesignReadiness(scope),
-    policyPort.getCurrentGuestPolicy(scope),
+    policyPort.getCurrentGuestRules(scope),
   ]);
   const settings = settingsResult.rows.length === 1 ? settingsResult.rows[0]! : null;
   if (!settings) return null;
   const design = parseBookingDesignReadinessResult(rawDesign, scope);
-  const policy = rawPolicy === null ? null : parseBookingGuestPolicyRevision(rawPolicy);
+  const policy = rawPolicy === null ? null : parseBookingGuestPolicyChoices(rawPolicy.choices);
+  if (
+    rawPolicy &&
+    (rawPolicy.propertyId !== scope.propertyId ||
+      rawPolicy.organizationId !== scope.organizationId ||
+      !/^guest-choices:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        rawPolicy.sourceRevision,
+      ) ||
+      !Number.isFinite(Date.parse(rawPolicy.confirmedAt)) ||
+      new Date(rawPolicy.confirmedAt).toISOString() !== rawPolicy.confirmedAt)
+  )
+    return null;
   if (!design || design.outcome === "provider_failure" || (rawPolicy !== null && !policy))
     return null;
 
@@ -164,9 +170,11 @@ async function load(
     `sha256:${sha256(JSON.stringify(settings))}`,
   );
   const pageSource = design.outcome === "ready" ? design.designSource : settingsSource;
-  const guestSource = policy
-    ? createBookingGuestPolicySourceRevision(scope.propertyId, policy.revision)
-    : createBookingGuestPolicyAbsentSourceRevision(scope.propertyId);
+  const guestSource = source(
+    "guest_choice_revision",
+    scope.propertyId,
+    rawPolicy?.sourceRevision ?? "guest-choices:absent",
+  );
   const sources = [
     ...new Map(
       [settingsSource, guestSource, ...(design.outcome === "ready" ? [pageSource] : [])].map(
@@ -184,12 +192,10 @@ async function load(
       pageSource,
       guestSource,
       pageBindings: [],
-      guestBindings: [],
       blockers,
       content: null,
     };
   }
-  const projection = createBookingGuestPolicyPublicProjection(policy);
   const hero =
     design.snapshot.cover.kind === "safe_media"
       ? (design.snapshot.cover.publicVariants.find(
@@ -213,10 +219,10 @@ async function load(
       fontPairing: design.snapshot.appearance.fontPairing,
     },
     policies: {
-      checkInFrom: projection.policy.checkInTime,
-      checkOutUntil: projection.policy.checkOutTime,
-      ...(projection.policy.checkInUntil ? { checkInUntil: projection.policy.checkInUntil } : {}),
-      ...(projection.policy.checkOutFrom ? { checkOutFrom: projection.policy.checkOutFrom } : {}),
+      checkInFrom: policy.checkInTime,
+      checkOutUntil: policy.checkOutTime,
+      ...(policy.checkInUntil ? { checkInUntil: policy.checkInUntil } : {}),
+      ...(policy.checkOutFrom ? { checkOutFrom: policy.checkOutFrom } : {}),
       cancellationSummary: null,
       termsUrl: null,
     },
@@ -230,14 +236,15 @@ async function load(
       maxRooms: 20,
       minAdults: 1,
       maxAdults: 20,
-      childrenSupported: projection.policy.childrenEnabled,
-      adultAgeThreshold: projection.policy.adultAgeThreshold ?? 18,
-      supportedCurrencies: [projection.policy.pricingCurrency],
+      childrenSupported: policy.childrenEnabled,
+      adultAgeThreshold: policy.adultAgeThreshold ?? 18,
+      // Finance supplies currencies when the complete owner snapshots are composed.
+      supportedCurrencies: [],
       supportedLocales,
     },
     freshness: {
       status: "fresh",
-      lastUpdatedAt: latestIso(settings.updatedAt, policy.acceptedAt),
+      lastUpdatedAt: latestIso(settings.updatedAt, rawPolicy!.confirmedAt),
     },
   };
   return {
@@ -245,7 +252,6 @@ async function load(
     pageSource,
     guestSource,
     pageBindings: design.snapshot.sourceBindings.filter(validBindingSource),
-    guestBindings: policy.bundle.sourceBindings.filter(validBindingSource),
     blockers,
     content,
   };

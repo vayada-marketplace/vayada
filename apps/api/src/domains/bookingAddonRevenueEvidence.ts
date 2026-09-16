@@ -25,6 +25,10 @@ export type AddonRevenueRefundTarget = {
   currency: string;
 };
 
+export type AddonRevenueCorrectionTarget = AddonRevenueRefundTarget & {
+  purchasedAmount: string;
+};
+
 export class BookingAddonRevenueEvidenceError extends Error {}
 
 export async function appendCheckoutAddonRevenueEvidence(
@@ -88,7 +92,75 @@ export async function appendAddonRevenueRefundEvidence(
     refunds: readonly { targetEvidenceId: string; grossAmount: string }[];
   },
 ): Promise<void> {
-  if (input.refunds.length === 0) return;
+  await appendAddonRevenueAdjustments(transaction, {
+    ...input,
+    event: "refund",
+    commandKeyPrefix: `pms-refund:${input.commandKeyHash}:addon:`,
+    adjustments: input.refunds,
+  });
+}
+
+export async function loadAddonRevenueCorrectionTargets(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    currency: string;
+    evidenceIds: readonly string[];
+  },
+): Promise<AddonRevenueCorrectionTarget[]> {
+  const result = await transaction.query<AddonRevenueCorrectionTarget>(
+    `WITH state AS (
+       SELECT evidence.id,evidence.addon_selection_id,evidence.recognized_on,evidence.currency,
+         COALESCE(SUM(evidence.gross_amount) OVER (PARTITION BY evidence.addon_selection_id),0) AS available,
+         first_value(evidence.economic_event) OVER (PARTITION BY evidence.addon_selection_id
+           ORDER BY evidence.source_revision) AS root_event,
+         row_number() OVER (PARTITION BY evidence.addon_selection_id
+           ORDER BY evidence.source_revision DESC,evidence.created_at DESC,evidence.id DESC) AS position
+       FROM booking.addon_revenue_evidence evidence
+       WHERE evidence.property_id=$2::uuid AND evidence.guest_booking_id=$3::uuid
+         AND evidence.currency=$4
+     ) SELECT state.id::text AS "evidenceId",state.recognized_on::text AS "recognizedOn",
+       state.available::text AS "availableAmount",trim(state.currency) AS currency,
+       selection.total_amount::text AS "purchasedAmount"
+     FROM state JOIN booking.booking_addon_selections selection
+       ON selection.id=state.addon_selection_id AND selection.property_id=$2::uuid
+     WHERE state.id=ANY($1::uuid[]) AND state.position=1 AND state.root_event='fulfillment'`,
+    [input.evidenceIds, input.propertyId, input.guestBookingId, input.currency],
+  );
+  return result.rows;
+}
+
+export async function appendAddonRevenueCorrectionEvidence(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    recognizedOn: string;
+    commandKeyHash: string;
+    corrections: readonly { targetEvidenceId: string; grossAmount: string }[];
+  },
+): Promise<void> {
+  await appendAddonRevenueAdjustments(transaction, {
+    ...input,
+    event: "correction",
+    commandKeyPrefix: `pms-price-correction:${input.commandKeyHash}:addon:`,
+    adjustments: input.corrections,
+  });
+}
+
+async function appendAddonRevenueAdjustments(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    recognizedOn: string;
+    event: "refund" | "correction";
+    commandKeyPrefix: string;
+    adjustments: readonly { targetEvidenceId: string; grossAmount: string }[];
+  },
+): Promise<void> {
+  if (input.adjustments.length === 0) return;
   const inserted = await transaction.query(
     `INSERT INTO booking.addon_revenue_evidence
        (addon_selection_id,property_id,guest_booking_id,recognized_on,quantity,currency,
@@ -96,8 +168,8 @@ export async function appendAddonRevenueRefundEvidence(
         source_revision,corrects_evidence_id,command_key)
      SELECT target.addon_selection_id,target.property_id,target.guest_booking_id,$3::date,
        target.quantity,target.currency,line."grossAmount"::numeric,target.ownership_kind,
-       target.partner_commission_rate,'refund','exact',target.source_revision+1,target.id,
-       $5 || target.addon_selection_id::text || ':v' || (target.source_revision+1)::text
+       target.partner_commission_rate,$5,'exact',target.source_revision+1,target.id,
+       $6 || target.addon_selection_id::text || ':v' || (target.source_revision+1)::text
      FROM booking.addon_revenue_evidence target
      JOIN jsonb_to_recordset($4::jsonb) AS line("targetEvidenceId" text,"grossAmount" text)
        ON target.id=line."targetEvidenceId"::uuid
@@ -106,12 +178,13 @@ export async function appendAddonRevenueRefundEvidence(
       input.propertyId,
       input.guestBookingId,
       input.recognizedOn,
-      JSON.stringify(input.refunds),
-      `pms-refund:${input.commandKeyHash}:addon:`,
+      JSON.stringify(input.adjustments),
+      input.event,
+      input.commandKeyPrefix,
     ],
   );
-  if (inserted.rowCount !== input.refunds.length)
-    throw new BookingAddonRevenueEvidenceError("Add-on refund target is unavailable.");
+  if (inserted.rowCount !== input.adjustments.length)
+    throw new BookingAddonRevenueEvidenceError("Add-on adjustment target is unavailable.");
 }
 
 async function appendAddonRevenueEvidence(

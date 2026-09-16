@@ -520,6 +520,33 @@ export async function captureDirectNightlyRevenueEvidence(
     if (options.required) throw new Error("Booked room evidence is unavailable.");
     return;
   }
+  await persistDirectNightlyRevenueProjection(client, booking, {
+    roomTypeId,
+    nights,
+    fingerprint,
+    recognizedOn: options.recognizedOn,
+  });
+}
+
+/** Shared internal direct-booking sink. Caller validates owner evidence and retains
+ * its transaction. Receives resolved room-night amounts, never a booking total to
+ * divide. Initial capture and later corrections retain the same append-only SQL. */
+export async function persistDirectNightlyRevenueProjection(
+  client: SettlementExecutor,
+  booking: Pick<DirectRevenueBooking, "guestBookingId" | "propertyId">,
+  projection: {
+    roomTypeId: string;
+    nights: readonly {
+      stayDate: string;
+      grossRoomAmount: string;
+      roomTypeId?: string;
+      roomPositions?: number[];
+    }[];
+    fingerprint: string;
+    recognizedOn?: string;
+  },
+) {
+  const { roomTypeId, nights, fingerprint } = projection;
   await client.query(
     `WITH booking_scope AS (
        SELECT id,property_id,currency,room_count,lifecycle_status FROM booking.guest_bookings
@@ -569,7 +596,7 @@ export async function captureDirectNightlyRevenueEvidence(
       roomTypeId,
       JSON.stringify(nights),
       sha256(fingerprint),
-      options.recognizedOn ?? null,
+      projection.recognizedOn ?? null,
     ],
   );
 }

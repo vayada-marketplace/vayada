@@ -152,7 +152,7 @@ export async function registerBookingGuestPolicyRoutes(
   );
 }
 
-async function authorizeRequest(
+export async function authorizeRequest(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyAccessRepository: PropertyAccessRepository,
@@ -233,7 +233,7 @@ function requireAuthorizedScope(
   return scope;
 }
 
-function readIdempotencyKey(request: FastifyRequest): string | null {
+export function readIdempotencyKey(request: FastifyRequest): string | null {
   const occurrences = request.raw.rawHeaders.filter(
     (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
   ).length;
@@ -243,7 +243,7 @@ function readIdempotencyKey(request: FastifyRequest): string | null {
   return key.length >= 1 && key.length <= 200 ? key : null;
 }
 
-function exactDataRecord(
+export function exactDataRecord(
   value: unknown,
   keys: readonly string[],
 ): value is Record<string, unknown> {

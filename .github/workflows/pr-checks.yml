@@ -154,6 +154,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify immutable legacy owner bootstrap receipts
+        env:
+          VAY2017_RECEIPT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_receipt_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_RECEIPT_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_receipt_fixture");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerBootstrapReceipts.integration.test.ts
+
+      - name: Verify scoped legacy owner email guard
+        env:
+          VAY2017_EMAIL_GUARD_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_email_guard_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_EMAIL_GUARD_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_email_guard_fixture");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerEmailIndexPlan.test.ts
+
       - name: Verify Marketplace matching event storage
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/matchingEventProjections.test.ts src/affiliatePercentagePolicyStorage.test.ts
         env:
@@ -181,9 +211,14 @@ jobs:
           src/marketplaceCollaborations.test.ts
           src/marketplaceAffiliateDestinationRoutes.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
+          src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
+          src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
+          src/domains/bookingAffiliateReferralProductionPreflightStorage.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \
+          src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
           src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
@@ -274,7 +309,10 @@ jobs:
       - name: Verify Finance OTA commission migration
         run: >-
           npm --workspace @vayada/backend-migration run test --
-          src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts && npm --workspace vayada-api run test -- src/domains/financeOtaCommissionEvidence.integration.test.ts
+          src/financeOtaCommissionRules.test.ts src/providerFeeEvidenceMigration.integration.test.ts
+          src/airbnbProviderSnapshots.test.ts && npm --workspace vayada-api run test --
+          src/domains/financeOtaCommissionEvidence.integration.test.ts
+          src/domains/financeAirbnbProviderSnapshot.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 

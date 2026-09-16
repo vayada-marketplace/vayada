@@ -70,6 +70,7 @@ function checkoutTime() {
 }
 
 function isPaid(b: Booking) {
+  if (b.amountStatus === "unverified") return false;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
 
@@ -274,7 +275,7 @@ export default function DashboardPage() {
         (booking) => booking.checkIn <= dateStr && booking.checkOut > dateStr,
       );
       const adr =
-        occupying.length > 0
+        occupying.length > 0 && occupying.every((booking) => booking.amountStatus !== "unverified")
           ? occupying.reduce((sum, b) => sum + (b.nightlyRate || 0), 0) / occupying.length
           : null;
       days.push({
@@ -397,7 +398,11 @@ export default function DashboardPage() {
         />
         <StatCard
           label={t("dashboard.revenueThisMonth")}
-          value={formatCurrency(revenueThisMonth, hotelCurrency)}
+          value={
+            bookings.some((b) => b.checkIn >= monthStartStr && b.amountStatus === "unverified")
+              ? t("bookings.detail.amountUnverified")
+              : formatCurrency(revenueThisMonth, hotelCurrency)
+          }
           sub={t("dashboard.monthToDate")}
           icon={<DollarIcon />}
         />
@@ -544,9 +549,11 @@ export default function DashboardPage() {
                   <div className="flex shrink-0 items-center gap-2">
                     {!isPaid(b) && (
                       <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 sm:inline-flex">
-                        {t("dashboard.amountPending", {
-                          amount: formatCurrency(b.balanceAmount || b.totalAmount, b.currency),
-                        })}
+                        {b.amountStatus === "unverified"
+                          ? t("bookings.detail.amountUnverified")
+                          : t("dashboard.amountPending", {
+                              amount: formatCurrency(b.balanceAmount || b.totalAmount, b.currency),
+                            })}
                       </span>
                     )}
                     <span
@@ -765,11 +772,13 @@ function ArrivalQuickView({
                       ? t("dashboard.checkedIn")
                       : t("dashboard.arrivingToday")}
             </span>
-            {due > 0 && (
+            {(booking.amountStatus === "unverified" || due > 0) && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
-                {t("dashboard.amountDue", {
-                  amount: formatCurrency(due, booking.currency),
-                })}
+                {booking.amountStatus === "unverified"
+                  ? t("bookings.detail.amountUnverified")
+                  : t("dashboard.amountDue", {
+                      amount: formatCurrency(due, booking.currency),
+                    })}
               </span>
             )}
             {missingIds > 0 && (

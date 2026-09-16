@@ -39,6 +39,19 @@ describe("Booking publication builder", () => {
     }
   });
 
+  it("takes currencies from Finance and still rejects incompatible PMS rates", async () => {
+    const readiness = await readyEvidence(), snapshots = snapshotSet(readiness);
+    const booking = { ...snapshots.booking, content: { ...snapshots.booking.content,
+      supportedQuoteParameters: { ...snapshots.booking.content.supportedQuoteParameters, supportedCurrencies: [] } } };
+    await expect(run(readiness, { booking, finance: { ...snapshots.finance, content: {
+      ...snapshots.finance.content, supportedCurrencies: ["EUR", "USD"] } } })).resolves.toMatchObject({ outcome: "rejected" });
+    const result = await run(readiness, { booking });
+    expect(result).toMatchObject({ outcome: "built", build: { publicContent: { profile: { hotel: {
+      supportedQuoteParameters: { supportedCurrencies: ["EUR"] } } } } } });
+    await expect(run(readiness, { booking, finance: { ...snapshots.finance, content: {
+      ...snapshots.finance.content, defaultCurrency: "USD", supportedCurrencies: ["USD"] } } })).resolves.toMatchObject({ outcome: "rejected" });
+  });
+
   it("fails closed for unavailable, mismatched, or incomplete snapshots", async () => {
     const readiness = await readyEvidence();
     const snapshots = snapshotSet(readiness);

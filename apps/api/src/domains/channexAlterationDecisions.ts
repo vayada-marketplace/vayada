@@ -8,6 +8,7 @@ import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
+import { assertChannexUnverifiedAlterationSupport } from "./channexUnverifiedAlterationSupport.js";
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const inputSchema = z.object({
@@ -48,6 +49,8 @@ export async function decideChannexAlteration(
     pool: pg.Pool;
     journalPool: pg.Pool;
     provider: Provider;
+    /** Enable only together with the reviewed unverified-money revision worker. */
+    allowUnverifiedAirbnbAlterations?: boolean;
     assertAvailability?: (
       transaction: pg.PoolClient,
       input: {
@@ -124,9 +127,11 @@ export async function decideChannexAlteration(
       adults: number;
       children: number;
       currency: string;
+      moneyStatus: string | null;
     }>(
       `SELECT booking.check_in::text AS "checkIn", booking.check_out::text AS "checkOut",
-         booking.total_amount::text AS total, booking.adults, booking.children, booking.currency
+         booking.total_amount::text AS total, booking.adults, booking.children, booking.currency,
+         booking.booking_metadata->>'airbnbMoneyStatus' AS "moneyStatus"
        FROM pms.channel_connections connection
        JOIN pms.channel_binding_claims claim ON claim.property_id=connection.property_id
          AND claim.provider='channex' AND claim.external_property_id=connection.external_property_id
@@ -176,17 +181,29 @@ export async function decideChannexAlteration(
         return decision;
       }
       const booking = owned.rows[0]!;
-      if (
-        input.action === "accept" &&
-        (row.changes["oldCheckIn"] !== booking.checkIn ||
-          row.changes["oldCheckOut"] !== booking.checkOut ||
-          row.changes["oldTotal"] !== booking.total ||
-          row.changes["oldAdults"] !== booking.adults ||
-          row.changes["oldChildren"] !== booking.children ||
-          row.changes["currency"] !== booking.currency)
-      )
-        throw new Error("alteration_booking_snapshot_changed");
-      if (input.action === "accept" && (await hasBookingFinancialEvidence(client, input))) {
+      let financialFailure = false;
+      if (input.action === "accept") {
+        if (booking.moneyStatus === "unverified" && config.allowUnverifiedAirbnbAlterations) {
+          try {
+            await assertChannexUnverifiedAlterationSupport(client, {
+              ...input,
+              providerBookingId: proposal.providerBookingId,
+            });
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              error.message !== "alteration_finance_reconciliation_required"
+            )
+              throw error;
+            financialFailure = true;
+          }
+        } else {
+          financialFailure =
+            booking.moneyStatus === "unverified" ||
+            (await hasBookingFinancialEvidence(client, input));
+        }
+      }
+      if (financialFailure) {
         // No send has started. Release the queued intent so staff can still decline.
         // Commit independently: the booking/binding locks stay held until rollback below.
         const cleared = await config.journalPool.query(
@@ -201,6 +218,16 @@ export async function decideChannexAlteration(
         if (cleared.rowCount !== 1) throw new Error("alteration_decision_not_saved");
         throw new Error("alteration_finance_reconciliation_required");
       }
+      if (
+        input.action === "accept" &&
+        (row.changes["oldCheckIn"] !== booking.checkIn ||
+          row.changes["oldCheckOut"] !== booking.checkOut ||
+          row.changes["oldTotal"] !== booking.total ||
+          row.changes["oldAdults"] !== booking.adults ||
+          row.changes["oldChildren"] !== booking.children ||
+          row.changes["currency"] !== booking.currency)
+      )
+        throw new Error("alteration_booking_snapshot_changed");
       if (input.action === "accept")
         await (config.assertAvailability ?? assertChannexAlterationAvailability)(client, {
           propertyId: input.propertyId,
