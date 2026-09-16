@@ -28,7 +28,10 @@ import {
 } from "@vayada/domain-pms";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
-import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import {
+  lockPmsInventoryMutationScope,
+  PMS_INVENTORY_MUTATION_LOCK_PREFIX,
+} from "./pmsInventoryMutationLock.js";
 import {
   reconcilePmsLinkedInventory,
   type PmsLinkedInventoryDirtyRange,
@@ -36,7 +39,10 @@ import {
 import { enqueuePmsLinkedInventorySideEffects } from "./pmsLinkedInventorySideEffects.js";
 import { loadPmsOperatingCalendarConfigurationByRevision } from "./pmsOperatingCalendarReadModel.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
-import { lockPmsRoomFactsMutationScope } from "./pmsRoomFactsMutationLock.js";
+import {
+  lockPmsRoomFactsMutationScope,
+  PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE,
+} from "./pmsRoomFactsMutationLock.js";
 
 const MATERIALIZATION_OPERATION = PMS_INVENTORY_MATERIALIZATION_IDEMPOTENCY.operation;
 const MATERIALIZATION_RESOURCE_TYPE = "inventory_materialization";
@@ -60,7 +66,7 @@ export type PmsInventoryMaterializationRepositoryClient = {
     text: string,
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
-  release(): void;
+  release(discard?: boolean): void;
 };
 
 export type PmsInventoryMaterializationRepositoryPool = {
@@ -79,10 +85,27 @@ export type PmsInventoryMaterializationRepositoryConfig = Readonly<{
   roomCapacity: RoomCapacityReadPort;
 }>;
 
+export type PmsCurrentInventoryDay = Readonly<{
+  kind: "available";
+  day: PmsInventoryDaySnapshot;
+  configurationSource: PmsOperatingCalendarConfigurationSnapshot["source"];
+  propertyProfileSource: PmsOperatingCalendarConfigurationSnapshot["sourceInputs"]["propertyProfile"];
+  propertyTimeZone: PmsOperatingCalendarConfigurationSnapshot["sourceInputs"]["propertyTimeZone"];
+  materializedRevision: number;
+  sourceRoomFactsRevision: number;
+  sourceRoomUnitsRevision: number;
+}>;
+/** Internal authorization only, under owner locks. No provider IO or inventory mutation. */
+type InventoryDayGuard = (
+  client: PmsInventoryMaterializationRepositoryClient,
+  day: PmsCurrentInventoryDay,
+) => Promise<boolean>;
+
 export type PmsInventoryMaterializationRepository = PmsInventoryMaterializationPort &
   PmsInventoryLaunchReadinessReadPort & {
     getCurrentInventoryDay(
       request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+      guard?: InventoryDayGuard,
     ): ReturnType<typeof readCurrentInventoryDay>;
     close(): Promise<void>;
   };
@@ -182,7 +205,8 @@ export function createPgPmsInventoryMaterializationRepository(
       return executeMaterialization(pool, config, normalized, acceptedAt);
     },
 
-    getCurrentInventoryDay: (request) => readCurrentInventoryDay(pool, config, request),
+    getCurrentInventoryDay: (request, guard) =>
+      readCurrentInventoryDay(pool, config, request, guard),
 
     async getInventoryLaunchReadiness(request) {
       const requiredCoverage = normalizeRequiredCoverage(request.requiredCoverage);
@@ -232,6 +256,7 @@ async function readCurrentInventoryDay(
   pool: PmsInventoryMaterializationRepositoryPool,
   config: PmsInventoryMaterializationRepositoryConfig,
   request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+  guard?: InventoryDayGuard,
 ) {
   const propertyId = normalizeUuid(request.propertyId),
     roomTypeId = normalizeUuid(request.roomTypeId);
@@ -249,12 +274,21 @@ async function readCurrentInventoryDay(
   const expectedProfileRevision = propertyProfileRevision(current.configuration);
   if (expectedProfileRevision === null) return unavailable("configuration_not_current");
   const client = await pool.connect();
-  let committed = false;
+  let committed = false,
+    sessionLocked = false,
+    roomFactsPinned = false,
+    transactionStarted = false,
+    discard = false;
   try {
-    await client.query("BEGIN");
-    await client.query("SET LOCAL statement_timeout='5s'");
-    await client.query("SET LOCAL lock_timeout='150ms'");
-    await lockPmsInventoryMutationScope(client, propertyId);
+    // Pin inventory before creating the MVCC snapshot; a wait inside BEGIN could
+    // otherwise retain an old append-only calendar revision after a writer commits.
+    const pin = await client.query(
+      "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",
+      [PMS_INVENTORY_MUTATION_LOCK_PREFIX + propertyId],
+    );
+    if (pin.rows[0]?.locked !== true)
+      throw Object.assign(new Error("Inventory source busy"), { code: "55P03" });
+    sessionLocked = true;
     return await config.propertyProfileEvidence.runWithPropertyProfileEvidence(
       { propertyId, expectedProfileRevision },
       async (profile) => {
@@ -266,6 +300,18 @@ async function readCurrentInventoryDay(
           )
         )
           return unavailable("configuration_not_current");
+        const factsPin = await client.query(
+          "SELECT pg_try_advisory_lock(hashtext($1),hashtext($2::uuid::text)) AS locked",
+          [PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE, propertyId],
+        );
+        if (factsPin.rows[0]?.locked !== true)
+          throw Object.assign(new Error("Room facts busy"), { code: "55P03" });
+        roomFactsPinned = true;
+        await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+        transactionStarted = true;
+        await client.query("SET LOCAL statement_timeout='5s'");
+        await client.query("SET LOCAL lock_timeout='150ms'");
+        await lockPmsInventoryMutationScope(client, propertyId);
         await lockPmsRoomFactsMutationScope(client, propertyId);
         for (const binding of [...current.configuration.sourceInputs.roomBindings].sort((a, b) =>
           compareCodeUnits(a.roomTypeId, b.roomTypeId),
@@ -310,7 +356,7 @@ async function readCurrentInventoryDay(
           !isPmsInventoryDayConsistent(day, binding)
         )
           return unavailable("inventory_day_unavailable");
-        const result = {
+        const result: PmsCurrentInventoryDay = {
           kind: "available" as const,
           day,
           configurationSource: exact.source,
@@ -320,17 +366,48 @@ async function readCurrentInventoryDay(
           sourceRoomFactsRevision: binding.sourceRoomFactsRevision,
           sourceRoomUnitsRevision: binding.sourceRoomUnitsRevision,
         };
+        if (guard && !(await guard(client, result)))
+          return unavailable("consumer_authority_unavailable");
         await client.query("COMMIT");
         committed = true;
         return result;
       },
     );
   } catch (error) {
+    if (!transactionStarted) discard = true;
     if (error instanceof InventoryInvariantError) return unavailable("inventory_day_unavailable");
     throw error;
   } finally {
-    if (!committed) await rollbackQuietly(client);
-    client.release();
+    if (transactionStarted && !committed) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        discard = true;
+      }
+    }
+    if (roomFactsPinned) {
+      try {
+        const released = await client.query(
+          "SELECT pg_advisory_unlock(hashtext($1),hashtext($2::uuid::text)) AS released",
+          [PMS_ROOM_FACTS_MUTATION_LOCK_NAMESPACE, propertyId],
+        );
+        if (released.rows[0]?.released !== true) discard = true;
+      } catch {
+        discard = true;
+      }
+    }
+    if (sessionLocked) {
+      try {
+        const released = await client.query(
+          "SELECT pg_advisory_unlock(hashtextextended($1,0)) AS released",
+          [PMS_INVENTORY_MUTATION_LOCK_PREFIX + propertyId],
+        );
+        if (released.rows[0]?.released !== true) discard = true;
+      } catch {
+        discard = true;
+      }
+    }
+    client.release(discard);
   }
 }
 

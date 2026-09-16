@@ -1163,3 +1163,12 @@ these checks. Closed or linked-stop-sell days may return an explicitly verified
 zero; malformed/inconsistent data returns unavailable. Every future dispatch and
 activation consumer must recheck this point-in-time evidence in its own current
 transaction and also prove Channex authority/room ownership.
+
+The reader pins the shared inventory advisory key at session scope with a
+nonwaiting try-lock before BEGIN, then enters the profile guard and pins room
+facts before creating the SERIALIZABLE snapshot and acquiring its normal
+transaction locks. Room-facts writers need their own pin because they do not all
+take the inventory lock. Contention returns `55P03` for retry; do not wait inside
+an existing snapshot and accept a superseded append-only calendar. Always release
+both session pins before returning the connection to the pool; failed rollback
+or unlock discards the connection. This pin does not authorize provider IO.
