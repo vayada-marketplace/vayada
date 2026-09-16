@@ -1251,3 +1251,12 @@ Availability task verification reuses the original ARI task envelope, identity,
 payload and ordered timestamp checks but requires the provider task type
 `Property.UpdateAvailability`. A restrictions task cannot prove an availability
 write, and task completion remains observation rather than reconciliation.
+
+Room-availability reconciliation first reads one clean original receipt and the
+exact retained request under current PMS inventory, mapping and Channex authority
+locks. It releases those locks for bounded task completion and exact room/date
+availability readback, then repeats the complete candidate in a fresh current-day
+transaction. Only unchanged PMS source evidence, provider identity, request,
+receipt and authority may perform the single unresolved-to-reconciled transition.
+The bounded evidence retains observation digests and the sanitized availability
+result. Reconciliation neither activates a channel nor grants another send.

@@ -1,6 +1,7 @@
 import {
   claimChannexRoomAvailability,
   prepareChannexRoomAvailabilityEvidence,
+  reconcileCurrentChannexRoomAvailability,
 } from "./channexRoomAvailabilityEvidence.js";
 import {
   prepareChannexRoomAvailabilityReceiptPersistence,
@@ -136,6 +137,61 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       dispatch: () =>
         prepareChannexRoomAvailabilityDispatch(channelPool, f.repository, lease, selection),
     };
+  }
+  async function availabilityReconciliationFixture() {
+    const f = await channelInventoryFixture(),
+      prepared = await f.dispatch(),
+      taskId = randomUUID();
+    if (prepared.kind !== "prepared") throw new Error("dispatch unavailable");
+    let request: unknown;
+    await prepared.dispatch(async (sent) => {
+      request = structuredClone(sent.body);
+      return new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+        { status: 200 },
+      );
+    });
+    if (!request) throw new Error("request unavailable");
+    const task = {
+      data: {
+        type: "task",
+        id: taskId,
+        attributes: {
+          id: taskId,
+          task: "Property.UpdateAvailability",
+          payload: request,
+          success: true,
+          errors: [],
+          received_at: "2026-09-16T00:00:00.000001",
+          executed_at: "2026-09-16T00:00:00.000002",
+          finished_at: "2026-09-16T00:00:00.000003",
+        },
+      },
+    };
+    const availability = {
+      data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+      meta: { warnings: [] },
+    };
+    const get = vi.fn(async (path: string) =>
+      path.includes("/tasks/") ? structuredClone(task) : structuredClone(availability),
+    );
+    const reconcile = (read: (path: string, signal: AbortSignal) => Promise<unknown> = get) =>
+      reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        prepared.attemptId,
+        read,
+      );
+    const state = async () =>
+      (
+        await admin.query(
+          "SELECT state,reconciliation_evidence FROM pms.channex_room_availability_attempts WHERE id=$1",
+          [prepared.attemptId],
+        )
+      ).rows[0];
+    return { ...f, prepared, task, availability, get, reconcile, state };
   }
   it("binds canonical inventory to the leased property's current Channex room", async () => {
     const f = await channelInventoryFixture();
@@ -339,11 +395,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(prepared.kind).toBe("prepared");
     if (prepared.kind !== "prepared") return;
     const taskId = randomUUID(),
-      post = vi.fn(async (_request: unknown, _signal: AbortSignal) =>
-        new Response(
-          JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
-          { status: 200 },
-        ),
+      post = vi.fn(
+        async (_request: unknown, _signal: AbortSignal) =>
+          new Response(
+            JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { message: "Success" } }),
+            { status: 200 },
+          ),
       );
     await expect(prepared.dispatch(post)).resolves.toEqual({
       kind: "retained",
@@ -353,7 +410,9 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     expect(post.mock.calls[0][0]).toMatchObject({
       method: "POST",
       path: "/api/v1/availability",
-      body: { values: [{ availability: 2, date_from: f.selection.date, date_to: f.selection.date }] },
+      body: {
+        values: [{ availability: 2, date_from: f.selection.date, date_to: f.selection.date }],
+      },
     });
     await expect(prepared.dispatch(post)).resolves.toEqual({
       kind: "unavailable",
@@ -427,6 +486,93 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0],
     ).toEqual({ outcome: "transport_error", http_status: null, provider_request_id: null });
+  });
+  it("reconciles exact task, readback and unchanged PMS evidence", async () => {
+    const f = await availabilityReconciliationFixture();
+    await expect(f.reconcile()).resolves.toEqual({
+      kind: "availability_reconciled",
+      attemptId: f.prepared.attemptId,
+    });
+    expect(f.get.mock.calls.map(([path]) => path)).toEqual([
+      expect.stringContaining(`/tasks/${f.task.data.id}`),
+      expect.stringContaining("/api/v1/availability?"),
+    ]);
+    expect(await f.state()).toMatchObject({
+      state: "reconciled",
+      reconciliation_evidence: {
+        schemaVersion: 1,
+        originalReceiptId: expect.any(String),
+        taskCount: 1,
+        observationsSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        inventoryEvidenceSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        availability: {
+          externalPropertyId: f.propertyId,
+          externalRoomTypeId: f.externalRoomTypeId,
+          date: f.selection.date,
+          availableCount: 2,
+        },
+      },
+    });
+    expect(await f.claim()).toMatchObject({ kind: "availability_claimed" });
+  });
+  it("keeps ownership unresolved when exact provider availability does not match", async () => {
+    const f = await availabilityReconciliationFixture();
+    f.availability.data[f.externalRoomTypeId]![f.selection.date] = 1;
+    await expect(f.reconcile()).rejects.toThrow("availability_readback_mismatch");
+    expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+  });
+  it.each(["binding", "inventory"])(
+    "rolls back reconciliation when current %s changes during provider reads",
+    async (mode) => {
+      const f = await availabilityReconciliationFixture();
+      const result = await f.reconcile(async (path) => {
+        if (path.includes("/tasks/")) {
+          if (mode === "binding")
+            await admin.query(
+              "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+              [f.connectionId],
+            );
+          else
+            await admin.query(
+              `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+               booking_source_revision=1,inventory_revision=inventory_revision+1
+             WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3`,
+              [f.propertyId, f.roomTypeId, f.selection.date],
+            );
+          return structuredClone(f.task);
+        }
+        return structuredClone(f.availability);
+      });
+      expect(result).toMatchObject({ kind: "unavailable" });
+      expect(await f.state()).toEqual({ state: "unresolved", reconciliation_evidence: {} });
+    },
+  );
+  it("does no provider IO for an ambiguous original receipt", async () => {
+    const f = await channelInventoryFixture(),
+      claimed = await f.claim(),
+      get = vi.fn();
+    if (claimed.kind !== "availability_claimed") throw new Error("claim unavailable");
+    await (
+      await prepareChannexRoomAvailabilityTransportFailurePersistence(channelPool, {
+        receiptId: randomUUID(),
+        attemptId: claimed.attemptId,
+        jobAttemptId: claimed.jobAttemptId,
+        workerId: claimed.workerId,
+        propertyId: f.propertyId,
+        connectionId: f.connectionId,
+      })
+    )();
+    expect(
+      await reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        claimed.attemptId,
+        get,
+      ),
+    ).toMatchObject({ kind: "unavailable" });
+    expect(get).not.toHaveBeenCalled();
   });
   it("writes no owner when current inventory is unavailable", async () => {
     const f = await channelInventoryFixture();
@@ -509,10 +655,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     if (mode === "uncanonical-property") {
       await admin.query("BEGIN");
       try {
-          await admin.query(
-            "UPDATE pms.channel_binding_claims SET external_property_id=$2 WHERE property_id=$1 AND claim_state='active'",
-            [f.propertyId, ` ${f.propertyId} `],
-          );
+        await admin.query(
+          "UPDATE pms.channel_binding_claims SET external_property_id=$2 WHERE property_id=$1 AND claim_state='active'",
+          [f.propertyId, ` ${f.propertyId} `],
+        );
         await admin.query(
           "UPDATE pms.channel_connections SET external_property_id=$2 WHERE id=$1",
           [f.connectionId, ` ${f.propertyId} `],
