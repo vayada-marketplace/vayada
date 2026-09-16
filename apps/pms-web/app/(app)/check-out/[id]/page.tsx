@@ -495,6 +495,11 @@ export default function CheckOutPage() {
                             <button
                               key={value}
                               type="button"
+                              aria-label={`${addOn.name}: ${t(
+                                value === "fulfilled"
+                                  ? "checkOut.addonFulfilled"
+                                  : "checkOut.addonNotConfirmed",
+                              )}`}
                               aria-pressed={addonFulfillment[addOn.selectionId] === value}
                               onClick={() => {
                                 setWarning("");
