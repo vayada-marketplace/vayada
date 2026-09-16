@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   UnauthorizedError,
+  requireAuthContext,
   validateStaffInviteAccess,
   validProductAccess,
   type CreateStaffInviteCommand,
@@ -80,6 +81,29 @@ export async function registerStaffInvitationRoutes(
   options: StaffInvitationRoutesOptions,
 ): Promise<void> {
   const authorized = new WeakMap<FastifyRequest, ReturnType<typeof enforceRoutePolicy>>();
+  app.get("/self-access", async (request, reply) => {
+    try {
+      const context = requireAuthContext(request);
+      if (
+        context.actor.status !== "active" ||
+        context.selectedOrganization.kind !== "hotel_group" ||
+        context.selectedOrganization.status !== "active" ||
+        context.membership.status !== "active"
+      )
+        throw new AuthorizationError();
+      reply.header("Cache-Control", "private, no-store");
+      return reply.send({
+        membershipId: context.membership.membershipId,
+        roleKey: context.membership.roleKey,
+        permissions: context.membership.permissions,
+      });
+    } catch (error) {
+      if (error instanceof UnauthorizedError)
+        return reply.status(401).send({ code: "unauthenticated" });
+      if (error instanceof AuthorizationError) return reply.status(403).send({ code: "forbidden" });
+      throw error;
+    }
+  });
   const authorize = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const context = enforceRoutePolicy(request, { permission: "identity.staff.manage" });

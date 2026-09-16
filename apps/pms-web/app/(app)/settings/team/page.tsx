@@ -12,6 +12,7 @@ import TeamRoleCards from "@/components/settings/team/TeamRoleCards";
 import TeamActionDialog, { type TeamAction } from "@/components/settings/team/TeamActionDialog";
 import { getPmsSettingsSections } from "@/lib/settings/navigation";
 import { useTranslation } from "@/lib/i18n";
+import { usePmsAccess } from "@/lib/settings/PmsAccessContext";
 import {
   clearPendingAdminTransfer,
   completePendingAdminTransfer,
@@ -46,7 +47,8 @@ const roleLabelKeys: Record<PmsStaffMember["roleKey"], string> = {
 
 export default function TeamSettingsPage() {
   const { t, locale } = useTranslation();
-  const sections = getPmsSettingsSections(false, t);
+  const access = usePmsAccess();
+  const sections = getPmsSettingsSections(false, t, access);
   const [admins, setAdmins] = useState<PmsAccountAdmin[]>([]);
   const [actorMembershipId, setActorMembershipId] = useState("");
   const [roles, setRoles] = useState<PmsTeamRole[]>([]);

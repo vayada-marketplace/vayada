@@ -21,6 +21,16 @@ export async function getPmsStaffRoster(): Promise<PmsStaffMember[]> {
   return response.members;
 }
 
+export type PmsSelfAccess = {
+  membershipId: string;
+  roleKey: string;
+  permissions: string[];
+};
+
+export function getPmsSelfAccess(): Promise<PmsSelfAccess> {
+  return pmsOperationsClient.get("/api/identity/staff/self-access", pmsOperationsRequestOptions);
+}
+
 export async function updatePmsStaffStatus(
   membershipId: string,
   status: "active" | "deactivated",

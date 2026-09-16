@@ -563,6 +563,26 @@ describe("staff invitation routes", () => {
     },
   );
 
+  it("returns the caller's live permissions without requiring staff-management access", async () => {
+    const fake = fakes();
+    app = await testApp(fake.options, {
+      roleKey: "front_desk",
+      permissions: ["pms.calendar.read"],
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/identity/staff/self-access",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      membershipId: "membership-owner",
+      roleKey: "front_desk",
+      permissions: ["pms.calendar.read"],
+    });
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+  });
+
   it("lists only the authenticated organization's roster", async () => {
     const fake = fakes();
     app = await testApp(fake.options);

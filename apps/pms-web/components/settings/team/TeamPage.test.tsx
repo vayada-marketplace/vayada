@@ -7,6 +7,12 @@ vi.mock("next/link", () => ({
     <a href={href}>{children}</a>
   ),
 }));
+vi.mock("@/lib/settings/PmsAccessContext", () => ({
+  usePmsAccess: () => ({
+    roleKey: "hotel_owner",
+    permissions: ["pms.settings.read", "identity.staff.manage"],
+  }),
+}));
 
 const api = vi.hoisted(() => ({
   roster: vi.fn(),
