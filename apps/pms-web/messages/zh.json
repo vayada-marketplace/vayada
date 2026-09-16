@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "金额未核实",
   "dashboard.reviewNoShow": "查看未入住情况…",
   "checkOut.reviewNoShow": "查看未入住情况…",
   "layout.header.signOut": "退出登录",

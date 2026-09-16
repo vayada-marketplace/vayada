@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Bedrag niet geverifieerd",
+  "dashboard.stats.incompleteAmounts": "Sommige boekingsbedragen zijn niet geverifieerd. Ze tellen niet mee voor de omzet en gemiddelde tarieven, maar de boekingen tellen wel mee in het aantal boekingen. Financiële vergelijkingen zijn niet beschikbaar.",
   "auth.login.sessionExpired": "Je sessie is verlopen. Log opnieuw in.",
   "auth.login.emailLabel": "E-mailadres",
   "auth.login.emailPlaceholder": "admin@example.com",

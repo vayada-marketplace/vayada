@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Jumlah belum diverifikasi",
+  "dashboard.stats.incompleteAmounts": "Sebagian jumlah pemesanan belum diverifikasi. Jumlah tersebut tidak disertakan dalam pendapatan dan tarif rata-rata, tetapi pemesanannya tetap dihitung. Perbandingan keuangan tidak tersedia.",
   "auth.login.sessionExpired": "Sesi Anda telah berakhir. Silakan masuk kembali.",
   "auth.login.emailLabel": "Alamat email",
   "auth.login.emailPlaceholder": "admin@example.com",

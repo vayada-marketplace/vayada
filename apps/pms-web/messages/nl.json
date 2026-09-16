@@ -1,4 +1,5 @@
 {
+  "bookings.detail.amountUnverified": "Bedrag niet geverifieerd",
   "dashboard.reviewNoShow": "No-show bekijken…",
   "checkOut.reviewNoShow": "No-show bekijken…",
   "layout.header.signOut": "Uitloggen",

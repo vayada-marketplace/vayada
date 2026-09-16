@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Importo non verificato",
+  "dashboard.stats.incompleteAmounts": "Alcuni importi delle prenotazioni non sono verificati. Sono esclusi dai ricavi e dalle tariffe medie, ma le prenotazioni restano incluse nel conteggio. I confronti finanziari non sono disponibili.",
   "auth.login.sessionExpired": "La tua sessione è scaduta. Effettua nuovamente l'accesso.",
   "auth.login.emailLabel": "Indirizzo email",
   "auth.login.emailPlaceholder": "admin@example.com",
