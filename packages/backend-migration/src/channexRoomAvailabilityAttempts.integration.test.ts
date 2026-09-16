@@ -177,6 +177,106 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
     ).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("retains one immutable original dispatch receipt", async () => {
+    const f = await fixture(),
+      attempt = (await f.insert()).rows[0],
+      receiptId = randomUUID(),
+      taskId = randomUUID();
+    const receipt = (
+      await pool.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,
+            provider_request_id,task_ids,has_warnings,warning_reason,captured_at)
+         VALUES($1,$2,$3,$4,'complete_json',200,'request.1',$5::uuid[],false,NULL,'2000-01-01')
+         RETURNING *`,
+        [receiptId, attempt.id, f.jobAttemptId, f.workerId, [taskId]],
+      )
+    ).rows[0];
+    expect(receipt).toMatchObject({
+      id: receiptId,
+      attempt_id: attempt.id,
+      job_attempt_id: f.jobAttemptId,
+      worker_id: f.workerId,
+      outcome: "complete_json",
+      http_status: 200,
+      provider_request_id: "request.1",
+      task_ids: [taskId],
+      has_warnings: false,
+      warning_reason: null,
+    });
+    expect(new Date(receipt.captured_at).getUTCFullYear()).not.toBe(2000);
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         VALUES(gen_random_uuid(),$1,$2,$3,'invalid_json',502,'{}',true)`,
+        [attempt.id, f.jobAttemptId, f.workerId],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+    await expect(
+      pool.query(
+        "UPDATE pms.channex_room_availability_receipts SET http_status=201 WHERE id=$1",
+        [receiptId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      pool.query("DELETE FROM pms.channex_room_availability_receipts WHERE id=$1", [receiptId]),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("requires exact attempt correlation and bounded receipt combinations", async () => {
+    const f = await fixture(),
+      other = await fixture(),
+      attempt = (await f.insert()).rows[0];
+    const insert = (values: string) =>
+      pool.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,
+            provider_request_id,task_ids,has_warnings,warning_reason)
+         VALUES(gen_random_uuid(),$1,$2,$3,${values})`,
+        [attempt.id, f.jobAttemptId, f.workerId],
+      );
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         VALUES(gen_random_uuid(),$1,$2,$3,'transport_error',NULL,'{}',true)`,
+        [attempt.id, other.jobAttemptId, other.workerId],
+      ),
+    ).rejects.toMatchObject({ code: "23503" });
+    await expect(insert("'transport_error',500,NULL,'{}',true,NULL")).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(insert("'invalid_json',500,NULL,ARRAY[gen_random_uuid()],true,NULL"))
+      .rejects.toMatchObject({ code: "23514" });
+    await expect(
+      insert("'complete_json',200,NULL,'{}',false,'provider_warnings'"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(insert("'complete_json',200,NULL,'{}',false,NULL")).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(insert("'complete_json',200,NULL,'{}',true,NULL")).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(
+      insert("'complete_json',200,'unsafe request id','{}',true,'invalid_tasks'"),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      insert("'complete_json',200,NULL,'{}',true,'invalid_tasks'"),
+    ).resolves.toMatchObject({ rowCount: 1 });
+
+    const transport = await fixture(),
+      transportAttempt = (await transport.insert()).rows[0];
+    await expect(
+      pool.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+           (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         VALUES(gen_random_uuid(),$1,$2,$3,'transport_error',NULL,'{}',true)`,
+        [transportAttempt.id, transport.jobAttemptId, transport.workerId],
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+  });
+
   it("requires an active mapping and correlated ordinary sync job", async () => {
     const f = await fixture(),
       other = await fixture();

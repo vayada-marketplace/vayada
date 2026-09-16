@@ -1219,3 +1219,9 @@ count and retains the complete current-day source evidence used to build it. A
 provider-room conflict returns reconciliation-required and never reuses the
 existing owner. The returned request belongs only to the new attempt; it is not
 a send permit, receipt, readback result, or activation decision.
+
+Each room-availability attempt accepts at most one immutable original-dispatch
+receipt. The receipt keeps exact attempt/job/worker correlation and only bounded
+HTTP status, request ID, task IDs, parser outcome, and warning classification;
+provider text is never retained. A transport exception is stored as ambiguous
+`transport_error`. Receipt presence cannot reconcile the attempt or permit retry.
