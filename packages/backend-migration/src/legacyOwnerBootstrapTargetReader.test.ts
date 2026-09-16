@@ -12,8 +12,8 @@ const rows = () =>
     exactCount: 0,
     restricted: false,
     identityConflict: false,
-    providerUserId: null,
-    providerEmailMatches: null,
+    providerUserId: null as string | null,
+    providerEmailMatches: null as boolean | null,
   }));
 const client = (query: unknown) => ({ query }) as AdoptionQueryClient;
 describe("scoped target read boundary", () => {
@@ -61,6 +61,23 @@ describe("scoped target read boundary", () => {
     expect(result.every((row) => row.target === "absent")).toBe(true);
     expect(JSON.stringify(result)).not.toContain("@");
   });
+  it.each(["owner@example.invalid", `user_${"a".repeat(129)}`])(
+    "redacts malformed provider ID %s while failing closed",
+    async (providerUserId) => {
+      const output = rows();
+      output[0]!.candidateCount = 1;
+      output[0]!.exactCount = 1;
+      output[0]!.providerUserId = providerUserId;
+      output[0]!.providerEmailMatches = true;
+      const query = vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [{ transaction_read_only: "on" }] })
+        .mockResolvedValueOnce({ rows: output });
+      const result = await readLegacyOwnerBootstrapTargets(client(query), owners);
+      expect(result[0]).toMatchObject({ target: "conflict", providerUserId: null });
+      expect(JSON.stringify(result)).not.toContain(providerUserId);
+    },
+  );
   it.each(["missing", "duplicate", "invalid_count"])("rejects %s output", async (mode) => {
     const output = rows();
     if (mode === "missing") output.pop();
