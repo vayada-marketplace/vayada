@@ -181,6 +181,7 @@ jobs:
           src/marketplaceCollaborations.test.ts
           src/marketplaceAffiliateDestinationRoutes.test.ts
           src/domains/bookingAffiliateDestinationSave.integration.test.ts
+          src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
