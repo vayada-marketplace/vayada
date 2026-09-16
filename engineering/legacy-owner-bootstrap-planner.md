@@ -60,3 +60,24 @@ Caller must independently verify the DB environment and full table visibility
 lifetime. This helper does not prove source ownership or provider state and does
 not set planner completeness. No production runner is wired; provider reads,
 source verification and organization/membership dependency checks remain pending.
+
+## Bounded source prerequisite
+
+`readLegacyOwnerBootstrapSources` reads only the eight approved owner/hotel pairs
+from a completed immutable source run. The independently approved request must
+bind ledger SHA256 and each row's ID, ordinal and checksum. The reader rehashes
+the selected PostgreSQL JSON in SQL and checks snapshot-identifier provenance;
+it does not replace full extraction/parity validation with a partial table scan.
+Ledger hash approval must follow that full validation. Unrelated row payloads
+are never returned; metadata for the run is read to verify the ledger hash.
+The reader also revalidates the exact four-source/table inventory, fingerprint
+parity and aggregate counts/checksums; a signed but incomplete ledger is denied.
+
+Requires a caller-owned REPEATABLE READ or SERIALIZABLE read-only transaction
+and verifies one PostgreSQL transaction ID spans every read, so matching session
+defaults without `BEGIN` are denied. It also requires verified environment/full
+table visibility. Sixteen exact source rows are
+required; the query caps at seventeen to detect duplicate/extra matches. The
+result includes sensitive email only for in-memory downstream comparison, not
+reporting. It proves a historical association, not current source ownership or
+production readiness. Protected QA hotel IDs are rejected. No writes occur.
