@@ -19,6 +19,22 @@ export async function verifyChannexAriTaskFinish(
   expected: Readonly<{ taskId: string; externalPropertyId: string; request: unknown }>,
   get: (method: "GET", path: string) => Promise<unknown>,
 ) {
+  return verifyTaskFinish(expected, "Property.UpdateRestrictions", get);
+}
+
+/** Availability-task observation with the same immutable payload guarantees. */
+export async function verifyChannexAvailabilityTaskFinish(
+  expected: Readonly<{ taskId: string; externalPropertyId: string; request: unknown }>,
+  get: (method: "GET", path: string) => Promise<unknown>,
+) {
+  return verifyTaskFinish(expected, "Property.UpdateAvailability", get);
+}
+
+async function verifyTaskFinish(
+  expected: Readonly<{ taskId: string; externalPropertyId: string; request: unknown }>,
+  expectedTask: "Property.UpdateRestrictions" | "Property.UpdateAvailability",
+  get: (method: "GET", path: string) => Promise<unknown>,
+) {
   const { taskId, externalPropertyId } = expected;
   if (![taskId, externalPropertyId].every((id) => typeof id === "string" && uuid.test(id)))
     throw new Error("ari_task_scope_unavailable");
@@ -57,7 +73,7 @@ export async function verifyChannexAriTaskFinish(
     finished = taskTime(value.finished_at);
   if (
     value.id !== taskId ||
-    value.task !== "Property.UpdateRestrictions" ||
+    value.task !== expectedTask ||
     value.success !== true ||
     !Array.isArray(value.errors) ||
     value.errors.length !== 0 ||

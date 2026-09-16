@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { verifyChannexAriTaskFinish as verify } from "./channexAriTaskReadback.js";
+import {
+  verifyChannexAriTaskFinish as verify,
+  verifyChannexAvailabilityTaskFinish,
+} from "./channexAriTaskReadback.js";
 const taskId = "5ff7d7b6-f455-4309-a19d-383442c09c50";
 const externalPropertyId = "8f4c1e47-3de1-4150-8bde-ad031a013842";
 const request = () => ({
@@ -176,5 +179,37 @@ describe("original ARI task finish observation", () => {
       finished_at: "2026-09-13T04:25:17.100001",
     });
     expect((await verify(expected(), async () => body)).kind).toBe("task_finish_observed");
+  });
+});
+
+describe("availability task finish observation", () => {
+  const availabilityRequest = {
+    values: [
+      {
+        property_id: externalPropertyId,
+        room_type_id: "55ed3514-378a-4467-ae77-164c1a6bd02e",
+        date_from: "2026-09-14",
+        date_to: "2026-09-14",
+        availability: 2,
+      },
+    ],
+  };
+  const expectedAvailability = { taskId, externalPropertyId, request: availabilityRequest };
+  it("requires the availability task type and exact original payload", async () => {
+    const body = response();
+    Object.assign(body.data.attributes, {
+      task: "Property.UpdateAvailability",
+      payload: availabilityRequest,
+    });
+    await expect(verifyChannexAvailabilityTaskFinish(expectedAvailability, async () => body))
+      .resolves.toMatchObject({ kind: "task_finish_observed", taskId, externalPropertyId });
+  });
+  it("rejects a restrictions task for an availability request", async () => {
+    const body = response();
+    body.data.attributes.payload =
+      availabilityRequest as unknown as typeof body.data.attributes.payload;
+    await expect(
+      verifyChannexAvailabilityTaskFinish(expectedAvailability, async () => body),
+    ).rejects.toThrow("ari_task_observation_unavailable");
   });
 });

@@ -1246,3 +1246,8 @@ that date. It rejects root errors or warnings, malformed metadata, missing room
 or date entries, booleans, fractional/negative counts and noncanonical numeric
 strings. The sanitized observation contains only external property/room IDs,
 date and exact nonnegative count; it is not reconciliation by itself.
+
+Availability task verification reuses the original ARI task envelope, identity,
+payload and ordered timestamp checks but requires the provider task type
+`Property.UpdateAvailability`. A restrictions task cannot prove an availability
+write, and task completion remains observation rather than reconciliation.
