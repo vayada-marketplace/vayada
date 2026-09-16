@@ -1,4 +1,11 @@
-import type { PoolClient } from "pg";
+import type { QueryResult, QueryResultRow } from "pg";
+
+export type ChannexPricingQueryClient = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
+};
 import { PMS_CHANNEX_MANAGEMENT_QUEUE } from "../domains/pmsChannexManagementReadModel.js";
 
 export const CHANNEX_JOB_LEASE_MS = 5 * 60_000;
@@ -19,7 +26,7 @@ export type ChannexPricingJobLease = ChannexPricingJobLeaseInput &
  * Recheck at the final read boundary; this function never renews the lease.
  */
 export async function lockChannexPricingJobLease(
-  client: PoolClient,
+  client: ChannexPricingQueryClient,
   input: ChannexPricingJobLeaseInput,
 ): Promise<ChannexPricingJobLease | null> {
   if (
