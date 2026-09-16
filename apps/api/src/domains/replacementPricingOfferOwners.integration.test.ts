@@ -1,3 +1,4 @@
+import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
 import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
@@ -782,9 +783,9 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(result).toMatchObject({ kind: "unavailable", reason: "ari_dispatch_unavailable" });
     expect(f.post).not.toHaveBeenCalled();
   });
-  async function ariReceiptFixture() {
+  async function ariReceiptFixture(date = initialAriDate) {
     const f = await initialAriFixture(),
-      claimed = await f.claimAri();
+      claimed = await f.claimAri(date);
     if (claimed.kind !== "ari_claimed") throw new Error("claim required");
     const correlation = {
       ...f.correlation,
@@ -805,8 +806,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       );
     return { ...f, ariCorrelation: correlation, taskId, ariResponse: response };
   }
-  async function stagedPriceFixture() {
-    const f = await ariReceiptFixture();
+  async function stagedPriceFixture(date = initialAriDate) {
+    const f = await ariReceiptFixture(date);
     const stored = (
       await pool.query("SELECT request_body FROM pms.channex_offer_ari_attempts WHERE id=$1", [
         f.ariCorrelation.attemptId,
@@ -1105,8 +1106,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       prepareChannexAriReceiptPersistence(pool, f.ariCorrelation, response).then((save) => save());
     return { ...f, readTasks: read, task, retain };
   }
-  async function reconciliationFixture() {
-    const f = await stagedPriceFixture();
+  async function reconciliationFixture(serviceDate = initialAriDate) {
+    const f = await stagedPriceFixture(serviceDate);
     const { property_id, rate_plan_id, date, rates: _rates, ...restrictions } = f.stored;
     const task = {
       data: {
@@ -1152,6 +1153,87 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0];
     return { ...f, get, task, restrictions, reconcile, retain, state };
   }
+  it("automatically selects the hotel-local first date and obtains only one fresh claim", async () => {
+    const f = await initialAriFixture();
+    await pool.query(
+      "UPDATE hotel_catalog.property_locations SET timezone='Pacific/Kiritimati' WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    const expected = (
+      await pool.query(
+        "SELECT to_char(clock_timestamp() AT TIME ZONE 'Pacific/Kiritimati','YYYY-MM-DD') AS date",
+      )
+    ).rows[0].date;
+    expect(
+      (await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId))
+        .kind,
+    ).toBe("prepared");
+    expect(
+      (
+        await pool.query(
+          "SELECT service_date::text AS date FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1",
+          [f.claim.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ date: expected }]);
+    expect(
+      await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId),
+    ).toMatchObject({ reason: "ari_reconciliation_required" });
+  });
+  it("automatically advances beyond a verified completed local date", async () => {
+    const today = (
+      await pool.query("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD') AS date")
+    ).rows[0].date;
+    const f = await reconciliationFixture(today);
+    await f.retain();
+    expect((await f.reconcile()).kind).toBe("ari_reconciled");
+    expect(
+      (await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId))
+        .kind,
+    ).toBe("prepared");
+    const expected = new Date(`${today}T00:00:00Z`);
+    expected.setUTCDate(expected.getUTCDate() + 1);
+    expect(
+      (
+        await pool.query(
+          "SELECT service_date::text AS date FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 AND state='unresolved'",
+          [f.claim.attemptId],
+        )
+      ).rows,
+    ).toEqual([{ date: expected.toISOString().slice(0, 10) }]);
+  });
+  it.each(["timezone", "configuration", "lease"])(
+    "does not automatically claim a date with missing %s authority",
+    async (mode) => {
+      const f = await initialAriFixture();
+      if (mode === "timezone")
+        await pool.query("DELETE FROM hotel_catalog.property_locations WHERE property_id=$1", [
+          f.scope.propertyId,
+        ]);
+      if (mode === "configuration")
+        await pool.query(
+          "UPDATE pms.channex_offer_target_intents SET result_evidence=result_evidence-'configuration' WHERE id=$1",
+          [f.claim.intentId],
+        );
+      if (mode === "lease")
+        await pool.query(
+          "UPDATE platform.jobs SET locked_at=clock_timestamp()-interval '10 minutes' WHERE id=$1",
+          [f.input.jobId],
+        );
+      expect(
+        (await prepareNextChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId))
+          .kind,
+      ).toBe("unavailable");
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1",
+            [f.claim.attemptId],
+          )
+        ).rows,
+      ).toEqual([]);
+    },
+  );
   async function completedDateFixture() {
     const f = await reconciliationFixture();
     await f.retain();

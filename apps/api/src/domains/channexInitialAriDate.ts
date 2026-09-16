@@ -1,19 +1,47 @@
 import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "../jobs/pmsChannexAriHorizon.js";
 
+const unavailable = { kind: "unavailable", reason: "ari_date_unavailable" } as const;
+
 /** Calendar-date admission only; no availability, capability or send permission. */
 export function admitChannexInitialAriDate(date: string, timeZone: unknown, now: Date) {
-  const unavailable = { kind: "unavailable", reason: "ari_date_unavailable" } as const;
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return unavailable;
+  const selected = new Date(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(selected.getTime()) || selected.toISOString().slice(0, 10) !== date)
+    return unavailable;
+  const window = initialAriWindow(timeZone, now);
+  if (window.kind !== "window" || date < window.propertyLocalDate || date > window.through)
+    return unavailable;
+  return { ...window, kind: "admitted" as const, date };
+}
+
+/** Callers must verify completion provenance before supplying covered dates. */
+export function selectNextChannexInitialAriDate(
+  timeZone: unknown,
+  now: Date,
+  completed: readonly string[],
+) {
+  const window = initialAriWindow(timeZone, now);
+  if (window.kind !== "window") return window;
+  const covered = new Set(completed);
+  const cursor = new Date(`${window.propertyLocalDate}T00:00:00.000Z`);
+  for (
+    let date = window.propertyLocalDate;
+    date <= window.through;
+    date = cursor.toISOString().slice(0, 10)
+  ) {
+    if (!covered.has(date)) return { ...window, kind: "selected" as const, date };
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return { ...window, kind: "selected" as const, date: null };
+}
+
+function initialAriWindow(timeZone: unknown, now: Date) {
   if (
-    typeof date !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
     typeof timeZone !== "string" ||
     !timeZone ||
     timeZone !== timeZone.trim() ||
     !Number.isFinite(now.getTime())
   )
-    return unavailable;
-  const selected = new Date(`${date}T00:00:00.000Z`);
-  if (!Number.isFinite(selected.getTime()) || selected.toISOString().slice(0, 10) !== date)
     return unavailable;
   try {
     const parts = Object.fromEntries(
@@ -33,8 +61,7 @@ export function admitChannexInitialAriDate(date: string, timeZone: unknown, now:
     // Calendar arithmetic intentionally avoids 24-hour additions in the hotel's zone.
     end.setUTCDate(end.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
     const through = end.toISOString().slice(0, 10);
-    if (date < today || date > through) return unavailable;
-    return { kind: "admitted" as const, date, propertyLocalDate: today, through, timeZone };
+    return { kind: "window" as const, propertyLocalDate: today, through, timeZone };
   } catch {
     return unavailable;
   }
