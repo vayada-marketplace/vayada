@@ -16,6 +16,20 @@ const url = process.env["VAY2017_EVIDENCE_TEST_DATABASE_URL"];
 describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
   let client: pg.Client;
   const fingerprints: LegacyOwnershipFingerprint[] = [];
+  async function refreshFingerprints(): Promise<LegacyOwnershipFingerprint[]> {
+    const rows: LegacyOwnershipFingerprint[] = [];
+    for (const item of fingerprints)
+      rows.push({
+        kind: item.kind,
+        table: item.table,
+        ...(await readLegacyOwnershipTargetRow(
+          client,
+          LEGACY_OWNERSHIP_ROW_TABLES[item.kind],
+          item.id,
+        )),
+      });
+    return rows;
+  }
   const legacyHotelId = "00000000-0000-4000-8000-000000000099";
   let identityProof: LegacyOwnerIdentityEvidence;
   const verifiedSession = () => ({
@@ -89,6 +103,8 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
       "UPDATE hotel_catalog.property_source_links SET property_id = $1, source_id = $2, source_system = 'pms', source_table = 'hotels', relationship = 'operational_input'",
       [id("property"), legacyHotelId],
     );
+    await client.query("UPDATE hotel_catalog.property_source_links SET status = 'active'");
+    await client.query("UPDATE identity.organization_resource_links SET status = 'suspended'");
     for (const [kind, product, type, resource] of [
       ["legacyLink", "pms", "pms_hotel", legacyHotelId],
       ["canonicalLink", "hotel_catalog", "property", id("property")],
@@ -236,6 +252,51 @@ describe.skipIf(!url)("ownership reader on disposable local PostgreSQL", () => {
       expect(await readLegacyOwnershipTargetEvidence(client, fingerprints, legacyHotelId)).toEqual({
         outcome: "blocked",
         reason: "source_link_conflict",
+      });
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+  it.each([
+    ["sourceLink", "superseded", "source_link_restricted"],
+    ["sourceLink", "ignored", "source_link_restricted"],
+    ["sourceLink", "unknown", "source_link_restricted"],
+    ["membership", "inactive", "membership_restricted"],
+    ["membership", "suspended", "membership_restricted"],
+    ["membership", "unknown", "membership_restricted"],
+    ["legacyLink", "archived", "ownership_link_restricted"],
+    ["canonicalLink", "archived", "ownership_link_restricted"],
+    ["pmsLink", "archived", "ownership_link_restricted"],
+    ["pmsLink", "unknown", "ownership_link_restricted"],
+  ] as const)(
+    "rejects %s %s even with freshly matching fingerprints",
+    async (kind, status, reason) => {
+      await client.query("BEGIN");
+      try {
+        const row = fingerprints.find((item) => item.kind === kind)!;
+        // Table comes only from the checked-in fixture allowlist, never external input.
+        await client.query(
+          `UPDATE ${LEGACY_OWNERSHIP_ROW_TABLES[kind]} SET status = $1 WHERE id = $2`,
+          [status, row.id],
+        );
+        const refreshed = await refreshFingerprints();
+        expect(await readLegacyOwnershipTargetEvidence(client, refreshed, legacyHotelId)).toEqual({
+          outcome: "blocked",
+          reason,
+        });
+      } finally {
+        await client.query("ROLLBACK");
+      }
+    },
+  );
+  it("keeps ordinary active membership and links eligible for evidence matching only", async () => {
+    await client.query("BEGIN");
+    try {
+      await client.query("UPDATE identity.organization_memberships SET status = 'active'");
+      await client.query("UPDATE identity.organization_resource_links SET status = 'active'");
+      const refreshed = await refreshFingerprints();
+      expect(await readLegacyOwnershipTargetEvidence(client, refreshed, legacyHotelId)).toEqual({
+        outcome: "target_matches",
       });
     } finally {
       await client.query("ROLLBACK");
