@@ -1,4 +1,4 @@
--- VAY-2021: Canonical Marketplace communication preferences. Historical newsletter rows
+-- VAY-2021: Canonical Marketplace communication preferences; historical newsletter rows
 -- are deliberately not read or copied by this forward-only migration.
 
 CREATE TABLE marketplace.communication_preference_sets (
