@@ -26,6 +26,7 @@ export type BookingReservationReadModelRow = {
   nightlyRate: number | string;
   numberOfRooms?: number | null;
   totalAmount: number | string;
+  amountStatus?: "recorded" | "unverified";
   currency: string;
   status: string;
   roomId?: string | null;
@@ -111,9 +112,12 @@ export function toBookingReservationReadModel(
     nights: daysBetween(checkIn, checkOut),
     adults: reservation.adults,
     children: reservation.children,
-    nightlyRate: toNumber(reservation.nightlyRate),
+    nightlyRate:
+      reservation.amountStatus === "unverified" ? null : toNumber(reservation.nightlyRate),
     numberOfRooms,
-    totalAmount: toNumber(reservation.totalAmount),
+    ...(reservation.amountStatus ? { amountStatus: reservation.amountStatus } : {}),
+    totalAmount:
+      reservation.amountStatus === "unverified" ? null : toNumber(reservation.totalAmount),
     currency: reservation.currency,
     status: reservation.status,
     roomId: reservation.roomId ?? null,
@@ -128,7 +132,10 @@ export function toBookingReservationReadModel(
     depositRequired: reservation.depositRequired ?? false,
     depositPercentage: toNullableNumber(reservation.depositPercentage),
     depositAmount: toNumber(reservation.depositAmount ?? 0),
-    balanceAmount: toNumber(reservation.balanceAmount ?? reservation.totalAmount),
+    balanceAmount:
+      reservation.amountStatus === "unverified"
+        ? null
+        : toNumber(reservation.balanceAmount ?? reservation.totalAmount),
     checkInPendingFlags: parseJson<string[]>(reservation.checkInPendingFlags, []),
     checkedInAt: toIsoDateTimeOrNull(reservation.checkedInAt),
     checkedOutAt: toIsoDateTimeOrNull(reservation.checkedOutAt),

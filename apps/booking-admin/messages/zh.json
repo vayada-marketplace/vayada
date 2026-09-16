@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "金额未核实",
+  "dashboard.stats.incompleteAmounts": "部分预订金额尚未核实。这些金额不计入收入和平均房价，但相应预订仍计入预订数量。暂时无法进行财务比较。",
   "auth.login.sessionExpired": "您的会话已过期，请重新登录。",
   "auth.login.emailLabel": "电子邮箱",
   "auth.login.emailPlaceholder": "admin@example.com",

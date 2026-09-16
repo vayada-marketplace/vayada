@@ -49,10 +49,9 @@ export async function appendFinanceAirbnbProviderSnapshot(
       checkOut: string;
       roomCount: number;
       status: string;
-      amountMatches: boolean;
     }>(
       `SELECT txid_current()::text AS "transactionId",check_in::text AS "checkIn",check_out::text AS "checkOut",
-       room_count AS "roomCount",lifecycle_status AS status,total_amount=$5::numeric AS "amountMatches" FROM booking.guest_bookings
+       room_count AS "roomCount",lifecycle_status AS status FROM booking.guest_bookings
      WHERE id=$1 AND property_id=$2 AND source_system='pms' AND source_booking_id=$3
        AND booking_channel='airbnb' AND currency=$4 FOR UPDATE`,
       [
@@ -60,7 +59,6 @@ export async function appendFinanceAirbnbProviderSnapshot(
         command.propertyId,
         `channex:${command.propertyId}:${snapshot.providerBookingId}`,
         snapshot.currency,
-        snapshot.providerBookingAmount,
       ],
     )
   ).rows[0];
@@ -87,7 +85,7 @@ export async function appendFinanceAirbnbProviderSnapshot(
       `SELECT id, (provider_property_id=$3::uuid AND provider_booking_id=$4::uuid AND provider_channel_id=$5::uuid
       AND provider_revision_at=$7::timestamptz AND settings_evidence_ref=$8 AND currency=$9
       AND amount_basis=$10 AND cohost_payout_calculations IS NOT DISTINCT FROM $11::boolean
-      AND provider_booking_amount=$12::numeric AND ota_commission IS NOT DISTINCT FROM $13::numeric
+      AND provider_booking_amount IS NOT DISTINCT FROM $12::numeric AND ota_commission IS NOT DISTINCT FROM $13::numeric
       AND snapshot=$14::jsonb) AS matches FROM finance.airbnb_provider_snapshots
      WHERE property_id=$1 AND guest_booking_id=$2 AND provider_revision_id=$6`,
       values,
@@ -98,11 +96,12 @@ export async function appendFinanceAirbnbProviderSnapshot(
     return { outcome: "replayed" as const, snapshotId: replay.id };
   }
   if (
-    booking.status !== "confirmed" ||
-    !booking.amountMatches ||
-    booking.checkIn !== snapshot.checkIn ||
-    booking.checkOut !== snapshot.checkOut ||
-    booking.roomCount !== snapshot.rooms.length
+    snapshot.replacement === "cancellation"
+      ? booking.status !== "canceled"
+      : booking.status !== "confirmed" ||
+        booking.checkIn !== snapshot.checkIn ||
+        booking.checkOut !== snapshot.checkOut ||
+        booking.roomCount !== snapshot.rooms.length
   )
     throw new Error("airbnb_finance_booking_stay_mismatch");
   const current = (

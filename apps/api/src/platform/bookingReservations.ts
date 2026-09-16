@@ -128,6 +128,7 @@ export function createTargetBookingReservationsReadRepository(config: {
              ) AS "nightlyRate",
              booking.room_count AS "numberOfRooms",
              booking.total_amount AS "totalAmount",
+             CASE WHEN booking.booking_metadata->>'airbnbMoneyStatus'='unverified' THEN 'unverified' ELSE 'recorded' END AS "amountStatus",
              booking.currency,
              ${TARGET_RESERVATION_STATUS_SQL} AS "status",
              primary_room.id::text AS "roomId",

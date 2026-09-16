@@ -13,7 +13,8 @@ export interface SuperAdminBookingRow {
   checkIn: string;
   checkOut: string;
   nights: number;
-  totalAmount: number;
+  totalAmount: number | null;
+  amountStatus?: "recorded" | "unverified";
   currency: string;
   status: BookingStatus;
   rawStatus: string;

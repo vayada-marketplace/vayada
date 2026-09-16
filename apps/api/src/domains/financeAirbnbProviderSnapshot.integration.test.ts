@@ -23,7 +23,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
         booking_channel text,currency text,check_in date,check_out date,room_count int,lifecycle_status text,total_amount numeric,
         PRIMARY KEY(id,property_id));
       INSERT INTO booking.guest_bookings VALUES('${id(1)}','${id(2)}','pms','channex:${id(2)}:${id(3)}',
-        'airbnb','EUR','2026-09-01','2026-09-04',1,'confirmed',120)`);
+        'airbnb','EUR','2026-09-01','2026-09-04',1,'confirmed',200)`);
     await pool.query(
       await readFile(
         new URL(
@@ -36,7 +36,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
   });
   afterAll(async () => {
     await pool?.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
     await admin.end();
   });
   const make = (
@@ -134,9 +134,6 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
 
   it("atomically replaces nightly evidence and commission; exact old replays cannot revive removed nights", async () => {
     const original = make();
-    await expect(
-      run({ ...original, rawRevision: { ...original.rawRevision, amount: "121.00" } }),
-    ).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
     expect((await run(original)).outcome).toBe("appended");
     expect((await run(original)).outcome).toBe("replayed");
     const next = make("revision-2", "revision-1", "2026-09-14T10:00:00.000002Z");
@@ -146,7 +143,7 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     Reflect.deleteProperty(next.rawRevision.rooms[0]!.days, "2026-09-03");
     await expect(run(next)).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
     const changeStay = (client: pg.PoolClient) =>
-      client.query("UPDATE booking.guest_bookings SET check_out='2026-09-03',total_amount=80");
+      client.query("UPDATE booking.guest_bookings SET check_out='2026-09-03'");
     const invalid = { ...next, previousRevisionId: "wrong" };
     await expect(run(invalid, changeStay)).rejects.toThrow(
       "airbnb_finance_previous_revision_conflict",
@@ -154,8 +151,12 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     expect(
       (await pool.query("SELECT check_out::text,total_amount::text FROM booking.guest_bookings"))
         .rows[0],
-    ).toEqual({ check_out: "2026-09-04", total_amount: "120" });
+    ).toEqual({ check_out: "2026-09-04", total_amount: "200" });
     expect((await run(next, changeStay)).outcome).toBe("appended");
+    expect(
+      (await pool.query("SELECT total_amount::text FROM booking.guest_bookings")).rows[0]
+        .total_amount,
+    ).toBe("200");
     expect((await run(original)).outcome).toBe("replayed");
     expect(
       (
@@ -223,5 +224,59 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
     } finally {
       client.release();
     }
+  });
+  it("cancels atomically with missing room details, preserving unknown commission and history", async () => {
+    const previous = (
+      await pool.query("SELECT provider_revision_id FROM finance.airbnb_current_provider_amounts")
+    ).rows[0].provider_revision_id;
+    const base = make("cancel-1", previous, "2026-09-14T11:00:00.000000Z");
+    const { rooms: _rooms, ota_commission: _commission, ...raw } = base.rawRevision;
+    const cancel = { ...base, rawRevision: { ...raw, status: "cancelled", amount: "25.00" } };
+    await expect(run(cancel)).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
+    const change = (client: pg.PoolClient) =>
+      client.query("UPDATE booking.guest_bookings SET lifecycle_status='canceled'");
+    await expect(run({ ...cancel, previousRevisionId: "wrong" }, change)).rejects.toThrow(
+      "airbnb_finance_previous_revision_conflict",
+    );
+    expect(
+      (await pool.query("SELECT lifecycle_status FROM booking.guest_bookings")).rows[0]
+        .lifecycle_status,
+    ).toBe("confirmed");
+    expect((await run(cancel, change)).outcome).toBe("appended");
+    expect((await run(cancel)).outcome).toBe("replayed");
+    expect(
+      (await pool.query("SELECT count(*)::int n FROM finance.airbnb_current_provider_nights"))
+        .rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await pool.query(
+          "SELECT provider_booking_amount::text amount,ota_commission FROM finance.airbnb_current_provider_amounts",
+        )
+      ).rows[0],
+    ).toEqual({ amount: "25.0000", ota_commission: null });
+    expect(
+      (await pool.query("SELECT count(*)::int n FROM finance.airbnb_provider_snapshots")).rows[0].n,
+    ).toBe(4);
+    const omitted = {
+      ...cancel,
+      previousRevisionId: "cancel-1",
+      providerRevisionAt: "2026-09-14T11:00:00.000001Z",
+      revisionScope: { ...cancel.revisionScope, revisionId: "cancel-2" },
+      settingsEvidence: { ...cancel.settingsEvidence, providerRevisionId: "cancel-2" },
+      rawRevision: { ...cancel.rawRevision, id: "cancel-2", amount: undefined },
+    };
+    expect((await run(omitted)).outcome).toBe("appended");
+    expect((await run(omitted)).outcome).toBe("replayed");
+    expect(
+      (
+        await pool.query(
+          "SELECT provider_booking_amount FROM finance.airbnb_current_provider_amounts",
+        )
+      ).rows[0].provider_booking_amount,
+    ).toBeNull();
+    await expect(
+      run({ ...omitted, rawRevision: { ...omitted.rawRevision, amount: "0.00" } }),
+    ).rejects.toThrow("airbnb_finance_revision_conflict");
   });
 });

@@ -1,5 +1,6 @@
 import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
+import { createAirbnbAlterationRuntime } from "./airbnbAlterationRuntime.js";
 import { createAirbnbImportRuntime } from "./airbnbImportRuntime.js";
 import { createPgMarketplaceSubmissionRepository } from "./domains/marketplaceSubmissionRepository.js";
 import { marketplaceSubmissionTransactionSources } from "./platform/marketplaceSubmissionTransactionSources.js";
@@ -425,7 +426,9 @@ const bankTransferBookings = bankTransferCodec
   ? createBankTransferBookingOperations(targetDatabaseUrl, bankTransferCodec)
   : undefined;
 
+const airbnbAlterationRuntime = createAirbnbAlterationRuntime({ config, connectionString: targetDatabaseUrl });
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
@@ -1401,6 +1404,7 @@ const app = buildApp({
           channex: config.providerWebhooks.channexMode,
         },
         channexReviewMode: config.providerWebhooks.channexReviewMode,
+        ...airbnbAlterationRuntime?.webhookOptions,
         channexBookingPromotionEnabled:
           config.channexManagement.capabilityModes.bookingSync === "mutating" &&
           config.channexManagement.bookingMutationOwner === "target",
@@ -1927,6 +1931,20 @@ app.addHook("onClose", async () => {
   ]);
 });
 
+const runAirbnbAlterations = () => {
+  void airbnbAlterationRuntime?.tick().catch((error: unknown) =>
+    app.log.warn({ err: error }, "Airbnb alteration intake/readback failed"));
+};
+const airbnbAlterationTimer = airbnbAlterationRuntime
+  ? setInterval(runAirbnbAlterations, 30_000) : undefined;
+airbnbAlterationTimer?.unref();
+if (airbnbAlterationRuntime) runAirbnbAlterations();
+// Fastify executes close hooks in reverse registration order: drain before global pool closure.
+app.addHook("onClose", async () => {
+  if (airbnbAlterationTimer) clearInterval(airbnbAlterationTimer);
+  await airbnbAlterationRuntime?.close();
+});
+
 let activeChannexReviewBatch: Promise<void> | undefined;
 const runChannexReviews = () => {
   if (!config.backgroundWorkersEnabled) return;
@@ -1957,6 +1975,7 @@ const runChannexBookings = () => {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
     signal: channexBookingAbort.signal,
+    ...airbnbAlterationRuntime?.bookingWorkerOptions,
     ownsMutation: () =>
       config.channexManagement.capabilityModes.bookingSync === "mutating" &&
       config.channexManagement.bookingMutationOwner === "target",

@@ -1,4 +1,6 @@
 {
+  "reservations.amountUnverified": "Importe sin verificar",
+  "dashboard.stats.incompleteAmounts": "Algunos importes de reservas no están verificados. Se excluyen de los ingresos y las tarifas medias, pero las reservas siguen incluidas en el recuento. Las comparaciones financieras no están disponibles.",
   "auth.login.sessionExpired": "Su sesión ha expirado. Por favor, inicie sesión de nuevo.",
   "auth.login.emailLabel": "Correo electrónico",
   "auth.login.emailPlaceholder": "admin@example.com",

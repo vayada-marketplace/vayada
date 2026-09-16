@@ -1,6 +1,7 @@
 import { loadAirbnbImportConfig } from "./airbnbImportRuntime.js";
 import { loadServerConfig } from "@vayada/backend-config";
 import { createHmac } from "node:crypto";
+import { z } from "zod";
 
 import {
   loadPlatformMediaServingConfig,
@@ -181,6 +182,7 @@ export type ApiConfig = {
   creatorPlatformConnections?: CreatorPlatformConnectionsConfig;
   providerWebhooks: ProviderWebhookConfig;
   airbnbImport?: ReturnType<typeof loadAirbnbImportConfig>;
+  airbnbAlterations?: { propertyIds: readonly string[] };
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
@@ -914,10 +916,50 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     );
   }
 
+  const backgroundWorkersEnabled = readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true);
+  let airbnbAlterations: ApiConfig["airbnbAlterations"];
+  if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {
+    const propertyIds = [
+      ...new Set(
+        (readOptionalEnv(env, "AIRBNB_ALTERATION_PROPERTY_IDS") ?? "")
+          .split(",")
+          .map((id) => id.trim().toLowerCase()),
+      ),
+    ];
+    if (propertyIds.length > 100 || propertyIds.some((id) => !z.uuid().safeParse(id).success)) {
+      throw new Error("AIRBNB_ALTERATION_PROPERTY_IDS requires 1 to 100 property UUIDs");
+    }
+    if (
+      !backgroundWorkersEnabled ||
+      !channexManagement.workerEnabled ||
+      channexManagement.capabilityModes.bookingSync !== "mutating" ||
+      channexManagement.bookingMutationOwner !== "target" ||
+      prospectiveConfig.providerWebhooks.channexMode !== "mutating" ||
+      !prospectiveConfig.providerWebhooks.channexSecret ||
+      !channexManagement.apiKey ||
+      !channexManagement.apiBaseUrl ||
+      pmsOperationsSource !== "target" ||
+      !auth ||
+      !authSession
+    ) {
+      throw new Error(
+        "AIRBNB_ALTERATIONS_ENABLED requires background and Channex workers, target-owned mutating booking sync, authenticated mutating Channex webhooks, provider credentials, target PMS, and complete auth/session config",
+      );
+    }
+    if (
+      !/^https:\/\/(app|staging)\.channex\.io(?:\/|\/api\/v1\/?)?$/.test(
+        channexManagement.apiBaseUrl,
+      )
+    ) {
+      throw new Error("AIRBNB_ALTERATIONS_ENABLED requires an approved Channex API URL");
+    }
+    airbnbAlterations = { propertyIds };
+  }
+
   return {
     ...server,
     apiRuntime,
-    backgroundWorkersEnabled: readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true),
+    backgroundWorkersEnabled,
     auth,
     authSession,
     targetDatabaseUrl,
@@ -981,6 +1023,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     providerWebhooks: prospectiveConfig.providerWebhooks,
     channexManagement,
     airbnbImport: loadAirbnbImportConfig(env),
+    airbnbAlterations,
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),

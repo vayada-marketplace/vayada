@@ -41,6 +41,7 @@ describe("dashboardService target route adapter", () => {
             current: {
               totalRevenue: { amountDecimal: "3600.00", currency: "EUR" },
               bookingCount: 10,
+              unverifiedBookingCount: 2,
               avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
               pageViewCount: 28,
             },
@@ -67,6 +68,8 @@ describe("dashboardService target route adapter", () => {
       revenue: 3600,
       revenue_previous: 2880,
       bookings: 10,
+      unverified_bookings: 2,
+      unverified_bookings_previous: 0,
       bookings_previous: 8,
       avg_nightly_rate: 120,
       avg_nightly_rate_previous: 110,
@@ -158,13 +161,23 @@ describe("dashboardService target route adapter", () => {
     );
   });
 
-  it.each(["today", "week", "month"] as const)("loads the %s funnel in property-local dates", async (range) => {
-    const funnel = { steps: [], paymentMethods: [], biggestDrop: null };
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ funnel })));
-    await expect(dashboardService.getConversionFunnel(range, "Pacific/Auckland")).resolves.toEqual(funnel);
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("/conversion-funnel?windowStart=");
-    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("windowEnd=2026-06-15");
-  });
+  it.each(["today", "week", "month"] as const)(
+    "loads the %s funnel in property-local dates",
+    async (range) => {
+      const funnel = { steps: [], paymentMethods: [], biggestDrop: null };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ funnel })),
+      );
+      await expect(
+        dashboardService.getConversionFunnel(range, "Pacific/Auckland"),
+      ).resolves.toEqual(funnel);
+      expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain(
+        "/conversion-funnel?windowStart=",
+      );
+      expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("windowEnd=2026-06-15");
+    },
+  );
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

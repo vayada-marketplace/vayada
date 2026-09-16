@@ -10,16 +10,75 @@ const propertyId = "f3000000-0000-0000-0000-000000000686";
 const guestBookingId = "f6000000-0000-0000-0000-000000000686";
 
 describe("booking manual payment settlement", () => {
-  it("records the immutable commission split in the Finance ledger", async () => {
-    const calls: Array<{ text: string; values?: readonly unknown[] }> = [];
+  it.each([false, true])(
+    "preserves the immutable commission split (replay: %s)",
+    async (replay) => {
+      const calls: Array<{ text: string; values?: readonly unknown[] }> = [];
+      const client = {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ): Promise<{ rows: T[]; rowCount: number }> {
+          calls.push({ text, values });
+          if (text.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
+          if (text.includes("FROM booking.guest_bookings booking")) {
+            return {
+              rows: [
+                {
+                  guestBookingId,
+                  currency: "EUR",
+                  balanceDue: "250.00",
+                  lifecycleStatus: "confirmed",
+                  paymentStatus: "unpaid",
+                  billingPlanSnapshot: "commission",
+                  commissionTermsSnapshot: { bookingEngineFeePercent: 5 },
+                } as unknown as T,
+              ],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO finance.payments")) {
+            return {
+              rows: [
+                {
+                  paymentId: "f9000000-0000-0000-0000-000000000686",
+                  replay,
+                } as unknown as T,
+              ],
+              rowCount: 1,
+            };
+          }
+          throw new Error(`Unhandled SQL: ${text}`);
+        },
+      };
+
+      const result = await recordBookingManualPaymentInClient(client, command());
+
+      expect(result).toMatchObject({
+        ok: true,
+        status: replay ? "idempotent_replay" : "created",
+        feeAmount: "12.50",
+        netAmount: "237.50",
+      });
+      const insert = calls.find(({ text }) => text.includes("INSERT INTO finance.payments"));
+      expect(insert?.values?.slice(5, 8)).toEqual(["250.00", "12.50", "237.50"]);
+      expect(insert?.values?.[3]).toMatch(
+        new RegExp(`^finance\\.manual-payment\\.payment\\.property\\.${propertyId}\\.key\\.`),
+      );
+    },
+  );
+
+  it("rejects unverified booking amounts at the Finance boundary before writing a payment", async () => {
+    const calls: string[] = [];
     const client = {
       async query<T extends QueryResultRow = QueryResultRow>(
         text: string,
-        values?: readonly unknown[],
       ): Promise<{ rows: T[]; rowCount: number }> {
-        calls.push({ text, values });
+        calls.push(text);
         if (text.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 1 };
         if (text.includes("FROM booking.guest_bookings booking")) {
+          expect(text).toContain("booking.booking_metadata->>'airbnbMoneyStatus'");
+          expect(text).toContain("FOR UPDATE OF booking");
           return {
             rows: [
               {
@@ -30,39 +89,21 @@ describe("booking manual payment settlement", () => {
                 paymentStatus: "unpaid",
                 billingPlanSnapshot: "commission",
                 commissionTermsSnapshot: { bookingEngineFeePercent: 5 },
+                airbnbMoneyStatus: "unverified",
               } as unknown as T,
             ],
             rowCount: 1,
           };
         }
-        if (text.includes("INSERT INTO finance.payments")) {
-          return {
-            rows: [
-              {
-                paymentId: "f9000000-0000-0000-0000-000000000686",
-                replay: false,
-              } as unknown as T,
-            ],
-            rowCount: 1,
-          };
-        }
-        throw new Error(`Unhandled SQL: ${text}`);
+        throw new Error(`Unexpected SQL after unverified amount: ${text}`);
       },
     };
-
-    const result = await recordBookingManualPaymentInClient(client, command());
-
-    expect(result).toMatchObject({
-      ok: true,
-      status: "created",
-      feeAmount: "12.50",
-      netAmount: "237.50",
+    expect(await recordBookingManualPaymentInClient(client, command())).toEqual({
+      ok: false,
+      code: "invalid_command",
+      message: "Booking amount is unverified and cannot accept manual payments.",
     });
-    const insert = calls.find(({ text }) => text.includes("INSERT INTO finance.payments"));
-    expect(insert?.values?.slice(5, 8)).toEqual(["250.00", "12.50", "237.50"]);
-    expect(insert?.values?.[3]).toMatch(
-      new RegExp(`^finance\\.manual-payment\\.payment\\.property\\.${propertyId}\\.key\\.`),
-    );
+    expect(calls.some((text) => text.includes("INSERT INTO finance.payments"))).toBe(false);
   });
 
   it("fails closed when the booking has no immutable commission terms", async () => {

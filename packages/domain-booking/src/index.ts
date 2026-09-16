@@ -52,6 +52,8 @@ export type BookingMoney = PmsMoney;
 export type BookingRevenueStats = {
   totalRevenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };
@@ -61,6 +63,8 @@ export type BookingSourceMixItem = {
   source: string;
   revenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   /** Revenue share as 0–100, rounded to one decimal place */
   revenueSharePercent: number;
 };
@@ -80,6 +84,8 @@ export type BookingSparklinePoint = {
   bucketEnd: BookingDate;
   revenue: BookingMoney;
   bookingCount: number;
+  /** Bookings excluded from monetary metrics because their amounts are unverified. */
+  unverifiedBookingCount?: number;
   avgNightlyRate: BookingMoney;
   pageViewCount: number;
 };
@@ -191,10 +197,11 @@ export type BookingReservationReadModel = {
   nights: number;
   adults: number;
   children: number;
-  nightlyRate: number;
+  nightlyRate: number | null;
   numberOfRooms: number;
   totalRoomCapacity: number;
-  totalAmount: number;
+  amountStatus?: "recorded" | "unverified";
+  totalAmount: number | null;
   currency: string;
   status: string;
   roomId: string | null;
@@ -206,7 +213,7 @@ export type BookingReservationReadModel = {
   depositRequired: boolean;
   depositPercentage: number | null;
   depositAmount: number;
-  balanceAmount: number;
+  balanceAmount: number | null;
   checkInPendingFlags: string[];
   checkedInAt: BookingUtcDateTime | null;
   checkedOutAt: BookingUtcDateTime | null;

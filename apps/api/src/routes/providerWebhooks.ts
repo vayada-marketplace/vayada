@@ -93,6 +93,7 @@ export type ProviderWebhookRoutesOptions = {
   modes?: ProviderWebhookModeConfig;
   channexBookingPromotionEnabled?: boolean;
   channexAlterationPromotionEnabled?: boolean;
+  channexAlterationPropertyIds?: readonly string[];
   channexReviewMode?: ProviderWebhookMode;
   store: ProviderWebhookStore;
   pmsInboxDeliveryReceipts?: Pick<PmsInboxDeliveryReceiptPort, "recordTrustedProviderReceipt">;
@@ -584,7 +585,8 @@ function channexModeFor(
     return options.channexReviewMode ?? mode;
   if (classification.family === "alert") return "observe_only";
   return mode === "mutating" &&
-    ((classification.family === "alteration" && !options.channexAlterationPromotionEnabled) ||
+    ((classification.family === "alteration" && (!options.channexAlterationPromotionEnabled ||
+        (options.channexAlterationPropertyIds !== undefined && !options.channexAlterationPropertyIds.includes(classification.propertyId)))) ||
       (classification.family === "booking" && !options.channexBookingPromotionEnabled) ||
       (["booking", "message", "alteration"].includes(classification.family) &&
         classification.propertyOwnerResolved === false) ||

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ChannexAlterationNightlyPriceScope } from "../integrations/channexAlterationNightlyPrices.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { assertChannexAlterationAvailability } from "./channexAlterationAvailability.js";
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
@@ -43,6 +44,7 @@ export async function applyChannexAlterationRevision(
   client: PmsOccupiedInventoryClient,
   scope: Scope,
   value: unknown,
+  captureFinancials?: (scope: ChannexAlterationNightlyPriceScope) => Promise<void>,
 ): Promise<boolean> {
   const requests = await client.query<{ id: string }>(
     `SELECT id FROM booking.booking_change_requests
@@ -205,7 +207,7 @@ export async function applyChannexAlterationRevision(
         assignment.roomTypeId === matches[0]!.roomTypeId,
     };
   });
-  if (await hasBookingFinancialEvidence(client, scope))
+  if (await hasBookingFinancialEvidence(client, scope, Boolean(captureFinancials)))
     throw new Error("alteration_finance_reconciliation_required");
   await assertChannexAlterationAvailability(client, {
     propertyId: scope.propertyId,
@@ -311,8 +313,9 @@ export async function applyChannexAlterationRevision(
     }
   }
   await client.query(
-    `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=$7::numeric,
-    balance_amount=CASE WHEN payment_status='unpaid' AND total_amount<>$7::numeric THEN $7::numeric ELSE balance_amount END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
+    `UPDATE booking.guest_bookings SET check_in=$3,check_out=$4,adults=$5,children=$6,total_amount=CASE WHEN $10 THEN total_amount ELSE $7::numeric END,
+    balance_amount=CASE WHEN NOT $10 AND payment_status='unpaid' AND total_amount<>$7::numeric THEN $7::numeric ELSE balance_amount END,
+    booking_metadata=CASE WHEN $10 THEN booking_metadata || '{"airbnbMoneyStatus":"unverified"}'::jsonb ELSE booking_metadata END,updated_at=$8,room_count=$9 WHERE id=$1 AND property_id=$2`,
     [
       scope.bookingId,
       scope.propertyId,
@@ -323,6 +326,7 @@ export async function applyChannexAlterationRevision(
       revision.amount,
       updatedAt,
       desired.length,
+      Boolean(captureFinancials),
     ],
   );
   await reconcilePmsOccupiedInventory(
@@ -342,6 +346,19 @@ export async function applyChannexAlterationRevision(
     ],
     updatedAt,
   );
+  if (captureFinancials)
+    await captureFinancials({
+      revisionId: revision.id,
+      providerBookingId: revision.booking_id,
+      providerPropertyId: revision.property_id,
+      currency: revision.currency,
+      checkIn: revision.arrival_date,
+      checkOut: revision.departure_date,
+      rooms: desired.map((item, index) => ({
+        roomTypeId: item.roomTypeId,
+        providerRoomTypeId: revision.rooms[index]!.room_type_id,
+      })),
+    });
   await client.query(
     `UPDATE booking.booking_change_requests SET status='accepted',decided_at=now(),
     requested_changes=jsonb_set(requested_changes,'{channex,appliedRevisionId}',to_jsonb($2::text)),updated_at=now() WHERE id=$1`,

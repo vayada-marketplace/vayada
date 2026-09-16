@@ -1,3 +1,6 @@
+import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
+import { captureChannexAlterationFinance } from "./channexAlterationFinance.js";
+import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
 import { createTargetPmsOperationsCommandRepository } from "./pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -77,6 +80,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     );
     await admin.query(
       "DELETE FROM booking.booking_change_requests WHERE guest_booking_id = ANY($1::uuid[])",
+      [alterationBookings],
+    );
+    await admin.query(
+      "DELETE FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=ANY($1::uuid[])",
       [alterationBookings],
     );
     await admin.query("COMMIT");
@@ -768,6 +775,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     }
     const applied = await prepareRevision("2026-08-05");
     await admin.query(
+      "UPDATE booking.guest_bookings SET source_system='pms',source_booking_id=$2 WHERE id=$1",
+      [bookingId, `channex:${propertyId}:${applied.providerBookingId}`],
+    );
+    await admin.query(
       `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,external_booking_id,channel,channel_room_index,sync_status)
       VALUES($1,$2,$3,$4,'channex',0,'active'),($1,$2,$3,$4,'channex',1,'active')`,
       [propertyId, connectionId, bookingId, applied.providerBookingId],
@@ -780,8 +791,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         rooms: applied.revision.attributes.rooms.map((room) => ({
           ...room,
           rate_plan_id: syntheticRatePlanId,
+          amount: "18.75",
+          days: { "2026-08-04": "18.75" },
+          taxes: [],
         })),
         ota_name: "Airbnb",
+        channel_id: randomUUID(),
+        ota_commission: "3.75",
         inserted_at: new Date().toISOString(),
       },
     };
@@ -806,12 +822,43 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         )
       ).rows[0].id as string;
     let acknowledgements = 0;
+    let financeEnabled = false;
+    let settingsState: "valid" | "missing" | "wrong_binding" = "valid";
     const runRevision = () =>
       runChannexBookingJobs(TEST_DATABASE_URL!, {
         apiBaseUrl: "https://staging.channex.io",
         apiKey: "synthetic-key",
         ownsMutation: () => true,
         applyAirbnbAlterations: true,
+        ...(financeEnabled
+          ? {
+              airbnbFinanceSettings: async (
+                _client: unknown,
+                identity: {
+                  propertyId: string;
+                  connectionId: string;
+                  bindingGeneration: string;
+                  providerPropertyId: string;
+                  providerBookingId: string;
+                  providerChannelId: string;
+                  providerRevisionId: string;
+                  providerRevisionAt: string;
+                },
+              ) =>
+                settingsState === "missing"
+                  ? null
+                  : {
+                      ...identity,
+                      bindingGeneration:
+                        settingsState === "wrong_binding"
+                          ? randomUUID()
+                          : identity.bindingGeneration,
+                      reference: "synthetic-verified-settings",
+                      booking_amount_settings: "Payout Amount" as const,
+                      cohost_payout_calculations: false,
+                    },
+            }
+          : {}),
         limit: 1,
         fetch: async (_url, init) => {
           if (init?.method === "POST") {
@@ -867,6 +914,43 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       await admin.query("DELETE FROM finance.payments WHERE id=$1", [financePayment]);
     }
     await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
+    financeEnabled = true;
+    await admin.query(
+      "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Europe/Berlin')",
+      [propertyId],
+    );
+    await admin.query("UPDATE platform.jobs SET max_attempts=10 WHERE id=$1", [jobId]);
+    for (const invalid of ["missing", "wrong_binding"] as const) {
+      settingsState = invalid;
+      await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
+      expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
+      expect(acknowledgements).toBe(0);
+      expect(
+        (
+          await admin.query("SELECT check_out::text FROM booking.guest_bookings WHERE id=$1", [
+            bookingId,
+          ])
+        ).rows[0].check_out,
+      ).toBe("2026-08-06");
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' code FROM platform.jobs WHERE id=$1",
+            [jobId],
+          )
+        ).rows[0].code,
+      ).toBe("alteration_finance_settings_unavailable");
+    }
+    settingsState = "valid";
+    await admin.query("UPDATE platform.jobs SET run_after=now() WHERE id=$1", [jobId]);
     const trigger = `alteration_fail_${bookingId.replaceAll("-", "")}`;
     await admin.query(
       `CREATE FUNCTION pms.${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.property_id='${propertyId}'::uuid THEN RAISE EXCEPTION 'synthetic mapping failure'; END IF; RETURN NEW; END$$; CREATE TRIGGER ${trigger} BEFORE INSERT ON pms.channel_booking_mappings FOR EACH ROW EXECUTE FUNCTION pms.${trigger}()`,
@@ -874,6 +958,38 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     try {
       expect(await runRevision()).toMatchObject({ retryScheduled: 1 });
       expect(acknowledgements).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual({ total_amount: "0.00", balance_amount: "0.00", money_status: null });
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(0);
       expect(
         (
           await admin.query(`SELECT check_out::text FROM booking.guest_bookings WHERE id=$1`, [
@@ -920,6 +1036,77 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     await queueRevision();
     expect(await runRevision()).toMatchObject({ succeeded: 1 });
     expect(acknowledgements).toBe(2);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    expect(
+      (
+        await admin.query(
+          "SELECT provider_booking_amount::text,ota_commission::text,amount_basis FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({
+      provider_booking_amount: "37.5000",
+      ota_commission: "3.7500",
+      amount_basis: "Payout Amount",
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n,sum(provider_nightly_amount)::text total FROM finance.airbnb_current_provider_nights WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ n: 2, total: "37.5000" });
+    const appliedProviderRevision = providerRevision.id;
+    {
+      financeEnabled = false;
+      providerRevision.id = randomUUID();
+      providerRevision.attributes.inserted_at = new Date(Date.now() + 1000).toISOString();
+      const unsupported = await queueRevision();
+      expect(await runRevision()).toMatchObject({ deadLettered: 1 });
+      expect(acknowledgements).toBe(2);
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' code FROM platform.jobs WHERE id=$1",
+            [unsupported],
+          )
+        ).rows[0].code,
+      ).toBe("alteration_finance_settings_required");
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "0.00", balance_amount: "0.00", money_status: "unverified" });
+    // Restore the untracked synthetic fixture for the existing generic lifecycle regressions.
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    await admin.query("DELETE FROM finance.ota_commission_evidence WHERE guest_booking_id=$1", [
+      bookingId,
+    ]);
+    await admin.query("DELETE FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1", [
+      bookingId,
+    ]);
+    await admin.query("DELETE FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1", [
+      bookingId,
+    ]);
+    await admin.query("COMMIT");
+    financeEnabled = false;
+    await admin.query(
+      "UPDATE booking.guest_bookings SET total_amount=37.5,balance_amount=37.5,booking_metadata=booking_metadata-'airbnbMoneyStatus' WHERE id=$1",
+      [bookingId],
+    );
+    providerRevision.id = appliedProviderRevision;
     expect(
       (
         await admin.query(
@@ -1110,7 +1297,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
-    // Full worker sequence also covers the downstream Booking revenue reader and ACK journal.
+    // Full tracked sequence: accepted alteration, ordinary modification, cancellation and replay.
+    financeEnabled = true;
     await admin.query(
       "UPDATE pms.room_types SET room_facts_revision=room_facts_revision-1 WHERE id=$1",
       [roomTypeId],
@@ -1154,7 +1342,147 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         ),
       ).toMatchObject({ succeeded: 1 });
     };
+    const rejectTrackedRevision = async (code: string) => {
+      providerRevision.id = randomUUID();
+      providerRevision.attributes.inserted_at = new Date(
+        Date.now() + ++followup * 1000,
+      ).toISOString();
+      const before = (
+        await admin.query(
+          "SELECT lifecycle_status,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0];
+      const snapshots = (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n;
+      const ackBefore = acknowledgements;
+      const failedJob = await queueRevision();
+      await admin.query("UPDATE platform.jobs SET max_attempts=1 WHERE id=$1", [failedJob]);
+      expect(await runRevision()).toMatchObject({ deadLettered: 1 });
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' code FROM platform.jobs WHERE id=$1",
+            [failedJob],
+          )
+        ).rows[0].code,
+      ).toBe(code);
+      expect(acknowledgements).toBe(ackBefore);
+      expect(
+        (
+          await admin.query(
+            "SELECT lifecycle_status,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual(before);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(snapshots);
+    };
+    const originalRule = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.commission_rules(id,property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision) VALUES($1,$2,'property','pms','percentage',10,'2026-01-01','finance','airbnb',1)",
+      [originalRule, propertyId],
+    );
     await nextWorkerRevision();
+    const historicalRevision = structuredClone(providerRevision);
+    expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId }, true)).toBe(false);
+    expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId })).toBe(true);
+    await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
+    try {
+      await admin.query("DELETE FROM finance.ota_commission_evidence WHERE guest_booking_id=$1", [
+        bookingId,
+      ]);
+      expect(await hasBookingFinancialEvidence(admin, { propertyId, bookingId }, true)).toBe(true);
+    } finally {
+      await admin.query("ROLLBACK");
+    }
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision+1 WHERE id=$1",
+      [propertyId],
+    );
+    await rejectTrackedRevision("nightly_revenue_evidence_conflict");
+    await admin.query(
+      "UPDATE hotel_catalog.properties SET profile_revision=profile_revision-1 WHERE id=$1",
+      [propertyId],
+    );
+    // Ordinary modifications must roll back canonical changes when evidence is unavailable.
+    providerRevision.attributes.amount = "40.00";
+    settingsState = "missing";
+    await rejectTrackedRevision("alteration_finance_settings_unavailable");
+    settingsState = "valid";
+    const protectedPayment = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [protectedPayment, propertyId, bookingId],
+    );
+    await rejectTrackedRevision("alteration_finance_reconciliation_required");
+    await admin.query("DELETE FROM finance.payments WHERE id=$1", [protectedPayment]);
+    providerRevision.attributes.amount = "37.50";
+    const originalRevenue = (
+      await admin.query(
+        "SELECT id FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 ORDER BY source_revision LIMIT 1",
+        [bookingId],
+      )
+    ).rows[0].id;
+    await admin.query("BEGIN");
+    try {
+      await appendExternalNightlyRevenueEconomics(
+        admin,
+        {
+          propertyId,
+          guestBookingId: bookingId,
+          sourceKind: "ota",
+          sourceBookingReference: `channex:${propertyId}:${applied.providerBookingId}`,
+          idempotencyKey: randomUUID(),
+          lines: [
+            {
+              roomTypeId,
+              stayDate: "2026-08-04",
+              recognizedOn: "2026-08-04",
+              grossRoomAmount: "100.00",
+              occupiedRoomNights: 0,
+              economicEvent: "correction",
+              lifecycleState: "corrected",
+              evidenceQuality: "exact",
+              linePosition: 1,
+              correctsEvidenceId: originalRevenue,
+            },
+          ],
+        },
+        {
+          source: {
+            ownerDomain: "hotel_catalog",
+            entityType: "property_profile",
+            entityId: propertyId,
+            revision: "profile:1",
+          },
+          timeZone: "Europe/Berlin",
+        },
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    // A later rule must not replace the original correction chain's 10% rule.
+    await admin.query("UPDATE finance.commission_rules SET ends_at='2026-07-01' WHERE id=$1", [
+      originalRule,
+    ]);
+    await admin.query(
+      "INSERT INTO finance.commission_rules(property_id,rule_scope,product,commission_type,percentage_rate,starts_at,source_system,ota_channel,revision) VALUES($1,'property','pms','percentage',99,'2026-07-01','finance','airbnb',2)",
+      [propertyId],
+    );
     const releasedHistory = (
       await admin.query(
         "SELECT to_jsonb(a) AS data FROM pms.operational_booking_assignments a WHERE guest_booking_id=$1 AND position=2",
@@ -1162,7 +1490,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       )
     ).rows;
     expect(releasedHistory[0].data.assignment_status).toBe("released");
+    providerRevision.attributes.amount = "40.00";
+    providerRevision.attributes.rooms[0]!.amount = "40.00";
+    Object.assign(providerRevision.attributes.rooms[0]!, { days: { "2026-08-04": "40.00" } });
     await nextWorkerRevision();
+    expect(
+      (
+        await admin.query(
+          "SELECT provider_booking_amount::text amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].amount,
+    ).toBe("40.0000");
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text,booking_metadata->>'airbnbMoneyStatus' AS money_status FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50", money_status: "unverified" });
     expect(
       (
         await admin.query(
@@ -1170,11 +1517,70 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].count,
-    ).toBe(1);
+    ).toBe(4);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1 AND commission_rule_id IS DISTINCT FROM $2",
+          [bookingId, originalRule],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT sum(commission_amount)::text amount FROM finance.ota_commission_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].amount,
+    ).toBe("0.0000");
     Object.assign(providerRevision.attributes, { status: "cancelled", amount: "0.00" });
+    Reflect.deleteProperty(providerRevision.attributes, "amount");
+    const repeatedCancellationRooms = providerRevision.attributes.rooms;
+    providerRevision.attributes.rooms = [];
+    settingsState = "wrong_binding";
+    await rejectTrackedRevision("alteration_finance_settings_unavailable");
+    settingsState = "valid";
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [protectedPayment, propertyId, bookingId],
+    );
+    await rejectTrackedRevision("alteration_finance_reconciliation_required");
+    await admin.query("DELETE FROM finance.payments WHERE id=$1", [protectedPayment]);
     await nextWorkerRevision();
     await queueRevision();
     expect(await runRevision()).toMatchObject({ succeeded: 1 });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(3);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_current_provider_nights WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT snapshot->>'replacement' replacement,provider_booking_amount::text amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ replacement: "cancellation", amount: null });
+    expect(
+      (
+        await admin.query("SELECT total_amount::text FROM booking.guest_bookings WHERE id=$1", [
+          bookingId,
+        ])
+      ).rows[0].total_amount,
+    ).toBe("37.50");
     expect(
       (
         await admin.query("SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1", [
@@ -1197,6 +1603,94 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].nights,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.ota_commission_evidence WHERE guest_booking_id=$1 AND corrects_commission_evidence_id IS NOT NULL",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(4);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1 AND gross_room_amount<>0",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(2);
+    // Some cancellation revisions repeat the stay; absent totals still preserve both amounts.
+    providerRevision.attributes.rooms = repeatedCancellationRooms;
+    await nextWorkerRevision();
+    expect(
+      (
+        await admin.query(
+          "SELECT total_amount::text,balance_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ total_amount: "37.50", balance_amount: "37.50" });
+    expect(
+      (
+        await admin.query(
+          "SELECT provider_booking_amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].provider_booking_amount,
+    ).toBeNull();
+    const revenueCount = (
+      await admin.query(
+        "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+        [bookingId],
+      )
+    ).rows[0].n;
+    await admin.query("BEGIN");
+    try {
+      await captureChannexAlterationFinance(
+        admin,
+        {
+          ...applied.scope,
+          bookingId,
+          rawRevision: historicalRevision,
+          providerRevisionAt: historicalRevision.attributes.inserted_at.replace(/Z$/, "000Z"),
+          revisionScope: {
+            revisionId: historicalRevision.id,
+            providerPropertyId: applied.scope.providerPropertyId,
+            providerBookingId: applied.providerBookingId,
+            currency: "EUR",
+            checkIn: "2026-08-04",
+            checkOut: "2026-08-05",
+            rooms: [{ providerRoomTypeId: externalRoom, roomTypeId }],
+          },
+        },
+        async (_client, identity) => ({
+          ...identity,
+          reference: "synthetic-verified-settings",
+          booking_amount_settings: "Payout Amount",
+          cohost_payout_calculations: false,
+        }),
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM booking.nightly_revenue_evidence WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(revenueCount);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_current_provider_nights WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
     ).toBe(0);
   });
 

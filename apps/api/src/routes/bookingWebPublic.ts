@@ -1273,7 +1273,7 @@ type TargetChangeRequestRow = QueryResultRow & {
 export type PgTargetBookingWebCheckoutAdapterConfig = {
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
-  airbnbAlterations?: { decide(input: {
+  airbnbAlterations?: { propertyIds?: readonly string[]; allowUnverifiedAirbnbAlterations?: boolean; decide(input: {
     propertyId: string; bookingId: string; changeRequestId: string; actorUserId: string;
     action: "accept" | "decline"; correlationId: string;
   }): Promise<unknown> };
@@ -1353,11 +1353,11 @@ export function createTargetBookingWebCheckoutAdapter(
     });
 
   const serializeTargetChangeRequest = (row: TargetChangeRequestRow, enabled = false) =>
-    serializeChangeRequest(row, config.externalChanges, enabled);
+    serializeChangeRequest(row, config.externalChanges, enabled, config.airbnbAlterations?.allowUnverifiedAirbnbAlterations === true);
 
   async function providerDecision(propertyId: string, bookingId: string, changeRequestId: string,
     action: "accept" | "decline", context: BookingHotelChangeDecisionContext) {
-    if (!config.airbnbAlterations) return null;
+    if (!config.airbnbAlterations || (config.airbnbAlterations.propertyIds && !config.airbnbAlterations.propertyIds.includes(propertyId))) return null;
     const load = async () => (await pool.query<TargetChangeRequestRow>(
       `SELECT change.id::text AS id,change.guest_booking_id::text AS "guestBookingId",change.status,
        change.requested_changes AS "requestedChanges",change.decision_note AS "decisionNote",
@@ -1467,7 +1467,7 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async findLatestChangeRequest(propertyId, bookingId) {
       const result = await loadLatestTargetChangeRequest(pool, propertyId, bookingId);
-      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations)) : null;
+      return result ? serializeTargetChangeRequest(result, Boolean(config.airbnbAlterations && (!config.airbnbAlterations.propertyIds || config.airbnbAlterations.propertyIds.includes(propertyId)))) : null;
     },
     async acceptChangeRequest(propertyId, bookingId, changeRequestId, context) {
       const provider = await providerDecision(propertyId, bookingId, changeRequestId, "accept", context);
@@ -3745,6 +3745,7 @@ export async function loadTargetBooking(
        LIMIT 1
      ) card_payment ON TRUE
      WHERE b.property_id = $1::uuid
+       AND b.booking_metadata->>'airbnbMoneyStatus' IS DISTINCT FROM 'unverified'
        AND (b.id::text = $2 OR b.public_reference = $2)
        AND (
          ($3::text IS NOT NULL AND lower(booker.email) = lower($3))
@@ -4181,10 +4182,10 @@ async function insertTargetChangeRequest(
   return changeRequest;
 }
 
-function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false): Record<string, unknown> {
+function serializeChangeRequest(row: TargetChangeRequestRow, externalChanges: ExternalChangePresentationPort, providerEnabled = false, allowUnverifiedMoney = false): Record<string, unknown> {
   const snapshot = objectValue(row.requestedChanges);
   return {
-    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status),
+    providerRequest: externalChanges.project(snapshot, providerEnabled && row.status === "pending", row.status, allowUnverifiedMoney),
     ...projectBookingRoomSelection(objectValue(snapshot["pricingSnapshot"])["selectedOffer"]),
     id: row.id,
     bookingId: row.guestBookingId,

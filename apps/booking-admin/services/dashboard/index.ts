@@ -4,6 +4,8 @@ import { apiClient } from "../api/client";
 export interface DashboardStats {
   revenue: number;
   revenue_previous: number;
+  unverified_bookings: number;
+  unverified_bookings_previous: number;
   bookings: number;
   bookings_previous: number;
   avg_nightly_rate: number;
@@ -27,8 +29,13 @@ export interface BookingsBySource {
 }
 
 export interface ConversionFunnel {
-  steps: { stage: string; count: number; percentOfVisits: number | null;
-    conversionPercent: number | null; previousCount: number }[];
+  steps: {
+    stage: string;
+    count: number;
+    percentOfVisits: number | null;
+    conversionPercent: number | null;
+    previousCount: number;
+  }[];
   paymentMethods: { method: string; count: number }[];
   biggestDrop: string | null;
 }
@@ -70,12 +77,14 @@ type TargetDashboardStatsResponse = {
     current: {
       totalRevenue: Money;
       bookingCount: number;
+      unverifiedBookingCount?: number;
       avgNightlyRate: Money;
       pageViewCount: number;
     };
     previous: {
       totalRevenue: Money;
       bookingCount: number;
+      unverifiedBookingCount?: number;
       avgNightlyRate: Money;
       pageViewCount: number;
     };
@@ -91,6 +100,7 @@ type TargetSourceMixResponse = {
       source: string;
       revenue: Money;
       bookingCount: number;
+      unverifiedBookingCount?: number;
       revenueSharePercent: number;
     }[];
   };
@@ -101,6 +111,7 @@ type TargetSparklinesResponse = {
     points: {
       revenue: Money;
       bookingCount: number;
+      unverifiedBookingCount?: number;
       avgNightlyRate: Money;
       pageViewCount: number;
     }[];
@@ -193,6 +204,8 @@ export const dashboardService = {
     return {
       revenue: amount(response.metrics.current.totalRevenue),
       revenue_previous: amount(response.metrics.previous.totalRevenue),
+      unverified_bookings: response.metrics.current.unverifiedBookingCount ?? 0,
+      unverified_bookings_previous: response.metrics.previous.unverifiedBookingCount ?? 0,
       bookings: response.metrics.current.bookingCount,
       bookings_previous: response.metrics.previous.bookingCount,
       avg_nightly_rate: amount(response.metrics.current.avgNightlyRate),

@@ -73,3 +73,18 @@ it("does not enable malformed provider records", () => {
   });
   expect(presentChannexAlteration({}, true)).toBeUndefined();
 });
+
+it("exposes unverified-money support only from an enabled explicit capability", () => {
+  const changes = { ...snapshot(), supportsUnverifiedMoney: true };
+  expect(presentChannexAlteration(changes, true)?.supportsUnverifiedMoney).toBeUndefined();
+  expect(
+    presentChannexAlteration(changes, true, "pending", false)?.supportsUnverifiedMoney,
+  ).toBeUndefined();
+  expect(
+    presentChannexAlteration(changes, false, "pending", true)?.supportsUnverifiedMoney,
+  ).toBeUndefined();
+  expect(presentChannexAlteration(changes, true, "pending", true)).toMatchObject({
+    supportsUnverifiedMoney: true,
+    allowedActions: ["accept", "decline"],
+  });
+});
