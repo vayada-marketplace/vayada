@@ -1166,6 +1166,29 @@ async function withPublishedChannexPricing(
                   },
                 ],
               };
+              // Older dates must have service-verified completion, not a raw storage release.
+              const prior = await client.query(
+                `SELECT a.service_date::text AS date,
+                  (a.creation_attempt_id=$3 AND a.state='reconciled'
+                    AND a.reconciliation_evidence->>'schemaVersion'='1'
+                    AND a.reconciliation_evidence->>'completionBasis'='finished_task_fifo'
+                    AND a.reconciliation_evidence->>'observationsSha256' ~ '^[a-f0-9]{64}$'
+                    AND (SELECT count(*) FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)=1
+                    AND EXISTS (SELECT 1 FROM pms.channex_offer_ari_receipts r
+                      WHERE r.attempt_id=a.id AND r.id::text=a.reconciliation_evidence->>'originalReceiptId'
+                        AND r.outcome='complete_json' AND r.http_status=200 AND NOT r.has_warnings
+                        AND cardinality(r.task_ids)>0
+                        AND a.reconciliation_evidence->'taskCount'=to_jsonb(cardinality(r.task_ids)))) AS verified
+                 FROM pms.channex_offer_ari_attempts a
+                 WHERE a.external_property_id=$1 AND a.external_rate_plan_id=$2
+                   AND ($4::uuid IS NULL OR a.id<>$4::uuid)`,
+                [configurationIdentity.externalPropertyId, configurationIdentity.externalRatePlanId,
+                  attempt.id, work.kind === "ari_dispatch" ? work.ariAttemptId : null],
+              );
+              if (prior.rows.some((row) => row.verified !== true))
+                return unavailable("ari_reconciliation_required");
+              if (prior.rows.some((row) => row.date === work.date))
+                return unavailable("ari_date_already_reconciled");
               if (work.kind === "ari_dispatch") {
                 const permitted = await client.query(
                   `SELECT a.id FROM pms.channex_offer_ari_attempts a
@@ -1174,9 +1197,6 @@ async function withPublishedChannexPricing(
                      AND a.worker_id=$4 AND j.job_id=$5 AND j.attempt_number=$6
                      AND a.state='unresolved' AND a.service_date=$7 AND a.request_body=$8::jsonb
                      AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)
-                     AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_attempts other
-                       WHERE other.external_property_id=a.external_property_id
-                         AND other.external_rate_plan_id=a.external_rate_plan_id AND other.id<>a.id)
                    FOR UPDATE OF a NOWAIT`,
                   [
                     work.ariAttemptId,

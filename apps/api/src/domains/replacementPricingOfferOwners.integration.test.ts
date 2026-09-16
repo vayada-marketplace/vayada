@@ -1152,6 +1152,141 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0];
     return { ...f, get, task, restrictions, reconcile, retain, state };
   }
+  async function completedDateFixture() {
+    const f = await reconciliationFixture();
+    await f.retain();
+    expect((await f.reconcile()).kind).toBe("ari_reconciled");
+    const prepare = (date = nextAriDate) =>
+      prepareChannexInitialAriDispatch(pool, f.input, f.selection, f.claim.attemptId, date);
+    const get = async (path: string) =>
+      path.includes("properties/")
+        ? {
+            data: {
+              type: "property",
+              id: f.scope.propertyId,
+              attributes: { settings: { min_stay_type: "both" } },
+            },
+          }
+        : path.includes("room_types")
+          ? providerRoom(f)
+          : f.response().json();
+    const post = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ type: "task", id: randomUUID() }], meta: { warnings: [] } }),
+        ),
+    );
+    return { ...f, prepare, preflightGet: get, post };
+  }
+  it("sends a distinct closed date once after verified earlier completion", async () => {
+    const f = await completedDateFixture();
+    const next = await f.prepare();
+    if (next.kind !== "prepared") throw new Error("Next date must prepare");
+    expect(await next.dispatch({ get: f.preflightGet, post: f.post })).toMatchObject({
+      kind: "retained",
+    });
+    expect(f.post).toHaveBeenCalledOnce();
+    expect(await next.dispatch({ get: f.preflightGet, post: f.post })).toMatchObject({
+      reason: "dispatch_already_used",
+    });
+    expect(await f.prepare()).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_reconciliation_required",
+    });
+    expect(
+      (
+        await pool.query(
+          "SELECT state,service_date::text AS date,request_body#>>'{values,0,stop_sell}' AS closed FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 ORDER BY service_date",
+          [f.claim.attemptId],
+        )
+      ).rows,
+    ).toEqual([
+      { state: "reconciled", date: initialAriDate, closed: "true" },
+      { state: "unresolved", date: nextAriDate, closed: "true" },
+    ]);
+  });
+  it("does not claim or resend the already reconciled date", async () => {
+    const f = await completedDateFixture();
+    expect(await f.prepare(initialAriDate)).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_date_already_reconciled",
+    });
+    expect(await f.claimAri(initialAriDate)).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_date_already_reconciled",
+    });
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1",
+          [f.claim.attemptId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+    expect(f.post).not.toHaveBeenCalled();
+  });
+  it("does not use a storage-only release to authorize the next date", async () => {
+    const f = await reconciliationFixture();
+    await f.retain();
+    await pool.query(
+      "UPDATE pms.channex_offer_ari_attempts SET state='reconciled',reconciliation_evidence='{\"manual\":true}'::jsonb WHERE id=$1",
+      [f.ariCorrelation.attemptId],
+    );
+    expect(await f.claimAri(nextAriDate)).toMatchObject({
+      kind: "unavailable",
+      reason: "ari_reconciliation_required",
+    });
+  });
+  it.each(["before_claim", "before_dispatch", "during_preflight"])(
+    "holds the next date after a late old receipt %s",
+    async (when) => {
+      const f = await completedDateFixture();
+      const late = async () =>
+        (
+          await prepareChannexAriTransportFailurePersistence(pool, {
+            ...f.ariCorrelation,
+            receiptId: randomUUID(),
+          })
+        )();
+      if (when === "before_claim") {
+        await late();
+        expect(await f.prepare()).toMatchObject({ reason: "ari_reconciliation_required" });
+        return;
+      }
+      const next = await f.prepare();
+      if (next.kind !== "prepared") throw new Error("Next date must prepare");
+      if (when === "before_dispatch") await late();
+      let added = false;
+      expect(
+        await next.dispatch({
+          get: async (path) => {
+            if (when === "during_preflight" && !added) {
+              added = true;
+              await late();
+            }
+            return f.preflightGet(path);
+          },
+          post: f.post,
+        }),
+      ).toMatchObject({ reason: "ari_reconciliation_required" });
+      expect(f.post).not.toHaveBeenCalled();
+    },
+  );
+  it("allows only one next-date claim after completion", async () => {
+    const f = await completedDateFixture();
+    const results = await Promise.allSettled([f.prepare(), f.prepare()]);
+    expect(
+      results.filter((r) => r.status === "fulfilled" && r.value.kind === "prepared"),
+    ).toHaveLength(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 AND state='unresolved'",
+          [f.claim.attemptId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+  });
   it("discovers and reconciles only the leased property uploads through the worker provider", async () => {
     const f = await reconciliationFixture(),
       foreign = await reconciliationFixture();
@@ -2328,7 +2463,7 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       reader.release();
     }
   });
-  function providerRoom(f: Awaited<ReturnType<typeof creationFixture>>) {
+  function providerRoom(f: Pick<Awaited<ReturnType<typeof creationFixture>>, "externalRoomTypeId" | "scope">) {
     return {
       data: {
         type: "room_type",
