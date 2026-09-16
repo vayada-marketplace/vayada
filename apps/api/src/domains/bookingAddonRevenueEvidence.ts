@@ -18,6 +18,13 @@ type PurchasedAddOn = {
   partnerCommissionRate: string | null;
 };
 
+export type AddonRevenueRefundTarget = {
+  evidenceId: string;
+  recognizedOn: string;
+  availableAmount: string;
+  currency: string;
+};
+
 export class BookingAddonRevenueEvidenceError extends Error {}
 
 export async function appendCheckoutAddonRevenueEvidence(
@@ -44,6 +51,67 @@ export async function appendMissingAddonRevenueEvidence(
   },
 ): Promise<void> {
   await appendAddonRevenueEvidence(transaction, { ...input, fulfilledSelectionIds: [] });
+}
+
+export async function loadAddonRevenueRefundTargets(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    currency: string;
+    evidenceIds: readonly string[];
+  },
+): Promise<AddonRevenueRefundTarget[]> {
+  const result = await transaction.query<AddonRevenueRefundTarget>(
+    `WITH state AS (
+       SELECT evidence.id,evidence.recognized_on,evidence.currency,
+         COALESCE(SUM(evidence.gross_amount) OVER (PARTITION BY addon_selection_id),0) AS available,
+         row_number() OVER (PARTITION BY addon_selection_id
+           ORDER BY source_revision DESC,created_at DESC,id DESC) AS position
+       FROM booking.addon_revenue_evidence evidence
+       WHERE property_id=$2::uuid AND guest_booking_id=$3::uuid AND currency=$4
+     ) SELECT id::text AS "evidenceId",recognized_on::text AS "recognizedOn",
+       available::text AS "availableAmount",trim(currency) AS currency
+     FROM state WHERE id=ANY($1::uuid[]) AND position=1 AND available>0`,
+    [input.evidenceIds, input.propertyId, input.guestBookingId, input.currency],
+  );
+  return result.rows;
+}
+
+export async function appendAddonRevenueRefundEvidence(
+  transaction: BookingAddonRevenueEvidenceClient,
+  input: {
+    propertyId: string;
+    guestBookingId: string;
+    recognizedOn: string;
+    commandKeyHash: string;
+    refunds: readonly { targetEvidenceId: string; grossAmount: string }[];
+  },
+): Promise<void> {
+  if (input.refunds.length === 0) return;
+  const inserted = await transaction.query(
+    `INSERT INTO booking.addon_revenue_evidence
+       (addon_selection_id,property_id,guest_booking_id,recognized_on,quantity,currency,
+        gross_amount,ownership_kind,partner_commission_rate,economic_event,evidence_quality,
+        source_revision,corrects_evidence_id,command_key)
+     SELECT target.addon_selection_id,target.property_id,target.guest_booking_id,$3::date,
+       target.quantity,target.currency,line."grossAmount"::numeric,target.ownership_kind,
+       target.partner_commission_rate,'refund','exact',target.source_revision+1,target.id,
+       $5 || target.addon_selection_id::text || ':v' || (target.source_revision+1)::text
+     FROM booking.addon_revenue_evidence target
+     JOIN jsonb_to_recordset($4::jsonb) AS line("targetEvidenceId" text,"grossAmount" text)
+       ON target.id=line."targetEvidenceId"::uuid
+     WHERE target.property_id=$1::uuid AND target.guest_booking_id=$2::uuid`,
+    [
+      input.propertyId,
+      input.guestBookingId,
+      input.recognizedOn,
+      JSON.stringify(input.refunds),
+      `pms-refund:${input.commandKeyHash}:addon:`,
+    ],
+  );
+  if (inserted.rowCount !== input.refunds.length)
+    throw new BookingAddonRevenueEvidenceError("Add-on refund target is unavailable.");
 }
 
 async function appendAddonRevenueEvidence(

@@ -3,7 +3,13 @@ import { getTimezone } from "countries-and-timezones";
 import {
   appendExternalNightlyRevenueEvidence,
   type ExternalRevenueEvidenceClient,
+  type ExternalRevenueEvidenceLine,
 } from "./bookingExternalNightlyRevenueEvidence.js";
+import {
+  appendAddonRevenueRefundEvidence,
+  loadAddonRevenueRefundTargets,
+} from "./bookingAddonRevenueEvidence.js";
+import { createHash } from "node:crypto";
 import {
   FinanceManualBookingRefundError,
   type FinanceManualBookingRefundPort,
@@ -82,7 +88,7 @@ export async function refundPmsManualBooking(
   if (command.accountingDate < propertyDate(acceptedAt, scope.timezone!))
     throw new ManualRefundEvidenceError("Manual refund accounting date is invalid");
 
-  const ids = command.allocations.map(({ evidenceId }) => evidenceId);
+  const ids = command.allocations.map(({ evidenceId }) => evidenceId.toLowerCase());
   const targets = await transaction.query<RevenueTarget>(
     `WITH tips AS (
        SELECT id,SUM(gross_room_amount) OVER (PARTITION BY stay_date,line_position) AS available,
@@ -100,25 +106,47 @@ export async function refundPmsManualBooking(
        AND tip.available>0`,
     [ids, command.propertyId, command.guestBookingId, scope.currency],
   );
-  if (targets.rows.length !== command.allocations.length)
+  const addonTargets = await loadAddonRevenueRefundTargets(transaction, {
+    propertyId: command.propertyId,
+    guestBookingId: command.guestBookingId,
+    currency: scope.currency,
+    evidenceIds: ids,
+  });
+  if (targets.rows.length + addonTargets.length !== command.allocations.length)
     throw new ManualRefundEvidenceError("Manual refund allocation is missing or ambiguous");
   const byId = new Map(targets.rows.map((target) => [target.id, target]));
+  const addonById = new Map(addonTargets.map((target) => [target.evidenceId, target]));
   let total = 0n;
-  const lines = command.allocations.map((allocation) => {
-    const target = byId.get(allocation.evidenceId);
+  const lines: ExternalRevenueEvidenceLine[] = [];
+  const addonRefunds: Array<{ targetEvidenceId: string; grossAmount: string }> = [];
+  for (const allocation of command.allocations) {
+    const evidenceId = allocation.evidenceId.toLowerCase();
+    const target = byId.get(evidenceId);
+    const addonTarget = addonById.get(evidenceId);
     const amount = units(allocation.amount.amountDecimal, true);
     if (
-      !target ||
+      (!target && !addonTarget) ||
       allocation.amount.currency !== scope.currency ||
-      command.accountingDate < target.recognizedOn ||
+      command.accountingDate < (target ?? addonTarget)!.recognizedOn ||
       amount <= 0n ||
-      amount > units(target.availableAmount)
+      amount > units((target ?? addonTarget)!.availableAmount)
     )
       throw new ManualRefundEvidenceError(
         "Manual refund allocation does not match revenue evidence",
       );
     total += amount;
-    return {
+    if (addonTarget) {
+      addonRefunds.push({
+        targetEvidenceId: addonTarget.evidenceId,
+        grossAmount: `-${decimal(amount)}`,
+      });
+      continue;
+    }
+    if (!target)
+      throw new ManualRefundEvidenceError(
+        "Manual refund allocation does not match revenue evidence",
+      );
+    lines.push({
       roomTypeId: target.roomTypeId,
       stayDate: target.stayDate,
       recognizedOn: command.accountingDate,
@@ -129,8 +157,8 @@ export async function refundPmsManualBooking(
       evidenceQuality: "exact" as const,
       linePosition: target.linePosition,
       correctsEvidenceId: target.id,
-    };
-  });
+    });
+  }
   let paymentStatus: "partially_refunded" | "refunded";
   try {
     paymentStatus = await finance.record({
@@ -153,13 +181,21 @@ export async function refundPmsManualBooking(
      WHERE id=$1::uuid AND property_id=$2::uuid`,
     [command.guestBookingId, command.propertyId, paymentStatus, acceptedAt],
   );
-  await appendExternalNightlyRevenueEvidence(transaction, {
+  if (lines.length > 0)
+    await appendExternalNightlyRevenueEvidence(transaction, {
+      propertyId: command.propertyId,
+      guestBookingId: command.guestBookingId,
+      sourceKind: "manual",
+      sourceBookingReference: scope.sourceBookingReference,
+      idempotencyKey: `pms-refund:${command.idempotencyKey}:v1`,
+      lines,
+    });
+  await appendAddonRevenueRefundEvidence(transaction, {
     propertyId: command.propertyId,
     guestBookingId: command.guestBookingId,
-    sourceKind: "manual",
-    sourceBookingReference: scope.sourceBookingReference,
-    idempotencyKey: `pms-refund:${command.idempotencyKey}:v1`,
-    lines,
+    recognizedOn: command.accountingDate,
+    commandKeyHash: createHash("sha256").update(command.idempotencyKey).digest("hex"),
+    refunds: addonRefunds,
   });
 }
 
