@@ -189,3 +189,33 @@ Signup collision protection remains unwired: `identityLifecycle.ts` can reuse a
 user by email and `workosWebhooks.ts` can insert a new UUID. Guarding only migration
 inserts would miss these paths. Do not enable this preparation until both are
 covered by the separately reviewed shared collision boundary.
+
+## Scoped email-index proposal
+
+`planLegacyOwnerEmailIndex` proposes a partial unique index covering exactly eight
+independently approved normalized-email SHA256 values. The key and predicate
+contain hashes, not plaintext contact data. PostgreSQL uniqueness arbitrates
+INSERT/UPDATE races even for writers unaware of migration advisory locks.
+Duplicates outside this email cohort remain allowed; existing in-cohort
+duplicates prevent index creation and must not be deleted or merged to proceed.
+
+This helper only produces SQL; no migration, CLI or executor runs it. Before an
+authorized installation, independently bind the eight hashes to approved source
+owners and a UTF8 target database, using the same database normalization and hash
+expression. The expression pins case folding to PostgreSQL's `C` collation;
+unknown normalization correspondence blocks. It uses immutable native functions
+for UTF8 text bytes; tests compare it against `convert_to(...,'UTF8')`, including
+backslashes and Unicode. Do not substitute a
+different normalization or treat JS lowercase as universally equivalent.
+
+Use a separately approved transactional DDL window with bounded lock/statement
+timeouts. Index construction scans the user table and blocks writes during the
+build, including unrelated signup; this operational cost needs explicit scope.
+Do not use IF NOT EXISTS as proof: verify the exact schema, expression, predicate,
+uniqueness and valid/ready flags of the installed index before any account write.
+Retain the guard after preparation; removal needs separate drift/recovery review.
+
+Uniqueness is not ownership or linking authority. `identityLifecycle.ts` must
+also reject email-only linking to prepared owners; the provider path must bind
+the exact approved external/internal identity. Those protections remain unwired,
+so an index proposal or installed index alone never enables account preparation.
