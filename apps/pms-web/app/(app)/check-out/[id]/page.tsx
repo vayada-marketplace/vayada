@@ -137,6 +137,9 @@ export default function CheckOutPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [addonFulfillment, setAddonFulfillment] = useState<
+    Record<string, "fulfilled" | "not_confirmed">
+  >({});
   const [confirmationFlags, setConfirmationFlags] = useState<CheckoutInspectionResult[] | null>(
     null,
   );
@@ -183,6 +186,13 @@ export default function CheckOutPage() {
   const incompleteRequired = useMemo(
     () => steps.filter((step) => step.required && !inspection[step.id]?.status),
     [inspection, steps],
+  );
+
+  const addonSelections = booking?.addonSelections ?? [];
+  const addonClassificationUnavailable =
+    Boolean(booking?.addonIds.length) && addonSelections.length === 0;
+  const hasUnclassifiedAddons = addonSelections.some(
+    ({ selectionId }) => !addonFulfillment[selectionId],
   );
 
   const checkInNotes = notes.filter((note) => note.source === "check-in");
@@ -262,6 +272,16 @@ export default function CheckOutPage() {
     if (!booking) return;
     if (pendingTotal > 0) return;
     const results = steps.map((step) => toInspectionResult(step, inspection[step.id]));
+    if (addonClassificationUnavailable || hasUnclassifiedAddons) {
+      setWarning(
+        t(
+          addonClassificationUnavailable
+            ? "checkOut.addonClassificationUnavailable"
+            : "checkOut.addonClassificationRequired",
+        ),
+      );
+      return;
+    }
     if (incompleteRequired.length > 0 && !warning) {
       setWarning(
         t("checkOut.inspectionIncomplete", {
@@ -280,6 +300,9 @@ export default function CheckOutPage() {
         results,
         flaggedResults,
         noteBody || undefined,
+        addonSelections
+          .filter(({ selectionId }) => addonFulfillment[selectionId] === "fulfilled")
+          .map(({ selectionId }) => selectionId),
       );
       if (noteBody) {
         const saved = await bookingsService.createNote(booking.id, noteBody, "check-out");
@@ -444,6 +467,64 @@ export default function CheckOutPage() {
                 <SummaryItem label={t("bookings.detail.guests")} value={guestsLabel(booking, t)} />
               </div>
             </Section>
+
+            {booking.addonIds.length > 0 && (
+              <Section
+                title={t("checkOut.addonFulfillment")}
+                description={t("checkOut.addonFulfillmentDescription")}
+              >
+                {addonClassificationUnavailable ? (
+                  <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {t("checkOut.addonClassificationUnavailable")}
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {addonSelections.map((addOn) => (
+                      <div
+                        key={addOn.selectionId}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-gray-950">{addOn.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {t("bookings.detail.quantity", { quantity: addOn.quantity })}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          {(["fulfilled", "not_confirmed"] as const).map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={addonFulfillment[addOn.selectionId] === value}
+                              onClick={() => {
+                                setWarning("");
+                                setAddonFulfillment((current) => ({
+                                  ...current,
+                                  [addOn.selectionId]: value,
+                                }));
+                              }}
+                              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                                addonFulfillment[addOn.selectionId] === value
+                                  ? value === "fulfilled"
+                                    ? "border-green-300 bg-green-100 text-green-800"
+                                    : "border-amber-300 bg-amber-100 text-amber-900"
+                                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                              }`}
+                            >
+                              {t(
+                                value === "fulfilled"
+                                  ? "checkOut.addonFulfilled"
+                                  : "checkOut.addonNotConfirmed",
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            )}
 
             <Section
               title={t("checkOut.roomInspection")}
@@ -720,11 +801,22 @@ export default function CheckOutPage() {
                     pendingTotal > 0 ? formatCurrency(pendingTotal, booking.currency) : undefined
                   }
                 />
+                {booking.addonIds.length > 0 && (
+                  <ChecklistItem
+                    label={t("checkOut.addonFulfillment")}
+                    state={addonClassificationUnavailable || hasUnclassifiedAddons ? "issue" : "ok"}
+                  />
+                )}
               </div>
               <button
                 type="button"
                 onClick={completeCheckOut}
-                disabled={pendingTotal > 0 || actionLoading === "complete"}
+                disabled={
+                  pendingTotal > 0 ||
+                  addonClassificationUnavailable ||
+                  hasUnclassifiedAddons ||
+                  actionLoading === "complete"
+                }
                 className="mt-5 w-full rounded-lg bg-primary-600 px-4 py-3 text-sm font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 {pendingTotal > 0

@@ -114,6 +114,12 @@ export interface Booking {
   addonTotal: number;
   addonQuantities: Record<string, number>;
   addonDates: Record<string, string[]>;
+  addonSelections?: Array<{
+    selectionId: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;
   guestWithdrawn: boolean;
@@ -307,7 +313,12 @@ type PmsOperationalReservation = {
     countryCodeRaw?: string | null;
     countryCodeReviewRequired?: boolean;
   };
-  addOns?: Array<{ addonId: string; name: string; quantity: number }>;
+  addOns?: Array<{
+    selectionId?: string;
+    addonId: string;
+    name: string;
+    quantity: number;
+  }>;
   assignments: Array<{
     assignmentId?: string | null;
     roomTypeId: string;
@@ -733,6 +744,7 @@ export const bookingsService = {
     inspectionResults: CheckoutInspectionResult[],
     pendingFlags: CheckoutInspectionResult[],
     checkoutNotes?: string,
+    fulfilledAddonSelectionIds: string[] = [],
   ) => {
     await pmsOperationsClient.post<PmsOperationsCommandResponse>(
       await reservationEndpoint(id, "/check-out"),
@@ -742,6 +754,7 @@ export const bookingsService = {
         pendingFlags: pendingFlags.map((flag) => flag.stepId),
         chargesSettled: [],
         checkoutNotes,
+        fulfilledAddonSelectionIds,
       },
       pmsOperationsRequestOptions,
     );
@@ -1224,12 +1237,28 @@ function toBooking(
     addonTotal: 0,
     addonQuantities: Object.fromEntries(addOns.map(({ addonId, quantity }) => [addonId, quantity])),
     addonDates: {},
+    addonSelections: toAddonSelections(addOns),
     estimatedArrivalTime: null,
     numberOfGuests: reservation.stay.adults + reservation.stay.children,
     guestWithdrawn: false,
     createdAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
     updatedAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
   };
+}
+
+function toAddonSelections(addOns: NonNullable<PmsOperationalReservation["addOns"]>) {
+  const selections = new Map<string, NonNullable<Booking["addonSelections"]>[number]>();
+  for (const addOn of addOns) {
+    if (!addOn.selectionId) continue;
+    const current = selections.get(addOn.selectionId);
+    selections.set(addOn.selectionId, {
+      selectionId: addOn.selectionId,
+      addonId: current?.addonId ?? addOn.addonId,
+      name: current ? `${current.name}, ${addOn.name}` : addOn.name,
+      quantity: (current?.quantity ?? 0) + addOn.quantity,
+    });
+  }
+  return Array.from(selections.values());
 }
 
 function toPaymentBreakdown(

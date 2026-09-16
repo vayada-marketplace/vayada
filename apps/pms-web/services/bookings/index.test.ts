@@ -121,7 +121,7 @@ describe("PMS target booking projection", () => {
     const detailed = {
       ...reservation,
       primaryGuest: { ...reservation.primaryGuest, specialRequests: "Quiet room" },
-      addOns: [{ addonId: "addon-1", name: "Breakfast", quantity: 2 }],
+      addOns: [{ selectionId: "selection-1", addonId: "addon-1", name: "Breakfast", quantity: 2 }],
     };
     mocks.get.mockImplementation(async (endpoint: string) =>
       endpoint.endsWith("/room-types") ? { items: [] } : { item: detailed },
@@ -132,7 +132,25 @@ describe("PMS target booking projection", () => {
       addonIds: ["addon-1"],
       addonNames: ["Breakfast"],
       addonQuantities: { "addon-1": 2 },
+      addonSelections: [
+        { selectionId: "selection-1", addonId: "addon-1", name: "Breakfast", quantity: 2 },
+      ],
     });
+  });
+
+  it("submits the explicitly fulfilled add-on selections at check-out", async () => {
+    mocks.post.mockResolvedValue({});
+    mocks.get.mockImplementation(async (endpoint: string) =>
+      endpoint.endsWith("/room-types") ? { items: [] } : { item: reservation },
+    );
+
+    await bookingsService.completeCheckOut("booking-1", [], [], undefined, ["selection-1"]);
+
+    expect(mocks.post).toHaveBeenCalledWith(
+      "/api/pms/properties/property-1/reservations/booking-1/check-out",
+      expect.objectContaining({ fulfilledAddonSelectionIds: ["selection-1"] }),
+      expect.anything(),
+    );
   });
 
   it("defaults additive booking evidence while an older API instance rolls out", async () => {
