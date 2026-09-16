@@ -17,6 +17,9 @@ const CATEGORY = "12130000-0000-4000-8000-000000000004";
 const SECOND_CATEGORY = "12130000-0000-4000-8000-000000000005";
 const OTHER_CATEGORY = "12130000-0000-4000-8000-000000000006";
 const RULE = "12130000-0000-4000-8000-000000000007";
+const OTHER_BOOKING = "12130000-0000-4000-8000-000000000020";
+const OTHER_ROOM = "12130000-0000-4000-8000-000000000021";
+const OTHER_NIGHT = "12130000-0000-4000-8000-000000000022";
 const EXPENSE = "12130000-0000-4000-8000-000000000010";
 const RECURRING = "12130000-0000-4000-8000-000000000011";
 const SMALL = "12130000-0000-4000-8000-000000000012";
@@ -54,6 +57,9 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
         ('${CATEGORY}','${PROPERTY}','Operations','#123456',1),('${SECOND_CATEGORY}','${PROPERTY}','Utilities','#654321',2),('${OTHER_CATEGORY}','${OTHER}','Other','#111111',1);
       INSERT INTO finance.recurring_expense_rules (id,property_id,category_id,cadence,starts_on,next_due_on,ends_on,vendor,amount,currency,payment_status,notes) VALUES
         ('${RULE}','${PROPERTY}','${SECOND_CATEGORY}','monthly','2026-08-01','2026-09-01','2026-12-01','Recurring vendor',10,'EUR','paid','Monthly service');
+      INSERT INTO booking.guest_bookings (id,property_id,public_reference,source_system,source_booking_id,lifecycle_status,check_in,check_out,currency,booking_channel,direct_booking_source) VALUES
+        ('${OTHER_BOOKING}','${OTHER}','expense-other-reversal','pms','expense-other-reversal','canceled','2026-07-31','2026-08-01','USD','direct','booking_engine');
+      INSERT INTO booking.nightly_revenue_room_scopes (property_id,room_type_id) VALUES ('${OTHER}','${OTHER_ROOM}');
       INSERT INTO finance.expenses (id,property_id,category_id,origin,entry_kind,incurred_on,paid_on,vendor,amount,currency,payment_status,recurring_rule_id,source_key,reverses_expense_id) VALUES
         ('12130000-0000-4000-8000-000000000008','${PROPERTY}','${CATEGORY}','manual','expense','2026-07-05','2026-07-05','Prior Alpha',20,'EUR','paid',NULL,NULL,NULL),
         ('${EXPENSE}','${PROPERTY}','${CATEGORY}','manual','expense','2026-08-10',NULL,'Alpha vendor',30,'EUR','unpaid',NULL,NULL,NULL),
@@ -75,7 +81,10 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-07-06','2026-07-06','EUR',20,1,'room_night','completed','direct','exact',1,'read-prior-2'),
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-08-10','2026-08-10','USD',10,1,'room_night','confirmed','direct','exact',1,'read-wrong-currency'),
         ('${PROPERTY}',gen_random_uuid(),gen_random_uuid(),'2026-07-20','2026-07-20','USD',10,1,'room_night','confirmed','direct','exact',1,'read-gap-wrong-currency');
-      SET session_replication_role=origin;`);
+      SET session_replication_role=origin;
+      INSERT INTO booking.nightly_revenue_evidence (id,property_id,guest_booking_id,room_type_id,stay_date,recognized_on,currency,gross_room_amount,occupied_room_nights,economic_event,lifecycle_state,source_kind,evidence_quality,source_revision,command_key,corrects_evidence_id) VALUES
+        ('${OTHER_NIGHT}','${OTHER}','${OTHER_BOOKING}','${OTHER_ROOM}','2026-07-31','2026-07-31','USD',500,1,'room_night','completed','direct','exact',1,'other-base',NULL),
+        ('12130000-0000-4000-8000-000000000023','${OTHER}','${OTHER_BOOKING}','${OTHER_ROOM}','2026-07-31','2026-08-10','USD',-500,-1,'room_night_reversal','canceled','direct','exact',2,'other-reversal','${OTHER_NIGHT}');`);
   });
   afterAll(async () => { await read.close(); await pricing.close(); await cleanup(); await admin.end(); });
 
@@ -144,6 +153,7 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM booking.nightly_revenue_evidence WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
+      DELETE FROM booking.nightly_revenue_room_scopes WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM booking.guest_bookings WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM finance.expenses WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM finance.recurring_expense_rules WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM finance.expense_categories WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM pms.property_pricing_settings WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');
       DELETE FROM hotel_catalog.property_locations WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); DELETE FROM hotel_catalog.properties WHERE id IN ('${PROPERTY}','${EMPTY}','${OTHER}'); COMMIT`);
