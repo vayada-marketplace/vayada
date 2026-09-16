@@ -92,6 +92,8 @@ import { composePlatformMediaRuntime } from "./platform/platformMediaRuntime.js"
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import { createWorkOSStaffInvitationProvider } from "./platform/workosStaffInvitations.js";
 import { createWorkOSStaffRemovalProvider } from "./platform/workosStaffRemoval.js";
+import { startAdminRoleWorker } from "./platform/adminRoleWorker.js";
+import { createWorkOSAdminRoleProvider } from "./platform/workosAdminRoleProvider.js";
 import { startStaffRemovalWorker } from "./platform/staffRemovalWorker.js";
 import { installPostgresPoolRuntime } from "./platform/postgresRuntime.js";
 import {
@@ -1767,6 +1769,18 @@ const creatorPlatformSyncWorker =
       })
     : undefined;
 
+const adminRoleWorker =
+  config.backgroundWorkersEnabled && config.auth && config.authSession
+    ? startAdminRoleWorker({
+        connectionString: config.auth.databaseUrl,
+        provider: createWorkOSAdminRoleProvider(config.authSession.workosApiKey),
+        warn: () =>
+          app.log.warn(
+            "Account-admin role reconciliation worker failed; durable lease recovery will retry",
+          ),
+      })
+    : undefined;
+
 const staffRemovalWorker =
   config.backgroundWorkersEnabled && staffInvitationRuntime
     ? startStaffRemovalWorker({
@@ -1826,6 +1840,7 @@ const bookingGuestPolicyProjectionWorker =
 
 app.addHook("onClose", async () => {
   await creatorPlatformSyncWorker?.close();
+  await adminRoleWorker?.close();
   await staffRemovalWorker?.close();
   await pmsInboxAssignmentReconciliationWorker?.close();
   await pmsInboxFollowUpReleaseWorker?.close();
