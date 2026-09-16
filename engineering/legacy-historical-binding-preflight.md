@@ -81,6 +81,13 @@ revision, recomputed ledger hash and hashed PMS snapshot tag to independently
 authenticated expected evidence. It does not verify a signature itself; an
 untrusted caller choosing its own expected hashes gains no authority.
 
+Use a dedicated, independently authenticated pool with bounded acquisition. The
+reader rolls back any leaked transaction before opening its snapshot, fixes its
+catalog search path and sets nonzero lock/query timeouts. Policy-filtered reads
+reject rather than silently hiding evidence. All seven relations must be ordinary
+tables without RLS or inheritance; relation locks retain that representation.
+These controls do not turn historical records into live ownership evidence.
+
 It uses the real default PMS snapshot reader and its identity/inventory validator:
 four-source/table ledger completeness, source aggregates, tag/ordinal continuity
 and raw PostgreSQL JSON row/table checksums are recomputed. Source table is fixed

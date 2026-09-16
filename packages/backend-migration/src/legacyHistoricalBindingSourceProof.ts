@@ -46,7 +46,12 @@ export async function readLegacyHistoricalBindingSourceProof(
   const client = await pool.connect();
   let discard = false;
   try {
+    // Dedicated reader pool: never reuse an earlier caller's snapshot or writes.
+    await client.query("ROLLBACK");
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await client.query(
+      "SET LOCAL search_path=pg_catalog; SET LOCAL row_security=off; SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='5s'",
+    );
     const tables = [
       "platform.source_extraction_runs",
       "platform.source_extraction_sources",
@@ -57,8 +62,10 @@ export async function readLegacyHistoricalBindingSourceProof(
     ];
     await client.query(`LOCK TABLE ${tables.join(", ")} IN ACCESS SHARE MODE`);
     const access = await client.query<{ complete: boolean }>(
-      `SELECT count(*) = 7 AND bool_and(NOT relrowsecurity AND has_table_privilege(oid, 'SELECT')) AS complete
-       FROM pg_class WHERE oid = ANY($1::regclass[])`,
+      `SELECT count(*) = 7 AND bool_and(relkind='r' AND NOT relrowsecurity AND NOT relforcerowsecurity
+        AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=c.oid OR inhparent=c.oid)
+        AND has_table_privilege(oid, 'SELECT')) AS complete
+       FROM pg_catalog.pg_class c WHERE oid = ANY($1::regclass[])`,
       [tables],
     );
     if (access.rows.length !== 1 || access.rows[0]?.complete !== true)
