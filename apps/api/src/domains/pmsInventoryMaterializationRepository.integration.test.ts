@@ -1034,8 +1034,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       ).rows[0],
     ).toEqual({ n: 2, total: "37.5000" });
     const appliedProviderRevision = providerRevision.id;
-    for (const enabled of [false, true]) {
-      financeEnabled = enabled;
+    {
+      financeEnabled = false;
       providerRevision.id = randomUUID();
       providerRevision.attributes.inserted_at = new Date(Date.now() + 1000).toISOString();
       const unsupported = await queueRevision();
@@ -1048,11 +1048,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
             [unsupported],
           )
         ).rows[0].code,
-      ).toBe(
-        enabled
-          ? "alteration_finance_lifecycle_unsupported"
-          : "alteration_finance_settings_required",
-      );
+      ).toBe("alteration_finance_settings_required");
     }
     // Restore the untracked synthetic fixture for the existing generic lifecycle regressions.
     await admin.query("BEGIN; SET LOCAL session_replication_role=replica");
@@ -1252,7 +1248,8 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       [roomTypeId],
     );
     await expect(check()).rejects.toThrow("alteration_inventory_not_current");
-    // Full worker sequence also covers the downstream Booking revenue reader and ACK journal.
+    // Full tracked sequence: accepted alteration, ordinary modification, cancellation and replay.
+    financeEnabled = true;
     await admin.query(
       "UPDATE pms.room_types SET room_facts_revision=room_facts_revision-1 WHERE id=$1",
       [roomTypeId],
@@ -1296,7 +1293,67 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         ),
       ).toMatchObject({ succeeded: 1 });
     };
+    const rejectTrackedRevision = async (code: string) => {
+      providerRevision.id = randomUUID();
+      providerRevision.attributes.inserted_at = new Date(
+        Date.now() + ++followup * 1000,
+      ).toISOString();
+      const before = (
+        await admin.query(
+          "SELECT lifecycle_status,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+          [bookingId],
+        )
+      ).rows[0];
+      const snapshots = (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n;
+      const ackBefore = acknowledgements;
+      const failedJob = await queueRevision();
+      await admin.query("UPDATE platform.jobs SET max_attempts=1 WHERE id=$1", [failedJob]);
+      expect(await runRevision()).toMatchObject({ deadLettered: 1 });
+      expect(
+        (
+          await admin.query(
+            "SELECT job_metadata->>'lastErrorCode' code FROM platform.jobs WHERE id=$1",
+            [failedJob],
+          )
+        ).rows[0].code,
+      ).toBe(code);
+      expect(acknowledgements).toBe(ackBefore);
+      expect(
+        (
+          await admin.query(
+            "SELECT lifecycle_status,total_amount::text FROM booking.guest_bookings WHERE id=$1",
+            [bookingId],
+          )
+        ).rows[0],
+      ).toEqual(before);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+            [bookingId],
+          )
+        ).rows[0].n,
+      ).toBe(snapshots);
+    };
     await nextWorkerRevision();
+    // Ordinary modifications must roll back canonical changes when evidence is unavailable.
+    providerRevision.attributes.amount = "40.00";
+    settingsState = "missing";
+    await rejectTrackedRevision("alteration_finance_settings_unavailable");
+    settingsState = "valid";
+    const protectedPayment = randomUUID();
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [protectedPayment, propertyId, bookingId],
+    );
+    await rejectTrackedRevision("alteration_finance_reconciliation_required");
+    await admin.query("DELETE FROM finance.payments WHERE id=$1", [protectedPayment]);
+    providerRevision.attributes.amount = "37.50";
     const releasedHistory = (
       await admin.query(
         "SELECT to_jsonb(a) AS data FROM pms.operational_booking_assignments a WHERE guest_booking_id=$1 AND position=2",
@@ -1312,11 +1369,45 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].count,
-    ).toBe(1);
+    ).toBe(0);
     Object.assign(providerRevision.attributes, { status: "cancelled", amount: "0.00" });
+    providerRevision.attributes.rooms = [];
+    settingsState = "wrong_binding";
+    await rejectTrackedRevision("alteration_finance_settings_unavailable");
+    settingsState = "valid";
+    await admin.query(
+      "INSERT INTO finance.payments(id,property_id,guest_booking_id,payment_kind,status,amount,currency) VALUES($1,$2,$3,'deposit','pending',10,'EUR')",
+      [protectedPayment, propertyId, bookingId],
+    );
+    await rejectTrackedRevision("alteration_finance_reconciliation_required");
+    await admin.query("DELETE FROM finance.payments WHERE id=$1", [protectedPayment]);
     await nextWorkerRevision();
     await queueRevision();
     expect(await runRevision()).toMatchObject({ succeeded: 1 });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_provider_snapshots WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(3);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM finance.airbnb_current_provider_nights WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT snapshot->>'replacement' replacement,provider_booking_amount::text amount FROM finance.airbnb_current_provider_amounts WHERE guest_booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ replacement: "cancellation", amount: "0.0000" });
     expect(
       (
         await admin.query("SELECT lifecycle_status FROM booking.guest_bookings WHERE id=$1", [
@@ -1339,7 +1430,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           [bookingId],
         )
       ).rows[0].nights,
-    ).toBe(0);
+    ).toBeNull();
   });
 
   it("rejects captured active-room evidence after closure without writing inventory", async () => {

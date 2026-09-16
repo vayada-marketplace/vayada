@@ -224,4 +224,38 @@ describe.skipIf(!databaseUrl)("Airbnb Finance writer (isolated PostgreSQL)", () 
       client.release();
     }
   });
+  it("cancels atomically with missing room details, preserving unknown commission and history", async () => {
+    const previous = (
+      await pool.query("SELECT provider_revision_id FROM finance.airbnb_current_provider_amounts")
+    ).rows[0].provider_revision_id;
+    const base = make("cancel-1", previous, "2026-09-14T11:00:00.000000Z");
+    const { rooms: _rooms, ota_commission: _commission, ...raw } = base.rawRevision;
+    const cancel = { ...base, rawRevision: { ...raw, status: "cancelled", amount: "25.00" } };
+    await expect(run(cancel)).rejects.toThrow("airbnb_finance_booking_stay_mismatch");
+    const change = (client: pg.PoolClient) =>
+      client.query("UPDATE booking.guest_bookings SET lifecycle_status='canceled'");
+    await expect(run({ ...cancel, previousRevisionId: "wrong" }, change)).rejects.toThrow(
+      "airbnb_finance_previous_revision_conflict",
+    );
+    expect(
+      (await pool.query("SELECT lifecycle_status FROM booking.guest_bookings")).rows[0]
+        .lifecycle_status,
+    ).toBe("confirmed");
+    expect((await run(cancel, change)).outcome).toBe("appended");
+    expect((await run(cancel)).outcome).toBe("replayed");
+    expect(
+      (await pool.query("SELECT count(*)::int n FROM finance.airbnb_current_provider_nights"))
+        .rows[0].n,
+    ).toBe(0);
+    expect(
+      (
+        await pool.query(
+          "SELECT provider_booking_amount::text amount,ota_commission FROM finance.airbnb_current_provider_amounts",
+        )
+      ).rows[0],
+    ).toEqual({ amount: "25.0000", ota_commission: null });
+    expect(
+      (await pool.query("SELECT count(*)::int n FROM finance.airbnb_provider_snapshots")).rows[0].n,
+    ).toBe(4);
+  });
 });

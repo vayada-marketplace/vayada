@@ -40,6 +40,23 @@ const make = () => ({
   ],
 });
 
+it("replaces canceled nights without interpreting the provider total as a refund", () => {
+  const original = make();
+  const { rooms: _rooms, ota_commission: _commission, ...raw } = original;
+  const result = read({ ...raw, status: "cancelled", amount: "25.00" }, scope, settings);
+  expect(result).toMatchObject({
+    replacement: "cancellation",
+    nightlyAllocation: "unavailable",
+    providerBookingAmount: "25.00",
+    otaCommission: null,
+    nights: [],
+    rooms: [],
+  });
+  expect(JSON.stringify(result)).not.toContain("PRIVATE GUEST");
+  expect(() => read({ ...raw, status: "cancelled", booking_id: id(9) }, scope, settings)).toThrow();
+  expect(() => read({ ...raw, status: "cancelled", amount: undefined }, scope, settings)).toThrow();
+});
+
 it.each(["Payout Amount", "Total Paid Amount"] as const)(
   "preserves %s amounts and separate commission without a second deduction or gross-up",
   (basis) => {

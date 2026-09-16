@@ -98,11 +98,13 @@ export async function appendFinanceAirbnbProviderSnapshot(
     return { outcome: "replayed" as const, snapshotId: replay.id };
   }
   if (
-    booking.status !== "confirmed" ||
-    !booking.amountMatches ||
-    booking.checkIn !== snapshot.checkIn ||
-    booking.checkOut !== snapshot.checkOut ||
-    booking.roomCount !== snapshot.rooms.length
+    snapshot.replacement === "cancellation"
+      ? booking.status !== "canceled"
+      : booking.status !== "confirmed" ||
+        !booking.amountMatches ||
+        booking.checkIn !== snapshot.checkIn ||
+        booking.checkOut !== snapshot.checkOut ||
+        booking.roomCount !== snapshot.rooms.length
   )
     throw new Error("airbnb_finance_booking_stay_mismatch");
   const current = (

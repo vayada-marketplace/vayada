@@ -1,4 +1,5 @@
 import { captureChannexAlterationFinance, type ChannexAirbnbFinanceSettingsPort } from "../domains/channexAlterationFinance.js";
+import { hasBookingFinancialEvidence } from "../domains/financeBookingAlterationGuard.js";
 import { applyChannexAlterationRevision } from "../domains/channexAlterationRevision.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
 import {
@@ -186,7 +187,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
     const financialHistory=guestBookingId&&(await client.query(`SELECT 1 FROM finance.airbnb_provider_snapshots WHERE property_id=$1 AND guest_booking_id=$2 LIMIT 1`,[job.propertyId,guestBookingId])).rows.length;
     if(financialHistory&&(!applyAlterations||!financeSettings))throw new Failure("alteration_finance_settings_required",false);
     const alterationApplied=Boolean(applyAlterations&&isModified&&guestBookingId&&await applyChannexAlterationRevision(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerPropertyId:job.providerPropertyId},rawRevision,financeSettings?async revisionScope=>captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId!,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope},financeSettings):undefined));
-    if(financialHistory&&!alterationApplied)throw new Failure("alteration_finance_lifecycle_unsupported",false);
+    if(financialHistory&&!alterationApplied&&!isModified&&revision.status!=="canceled")throw new Failure("alteration_finance_lifecycle_unsupported",false);
     if (!guestBookingId) {
       guestBookingId = (
         await client.query<{id:string}>(
@@ -207,6 +208,7 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       const current=(await client.query<{status:string}>(`SELECT lifecycle_status status FROM booking.guest_bookings WHERE id=$1::uuid AND property_id=$2::uuid FOR UPDATE`,[guestBookingId,job.propertyId])).rows[0];
       if(!current||(current.status!=="confirmed"&&(current.status!=="canceled"||revision.status!=="canceled")))throw new ChannexAssignmentConflict("operational_booking_terminal");
       alreadyCanceled=current.status==="canceled";
+      if(financialHistory&&!alterationApplied&&await hasBookingFinancialEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId}))throw new Failure("alteration_finance_reconciliation_required",false);
       if(!alterationApplied)await client.query(revision.roomCount?`UPDATE booking.guest_bookings SET lifecycle_status=$3,check_in=$4::date,check_out=$5::date,
            adults=$6,children=$7,room_count=$8,currency=$9,total_amount=$10::numeric,
            balance_amount=CASE WHEN payment_status='unpaid' THEN $10::numeric ELSE balance_amount END,updated_at=now()
@@ -216,7 +218,12 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       if(revision.hasCustomer)await client.query("UPDATE booking.booking_guests SET first_name=COALESCE($2,first_name),last_name=COALESCE($3,last_name),email=CASE WHEN $6 THEN $4 ELSE email END,phone=CASE WHEN $7 THEN $5 ELSE phone END,updated_at=now() WHERE guest_booking_id=$1::uuid AND guest_role='booker'",[guestBookingId,revision.firstName,revision.lastName,revision.email,revision.phone,revision.hasEmail,revision.hasPhone]);
     }
     if(!alreadyCanceled&&!alterationApplied)await persistChannexAssignments(client,{propertyId:job.propertyId,connectionId:connection[0]!.id,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,channel:canonicalChannel(mappings.length?mappings[0]!.providerSource:revision.providerSource),canceled:revision.status==="canceled",rooms:assignmentRooms(revision.rooms),...(scope?.catalogHash?{stagingCatalogBindingGeneration:scope.bindingGeneration,bootstrapHash:scope.catalogHash}:{})});
-    if(!alterationApplied)await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:revision.retainedCharges,rooms:revision.rooms});
+    if(financialHistory&&!alterationApplied){
+      const rooms=revision.status==="canceled"?[]:(await client.query<{position:number;roomTypeId:string}>(`SELECT position,room_type_id::text AS "roomTypeId" FROM pms.operational_booking_assignments WHERE property_id=$1 AND guest_booking_id=$2 AND assignment_status IN ('pending','assigned') ORDER BY position`,[job.propertyId,guestBookingId])).rows;
+      if(revision.status!=="canceled"&&(rooms.length!==revision.rooms.length||rooms.some((room,index)=>room.position!==index+1)))throw new Failure("alteration_finance_room_scope_unavailable",false);
+      await captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope:{revisionId:revision.id,providerPropertyId:job.providerPropertyId,providerBookingId:job.channelBookingId,currency:revision.currency,checkIn:revision.checkIn,checkOut:revision.checkOut,rooms:rooms.map((room,index)=>({roomTypeId:room.roomTypeId,providerRoomTypeId:revision.rooms[index]!.externalRoomTypeId}))}},financeSettings!);
+    }
+    if(!alterationApplied&&!financialHistory)await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:revision.retainedCharges,rooms:revision.rooms});
     if(revision.roomCount)await client.query(
       `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,
          external_booking_id,external_revision_id,channel,channel_room_index,sync_status,last_synced_at,mapping_metadata)
