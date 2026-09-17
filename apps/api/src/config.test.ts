@@ -670,6 +670,23 @@ describe("api config", () => {
     );
   });
 
+  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+    expect(
+      loadConfig({
+        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
+      }).replacementPricingAcceptanceAllowedSlugs,
+    ).toEqual(["test-hotel", "other-hotel"]);
+    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
+  });
+
+  it("rejects malformed replacement-pricing acceptance slugs", () => {
+    expect(() =>
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
+    ).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
+    );
+  });
+
   it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
     expect(() =>
       loadConfig({
