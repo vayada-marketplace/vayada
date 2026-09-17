@@ -134,6 +134,7 @@ function harness() {
           grossRoomAmount: "100.0000",
           otaCommissionAmount: "0.0000",
           occupiedRoomNights: 1,
+          pricedOccupiedRoomNights: 1,
         },
       ],
       eligibleBookings: { current: 1, comparison: 0 },
