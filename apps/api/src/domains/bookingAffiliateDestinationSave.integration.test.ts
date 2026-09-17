@@ -2,9 +2,11 @@ import { createPgBookingAffiliateDestinationRepository } from "./bookingAffiliat
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
+import { AFFILIATE_TRACKING_PURPOSES } from "@vayada/domain-booking";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { saveBookingAffiliateDestinationFromMarketplace as save } from "./bookingAffiliateDestinationSave.js";
+import type { AffiliateDestinationTrackingReadinessInput } from "./bookingAffiliateDestinationTrackingReadiness.js";
 const databaseUrl = process.env["TEST_DATABASE_URL"];
 const id = (n: number) => `15100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
@@ -159,6 +161,133 @@ describe.skipIf(!databaseUrl)("affiliate destination save (PostgreSQL)", () => {
       }
       await pool.query("UPDATE hotel_catalog.properties SET profile_status='disabled'");
       expect(await repository.get(id(3), id(4), saved.destinationVersionId)).toBeNull();
+    } finally {
+      await repository.close();
+    }
+  });
+  it("reads configured tracking readiness inside one explicit transaction", async () => {
+    const purposes = Object.fromEntries(
+      AFFILIATE_TRACKING_PURPOSES.map((purpose) => [
+        purpose,
+        {
+          certificationConnectionReference: `diagnostic:${purpose}`,
+          productionConnectionReference: `production:${purpose}`,
+          adapterVersion: `${purpose}-v1`,
+        },
+      ]),
+    ) as AffiliateDestinationTrackingReadinessInput["purposes"];
+    const clients = new Set<pg.PoolClient>();
+    const repository = createPgBookingAffiliateDestinationRepository(isolatedUrl, {
+      configuration: async (client, scope) => {
+        clients.add(client);
+        expect(scope).toMatchObject({ propertyId: id(3), organizationId: id(4) });
+        await client.query("SAVEPOINT destination_read_configuration_test");
+        await client.query("RELEASE SAVEPOINT destination_read_configuration_test");
+        return { certificationEnvironment: "sandbox", purposes };
+      },
+      readiness: async (client, scope) => {
+        clients.add(client);
+        expect(scope).toMatchObject({
+          propertyId: id(3),
+          organizationId: id(4),
+          certificationEnvironment: "sandbox",
+          purposes,
+        });
+        return {
+          status: "verified",
+          missing: [],
+          policyVersion: "booking-affiliate-destination-tracking-readiness.v1",
+          evidence: AFFILIATE_TRACKING_PURPOSES.map((purpose, index) => ({
+            purpose,
+            evidenceReference:
+              `booking:affiliate-destination-capability-readiness:${purpose}:` +
+              `${id(100 + index)}:${id(200 + index)}`,
+            validatedAt: new Date().toISOString(),
+          })),
+        };
+      },
+    });
+    try {
+      const saved = await repository.save(input());
+      if (!saved.ok) throw new Error("fixture failed");
+      await expect(repository.get(id(3), id(4), saved.destinationVersionId)).resolves.toMatchObject(
+        {
+          destinationVersionId: saved.destinationVersionId,
+          trackingStatus: "validated",
+          trackingReadiness: {
+            status: "verified",
+            missing: [],
+            evidence: AFFILIATE_TRACKING_PURPOSES.map((purpose) => ({ purpose })),
+          },
+        },
+      );
+      expect(clients.size).toBe(1);
+    } finally {
+      await repository.close();
+    }
+  });
+  it("redacts malformed verified readiness from authorized destination reads", async () => {
+    const purposes = Object.fromEntries(
+      AFFILIATE_TRACKING_PURPOSES.map((purpose) => [
+        purpose,
+        {
+          certificationConnectionReference: `diagnostic:${purpose}`,
+          productionConnectionReference: `production:${purpose}`,
+          adapterVersion: `${purpose}-v1`,
+        },
+      ]),
+    ) as AffiliateDestinationTrackingReadinessInput["purposes"];
+    let evidence: {
+      purpose: (typeof AFFILIATE_TRACKING_PURPOSES)[number];
+      evidenceReference: string;
+      validatedAt: string;
+    }[] = [];
+    const repository = createPgBookingAffiliateDestinationRepository(isolatedUrl, {
+      configuration: async () => ({ certificationEnvironment: "sandbox", purposes }),
+      readiness: async () => ({
+        status: "verified",
+        missing: [],
+        policyVersion: "booking-affiliate-destination-tracking-readiness.v1",
+        evidence,
+      }),
+    });
+    try {
+      const saved = await repository.save(input());
+      if (!saved.ok) throw new Error("fixture failed");
+      const expectRedacted = async () => {
+        const destination = await repository.get(id(3), id(4), saved.destinationVersionId);
+        expect(destination).toMatchObject({
+          trackingStatus: "not_validated",
+          trackingReadiness: {
+            status: "pending",
+            missing: AFFILIATE_TRACKING_PURPOSES,
+          },
+        });
+        expect(destination?.trackingReadiness).not.toHaveProperty("evidence");
+      };
+      await expectRedacted();
+      evidence = AFFILIATE_TRACKING_PURPOSES.map((purpose, index) => ({
+        purpose,
+        evidenceReference:
+          `booking:affiliate-destination-capability-readiness:${purpose}:` +
+          `${id(100 + index)}:${id(200 + index)}`,
+        validatedAt: new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString(),
+      }));
+      await expectRedacted();
+      evidence = AFFILIATE_TRACKING_PURPOSES.map((purpose, index) => ({
+        purpose,
+        evidenceReference:
+          index === 0
+            ? ({
+                toString: () =>
+                  `booking:affiliate-destination-capability-readiness:${purpose}:` +
+                  `${id(100 + index)}:${id(200 + index)}`,
+              } as unknown as string)
+            : `booking:affiliate-destination-capability-readiness:${purpose}:` +
+              `${id(100 + index)}:${id(200 + index)}`,
+        validatedAt: new Date().toISOString(),
+      }));
+      await expectRedacted();
     } finally {
       await repository.close();
     }
