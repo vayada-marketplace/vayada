@@ -43,6 +43,27 @@ const financeFolioKmsEnv = {
 };
 
 describe("api config", () => {
+  it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
+    const keys = {
+      "key-1": Buffer.alloc(32, 1).toString("base64url"),
+      "key-2": Buffer.alloc(32, 2).toString("base64url"),
+    };
+    const config = (current = "key-2", encoded = JSON.stringify(keys)) =>
+      loadConfig({
+        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: current,
+        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON: encoded,
+      });
+    expect(config().marketplaceCommunicationUnsubscribe).toEqual({
+      currentKeyVersion: "key-2",
+      keys,
+    });
+    expect(() =>
+      loadConfig({ MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: "key-2" }),
+    ).toThrow("Incomplete Marketplace communication unsubscribe signing config");
+    expect(() => config("missing")).toThrow("signing keys are invalid");
+    expect(() => config("key-2", "not-json")).toThrow("must be valid JSON");
+  });
+
   it("parses a review-only webhook override without changing other intake modes", () => {
     expect(loadConfig({}).providerWebhooks.channexReviewMode).toBeUndefined();
     const config = loadConfig({ CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE: "mutating" });

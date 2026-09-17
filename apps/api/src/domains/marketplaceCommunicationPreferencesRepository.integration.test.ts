@@ -1,6 +1,7 @@
 import {
   parseReplaceMarketplaceCommunicationPreferences,
   type MarketplaceCommunicationLaunchPolicy,
+  type MarketplaceCommunicationUnsubscribeCommand,
   type ReplaceMarketplaceCommunicationPreferencesCommand,
 } from "@vayada/domain-marketplace";
 import pg from "pg";
@@ -13,10 +14,12 @@ const userId = "a2022000-0000-4000-8000-000000000001";
 const otherUserId = "a2022000-0000-4000-8000-000000000002";
 const organizationId = "a2022000-0000-4000-8000-000000000003";
 const otherOrganizationId = "a2022000-0000-4000-8000-000000000004";
+const deliveryId = "a2022000-0000-4000-8000-000000000005";
 const acceptedAt = "2026-09-17T01:00:00.000Z";
 const updatedAt = "2026-09-17T02:00:00.000Z";
 const policyEffectiveAt = "2026-09-01T00:00:00.000Z";
 const operation = "marketplace.communication_preferences.replace";
+const unsubscribeOperation = "marketplace.communication_preferences.unsubscribe_topic";
 const auditFailureFunction = "platform.vay2022_fail_communication_preference_audit";
 const auditFailureTrigger = "trg_vay2022_fail_communication_preference_audit";
 
@@ -29,6 +32,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
     connectionString: TEST_DATABASE_URL ?? "postgresql://integration-test-disabled",
     max: 6,
     now: () => new Date(repositoryTime),
+    policy: { launchPolicy: "disabled", effectiveAt: policyEffectiveAt },
   });
 
   beforeAll(async () => {
@@ -209,12 +213,124 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
     }
   });
 
+  it("uses the accepted request time to apply and replay a category opt-out", async () => {
+    repositoryTime = "2026-09-19T00:00:00.000Z";
+    const unsubscribe = unsubscribeCommand("a".repeat(64));
+    await expect(repository.unsubscribeCommunicationTopic(unsubscribe)).resolves.toEqual({
+      ok: true,
+      replayed: false,
+    });
+    await expect(repository.unsubscribeCommunicationTopic(unsubscribe)).resolves.toEqual({
+      ok: true,
+      replayed: true,
+    });
+    await expect(
+      repository.getCommunicationPreferences(scope("service_default_on")),
+    ).resolves.toMatchObject({
+      revision: 1,
+      email: { state: "on", source: "policy_default", effectiveAt: policyEffectiveAt },
+      topics: {
+        collaborationActionRequired: {
+          cadence: "off",
+          source: "signed_unsubscribe",
+          effectiveAt: acceptedAt,
+        },
+      },
+    });
+    const evidence = await admin.query<{
+      aggregate: string;
+      audit: string;
+      auditPayload: unknown;
+      channel: string;
+      idempotency: string;
+      metadata: unknown;
+      topic: string;
+    }>(
+      `SELECT
+         (SELECT count(*) FROM marketplace.communication_preference_sets
+           WHERE organization_id = $1::uuid)::text AS aggregate,
+         (SELECT count(*) FROM marketplace.communication_channel_preferences
+           WHERE organization_id = $1::uuid)::text AS channel,
+         (SELECT count(*) FROM marketplace.communication_topic_preferences
+           WHERE organization_id = $1::uuid)::text AS topic,
+         (SELECT count(*) FROM platform.product_audit_events
+           WHERE organization_id = $1::uuid
+             AND action = 'marketplace.communication_preferences.topic_unsubscribed')::text AS audit,
+         (SELECT count(*) FROM platform.idempotency_keys
+           WHERE organization_id = $1::uuid AND operation = $2)::text AS idempotency,
+         (SELECT idempotency_metadata FROM platform.idempotency_keys
+           WHERE organization_id = $1::uuid AND operation = $2) AS metadata,
+         (SELECT redacted_payload FROM platform.product_audit_events
+           WHERE organization_id = $1::uuid
+             AND action = 'marketplace.communication_preferences.topic_unsubscribed') AS "auditPayload"`,
+      [organizationId, unsubscribeOperation],
+    );
+    expect(evidence.rows[0]).toMatchObject({
+      aggregate: "1",
+      channel: "0",
+      topic: "1",
+      audit: "1",
+      idempotency: "1",
+      metadata: {},
+      auditPayload: {
+        outcome: "updated",
+        revision: 1,
+        deliveryId,
+        topic: "collaboration_action_required",
+        channel: "email",
+      },
+    });
+    expect(JSON.stringify(evidence.rows[0])).not.toContain(unsubscribe.tokenHash);
+    expect(JSON.stringify(evidence.rows[0])).not.toContain(unsubscribe.claims.nonce);
+  });
+
+  it("rolls back the topic, replay hash, and audit together", async () => {
+    await installAuditFailureTrigger("marketplace.communication_preferences.topic_unsubscribed");
+    try {
+      await expect(
+        repository.unsubscribeCommunicationTopic(unsubscribeCommand("b".repeat(64))),
+      ).rejects.toThrow("injected VAY-2022 audit failure");
+      await expect(sideEffectCounts()).resolves.toEqual({
+        aggregate: 0,
+        audit: 0,
+        channel: 0,
+        idempotency: 0,
+        topic: 0,
+      });
+    } finally {
+      await removeAuditFailureTrigger();
+    }
+  });
+
+  it("fails closed without retaining evidence for an unknown token scope", async () => {
+    const original = unsubscribeCommand("c".repeat(64));
+    const invalid: MarketplaceCommunicationUnsubscribeCommand = {
+      ...original,
+      claims: {
+        ...original.claims,
+        userId: "a2022000-0000-4000-8000-000000000099",
+      },
+    };
+    await expect(repository.unsubscribeCommunicationTopic(invalid)).resolves.toEqual({
+      ok: false,
+      error: { code: "invalid_scope" },
+    });
+    await expect(sideEffectCounts()).resolves.toEqual({
+      aggregate: 0,
+      audit: 0,
+      channel: 0,
+      idempotency: 0,
+      topic: 0,
+    });
+  });
+
   it("returns typed command_in_progress when the aggregate lock times out", async () => {
     const blocker = new pg.Client({ connectionString: TEST_DATABASE_URL! });
     const shortTimeoutRepository = createPgMarketplaceCommunicationPreferencesRepository({
       connectionString: TEST_DATABASE_URL!,
       now: () => new Date(acceptedAt),
       lockTimeoutMs: 25,
+      policy: { launchPolicy: "disabled", effectiveAt: policyEffectiveAt },
     });
     await blocker.connect();
     await blocker.query("BEGIN");
@@ -286,6 +402,28 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
     };
   }
 
+  function unsubscribeCommand(tokenHash: string): MarketplaceCommunicationUnsubscribeCommand {
+    return {
+      tokenHash,
+      claims: {
+        action: "unsubscribe_topic",
+        channel: "email",
+        deliveryId,
+        expiresAt: Date.parse("2026-09-18T00:00:00.000Z") / 1_000,
+        keyVersion: "key-1",
+        nonce: "AAAAAAAAAAAAAAAAAAAAAA",
+        organizationId,
+        topic: "collaboration_action_required",
+        userId,
+      },
+      audit: {
+        requestId: "request-vay-2024",
+        correlationId: "correlation-vay-2024",
+        requestedAt: acceptedAt,
+      },
+    };
+  }
+
   async function seedIdentity(): Promise<void> {
     await admin.query(
       `INSERT INTO identity.users (id, email, name, status) VALUES
@@ -314,22 +452,24 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL Marketplace communication prefer
            WHERE organization_id = $1::uuid
              AND action LIKE 'marketplace.communication_preferences.%')::text AS audit,
          (SELECT count(*) FROM platform.idempotency_keys
-           WHERE organization_id = $1::uuid AND operation = $2)::text AS idempotency`,
-      [organizationId, operation],
+           WHERE organization_id = $1::uuid AND operation IN ($2, $3))::text AS idempotency`,
+      [organizationId, operation, unsubscribeOperation],
     );
     return Object.fromEntries(
       Object.entries(result.rows[0]!).map(([key, value]) => [key, Number(value)]),
     );
   }
 
-  async function installAuditFailureTrigger(): Promise<void> {
+  async function installAuditFailureTrigger(
+    action = "marketplace.communication_preferences.updated",
+  ): Promise<void> {
     await removeAuditFailureTrigger();
     await admin.query(
       `CREATE FUNCTION ${auditFailureFunction}()
        RETURNS trigger LANGUAGE plpgsql AS $function$
        BEGIN
          IF NEW.organization_id = '${organizationId}'::uuid
-            AND NEW.action = 'marketplace.communication_preferences.updated' THEN
+            AND NEW.action = '${action}' THEN
            RAISE EXCEPTION 'injected VAY-2022 audit failure';
          END IF;
          RETURN NEW;

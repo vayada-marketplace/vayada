@@ -104,6 +104,11 @@ export type BookingEmailDeliveryConfig = {
   from: string;
 };
 
+export type MarketplaceCommunicationUnsubscribeConfig = {
+  currentKeyVersion: string;
+  keys: Readonly<Record<string, string>>;
+};
+
 export function stripeSubscriptionRuntimeEnabled(
   config: Pick<ApiConfig, "financeSource" | "providerWebhooks" | "stripeSubscriptions">,
 ): boolean {
@@ -186,6 +191,7 @@ export type ApiConfig = {
   channexManagement: ChannexManagementConfig;
   stripeSubscriptions: StripeSubscriptionConfig;
   bookingEmailDelivery?: BookingEmailDeliveryConfig;
+  marketplaceCommunicationUnsubscribe?: MarketplaceCommunicationUnsubscribeConfig;
   xenditSecretKey?: string;
 };
 
@@ -273,6 +279,38 @@ function readOptionalCsvEnv(
         .map((entry) => entry.trim())
         .filter(Boolean)
     : defaultValue;
+}
+
+function loadMarketplaceCommunicationUnsubscribeConfig(
+  env: NodeJS.ProcessEnv,
+): MarketplaceCommunicationUnsubscribeConfig | undefined {
+  const currentKeyVersion = readOptionalEnv(
+    env,
+    "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION",
+  );
+  const encodedKeys = readOptionalEnv(env, "MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON");
+  if (!currentKeyVersion && !encodedKeys) return undefined;
+  if (!currentKeyVersion || !encodedKeys) {
+    throw new Error("Incomplete Marketplace communication unsubscribe signing config");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(encodedKeys);
+  } catch {
+    throw new Error("Marketplace communication unsubscribe signing keys must be valid JSON");
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.keys(value).length === 0 ||
+    Object.values(value).some((key) => typeof key !== "string") ||
+    !Object.hasOwn(value, currentKeyVersion)
+  ) {
+    throw new Error("Marketplace communication unsubscribe signing keys are invalid");
+  }
+  return { currentKeyVersion, keys: value as Record<string, string> };
 }
 
 const KMS_KEY_ARN =
@@ -1026,6 +1064,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     airbnbAlterations,
     stripeSubscriptions: prospectiveConfig.stripeSubscriptions,
     bookingEmailDelivery,
+    marketplaceCommunicationUnsubscribe: loadMarketplaceCommunicationUnsubscribeConfig(env),
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };
 }
