@@ -207,7 +207,8 @@ type ExpensesResponse = Envelope & { summary: { totalMtd: MoneyMetric; perOccupi
   unpaidAmount: MoneyMetric; unpaidCount: CountMetric };
   categories: Array<{ category: Category; amount: Money }>; page: Page<Expense> };
 type ProfitLossResponse = Envelope & { summary: { revenueYtd: MoneyMetric; expensesYtd: MoneyMetric; netProfitYtd: MoneyMetric };
-  months: Array<{ month: string; revenue: Money; expenses: Money; netProfit: Money;
+  months: Array<{ month: string; roomRevenue: Money; upsellRevenue: Money;
+  revenue: Money; expenses: Money; netProfit: Money;
   expenseCategories: Record<string, Money> }> };
 type FolioSummary = { folioId: string; bookingId: string | null; revision: number; state: FolioState;
   serviceFrom: Date; serviceTo: Date; total: Money; createdAt: string };
@@ -245,6 +246,21 @@ an official invoice document and does not promise PDF renditions.
 
 P&L is computed from ledger/evidence rows; no second source-of-truth table is
 introduced.
+
+P&L category roll-up is deterministic. `maintenance` and `supplies` use the
+`maintenance_supplies` row; `marketing` and `platform_fees` use the
+`marketing_platform` row; the other default system keys keep their own row.
+Every custom category uses `custom:<category UUID>` and is returned separately,
+including zero-valued months, so no name matching or omission can change
+historical grouping.
+
+Months are unique ascending `YYYY-MM` rows from January through the selected
+year's last reportable month: the property-local current month for the current
+year, or December for a completed year. The no-evidence response returns those
+rows with zero money, every default roll-up row and every property custom row.
+Each month's revenue equals room plus upsell revenue, expenses equal the sum of
+category rows, and net profit equals revenue minus expenses. YTD values sum the
+returned months and use the same property currency throughout.
 
 ### Authorization and errors
 
