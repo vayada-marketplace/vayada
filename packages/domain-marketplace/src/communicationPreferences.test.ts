@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateMarketplaceCommunicationPolicy,
   parseMarketplaceCommunicationPreferences,
+  parseMarketplaceCommunicationUnsubscribeRequest,
+  parseMarketplaceCommunicationUnsubscribeResult,
   parseReplaceMarketplaceCommunicationPreferences,
   parseReplaceMarketplaceCommunicationPreferencesResult,
   resolveMarketplaceCommunicationPreferenceDefaults,
@@ -47,6 +49,30 @@ const allBlocked = {
 } as const;
 
 describe("Marketplace communication preferences", () => {
+  it("parses only the exact public unsubscribe envelope and port result", () => {
+    const request = {
+      contractVersion: "marketplace-communications.v1",
+      token: "opaque-token",
+    };
+    expect(parseMarketplaceCommunicationUnsubscribeRequest(request)).toEqual(request);
+    expect(parseMarketplaceCommunicationUnsubscribeRequest({ ...request, extra: true })).toBeNull();
+    expect(parseMarketplaceCommunicationUnsubscribeRequest({ ...request, token: "" })).toBeNull();
+    expect(parseMarketplaceCommunicationUnsubscribeRequest({ token: request.token })).toBeNull();
+    expect(parseMarketplaceCommunicationUnsubscribeResult({ ok: true, replayed: false })).toEqual({
+      ok: true,
+      replayed: false,
+    });
+    expect(
+      parseMarketplaceCommunicationUnsubscribeResult({
+        ok: false,
+        error: { code: "invalid_scope" },
+      }),
+    ).toEqual({ ok: false, error: { code: "invalid_scope" } });
+    expect(
+      parseMarketplaceCommunicationUnsubscribeResult({ ok: false, error: { code: "missing" } }),
+    ).toBeNull();
+  });
+
   it("parses only the complete exact effective document", () => {
     expect(parseMarketplaceCommunicationPreferences(preferences)).toEqual(preferences);
     expect(parseMarketplaceCommunicationPreferences({ ...preferences, extra: true })).toBeNull();
