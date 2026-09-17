@@ -29,6 +29,7 @@ describe("Financials Dashboard", () => {
 
     expect(view.root.findByProps({ "aria-label": "Loading Financials" })).toBeDefined();
     const buttons = view.root.findAllByType("button");
-    expect(buttons.map((button) => button.props.disabled)).toEqual([true, true]);
+    expect(buttons.filter((button) => button.props.disabled)).toHaveLength(2);
+    expect(view.root.findAllByProps({ role: "tab" })).toHaveLength(2);
   });
 });

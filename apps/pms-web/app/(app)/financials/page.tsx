@@ -15,9 +15,11 @@ import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getFinanceDashboard } from "@/services/finance/financialReports";
 
+import { RevenueTab } from "./RevenueTab";
+
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ready"; data: FinanceDashboardResponse; locale: string }
+  | { kind: "ready"; data: FinanceDashboardResponse; locale: string; propertyId: string }
   | { kind: "permission" }
   | { kind: "unavailable" }
   | { kind: "error" };
@@ -32,6 +34,7 @@ const CARD_LABELS = {
 export default function FinancialsPage() {
   const [asOf, setAsOf] = useState("");
   const [reload, setReload] = useState(0);
+  const [tab, setTab] = useState<"dashboard" | "revenue">("dashboard");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export default function FinancialsPage() {
           sharedHotelSetupApi.getPublicPropertyProfile(propertyId, { signal: controller.signal }),
         ]);
         if (!controller.signal.aborted)
-          setState({ kind: "ready", data, locale: profile.publicProfile.locale });
+          setState({ kind: "ready", data, locale: profile.publicProfile.locale, propertyId });
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ApiErrorResponse) {
@@ -64,21 +67,27 @@ export default function FinancialsPage() {
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-blue-700">Financials</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">Dashboard</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
+            {tab === "dashboard" ? "Dashboard" : "Revenue"}
+          </h1>
           <p className="mt-1 text-sm text-gray-600">
-            Revenue, costs, and upcoming property transactions.
+            {tab === "dashboard"
+              ? "Revenue, costs, and upcoming property transactions."
+              : "Where money comes from."}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-sm font-medium text-gray-700">
-            As of date
-            <input
-              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-gray-900 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
-              type="date"
-              value={asOf}
-              onChange={(event) => setAsOf(event.target.value)}
-            />
-          </label>
+          {tab === "dashboard" && (
+            <label className="grid gap-1 text-sm font-medium text-gray-700">
+              As of date
+              <input
+                className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-gray-900 shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                type="date"
+                value={asOf}
+                onChange={(event) => setAsOf(event.target.value)}
+              />
+            </label>
+          )}
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500"
             type="button"
@@ -100,11 +109,49 @@ export default function FinancialsPage() {
       <p id="ai-insights-status" className="mt-2 text-xs text-gray-500">
         AI Insights is planned for v2.
       </p>
-      {state.kind === "loading" && <DashboardSkeleton />}
-      {state.kind === "ready" && <Dashboard data={state.data} locale={state.locale} />}
-      {state.kind !== "loading" && state.kind !== "ready" && (
-        <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
-      )}
+      <div
+        className="mt-5 flex w-full overflow-x-auto rounded-xl border border-gray-200 bg-white p-1"
+        role="tablist"
+        aria-label="Financials sections"
+      >
+        {(["dashboard", "revenue"] as const).map((item) => (
+          <button
+            key={item}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${tab === item ? "bg-blue-50 text-blue-800" : "text-gray-600 hover:bg-gray-50"}`}
+            type="button"
+            role="tab"
+            id={`financials-${item}-tab`}
+            aria-controls={`financials-${item}-panel`}
+            aria-selected={tab === item}
+            onClick={() => setTab(item)}
+          >
+            {item === "dashboard" ? "Dashboard" : "Revenue"}
+          </button>
+        ))}
+      </div>
+      <div
+        id={`financials-${tab}-panel`}
+        className="pt-6"
+        role="tabpanel"
+        aria-labelledby={`financials-${tab}-tab`}
+      >
+        {state.kind === "loading" && <DashboardSkeleton />}
+        {state.kind === "ready" && tab === "dashboard" && (
+          <Dashboard data={state.data} locale={state.locale} />
+        )}
+        {state.kind === "ready" && tab === "revenue" && (
+          <RevenueTab
+            key={`${state.propertyId}-${state.data.generatedAt}`}
+            propertyId={state.propertyId}
+            locale={state.locale}
+            generatedAt={state.data.generatedAt}
+            timeZone={state.data.timeZone}
+          />
+        )}
+        {state.kind !== "loading" && state.kind !== "ready" && (
+          <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
+        )}
+      </div>
     </main>
   );
 }
