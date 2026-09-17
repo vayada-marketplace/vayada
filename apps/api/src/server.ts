@@ -837,6 +837,7 @@ const marketplaceHotelCollaborationPreferencesRepository =
 const marketplaceCommunicationPreferencesRepository =
   createPgMarketplaceCommunicationPreferencesRepository({
     connectionString: targetDatabaseUrl,
+    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
   });
 const bookingDesignRepository = createPgBookingDesignRepository({
   connectionString: targetDatabaseUrl,
