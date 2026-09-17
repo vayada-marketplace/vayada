@@ -40,6 +40,7 @@ import {
 } from "../jobs/pmsChannexPricingJobLease.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
+import { lockCurrentChannexRoomAvailability } from "./channexRoomAvailabilityCoordinator.js";
 import { readCurrentPricingSnapshot, PricingStorageError } from "./replacementPricingSnapshot.js";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { ReplacementOfferTerms } from "@vayada/domain-booking";
@@ -365,8 +366,74 @@ type TargetWork =
       observation?: Awaited<ReturnType<typeof verifyChannexOfferConfiguration>>;
       nextDate?: true;
     }
+  | { kind: "activate"; attemptId: string }
   | { kind: "dispatch"; attemptId: string; jobAttemptId: string; workerId: string }
   | ({ attemptId: string } & ReturnType<typeof readChannexCreatedRateIdentity>);
+
+/** Seals every ready target for this property and advances its active pointer. */
+export async function activatePublishedChannexOffers(
+  pool: Pool,
+  input: ChannexPricingJobLeaseInput,
+) {
+  const current = await readPublishedPricingForChannexJob(pool, input);
+  if (current.kind !== "available") return current;
+  const readState = () =>
+    pool.query<{ total: number; active: number }>(
+      `SELECT count(*)::int AS total,count(*) FILTER (
+         WHERE target.active_version IS NOT NULL
+           AND version.binding_generation=connection.binding_generation
+           AND intent.proposal->'publicationRevision'=$3::jsonb
+           AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_target_intents pending
+             WHERE pending.target_id=target.id AND pending.status='pending'))::int AS active
+       FROM pms.channex_offer_targets target
+       JOIN pms.channel_connections connection ON connection.id=target.connection_id
+       LEFT JOIN pms.channex_offer_target_versions version
+         ON version.target_id=target.id AND version.version=target.active_version
+       LEFT JOIN pms.channex_offer_target_intents intent ON intent.id=version.intent_id
+       WHERE target.property_id=$1 AND target.connection_id=$2`,
+      [
+        current.authority.lease.propertyId,
+        current.authority.connectionId,
+        JSON.stringify(current.publication.revision),
+      ],
+    );
+  const state = (await readState()).rows[0];
+  if (!state?.total) return { kind: "no_targets" as const };
+  const candidates = await pool.query<{
+    creationAttemptId: string;
+    roomTypeId: string;
+    offerId: string;
+    operationKey: string;
+    primaryOccupancy: number;
+  }>(
+    `SELECT a.id AS "creationAttemptId",t.room_type_id AS "roomTypeId",t.offer_id AS "offerId",
+       i.operation_key AS "operationKey",(i.proposal->>'primaryOccupancy')::int AS "primaryOccupancy"
+     FROM pms.channex_offer_targets t
+     JOIN pms.channex_offer_target_intents i ON i.target_id=t.id AND i.status='pending'
+     JOIN pms.channex_offer_create_attempts a ON a.intent_id=i.id AND a.state='identified'
+     WHERE t.property_id=$1 AND t.connection_id=$2
+     ORDER BY t.room_type_id::text COLLATE "C",t.offer_id`,
+    [current.authority.lease.propertyId, current.authority.connectionId],
+  );
+  if (!candidates.rows.length)
+    return state.active === state.total
+      ? { kind: "all_targets_active" as const, count: state.total }
+      : { kind: "unavailable" as const, reason: "target_activation_pending" };
+  if (state.active + candidates.rows.length !== state.total)
+    return { kind: "unavailable" as const, reason: "target_activation_pending" };
+  for (const candidate of candidates.rows) {
+    const result = await withSelectedChannexTarget(pool, input, candidate, {
+      kind: "activate",
+      attemptId: candidate.creationAttemptId,
+    });
+    if (result.kind !== "available") return result;
+    if (!result.activation) throw new Error("Target activation missing");
+  }
+  const completed = (await readState()).rows[0];
+  return completed?.total === state.total && completed.active === completed.total
+    ? { kind: "all_targets_active" as const, count: completed.total }
+    : { kind: "unavailable" as const, reason: "target_activation_pending" };
+}
 
 /** Records identity only; fresh authority still applies to late provider observations. */
 export async function recordPublishedChannexOfferCreate(
@@ -1145,6 +1212,7 @@ async function withPublishedChannexPricing(
     let nextAriDate: string | null | undefined;
     let identification: { attemptId: string; externalRatePlanId: string } | undefined;
     let configurationIdentity: ReturnType<typeof readChannexCreatedRateIdentity> | undefined;
+    let activation: { targetId: string; version: string } | undefined;
     if (selection) {
       const room = snapshot.rooms.find((room) => room.roomTypeId === selection.roomTypeId);
       if (!room || !room.offers.some((offer) => offer.id === selection.offerId))
@@ -1162,18 +1230,6 @@ async function withPublishedChannexPricing(
         )
       ).rows[0];
       if (!binding) return unavailable("connection_unavailable");
-      const proposal = JSON.stringify({
-        publicationRevision: snapshot.revision,
-        sources: snapshot.sources,
-        ownerReferences: snapshot.ownerReferences,
-        currency: snapshot.currency,
-        bindingGeneration: binding.binding_generation,
-        externalPropertyId: authority.externalPropertyId,
-        room,
-        offerId: selection.offerId,
-        primaryOccupancy: selection.primaryOccupancy,
-        providerConfiguration: plan.configuration,
-      });
       await client.query(
         `INSERT INTO pms.channex_offer_targets
         (property_id,connection_id,room_type_id,offer_id) VALUES($1,$2,$3,$4)
@@ -1181,12 +1237,25 @@ async function withPublishedChannexPricing(
         [lease.propertyId, authority.connectionId, room.roomTypeId, selection.offerId],
       );
       const target = (
-        await client.query(
-          `SELECT id FROM pms.channex_offer_targets
+        await client.query<{ id: string; active_version: string | null }>(
+          `SELECT id,active_version FROM pms.channex_offer_targets
         WHERE connection_id=$1 AND room_type_id=$2 AND offer_id=$3 FOR UPDATE NOWAIT`,
           [authority.connectionId, room.roomTypeId, selection.offerId],
         )
       ).rows[0];
+      const proposal = JSON.stringify({
+        publicationRevision: snapshot.revision,
+        sources: snapshot.sources,
+        ownerReferences: snapshot.ownerReferences,
+        currency: snapshot.currency,
+        bindingGeneration: binding.binding_generation,
+        externalPropertyId: authority.externalPropertyId,
+        ...(target.active_version === null ? {} : { expectedActiveVersion: target.active_version }),
+        room,
+        offerId: selection.offerId,
+        primaryOccupancy: selection.primaryOccupancy,
+        providerConfiguration: plan.configuration,
+      });
       const existing = (
         await client.query(
           `SELECT id,version,status,proposal=$3::jsonb AS matches
@@ -1312,6 +1381,7 @@ async function withPublishedChannexPricing(
           if (
             "kind" in work &&
             (work.kind === "configuration" ||
+              work.kind === "activate" ||
               work.kind === "ari_claim" ||
               work.kind === "ari_dispatch" ||
               work.kind === "ari_observe")
@@ -1604,6 +1674,96 @@ async function withPublishedChannexPricing(
               );
               if (!saved.rowCount) return unavailable("configuration_evidence_conflict");
             }
+            if (work.kind === "activate") {
+              const configurationEvidence = {
+                schemaVersion: 1,
+                attemptId: attempt.id,
+                intentId: intent.id,
+                version: intent.version,
+                bindingGeneration: binding.binding_generation,
+                observation: {
+                  ...configurationIdentity,
+                  mealType: plan.configuration.meal_type,
+                  configuration: plan.configuration,
+                },
+              };
+              if (
+                !(
+                  await client.query(
+                    "SELECT 1 FROM pms.channex_offer_target_intents WHERE id=$1 AND result_evidence->'configuration'=$2::jsonb",
+                    [intent.id, JSON.stringify(configurationEvidence)],
+                  )
+                ).rowCount
+              )
+                return unavailable("configuration_evidence_unavailable");
+              const initialAri = await readChannexInitialAriHistory(
+                client,
+                configurationIdentity,
+                attempt.id,
+              );
+              if (!initialAri.rows.length || initialAri.rows.some((row) => row.verified !== true))
+                return unavailable("ari_reconciliation_required");
+              const location = (
+                await client.query(
+                  "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT",
+                  [lease.propertyId],
+                )
+              ).rows[0];
+              const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0]
+                .now as Date;
+              const horizon = selectNextChannexInitialAriDate(
+                location?.timezone,
+                now,
+                initialAri.rows.map((row) => row.date),
+              );
+              if (horizon.kind !== "selected" || horizon.date !== null)
+                return unavailable("initial_ari_incomplete");
+              const availability = await lockCurrentChannexRoomAvailability(client, {
+                propertyId: lease.propertyId,
+                connectionId: authority.connectionId,
+                externalPropertyId: authority.externalPropertyId,
+                bindingGeneration: binding.binding_generation,
+              });
+              if (availability.kind !== "current") return availability;
+              const readbackEvidence = {
+                schemaVersion: 1,
+                configuration: configurationEvidence,
+                initialAri: {
+                  from: initialAri.rows[0]!.date,
+                  through: initialAri.rows.at(-1)!.date,
+                  dayCount: initialAri.rows.length,
+                  completionBasis: "verified_closed_readback",
+                },
+                availability,
+              };
+              const sealed = await client.query(
+                `INSERT INTO pms.channex_offer_target_versions
+                   (target_id,version,intent_id,binding_generation,external_property_id,
+                    external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
+                 VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)
+                 RETURNING version`,
+                [
+                  target.id,
+                  intent.version,
+                  intent.id,
+                  binding.binding_generation,
+                  configurationIdentity.externalPropertyId,
+                  configurationIdentity.externalRoomTypeId,
+                  configurationIdentity.externalRatePlanId,
+                  JSON.stringify(plan.configuration),
+                  JSON.stringify(readbackEvidence),
+                ],
+              );
+              const activated = await client.query(
+                `UPDATE pms.channex_offer_targets SET active_version=$2
+                 WHERE id=$1 AND active_version IS NOT DISTINCT FROM $3::bigint
+                 RETURNING id`,
+                [target.id, intent.version, target.active_version],
+              );
+              if (!sealed.rowCount || !activated.rowCount)
+                return unavailable("activation_compare_and_swap_failed");
+              activation = { targetId: target.id, version: String(intent.version) };
+            }
           } else if ("kind" in work && work.kind === "dispatch") {
             if (
               attempt.state !== "unresolved" ||
@@ -1732,6 +1892,7 @@ async function withPublishedChannexPricing(
       ariRequest,
       stagedAri,
       nextAriDate,
+      activation,
     });
   } catch (error) {
     if (error instanceof PricingStorageError && error.code === "invalid")

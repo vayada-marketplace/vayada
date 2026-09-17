@@ -2,6 +2,7 @@ import { createReplacementPricingPublicationReader } from "./domains/replacement
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
+import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
 import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./domains/channexPendingRoomAvailabilityReconciliation.js";
@@ -1064,6 +1065,10 @@ const channexManagementProvider =
                   pmsOperatingCalendarRuntime.inventory,
                   lease,
                 )
+            : undefined,
+        activatePublishedOffers:
+          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+            ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
             : undefined,
       })
     : undefined;
