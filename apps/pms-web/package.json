@@ -17,6 +17,7 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@vayada/domain-booking": "*",
+    "@vayada/domain-finance": "*",
     "@vayada/domain-pms-channex": "*",
     "@vayada/feature-hub": "*",
     "@vayada/locale-constants": "*",
