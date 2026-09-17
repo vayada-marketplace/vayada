@@ -834,3 +834,65 @@ does not authorize automated sends.
   cutover.
 
 No follow-up may broaden the approved MVP without a new product decision.
+
+## Airbnb inquiry pre-approval (VAY-383, 2026-09-17)
+
+Selected by Flamur in VAY-2031; implementation authorized by the subsequent
+“ok proceed”. This extends the existing Inbox, not reservation requests or
+alterations. The guest can accept an invitation at Airbnb's current listing
+price for the inquiry's existing dates and guest count. No custom quote or
+special offer is part of this action. No booking/payment is created locally.
+
+The first version always submits `type: preapproval` with
+`block_instant_booking: false`. The confirmation explains that dates are not
+held and the guest has 24 hours to accept. Show provider-supplied stay details;
+never substitute canonical direct-booking prices for the current Airbnb price.
+
+### Identity and authorization
+
+Retain the explicit Channex live-feed event ID separately from the generic
+inquiry reference. A generic message containing a live-feed ID is not itself
+an inquiry. Require verified inquiry classification, property/channel binding,
+listing identity, thread identity and stay context before exposing the action.
+The server derives these values from retained provider evidence; the browser
+cannot nominate another provider event. Missing/conflicting evidence disables
+the action. Reuse property-scoped Inbox read/reply authorization, active
+entitlements and current membership checks at command and dispatch time.
+
+Standalone inquiry events and inquiry system messages converge on the existing
+provider thread, with provider-event idempotency; do not create a second Inbox
+or manufacture a booking link. Existing message projection remains authoritative.
+
+### Dispatch and outcome
+
+Use a durable intent and job, serializing decisions per property and inquiry.
+Read the provider event immediately before submission and compare its kind,
+identity and stay with the reviewed context. Reject changed/resolved events.
+Never dispatch on an expired job, stale thread version or revoked staff access.
+A durable dispatch marker is written before external mutation. On timeout or
+worker recovery, reconcile by reading; never automatically repeat an uncertain
+POST. The provider has no documented caller idempotency key for this action.
+
+Send `POST /api/v1/live_feed/{id}/resolve` with the resolution above. Validate
+returned identity and intended resolution; an unchanged resolved event or HTTP
+200 alone is not success. Report pending, provider-confirmed, rejected and
+unknown outcomes distinctly, retaining staff audit identity. A readback that
+shows a competing action is not our success. Do not describe an invitation as
+a booking. A local 24-hour timer is only an estimate based on send evidence;
+Airbnb supplies no offer-expiry/decline event or booking-correlation event.
+
+### Delivery sequence and validation
+
+1. Strict, isolated provider adapter and contract tests; no runtime registration.
+2. Retained identity/intake, durable command and worker integration.
+3. Protected HTTP action and existing Inbox confirmation/status UI.
+
+Each slice receives its own reviewable PR under VAY-383. Tests must cover
+cross-property access, generic live-feed messages, mismatched IDs, changed stay,
+resolved inquiries, duplicate/concurrent clicks, dispatch uncertainty, rejected
+responses and successful readback. Browser validation uses bounded fixtures.
+Live acceptance requires a sanctioned Airbnb test inquiry and verified bindings;
+no real guest action or production activation is authorized by implementation.
+Preserve VAY-1381's migration, cutover and rollback gates.
+
+Provider reference: <https://docs.channex.io/api-v.1-documentation/airbnb-api#inquiry>.
