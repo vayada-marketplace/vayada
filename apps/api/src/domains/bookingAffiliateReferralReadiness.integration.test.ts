@@ -46,30 +46,35 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
     ...overrides,
   });
 
-  async function insertCertification(probeLifetime = "1 hour") {
+  async function insertCertification(
+    probeLifetime = "1 hour",
+    identifiers = { probe: id(40), booking: id(41), certification: id(50) },
+  ) {
     await fixture.pool().query(
       `INSERT INTO booking.affiliate_validation_probes
       (id,property_id,destination_version_id,organization_id,actor_id,environment,
        connection_reference,adapter_version,request_id,key_hash,fingerprint,expires_at)
       VALUES($1,$2,$3,$4,$5,'sandbox',$6,$7,'probe',$8,$9,clock_timestamp()+$10::interval)`,
       [
-        id(40),
+        identifiers.probe,
         id(3),
         id(30),
         id(4),
         id(1),
         certificationConnectionReference,
         adapterVersion,
-        "a".repeat(64),
-        "b".repeat(64),
+        identifiers.probe.replaceAll("-", "").padEnd(64, "a").slice(0, 64),
+        identifiers.certification.replaceAll("-", "").padEnd(64, "b").slice(0, 64),
         probeLifetime,
       ],
     );
-    await fixture.pool().query("INSERT INTO booking.guest_bookings VALUES($1,$2)", [id(41), id(3)]);
+    await fixture
+      .pool()
+      .query("INSERT INTO booking.guest_bookings VALUES($1,$2)", [identifiers.booking, id(3)]);
     await fixture.pool().query(
       `INSERT INTO booking.affiliate_validation_booking_bindings
       (booking_id,property_id,probe_id,request_id) VALUES($1,$2,$3,'binding')`,
-      [id(41), id(3), id(40)],
+      [identifiers.booking, id(3), identifiers.probe],
     );
     await fixture.pool().query(
       `INSERT INTO booking.affiliate_referral_transport_certifications
@@ -80,9 +85,9 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
        'booking-affiliate-referral-transport-certification.v1','["diagnostic"]',$9,
        'certification','infinity')`,
       [
-        id(50),
-        id(40),
-        id(41),
+        identifiers.certification,
+        identifiers.probe,
+        identifiers.booking,
         id(3),
         id(30),
         id(4),
@@ -93,7 +98,10 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
     );
   }
 
-  async function insertPreflight(completedAt: Date | "infinity" = "infinity") {
+  async function insertPreflight(
+    completedAt: Date | "infinity" = "infinity",
+    preflightId = id(60),
+  ) {
     if (completedAt !== "infinity")
       await fixture
         .pool()
@@ -107,13 +115,13 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
       VALUES($1,$2,$3,$4,$5,$6,$7,'booking-affiliate-referral-production-preflight.v1',
        '["production"]',$8,'preflight',$9)`,
       [
-        id(60),
+        preflightId,
         id(3),
         id(30),
         id(4),
         productionConnectionReference,
         adapterVersion,
-        "c".repeat(64),
+        preflightId.replaceAll("-", "").padEnd(64, "c").slice(0, 64),
         id(1),
         completedAt,
       ],
@@ -142,6 +150,9 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
     const client = await fixture.pool().connect();
     try {
       await expect(readAffiliateReferralRoundTripReadiness(client, scope())).rejects.toThrow();
+      await expect(
+        readAffiliateReferralRoundTripReadiness(client, scope({ propertyId: "invalid" })),
+      ).rejects.toThrow();
     } finally {
       client.release();
     }
@@ -227,6 +238,89 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
       reasons: ["diagnostic_certification_unavailable"],
     });
   });
+
+  it("uses older current proofs when newer proof records were revoked", async () => {
+    await insertCertification();
+    await insertPreflight();
+    await insertCertification("1 hour", {
+      probe: id(42),
+      booking: id(43),
+      certification: id(51),
+    });
+    await insertPreflight("infinity", id(61));
+    await fixture.pool().query(
+      `INSERT INTO booking.affiliate_validation_probe_revocations
+      (probe_id,actor_id,organization_id,request_id) VALUES($1,$2,$3,'revoke-newest')`,
+      [id(42), id(1), id(4)],
+    );
+    await fixture.pool().query(
+      `INSERT INTO booking.affiliate_referral_production_preflight_revocations
+      (preflight_id,actor_id,organization_id,request_id) VALUES($1,$2,$3,'revoke-newest')`,
+      [id(61), id(1), id(4)],
+    );
+
+    await expect(read()).resolves.toMatchObject({
+      status: "ready",
+      evidenceReferences: [
+        `booking:affiliate-referral-transport-certification:${id(50)}`,
+        `booking:affiliate-referral-production-preflight:${id(60)}`,
+      ],
+    });
+  });
+
+  it.each(["probe", "preflight"] as const)(
+    "falls back after a newer %s proof is concurrently revoked first",
+    async (target) => {
+      await insertCertification();
+      await insertPreflight();
+      if (target === "probe")
+        await insertCertification("1 hour", {
+          probe: id(42),
+          booking: id(43),
+          certification: id(51),
+        });
+      else await insertPreflight("infinity", id(61));
+      const revoker = await fixture.pool().connect();
+      const reader = await fixture.pool().connect();
+      let readiness: Promise<unknown> | undefined;
+      try {
+        await revoker.query("BEGIN");
+        await revoker.query(
+          target === "probe"
+            ? `INSERT INTO booking.affiliate_validation_probe_revocations
+              (probe_id,actor_id,organization_id,request_id) VALUES($1,$2,$3,'revoke-first')`
+            : `INSERT INTO booking.affiliate_referral_production_preflight_revocations
+              (preflight_id,actor_id,organization_id,request_id) VALUES($1,$2,$3,'revoke-first')`,
+          [target === "probe" ? id(42) : id(61), id(1), id(4)],
+        );
+        await reader.query("BEGIN");
+        const pid = (await reader.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+        readiness = readAffiliateReferralRoundTripReadiness(reader, scope());
+        await expect
+          .poll(async () => {
+            const result = await fixture
+              .pool()
+              .query("SELECT cardinality(pg_blocking_pids($1)) AS blocked", [pid]);
+            return result.rows[0].blocked;
+          })
+          .toBeGreaterThan(0);
+        await revoker.query("COMMIT");
+        await expect(readiness).resolves.toMatchObject({
+          status: "ready",
+          evidenceReferences: [
+            `booking:affiliate-referral-transport-certification:${id(50)}`,
+            `booking:affiliate-referral-production-preflight:${id(60)}`,
+          ],
+        });
+      } finally {
+        await revoker.query("ROLLBACK").catch(() => undefined);
+        await reader.query("ROLLBACK").catch(() => undefined);
+        await readiness?.catch(() => undefined);
+        revoker.release();
+        reader.release();
+      }
+    },
+  );
 
   it.each(["probe", "preflight"] as const)(
     "serializes a concurrent %s revocation with the readiness transaction",

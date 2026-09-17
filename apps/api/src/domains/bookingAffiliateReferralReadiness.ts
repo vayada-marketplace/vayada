@@ -52,6 +52,7 @@ export async function readAffiliateReferralRoundTripReadiness(
   client: pg.PoolClient,
   input: Scope,
 ): Promise<AffiliateReferralReadiness> {
+  await requireReadCommittedTransaction(client);
   if (
     !uuid.test(input.propertyId) ||
     !uuid.test(input.destinationVersionId) ||
@@ -62,7 +63,6 @@ export async function readAffiliateReferralRoundTripReadiness(
     !bounded(input.adapterVersion, 100)
   )
     return { status: "blocked", reasons: ["destination_unavailable"] };
-  await requireReadCommittedTransaction(client);
 
   const scope = {
     propertyId: input.propertyId.toLowerCase(),
@@ -82,88 +82,106 @@ export async function readAffiliateReferralRoundTripReadiness(
   if (!destination.rowCount) return { status: "blocked", reasons: ["destination_unavailable"] };
 
   const reasons: Exclude<AffiliateReferralReadiness, { status: "ready" }>["reasons"] = [];
-  const certification = (
-    await client.query(
-      `SELECT certification.id,certification.probe_id
-      FROM booking.affiliate_referral_transport_certifications certification
-      JOIN booking.affiliate_validation_probes probe ON probe.id=certification.probe_id
-        AND probe.property_id=certification.property_id
-        AND probe.destination_version_id=certification.destination_version_id
-        AND probe.organization_id=certification.organization_id
-        AND probe.environment=certification.environment
-        AND probe.connection_reference=certification.connection_reference
-        AND probe.adapter_version=certification.adapter_version
-      WHERE certification.property_id=$1 AND certification.destination_version_id=$2
-        AND certification.organization_id=$3 AND certification.connection_reference=$4
-        AND certification.adapter_version=$5 AND certification.environment=$6
-        AND certification.capability='referral_round_trip'
-        AND certification.validation_kind='adapter_certification'
-        AND certification.evidence_scope='capability_validation'
-      ORDER BY certification.completed_at DESC,certification.id DESC LIMIT 1
-      FOR SHARE OF certification,probe`,
-      [
-        scope.propertyId,
-        scope.destinationVersionId,
-        scope.organizationId,
-        scope.certificationConnectionReference,
-        scope.adapterVersion,
-        scope.certificationEnvironment,
-      ],
-    )
-  ).rows[0] as { id: string; probe_id: string } | undefined;
-  const certificationCurrent = certification
-    ? (
+  const certification = await (async () => {
+    for (;;) {
+      const candidate = (
         await client.query(
-          `SELECT certification.completed_at >= clock_timestamp() - make_interval(secs => $3)
-              AND NOT EXISTS (
+          `SELECT certification.id,certification.probe_id
+          FROM booking.affiliate_referral_transport_certifications certification
+          JOIN booking.affiliate_validation_probes probe ON probe.id=certification.probe_id
+            AND probe.property_id=certification.property_id
+            AND probe.destination_version_id=certification.destination_version_id
+            AND probe.organization_id=certification.organization_id
+            AND probe.environment=certification.environment
+            AND probe.connection_reference=certification.connection_reference
+            AND probe.adapter_version=certification.adapter_version
+          WHERE certification.property_id=$1 AND certification.destination_version_id=$2
+            AND certification.organization_id=$3 AND certification.connection_reference=$4
+            AND certification.adapter_version=$5 AND certification.environment=$6
+            AND certification.capability='referral_round_trip'
+            AND certification.validation_kind='adapter_certification'
+            AND certification.evidence_scope='capability_validation'
+            AND NOT EXISTS (
+              SELECT 1 FROM booking.affiliate_validation_probe_revocations revoked
+              WHERE revoked.probe_id=probe.id
+            )
+          ORDER BY certification.completed_at DESC,certification.id DESC LIMIT 1
+          FOR SHARE OF certification,probe`,
+          [
+            scope.propertyId,
+            scope.destinationVersionId,
+            scope.organizationId,
+            scope.certificationConnectionReference,
+            scope.adapterVersion,
+            scope.certificationEnvironment,
+          ],
+        )
+      ).rows[0] as { id: string; probe_id: string } | undefined;
+      if (!candidate) return undefined;
+      const current = (
+        await client.query(
+          `SELECT certification.completed_at >= clock_timestamp() - make_interval(secs => $3) AS fresh,
+              NOT EXISTS (
                 SELECT 1 FROM booking.affiliate_validation_probe_revocations revoked
                 WHERE revoked.probe_id=probe.id
-              ) AS current
+              ) AS unrevoked
           FROM booking.affiliate_validation_probes probe
           JOIN booking.affiliate_referral_transport_certifications certification
             ON certification.id=$1 AND certification.probe_id=probe.id
           WHERE probe.id=$2`,
-          [certification.id, certification.probe_id, AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS],
+          [candidate.id, candidate.probe_id, AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS],
         )
-      ).rows[0]?.current === true
-    : false;
-  if (!certificationCurrent) reasons.push("diagnostic_certification_unavailable");
+      ).rows[0] as { fresh: boolean; unrevoked: boolean } | undefined;
+      if (!current?.fresh) return undefined;
+      if (current.unrevoked) return candidate;
+    }
+  })();
+  if (!certification) reasons.push("diagnostic_certification_unavailable");
 
-  const preflight = (
-    await client.query(
-      `SELECT preflight.id
-      FROM booking.affiliate_referral_production_preflights preflight
-      WHERE preflight.property_id=$1 AND preflight.destination_version_id=$2
-        AND preflight.organization_id=$3 AND preflight.connection_reference=$4
-        AND preflight.adapter_version=$5 AND preflight.environment='production'
-        AND preflight.capability='referral_round_trip'
-        AND preflight.validation_kind='production_preflight'
-        AND preflight.evidence_scope='capability_validation'
-      ORDER BY preflight.completed_at DESC,preflight.id DESC LIMIT 1
-      FOR SHARE OF preflight`,
-      [
-        scope.propertyId,
-        scope.destinationVersionId,
-        scope.organizationId,
-        scope.productionConnectionReference,
-        scope.adapterVersion,
-      ],
-    )
-  ).rows[0] as { id: string } | undefined;
-  const preflightCurrent = preflight
-    ? (
+  const preflight = await (async () => {
+    for (;;) {
+      const candidate = (
         await client.query(
-          `SELECT preflight.completed_at >= clock_timestamp() - make_interval(secs => $2)
-              AND NOT EXISTS (
+          `SELECT preflight.id
+          FROM booking.affiliate_referral_production_preflights preflight
+          WHERE preflight.property_id=$1 AND preflight.destination_version_id=$2
+            AND preflight.organization_id=$3 AND preflight.connection_reference=$4
+            AND preflight.adapter_version=$5 AND preflight.environment='production'
+            AND preflight.capability='referral_round_trip'
+            AND preflight.validation_kind='production_preflight'
+            AND preflight.evidence_scope='capability_validation'
+            AND NOT EXISTS (
+              SELECT 1 FROM booking.affiliate_referral_production_preflight_revocations revoked
+              WHERE revoked.preflight_id=preflight.id
+            )
+          ORDER BY preflight.completed_at DESC,preflight.id DESC LIMIT 1
+          FOR SHARE OF preflight`,
+          [
+            scope.propertyId,
+            scope.destinationVersionId,
+            scope.organizationId,
+            scope.productionConnectionReference,
+            scope.adapterVersion,
+          ],
+        )
+      ).rows[0] as { id: string } | undefined;
+      if (!candidate) return undefined;
+      const current = (
+        await client.query(
+          `SELECT preflight.completed_at >= clock_timestamp() - make_interval(secs => $2) AS fresh,
+              NOT EXISTS (
                 SELECT 1 FROM booking.affiliate_referral_production_preflight_revocations revoked
                 WHERE revoked.preflight_id=preflight.id
-              ) AS current
+              ) AS unrevoked
           FROM booking.affiliate_referral_production_preflights preflight WHERE preflight.id=$1`,
-          [preflight.id, AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS],
+          [candidate.id, AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS],
         )
-      ).rows[0]?.current === true
-    : false;
-  if (!preflightCurrent) reasons.push("production_preflight_unavailable");
+      ).rows[0] as { fresh: boolean; unrevoked: boolean } | undefined;
+      if (!current?.fresh) return undefined;
+      if (current.unrevoked) return candidate;
+    }
+  })();
+  if (!preflight) reasons.push("production_preflight_unavailable");
 
   if (reasons.length) return { status: "blocked", reasons };
   return {
