@@ -169,6 +169,7 @@ describe.skipIf(!databaseUrl)("affiliate referral round-trip readiness", () => {
         `booking:affiliate-referral-transport-certification:${id(50)}`,
         `booking:affiliate-referral-production-preflight:${id(60)}`,
       ],
+      validatedAt: expect.any(String),
     });
     await expect(
       read(scope({ certificationConnectionReference: "changed-sandbox-connection" })),
