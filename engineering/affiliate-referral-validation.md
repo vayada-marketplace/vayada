@@ -309,3 +309,21 @@ destination ready. Authorized commands still need to obtain and verify the evide
 each adapter. A later reader must apply freshness, reject revoked or changed configuration,
 require both matching rows per capability and then supply the three results alongside
 `referral_round_trip` to the existing four-purpose assessment.
+
+## Remaining source-capability production preflight command
+
+Migration 0221 and the internal source-capability preflight command add retry identity to
+the three remaining production evidence types. The command reauthorizes the exact hotel and
+saved destination before invoking a server-owned adapter for one explicit capability. The
+adapter must use a documented authenticated read and return the exact capability, current
+connection and adapter version, bounded source references and a globally namespaced,
+capability-independent identity for the underlying provider snapshot. Vayada hashes that
+identity before storage; global uniqueness prevents the same source snapshot from proving a
+second capability.
+
+Concurrent retries run one adapter check. Reusing a retry key with another actor, capability,
+destination or adapter configuration is a conflict. Unavailable, timed-out, mismatched or
+malformed evidence records nothing. The command creates no reservation, inventory, payment,
+creator, agreement, click, attribution or Finance record and does not grant readiness. The
+diagnostic certification commands and the freshness-aware aggregate reader remain separate
+required slices.
