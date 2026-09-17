@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BoltIcon,
+  BanknotesIcon,
   ChatBubbleLeftRightIcon,
   ChevronLeftIcon,
   ChevronDownIcon,
@@ -75,6 +76,12 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
     href: "/reviews",
     icon: StarIcon,
     requiredAny: ["pms.operations.read"],
+  },
+  {
+    labelKey: "layout.sidebar.financials",
+    href: "/financials",
+    icon: BanknotesIcon,
+    requiredAny: ["pms.finance.read"],
   },
   {
     labelKey: "layout.sidebar.roomsAndRates",
