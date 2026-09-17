@@ -226,6 +226,25 @@ describe("closed upload worker gates", () => {
     expect(result).toMatchObject({ ok: false, code: "invalid_state" });
     expect(f.plan).not.toHaveBeenCalled();
   });
+  it("keeps pending published target activation retryable", async () => {
+    const f = setup();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      prepareRoomAvailability: async () => ({
+        kind: "room_availability_current" as const,
+        from: "2026-09-17",
+        through: "2026-09-17",
+        roomCount: 1,
+        dayCount: 1,
+      }),
+      activatePublishedOffers: async () => ({
+        kind: "unavailable" as const,
+        reason: "target_activation_pending",
+      }),
+    }).execute(job, { workerId: "worker" });
+    expect(result).toMatchObject({ ok: false, code: "provider_unavailable" });
+    expect(f.plan).not.toHaveBeenCalled();
+  });
   it("fails closed without provider IO for unavailable or unpaired availability hooks", async () => {
     const f = setup(),
       fetcher = vi.fn();

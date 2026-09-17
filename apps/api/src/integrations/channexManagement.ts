@@ -277,7 +277,9 @@ export function createChannexManagementProvider(config: {
                 if (activated.kind === "all_targets_active") return { ok: true };
                 if (activated.kind !== "no_targets")
                   return failure(
-                    "invalid_state",
+                    activated.reason === "target_activation_pending"
+                      ? "provider_unavailable"
+                      : "invalid_state",
                     new Error("Verified Channex offer activation is unavailable."),
                   );
               }
