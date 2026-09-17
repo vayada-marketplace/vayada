@@ -114,6 +114,24 @@ describe("Finance Revenue response", () => {
       ]),
     );
   });
+
+  it("excludes explicitly missing room prices from ADR without hiding occupied nights", () => {
+    const missing = input();
+    missing.rooms.rows = [
+      room("current", "direct", "email", ROOM, "100", "0", 1),
+      room("current", "booking_com", null, ROOM, "0", "0", 1, 0),
+    ];
+    missing.rooms.incompleteEvidence = [{ code: "room_revenue_missing", count: 1 }];
+
+    const result = composeFinanceRevenueResponse(missing);
+
+    expect(result.summary.nights.value).toBe(2);
+    expect(result.summary.adr.value).toEqual(money("100.0000"));
+    expect(result.roomTypes).toEqual([
+      { roomTypeId: ROOM, nights: 2, revenue: money("100.0000"), adr: money("100.0000") },
+    ]);
+    expect(result.incompleteEvidence).toContainEqual({ code: "room_revenue_missing", count: 1 });
+  });
 });
 
 function input(): FinanceRevenueResponseInput {
@@ -169,7 +187,7 @@ function input(): FinanceRevenueResponseInput {
 }
 
 // prettier-ignore
-const room = (period: "current" | "comparison", channel: string, directSource: string | null, roomTypeId: string, grossRoomAmount: string, otaCommissionAmount: string, occupiedRoomNights: number) => ({ period, recognizedOn: period === "current" ? "2026-08-01" : "2026-07-31", channel, directSource, roomTypeId, grossRoomAmount, otaCommissionAmount, occupiedRoomNights });
+const room = (period: "current" | "comparison", channel: string, directSource: string | null, roomTypeId: string, grossRoomAmount: string, otaCommissionAmount: string, occupiedRoomNights: number, pricedOccupiedRoomNights = occupiedRoomNights) => ({ period, recognizedOn: period === "current" ? "2026-08-01" : "2026-07-31", channel, directSource, roomTypeId, grossRoomAmount, otaCommissionAmount, occupiedRoomNights, pricedOccupiedRoomNights });
 const money = (amount: string) => ({ amount, currency: "EUR" });
 // prettier-ignore
 const metric = (value: string, change: string, percentChange: string | null) => ({ value: money(value), absoluteChange: money(change), percentChange });

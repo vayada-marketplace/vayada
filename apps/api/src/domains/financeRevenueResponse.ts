@@ -94,6 +94,10 @@ function totals(input: FinanceRevenueResponseInput, period: "current" | "compari
     0,
     rooms.reduce((total, row) => total + row.occupiedRoomNights, 0),
   );
+  const pricedNights = Math.max(
+    0,
+    rooms.reduce((total, row) => total + row.pricedOccupiedRoomNights, 0),
+  );
   return {
     gross,
     commission,
@@ -102,7 +106,7 @@ function totals(input: FinanceRevenueResponseInput, period: "current" | "compari
       input.addOns.rows.filter((row) => row.period === period).map((row) => row.revenueAmount),
     ),
     nights,
-    adr: divideFinanceReportingDecimal(gross, nights),
+    adr: divideFinanceReportingDecimal(gross, pricedNights),
   };
 }
 
@@ -159,11 +163,12 @@ function upsells(facts: FinanceRevenueAddonFacts, currency: string) {
 }
 
 function roomTypes(rows: FinanceRevenueRoomFact[], currency: string) {
-  const grouped = new Map<string, { revenue: bigint; nights: number }>();
+  const grouped = new Map<string, { revenue: bigint; nights: number; pricedNights: number }>();
   for (const row of rows.filter(({ period }) => period === "current")) {
-    const value = grouped.get(row.roomTypeId) ?? { revenue: 0n, nights: 0 };
+    const value = grouped.get(row.roomTypeId) ?? { revenue: 0n, nights: 0, pricedNights: 0 };
     value.revenue += units(row.grossRoomAmount);
     value.nights += row.occupiedRoomNights;
+    value.pricedNights += row.pricedOccupiedRoomNights;
     grouped.set(row.roomTypeId, value);
   }
   const unavailable = [...grouped.values()].filter(({ nights }) => nights < 0).length;
@@ -176,7 +181,9 @@ function roomTypes(rows: FinanceRevenueRoomFact[], currency: string) {
         nights: value.nights,
         revenue: money(value.revenue, currency),
         adr: money(
-          units(divideFinanceReportingDecimal(decimal(value.revenue), value.nights)),
+          units(
+            divideFinanceReportingDecimal(decimal(value.revenue), Math.max(0, value.pricedNights)),
+          ),
           currency,
         ),
       })),

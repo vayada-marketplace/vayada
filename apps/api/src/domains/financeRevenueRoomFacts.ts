@@ -28,6 +28,7 @@ export type FinanceRevenueRoomFact = {
   grossRoomAmount: string;
   otaCommissionAmount: string;
   occupiedRoomNights: number;
+  pricedOccupiedRoomNights: number;
 };
 export type FinanceRevenueRoomGap =
   | {
@@ -121,17 +122,17 @@ export async function readFinanceRevenueRoomFacts(
   };
 }
 
-const SCOPED = `SELECT revenue.*,attribution.booking_channel AS channel,attribution.direct_booking_source AS "directSource",commission.snapshot_id AS "commissionSnapshotId",commission.commission_amount AS "commissionAmount",commission.evidence_state AS "commissionState",commission.created_at AS "commissionCreatedAt" FROM booking.finance_nightly_revenue_evidence revenue JOIN booking.finance_booking_attribution attribution ON attribution.guest_booking_id=revenue.guest_booking_id AND attribution.property_id=revenue.property_id LEFT JOIN finance.ota_commission_reporting_evidence commission ON commission.booking_revenue_evidence_id=revenue.evidence_id AND commission.property_id=revenue.property_id WHERE revenue.property_id=$1::uuid AND (revenue.recognized_on BETWEEN $3::date AND $4::date OR revenue.recognized_on BETWEEN $5::date AND $6::date)`;
+const SCOPED = `WITH RECURSIVE selected AS (SELECT revenue.*,attribution.booking_channel AS channel,attribution.direct_booking_source AS "directSource",commission.snapshot_id AS "commissionSnapshotId",commission.commission_amount AS "commissionAmount",commission.evidence_state AS "commissionState",commission.created_at AS "commissionCreatedAt" FROM booking.finance_nightly_revenue_evidence revenue JOIN booking.finance_booking_attribution attribution ON attribution.guest_booking_id=revenue.guest_booking_id AND attribution.property_id=revenue.property_id LEFT JOIN finance.ota_commission_reporting_evidence commission ON commission.booking_revenue_evidence_id=revenue.evidence_id AND commission.property_id=revenue.property_id WHERE revenue.property_id=$1::uuid AND (revenue.recognized_on BETWEEN $3::date AND $4::date OR revenue.recognized_on BETWEEN $5::date AND $6::date)),lineage AS (SELECT evidence_id AS root_id,evidence_id,gross_room_amount FROM selected UNION ALL SELECT lineage.root_id,child.evidence_id,child.gross_room_amount FROM lineage JOIN selected child ON child.corrects_evidence_id=lineage.evidence_id),priced AS (SELECT root_id,bool_or(gross_room_amount IS NOT NULL) AS "hasRoomPrice" FROM lineage GROUP BY root_id) SELECT selected.*,priced."hasRoomPrice" FROM selected JOIN priced ON priced.root_id=selected.evidence_id`;
 
 // Curated Finance-safe Booking views are the integration boundary; this adapter never reads guest PII.
 // prettier-ignore
 async function readFacts(client: Pick<Client, "query">, values: readonly unknown[]): Promise<FactRow[]> {
-  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,recognized_on::text AS "recognizedOn",channel,"directSource",room_type_id::text AS "roomTypeId",COALESCE(sum(gross_room_amount),0)::text AS "grossRoomAmount",COALESCE(sum("commissionAmount") FILTER (WHERE "commissionState"='applied'),0)::text AS "otaCommissionAmount",COALESCE(sum(occupied_room_nights),0)::int AS "occupiedRoomNights",(max(max(recognized_on)) OVER ())::text AS "bookingRevenueThrough",(max(max("commissionCreatedAt")) OVER ())::text AS "financeOtaCommissionAt" FROM reporting GROUP BY period,recognized_on,channel,"directSource",room_type_id ORDER BY period,recognized_on,channel,"directSource" NULLS FIRST,room_type_id`, values)).rows;
+  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,recognized_on::text AS "recognizedOn",channel,"directSource",room_type_id::text AS "roomTypeId",COALESCE(sum(gross_room_amount),0)::text AS "grossRoomAmount",COALESCE(sum("commissionAmount") FILTER (WHERE "commissionState"='applied'),0)::text AS "otaCommissionAmount",COALESCE(sum(occupied_room_nights),0)::int AS "occupiedRoomNights",COALESCE(sum(occupied_room_nights) FILTER (WHERE "hasRoomPrice"),0)::int AS "pricedOccupiedRoomNights",(max(max(recognized_on)) OVER ())::text AS "bookingRevenueThrough",(max(max("commissionCreatedAt")) OVER ())::text AS "financeOtaCommissionAt" FROM reporting GROUP BY period,recognized_on,channel,"directSource",room_type_id ORDER BY period,recognized_on,channel,"directSource" NULLS FIRST,room_type_id`, values)).rows;
 }
 
 // prettier-ignore
 async function readGaps(client: Pick<Client, "query">, values: readonly unknown[]): Promise<GapRow[]> {
-  return (await client.query<GapRow>(`WITH scoped AS (${SCOPED}),gaps AS (SELECT 'room_revenue_currency_mismatch'::text AS code,count(*)::int AS count,CASE WHEN count(gross_room_amount)=count(*) THEN sum(gross_room_amount)::text END AS amount,currency::text AS currency FROM scoped WHERE currency<>$2 GROUP BY currency UNION ALL SELECT 'room_revenue_missing',count(*)::int,NULL,NULL FROM scoped WHERE gross_room_amount IS NULL UNION ALL SELECT 'ota_commission_missing',count(*)::int,NULL,NULL FROM scoped WHERE currency=$2 AND channel IN ('booking_com','airbnb','expedia','agoda','other_ota') AND ("commissionSnapshotId" IS NULL OR "commissionState"<>'applied')) SELECT * FROM gaps WHERE count>0 ORDER BY code,currency NULLS FIRST`, values)).rows;
+  return (await client.query<GapRow>(`WITH scoped AS (${SCOPED}),gaps AS (SELECT 'room_revenue_currency_mismatch'::text AS code,count(*)::int AS count,CASE WHEN count(gross_room_amount)=count(*) THEN sum(gross_room_amount)::text END AS amount,currency::text AS currency FROM scoped WHERE currency<>$2 GROUP BY currency UNION ALL SELECT 'room_revenue_missing',count(*)::int,NULL,NULL FROM scoped WHERE gross_room_amount IS NULL AND NOT "hasRoomPrice" UNION ALL SELECT 'ota_commission_missing',count(*)::int,NULL,NULL FROM scoped WHERE currency=$2 AND channel IN ('booking_com','airbnb','expedia','agoda','other_ota') AND ("commissionSnapshotId" IS NULL OR "commissionState"<>'applied')) SELECT * FROM gaps WHERE count>0 ORDER BY code,currency NULLS FIRST`, values)).rows;
 }
 
 // Attach-rate eligibility is non-monetary and therefore independent of evidence currency.
@@ -153,7 +154,8 @@ function fact(row: FactRow): FinanceRevenueRoomFact {
     !row.channel.trim() ||
     (row.directSource !== null && !row.directSource.trim()) ||
     !UUID.test(row.roomTypeId) ||
-    !Number.isSafeInteger(row.occupiedRoomNights)
+    !Number.isSafeInteger(row.occupiedRoomNights) ||
+    !Number.isSafeInteger(row.pricedOccupiedRoomNights)
   )
     throw new Error("Finance revenue room facts are invalid");
   return {
@@ -165,6 +167,7 @@ function fact(row: FactRow): FinanceRevenueRoomFact {
     grossRoomAmount: normalizeFinanceReportingDecimal(row.grossRoomAmount),
     otaCommissionAmount: normalizeFinanceReportingDecimal(row.otaCommissionAmount),
     occupiedRoomNights: row.occupiedRoomNights,
+    pricedOccupiedRoomNights: row.pricedOccupiedRoomNights,
   };
 }
 function localDate(value: unknown): value is string {
