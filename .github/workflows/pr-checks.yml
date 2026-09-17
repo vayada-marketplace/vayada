@@ -33,6 +33,9 @@ jobs:
       - name: Architecture boundaries
         run: npm run check:architecture-boundaries
 
+      - name: Coordinated release contracts
+        run: npm run test:coordinated-release
+
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 

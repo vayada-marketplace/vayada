@@ -4,6 +4,11 @@ Updated: 2026-08-22
 
 ## Active delivery lanes
 
+The coordinated six-service next release builder and publisher are present but
+remain gated by `COORDINATED_RELEASES_ENABLED` until VAY-2029 installs the
+platform receiver and switches all affected automatic lanes together. See
+[`coordinated-release-publishing.md`](coordinated-release-publishing.md).
+
 The monorepo keeps deploy workflows only for the production Python APIs and the
 parallel `next-*` validation stack. They are manually dispatchable and also run
 on relevant pushes to `main`.
