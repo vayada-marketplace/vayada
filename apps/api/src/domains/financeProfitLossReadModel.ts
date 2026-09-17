@@ -1,6 +1,7 @@
 import {
   financeProfitLossPeriods,
   parseFinanceProfitLossQuery,
+  type FinanceProfitLossExpenseCategoryRow,
   type FinanceProfitLossQuery,
   type FinanceProfitLossResponse,
 } from "@vayada/domain-finance";
@@ -17,7 +18,10 @@ export type FinanceProfitLossReadModel = {
   profitLoss(
     propertyId: string,
     query: FinanceProfitLossQuery,
-  ): Promise<FinanceProfitLossResponse | null>;
+  ): Promise<{
+    response: FinanceProfitLossResponse;
+    categoryRows: FinanceProfitLossExpenseCategoryRow[];
+  } | null>;
 };
 
 export class FinanceProfitLossEvidenceError extends Error {
@@ -55,7 +59,7 @@ export function createFinanceProfitLossReadModel(config: {
         currency: pricing!.currency,
         periods: financeProfitLossPeriods(query, asOf),
       });
-      return composeFinanceProfitLossResponse({
+      const response = composeFinanceProfitLossResponse({
         ...facts,
         propertyId,
         currency: pricing!.currency,
@@ -71,6 +75,7 @@ export function createFinanceProfitLossReadModel(config: {
           ...facts.sourceFreshness,
         },
       });
+      return { response, categoryRows: [...facts.categoryRows] };
     },
   };
 }

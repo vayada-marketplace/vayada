@@ -211,6 +211,7 @@ import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions
 import { registerFinanceExpenseRoutes } from "./routes/financeExpenses.js";
 import { registerFinanceFolioRoutes } from "./routes/financeFolios.js";
 import { registerFinanceDashboardRoutes } from "./routes/financeDashboard.js";
+import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
@@ -460,6 +461,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeExpenses?: Parameters<typeof registerFinanceExpenseRoutes>[1];
   financeFolios?: Parameters<typeof registerFinanceFolioRoutes>[1];
   financeDashboard?: Parameters<typeof registerFinanceDashboardRoutes>[1];
+  financeProfitLoss?: Parameters<typeof registerFinanceProfitLossRoutes>[1];
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
@@ -1090,6 +1092,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.financeDashboard,
       propertyAccessRepository:
         options.auth?.propertyAccessRepository ?? options.financeDashboard.propertyAccessRepository,
+    });
+  }
+  if (options.financeProfitLoss) {
+    app.register(registerFinanceProfitLossRoutes, {
+      prefix: "/api",
+      ...options.financeProfitLoss,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ??
+        options.financeProfitLoss.propertyAccessRepository,
     });
   }
   if (options.financeBankTransfer) {

@@ -24,17 +24,20 @@ describe("Finance profit and loss read model", () => {
       },
     });
     expect(result).toMatchObject({
-      propertyId,
-      currency: "EUR",
-      timeZone: "Europe/Berlin",
-      summary: {
-        revenueYtd: { value: { amount: "120.0000" } },
-        expensesYtd: { value: { amount: "30.0000" } },
-        netProfitYtd: { value: { amount: "90.0000" } },
+      categoryRows: [custom],
+      response: {
+        propertyId,
+        currency: "EUR",
+        timeZone: "Europe/Berlin",
+        summary: {
+          revenueYtd: { value: { amount: "120.0000" } },
+          expensesYtd: { value: { amount: "30.0000" } },
+          netProfitYtd: { value: { amount: "90.0000" } },
+        },
       },
     });
-    expect(result!.months).toHaveLength(3);
-    expect(result!.sourceFreshness).toMatchObject({
+    expect(result!.response.months).toHaveLength(3);
+    expect(result!.response.sourceFreshness).toMatchObject({
       pmsPricingRevision: "2",
       hotelCatalogRevision: "profile:3",
       financeExpensesAt: "2026-03-16T10:00:00.000Z",
