@@ -83,6 +83,77 @@ export type MarketplaceCommunicationPreferenceCommandPort = {
   ): Promise<ReplaceMarketplaceCommunicationPreferencesResult>;
 };
 
+export type MarketplaceCommunicationUnsubscribeRequestV1 = {
+  readonly contractVersion: typeof MARKETPLACE_COMMUNICATIONS_CONTRACT_VERSION;
+  readonly token: string;
+};
+export type MarketplaceCommunicationUnsubscribeClaims = {
+  readonly action: "unsubscribe_topic";
+  readonly channel: "email";
+  readonly deliveryId: string;
+  readonly expiresAt: number;
+  readonly keyVersion: string;
+  readonly nonce: string;
+  readonly organizationId: string;
+  readonly topic: "collaboration_action_required";
+  readonly userId: string;
+};
+export type VerifiedMarketplaceCommunicationUnsubscribeToken = {
+  readonly claims: MarketplaceCommunicationUnsubscribeClaims;
+  /** Lowercase SHA-256 digest of the complete opaque token. */
+  readonly tokenHash: string;
+};
+export type MarketplaceCommunicationUnsubscribeTokenPort = {
+  verify(token: string, now: Date): VerifiedMarketplaceCommunicationUnsubscribeToken | null;
+};
+export type MarketplaceCommunicationUnsubscribeCommand =
+  VerifiedMarketplaceCommunicationUnsubscribeToken & {
+    readonly audit: {
+      readonly requestId: string;
+      readonly correlationId: string | null;
+      readonly requestedAt: string;
+    };
+  };
+export type MarketplaceCommunicationUnsubscribeResult =
+  | { readonly ok: true; readonly replayed: boolean }
+  | { readonly ok: false; readonly error: { readonly code: "invalid_scope" } };
+export type MarketplaceCommunicationUnsubscribeCommandPort = {
+  unsubscribeCommunicationTopic(
+    command: MarketplaceCommunicationUnsubscribeCommand,
+  ): Promise<MarketplaceCommunicationUnsubscribeResult>;
+};
+
+export function parseMarketplaceCommunicationUnsubscribeRequest(
+  value: unknown,
+): MarketplaceCommunicationUnsubscribeRequestV1 | null {
+  const root = exact(value, ["contractVersion", "token"]);
+  return root?.contractVersion === MARKETPLACE_COMMUNICATIONS_CONTRACT_VERSION &&
+    typeof root.token === "string" &&
+    root.token.length >= 1 &&
+    root.token.length <= 4_096
+    ? deepFreeze({
+        contractVersion: MARKETPLACE_COMMUNICATIONS_CONTRACT_VERSION,
+        token: root.token,
+      })
+    : null;
+}
+
+export function parseMarketplaceCommunicationUnsubscribeResult(
+  value: unknown,
+): MarketplaceCommunicationUnsubscribeResult | null {
+  const root = record(value);
+  if (!root || typeof root.ok !== "boolean") return null;
+  if (root.ok) {
+    return exact(root, ["ok", "replayed"]) && typeof root.replayed === "boolean"
+      ? deepFreeze({ ok: true, replayed: root.replayed })
+      : null;
+  }
+  const error = exact(root.error, ["code"]);
+  return exact(root, ["ok", "error"]) && error?.code === "invalid_scope"
+    ? deepFreeze({ ok: false, error: { code: "invalid_scope" } })
+    : null;
+}
+
 export function resolveMarketplaceCommunicationPreferenceDefaults(
   scope: MarketplaceCommunicationPreferenceScope,
 ): MarketplaceCommunicationPreferencesV1 {
