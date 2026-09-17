@@ -272,3 +272,21 @@ This command still does not grant readiness. It creates no reservation, inventor
 payment, creator, agreement, click, attribution or Finance record. A later reader must
 apply an explicit freshness policy and require current non-revoked production evidence,
 unchanged configuration and matching current diagnostic certification.
+
+## Initial referral readiness reader
+
+The Booking-owned `referral_round_trip` reader requires both an unrevoked diagnostic
+certification and an unrevoked production preflight for the exact property, destination,
+organization and adapter version. The server supplies the exact local/sandbox certification
+environment and connection separately from the selected production connection; one is never
+relabeled as the other. Both proofs must have completed within the previous 24 hours under
+`booking-affiliate-referral-readiness.v1`. This window is capability-evidence freshness only;
+it is not the probe lifetime, click-attribution window, data retention, or a general
+provider-health promise. The reader requires an explicit `READ COMMITTED` transaction;
+row locks then serialize each final currentness check with permanent revocation without
+allowing an older repeatable-read snapshot to hide a committed revocation. The result
+exposes only opaque evidence references.
+
+This reader covers only `referral_round_trip`. Publication and agreement activation remain
+blocked until equivalent two-part evidence exists for reservation lifecycle, stay completion
+and accommodation revenue and the existing four-purpose assessment accepts all four.
