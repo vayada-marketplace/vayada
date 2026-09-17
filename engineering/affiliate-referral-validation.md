@@ -327,3 +327,19 @@ malformed evidence records nothing. The command creates no reservation, inventor
 creator, agreement, click, attribution or Finance record and does not grant readiness. The
 diagnostic certification commands and the freshness-aware aggregate reader remain separate
 required slices.
+
+## Remaining source-capability certification command
+
+The internal source-capability certification command completes the diagnostic writer for
+`reservation_lifecycle`, `stay_completion` and `accommodation_revenue`. It reauthorizes the
+hotel and exact destination, locks and rechecks the unexpired, unrevoked probe, and requires
+exactly one bound booking that remains explicitly marked as an isolated affiliate-validation
+fixture. A server-owned adapter then verifies one named capability against that exact probe
+and booking with a bounded call. Scope, capability, booking identity and evidence references
+must all match before the immutable certification is stored.
+
+One probe may certify each capability once; concurrent retries perform one adapter check and
+return the same certification. Expiry or revocation during verification prevents insertion.
+The bound booking remains permanently excluded from the Finance affiliate journal. The
+command creates no production reservation, attribution, readiness, payment or earning data.
+The aggregate freshness-aware reader remains the next required slice.
