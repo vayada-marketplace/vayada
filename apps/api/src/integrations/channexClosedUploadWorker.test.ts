@@ -186,6 +186,65 @@ describe("closed upload worker gates", () => {
     expect(result).toMatchObject({ ok: true });
     expect(f.plan).toHaveBeenCalledOnce();
   });
+  it("finishes through verified offer activation without running the legacy plan", async () => {
+    const f = setup(),
+      activatePublishedOffers = vi.fn(async () => ({
+        kind: "all_targets_active" as const,
+        count: 2,
+      }));
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      prepareRoomAvailability: async () => ({
+        kind: "room_availability_current" as const,
+        from: "2026-09-17",
+        through: "2026-09-17",
+        roomCount: 1,
+        dayCount: 1,
+      }),
+      activatePublishedOffers,
+    }).execute(job, { workerId: "worker" });
+    expect(result).toEqual({ ok: true });
+    expect(activatePublishedOffers).toHaveBeenCalledOnce();
+    expect(f.plan).not.toHaveBeenCalled();
+  });
+  it("fails closed when a published target cannot activate", async () => {
+    const f = setup();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      prepareRoomAvailability: async () => ({
+        kind: "room_availability_current" as const,
+        from: "2026-09-17",
+        through: "2026-09-17",
+        roomCount: 1,
+        dayCount: 1,
+      }),
+      activatePublishedOffers: async () => ({
+        kind: "unavailable" as const,
+        reason: "initial_ari_incomplete",
+      }),
+    }).execute(job, { workerId: "worker" });
+    expect(result).toMatchObject({ ok: false, code: "invalid_state" });
+    expect(f.plan).not.toHaveBeenCalled();
+  });
+  it("keeps pending published target activation retryable", async () => {
+    const f = setup();
+    const result = await createChannexManagementProvider({
+      ...f.config,
+      prepareRoomAvailability: async () => ({
+        kind: "room_availability_current" as const,
+        from: "2026-09-17",
+        through: "2026-09-17",
+        roomCount: 1,
+        dayCount: 1,
+      }),
+      activatePublishedOffers: async () => ({
+        kind: "unavailable" as const,
+        reason: "target_activation_pending",
+      }),
+    }).execute(job, { workerId: "worker" });
+    expect(result).toMatchObject({ ok: false, code: "provider_unavailable" });
+    expect(f.plan).not.toHaveBeenCalled();
+  });
   it("fails closed without provider IO for unavailable or unpaired availability hooks", async () => {
     const f = setup(),
       fetcher = vi.fn();
