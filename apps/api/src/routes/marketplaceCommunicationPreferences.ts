@@ -2,11 +2,15 @@ import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import { AuthorizationError } from "@vayada/backend-authorization";
 import {
   parseMarketplaceCommunicationPreferences,
+  parseMarketplaceCommunicationUnsubscribeRequest,
+  parseMarketplaceCommunicationUnsubscribeResult,
   parseReplaceMarketplaceCommunicationPreferences,
   parseReplaceMarketplaceCommunicationPreferencesResult,
   type MarketplaceCommunicationPreferenceCommandPort,
   type MarketplaceCommunicationPreferencePolicy,
   type MarketplaceCommunicationPreferenceReadPort,
+  type MarketplaceCommunicationUnsubscribeCommandPort,
+  type MarketplaceCommunicationUnsubscribeTokenPort,
   type ReplaceMarketplaceCommunicationPreferencesV1,
   type ReplaceMarketplaceCommunicationPreferencesResult,
 } from "@vayada/domain-marketplace";
@@ -32,6 +36,11 @@ export type MarketplaceCommunicationPreferencesRoutesOptions = {
   commandPort: MarketplaceCommunicationPreferenceCommandPort;
   readPort: MarketplaceCommunicationPreferenceReadPort;
   policy: MarketplaceCommunicationPreferencePolicy;
+  unsubscribe?: {
+    commandPort: MarketplaceCommunicationUnsubscribeCommandPort;
+    tokenPort: MarketplaceCommunicationUnsubscribeTokenPort;
+    now?: () => Date;
+  };
 };
 
 export async function registerMarketplaceCommunicationPreferencesRoutes(
@@ -44,7 +53,7 @@ export async function registerMarketplaceCommunicationPreferencesRoutes(
     if (scope) authorized.set(request, scope);
   };
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     if (
       typeof error === "object" &&
       error !== null &&
@@ -52,7 +61,9 @@ export async function registerMarketplaceCommunicationPreferencesRoutes(
       typeof error.code === "string" &&
       INVALID_BODY_ERROR_CODES.has(error.code)
     )
-      return invalidRequest(reply);
+      return request.routeOptions.url?.endsWith("/communication-unsubscribe")
+        ? invalidUnsubscribe(reply)
+        : invalidRequest(reply);
     return reply.send(error);
   });
 
@@ -104,6 +115,33 @@ export async function registerMarketplaceCommunicationPreferencesRoutes(
         : sendCommandError(reply, result.error.code);
     },
   );
+
+  if (options.unsubscribe) {
+    app.post<{ Body: unknown }>("/communication-unsubscribe", async (request, reply) => {
+      if (request.raw.url?.includes("?")) return invalidUnsubscribe(reply);
+      const body = parseMarketplaceCommunicationUnsubscribeRequest(request.body);
+      const acceptedAt = options.unsubscribe!.now?.() ?? new Date();
+      const verified = body ? options.unsubscribe!.tokenPort.verify(body.token, acceptedAt) : null;
+      if (!verified) return invalidUnsubscribe(reply);
+
+      let value: unknown;
+      try {
+        value = await options.unsubscribe!.commandPort.unsubscribeCommunicationTopic({
+          ...verified,
+          audit: {
+            requestId: String(request.id),
+            correlationId: null,
+            requestedAt: acceptedAt.toISOString(),
+          },
+        });
+      } catch {
+        return portViolation(reply);
+      }
+      const result = parseMarketplaceCommunicationUnsubscribeResult(value);
+      if (!result) return portViolation(reply);
+      return result.ok ? reply.status(204).send() : invalidUnsubscribe(reply);
+    });
+  }
 }
 
 function authorizeRequest(
@@ -237,6 +275,10 @@ function requireAuthorizedScope(
 
 function invalidRequest(reply: FastifyReply) {
   return reply.status(400).send({ error: { code: "invalid_request" } });
+}
+
+function invalidUnsubscribe(reply: FastifyReply) {
+  return reply.status(400).send({ error: { code: "invalid_or_expired_unsubscribe" } });
 }
 
 function portViolation(reply: FastifyReply) {

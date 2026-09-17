@@ -10,12 +10,15 @@ import { injectJson } from "@vayada/backend-test";
 import {
   MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
   type MarketplaceCommunicationPreferencesV1,
+  type MarketplaceCommunicationUnsubscribeCommand,
+  type MarketplaceCommunicationUnsubscribeResult,
   type ReplaceMarketplaceCommunicationPreferencesCommand,
   type ReplaceMarketplaceCommunicationPreferencesResult,
 } from "@vayada/domain-marketplace";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildApp } from "./app.js";
 import {
   registerMarketplaceCommunicationPreferencesRoutes,
   type MarketplaceCommunicationPreferencesRoutesOptions,
@@ -39,6 +42,7 @@ type AuthOptions = {
 type FakePorts = MarketplaceCommunicationPreferencesRoutesOptions & {
   commands: ReplaceMarketplaceCommunicationPreferencesCommand[];
   reads: unknown[];
+  unsubscribeCommands: MarketplaceCommunicationUnsubscribeCommand[];
 };
 
 function requestBody(expectedRevision = 0) {
@@ -91,12 +95,16 @@ function entitlement(status: ProductEntitlement["status"] = "active"): ProductEn
   return { product: "marketplace", key: "marketplace-hotel-profile", status };
 }
 
-function fakePorts(overrides: { read?: unknown; result?: unknown } = {}): FakePorts {
+function fakePorts(
+  overrides: { read?: unknown; result?: unknown; unsubscribeResult?: unknown } = {},
+): FakePorts {
   const commands: ReplaceMarketplaceCommunicationPreferencesCommand[] = [];
   const reads: unknown[] = [];
+  const unsubscribeCommands: MarketplaceCommunicationUnsubscribeCommand[] = [];
   return {
     commands,
     reads,
+    unsubscribeCommands,
     policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
     readPort: {
       async getCommunicationPreferences(scope) {
@@ -111,6 +119,38 @@ function fakePorts(overrides: { read?: unknown; result?: unknown } = {}): FakePo
           ok: true,
           preferences: preferences(command.request.expectedRevision + 1),
         }) as ReplaceMarketplaceCommunicationPreferencesResult;
+      },
+    },
+    unsubscribe: {
+      now: () => new Date(now),
+      tokenPort: {
+        verify(token) {
+          return token === "valid-unsubscribe-token"
+            ? {
+                tokenHash: "a".repeat(64),
+                claims: {
+                  action: "unsubscribe_topic",
+                  channel: "email",
+                  deliveryId: "55555555-5555-4555-8555-555555555555",
+                  expiresAt: Date.parse("2026-09-17T00:00:00.000Z") / 1_000,
+                  keyVersion: "key-1",
+                  nonce: "AAAAAAAAAAAAAAAAAAAAAA",
+                  organizationId,
+                  topic: "collaboration_action_required",
+                  userId,
+                },
+              }
+            : null;
+        },
+      },
+      commandPort: {
+        async unsubscribeCommunicationTopic(command) {
+          unsubscribeCommands.push(command);
+          return (overrides.unsubscribeResult ?? {
+            ok: true,
+            replayed: false,
+          }) as MarketplaceCommunicationUnsubscribeResult;
+        },
       },
     },
   };
@@ -167,6 +207,26 @@ async function put(
     headers,
     payload: options.body ?? requestBody(),
   });
+}
+
+async function unsubscribe(
+  app: Awaited<ReturnType<typeof testApp>>,
+  body: unknown = {
+    contractVersion: "marketplace-communications.v1",
+    token: "valid-unsubscribe-token",
+  },
+  url = "/communication-unsubscribe",
+) {
+  const response = await app.inject({
+    method: "POST",
+    url,
+    headers: { "content-type": "application/json" },
+    payload: JSON.stringify(body),
+  });
+  return {
+    statusCode: response.statusCode,
+    body: response.body ? (response.json() as unknown) : null,
+  };
 }
 
 async function repeatedKey(app: Awaited<ReturnType<typeof testApp>>) {
@@ -249,6 +309,76 @@ describe("Marketplace communication preference routes", () => {
     });
     expect((await get(app)).statusCode).toBe(200);
     expect((await put(app)).statusCode).toBe(200);
+  });
+
+  it("accepts a verified public category unsubscribe without authentication", async () => {
+    const ports = fakePorts();
+    app = await testApp(ports);
+
+    expect(await unsubscribe(app)).toEqual({ statusCode: 204, body: null });
+    expect(ports.unsubscribeCommands).toEqual([
+      {
+        tokenHash: "a".repeat(64),
+        claims: expect.objectContaining({
+          action: "unsubscribe_topic",
+          organizationId,
+          topic: "collaboration_action_required",
+          userId,
+        }),
+        audit: {
+          requestId: "req-1",
+          correlationId: null,
+          requestedAt: now,
+        },
+      },
+    ]);
+    expect(JSON.stringify(ports.unsubscribeCommands)).not.toContain("valid-unsubscribe-token");
+  });
+
+  it("returns one non-enumerating error for invalid, expired, or unknown unsubscribe state", async () => {
+    const ports = fakePorts({
+      unsubscribeResult: { ok: false, error: { code: "invalid_scope" } },
+    });
+    app = await testApp(ports);
+    const invalid = { error: { code: "invalid_or_expired_unsubscribe" } };
+
+    expect(
+      await unsubscribe(app, { contractVersion: "marketplace-communications.v1", token: "x" }),
+    ).toEqual({ statusCode: 400, body: invalid });
+    expect(await unsubscribe(app)).toEqual({ statusCode: 400, body: invalid });
+    expect(
+      await unsubscribe(
+        app,
+        { contractVersion: "marketplace-communications.v1", token: "valid-unsubscribe-token" },
+        "/communication-unsubscribe?token=must-not-be-accepted",
+      ),
+    ).toEqual({ statusCode: 400, body: invalid });
+  });
+
+  it("disables access logs for the unsubscribe path before query material can be logged", async () => {
+    const ports = fakePorts();
+    let logs = "";
+    app = buildApp({
+      logger: { level: "info", stream: { write: (chunk) => (logs += chunk) } },
+      marketplaceCommunicationPreferences: ports,
+    });
+    const malformed = await app.inject({
+      method: "POST",
+      url: "/api/marketplace/communication-unsubscribe",
+      headers: { "content-type": "application/json" },
+      payload: "{",
+    });
+    const rawToken = "raw-token-must-never-enter-logs";
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/marketplace/communication-unsubscribe?token=${rawToken}`,
+      payload: { contractVersion: "marketplace-communications.v1", token: rawToken },
+    });
+
+    expect(malformed.json()).toEqual({ error: { code: "invalid_or_expired_unsubscribe" } });
+    expect(response.statusCode).toBe(400);
+    expect(ports.unsubscribeCommands).toHaveLength(0);
+    expect(logs).not.toContain(rawToken);
   });
 
   it.each([

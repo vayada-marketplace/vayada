@@ -70,6 +70,7 @@ import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/fi
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
 import { createPgMarketplaceCommunicationPreferencesRepository } from "./domains/marketplaceCommunicationPreferencesRepository.js";
+import { createMarketplaceCommunicationUnsubscribeTokenService } from "./domains/marketplaceCommunicationUnsubscribeToken.js";
 import { MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY } from "@vayada/domain-marketplace";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
@@ -839,6 +840,11 @@ const marketplaceCommunicationPreferencesRepository =
     connectionString: targetDatabaseUrl,
     policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
   });
+const marketplaceCommunicationUnsubscribeTokenService = config.marketplaceCommunicationUnsubscribe
+  ? createMarketplaceCommunicationUnsubscribeTokenService(
+      config.marketplaceCommunicationUnsubscribe,
+    )
+  : undefined;
 const bookingDesignRepository = createPgBookingDesignRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -1864,6 +1870,14 @@ const app = buildApp({
     commandPort: marketplaceCommunicationPreferencesRepository,
     readPort: marketplaceCommunicationPreferencesRepository,
     policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
+    ...(marketplaceCommunicationUnsubscribeTokenService
+      ? {
+          unsubscribe: {
+            commandPort: marketplaceCommunicationPreferencesRepository,
+            tokenPort: marketplaceCommunicationUnsubscribeTokenService,
+          },
+        }
+      : {}),
   },
   bookingDesign: {
     commandPort: bookingDesignRepository,
