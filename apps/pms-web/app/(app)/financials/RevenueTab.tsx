@@ -8,11 +8,11 @@ import type {
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiErrorResponse } from "@/services/api/client";
-import { getFinanceRevenue } from "@/services/finance/financialReports";
+import { getFinanceRevenue, getRoomTypeNames } from "@/services/finance/financialReports";
 
 type RevenueState =
   | { kind: "loading" }
-  | { kind: "ready"; data: FinanceRevenueResponse }
+  | { kind: "ready"; data: FinanceRevenueResponse; roomTypeNames: Map<string, string> }
   | { kind: "permission" }
   | { kind: "unavailable" }
   | { kind: "error" };
@@ -55,7 +55,22 @@ export function RevenueTab({
       try {
         const data = await getFinanceRevenue(propertyId, { from, to, signal: controller.signal });
         if (controller.signal.aborted) return;
-        setState({ kind: "ready", data });
+        setState({ kind: "ready", data, roomTypeNames: new Map() });
+        void getRoomTypeNames(propertyId, controller.signal)
+          .then((roomTypes) => {
+            if (controller.signal.aborted) return;
+            setState((current) =>
+              current.kind === "ready"
+                ? {
+                    ...current,
+                    roomTypeNames: new Map(
+                      roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType.name]),
+                    ),
+                  }
+                : current,
+            );
+          })
+          .catch(() => undefined);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ApiErrorResponse) {
@@ -98,7 +113,9 @@ export function RevenueTab({
         </div>
       </section>
       {state.kind === "loading" && <RevenueSkeleton />}
-      {state.kind === "ready" && <Revenue data={state.data} locale={locale} />}
+      {state.kind === "ready" && (
+        <Revenue data={state.data} locale={locale} roomTypeNames={state.roomTypeNames} />
+      )}
       {state.kind !== "loading" && state.kind !== "ready" && (
         <RevenueStatus kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
       )}
@@ -106,7 +123,15 @@ export function RevenueTab({
   );
 }
 
-function Revenue({ data, locale }: { data: FinanceRevenueResponse; locale: string }) {
+function Revenue({
+  data,
+  locale,
+  roomTypeNames,
+}: {
+  data: FinanceRevenueResponse;
+  locale: string;
+  roomTypeNames: Map<string, string>;
+}) {
   return (
     <>
       {data.incompleteEvidence.length > 0 && (
@@ -196,7 +221,137 @@ function Revenue({ data, locale }: { data: FinanceRevenueResponse; locale: strin
           )}
         </table>
       </section>
+      <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="p-4">
+          <h2 className="text-base font-semibold text-gray-900">Direct sources</h2>
+          <p className="mt-1 text-sm text-gray-600">Revenue from direct booking sources.</p>
+        </div>
+        <table className="min-w-[30rem] w-full text-left text-sm">
+          <caption className="sr-only">Direct booking sources</caption>
+          <thead className="border-y border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+            <tr>
+              <th className="px-4 py-3" scope="col">
+                Source
+              </th>
+              <th className="px-4 py-3 text-right" scope="col">
+                Revenue
+              </th>
+              <th className="px-4 py-3 text-right" scope="col">
+                Share
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {data.directSources.length ? (
+              data.directSources.map((source) => (
+                <tr key={source.source}>
+                  <th className="px-4 py-3 font-medium text-gray-900" scope="row">
+                    {channelLabel(source.source)}
+                  </th>
+                  <td className="px-4 py-3 text-right text-gray-700">
+                    {formatMoney(source.revenue, locale)}
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-700">
+                    {formatPercent(source.share, locale)}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <EmptyRow columns={3} label="No direct booking sources for this period." />
+            )}
+          </tbody>
+        </table>
+      </section>
+      <section className="grid gap-6 xl:grid-cols-2">
+        <BreakdownList
+          title="Upsell revenue"
+          description="Revenue split by ownership."
+          emptyLabel="No upsell revenue for this period."
+          rows={data.upsells.map((upsell) => ({
+            label: upsell.ownership === "property" ? "Property-owned" : "Partner-owned",
+            value: formatMoney(upsell.revenue, locale),
+          }))}
+        />
+        <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="p-4">
+            <h2 className="text-base font-semibold text-gray-900">Revenue by room type</h2>
+            <p className="mt-1 text-sm text-gray-600">Nights, revenue, and average daily rate.</p>
+          </div>
+          <table className="min-w-[34rem] w-full text-left text-sm">
+            <caption className="sr-only">Revenue by room type</caption>
+            <thead className="border-y border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-4 py-3" scope="col">
+                  Room type
+                </th>
+                <th className="px-4 py-3 text-right" scope="col">
+                  Nights
+                </th>
+                <th className="px-4 py-3 text-right" scope="col">
+                  Revenue
+                </th>
+                <th className="px-4 py-3 text-right" scope="col">
+                  ADR
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.roomTypes.length ? (
+                data.roomTypes.map((roomType) => (
+                  <tr key={roomType.roomTypeId}>
+                    <th className="px-4 py-3 font-medium text-gray-900" scope="row">
+                      {roomTypeNames.get(roomType.roomTypeId) ?? roomType.roomTypeId}
+                    </th>
+                    <td className="px-4 py-3 text-right text-gray-700">
+                      {formatCount(roomType.nights, locale)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-700">
+                      {formatMoney(roomType.revenue, locale)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-700">
+                      {formatMoney(roomType.adr, locale)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <EmptyRow columns={4} label="No room-type revenue for this period." />
+              )}
+            </tbody>
+          </table>
+        </section>
+      </section>
     </>
+  );
+}
+
+function BreakdownList({
+  title,
+  description,
+  emptyLabel,
+  rows,
+}: {
+  title: string;
+  description: string;
+  emptyLabel: string;
+  rows: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+      <p className="mt-1 text-sm text-gray-600">{description}</p>
+      {rows.length ? (
+        <dl className="mt-4 divide-y divide-gray-100">
+          {rows.map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-4 py-3 text-sm">
+              <dt className="font-medium text-gray-900">{row.label}</dt>
+              <dd className="text-right text-gray-700">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-4 text-sm text-gray-600">{emptyLabel}</p>
+      )}
+    </section>
   );
 }
 
@@ -309,6 +464,9 @@ function formatPercent(value: string, locale: string) {
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(
     numeric(value),
   );
+}
+function formatCount(value: number, locale: string) {
+  return new Intl.NumberFormat(locale).format(value);
 }
 function formatSignedPercent(value: string, locale: string) {
   return new Intl.NumberFormat(locale, {
