@@ -86,6 +86,8 @@ import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel
 import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
 import { createPgFinanceDashboardFacts } from "./domains/financeDashboardFacts.js";
 import { createFinanceDashboardReadModel } from "./domains/financeDashboardReadModel.js";
+import { createPgFinanceProfitLossFacts } from "./domains/financeProfitLossFacts.js";
+import { createFinanceProfitLossReadModel } from "./domains/financeProfitLossReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -684,6 +686,22 @@ const financeDashboardRuntime =
         const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
         const facts = createPgFinanceDashboardFacts({ connectionString: targetDatabaseUrl });
         const read = createFinanceDashboardReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          facts,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), facts.close()]),
+        };
+      })()
+    : undefined;
+const financeProfitLossRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const facts = createPgFinanceProfitLossFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceProfitLossReadModel({
           pricing: pmsPricingReadModel,
           propertyContext,
           facts,
@@ -1708,6 +1726,7 @@ const app = buildApp({
     : undefined,
   financeRevenue: financeRevenueRuntime?.routes,
   financeDashboard: financeDashboardRuntime?.routes,
+  financeProfitLoss: financeProfitLossRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -2060,6 +2079,7 @@ app.addHook("onClose", async () => {
     financeExpenseRuntime?.close(),
     financeRevenueRuntime?.close(),
     financeDashboardRuntime?.close(),
+    financeProfitLossRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
