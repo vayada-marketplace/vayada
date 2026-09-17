@@ -22,7 +22,8 @@ export function readChannexInitialAriHistory(
                  FROM pms.channex_offer_ari_attempts a
                  WHERE a.external_property_id=$1 AND a.external_rate_plan_id=$2
                    AND a.state<>'released'
-                   AND ($4::uuid IS NULL OR a.id<>$4::uuid)`,
+                   AND ($4::uuid IS NULL OR a.id<>$4::uuid)
+                 ORDER BY a.service_date`,
     [
       identity.externalPropertyId,
       identity.externalRatePlanId,
