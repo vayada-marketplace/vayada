@@ -21,4 +21,16 @@ describe("financial report reads", () => {
       { cache: "no-store", signal: undefined },
     );
   });
+
+  it("uses the canonical Revenue route with its required range", async () => {
+    get.mockResolvedValue({});
+    const { getFinanceRevenue } = await import("./financialReports");
+
+    await getFinanceRevenue("property", { from: "2026-09-01", to: "2026-09-17" });
+
+    expect(get).toHaveBeenCalledWith(
+      "/finance/properties/property/financials/revenue?from=2026-09-01&to=2026-09-17",
+      { cache: "no-store", signal: undefined },
+    );
+  });
 });
