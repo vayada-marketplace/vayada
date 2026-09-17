@@ -290,3 +290,22 @@ exposes only opaque evidence references.
 This reader covers only `referral_round_trip`. Publication and agreement activation remain
 blocked until equivalent two-part evidence exists for reservation lifecycle, stay completion
 and accommodation revenue and the existing four-purpose assessment accepts all four.
+
+## Remaining source-capability evidence storage
+
+Migration 0220 adds the same two-part evidence boundary for `reservation_lifecycle`,
+`stay_completion` and `accommodation_revenue`. One immutable certification row records a
+successful isolated synthetic fixture for one capability and remains pinned to the exact
+diagnostic probe, booking binding, property, destination, organization, connection and
+adapter version. One immutable production preflight row records a documented authenticated
+read for one capability and remains pinned to the exact production destination and source
+configuration. Fixed capability-specific assertions and a globally unique evidence
+fingerprint prevent one source check from being relabeled as another purpose. Permanent
+preflight revocations preserve the old evidence.
+
+These tables are validation inputs only. They contain no creator, agreement, click,
+attribution, commission, payment or Finance journal association, and they do not make a
+destination ready. Authorized commands still need to obtain and verify the evidence through
+each adapter. A later reader must apply freshness, reject revoked or changed configuration,
+require both matching rows per capability and then supply the three results alongside
+`referral_round_trip` to the existing four-purpose assessment.
