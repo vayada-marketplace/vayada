@@ -343,3 +343,48 @@ return the same certification. Expiry or revocation during verification prevents
 The bound booking remains permanently excluded from the Finance affiliate journal. The
 command creates no production reservation, attribution, readiness, payment or earning data.
 The aggregate freshness-aware reader remains the next required slice.
+
+## Aggregate destination tracking readiness
+
+The Booking-owned aggregate reader applies the existing 24-hour evidence policy to all four
+tracking purposes and then calls the existing `assessAffiliateDestinationTracking` domain
+decision. Server-owned configuration supplies the exact diagnostic and production connection
+plus adapter version separately for each purpose. A purpose contributes one healthy validated
+item only when both its exact current certification and production preflight are present,
+fresh and unrevoked. Missing, stale, revoked or configuration-mismatched evidence leaves that
+purpose pending; success for another purpose cannot substitute for it.
+
+The caller owns an explicit `READ COMMITTED` transaction. Destination, certification, probe
+and preflight row locks serialize final currentness checks with permanent revocation, including
+revoker-first fallback to an older current proof. The result exposes one opaque combined
+reference per ready purpose and never exposes provider evidence payloads. It performs no
+network call or write and creates no booking, attribution, agreement, readiness override,
+payment or earning. Publication consumption remains a separate slice.
+
+## Authorized destination readiness consumption
+
+The private hotel destination repository can now evaluate the aggregate reader inside one
+explicit `READ COMMITTED` transaction when a trusted server-owned source configuration is
+installed. The destination and active property are locked with the evidence rows so a
+concurrent revocation or property change cannot produce a mixed readiness response.
+
+Only the exact current policy with one distinct, fresh, purpose-bound opaque reference for
+each of the four purposes may be returned as validated. Malformed, partial, duplicated,
+future or stale port results are redacted to the existing pending response. Without a current
+source-selection provider, the production repository continues to report pending; request
+payloads cannot supply configuration or readiness.
+
+## Publication prerequisite composition
+
+The internal Marketplace publication command can compose complete commercial conditions
+with the Booking-owned aggregate reader inside its existing `READ COMMITTED` transaction.
+It derives the destination from the locked draft, obtains source selection from a trusted
+server port and retains the four opaque tracking references with commercial evidence in the
+immutable published terms.
+
+Missing configuration, commercial conditions or a tracking purpose blocks publication and
+writes nothing. Pending purposes remain explicit; malformed port responses return a safe
+`tracking_readiness_invalid` blocker rather than throwing or storing partial proof. The
+default publication resolver remains blocking because the commercial-conditions and current
+source-selection providers do not yet exist. This composition adds no HTTP publication route,
+agreement or link activation, and no request payload can supply readiness.

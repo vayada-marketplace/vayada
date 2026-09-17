@@ -1066,3 +1066,18 @@ Run the global audit after the targeted backfill:
 TARGET_DATABASE_URL=<target database url> \
   npm --workspace @vayada/backend-migration run target:workos:audit:dist
 ```
+
+## PMS Financials activation readiness
+
+Run the property-scoped audit after the nightly-revenue backfill and Finance
+expense worker have drained, before Feature Hub activation:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:financials:readiness:dist -- \
+    --property-id <property id> --expect-inactive --pretty
+```
+
+The command is read-only and blocks on missing category seeds, revenue or
+attribution projections, OTA commission evidence/rules/expenses, or an
+unexpected module state. After activation, rerun it with `--expect-active`.

@@ -14,6 +14,7 @@ import ReplacementBookingConfirmation from "@/components/booking/ReplacementBook
 import type { PublicQuoteGuestDisclosure } from "@vayada/domain-booking/replacement-pricing";
 import { useSlug } from "@/contexts/HotelContext";
 import { useReplacementQuote } from "@/lib/hooks/useReplacementQuote";
+import { replacementPricingAcceptanceEnabled } from "@/lib/replacementPricingAcceptance";
 import {
   displayQuoteMoney,
   getReplacementOffers,
@@ -38,8 +39,7 @@ export default function BookPageClient() {
 }
 
 function RoomQuoteForm({ slug }: { slug: string }) {
-  const acceptanceEnabled =
-    process.env.NEXT_PUBLIC_REPLACEMENT_PRICING_ACCEPTANCE_ENABLED === "true";
+  const acceptanceEnabled = replacementPricingAcceptanceEnabled(slug);
   const [termsAcknowledgement, setTermsAcknowledgement] =
     useState<QuoteTermsAcknowledgement | null>(null);
   const [guestDisclosure, setGuestDisclosure] = useState<PublicQuoteGuestDisclosure | null>(null);

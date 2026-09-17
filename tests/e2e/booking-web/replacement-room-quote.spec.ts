@@ -89,6 +89,7 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
       checkOut: selection.checkOut,
       currency: "EUR",
       paymentMethod,
+      acceptanceMode: "instant",
       issuedAt: new Date(Date.now() - 1000).toISOString(),
       expiresAt: new Date(Date.now() + (requests === 1 ? 8000 : 2500)).toISOString(),
       totalMinor: withExtra ? "32000" : "31500",
@@ -166,6 +167,10 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   );
   await guestAcknowledgement.check();
   await expect(guestAcknowledgement).toBeChecked();
+  if (process.env.E2E_REPLACEMENT_PRICING_ACCEPTANCE_EXPECTED === "true") {
+    await expect(page.getByRole("heading", { name: "Your details" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm booking" })).toBeEnabled();
+  }
   await expect(page.getByRole("heading", { name: "Your room and rate terms" })).toBeVisible();
   expect(submitted.selection.rooms.map((room: any) => [room.publicOfferKey, room.guests])).toEqual([
     [firstKey, { adults: 2, childAgesAtCheckIn: [0] }],
@@ -193,7 +198,9 @@ test("prices explicit mixed rooms and child ages, clears edits, and recovers fro
   await expect(guestAcknowledgement).not.toBeChecked();
   expect(submitted.selection.addons).toEqual([]);
   await expect(page.getByText(/This price has expired/)).toBeVisible({ timeout: 6000 });
-  await expect(page.getByRole("region", { name: "Your stay price" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Your stay price" })).toBeVisible();
+  await expect(acknowledgement).toBeDisabled();
+  await expect(guestAcknowledgement).toBeDisabled();
   await page.getByRole("button", { name: "Get price", exact: true }).click();
   await expect(page.getByText("Total: EUR 315.00", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("room-quote-desktop.png"), fullPage: true });
