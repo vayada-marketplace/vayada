@@ -41,6 +41,10 @@ export type AffiliateSourceCapabilityCertificationVerifier = {
   connectionReference: string;
   adapterVersion: string;
   timeoutMilliseconds: number;
+  /**
+   * Read-only diagnostic inspection. It must not mutate provider state and may
+   * be retried after timeout; implementations should stop promptly on abort.
+   */
   verifySyntheticCapability(input: VerificationInput): Promise<VerificationResult>;
 };
 

@@ -320,20 +320,28 @@ describe.skipIf(!databaseUrl)("authorized source-capability certification", () =
       expect.objectContaining({ ok: true, replayed: true }),
     ]);
 
+    let lateVerifierSettled = false;
     expect(
       await certifyAffiliateSourceCapability(fixture.pool(), input("stay_completion"), {
         ...verifier,
         timeoutMilliseconds: 5,
-        verifySyntheticCapability: ({ signal }) =>
-          new Promise((resolve) =>
-            signal.addEventListener(
-              "abort",
-              () => resolve({ ok: false, code: "fixture_unavailable" }),
-              { once: true },
-            ),
-          ),
+        async verifySyntheticCapability(value) {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          lateVerifierSettled = true;
+          return {
+            ok: true,
+            connectionReference: this.connectionReference,
+            adapterVersion: this.adapterVersion,
+            verifiedCapability: value.capability,
+            verifiedBookingId: value.bookingId,
+            evidenceReferences: ["synthetic:late"],
+          };
+        },
       }),
     ).toEqual({ ok: false, code: "verification_unavailable" });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(lateVerifierSettled).toBe(true);
+    expect(await certificationCount()).toBe(1);
   });
 
   it("rejects a probe that expires during verification", async () => {
