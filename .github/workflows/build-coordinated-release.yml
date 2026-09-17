@@ -1,0 +1,374 @@
+name: Build coordinated next release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: coordinated-next-release-main
+  cancel-in-progress: false
+
+env:
+  AWS_ACCOUNT_ID: "269416271598"
+  AWS_REGION: eu-west-1
+  NEXT_API_URL: https://next-api.vayada.com
+
+jobs:
+  prepare:
+    if: ${{ vars.COORDINATED_RELEASES_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      affected-count: ${{ steps.plan.outputs.affected-count }}
+    steps:
+      - name: Require an immutable main source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_REF" = refs/heads/main
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *) echo "::error::Untrusted build event: $EVENT_NAME"; exit 1 ;;
+          esac
+
+      - name: Checkout pinned source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download non-expired published baseline candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-work/candidates release-work/downloads
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("next-release-published-v1-"))) | [.id, .name] | @tsv' \
+            > release-work/artifacts.tsv
+          while IFS=$'\t' read -r artifact_id artifact_name; do
+            test -n "$artifact_id" || continue
+            destination="release-work/downloads/${artifact_id}"
+            mkdir -p "$destination"
+            if (
+              set -e
+              artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
+              test "$(jq -r '.expired' <<< "$artifact_json")" = false
+              test "$(jq -r '.name' <<< "$artifact_json")" = "$artifact_name"
+              publisher_run_id="$(jq -r '.workflow_run.id' <<< "$artifact_json")"
+              publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
+              test "$(jq -r '.status' <<< "$publisher_run")" = completed
+              test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
+              test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
+              test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+              test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml
+              test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+              gh api \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+                > "$destination/artifact.zip"
+              unzip -q "$destination/artifact.zip" -d "$destination/content"
+              record="$destination/content/published-record.json"
+              test -f "$record"
+              test "$(jq -r '.publishedArtifactName' "$record")" = "$artifact_name"
+              test "$(jq -r '.publisher.runId' "$record")" = "$publisher_run_id"
+              test "$(jq -r '.publisher.runAttempt' "$record")" = \
+                "$(jq -r '.run_attempt' <<< "$publisher_run")"
+            ); then
+              mv "$destination/content" "release-work/candidates/${artifact_id}"
+            else
+              echo "::warning::Ignoring untrusted or unavailable published artifact ${artifact_name} (${artifact_id})"
+            fi
+          done < release-work/artifacts.tsv
+
+      - name: Select ancestry-newest complete baseline
+        run: |
+          set -euo pipefail
+          node scripts/coordinated-release/choose-baseline.mjs \
+            --candidates release-work/candidates \
+            --target "${GITHUB_SHA}" \
+            --output release-work/baseline.json
+
+      - name: Configure AWS credentials for baseline verification
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify every baseline image and source tag still agree
+        run: |
+          set -euo pipefail
+          if ! test -f release-work/baseline.json; then
+            exit 0
+          fi
+          baseline_valid=true
+          while IFS=$'\t' read -r repository digest image_source_sha; do
+            if ! verified="$(aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageTag=next-${image_source_sha}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)" || test "$verified" != "$digest"; then
+              echo "::warning::Baseline image ${repository}:next-${image_source_sha} does not resolve to ${digest}; rebuilding all services"
+              baseline_valid=false
+              break
+            fi
+          done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/baseline.json)
+          if test "$baseline_valid" != true; then
+            mv release-work/baseline.json release-work/unverifiable-baseline.json
+          fi
+
+      - name: Plan cumulative affected services and barriers
+        id: plan
+        run: |
+          set -euo pipefail
+          baseline_args=()
+          if test -f release-work/baseline.json; then
+            baseline_args=(--baseline release-work/baseline.json --accepted-baseline release-work/accepted-baseline.json)
+          fi
+          node scripts/coordinated-release/plan.mjs \
+            --target "${GITHUB_SHA}" \
+            --services deployment/coordinated-release/services.json \
+            --output release-work/selection.json \
+            "${baseline_args[@]}"
+          matrix="$(jq -c --slurpfile services deployment/coordinated-release/services.json \
+            '[.affectedServices[] as $key | {service: $key} + $services[0][$key]]' \
+            release-work/selection.json)"
+          count="$(jq '.affectedServices | length' release-work/selection.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "affected-count=$count" >> "$GITHUB_OUTPUT"
+          jq '{targetSha, previousManifestId, affectedServices, reasons, barriers}' \
+            release-work/selection.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload pinned release plan
+        uses: actions/upload-artifact@v6
+        with:
+          name: next-release-plan-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            release-work/selection.json
+            release-work/accepted-baseline.json
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.affected-count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push immutable service image
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_BROWSER_API_KEY }}
+          PLATFORM_WORKOS_ORG_ID: ${{ vars.NEXT_PUBLIC_PLATFORM_WORKOS_ORG_ID }}
+          SERVICE: ${{ matrix.service }}
+          APP_PATH: ${{ matrix.appPath }}
+          ECR_REPOSITORY: ${{ matrix.ecrRepository }}
+        run: |
+          set -euo pipefail
+          image="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
+          build_args=()
+          case "$SERVICE" in
+            next-target-backend)
+              build_args+=(--build-arg API_RUNTIME=next --build-arg "APPLICATION_RELEASE=${GITHUB_SHA}")
+              ;;
+            next-pms-frontend)
+              build_args+=(
+                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_PMS_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_PMS_OPERATIONS_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+                --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
+                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
+                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
+                --build-arg NEXT_PUBLIC_AIRBNB_IMPORT_ENABLED=true
+                --build-arg NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
+              )
+              ;;
+            next-booking-frontend)
+              build_args+=(
+                --build-arg "NEXT_PUBLIC_BOOKING_WEB_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+                --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_51T4q9THtaQeEOmq25xCQRtxOCZ7WKDN8Bpmo2jMuQCKGLPxjoU7cApWRR0fysdKgxjLsEs7zoL00qaAB6boaNMC600tH1jDPWD
+                --build-arg "BOOKING_WEB_BUILD_SHA=${GITHUB_SHA}"
+              )
+              ;;
+            next-booking-admin)
+              build_args+=(
+                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
+                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
+                --build-arg NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
+                --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+                --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
+                --build-arg NEXT_PUBLIC_PMS_FRONTEND_URL=https://next-pms.vayada.com
+                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
+                --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
+              )
+              ;;
+            next-marketplace-frontend)
+              build_args+=(
+                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_VAYADA_API_URL=${NEXT_API_URL}"
+                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
+                --build-arg "NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
+                --build-arg NEXT_PUBLIC_PMS_URL=https://next-pms.vayada.com
+                --build-arg NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
+                --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
+              )
+              ;;
+            next-marketplace-admin)
+              test -n "$PLATFORM_WORKOS_ORG_ID"
+              build_args+=(
+                --build-arg "NEXT_PUBLIC_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_AUTH_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_VAYADA_API_URL=${NEXT_API_URL}"
+                --build-arg NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
+                --build-arg NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false
+                --build-arg "NEXT_PUBLIC_PLATFORM_WORKOS_ORG_ID=${PLATFORM_WORKOS_ORG_ID}"
+                --build-arg "NEXT_PUBLIC_BOOKING_API_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_PMS_URL=${NEXT_API_URL}"
+                --build-arg "NEXT_PUBLIC_PMS_API_URL=${NEXT_API_URL}"
+                --build-arg 'NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com'
+              )
+              ;;
+            *) echo "::error::Unknown managed service $SERVICE"; exit 1 ;;
+          esac
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --file "${APP_PATH}/Dockerfile" \
+            --tag "${image}:next-latest" \
+            --tag "${image}:next-${GITHUB_SHA}" \
+            --cache-from "type=gha,scope=${SERVICE}" \
+            --cache-to "type=gha,mode=max,scope=${SERVICE}" \
+            "${build_args[@]}" \
+            .
+
+      - name: Verify immutable ECR digest
+        env:
+          SERVICE: ${{ matrix.service }}
+          ECR_REPOSITORY: ${{ matrix.ecrRepository }}
+        run: |
+          set -euo pipefail
+          digest="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=next-${GITHUB_SHA}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq -n \
+            --arg service "$SERVICE" \
+            --arg repository "$ECR_REPOSITORY" \
+            --arg digest "$digest" \
+            --arg source "$GITHUB_SHA" \
+            '{service: $service, ecrRepository: $repository, digest: $digest, imageSourceSha: $source}' \
+            > "image-record-${SERVICE}.json"
+
+      - name: Upload verified image record
+        uses: actions/upload-artifact@v6
+        with:
+          name: next-release-image-v1-${{ matrix.service }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: image-record-${{ matrix.service }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: [prepare, build]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted assembler
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download pinned release plan
+        uses: actions/download-artifact@v8
+        with:
+          name: next-release-plan-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-work/plan
+
+      - name: Download verified image records
+        if: ${{ needs.prepare.outputs.affected-count != '0' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: next-release-image-v1-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-work/images
+          merge-multiple: true
+
+      - name: Assemble complete six-service manifest
+        run: |
+          set -euo pipefail
+          mkdir -p release-work/images release-work/candidate
+          baseline_args=()
+          if test -f release-work/plan/accepted-baseline.json; then
+            baseline_args=(--baseline release-work/plan/accepted-baseline.json)
+          fi
+          node scripts/coordinated-release/assemble.mjs \
+            --selection release-work/plan/selection.json \
+            --images release-work/images \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --event "${GITHUB_EVENT_NAME}" \
+            --output release-work/candidate/manifest.json \
+            --hash-output release-work/candidate/manifest.sha256 \
+            "${baseline_args[@]}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify every referenced digest and source tag agree
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r repository digest image_source_sha; do
+            verified="$(aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageTag=next-${image_source_sha}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)"
+            test "$verified" = "$digest"
+          done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/candidate/manifest.json)
+
+      - name: Upload complete candidate manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: next-release-candidate-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-work/candidate/
+          if-no-files-found: error
+          retention-days: 14
