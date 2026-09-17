@@ -55,6 +55,43 @@ test("failed availability is an error, not a capacity claim", async ({ page }) =
   await expect(page.getByRole("status")).toContainText("We couldn’t check availability");
 });
 
+test("initial unavailable pricing keeps the hotel page usable", async ({ page }) => {
+  await mockBookingApis(page);
+  let releaseRetry: (() => void) | undefined;
+  const retryPending = new Promise<void>((resolve) => {
+    releaseRetry = resolve;
+  });
+  let markRetryStarted: (() => void) | undefined;
+  const retryStarted = new Promise<void>((resolve) => {
+    markRetryStarted = resolve;
+  });
+  let requestCount = 0;
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
+    requestCount += 1;
+    if (requestCount > 1) {
+      markRetryStarted?.();
+      await retryPending;
+    }
+    await route.fulfill({
+      status: 503,
+      json: {
+        code: "PRICING_UNAVAILABLE",
+        message: "Pricing is unavailable while the TypeScript pricing system is rebuilt.",
+      },
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
+  await retryStarted;
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveCount(0);
+  releaseRetry?.();
+  await expect(page.getByRole("status")).toContainText("We couldn’t check availability");
+  await expect(page.getByRole("heading", { name: "Unable to Load Hotel" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Choose rooms and get a price" })).toHaveCount(0);
+});
+
 test("an older search cannot replace a newer result", async ({ page }) => {
   await mockBookingApis(page);
   let releaseOld: (() => void) | undefined;

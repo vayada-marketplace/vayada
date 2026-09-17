@@ -339,7 +339,9 @@ function HomePageContent() {
     const totalGuests = committedAdults + effectiveCommittedChildren;
     const targets = new Set<string>();
     for (const room of rooms.slice(0, 8)) {
-      const requiredRooms = room.combination ? room.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0) : Math.ceil(totalGuests / room.maxOccupancy);
+      const requiredRooms = room.combination
+        ? room.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0)
+        : Math.ceil(totalGuests / room.maxOccupancy);
       if (room.remainingRooms < requiredRooms) continue;
       const rateType = getSelectedAvailableRate(room);
       if (!rateType) continue;
@@ -731,7 +733,14 @@ function HomePageContent() {
             </div>
           )}
 
-        <a href={`/${locale}/book?${new URLSearchParams({ checkIn, checkOut })}`} className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white">Choose rooms and get a price</a>
+        {!roomsRefetching && searchMessage !== "availabilityError" && (
+          <a
+            href={`/${locale}/book?${new URLSearchParams({ checkIn, checkOut })}`}
+            className="inline-block mb-6 rounded-full bg-primary-600 px-6 py-3 font-semibold text-white"
+          >
+            Choose rooms and get a price
+          </a>
+        )}
 
         {/* Room Cards */}
         <div>
@@ -799,9 +808,12 @@ function HomePageContent() {
         filteredRooms[detailModalIndex] &&
         (() => {
           const modalRoom = filteredRooms[detailModalIndex];
-          const modalRequiredRooms = modalRoom.combination ? modalRoom.combination.roomSelection.lines.reduce((sum, line) => sum + line.guests.length, 0) : Math.ceil(
-            (committedAdults + effectiveCommittedChildren) / modalRoom.maxOccupancy,
-          );
+          const modalRequiredRooms = modalRoom.combination
+            ? modalRoom.combination.roomSelection.lines.reduce(
+                (sum, line) => sum + line.guests.length,
+                0,
+              )
+            : Math.ceil((committedAdults + effectiveCommittedChildren) / modalRoom.maxOccupancy);
           const modalSoldOut = modalRoom.remainingRooms < modalRequiredRooms;
           return (
             <RoomDetailModal
