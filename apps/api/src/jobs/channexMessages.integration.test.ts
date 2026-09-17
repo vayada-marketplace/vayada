@@ -369,12 +369,12 @@ describe.skipIf(!URL)("Channex message worker (PostgreSQL)", () => {
             inserted_at: "2026-09-04T12:00:00.000000",
             attachments: [],
             meta: {
-              live_feed_event_id: "live-feed-inquiry-1",
+              live_feed_event_id: "13720000-0000-4000-8000-000000000099",
               booking_details: {
                 property_id: "chx-vay-1372",
                 guest_name: "Stale Andrew",
                 checkin_date: "2026-11-02",
-                checkout_date: "2026-11-05",
+                nights: 3,
                 number_of_adults: 3,
                 number_of_children: 0,
               },
@@ -402,7 +402,7 @@ describe.skipIf(!URL)("Channex message worker (PostgreSQL)", () => {
       guestBookingId: null,
       guestDisplayName: "Andrew",
       unreadCount: 1,
-      sourceBookingId: "live-feed-inquiry-1",
+      sourceBookingId: "13720000-0000-4000-8000-000000000099",
       conversationContextState: "inquiry",
       inquiryArrivalDate: "2026-11-02",
       inquiryDepartureDate: "2026-11-05",
@@ -410,6 +410,14 @@ describe.skipIf(!URL)("Channex message worker (PostgreSQL)", () => {
       inquiryChildren: 0,
     });
     expect(await failureCode(documentedInquiry)).toBeNull();
+    const retainedInquiry = (
+      await db.query(
+        `SELECT raw_payload FROM pms.messages WHERE source_message_id = 'message-documented-inquiry'`,
+      )
+    ).rows[0].raw_payload;
+    expect(retainedInquiry.liveFeedEventId).toBe("13720000-0000-4000-8000-000000000099");
+    expect(retainedInquiry.airbnbInquiry).toBeNull(); // Incomplete terms remain non-actionable.
+
     expect(
       (
         await db.query(
