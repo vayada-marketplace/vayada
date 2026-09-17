@@ -360,3 +360,17 @@ revoker-first fallback to an older current proof. The result exposes one opaque 
 reference per ready purpose and never exposes provider evidence payloads. It performs no
 network call or write and creates no booking, attribution, agreement, readiness override,
 payment or earning. Publication consumption remains a separate slice.
+
+## Authorized destination readiness consumption
+
+The private hotel destination repository can now evaluate the aggregate reader inside one
+explicit `READ COMMITTED` transaction when a trusted server-owned source configuration is
+installed. The destination and active property are locked with the evidence rows so a
+concurrent revocation or property change cannot produce a mixed readiness response.
+
+Only the exact current policy with one distinct, fresh, purpose-bound opaque reference for
+each of the four purposes may be returned as validated. Malformed, partial, duplicated,
+future or stale port results are redacted to the existing pending response. Without a current
+source-selection provider, the production repository continues to report pending; request
+payloads cannot supply configuration or readiness. Publication consumption remains the next
+slice.

@@ -1,5 +1,6 @@
 import type pg from "pg";
 import {
+  AFFILIATE_TRACKING_PURPOSES,
   assessAffiliateDestinationTracking,
   type AffiliateDestinationTrackingEvidence,
   type AffiliateTrackingPurpose,
@@ -17,19 +18,32 @@ import {
 export const AFFILIATE_DESTINATION_TRACKING_READINESS_POLICY_VERSION =
   "booking-affiliate-destination-tracking-readiness.v1";
 
-type PurposeConfiguration = {
+export type AffiliateDestinationTrackingPurposeConfiguration = {
   certificationConnectionReference: string;
   productionConnectionReference: string;
   adapterVersion: string;
 };
 
-type Scope = {
+export type AffiliateDestinationTrackingReadinessInput = {
   propertyId: string;
   destinationVersionId: string;
   organizationId: string;
   certificationEnvironment: "local" | "sandbox";
-  purposes: Record<AffiliateTrackingPurpose, PurposeConfiguration>;
+  purposes: Record<AffiliateTrackingPurpose, AffiliateDestinationTrackingPurposeConfiguration>;
 };
+
+export type AffiliateDestinationTrackingScope = Pick<
+  AffiliateDestinationTrackingReadinessInput,
+  "propertyId" | "destinationVersionId" | "organizationId"
+>;
+
+export type AffiliateDestinationTrackingConfigurationPort = (
+  client: pg.PoolClient,
+  scope: AffiliateDestinationTrackingScope,
+) => Promise<
+  | Pick<AffiliateDestinationTrackingReadinessInput, "certificationEnvironment" | "purposes">
+  | undefined
+>;
 
 type ReadyPurpose = {
   purpose: AffiliateTrackingPurpose;
@@ -44,20 +58,71 @@ export type AffiliateDestinationTrackingReadiness = {
   evidence: ReadyPurpose[];
 };
 
+export type AffiliateDestinationTrackingReadinessPort = (
+  client: pg.PoolClient,
+  input: AffiliateDestinationTrackingReadinessInput,
+) => Promise<AffiliateDestinationTrackingReadiness>;
+
+const combinedReferencePattern = (purpose: AffiliateTrackingPurpose) =>
+  new RegExp(
+    `^booking:affiliate-destination-capability-readiness:${purpose}:` +
+      "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:" +
+      "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    "i",
+  );
+
+/** Fails closed when a trusted port violates the aggregate reader's runtime contract. */
+export function isVerifiedAffiliateDestinationTrackingReadiness(
+  value: unknown,
+  now = new Date(),
+): value is AffiliateDestinationTrackingReadiness {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Partial<AffiliateDestinationTrackingReadiness>;
+  if (
+    result.status !== "verified" ||
+    result.policyVersion !== AFFILIATE_DESTINATION_TRACKING_READINESS_POLICY_VERSION ||
+    !Array.isArray(result.missing) ||
+    result.missing.length !== 0 ||
+    !Array.isArray(result.evidence) ||
+    result.evidence.length !== AFFILIATE_TRACKING_PURPOSES.length ||
+    !Number.isFinite(now.getTime())
+  )
+    return false;
+  const references = new Set<string>();
+  return AFFILIATE_TRACKING_PURPOSES.every((purpose) => {
+    const items = result.evidence!.filter((item) => item?.purpose === purpose);
+    if (items.length !== 1) return false;
+    const item = items[0]!;
+    if (typeof item.evidenceReference !== "string" || typeof item.validatedAt !== "string")
+      return false;
+    const validatedAt = Date.parse(item.validatedAt);
+    if (
+      !combinedReferencePattern(purpose).test(item.evidenceReference) ||
+      !Number.isFinite(validatedAt) ||
+      validatedAt > now.getTime() ||
+      validatedAt < now.getTime() - AFFILIATE_REFERRAL_READINESS_MAX_AGE_SECONDS * 1_000 ||
+      references.has(item.evidenceReference)
+    )
+      return false;
+    references.add(item.evidenceReference);
+    return true;
+  });
+}
+
 type CurrentProof = { id: string; completed_at: Date };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bounded = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= max;
-const validConfiguration = (value: PurposeConfiguration) =>
+const validConfiguration = (value: AffiliateDestinationTrackingPurposeConfiguration) =>
   bounded(value?.certificationConnectionReference, 200) &&
   bounded(value?.productionConnectionReference, 200) &&
   bounded(value?.adapterVersion, 100);
 
 async function currentCertification(
   client: pg.PoolClient,
-  scope: Omit<Scope, "purposes">,
+  scope: Omit<AffiliateDestinationTrackingReadinessInput, "purposes">,
   capability: AffiliateSourceCapability,
-  configuration: PurposeConfiguration,
+  configuration: AffiliateDestinationTrackingPurposeConfiguration,
 ): Promise<CurrentProof | undefined> {
   for (;;) {
     const candidate = (
@@ -119,9 +184,12 @@ async function currentCertification(
 
 async function currentPreflight(
   client: pg.PoolClient,
-  scope: Pick<Scope, "propertyId" | "destinationVersionId" | "organizationId">,
+  scope: Pick<
+    AffiliateDestinationTrackingReadinessInput,
+    "propertyId" | "destinationVersionId" | "organizationId"
+  >,
   capability: AffiliateSourceCapability,
-  configuration: PurposeConfiguration,
+  configuration: AffiliateDestinationTrackingPurposeConfiguration,
 ): Promise<CurrentProof | undefined> {
   for (;;) {
     const candidate = (
@@ -184,7 +252,7 @@ const combinedReference = (
  */
 export async function readAffiliateDestinationTrackingReadiness(
   client: pg.PoolClient,
-  input: Scope,
+  input: AffiliateDestinationTrackingReadinessInput,
 ): Promise<AffiliateDestinationTrackingReadiness> {
   await requireAffiliateReadinessTransaction(client);
   const validScope =
