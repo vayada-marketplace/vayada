@@ -157,7 +157,7 @@ function input(): FinanceDashboardResponseInput {
 }
 
 // prettier-ignore
-const room = (period: "current" | "comparison", recognizedOn: string, grossRoomAmount: string) => ({ period, recognizedOn, channel: "direct", directSource: null, roomTypeId: ROOM, grossRoomAmount, otaCommissionAmount: "0", occupiedRoomNights: 1 });
+const room = (period: "current" | "comparison", recognizedOn: string, grossRoomAmount: string) => ({ period, recognizedOn, channel: "direct", directSource: null, roomTypeId: ROOM, grossRoomAmount, otaCommissionAmount: "0", occupiedRoomNights: 1, pricedOccupiedRoomNights: 1 });
 // prettier-ignore
 const addOn = (period: "current" | "comparison", recognizedOn: string, revenueAmount: string) => ({ period, recognizedOn, ownership: "property" as const, revenueAmount });
 const money = (amount: string) => ({ amount, currency: "EUR" });

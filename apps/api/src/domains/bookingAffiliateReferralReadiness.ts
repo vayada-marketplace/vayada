@@ -20,6 +20,7 @@ export type AffiliateReferralReadiness =
       capability: "referral_round_trip";
       policyVersion: typeof AFFILIATE_REFERRAL_READINESS_POLICY_VERSION;
       evidenceReferences: string[];
+      validatedAt: string;
     }
   | {
       status: "blocked";
@@ -34,7 +35,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bounded = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= max;
 
-async function requireReadCommittedTransaction(client: pg.PoolClient) {
+export async function requireAffiliateReadinessTransaction(client: pg.PoolClient) {
   await client.query("SAVEPOINT affiliate_referral_readiness_transaction");
   const isolation = (await client.query("SHOW transaction_isolation")).rows[0]
     ?.transaction_isolation;
@@ -52,7 +53,7 @@ export async function readAffiliateReferralRoundTripReadiness(
   client: pg.PoolClient,
   input: Scope,
 ): Promise<AffiliateReferralReadiness> {
-  await requireReadCommittedTransaction(client);
+  await requireAffiliateReadinessTransaction(client);
   if (
     !uuid.test(input.propertyId) ||
     !uuid.test(input.destinationVersionId) ||
@@ -86,7 +87,7 @@ export async function readAffiliateReferralRoundTripReadiness(
     for (;;) {
       const candidate = (
         await client.query(
-          `SELECT certification.id,certification.probe_id
+          `SELECT certification.id,certification.probe_id,certification.completed_at
           FROM booking.affiliate_referral_transport_certifications certification
           JOIN booking.affiliate_validation_probes probe ON probe.id=certification.probe_id
             AND probe.property_id=certification.property_id
@@ -116,7 +117,7 @@ export async function readAffiliateReferralRoundTripReadiness(
             scope.certificationEnvironment,
           ],
         )
-      ).rows[0] as { id: string; probe_id: string } | undefined;
+      ).rows[0] as { id: string; probe_id: string; completed_at: Date } | undefined;
       if (!candidate) return undefined;
       const current = (
         await client.query(
@@ -142,7 +143,7 @@ export async function readAffiliateReferralRoundTripReadiness(
     for (;;) {
       const candidate = (
         await client.query(
-          `SELECT preflight.id
+          `SELECT preflight.id,preflight.completed_at
           FROM booking.affiliate_referral_production_preflights preflight
           WHERE preflight.property_id=$1 AND preflight.destination_version_id=$2
             AND preflight.organization_id=$3 AND preflight.connection_reference=$4
@@ -164,7 +165,7 @@ export async function readAffiliateReferralRoundTripReadiness(
             scope.adapterVersion,
           ],
         )
-      ).rows[0] as { id: string } | undefined;
+      ).rows[0] as { id: string; completed_at: Date } | undefined;
       if (!candidate) return undefined;
       const current = (
         await client.query(
@@ -192,5 +193,8 @@ export async function readAffiliateReferralRoundTripReadiness(
       `booking:affiliate-referral-transport-certification:${certification!.id}`,
       `booking:affiliate-referral-production-preflight:${preflight!.id}`,
     ],
+    validatedAt: new Date(
+      Math.min(certification!.completed_at.getTime(), preflight!.completed_at.getTime()),
+    ).toISOString(),
   };
 }

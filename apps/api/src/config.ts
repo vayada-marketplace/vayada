@@ -175,6 +175,7 @@ export type ApiConfig = {
   affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
   bookingWebEventSink: BookingWebEventSink;
+  replacementPricingAcceptanceAllowedSlugs: string[];
   bookingHostBase?: string;
   platformMediaServing?: PlatformMediaServingConfig;
   platformMediaCleanupEnabled: boolean;
@@ -279,6 +280,14 @@ function readOptionalCsvEnv(
         .map((entry) => entry.trim())
         .filter(Boolean)
     : defaultValue;
+}
+
+function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+  const slugs = [...new Set(readOptionalCsvEnv(env, key).map((slug) => slug.toLowerCase()))];
+  if (slugs.length > 100 || slugs.some((slug) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))) {
+    throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
+  }
+  return slugs;
 }
 
 function loadMarketplaceCommunicationUnsubscribeConfig(
@@ -1024,6 +1033,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "https://marketplace.localhost",
     ]),
     bookingWebEventSink,
+    replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
+      env,
+      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS",
+    ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing,
     platformMediaCleanupEnabled: readBooleanEnv(env, "PLATFORM_MEDIA_CLEANUP_ENABLED", true),

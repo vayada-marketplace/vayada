@@ -1,4 +1,5 @@
 import type { dispatchNextChannexClosedUpload } from "../domains/channexNextClosedUpload.js";
+import type { activatePublishedChannexOffers } from "../domains/replacementPricingOfferOwners.js";
 import type { prepareNextChannexRoomAvailabilityDispatch } from "../domains/channexRoomAvailabilityCoordinator.js";
 import type { reconcilePendingChannexRoomAvailability } from "../domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexResponse } from "./channexResponseBody.js";
@@ -128,6 +129,9 @@ export function createChannexManagementProvider(config: {
   prepareRoomAvailability?: (
     lease: Parameters<typeof prepareNextChannexRoomAvailabilityDispatch>[2],
   ) => ReturnType<typeof prepareNextChannexRoomAvailabilityDispatch>;
+  activatePublishedOffers?: (
+    lease: Parameters<typeof activatePublishedChannexOffers>[1],
+  ) => ReturnType<typeof activatePublishedChannexOffers>;
 }): ChannexManagementProvider {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
@@ -268,7 +272,17 @@ export function createChannexManagementProvider(config: {
             await input.onProgress?.();
             const prepared = await config.prepareRoomAvailability(lease);
             if (prepared.kind === "room_availability_current") {
-              // Continue to the existing plan only after complete current coverage.
+              if (config.activatePublishedOffers) {
+                const activated = await config.activatePublishedOffers(lease);
+                if (activated.kind === "all_targets_active") return { ok: true };
+                if (activated.kind !== "no_targets")
+                  return failure(
+                    activated.reason === "target_activation_pending"
+                      ? "provider_unavailable"
+                      : "invalid_state",
+                    new Error("Verified Channex offer activation is unavailable."),
+                  );
+              }
             } else if (prepared.kind === "prepared") {
               const result = await prepared.dispatch(async (request, signal) => {
                 if (request.method !== "POST" || request.path !== "/api/v1/availability")

@@ -1,0 +1,211 @@
+name: Publish coordinated next release
+
+on:
+  workflow_run:
+    workflows:
+      - Build coordinated next release
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      published_artifact_id:
+        description: Existing non-expired published artifact ID to redispatch
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: coordinated-next-release-publisher
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  publish:
+    if: >-
+      ${{
+        vars.COORDINATED_RELEASES_ENABLED == 'true' &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          (
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.head_branch == 'main' &&
+            github.event.workflow_run.repository.full_name == 'vayada-marketplace/vayada' &&
+            github.event.workflow_run.head_repository.full_name == 'vayada-marketplace/vayada'
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted publisher from main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Download and validate exact source artifact
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          REDISPATCH_ARTIFACT_ID: ${{ inputs.published_artifact_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-work/content
+          if test "${GITHUB_EVENT_NAME}" = workflow_run; then
+            case "$SOURCE_EVENT" in
+              push|workflow_dispatch) ;;
+              *) echo "::error::Source event is not allowlisted: $SOURCE_EVENT"; exit 1 ;;
+            esac
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+            test "$(jq -r '.status' <<< "$run_json")" = completed
+            test "$(jq -r '.conclusion' <<< "$run_json")" = success
+            test "$(jq -r '.head_branch' <<< "$run_json")" = main
+            test "$(jq -r '.head_sha' <<< "$run_json")" = "$SOURCE_SHA"
+            test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.run_attempt' <<< "$run_json")" = "$SOURCE_RUN_ATTEMPT"
+            test "$(jq -r '.path' <<< "$run_json")" = .github/workflows/build-coordinated-release.yml
+            artifact_name="next-release-candidate-v1-${SOURCE_RUN_ID}-${SOURCE_RUN_ATTEMPT}"
+            artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+              --jq ".artifacts[] | select(.name == \"${artifact_name}\" and .expired == false)")"
+            artifact_id="$(jq -r '.id' <<< "$artifact_json")"
+            test -n "$artifact_id" && test "$artifact_id" != null
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              > release-work/artifact.zip
+            unzip -q release-work/artifact.zip -d release-work/content
+            node scripts/coordinated-release/validate.mjs manifest \
+              release-work/content/manifest.json \
+              "$(awk '{print $1}' release-work/content/manifest.sha256)"
+            test "$(jq -r '.source.sha' release-work/content/manifest.json)" = "$SOURCE_SHA"
+            test "$(jq -r '.build.runId' release-work/content/manifest.json)" = "$SOURCE_RUN_ID"
+            test "$(jq -r '.build.runAttempt' release-work/content/manifest.json)" = "$SOURCE_RUN_ATTEMPT"
+            published_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+            published_name="$(node scripts/coordinated-release/prepare-publication.mjs \
+              --manifest release-work/content/manifest.json \
+              --manifest-hash release-work/content/manifest.sha256 \
+              --candidate-artifact-id "$artifact_id" \
+              --publisher-run-id "$GITHUB_RUN_ID" \
+              --publisher-run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --published-at "$published_at" \
+              --output release-work/content/published-record.json \
+              --hash-output release-work/content/published-record.sha256)"
+            {
+              echo "mode=publish"
+              echo "published-name=$published_name"
+            } >> "$GITHUB_OUTPUT"
+          else
+            [[ "$REDISPATCH_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+            artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${REDISPATCH_ARTIFACT_ID}")"
+            test "$(jq -r '.expired' <<< "$artifact_json")" = false
+            artifact_name="$(jq -r '.name' <<< "$artifact_json")"
+            [[ "$artifact_name" =~ ^next-release-published-v1- ]]
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${REDISPATCH_ARTIFACT_ID}/zip" \
+              > release-work/artifact.zip
+            unzip -q release-work/artifact.zip -d release-work/content
+            manifest_hash="$(node scripts/coordinated-release/validate.mjs manifest release-work/content/manifest.json)"
+            node scripts/coordinated-release/validate.mjs published-record release-work/content/published-record.json \
+              "$(cat release-work/content/published-record.sha256)"
+            test "$manifest_hash" = "$(jq -r '.manifestSha256' release-work/content/published-record.json)"
+            test "$artifact_name" = "$(jq -r '.publishedArtifactName' release-work/content/published-record.json)"
+            test "$(jq -r '.workflow_run.id' <<< "$artifact_json")" = \
+              "$(jq -r '.publisher.runId' release-work/content/published-record.json)"
+            publisher_run_id="$(jq -r '.publisher.runId' release-work/content/published-record.json)"
+            publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
+            test "$(jq -r '.status' <<< "$publisher_run")" = completed
+            test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
+            test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
+            test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml
+            test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.run_attempt' <<< "$publisher_run")" = \
+              "$(jq -r '.publisher.runAttempt' release-work/content/published-record.json)"
+            test "$(date -u +%s)" -lt "$(date -u -d "$(jq -r '.expiresAt' release-work/content/published-record.json)" +%s)"
+            {
+              echo "mode=redispatch"
+              echo "published-artifact-id=$REDISPATCH_ARTIFACT_ID"
+              echo "published-name=$artifact_name"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Reverify every immutable image and source tag before publication
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r repository digest image_source_sha; do
+            verified="$(aws ecr describe-images \
+              --repository-name "$repository" \
+              --image-ids "imageTag=next-${image_source_sha}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)"
+            test "$verified" = "$digest"
+          done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/content/manifest.json)
+
+      - name: Upload durable published release
+        if: ${{ steps.prepare.outputs.mode == 'publish' }}
+        id: upload
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.prepare.outputs.published-name }}
+          path: |
+            release-work/content/manifest.json
+            release-work/content/manifest.sha256
+            release-work/content/published-record.json
+            release-work/content/published-record.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Resolve published artifact identity
+        id: artifact
+        env:
+          MODE: ${{ steps.prepare.outputs.mode }}
+          NEW_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          EXISTING_ARTIFACT_ID: ${{ steps.prepare.outputs.published-artifact-id }}
+        run: |
+          set -euo pipefail
+          if test "$MODE" = publish; then
+            artifact_id="$NEW_ARTIFACT_ID"
+          else
+            artifact_id="$EXISTING_ARTIFACT_ID"
+          fi
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          echo "id=$artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch immutable release identity to platform
+        env:
+          GH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          PUBLISHED_ARTIFACT_ID: ${{ steps.artifact.outputs.id }}
+        run: |
+          set -euo pipefail
+          node scripts/coordinated-release/dispatch-payload.mjs \
+            release-work/content/manifest.json \
+            release-work/content/published-record.json \
+            "$PUBLISHED_ARTIFACT_ID" \
+            > release-work/dispatch.json
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            repos/vayada-marketplace/vayada-platform/dispatches \
+            --input release-work/dispatch.json
+
+      - name: Summarize publication
+        run: |
+          jq -n \
+            --arg mode "${{ steps.prepare.outputs.mode }}" \
+            --arg manifestId "$(jq -r '.manifestId' release-work/content/manifest.json)" \
+            --arg sourceSha "$(jq -r '.source.sha' release-work/content/manifest.json)" \
+            --arg artifactId "${{ steps.artifact.outputs.id }}" \
+            '{mode: $mode, manifestId: $manifestId, sourceSha: $sourceSha, publishedArtifactId: $artifactId}' \
+            >> "$GITHUB_STEP_SUMMARY"
