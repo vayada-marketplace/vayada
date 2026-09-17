@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { airbnbInquiryEvidence } from "../domains/airbnbInquiryEvidence.js";
 
 import type { PlatformMediaInboundAttachmentWriter } from "../platform/platformMediaS3.js";
 
@@ -59,6 +60,8 @@ type Message = {
   guestEmail: string | null;
   sourceBookingId: string | null;
   providerInquiryId: string | null;
+  inquiryEventId?: string | null;
+  inquiryBookingDetails?: Record<string, unknown>;
   inquiry: boolean;
   inquiryArrivalDate: string | null;
   inquiryDepartureDate: string | null;
@@ -961,6 +964,16 @@ function providerEvidence(job: Job, message: Message): Record<string, unknown> {
     sourceMessageId: message.sourceMessageId,
     sourceBookingId: message.sourceBookingId,
     providerInquiryId: message.providerInquiryId,
+    inquiry: message.inquiry,
+    liveFeedEventId: message.inquiryEventId ?? null,
+    airbnbInquiry: airbnbInquiryEvidence({
+      inquiry: message.inquiry,
+      providerChannel: message.providerChannel,
+      providerPropertyId: job.providerPropertyId,
+      threadId: message.threadId,
+      eventId: message.inquiryEventId,
+      bookingDetails: message.inquiryBookingDetails,
+    }),
     providerChannel: message.providerChannel,
     attachmentIds: message.attachments
       .map((attachment) => attachment.sourceAttachmentId)
@@ -1395,7 +1408,7 @@ function parseMessage(job: Job, rawPayload: Record<string, unknown>, apiBaseUrl:
     !sourceBookingId &&
     Boolean(
       (providerChannel === "airbnb" &&
-        (providerInquiryId ||
+        (firstTextFrom(sources, ["provider_inquiry_id", "inquiry_id"]) ||
           Object.keys(inquiry).length ||
           messageType?.toLowerCase().includes("inquiry"))) ||
       (senderType === "system" &&
@@ -1408,9 +1421,24 @@ function parseMessage(job: Job, rawPayload: Record<string, unknown>, apiBaseUrl:
   const arrival = optionalDate(
     firstValueFrom(inquirySources, ["arrival_date", "checkin_date", "check_in", "checkin"]),
   );
-  const departure = optionalDate(
+  let departure = optionalDate(
     firstValueFrom(inquirySources, ["departure_date", "checkout_date", "check_out", "checkout"]),
   );
+  if (arrival && isInquiry) {
+    const nights = bookingDetails["nights"];
+    if (
+      typeof nights === "number" &&
+      Number.isSafeInteger(nights) &&
+      nights > 0 &&
+      nights <= 3650
+    ) {
+      const end = new Date(`${arrival}T00:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + nights);
+      const computed = optionalDate(end.toISOString().slice(0, 10));
+      if (departure && departure !== computed) throw new Failure("invalid_inquiry_dates", false);
+      departure ??= computed;
+    }
+  }
   if (
     (arrival && !departure) ||
     (!arrival && departure) ||
@@ -1435,6 +1463,8 @@ function parseMessage(job: Job, rawPayload: Record<string, unknown>, apiBaseUrl:
     guestEmail: firstTextFrom(sources, ["guest_email"]),
     sourceBookingId,
     providerInquiryId,
+    inquiryEventId: uuid(meta["live_feed_event_id"]) ? meta["live_feed_event_id"] : null,
+    inquiryBookingDetails: bookingDetails,
     inquiry: isInquiry,
     inquiryArrivalDate: isInquiry ? arrival : null,
     inquiryDepartureDate: isInquiry ? departure : null,
