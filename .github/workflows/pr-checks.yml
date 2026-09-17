@@ -224,6 +224,8 @@ jobs:
           src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
+          src/domains/marketplaceAffiliatePublicationPrerequisites.test.ts
+          src/domains/marketplaceAffiliatePublication.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \

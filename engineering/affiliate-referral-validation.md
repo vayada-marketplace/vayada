@@ -372,5 +372,19 @@ Only the exact current policy with one distinct, fresh, purpose-bound opaque ref
 each of the four purposes may be returned as validated. Malformed, partial, duplicated,
 future or stale port results are redacted to the existing pending response. Without a current
 source-selection provider, the production repository continues to report pending; request
-payloads cannot supply configuration or readiness. Publication consumption remains the next
-slice.
+payloads cannot supply configuration or readiness.
+
+## Publication prerequisite composition
+
+The internal Marketplace publication command can compose complete commercial conditions
+with the Booking-owned aggregate reader inside its existing `READ COMMITTED` transaction.
+It derives the destination from the locked draft, obtains source selection from a trusted
+server port and retains the four opaque tracking references with commercial evidence in the
+immutable published terms.
+
+Missing configuration, commercial conditions or a tracking purpose blocks publication and
+writes nothing. Pending purposes remain explicit; malformed port responses return a safe
+`tracking_readiness_invalid` blocker rather than throwing or storing partial proof. The
+default publication resolver remains blocking because the commercial-conditions and current
+source-selection providers do not yet exist. This composition adds no HTTP publication route,
+agreement or link activation, and no request payload can supply readiness.
