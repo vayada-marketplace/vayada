@@ -139,13 +139,17 @@ designs need coordinated review of shared `identity.*` access and secrets.
 - Negative ACL tests: snapshot the general role's **existing** shared-table
   grants and prove it gains no new pricing/identity privileges; do not revoke
   capabilities already used by unrelated routes (for example,
-  `hotel_catalog.properties`). The pricing role cannot directly mutate **each** protected
-  locked relation (including Booking authority revisions, Finance, PMS, and
-  Distribution), cross property boundaries on intentional writes, or run
-  unreviewed definer functions. A successful `FOR SHARE` test alone does not
-  prove the write boundary: attempt direct UPDATE on every locked table. If
-  grants make denial impossible, redesign the lock/write mechanism rather than
-  treating a dedicated pool as sufficient isolation.
+  `hotel_catalog.properties`). The only intended pricing writes here are
+  `INSERT` on `booking.pricing_authority_revisions`, `INSERT`/`UPDATE` on
+  `booking.pricing_authority_heads`, and `INSERT` on `booking.pricing_quotes`,
+  all scoped to the authorized property. Deny direct writes to every other
+  protected locked relation (including Identity, Finance, PMS, and
+  Distribution), `UPDATE`/`DELETE` on revisions or quotes, `DELETE` on heads,
+  cross-property writes, and unreviewed definer execution. A successful
+  `FOR SHARE` test alone does not prove this boundary: attempt direct UPDATE
+  on every locked table. If grants cannot enforce these denials, redesign the
+  lock/write mechanism rather than treating a dedicated pool as sufficient
+  isolation.
 - Concurrency tests retain the existing reader-versus-writer blocking and
   stale/revocation behavior (`bookingPricingAuthority.integration.test.ts`).
   Test transaction rollback on every denial/error and no leaked privileged
