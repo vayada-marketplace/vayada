@@ -36,6 +36,7 @@ const category = {
 test("filters expenses and exports the same selection accessibly", async ({ page }) => {
   const categories = [category];
   let createdExpense: Record<string, unknown> | null = null;
+  let createdSupplierBill: Record<string, unknown> | null = null;
   let firstManualCommandId = "";
   let receiptTargetId = "";
   let receiptUploads = 0;
@@ -72,7 +73,16 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   });
   await page.route("**/api/media/upload-sessions/receipt-session/finalize", (route) =>
     route.fulfill({
-      json: { mediaObjects: [{ mediaObjectId: "12140000-0000-4000-8000-000000000009" }] },
+      json: {
+        mediaObjects: [
+          {
+            mediaObjectId:
+              receiptUploads === 1
+                ? "12140000-0000-4000-8000-000000000009"
+                : "12140000-0000-4000-8000-00000000000a",
+          },
+        ],
+      },
     }),
   );
   await page.route("**/api/identity/staff/self-access", (route) =>
@@ -167,6 +177,31 @@ test("filters expenses and exports the same selection accessibly", async ({ page
     (route) => {
       if (route.request().method() === "POST") {
         const body = route.request().postDataJSON();
+        if (body.supplierInvoiceNumber) {
+          expect(body.supplierInvoiceNumber).toBe("INV-2026-09");
+          expect(body.recurrence).toBeUndefined();
+          expect(body.receiptMediaId).toBe("12140000-0000-4000-8000-00000000000a");
+          expect(body.commandId).toBe(receiptTargetId);
+          createdSupplierBill = {
+            id: body.commandId,
+            categoryId: body.categoryId,
+            origin: "supplier_bill",
+            incurredOn: body.incurredOn,
+            vendor: body.vendor,
+            amount: body.amount,
+            paymentStatus: body.paymentStatus,
+            paidOn: body.paidOn,
+            recurringRuleId: null,
+            sourceKey: `supplier_bill:${body.commandId}`,
+            reversesExpenseId: null,
+            supplierInvoiceNumber: body.supplierInvoiceNumber,
+            revision: 1,
+          };
+          return route.fulfill({
+            status: 201,
+            json: { ...envelope, item: createdSupplierBill, outcome: "created" },
+          });
+        }
         if (body.recurrence) {
           expect(body.vendor).toBe("Weekly cleaning");
           expect(body.recurrence).toEqual({ cadence: "weekly", startsOn: "2026-09-17" });
@@ -227,6 +262,7 @@ test("filters expenses and exports the same selection accessibly", async ({ page
           page: {
             items: [
               ...(createdExpense ? [createdExpense] : []),
+              ...(createdSupplierBill ? [createdSupplierBill] : []),
               {
                 id: "12140000-0000-4000-8000-000000000003",
                 categoryId: category.id,
@@ -414,4 +450,27 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await categoriesDialog.getByLabel("Name").fill("Housekeeping & linen");
   await categoriesDialog.getByRole("button", { name: "Save changes" }).click();
   await expect(categoriesDialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Log expense" }).click();
+  await expenseDialog.getByLabel("Entry type").selectOption("supplier_bill");
+  await expect(expenseDialog.getByLabel("Repeat")).toHaveCount(0);
+  await expect(expenseDialog.getByLabel("Supplier bill reference")).toHaveAttribute("required", "");
+  expect((await new AxeBuilder({ page }).include('[role="dialog"]').analyze()).violations).toEqual(
+    [],
+  );
+  await expenseDialog.getByLabel("Supplier bill reference").fill("INV-2026-09");
+  await expenseDialog.getByLabel("Vendor").fill("Linen Supplier");
+  await expenseDialog.getByLabel("Category").selectOption({ label: "Housekeeping & linen" });
+  await expenseDialog.getByLabel("Amount (EUR)").fill("30");
+  await expenseDialog.getByLabel("Receipt image (optional)").setInputFiles({
+    name: "bill.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("supplier receipt"),
+  });
+  await expenseDialog.getByRole("button", { name: "Log supplier bill" }).click();
+  await expect(expenseDialog).toHaveCount(0);
+  expect(receiptUploads).toBe(2);
+  const supplierRow = page.getByRole("row").filter({ hasText: "Linen Supplier" });
+  await expect(supplierRow).toContainText("Supplier bill: INV-2026-09");
+  await expect(supplierRow).toContainText("supplier bill");
+  await expect(supplierRow).not.toContainText("generated");
 });

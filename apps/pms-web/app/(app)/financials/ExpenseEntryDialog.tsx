@@ -44,6 +44,8 @@ export function ExpenseEntryDialog({
   const [paidOn, setPaidOn] = useState(today);
   const [notes, setNotes] = useState("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [entryType, setEntryType] = useState<"manual" | "supplier_bill">("manual");
+  const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState("");
   const [cadence, setCadence] = useState<FinanceExpenseCadence | "">("");
   const [endsOn, setEndsOn] = useState("");
   const [error, setError] = useState("");
@@ -57,6 +59,10 @@ export function ExpenseEntryDialog({
     }
     if (paymentStatus === "paid" && !cadence && !paidOn) {
       setError("Enter the payment date for a paid expense.");
+      return;
+    }
+    if (entryType === "supplier_bill" && !supplierInvoiceNumber.trim()) {
+      setError("Enter the supplier bill reference.");
       return;
     }
     if (endsOn && (!cadence || endsOn < incurredOn)) {
@@ -84,6 +90,9 @@ export function ExpenseEntryDialog({
         ? { paymentStatus, paidOn: cadence ? incurredOn : paidOn }
         : { paymentStatus, paidOn: null }),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(entryType === "supplier_bill"
+        ? { supplierInvoiceNumber: supplierInvoiceNumber.trim() }
+        : {}),
       ...(cadence
         ? { recurrence: { cadence, startsOn: incurredOn, ...(endsOn ? { endsOn } : {}) } }
         : {}),
@@ -151,14 +160,20 @@ export function ExpenseEntryDialog({
             disabled={saving || !categories.some((item) => !item.archived)}
             className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {saving ? "Saving…" : cadence ? "Save recurring expense" : "Log expense"}
+            {saving
+              ? "Saving…"
+              : cadence
+                ? "Save recurring expense"
+                : entryType === "supplier_bill"
+                  ? "Log supplier bill"
+                  : "Log expense"}
           </button>
         </div>
       }
     >
       <h2 className="text-lg font-semibold text-gray-900">Log expense</h2>
       <p className="mt-1 text-sm text-gray-600">
-        Record a manual cost or set a recurring schedule.
+        Record a manual cost, supplier bill, or recurring schedule.
       </p>
       <form
         id="log-expense-form"
@@ -168,6 +183,40 @@ export function ExpenseEntryDialog({
           void save();
         }}
       >
+        <label className={label}>
+          Entry type
+          <select
+            disabled={saving}
+            className={input}
+            value={entryType}
+            onChange={(event) => {
+              const next = event.target.value as "manual" | "supplier_bill";
+              setEntryType(next);
+              if (next === "supplier_bill") {
+                setCadence("");
+                setEndsOn("");
+              } else {
+                setSupplierInvoiceNumber("");
+              }
+            }}
+          >
+            <option value="manual">Manual expense</option>
+            <option value="supplier_bill">Supplier bill</option>
+          </select>
+        </label>
+        {entryType === "supplier_bill" && (
+          <label className={label}>
+            Supplier bill reference
+            <input
+              disabled={saving}
+              className={input}
+              required
+              maxLength={200}
+              value={supplierInvoiceNumber}
+              onChange={(event) => setSupplierInvoiceNumber(event.target.value)}
+            />
+          </label>
+        )}
         <label className={label}>
           Expense date
           <input
@@ -272,24 +321,26 @@ export function ExpenseEntryDialog({
             </span>
           </label>
         )}
-        <label className={label}>
-          Repeat
-          <select
-            disabled={saving}
-            className={input}
-            value={cadence}
-            onChange={(event) => {
-              const nextCadence = event.target.value as FinanceExpenseCadence | "";
-              if (nextCadence) setReceiptFile(null);
-              setCadence(nextCadence);
-            }}
-          >
-            <option value="">One-off</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-        </label>
+        {entryType === "manual" && (
+          <label className={label}>
+            Repeat
+            <select
+              disabled={saving}
+              className={input}
+              value={cadence}
+              onChange={(event) => {
+                const nextCadence = event.target.value as FinanceExpenseCadence | "";
+                if (nextCadence) setReceiptFile(null);
+                setCadence(nextCadence);
+              }}
+            >
+              <option value="">One-off</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+        )}
         {cadence && (
           <p className="self-end text-xs text-gray-600">
             Paid recurring entries use each occurrence date as their payment date.

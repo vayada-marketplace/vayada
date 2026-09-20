@@ -594,6 +594,11 @@ function ExpenseTable({
                 </td>
                 <th className="px-4 py-3 font-medium text-gray-900" scope="row">
                   {item.vendor}
+                  {item.supplierInvoiceNumber && (
+                    <span className="block text-xs font-normal text-gray-600">
+                      Supplier bill: {item.supplierInvoiceNumber}
+                    </span>
+                  )}
                 </th>
                 <td className="px-4 py-3 text-gray-600">
                   {categoryNames.get(item.categoryId) ?? "Archived category"}
@@ -631,7 +636,7 @@ function ExpenseTable({
 }
 
 function OriginBadge({ item }: { item: FinanceExpense }) {
-  const generated = item.origin !== "manual";
+  const generated = item.origin !== "manual" && item.origin !== "supplier_bill";
   const label = item.recurringRuleId ? "Recurring" : item.origin.replaceAll("_", " ");
   return (
     <span
