@@ -16,6 +16,8 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
   let readerUrl: string;
   let lifecycle: ReturnType<typeof createPgIdentityLifecycleCommandBus>;
   let protectedUserId: string;
+  let suspendedProtectedUserId: string;
+  let deletedProtectedUserId: string;
   let ordinaryUserId: string;
   let adminConnected = false;
   let readerRoleCreated = false;
@@ -36,13 +38,19 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
     );
 
     protectedUserId = randomUUID();
+    suspendedProtectedUserId = randomUUID();
+    deletedProtectedUserId = randomUUID();
     ordinaryUserId = randomUUID();
     await admin.query(
       `INSERT INTO identity.users(id, email, status)
-       VALUES ($1, $2, 'pending'), ($3, $4, 'pending')`,
+       VALUES ($1, $2, 'pending'), ($3, $4, 'suspended'), ($5, $6, 'deleted'), ($7, $8, 'pending')`,
       [
         protectedUserId,
         `protected-${protectedUserId}@example.test`,
+        suspendedProtectedUserId,
+        `suspended-${suspendedProtectedUserId}@example.test`,
+        deletedProtectedUserId,
+        `deleted-${deletedProtectedUserId}@example.test`,
         ordinaryUserId,
         `ordinary-${ordinaryUserId}@example.test`,
       ],
@@ -66,7 +74,11 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
         approval_envelope_sha256, executor_principal_sha256, checkpoint)
        VALUES ($1, 'legacy-owner-internal-setup.v1', 'local', $2, $3,
         'vay1351-aaaaaaaaaaaaaaaaaaaaaaaa', $2, $2, $2, $2, $2, 'internal_users_prepared')`,
-      [randomUUID(), hash, [protectedUserId]],
+      [
+        randomUUID(),
+        hash,
+        [protectedUserId, suspendedProtectedUserId, deletedProtectedUserId].sort(),
+      ],
     );
 
     parsed.username = roleName;
@@ -134,10 +146,23 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
     await expect(
       lifecycle.execute(emailCommand(protectedUserId, "blocked@example.test")),
     ).rejects.toThrow("Legacy owner account reconciliation required");
-    for (const status of ["active", "pending"] as const)
+    const protectedState = async () =>
+      (
+        await admin.query("SELECT email, status FROM identity.users WHERE id = $1", [
+          protectedUserId,
+        ])
+      ).rows;
+    await expect(protectedState()).resolves.toEqual([
+      { email: `protected-${protectedUserId}@example.test`, status: "pending" },
+    ]);
+    for (const status of ["active", "pending"] as const) {
       await expect(lifecycle.execute(statusCommand(protectedUserId, status))).rejects.toThrow(
         "Legacy owner account reconciliation required",
       );
+      await expect(protectedState()).resolves.toEqual([
+        { email: `protected-${protectedUserId}@example.test`, status: "pending" },
+      ]);
+    }
     await expect(
       lifecycle.execute(statusCommand(protectedUserId, "suspended")),
     ).resolves.toMatchObject({ status: "accepted" });
@@ -148,6 +173,20 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
         ])
       ).rows,
     ).toEqual([{ email: `protected-${protectedUserId}@example.test`, status: "suspended" }]);
+  });
+
+  it("denies email updates for suspended and deleted protected users", async () => {
+    for (const [userId, status] of [
+      [suspendedProtectedUserId, "suspended"],
+      [deletedProtectedUserId, "deleted"],
+    ] as const) {
+      await expect(lifecycle.execute(emailCommand(userId, "blocked@example.test"))).rejects.toThrow(
+        "Legacy owner account reconciliation required",
+      );
+      expect(
+        (await admin.query("SELECT status FROM identity.users WHERE id = $1", [userId])).rows,
+      ).toEqual([{ status }]);
+    }
   });
 
   it("allows ordinary email updates and keeps receipt columns private", async () => {
