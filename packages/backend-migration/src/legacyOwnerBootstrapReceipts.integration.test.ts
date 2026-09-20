@@ -162,9 +162,10 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
       throw new Error("Dedicated loopback receipt reader fixture required");
 
     let reader: pg.Client | undefined;
+    let readerRoleCreated = false;
     try {
-      await client.query("DROP ROLE IF EXISTS vay2017_receipt_reader");
       await client.query("CREATE ROLE vay2017_receipt_reader LOGIN PASSWORD 'reader_test_only'");
+      readerRoleCreated = true;
       await client.query(
         "GRANT CONNECT ON DATABASE vay2017_receipt_fixture TO vay2017_receipt_reader",
       );
@@ -217,7 +218,16 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
         ).rejects.toMatchObject({ code: "42501" });
     } finally {
       await reader?.end();
-      await client.query("DROP ROLE IF EXISTS vay2017_receipt_reader");
+      if (readerRoleCreated) {
+        await client.query(
+          "REVOKE SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts FROM vay2017_receipt_reader",
+        );
+        await client.query("REVOKE USAGE ON SCHEMA platform FROM vay2017_receipt_reader");
+        await client.query(
+          "REVOKE CONNECT ON DATABASE vay2017_receipt_fixture FROM vay2017_receipt_reader",
+        );
+        await client.query("DROP ROLE vay2017_receipt_reader");
+      }
     }
   });
 });
