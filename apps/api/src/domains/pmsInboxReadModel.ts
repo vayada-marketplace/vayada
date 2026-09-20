@@ -375,7 +375,8 @@ export function createPgPmsInboxReadPort(config: {
       );
 
       const inquiry =
-        config.providerMutationEnabled && threadRow.providerChannel === "airbnb"
+        config.providerMutationEnabled &&
+        threadRow.providerChannel?.trim().toLowerCase() === "airbnb"
           ? await readPmsInboxInquiryContext(
               pool,
               input.propertyId,

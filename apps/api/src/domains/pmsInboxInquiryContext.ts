@@ -43,7 +43,7 @@ export async function readPmsInboxInquiryContext(
         AND raw_payload->>'inquiry' = 'true'
       ORDER BY sent_at DESC, id DESC LIMIT 1) message ON true
     WHERE thread.property_id = $1 AND thread.id = $2 AND thread.source = 'channex'
-      AND thread.delivery_channel = 'ota' AND thread.provider_channel = 'airbnb'
+      AND thread.delivery_channel = 'ota' AND lower(BTRIM(thread.provider_channel)) = 'airbnb'
       AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL
       AND ($3::bigint IS NULL OR thread.version = $3)`,
     [propertyId, threadId, expectedVersion ?? null],

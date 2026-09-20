@@ -71,7 +71,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       [PROPERTY, OTHER_PROPERTY],
     );
     await admin.query(
-      `UPDATE pms.message_threads SET provider_channel = 'airbnb', conversation_context_state = 'inquiry',
+      `UPDATE pms.message_threads SET provider_channel = ' AirBnB ', conversation_context_state = 'inquiry',
       inquiry_arrival_date = '2030-12-12', inquiry_departure_date = '2030-12-15', inquiry_adults = 2, inquiry_children = 0 WHERE id = $1`,
       [THREAD],
     );
