@@ -150,6 +150,25 @@ negative cases, audit `BEFORE UPDATE` triggers for side effects, and preserve
 VAY-2038's separate identity role boundary. No RLS migration, grant, or
 credential mapping is approved by this experiment.
 
+A second disposable PostgreSQL 17 check loaded the current target schema and
+repeated the lock/deny test on the **real** `identity.organizations` table with
+a synthetic hotel-group row. A non-owner test role could run the route's
+`FOR UPDATE` query, but its direct `UPDATE` failed the restrictive policy;
+another test role could still update, and the row stayed unchanged after both
+transactions rolled back. This narrows one known blocker, but does not validate
+the other lock relations or authorize a live identity-table policy. The actual
+schema has `BEFORE UPDATE` triggers on some locked relations, so the final
+policy review must check their behavior as well.
+
+The remaining decision is the intentional authority-head and quote writes.
+A dedicated role with direct `INSERT`/`UPDATE` rights can address rows for any
+property unless the database enforces scope. A property ID or custom session
+setting supplied by that same role is not, by itself, a security boundary: a
+compromised role could supply another value. Either establish a stronger
+database-verifiable scope mechanism, or explicitly accept application
+authorization as the cross-property boundary in a security review. Do not
+infer that the lock-only RLS result resolves this write-scope decision.
+
 ## Required proof before deployment
 
 - PostgreSQL integration tests with **separate actual test roles**, not owner
