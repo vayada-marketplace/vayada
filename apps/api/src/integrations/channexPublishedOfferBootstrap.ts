@@ -7,6 +7,7 @@ import {
   retainChannexOfferConfiguration,
 } from "../domains/replacementPricingOfferOwners.js";
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
+import { planChannexOfferConfiguration } from "./channexOfferConfiguration.js";
 
 type BootstrapResult =
   | { kind: "ready" }
@@ -53,14 +54,49 @@ export async function bootstrapPublishedChannexOffer(
   if (current.kind !== "available") return current;
   if (current.publication.revision !== saved.publicationRevision)
     return { kind: "unavailable", reason: "publication_changed" };
-  if (
-    !current.publication.rooms.some(
-      (room) =>
-        room.roomTypeId === saved.roomTypeId &&
-        room.offers.some((offer) => offer.id === saved.offerId),
+  const room = current.publication.rooms.find(
+    (room) =>
+      room.roomTypeId === saved.roomTypeId &&
+      room.offers.some((offer) => offer.id === saved.offerId),
+  );
+  if (!room) return { kind: "unavailable", reason: "published_offer_missing" };
+  const plan = planChannexOfferConfiguration(room, saved.offerId, saved.primaryOccupancy);
+  if (plan.kind !== "planned") return plan;
+  const active = (
+    await pool.query<{ matches: boolean }>(
+      `SELECT (intent.status='sealed' AND version.intent_id=intent.id
+         AND version.binding_generation=connection.binding_generation
+         AND version.external_property_id=$5
+         AND intent.proposal->>'publicationRevision'=$6
+         AND intent.proposal->>'primaryOccupancy'=$7
+         AND intent.proposal->'room'=$8::jsonb
+         AND version.configuration=$9::jsonb
+         AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_target_intents pending
+           WHERE pending.target_id=target.id AND pending.status='pending')) AS matches
+       FROM pms.channex_offer_targets target
+       JOIN pms.channel_connections connection ON connection.id=target.connection_id
+       JOIN pms.channex_offer_target_versions version
+         ON version.target_id=target.id AND version.version=target.active_version
+       JOIN pms.channex_offer_target_intents intent ON intent.id=version.intent_id
+       WHERE target.property_id=$1 AND target.connection_id=$2
+         AND target.room_type_id=$3 AND target.offer_id=$4`,
+      [
+        job.propertyId,
+        current.authority.connectionId,
+        saved.roomTypeId,
+        saved.offerId,
+        current.authority.externalPropertyId,
+        String(saved.publicationRevision),
+        String(saved.primaryOccupancy),
+        JSON.stringify(room),
+        JSON.stringify(plan.configuration),
+      ],
     )
-  )
-    return { kind: "unavailable", reason: "published_offer_missing" };
+  ).rows[0];
+  if (active)
+    return active.matches
+      ? { kind: "ready" }
+      : { kind: "unavailable", reason: "active_offer_conflict" };
   const attempt = (
     await pool.query<{ attemptId: string; state: "unresolved" | "identified"; completed: boolean }>(
       `SELECT attempt.id::text AS "attemptId",attempt.state,
@@ -97,10 +133,19 @@ export async function bootstrapPublishedChannexOffer(
       getRoom: ports.get,
       create: ports.create,
     });
-    if (result.kind === "receipt_pending") await result.persist();
+    if (result.kind === "receipt_pending") {
+      for (const delay of [0, 100, 300]) {
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        try {
+          await result.persist();
+          return { kind: "creation_retained", attemptId: result.attemptId };
+        } catch {
+          // Keep the captured response in memory for bounded persistence retries.
+        }
+      }
+      return { kind: "unavailable", reason: "creation_receipt_persistence_failed" };
+    }
     if (result.kind === "retained")
-      return { kind: "creation_retained", attemptId: result.attemptId };
-    if (result.kind === "receipt_pending")
       return { kind: "creation_retained", attemptId: result.attemptId };
     return result;
   }

@@ -13,6 +13,12 @@ vi.mock("../domains/replacementPricingOfferOwners.js", () => ({
   recordRetainedChannexOfferCreate: primitives.record,
   retainChannexOfferConfiguration: primitives.configure,
 }));
+vi.mock("./channexOfferConfiguration.js", () => ({
+  planChannexOfferConfiguration: vi.fn(() => ({
+    kind: "planned",
+    configuration: { meal_type: "breakfast" },
+  })),
+}));
 
 import { bootstrapPublishedChannexOffer } from "./channexPublishedOfferBootstrap.js";
 
@@ -41,6 +47,10 @@ describe("published Channex offer bootstrap", () => {
     vi.clearAllMocks();
     primitives.read.mockResolvedValue({
       kind: "available",
+      authority: {
+        connectionId: "77777777-7777-4777-8777-777777777777",
+        externalPropertyId: propertyId,
+      },
       publication: {
         revision: 1,
         rooms: [{ roomTypeId, offers: [{ id: offerId }] }],
@@ -50,7 +60,10 @@ describe("published Channex offer bootstrap", () => {
 
   it("uses retained creation evidence on retry without another provider create", async () => {
     const pool = {
-      query: vi.fn().mockResolvedValue({ rows: [{ attemptId, state: "unresolved" }] }),
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ attemptId, state: "unresolved" }] }),
     } as unknown as Pool;
     primitives.record.mockResolvedValue({ kind: "identified" });
     primitives.configure.mockResolvedValue({ kind: "configuration_retained" });
@@ -80,11 +93,32 @@ describe("published Channex offer bootstrap", () => {
     expect(dispatch).toHaveBeenCalledWith({ getRoom: ports.get, create: ports.create });
   });
 
+  it("retries a captured receipt before continuing and holds repeated persistence failure", async () => {
+    const pool = { query: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as Pool;
+    const persist = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary write failure"))
+      .mockResolvedValueOnce(undefined);
+    primitives.prepare.mockResolvedValue({
+      kind: "prepared",
+      dispatch: vi.fn().mockResolvedValue({ kind: "receipt_pending", attemptId, persist }),
+    });
+    await expect(bootstrapPublishedChannexOffer(pool, job, "worker", ports)).resolves.toEqual({
+      kind: "creation_retained",
+      attemptId,
+    });
+    expect(persist).toHaveBeenCalledTimes(2);
+    persist.mockReset().mockRejectedValue(new Error("storage unavailable"));
+    await expect(bootstrapPublishedChannexOffer(pool, job, "worker", ports)).resolves.toEqual({
+      kind: "unavailable",
+      reason: "creation_receipt_persistence_failed",
+    });
+    expect(persist).toHaveBeenCalledTimes(3);
+  });
+
   it("recognizes an already activated matching offer after worker completion crashes", async () => {
     const pool = {
-      query: vi
-        .fn()
-        .mockResolvedValue({ rows: [{ attemptId, state: "identified", completed: true }] }),
+      query: vi.fn().mockResolvedValue({ rows: [{ matches: true }] }),
     } as unknown as Pool;
     await expect(bootstrapPublishedChannexOffer(pool, job, "worker", ports)).resolves.toEqual({
       kind: "ready",

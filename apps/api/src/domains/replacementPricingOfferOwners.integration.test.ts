@@ -2178,6 +2178,57 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       }),
     ).toEqual({ kind: "ready" });
     expect(create).not.toHaveBeenCalled();
+    const repeatId = randomUUID();
+    await pool.query(
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
+         tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+       VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','running',1,
+         'reader-test',clock_timestamp(),'property',$2::uuid,'pms','channex_connection',$2::text,
+         $3::jsonb)`,
+      [repeatId, f.scope.propertyId, JSON.stringify(job.input)],
+    );
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'reader-test')",
+      [repeatId],
+    );
+    const repeat = { ...job, jobId: repeatId };
+    expect(
+      await bootstrapPublishedChannexOffer(pool, repeat, f.input.workerId, {
+        get: vi.fn(),
+        create,
+      }),
+    ).toEqual({ kind: "ready" });
+    expect(
+      await bootstrapPublishedChannexOffer(
+        pool,
+        {
+          ...repeat,
+          input: {
+            ...repeat.input,
+            publishedOffer: { ...repeat.input.publishedOffer, primaryOccupancy: 2 },
+          },
+        },
+        f.input.workerId,
+        { get: vi.fn(), create },
+      ),
+    ).toEqual({
+      kind: "unavailable",
+      reason: "active_offer_conflict",
+    });
+    expect(
+      (
+        await prepareChannexOfferDispatch(
+          pool,
+          {
+            jobId: repeatId,
+            attemptNumber: 1,
+            workerId: f.input.workerId,
+          },
+          { ...f.selection, operationKey: repeatId },
+        )
+      ).kind,
+    ).toBe("unavailable");
+    expect(create).not.toHaveBeenCalled();
   });
   it.each(["availability", "binding"])(
     "keeps the target pending when current %s evidence changes",

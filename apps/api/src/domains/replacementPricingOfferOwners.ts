@@ -1243,6 +1243,12 @@ async function withPublishedChannexPricing(
           [authority.connectionId, room.roomTypeId, selection.offerId],
         )
       ).rows[0];
+      if (
+        work === "claim" &&
+        authority.lease.publishedOfferProvisioning &&
+        target.active_version !== null
+      )
+        return unavailable("active_offer_conflict");
       const proposal = JSON.stringify({
         publicationRevision: snapshot.revision,
         sources: snapshot.sources,
