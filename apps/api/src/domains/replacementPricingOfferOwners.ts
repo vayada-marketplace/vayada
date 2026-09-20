@@ -1006,7 +1006,7 @@ export async function prepareChannexOfferDispatch(
           return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
         return { kind: "retained" as const, attemptId: claim.attemptId };
       } catch {
-        return { kind: "receipt_pending" as const, persist };
+        return { kind: "receipt_pending" as const, persist, attemptId: claim.attemptId };
       }
     },
   };
@@ -1243,6 +1243,12 @@ async function withPublishedChannexPricing(
           [authority.connectionId, room.roomTypeId, selection.offerId],
         )
       ).rows[0];
+      if (
+        work === "claim" &&
+        authority.lease.publishedOfferProvisioning &&
+        target.active_version !== null
+      )
+        return unavailable("active_offer_conflict");
       const proposal = JSON.stringify({
         publicationRevision: snapshot.revision,
         sources: snapshot.sources,

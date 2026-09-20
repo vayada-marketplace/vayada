@@ -7,6 +7,42 @@ import {
 export type OfferPreviewResult =
   | { kind: "preview"; currency: string; meal: string; occupancies: number[]; primary: number }
   | { kind: "unsupported"; reason: "child_representation_unavailable" | "candidate_limit" };
+
+export async function requestOfferProvisioning(
+  propertyId: string,
+  room: PricingConfiguration,
+  offerId: string,
+  primary: number,
+): Promise<{ operationId: string }> {
+  const offer = room.offers.find((offer) => offer.id === offerId);
+  if (
+    room.propertyId !== propertyId ||
+    !offer ||
+    !Number.isSafeInteger(primary) ||
+    primary < 1 ||
+    primary > Math.min(room.capacity.adults, 100)
+  )
+    throw new Error("Invalid provisioning selection");
+  const commandId = globalThis.crypto?.randomUUID?.();
+  const idempotencyKey = globalThis.crypto?.randomUUID?.();
+  if (!commandId || !idempotencyKey) throw new Error("Secure request IDs are unavailable.");
+  const value = await pmsOperationsClient.post<unknown>(
+    `/api/pms/properties/${encodeURIComponent(propertyId)}/channex/published-offers/provision`,
+    {
+      commandId,
+      idempotencyKey,
+      roomTypeId: room.roomTypeId,
+      offerId,
+      publicationRevision: room.revision,
+      primaryOccupancy: primary,
+    },
+    pmsOperationsRequestOptions,
+  );
+  if (!pricingObject(value) || typeof value.operationId !== "string" || !value.operationId.trim())
+    throw new Error("The provisioning request could not be verified. Try again.");
+  return { operationId: value.operationId };
+}
+
 export async function readOfferPreview(
   propertyId: string,
   room: PricingConfiguration,

@@ -432,7 +432,11 @@ async function lockRoom(
   roomTypeId: string,
 ) {
   const authority = await lockChannexPricingPropertyAuthority(client, lease);
-  if (authority.kind !== "authorized" || authority.lease.operationType !== "sync_ari") return null;
+  if (
+    authority.kind !== "authorized" ||
+    (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
+  )
+    return null;
   const mapping = (
     await client.query<{
       mappingId: string;
