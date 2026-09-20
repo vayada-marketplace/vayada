@@ -1,3 +1,4 @@
+import { registerPmsBookingChangeRequestRoutes } from "./routes/pmsBookingChangeRequests.js";
 import {
   registerBookingGuestChoiceRoutes,
   type BookingGuestChoiceRoutesOptions,
@@ -888,6 +889,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       emails: options.pmsConfirmationEmails,
       propertyAccessRepository: options.auth.propertyAccessRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (
+    options.pmsOperationsRepository &&
+    options.bookingChangeRequestRepository &&
+    options.auth?.propertyAccessRepository
+  ) {
+    app.register(registerPmsBookingChangeRequestRoutes, {
+      prefix: "/api/pms",
+      repository: options.bookingChangeRequestRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins ?? [],
     });
   }
   if (options.pmsOperationsRepository) {
