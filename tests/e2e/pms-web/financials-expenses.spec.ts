@@ -7,7 +7,7 @@ import {
   PMS_WEB_PROPERTY_ID,
 } from "../support/pmsWebMocks";
 
-const root = `/finance/properties/${PMS_WEB_PROPERTY_ID}/financials`;
+const root = `/api/finance/properties/${PMS_WEB_PROPERTY_ID}/financials`;
 const money = (amount: string) => ({ amount, currency: "EUR" });
 const metric = (amount: string) => ({
   value: money(amount),
@@ -142,7 +142,8 @@ test("filters expenses and exports the same selection accessibly", async ({ page
       const body = route.request().postDataJSON();
       expect(body.tab).toBe("expenses");
       expect(body.filters.paymentStatus).toBe("unpaid");
-      expect(body.filters.from).toBe("2026-09-01");
+      expect(body.filters.categoryId).toBe(category.id);
+      expect(body.filters.from).toBe("2026-09-10");
       return route.fulfill({
         status: 202,
         json: {
@@ -178,7 +179,11 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await page.getByRole("tab", { name: "Expenses" }).click();
   await expect(page.getByRole("heading", { name: "Expense ledger" })).toBeVisible();
   await expect(page.getByText("Booking.com")).toBeVisible();
+  await page.getByLabel("From").fill("2026-09-10");
   await page.getByLabel("Paid state").selectOption("unpaid");
+  await page.getByRole("combobox", { name: "Category" }).selectOption(category.id);
+  await expect(page.getByRole("button", { name: "Export CSV" })).toBeDisabled();
+  await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByText("Weekly laundry")).toBeVisible();
   await expect(page.getByText("Booking.com")).toHaveCount(0);
   expect((await new AxeBuilder({ page }).include("main").analyze()).violations).toEqual([]);

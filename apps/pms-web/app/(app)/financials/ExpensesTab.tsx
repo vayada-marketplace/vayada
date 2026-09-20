@@ -39,6 +39,7 @@ export function ExpensesTab({
 }) {
   const range = useMemo(() => currentMonthRange(generatedAt, timeZone), [generatedAt, timeZone]);
   const [filters, setFilters] = useState<ExpenseFilters>({ ...range, sort: "incurredOn_desc" });
+  const [draftFilters, setDraftFilters] = useState<ExpenseFilters>(filters);
   const [dateFrom, setDateFrom] = useState(range.from);
   const [dateTo, setDateTo] = useState(range.to);
   const [dateError, setDateError] = useState("");
@@ -52,6 +53,13 @@ export function ExpensesTab({
   const [exportNotice, setExportNotice] = useState<string>();
   const [downloadUrl, setDownloadUrl] = useState<string>();
   const exportKey = JSON.stringify(filters);
+  const pendingFilters =
+    JSON.stringify({
+      ...draftFilters,
+      from: dateFrom,
+      to: dateTo,
+      search: search.trim() || undefined,
+    }) !== exportKey;
   const activeKey = useRef(exportKey);
 
   useEffect(() => {
@@ -148,7 +156,7 @@ export function ExpensesTab({
           </p>
         </div>
         <div className="flex gap-2">
-          {downloadUrl && (
+          {downloadUrl && !pendingFilters && (
             <a
               className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
               href={downloadUrl}
@@ -159,7 +167,8 @@ export function ExpensesTab({
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             type="button"
-            disabled={state.kind !== "ready" || exporting}
+            disabled={state.kind !== "ready" || exporting || pendingFilters}
+            title={pendingFilters ? "Apply filters before exporting." : undefined}
             onClick={exportCsv}
           >
             <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />
@@ -180,7 +189,7 @@ export function ExpensesTab({
           data={state.data}
           categories={state.categories}
           locale={locale}
-          filters={filters}
+          filters={draftFilters}
           dateFrom={dateFrom}
           dateTo={dateTo}
           dateError={dateError}
@@ -190,7 +199,9 @@ export function ExpensesTab({
           onDateFrom={setDateFrom}
           onDateTo={setDateTo}
           onDateError={setDateError}
-          onFilters={setFilters}
+          onFilters={setDraftFilters}
+          onApplyFilters={setFilters}
+          pendingFilters={pendingFilters}
           onLoadMore={loadMore}
         />
       )}
@@ -216,6 +227,8 @@ function ExpensesWorkspace({
   onDateTo,
   onDateError,
   onFilters,
+  onApplyFilters,
+  pendingFilters,
   onLoadMore,
 }: {
   data: FinanceExpensesResponse;
@@ -232,6 +245,8 @@ function ExpensesWorkspace({
   onDateTo: (value: string) => void;
   onDateError: (value: string) => void;
   onFilters: (value: ExpenseFilters) => void;
+  onApplyFilters: (value: ExpenseFilters) => void;
+  pendingFilters: boolean;
   onLoadMore: () => void;
 }) {
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
@@ -276,7 +291,7 @@ function ExpensesWorkspace({
             return;
           }
           onDateError("");
-          onFilters({ ...filters, from: dateFrom, to: dateTo, search: search.trim() || undefined });
+          onApplyFilters({ ...filters, from: dateFrom, to: dateTo, search: search.trim() || undefined });
         }}
         aria-label="Expense filters"
       >
@@ -372,6 +387,11 @@ function ExpensesWorkspace({
           </button>
         </div>
       </form>
+      {pendingFilters && (
+        <p className="text-xs text-gray-600" role="status">
+          Apply filters to update the ledger and CSV export.
+        </p>
+      )}
       {dateError && (
         <p className="text-sm text-red-700" role="alert">
           {dateError}
@@ -397,22 +417,23 @@ function ExpensesWorkspace({
 
 function CategoryDistribution({ data, locale }: { data: FinanceExpensesResponse; locale: string }) {
   const total = data.categories.reduce(
-    (sum, item) => sum + Math.max(0, numeric(item.amount.amount)),
+    (sum, item) => sum + Math.abs(numeric(item.amount.amount)),
     0,
   );
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h3 className="text-base font-semibold text-gray-900">Spend by category this month</h3>
+      <h3 className="text-base font-semibold text-gray-900">Net amount by category this month</h3>
+      <p className="mt-1 text-xs text-gray-600">Bar widths show magnitude; amounts retain corrections and reversals.</p>
       <div
         className="mt-4 flex h-3 overflow-hidden rounded-full bg-gray-100"
-        aria-label="Expense category distribution"
+        aria-label="Expense category amount distribution by magnitude"
       >
         {data.categories.map(({ category, amount }) => (
           <span
             key={category.id}
             style={{
               backgroundColor: category.color,
-              width: `${total ? (Math.max(0, numeric(amount.amount)) / total) * 100 : 0}%`,
+              width: `${total ? (Math.abs(numeric(amount.amount)) / total) * 100 : 0}%`,
             }}
             title={`${category.name}: ${formatMoney(amount, locale)}`}
           />

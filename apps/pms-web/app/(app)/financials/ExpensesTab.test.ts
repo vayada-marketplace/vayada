@@ -134,16 +134,47 @@ describe("ExpensesTab", () => {
     expect(text).toContain("Paid");
   });
 
-  it("reloads from the server when a paid-state filter changes", async () => {
+  it("keeps negative correction amounts visible in the category distribution", async () => {
+    getFinanceExpenses.mockResolvedValue({
+      ...expenses,
+      categories: [{ category, amount: money("-25.0000") }],
+    });
+    const view = await render();
+    const bar = view.root.findByProps({
+      "aria-label": "Expense category amount distribution by magnitude",
+    });
+
+    expect(bar.findByType("span").props.style.width).toBe("100%");
+    expect(JSON.stringify(view.toJSON())).toContain("-€25.00");
+  });
+
+  it("applies paid-state filters together before reloading and exporting", async () => {
     const view = await render();
     const paidState = view.root.findAllByType("select")[1]!;
 
     await act(async () => paidState.props.onChange({ target: { value: "unpaid" } }));
+    expect(getFinanceExpenses).toHaveBeenCalledTimes(1);
+    expect(
+      view.root.findAllByType("button").find((button) => button.children.includes("Export CSV"))!
+        .props.disabled,
+    ).toBe(true);
+    const form = view.root.findAllByType("form")[0]!;
+    await act(async () => form.props.onSubmit({ preventDefault() {} }));
 
     expect(getFinanceExpenses).toHaveBeenLastCalledWith(
       envelope.propertyId,
       expect.objectContaining({ paymentStatus: "unpaid" }),
       expect.objectContaining({ signal: expect.anything() }),
+    );
+    await act(async () =>
+      view.root
+        .findAllByType("button")
+        .find((button) => button.children.includes("Export CSV"))!
+        .props.onClick(),
+    );
+    expect(requestExpenseCsv).toHaveBeenCalledWith(
+      envelope.propertyId,
+      expect.objectContaining({ paymentStatus: "unpaid" }),
     );
   });
 
