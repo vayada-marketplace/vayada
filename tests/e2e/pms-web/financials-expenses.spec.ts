@@ -135,6 +135,8 @@ test("filters expenses and exports the same selection accessibly", async ({ page
         if (body.recurrence) {
           expect(body.vendor).toBe("Weekly cleaning");
           expect(body.recurrence).toEqual({ cadence: "weekly", startsOn: "2026-09-17" });
+          expect(body.paymentStatus).toBe("paid");
+          expect(body.paidOn).toBe("2026-09-17");
           return route.fulfill({
             status: 201,
             json: {
@@ -298,6 +300,7 @@ test("filters expenses and exports the same selection accessibly", async ({ page
     "https://files.example/expenses.csv",
   );
   await page.getByLabel("Paid state").selectOption("");
+  await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.getByText("Booking.com")).toBeVisible();
   await page.getByRole("button", { name: "Categories" }).click();
   const categoriesDialog = page.getByRole("dialog", { name: "Manage expense categories" });
@@ -340,7 +343,10 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await expenseDialog.getByLabel("Vendor").fill("Weekly cleaning");
   await expenseDialog.getByLabel("Category").selectOption({ label: "Housekeeping" });
   await expenseDialog.getByLabel("Amount (EUR)").fill("25");
+  await expenseDialog.getByLabel("Paid state").selectOption("paid");
   await expenseDialog.getByLabel("Repeat").selectOption("weekly");
+  await expect(expenseDialog.getByLabel("Paid on")).toHaveCount(0);
+  await expect(expenseDialog.getByText(/Paid recurring entries use each occurrence date/)).toBeVisible();
   await expenseDialog.getByRole("button", { name: "Save recurring expense" }).click();
   await expect(expenseDialog).toHaveCount(0);
   await expect(

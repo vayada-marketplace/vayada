@@ -108,7 +108,7 @@ describe("financial expense operations", () => {
       paidOn: null,
     });
     expect(post).toHaveBeenCalledWith(
-      "/finance/properties/property/financials/expenses",
+      "/api/finance/properties/property/financials/expenses",
       expect.objectContaining({
         commandId: "12140000-0000-4000-8000-000000000001",
         idempotencyKey: "12140000-0000-4000-8000-000000000001",
@@ -133,7 +133,7 @@ describe("financial expense operations", () => {
       revision: 3,
     });
     expect(remove).toHaveBeenCalledWith(
-      "/finance/properties/property/financials/expense-categories/category-1",
+      "/api/finance/properties/property/financials/expense-categories/category-1",
       expect.objectContaining({
         body: JSON.stringify({
           expectedRevision: 3,

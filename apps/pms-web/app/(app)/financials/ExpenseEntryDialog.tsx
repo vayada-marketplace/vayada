@@ -52,7 +52,7 @@ export function ExpenseEntryDialog({
       setError("Enter a date, vendor, active category, and positive amount.");
       return;
     }
-    if (paymentStatus === "paid" && !paidOn) {
+    if (paymentStatus === "paid" && !cadence && !paidOn) {
       setError("Enter the payment date for a paid expense.");
       return;
     }
@@ -78,7 +78,9 @@ export function ExpenseEntryDialog({
       vendor: vendor.trim(),
       categoryId,
       amount: { amount: normalizedAmount, currency },
-      ...(paymentStatus === "paid" ? { paymentStatus, paidOn } : { paymentStatus, paidOn: null }),
+      ...(paymentStatus === "paid"
+        ? { paymentStatus, paidOn: cadence ? incurredOn : paidOn }
+        : { paymentStatus, paidOn: null }),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(receiptMediaId ? { receiptMediaId } : {}),
       ...(cadence
@@ -198,7 +200,7 @@ export function ExpenseEntryDialog({
             <option value="paid">Paid</option>
           </select>
         </label>
-        {paymentStatus === "paid" && (
+        {paymentStatus === "paid" && !cadence && (
           <label className={label}>
             Paid on
             <input
@@ -244,6 +246,11 @@ export function ExpenseEntryDialog({
             <option value="yearly">Yearly</option>
           </select>
         </label>
+        {cadence && (
+          <p className="self-end text-xs text-gray-600">
+            Paid recurring entries use each occurrence date as their payment date.
+          </p>
+        )}
         {cadence && (
           <label className={label}>
             Repeat until (optional)
