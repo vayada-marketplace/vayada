@@ -180,6 +180,14 @@ export type PmsInboxReadPort = {
       thread: PmsInboxThreadSummary;
       availableProviderActions: readonly PmsInboxProviderAction[];
       providerActions?: readonly PmsInboxProviderActionOutcome[];
+      inquiryPreapproval?: {
+        listingId: string;
+        arrivalDate: string;
+        departureDate: string;
+        adults: number;
+        children: number;
+        currency: string;
+      } | null;
       timeline: readonly { propertyId: string; threadId: string; item: PmsInboxTimelineItem }[];
       previousCursor: string | null;
     }>
@@ -517,7 +525,10 @@ export type PmsInboxProviderActionError = {
   message: string;
 };
 
-export type PmsInboxProviderAction = "booking_com_no_reply_needed" | "channex_close";
+export type PmsInboxProviderAction =
+  | "booking_com_no_reply_needed"
+  | "channex_close"
+  | "airbnb_preapprove";
 export type PmsInboxProviderActionOutcome = {
   action: PmsInboxProviderAction;
   state: "pending" | "retrying" | "confirmed" | "held" | "failed";

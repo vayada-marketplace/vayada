@@ -26,11 +26,21 @@ type BookingChangeDeclineBody = {
 export async function registerBookingChangeRequestRoutes(
   app: FastifyInstance,
   repository: BookingHotelChangeRequestRepository,
+  routeOptions: {
+    basePath: string;
+    authorize: (
+      request: FastifyRequest,
+      propertyId: string,
+      access: "read" | "write",
+    ) =>
+      | ReturnType<typeof enforceBookingChangePolicy>
+      | Promise<ReturnType<typeof enforceBookingChangePolicy>>;
+  } = { basePath: "/hotels/:hotelId/reservations", authorize: enforceBookingChangePolicy },
 ): Promise<void> {
   app.get<{ Params: BookingChangeRequestParams }>(
-    "/hotels/:hotelId/reservations/:bookingId/change-request",
+    `${routeOptions.basePath}/:bookingId/change-request`,
     async (request) => {
-      enforceBookingChangePolicy(request, request.params.hotelId, "read");
+      await routeOptions.authorize(request, request.params.hotelId, "read");
       const result = await repository.findLatestChangeRequest(
         request.params.hotelId,
         request.params.bookingId,
@@ -43,7 +53,7 @@ export async function registerBookingChangeRequestRoutes(
         typeof result.providerRequest === "object"
       ) {
         try {
-          enforceBookingChangePolicy(request, request.params.hotelId, "write");
+          await routeOptions.authorize(request, request.params.hotelId, "write");
         } catch {
           return {
             ...result,
@@ -56,9 +66,9 @@ export async function registerBookingChangeRequestRoutes(
   );
 
   app.post<{ Params: BookingChangeDecisionParams }>(
-    "/hotels/:hotelId/reservations/:bookingId/change-request/:changeRequestId/accept",
+    `${routeOptions.basePath}/:bookingId/change-request/:changeRequestId/accept`,
     async (request) => {
-      const context = enforceBookingChangePolicy(request, request.params.hotelId, "write");
+      const context = await routeOptions.authorize(request, request.params.hotelId, "write");
       return repository.acceptChangeRequest(
         request.params.hotelId,
         request.params.bookingId,
@@ -75,9 +85,9 @@ export async function registerBookingChangeRequestRoutes(
   );
 
   app.post<{ Params: BookingChangeDecisionParams; Body: BookingChangeDeclineBody }>(
-    "/hotels/:hotelId/reservations/:bookingId/change-request/:changeRequestId/decline",
+    `${routeOptions.basePath}/:bookingId/change-request/:changeRequestId/decline`,
     async (request) => {
-      const context = enforceBookingChangePolicy(request, request.params.hotelId, "write");
+      const context = await routeOptions.authorize(request, request.params.hotelId, "write");
       const note = optionalDecisionNote(request.body?.reason);
       return repository.declineChangeRequest(
         request.params.hotelId,

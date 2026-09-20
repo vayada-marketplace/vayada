@@ -1,4 +1,6 @@
 import type { dispatchNextChannexClosedUpload } from "../domains/channexNextClosedUpload.js";
+import type { activatePublishedChannexOffers } from "../domains/replacementPricingOfferOwners.js";
+import type { advancePublishedChannexOfferCreates } from "../domains/channexPublishedOfferCreate.js";
 import type { prepareNextChannexRoomAvailabilityDispatch } from "../domains/channexRoomAvailabilityCoordinator.js";
 import type { reconcilePendingChannexRoomAvailability } from "../domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexResponse } from "./channexResponseBody.js";
@@ -128,6 +130,28 @@ export function createChannexManagementProvider(config: {
   prepareRoomAvailability?: (
     lease: Parameters<typeof prepareNextChannexRoomAvailabilityDispatch>[2],
   ) => ReturnType<typeof prepareNextChannexRoomAvailabilityDispatch>;
+  activatePublishedOffers?: (
+    lease: Parameters<typeof activatePublishedChannexOffers>[1],
+  ) => ReturnType<typeof activatePublishedChannexOffers>;
+  advancePublishedOffers?: (
+    lease: Parameters<typeof advancePublishedChannexOfferCreates>[1],
+    ports: Parameters<typeof advancePublishedChannexOfferCreates>[2],
+  ) => ReturnType<typeof advancePublishedChannexOfferCreates>;
+  bootstrapPublishedOffer?: (
+    job: ChannexManagementJob,
+    workerId: string,
+    ports: {
+      get(path: string, signal: AbortSignal): Promise<unknown>;
+      create(
+        request: { method: "POST"; path: "/api/v1/rate_plans"; body: unknown },
+        signal: AbortSignal,
+      ): Promise<Response>;
+    },
+  ) => Promise<
+    | { kind: "ready" }
+    | { kind: "creation_retained"; attemptId: string }
+    | { kind: "unavailable"; reason: string }
+  >;
 }): ChannexManagementProvider {
   const apiBaseUrl = requiredUrl(config.apiBaseUrl);
   const apiKey = required(config.apiKey, "Channex apiKey");
@@ -163,7 +187,10 @@ export function createChannexManagementProvider(config: {
       input?: Parameters<ChannexManagementProvider["execute"]>[1],
       preparedPlan?: () => Promise<ChannexManagementActionPlan>,
     ): ReturnType<ChannexManagementProvider["execute"]> {
-      if (job.input.operationType === "sync_ari" && config.canSyncAri === false) {
+      const pricingDelivery =
+        job.input.operationType === "sync_ari" ||
+        (job.input.operationType === "provision" && Boolean(job.input.publishedOffer));
+      if (pricingDelivery && config.canSyncAri === false) {
         return failure("invalid_state", new Error("Channex ARI capability is not mutating."));
       }
       const ariContinuationHooks = [
@@ -173,16 +200,94 @@ export function createChannexManagementProvider(config: {
         config.prepareRoomAvailability,
       ];
       if (
-        job.input.operationType === "sync_ari" &&
+        job.input.publishedOffer &&
+        (job.input.operationType !== "provision" ||
+          job.input.restrictionsOnly ||
+          !ariContinuationHooks.every(Boolean) ||
+          !config.activatePublishedOffers)
+      )
+        return failure(
+          "invalid_state",
+          new Error("Complete published-offer delivery and activation bundle required."),
+        );
+      if (job.input.publishedOffer) {
+        if (!input?.workerId || !config.bootstrapPublishedOffer)
+          return failure(
+            "invalid_state",
+            new Error("Published offer provisioning is unavailable."),
+          );
+        const bootstrapped = await config.bootstrapPublishedOffer(job, input.workerId, {
+          get: readClosedUpload,
+          create: async (request, signal) => {
+            if (request.method !== "POST" || request.path !== "/api/v1/rate_plans")
+              throw new Error("Invalid Channex rate-plan scope.");
+            signal.throwIfAborted();
+            return fetcher(new URL(request.path, apiBaseUrl), {
+              method: "POST",
+              headers: { "user-api-key": apiKey, "content-type": "application/json" },
+              body: JSON.stringify(request.body),
+              signal,
+              redirect: "error",
+            });
+          },
+        });
+        if (bootstrapped.kind === "creation_retained")
+          return { ok: false, code: "offer_creation_retained", attemptId: bootstrapped.attemptId };
+        if (bootstrapped.kind !== "ready")
+          return failure(
+            "invalid_state",
+            new Error(`Published offer bootstrap: ${bootstrapped.reason}`),
+          );
+      }
+      if (
+        pricingDelivery &&
         !job.input.restrictionsOnly &&
-        ariContinuationHooks.some(Boolean) &&
+        (ariContinuationHooks.some(Boolean) || Boolean(config.advancePublishedOffers)) &&
         !ariContinuationHooks.every(Boolean)
       )
         return failure(
           "invalid_state",
           new Error("Complete pricing and availability reconciliation bundle required."),
         );
-      if (job.input.operationType === "sync_ari" && config.reconcileClosedUploads) {
+      if (job.input.operationType === "sync_ari" && !job.input.restrictionsOnly &&
+          config.advancePublishedOffers) {
+        if (!input?.workerId)
+          return failure("invalid_state", new Error("Current offer worker lease required."));
+        try {
+          const result = await config.advancePublishedOffers(
+            { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
+            {
+              get: readClosedUpload,
+              create: async (request, signal) => {
+                if (request.method !== "POST" || request.path !== "/api/v1/rate_plans")
+                  throw new Error("Invalid Channex rate creation scope.");
+                signal.throwIfAborted();
+                return fetcher(new URL(request.path, apiBaseUrl), {
+                  method: "POST",
+                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                  body: JSON.stringify(request.body),
+                  signal,
+                  redirect: "error",
+                });
+              },
+            },
+          );
+          if (result.kind === "retained" || result.kind === "receipt_pending") {
+            if (result.kind === "receipt_pending") await result.persist();
+            return { ok: false, code: "offer_create_retained", attemptId: result.attemptId };
+          }
+          if (result.kind !== "offer_creates_current")
+            return failure(
+              result.kind === "unavailable" &&
+                ["creation_reconciliation_required", "creation_batch_pending"].includes(result.reason)
+                ? "provider_unavailable" : "invalid_state",
+              new Error("Published Channex offer creation is unavailable."),
+            );
+        } catch {
+          return failure("provider_unavailable", new Error("Channex offer creation unavailable."));
+        }
+      }
+      if (pricingDelivery && config.reconcileClosedUploads) {
         if (!input?.workerId)
           return failure("invalid_state", new Error("Current worker lease required."));
         try {
@@ -201,11 +306,7 @@ export function createChannexManagementProvider(config: {
           return failure("provider_unavailable", new Error("Channex completion read unavailable."));
         }
       }
-      if (
-        job.input.operationType === "sync_ari" &&
-        !job.input.restrictionsOnly &&
-        config.dispatchClosedUpload
-      ) {
+      if (pricingDelivery && !job.input.restrictionsOnly && config.dispatchClosedUpload) {
         if (!input?.workerId || !config.reconcileClosedUploads)
           return failure("invalid_state", new Error("Current worker and reconciliation required."));
         try {
@@ -238,7 +339,7 @@ export function createChannexManagementProvider(config: {
           return failure("provider_unavailable", new Error("Initial Channex upload unavailable."));
         }
       }
-      if (job.input.operationType === "sync_ari" && !job.input.restrictionsOnly) {
+      if (pricingDelivery && !job.input.restrictionsOnly) {
         if (Boolean(config.reconcileRoomAvailability) !== Boolean(config.prepareRoomAvailability))
           return failure(
             "invalid_state",
@@ -268,7 +369,17 @@ export function createChannexManagementProvider(config: {
             await input.onProgress?.();
             const prepared = await config.prepareRoomAvailability(lease);
             if (prepared.kind === "room_availability_current") {
-              // Continue to the existing plan only after complete current coverage.
+              if (config.activatePublishedOffers) {
+                const activated = await config.activatePublishedOffers(lease);
+                if (activated.kind === "all_targets_active") return { ok: true };
+                if (activated.kind !== "no_targets")
+                  return failure(
+                    activated.reason === "target_activation_pending"
+                      ? "provider_unavailable"
+                      : "invalid_state",
+                    new Error("Verified Channex offer activation is unavailable."),
+                  );
+              }
             } else if (prepared.kind === "prepared") {
               const result = await prepared.dispatch(async (request, signal) => {
                 if (request.method !== "POST" || request.path !== "/api/v1/availability")
@@ -312,6 +423,8 @@ export function createChannexManagementProvider(config: {
           );
         }
       }
+      if (job.input.publishedOffer)
+        return failure("invalid_state", new Error("Published offer delivery is incomplete."));
       let plan: ChannexManagementActionPlan;
       try {
         plan = await (preparedPlan ? preparedPlan() : config.plans.plan(job));

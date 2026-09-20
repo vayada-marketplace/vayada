@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { parseBookingPricingOfferTerms, type ReplacementOfferTerms } from "@vayada/domain-booking/replacement-pricing";
+import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { decimalAmount, parseMinorInput } from "./pricingAmounts";
 
 export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { terms: ReplacementOfferTerms; disabled: boolean;
   onApply(value: ReplacementOfferTerms): void; onCancel(): void }) {
   const original = terms.cancellation.kind === "flexible" ? terms.cancellation.terms : null;
   const [kind, setKind] = useState(terms.cancellation.kind), [payment, setPayment] = useState(terms.payment.kind);
+  const [methods, setMethods] = useState<PaymentMethod[]>([...(terms.payment.acceptedMethods ?? [])]);
   const [values, setValues] = useState({ deadline: String(original?.freeCancellationDeadlineDays ?? 7), type: original?.flexibleCancellationType ?? "",
     window: original?.partialRefundCancelWindowDays?.toString() ?? "", percent: original?.partialRefundAmountPercent?.toString() ?? "", text: original?.text ?? "",
     deposit: terms.payment.kind === "deposit" ? decimalAmount(String(terms.payment.basisPoints), 2) : "30", balance: terms.payment.kind === "deposit" ? String(terms.payment.balanceDaysBeforeArrival) : "7" });
@@ -17,14 +19,15 @@ export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { term
   function apply() {
     if (disabled) return;
     try {
+      if (!methods.length) throw new Error("Choose at least one accepted payment method.");
       const cancellation = kind === "non_refundable" ? { kind } : { kind, terms: {
         type: "free_until_days_before_arrival", freeCancellationDeadlineDays: integer(values.deadline), afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount",
         ...(values.type ? { flexibleCancellationType: values.type } : {}), ...(values.window ? { partialRefundCancelWindowDays: integer(values.window) } : {}),
         ...(values.percent ? { partialRefundAmountPercent: integer(values.percent) } : {}), ...(values.text ? { text: values.text } : {}),
         ...(tiers.length || original?.partialRefundTiers !== undefined ? { partialRefundTiers: tiers.map((t) => ({ minDaysBeforeCheckIn: integer(t.days), refundPercent: integer(t.percent) })) } : {}),
       } };
-      const parsed = parseBookingPricingOfferTerms({ ...terms, cancellation, payment: payment === "full" ? { kind: payment } : {
-        kind: payment, basisPoints: Number(parseMinorInput(values.deposit, 2)), balanceDaysBeforeArrival: integer(values.balance),
+      const parsed = parseBookingPricingOfferTerms({ ...terms, cancellation, payment: payment === "full" ? { kind: payment, acceptedMethods: methods } : {
+        kind: payment, basisPoints: Number(parseMinorInput(values.deposit, 2)), balanceDaysBeforeArrival: integer(values.balance), acceptedMethods: methods,
       } });
       if (!parsed) throw new Error("Check the policy fields. Days must be whole numbers; cancellation deadlines are 0–365, tier refunds 0–100%, and partial-refund policies need at least one tier with a unique deadline.");
       onApply(parsed);
@@ -55,6 +58,7 @@ export function PricingPolicyForm({ terms, disabled, onApply, onCancel }: { term
       <option value="full">Full payment</option><option value="deposit">Deposit and balance</option></select></label>
     {payment === "deposit" && <>{field("deposit", "Deposit (% of final total)")}{field("balance", "Balance due (days before arrival)")}
       <p className="text-sm text-amber-900">Deposit execution is not available yet. This requested schedule cannot be approved until payment readiness supports it.</p></>}
+    <AcceptedPaymentMethods methods={methods} disabled={disabled} onChange={setMethods} />
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     <p className="text-sm">Apply changes locally, then save and review your pricing draft. Approved policies change only when rates are approved.</p>
     <div className="flex gap-2"><button type="button" className="rounded bg-emerald-700 px-3 py-2 text-white" onClick={apply}>Apply policy changes</button>

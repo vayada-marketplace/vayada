@@ -159,6 +159,9 @@ export default function InboxWorkspace() {
 
   const [contextOpen, setContextOpen] = useState(false);
   const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [preapprovalReview, setPreapprovalReview] = useState<InboxThreadDetailResponse | null>(
+    null,
+  );
   const [followUpAt, setFollowUpAt] = useState(() => defaultFollowUpTime(browserTimeZone()));
   const [quickManagerOpen, setQuickManagerOpen] = useState(false);
   const [directOpen, setDirectOpen] = useState(false);
@@ -258,6 +261,7 @@ export default function InboxWorkspace() {
     setUploadingName(null);
     setProviderActionPendingThreads(new Set());
     setFollowUpOpen(false);
+    setPreapprovalReview(null);
     setQuickManagerOpen(false);
     setDirectOpen(false);
     setToast(null);
@@ -764,6 +768,7 @@ export default function InboxWorkspace() {
 
   async function handleReplyPermissionDenied(message: string) {
     setFollowUpOpen(false);
+    setPreapprovalReview(null);
     setQuickManagerOpen(false);
     setDirectOpen(false);
     if (!propertyId) {
@@ -872,6 +877,7 @@ export default function InboxWorkspace() {
           return;
         }
         setFollowUpOpen(false);
+        setPreapprovalReview(null);
         if (attentionState !== "follow_up") {
           setThreads((items) => items.filter((item) => item.id !== thread.id));
           closeThread();
@@ -1171,8 +1177,19 @@ export default function InboxWorkspace() {
     }
   }
 
-  async function noReplyNeeded(action: "no-reply-needed" | "close" = "no-reply-needed") {
+  async function noReplyNeeded(
+    action: "no-reply-needed" | "close" | "preapprove" = "no-reply-needed",
+  ) {
     if (!propertyId || !detail || providerActionPending || mutationInFlight.current) return;
+    if (
+      action === "preapprove" &&
+      (!preapprovalReview ||
+        preapprovalReview.thread.id !== detail.thread.id ||
+        preapprovalReview.thread.version !== detail.thread.version ||
+        !detail.availableProviderActions.includes("airbnb_preapprove"))
+    )
+      return;
+    setPreapprovalReview(null);
     const threadId = detail.thread.id;
     setProviderActionPendingThreads((current) => new Set(current).add(threadId));
     await handleMutation(
@@ -1198,7 +1215,13 @@ export default function InboxWorkspace() {
         if (selectedThreadIdRef.current === threadId) await loadDetail(true);
         else setReloadList((value) => value + 1);
       },
-      t(action === "close" ? "inbox.errorChannexUpdate" : "inbox.errorBookingComUpdate"),
+      t(
+        action === "preapprove"
+          ? "inbox.errorPreapproval"
+          : action === "close"
+            ? "inbox.errorChannexUpdate"
+            : "inbox.errorBookingComUpdate",
+      ),
       threadId,
     );
   }
@@ -1326,15 +1349,31 @@ export default function InboxWorkspace() {
                 onAssign={(id) => void assignThread(id)}
                 onNoReplyNeeded={() => void noReplyNeeded()}
               />
+              {canReply === true &&
+                activeDetail.inquiryPreapproval &&
+                activeDetail.availableProviderActions.includes("airbnb_preapprove") && (
+                  <div className="border-b border-gray-100 px-4 py-3">
+                    <button
+                      type="button"
+                      disabled={providerActionPending || !!mutationBusy}
+                      onClick={() => setPreapprovalReview(activeDetail)}
+                      className="rounded-md bg-gray-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                    >
+                      {t("inbox.preapproveInquiry")}
+                    </button>
+                  </div>
+                )}
               {(activeDetail.providerActions ?? []).map((outcome) => (
                 <p
                   key={outcome.action}
                   role="status"
                   className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-700"
                 >
-                  {outcome.action === "channex_close"
-                    ? t("inbox.providerClosure")
-                    : t("inbox.providerNoReply")}
+                  {outcome.action === "airbnb_preapprove"
+                    ? t("inbox.preapproval")
+                    : outcome.action === "channex_close"
+                      ? t("inbox.providerClosure")
+                      : t("inbox.providerNoReply")}
                   :{" "}
                   {outcome.state === "confirmed"
                     ? t("inbox.providerConfirmed")
@@ -1347,7 +1386,11 @@ export default function InboxWorkspace() {
                           : t("inbox.providerFailed")}
                   {outcome.threadVersion !== activeDetail.thread.version &&
                     t("inbox.providerChanged")}{" "}
-                  {t("inbox.providerLocalOnly")}
+                  {t(
+                    outcome.action === "airbnb_preapprove"
+                      ? "inbox.preapprovalNotBooked"
+                      : "inbox.providerLocalOnly",
+                  )}
                 </p>
               ))}
               <ForwardedConversationTimeline
@@ -1449,6 +1492,61 @@ export default function InboxWorkspace() {
         <ContextDrawer thread={activeDetail.thread} onClose={() => setContextOpen(false)} />
       )}
 
+      {preapprovalReview?.inquiryPreapproval &&
+        activeDetail?.thread.id === preapprovalReview.thread.id && (
+          <Modal
+            onClose={() => setPreapprovalReview(null)}
+            ariaLabel={t("inbox.preapproveInquiry")}
+            footer={
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreapprovalReview(null)}
+                  className="rounded-md border border-gray-200 px-4 py-2 text-sm"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    canReply !== true ||
+                    providerActionPending ||
+                    !!mutationBusy ||
+                    activeDetail.thread.version !== preapprovalReview.thread.version ||
+                    !activeDetail.availableProviderActions.includes("airbnb_preapprove")
+                  }
+                  onClick={() => void noReplyNeeded("preapprove")}
+                  className="rounded-md bg-gray-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                >
+                  {t("inbox.confirmPreapproval")}
+                </button>
+              </div>
+            }
+          >
+            <div className="space-y-4 text-sm text-gray-700">
+              <h2 className="text-lg font-semibold text-gray-950">
+                {t("inbox.preapproveInquiry")}
+              </h2>
+              <p>
+                {t("inbox.preapprovalStay", {
+                  arrival: preapprovalReview.inquiryPreapproval.arrivalDate,
+                  departure: preapprovalReview.inquiryPreapproval.departureDate,
+                  adults: preapprovalReview.inquiryPreapproval.adults,
+                  children: preapprovalReview.inquiryPreapproval.children,
+                })}
+              </p>
+              <p>
+                {t("inbox.preapprovalListing", {
+                  listing: preapprovalReview.inquiryPreapproval.listingId,
+                })}
+              </p>
+              <p>{t("inbox.preapprovalTerms")}</p>
+              {activeDetail.thread.version !== preapprovalReview.thread.version && (
+                <p role="alert">{t("inbox.preapprovalChanged")}</p>
+              )}
+            </div>
+          </Modal>
+        )}
       {followUpOpen && activeDetail && (
         <FollowUpDialog
           value={followUpAt}

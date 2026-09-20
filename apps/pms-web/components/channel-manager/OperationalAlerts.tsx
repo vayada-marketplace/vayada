@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertDiagnostics } from "./AlertDiagnostics";
 import { useCallback, useEffect, useState } from "react";
 import { channexService, type ChannexSnapshot, type ChannexAlert } from "@/services/channex";
 import { channelManagerButtonClass as buttonClass } from "./ChannelManagerUi";
@@ -177,6 +178,12 @@ export function OperationalAlerts({
                   : ""}
               </p>
             ))}
+            <AlertDiagnostics
+              key={`${snapshot.propertyId}:${alert.id}:${alert.recoveryRound}:${alert.lastOccurredAt}`}
+              propertyId={snapshot.propertyId}
+              alertId={alert.id}
+              round={alert.recoveryRound}
+            />
             {!resolved &&
               alert.recovery.some(
                 (job) => job.status === "succeeded" && job.verified === false,

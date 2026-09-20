@@ -28,7 +28,10 @@ export async function reconcilePendingChannexRoomAvailability(
     await client.query("SET LOCAL statement_timeout='5s'");
     await client.query("SET LOCAL lock_timeout='150ms'");
     const authority = await lockChannexPricingPropertyAuthority(client, lease);
-    if (authority.kind !== "authorized" || authority.lease.operationType !== "sync_ari")
+    if (
+      authority.kind !== "authorized" ||
+      (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
+    )
       return { kind: "unavailable" as const, reason: "availability_authority_unavailable" };
     candidates = (
       await client.query<{

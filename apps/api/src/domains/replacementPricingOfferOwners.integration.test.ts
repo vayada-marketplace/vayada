@@ -42,11 +42,14 @@ import type { FixedChargePolicy } from "./replacementFixedCharges.js";
 import { lockPublicPricingChargeTotals } from "./publicPricingChargeTotals.js";
 import { lockPublicPricingComponents } from "./publicPricingComponents.js";
 import { dispatchNextChannexClosedUpload } from "./channexNextClosedUpload.js";
+import { advancePublishedChannexOfferCreates } from "./channexPublishedOfferCreate.js";
 import { runPmsChannexManagementWorkerOnce } from "../jobs/pmsChannexManagementWorker.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
+import { createPgChannexAriSchedule } from "../jobs/pmsChannexAriSchedule.js";
 import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
+import { bootstrapPublishedChannexOffer } from "../integrations/channexPublishedOfferBootstrap.js";
 import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexStagedPrices } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
@@ -95,6 +98,7 @@ import {
   reservePublishedChannexOfferTarget,
   claimPublishedChannexOfferCreate,
   recordPublishedChannexOfferCreate as recordCreation,
+  activatePublishedChannexOffers,
 } from "./replacementPricingOfferOwners.js";
 import {
   createReplacementChargeDeclarationStore,
@@ -477,11 +481,19 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
-  async function creationFixture(baseMinor = "10000") {
+  async function creationFixture(baseMinor = "10000", savedOffer = false) {
     const f = await serviceFixture(2, 2, baseMinor);
     await f.publish();
     const roomTypeId = f.snapshot.rooms[0].roomTypeId,
       externalRoomTypeId = randomUUID();
+    if (savedOffer)
+      await pool.query(
+        `UPDATE platform.jobs SET job_type='channex.provision',
+           payload=jsonb_build_object('operationType','provision','publishedOffer',
+             jsonb_build_object('roomTypeId',$2::text,'offerId','flex',
+               'publicationRevision',1,'primaryOccupancy',1)) WHERE id=$1`,
+        [f.input.jobId, roomTypeId],
+      );
     await pool.query(
       `INSERT INTO pms.channel_room_type_mappings
       (property_id,connection_id,room_type_id,external_room_type_id)
@@ -491,7 +503,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     return {
       ...f,
       externalRoomTypeId,
-      selection: { roomTypeId, offerId: "flex", operationKey: "create", primaryOccupancy: 1 },
+      selection: {
+        roomTypeId,
+        offerId: "flex",
+        operationKey: savedOffer ? f.input.jobId : "create",
+        primaryOccupancy: 1,
+      },
     };
   }
   function createdResponse(body: unknown) {
@@ -507,14 +524,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
     return { data: { type: "rate_plan", id, attributes } };
   }
-  async function recordingFixture(baseMinor = "10000") {
-    const f = await creationFixture(baseMinor);
+  async function recordingFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await creationFixture(baseMinor, savedOffer);
     const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
     if (claim.kind !== "claimed") throw new Error(`claim required: ${JSON.stringify(claim)}`);
     return { ...f, claim, response: createdResponse(claim.request.body) };
   }
-  async function receiptFixture(baseMinor = "10000") {
-    const f = await recordingFixture(baseMinor);
+  async function receiptFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await recordingFixture(baseMinor, savedOffer);
     const connectionId = (
       await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
         f.claim.targetId,
@@ -611,8 +628,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await prepared.dispatch(ports)).toMatchObject({ reason: "dispatch_already_used" });
     expect(create).toHaveBeenCalledOnce();
   }, 30000);
-  async function configurationFixture(baseMinor = "10000") {
-    const f = await receiptFixture(baseMinor);
+  async function configurationFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await receiptFixture(baseMinor, savedOffer);
     await (
       await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
     )();
@@ -623,8 +640,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   }
   const initialAriDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const nextAriDate = new Date(Date.now() + 4 * 86400000).toISOString().slice(0, 10);
-  async function initialAriFixture(baseMinor = "10000") {
-    const f = await configurationFixture(baseMinor);
+  async function initialAriFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await configurationFixture(baseMinor, savedOffer);
     await pool.query(
       "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
       [f.scope.propertyId],
@@ -638,9 +655,245 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
         async () => f.response().json(),
       ),
     ).toMatchObject({ kind: "configuration_retained" });
+    const otherSelection = { ...f.selection, offerId: "other", operationKey: "other-create" };
+    const otherClaim = await claimPublishedChannexOfferCreate(pool, f.input, otherSelection);
+    if (otherClaim.kind !== "claimed") throw new Error("second offer claim required");
+    const otherData = createdResponse(otherClaim.request.body);
+    const otherResponse = new Response(JSON.stringify(otherData), { status: 201 });
+    await (await prepareChannexReceiptPersistence(pool, {
+      ...f.correlation,
+      receiptId: randomUUID(),
+      attemptId: otherClaim.attemptId,
+      jobAttemptId: otherClaim.jobAttemptId,
+      workerId: otherClaim.workerId,
+    }, otherResponse))();
+    expect((await recordRetained(pool, f.input, otherSelection, otherClaim.attemptId)).kind).toBe("identified");
+    expect((await retainChannexOfferConfiguration(
+      pool, f.input, otherSelection, otherClaim.attemptId,
+      async () => otherData,
+    )).kind).toBe("configuration_retained");
     const claim = (date = initialAriDate) =>
       claimPublishedChannexInitialAri(pool, f.input, f.selection, f.claim.attemptId, date);
-    return { ...f, claimAri: claim };
+    return { ...f, otherClaim, claimAri: claim };
+  }
+  async function seedCurrentAvailability(f: Awaited<ReturnType<typeof initialAriFixture>>) {
+    const today = new Date().toISOString().slice(0, 10),
+      receiptId = randomUUID(),
+      taskId = randomUUID(),
+      attemptId = randomUUID(),
+      digest = "a".repeat(64),
+      observations = "b".repeat(64);
+    const mapping = (
+      await pool.query(
+        `SELECT m.id,c.id AS connection_id,c.binding_generation,c.external_property_id,
+           m.external_room_type_id
+         FROM pms.channel_room_type_mappings m
+         JOIN pms.channel_connections c ON c.id=m.connection_id
+         WHERE m.property_id=$1 AND m.room_type_id=$2`,
+        [f.scope.propertyId, f.selection.roomTypeId],
+      )
+    ).rows[0];
+    const evidence = {
+      kind: "available",
+      day: {
+        propertyId: f.scope.propertyId,
+        roomTypeId: f.selection.roomTypeId,
+        stayDate: today,
+        calendarRevision: 1,
+        inventoryRevision: 1,
+        sourceRevisions: { generated: 1, channel: 0, manual: 0, block: 0, booking: 0 },
+        operatingStatus: "open",
+        physicalCapacityCount: 2,
+        generatedSellableLimitCount: 2,
+        channelSellableLimitCount: null,
+        manualSellableLimitCount: null,
+        effectiveSellableLimitCount: 2,
+        assignedCount: 0,
+        blockedCount: 0,
+        linkedStopSell: false,
+        linkedSourceRevision: 0,
+        availableCount: 2,
+      },
+      configurationSource: {
+        ownerDomain: "pms",
+        entityType: "pms_operating_calendar.v1",
+        entityId: f.scope.propertyId,
+        revision: "calendar:1",
+      },
+      propertyProfileSource: {
+        ownerDomain: "hotel_catalog",
+        entityType: "property_profile",
+        entityId: f.scope.propertyId,
+        revision: "profile:1",
+      },
+      propertyTimeZone: "Etc/UTC",
+      materializedRevision: 1,
+      sourceRoomFactsRevision: 1,
+      sourceRoomUnitsRevision: 1,
+    };
+    const request = {
+      values: [
+        {
+          property_id: mapping.external_property_id,
+          room_type_id: mapping.external_room_type_id,
+          date_from: today,
+          date_to: today,
+          availability: 2,
+        },
+      ],
+    };
+    const reconciliation = {
+      schemaVersion: 1,
+      completionBasis: "finished_task_fifo",
+      observationsSha256: observations,
+      inventoryEvidenceSha256: digest,
+      originalReceiptId: receiptId,
+      taskCount: 1,
+      availability: {
+        kind: "availability_observed",
+        externalPropertyId: mapping.external_property_id,
+        externalRoomTypeId: mapping.external_room_type_id,
+        date: today,
+        availableCount: 2,
+      },
+    };
+    const client = await pool.connect();
+    try {
+      await client.query("SET session_replication_role='replica'");
+      await client.query(
+        `INSERT INTO pms.operating_calendar_revisions
+          (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,
+           property_time_zone,schedule_mode,recurring_period_count,room_binding_count,
+           default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,
+           created_by_user_id,created_at,updated_at)
+         VALUES($1,$2,1,'pms-operating-calendar.v1',1,'Etc/UTC','year_round',0,1,1,$3,$4,$5,$6,now(),now())`,
+        [
+          f.scope.organizationId,
+          f.scope.propertyId,
+          randomUUID(),
+          randomUUID(),
+          randomUUID(),
+          f.scope.actorUserId,
+        ],
+      );
+      await client.query(
+        `INSERT INTO pms.operating_calendar_room_bindings
+          (property_id,calendar_revision,room_type_id,source_room_facts_revision,
+           source_room_units_revision,physical_capacity_count,starting_sellable_limit_count)
+         VALUES($1,1,$2,1,1,2,2)`,
+        [f.scope.propertyId, f.selection.roomTypeId],
+      );
+      await client.query(
+        `INSERT INTO pms.inventory_materialization_coverage
+          (property_id,organization_id,calendar_revision,materialized_revision,coverage_from,
+           coverage_through,room_type_count,expected_day_count,materialized_day_count,
+           last_changed_materialization_idempotency_key_id,
+           last_changed_materialization_domain_event_id,last_changed_materialization_outbox_event_id,updated_at)
+         VALUES($1,$2,1,1,$3,$3,1,1,1,$4,$5,$6,now())`,
+        [
+          f.scope.propertyId,
+          f.scope.organizationId,
+          today,
+          randomUUID(),
+          randomUUID(),
+          randomUUID(),
+        ],
+      );
+      await client.query(
+        `INSERT INTO pms.inventory_days
+          (property_id,room_type_id,stay_date,total_count,available_count,calendar_revision,
+           inventory_revision,generated_sellable_limit_count,effective_sellable_limit_count,
+           generated_source_revision,channel_source_revision,manual_source_revision,
+           block_source_revision,booking_source_revision)
+         VALUES($1,$2,$3,2,2,1,1,2,2,1,0,0,0,0)`,
+        [f.scope.propertyId, f.selection.roomTypeId, today],
+      );
+      await client.query(
+        `INSERT INTO pms.channex_room_availability_attempts
+          (id,property_id,connection_id,mapping_id,room_type_id,binding_generation,
+           external_property_id,external_room_type_id,job_attempt_id,worker_id,service_date,
+           available_count,inventory_evidence,request_body,state,reconciliation_evidence,
+           inventory_evidence_sha256)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,2,$12,$13,'reconciled',$14,$15)`,
+        [
+          attemptId,
+          f.scope.propertyId,
+          mapping.connection_id,
+          mapping.id,
+          f.selection.roomTypeId,
+          mapping.binding_generation,
+          mapping.external_property_id,
+          mapping.external_room_type_id,
+          f.claim.jobAttemptId,
+          f.claim.workerId,
+          today,
+          evidence,
+          request,
+          reconciliation,
+          digest,
+        ],
+      );
+      await client.query(
+        `INSERT INTO pms.channex_room_availability_receipts
+          (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         VALUES($1,$2,$3,$4,'complete_json',200,ARRAY[$5::uuid],false)`,
+        [receiptId, attemptId, f.claim.jobAttemptId, f.claim.workerId, taskId],
+      );
+      await client.query(
+        `INSERT INTO pms.channex_room_availability_reconciliation_attestations
+          (attempt_id,receipt_id,inventory_evidence_sha256,observations_sha256,reconciliation_evidence)
+         VALUES($1,$2,$3,$4,$5)`,
+        [attemptId, receiptId, digest, observations, reconciliation],
+      );
+    } finally {
+      await client.query("SET session_replication_role='origin'");
+      client.release();
+    }
+  }
+  async function seedCompletedInitialAri(f: Awaited<ReturnType<typeof initialAriFixture>>) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role='replica'");
+      await client.query(
+        `CREATE TEMP TABLE activation_ari_seed ON COMMIT DROP AS
+         SELECT created.id AS creation_attempt_id,gen_random_uuid() AS attempt_id,
+           gen_random_uuid() AS receipt_id,gen_random_uuid() AS task_id,day::date AS service_date
+         FROM pms.channex_offer_create_attempts created
+         CROSS JOIN generate_series(current_date,current_date+548,interval '1 day') day
+         WHERE created.id=ANY($1::uuid[])
+           AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_ari_attempts existing
+             WHERE existing.creation_attempt_id=created.id AND existing.service_date=day::date)`,
+        [[f.claim.attemptId, f.otherClaim.attemptId]],
+      );
+      await client.query(
+        `INSERT INTO pms.channex_offer_ari_attempts
+          (id,creation_attempt_id,target_id,intent_id,version,binding_generation,
+           external_property_id,external_room_type_id,external_rate_plan_id,job_attempt_id,
+           worker_id,service_date,request_body,state,reconciliation_evidence)
+         SELECT seed.attempt_id,created.id,created.target_id,created.intent_id,created.version,
+           created.binding_generation,created.external_property_id,created.external_room_type_id,
+           created.external_rate_plan_id,created.job_attempt_id,created.worker_id,seed.service_date,
+           '{"values":[{}]}'::jsonb,'reconciled',jsonb_build_object(
+             'schemaVersion',1,'completionBasis','finished_task_fifo',
+             'observationsSha256',repeat('c',64),'originalReceiptId',seed.receipt_id::text,
+             'taskCount',1)
+         FROM activation_ari_seed seed
+         JOIN pms.channex_offer_create_attempts created ON created.id=seed.creation_attempt_id`,
+      );
+      await client.query(
+        `INSERT INTO pms.channex_offer_ari_receipts
+          (id,attempt_id,job_attempt_id,worker_id,outcome,http_status,task_ids,has_warnings)
+         SELECT seed.receipt_id,seed.attempt_id,created.job_attempt_id,created.worker_id,
+           'complete_json',200,ARRAY[seed.task_id],false
+         FROM activation_ari_seed seed
+         JOIN pms.channex_offer_create_attempts created ON created.id=seed.creation_attempt_id`,
+      );
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   }
   it("claims all occupancy totals and explicit restrictions for the current identified rate", async () => {
     const f = await initialAriFixture(),
@@ -1883,216 +2136,290 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ).rows[0].count,
     ).toBe(1);
   });
-  it("completes 549 closed dates across worker restarts, a read retry and a receipt-before-crash", async () => {
+  it("activates exactly once after complete ARI and current room availability", async () => {
     const f = await initialAriFixture();
-    const metadata = (await f.response().json()) as {
-      data: {
-        id: string;
-        attributes: { options: { id: string; occupancy: number; is_primary: boolean }[] };
-      };
-    };
-    const rateId = metadata.data.id;
-    const options = metadata.data.attributes.options;
-    options.forEach((option) => {
-      option.id = option.is_primary ? rateId : randomUUID();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    const first = await activatePublishedChannexOffers(pool, f.input);
+    expect(first).toEqual({ kind: "all_targets_active", count: 2 });
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual(first);
+    const target = (
+      await pool.query(
+        `SELECT t.active_version,i.status,
+           (SELECT count(*)::int FROM pms.channex_offer_target_versions v
+             WHERE v.target_id=t.id) AS versions,
+           v.readback_evidence#>>'{initialAri,from}' AS "ariFrom",
+           v.readback_evidence#>>'{initialAri,through}' AS "ariThrough"
+         FROM pms.channex_offer_targets t
+         JOIN pms.channex_offer_target_intents i ON i.target_id=t.id
+         JOIN pms.channex_offer_target_versions v
+           ON v.target_id=t.id AND v.version=t.active_version
+         WHERE t.id=$1`,
+        [f.claim.targetId],
+      )
+    ).rows[0];
+    const through = new Date(`${target.ariFrom}T00:00:00.000Z`);
+    through.setUTCDate(through.getUTCDate() + 548);
+    expect(target).toEqual({
+      active_version: "1",
+      status: "sealed",
+      versions: 1,
+      ariFrom: new Date().toISOString().slice(0, 10),
+      ariThrough: through.toISOString().slice(0, 10),
     });
-    type Value = {
-      property_id: string;
-      rate_plan_id: string;
-      date: string;
-      rates: { occupancy: number; rate: string }[];
-      stop_sell: boolean;
-    };
-    const uploads = new Map<string, { taskId: string; body: { values: Value[] } }>();
-    let readFailed = false,
-      crashInjected = false;
-    const fetcher: typeof fetch = async (url, init) => {
-      const parsed = new URL(String(url)),
-        path = parsed.pathname;
-      expect(init?.redirect).toBe("error");
-      if (init?.method === "POST") {
-        expect(path).toBe("/api/v1/restrictions");
-        const body = JSON.parse(String(init.body)) as { values: Value[] },
-          value = body.values[0];
-        expect(body.values).toHaveLength(1);
-        expect(value.stop_sell).toBe(true);
-        expect(value.rates).toEqual([
-          { occupancy: 1, rate: "100.00" },
-          { occupancy: 2, rate: "100.00" },
-        ]);
-        expect(uploads.has(value.date)).toBe(false);
-        const taskId = randomUUID();
-        uploads.set(value.date, { taskId, body });
-        return Response.json({
-          data: [{ type: "task", id: taskId }],
-          meta: { message: "Success" },
-        });
-      }
-      if (path.includes("/tasks/")) {
-        if (uploads.size === 80 && !readFailed) {
-          readFailed = true;
-          return new Response(null, { status: 503 });
-        }
-        const saved = [...uploads.values()].find((entry) => path.endsWith(entry.taskId));
-        if (!saved) throw new Error("Unexpected task");
-        return Response.json({
-          data: {
-            type: "task",
-            id: saved.taskId,
-            attributes: {
-              id: saved.taskId,
-              task: "Property.UpdateRestrictions",
-              payload: saved.body,
-              success: true,
-              errors: [],
-              received_at: "2026-09-14T00:00:00.000001",
-              executed_at: "2026-09-14T00:00:00.000002",
-              finished_at: "2026-09-14T00:00:00.000003",
-            },
-          },
-        });
-      }
-      if (path.includes("/properties/"))
-        return Response.json({
-          data: {
-            type: "property",
-            id: f.scope.propertyId,
-            attributes: { settings: { min_stay_type: "both" } },
-          },
-        });
-      if (path.includes("/room_types/")) return Response.json(providerRoom(f));
-      if (path.includes("/rate_plans/")) return Response.json(metadata);
-      const date = parsed.searchParams.get("filter[date]")!,
-        saved = uploads.get(date);
-      if (!saved) throw new Error("Read without upload");
-      const value = saved.body.values[0];
-      if (parsed.searchParams.get("filter[restrictions]")?.includes("min_stay")) {
-        const { property_id, rate_plan_id, date: _date, rates, ...rules } = value;
-        return Response.json({ data: { [rate_plan_id]: { [date]: rules } } });
-      }
-      const option = options.find(
-        (entry) => entry.id === parsed.searchParams.get("filter[rate_plan_id]"),
-      );
-      if (!option) throw new Error("Unexpected occupancy read");
-      return Response.json({
-        data: {
-          [option.id]: {
-            [date]: {
-              rate: value.rates.find((r) => r.occupancy === option.occupancy)!.rate,
-              stop_sell: true,
-            },
-          },
+  });
+  it("does not report activation complete while a mapped published offer has no target", async () => {
+    const f = await creationFixture();
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "unavailable",
+      reason: "target_activation_pending",
+    });
+  });
+  it("recognizes the saved operation after activation commits but before job completion", async () => {
+    const f = await initialAriFixture("10000", true);
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const job = {
+      ...f.input,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      maxAttempts: 3,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "provision" as const,
+        publishedOffer: {
+          roomTypeId: f.selection.roomTypeId,
+          offerId: f.selection.offerId,
+          publicationRevision: 1,
+          primaryOccupancy: 1,
         },
-      });
-    };
-    const state = { succeed: vi.fn(), fail: vi.fn() };
-    const scopedPool = {
-      connect: async () => {
-        const client = await pool.connect();
-        return {
-          release: client.release.bind(client),
-          query: (text: string, values?: unknown[]) =>
-            text.includes("pms.enqueue_restriction_ari")
-              ? Promise.resolve({ rows: [], rowCount: 0 })
-              : client.query(
-                  text.includes('max_attempts AS "maxAttempts"')
-                    ? text.replace(
-                        "WHERE queue_name = $1",
-                        `WHERE id='${f.input.jobId}'::uuid AND queue_name = $1`,
-                      )
-                    : text,
-                  values,
-                ),
-        };
       },
-      end: async () => {},
     };
+    const create = vi.fn();
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, {
+        get: vi.fn(),
+        create,
+      }),
+    ).toEqual({ kind: "ready" });
+    expect(create).not.toHaveBeenCalled();
+    const repeatId = randomUUID();
     await pool.query(
-      `UPDATE platform.jobs SET locked_at=now()-interval '1 hour',payload=$2::jsonb WHERE id=$1`,
-      [
-        f.input.jobId,
-        JSON.stringify({
-          operationType: "sync_ari",
-          commandId: randomUUID(),
-          idempotencyKey: randomUUID(),
-        }),
-      ],
+      `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
+         tenant_scope,property_id,resource_product,resource_type,resource_id,payload)
+       VALUES($1::uuid,$1::text,'pms.channex.management','channex.provision','running',1,
+         'reader-test',clock_timestamp(),'property',$2::uuid,'pms','channex_connection',$2::text,
+         $3::jsonb)`,
+      [repeatId, f.scope.propertyId, JSON.stringify(job.input)],
     );
-    let terminal: string | undefined;
-    for (let run = 0; run < 553; run++) {
-      // Emulate the scheduler reaching run_after; no sleeps or in-memory worker state.
-      await pool.query("UPDATE platform.jobs SET run_after=now()-interval '1 second' WHERE id=$1", [
-        f.input.jobId,
-      ]);
-      const store = createPgPmsChannexManagementWorkerStore({
-        connectionString: url!,
-        pool: scopedPool,
-        targetState: state,
-      });
-      const provider = createChannexManagementProvider({
-        apiBaseUrl: "https://staging.channex.io",
-        apiKey: "synthetic",
-        fetch: fetcher,
-        plans: {
-          plan: async () => {
-            throw new Error("Old pricing plan must not run");
+    await pool.query(
+      "INSERT INTO platform.job_attempts(job_id,attempt_number,worker_id) VALUES($1,1,'reader-test')",
+      [repeatId],
+    );
+    const repeat = { ...job, jobId: repeatId };
+    expect(
+      await bootstrapPublishedChannexOffer(pool, repeat, f.input.workerId, {
+        get: vi.fn(),
+        create,
+      }),
+    ).toEqual({ kind: "ready" });
+    expect(
+      await bootstrapPublishedChannexOffer(
+        pool,
+        {
+          ...repeat,
+          input: {
+            ...repeat.input,
+            publishedOffer: { ...repeat.input.publishedOffer, primaryOccupancy: 2 },
           },
         },
-        reconcileClosedUploads: (lease, get) => reconcilePendingChannexUploads(pool, lease, get),
-        dispatchClosedUpload: (lease, ports) => dispatchNextChannexClosedUpload(pool, lease, ports),
+        f.input.workerId,
+        { get: vi.fn(), create },
+      ),
+    ).toEqual({
+      kind: "unavailable",
+      reason: "active_offer_conflict",
+    });
+    expect(
+      (
+        await prepareChannexOfferDispatch(
+          pool,
+          {
+            jobId: repeatId,
+            attemptNumber: 1,
+            workerId: f.input.workerId,
+          },
+          { ...f.selection, operationKey: repeatId },
+        )
+      ).kind,
+    ).toBe("unavailable");
+    expect(create).not.toHaveBeenCalled();
+  });
+  it.each(["availability", "binding"])(
+    "keeps the target pending when current %s evidence changes",
+    async (changed) => {
+      const f = await initialAriFixture();
+      await seedCurrentAvailability(f);
+      await seedCompletedInitialAri(f);
+      if (changed === "availability")
+        await pool.query(
+          `UPDATE pms.inventory_days SET assigned_count=1,available_count=1,
+             booking_source_revision=booking_source_revision+1,
+             inventory_revision=inventory_revision+1
+           WHERE property_id=$1 AND room_type_id=$2`,
+          [f.scope.propertyId, f.selection.roomTypeId],
+        );
+      else
+        await pool.query(
+          "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+          [f.scope.propertyId],
+        );
+      expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+        kind: "unavailable",
       });
-      const workerId = `restart-${run}`;
-      if (uploads.size === 274 && !crashInjected) {
-        const job = await store.claim({ workerId, now: new Date() });
-        expect(job).not.toBeNull();
-        expect(await provider.execute(job!, { workerId })).toMatchObject({
-          code: "initial_upload_retained",
-        });
-        crashInjected = true;
-        await pool.query("UPDATE platform.jobs SET locked_at=now()-interval '1 hour' WHERE id=$1", [
-          f.input.jobId,
-        ]);
-        continue;
-      }
-      const result = await runPmsChannexManagementWorkerOnce({ store, provider, workerId });
-      if (result.outcome === "continued" || result.outcome === "retry_scheduled") continue;
-      terminal = result.outcome;
-      break;
-    }
-    expect(readFailed).toBe(true);
-    expect(crashInjected).toBe(true);
-    expect(uploads.size).toBe(549);
-    const dates = [...uploads.keys()].sort();
-    for (let index = 0; index < dates.length; index++) {
-      expect(dates[index]).toBe(
-        new Date(new Date(dates[0] + "T00:00:00Z").getTime() + index * 86400000)
-          .toISOString()
-          .slice(0, 10),
-      );
-    }
+      expect(
+        (
+          await pool.query(
+            `SELECT t.active_version,i.status FROM pms.channex_offer_targets t
+             JOIN pms.channex_offer_target_intents i ON i.target_id=t.id WHERE t.id=$1`,
+            [f.claim.targetId],
+          )
+        ).rows[0],
+      ).toEqual({ active_version: null, status: "pending" });
+    },
+  );
+  it("does not duplicate a version when activation races", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    const raced = await Promise.allSettled([
+      activatePublishedChannexOffers(pool, f.input),
+      activatePublishedChannexOffers(pool, f.input),
+    ]);
+    expect(
+      raced.some(
+        (result) => result.status === "fulfilled" && result.value.kind === "all_targets_active",
+      ),
+    ).toBe(true);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
     expect(
       (
         await pool.query(
-          "SELECT state,count(*)::int AS count FROM pms.channex_offer_ari_attempts WHERE creation_attempt_id=$1 GROUP BY state",
-          [f.claim.attemptId],
+          "SELECT count(*)::int AS count FROM pms.channex_offer_target_versions WHERE target_id=$1",
+          [f.claim.targetId],
         )
-      ).rows,
-    ).toEqual([{ state: "reconciled", count: 549 }]);
-    expect(
-      (await pool.query("SELECT max_attempts FROM platform.jobs WHERE id=$1", [f.input.jobId]))
-        .rows[0].max_attempts,
-    ).toBe(554);
-    expect(state.succeed).not.toHaveBeenCalled();
-    expect(terminal).toBe("dead_lettered"); // Activation is deliberately still unavailable.
-    expect(state.fail.mock.calls.at(-1)?.[2]).toMatchObject({ code: "invalid_state" });
+      ).rows[0].count,
+    ).toBe(1);
+  });
+  it("does not accept an incomplete replacement over the active version", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const replacement = { ...f.selection, operationKey: "replacement-pending" };
+    expect(await reservePublishedChannexOfferTarget(pool, f.input, replacement)).toMatchObject({
+      kind: "reserved",
+      version: "2",
+    });
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "unavailable",
+      reason: "target_activation_pending",
+    });
     expect(
       (
         await pool.query("SELECT active_version FROM pms.channex_offer_targets WHERE id=$1", [
           f.claim.targetId,
         ])
       ).rows[0].active_version,
-    ).toBeNull();
-  }, 240_000);
+    ).toBe("1");
+  });
+  it("activates a fully verified replacement and preserves both versions", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    await activatePublishedChannexOffers(pool, f.input);
+    const selection = { ...f.selection, operationKey: "replacement-complete" };
+    const claim = await claimPublishedChannexOfferCreate(pool, f.input, selection);
+    if (claim.kind !== "claimed") throw new Error("replacement claim required");
+    const created = createdResponse(claim.request.body),
+      correlation = {
+        ...f.correlation,
+        receiptId: randomUUID(),
+        attemptId: claim.attemptId,
+        jobAttemptId: claim.jobAttemptId,
+        workerId: claim.workerId,
+      };
+    await (
+      await prepareChannexReceiptPersistence(
+        pool,
+        correlation,
+        Response.json(created, { status: 201 }),
+      )
+    )();
+    expect(await recordRetained(pool, f.input, selection, claim.attemptId)).toMatchObject({
+      kind: "identified",
+    });
+    expect(
+      await retainChannexOfferConfiguration(pool, f.input, selection, claim.attemptId, async () =>
+        Response.json(created).json(),
+      ),
+    ).toMatchObject({ kind: "configuration_retained" });
+    await seedCompletedInitialAri({ ...f, selection, claim });
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "all_targets_active",
+      count: 2,
+    });
+    expect(
+      (
+        await pool.query(
+          `SELECT active_version,
+             (SELECT count(*)::int FROM pms.channex_offer_target_versions version
+               WHERE version.target_id=target.id) AS versions
+           FROM pms.channex_offer_targets target WHERE id=$1`,
+          [f.claim.targetId],
+        )
+      ).rows[0],
+    ).toEqual({ active_version: "2", versions: 2 });
+  });
+  it("does not accept an active version after its binding changes", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    await activatePublishedChannexOffers(pool, f.input);
+    await pool.query(
+      "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "unavailable",
+      reason: "target_activation_pending",
+    });
+  });
+  it("does not accept an active version after its room mapping changes", async () => {
+    const f = await initialAriFixture();
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    await pool.query(
+      "UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1 AND room_type_id=$3",
+      [f.scope.propertyId, randomUUID(), f.selection.roomTypeId],
+    );
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({
+      kind: "unavailable",
+      reason: "target_activation_pending",
+    });
+  });
   it("worker reconciles today, sends tomorrow closed once, and continues without sync success", async () => {
     const today = new Date().toISOString().slice(0, 10);
     const f = await reconciliationFixture(today),
@@ -3399,6 +3726,336 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     };
   }
+  it("bootstraps each mapped published offer through retained creation receipts", async () => {
+    const f = await creationFixture();
+    const room = providerRoom(f);
+    Object.assign(room.data.attributes, { default_occupancy: 1 });
+    let created: unknown;
+    const create = vi.fn(async (request: { body: unknown }) => {
+      created = createdResponse(request.body);
+      return new Response(JSON.stringify(created), { status: 201 });
+    });
+    const get = vi.fn(async (path: string) =>
+      path.startsWith("/api/v1/room_types/") ? room : created,
+    );
+    const first = await advancePublishedChannexOfferCreates(pool, f.input, { get, create });
+    expect(first.kind).toBe("retained");
+    expect(create).toHaveBeenCalledOnce();
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe(
+      "retained",
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "offer_creates_current",
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    const result = await pool.query(
+      `SELECT t.active_version,i.result_evidence ? 'configuration' AS configured
+       FROM pms.channex_offer_targets t
+       JOIN pms.channex_offer_target_intents i ON i.target_id=t.id
+       WHERE t.property_id=$1`,
+      [f.scope.propertyId],
+    );
+    expect(result.rows).toEqual([
+      { active_version: null, configured: true },
+      { active_version: null, configured: true },
+    ]);
+  });
+  it("refuses to create an offer without a verified room primary occupancy", async () => {
+    const f = await creationFixture();
+    const create = vi.fn(async () => new Response("{}", { status: 201 }));
+    expect(
+      await advancePublishedChannexOfferCreates(pool, f.input, {
+        get: async () => providerRoom(f),
+        create,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "primary_occupancy_unavailable" });
+    expect(create).not.toHaveBeenCalled();
+    expect(
+      (await pool.query("SELECT 1 FROM pms.channex_offer_targets WHERE property_id=$1", [
+        f.scope.propertyId,
+      ])).rowCount,
+    ).toBe(0);
+  });
+  it("schedules the scoped Channex job when published pricing changes", async () => {
+    const f = await creationFixture();
+    const schedule = createPgChannexAriSchedule(url!, f.scope.propertyId);
+    try {
+      expect(await schedule.enqueue()).toBe(1);
+      expect(await schedule.enqueue()).toBe(0);
+      await pool.query("UPDATE pms.pricing_v2_heads SET revision=0 WHERE property_id=$1", [
+        f.scope.propertyId,
+      ]);
+      expect(await schedule.enqueue()).toBe(1);
+      await pool.query("UPDATE pms.channel_connections SET connection_status='disconnected' WHERE property_id=$1", [f.scope.propertyId]);
+      expect(await schedule.enqueue()).toBe(0);
+      await pool.query("UPDATE pms.channel_connections SET connection_status='connected' WHERE property_id=$1", [f.scope.propertyId]);
+      expect(await schedule.enqueue()).toBe(1);
+      expect((await pool.query(
+        `SELECT count(*)::int AS count FROM platform.jobs
+         WHERE property_id=$1 AND job_metadata->>'source'='channex-ari-schedule'`,
+        [f.scope.propertyId],
+      )).rows[0].count).toBe(3);
+    } finally {
+      await schedule.close();
+    }
+  });
+  it("continues a persisted offer creation without consuming its retry limit", async () => {
+    const f = await creationFixture();
+    const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);
+    if (prepared.kind !== "prepared") throw new Error("dispatch required");
+    const progress = await prepared.dispatch({
+      getRoom: async () => providerRoom(f),
+      create: async (request) => new Response(
+        JSON.stringify(createdResponse(request.body)), { status: 201 },
+      ),
+    });
+    if (progress.kind !== "retained") throw new Error("receipt required");
+    const store = createPgPmsChannexManagementWorkerStore({
+      connectionString: url!, pool, ariSyncMutating: false,
+      targetState: { async succeed() {}, async fail() {} },
+    });
+    const job = {
+      jobId: f.input.jobId, propertyId: f.scope.propertyId, correlationId: null,
+      attemptNumber: 1, maxAttempts: 5,
+      input: { operationType: "sync_ari" as const, commandId: randomUUID(), idempotencyKey: randomUUID() },
+    };
+    await store.continueUpload(job, {
+      ok: false, code: "offer_create_retained", attemptId: progress.attemptId,
+    }, { workerId: f.input.workerId, now: new Date() });
+    expect((await pool.query(
+      "SELECT status,attempts_count,max_attempts FROM platform.jobs WHERE id=$1",
+      [f.input.jobId],
+    )).rows[0]).toEqual({ status: "pending", attempts_count: 1, max_attempts: 6 });
+  });
+  it("retries a released preflight attempt once room metadata is corrected", async () => {
+    const f = await creationFixture();
+    const validRoom = providerRoom(f);
+    Object.assign(validRoom.data.attributes, { default_occupancy: 1 });
+    let reads = 0;
+    const get = async () => {
+      reads += 1;
+      return reads === 2
+        ? { ...validRoom, data: { ...validRoom.data, id: randomUUID() } }
+        : validRoom;
+    };
+    const create = vi.fn(async (request: { body: unknown }) =>
+      new Response(JSON.stringify(createdResponse(request.body)), { status: 201 }),
+    );
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "unavailable", reason: "creation_preflight_unavailable",
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect((await pool.query(
+      `SELECT a.state FROM pms.channex_offer_create_attempts a
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id WHERE t.property_id=$1`,
+      [f.scope.propertyId],
+    )).rows).toEqual([{ state: "released" }]);
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    expect(create).toHaveBeenCalledOnce();
+  });
+  it("uses a new intent when occupancy changes after a released preflight", async () => {
+    const f = await creationFixture();
+    const room = providerRoom(f);
+    Object.assign(room.data.attributes, { default_occupancy: 1 });
+    let reads = 0;
+    const get = async () => {
+      reads += 1;
+      return reads === 2
+        ? { ...room, data: { ...room.data, id: randomUUID() } }
+        : room;
+    };
+    const create = vi.fn(async (request: { body: unknown }) =>
+      new Response(JSON.stringify(createdResponse(request.body)), { status: 201 }),
+    );
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "unavailable", reason: "creation_preflight_unavailable",
+    });
+    Object.assign(room.data.attributes, { default_occupancy: 2 });
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    expect(create).toHaveBeenCalledOnce();
+    expect((await pool.query(
+      `SELECT status FROM pms.channex_offer_target_intents i
+       JOIN pms.channex_offer_targets t ON t.id=i.target_id
+       WHERE t.property_id=$1 ORDER BY status`,
+      [f.scope.propertyId],
+    )).rows).toEqual([{ status: "failed" }, { status: "pending" }]);
+  });
+  it("creates a replacement when the active offer has an older binding", async () => {
+    const f = await creationFixture();
+    const reserved = await reservePublishedChannexOfferTarget(pool, f.input, f.selection);
+    if (reserved.kind !== "reserved") throw new Error("reservation required");
+    const binding = (await pool.query(
+      "SELECT binding_generation FROM pms.channel_connections WHERE property_id=$1",
+      [f.scope.propertyId],
+    )).rows[0].binding_generation as string;
+    await pool.query(
+      `INSERT INTO pms.channex_offer_target_versions
+       (target_id,version,intent_id,binding_generation,external_property_id,
+        external_room_type_id,external_rate_plan_id,configuration,readback_evidence)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'{"meal_type":"room_only"}','{"verified":true}')`,
+      [reserved.targetId, reserved.version, reserved.intentId, binding,
+        f.scope.propertyId, f.externalRoomTypeId, randomUUID()],
+    );
+    const seed = await pool.connect();
+    try {
+      // Seed a prior active version; production reaches this state only after full ARI readback.
+      await seed.query("SET session_replication_role=replica");
+      await seed.query("UPDATE pms.channex_offer_target_intents SET status='sealed' WHERE id=$1", [reserved.intentId]);
+    } finally {
+      await seed.query("SET session_replication_role=origin");
+      seed.release();
+    }
+    await pool.query("UPDATE pms.channex_offer_targets SET active_version=$2 WHERE id=$1", [reserved.targetId, reserved.version]);
+    await pool.query("UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE property_id=$1", [f.scope.propertyId]);
+    const room = providerRoom(f);
+    Object.assign(room.data.attributes, { default_occupancy: 1 });
+    const create = vi.fn(async (request: { body: unknown }) =>
+      new Response(JSON.stringify(createdResponse(request.body)), { status: 201 }),
+    );
+    const result = await advancePublishedChannexOfferCreates(pool, f.input, {
+      get: async () => room,
+      create,
+    });
+    expect(result.kind).toBe("retained");
+    expect(create).toHaveBeenCalledOnce();
+    expect((await pool.query(
+      "SELECT active_version FROM pms.channex_offer_targets WHERE id=$1",
+      [reserved.targetId],
+    )).rows[0].active_version).toBe(reserved.version);
+  });
+  it("reconciles a definitive create receipt across mapping changes and a return to the original mapping", async () => {
+    const f = await creationFixture();
+    let externalRoomTypeId = f.externalRoomTypeId;
+    let created: unknown;
+    const create = vi.fn(async (request: { body: unknown }) => {
+      created = createdResponse(request.body);
+      return new Response(JSON.stringify(created), { status: 201 });
+    });
+    const get = async (path: string) => {
+      if (!path.startsWith("/api/v1/room_types/")) return created;
+      const room = providerRoom(f);
+      room.data.id = externalRoomTypeId;
+      Object.assign(room.data.attributes, { default_occupancy: 1 });
+      return room;
+    };
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    externalRoomTypeId = randomUUID();
+    await pool.query("UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1", [
+      f.scope.propertyId, externalRoomTypeId,
+    ]);
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    externalRoomTypeId = f.externalRoomTypeId;
+    await pool.query("UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1", [
+      f.scope.propertyId, externalRoomTypeId,
+    ]);
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    expect(create).toHaveBeenCalledTimes(3);
+    expect((await pool.query(
+      `SELECT count(*)::int AS count FROM pms.channex_offer_target_intents i
+       JOIN pms.channex_offer_targets t ON t.id=i.target_id
+       WHERE t.property_id=$1 AND i.status='failed'`,
+      [f.scope.propertyId],
+    )).rows[0].count).toBe(2);
+  });
+  it("holds a stale create when the original provider outcome is ambiguous", async () => {
+    const f = await creationFixture();
+    let externalRoomTypeId = f.externalRoomTypeId;
+    const get = async () => {
+      const room = providerRoom(f);
+      room.data.id = externalRoomTypeId;
+      Object.assign(room.data.attributes, { default_occupancy: 1 });
+      return room;
+    };
+    const create = vi.fn(async () => { throw new Error("provider timeout"); });
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "unavailable", reason: "creation_reconciliation_required",
+    });
+    externalRoomTypeId = randomUUID();
+    await pool.query("UPDATE pms.channel_room_type_mappings SET external_room_type_id=$2 WHERE property_id=$1", [
+      f.scope.propertyId, externalRoomTypeId,
+    ]);
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "unavailable", reason: "stale_creation_requires_reconciliation",
+    });
+    expect(create).toHaveBeenCalledOnce();
+  });
+  it("retires a definitive pending create when its room mapping is disabled", async () => {
+    const f = await creationFixture();
+    const room = providerRoom(f);
+    Object.assign(room.data.attributes, { default_occupancy: 1 });
+    let created: unknown;
+    const create = vi.fn(async (request: { body: unknown }) => {
+      created = createdResponse(request.body);
+      return new Response(JSON.stringify(created), { status: 201 });
+    });
+    const get = async (path: string) =>
+      path.startsWith("/api/v1/room_types/") ? room : created;
+    expect((await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).kind).toBe("retained");
+    await pool.query(
+      "UPDATE pms.channel_room_type_mappings SET status='disabled' WHERE property_id=$1",
+      [f.scope.propertyId],
+    );
+    expect(await advancePublishedChannexOfferCreates(pool, f.input, { get, create })).toEqual({
+      kind: "offer_creates_current",
+    });
+    expect(await activatePublishedChannexOffers(pool, f.input)).toEqual({ kind: "no_targets" });
+    expect(create).toHaveBeenCalledOnce();
+    expect((await pool.query(
+      `SELECT i.status FROM pms.channex_offer_target_intents i
+       JOIN pms.channex_offer_targets t ON t.id=i.target_id
+       WHERE t.property_id=$1`,
+      [f.scope.propertyId],
+    )).rows).toEqual([{ status: "failed" }]);
+  });
+  it("replays a saved-offer creation receipt without creating a second Channex rate", async () => {
+    const f = await creationFixture("10000", true);
+    const selection = f.selection;
+    const job = {
+      ...f.input,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      maxAttempts: 3,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "provision" as const,
+        publishedOffer: {
+          roomTypeId: selection.roomTypeId,
+          offerId: selection.offerId,
+          publicationRevision: 1,
+          primaryOccupancy: 1,
+        },
+      },
+    };
+    let created: unknown;
+    const create = vi.fn(async (request: { body: unknown }) => {
+      created = createdResponse(request.body);
+      return new Response(JSON.stringify(created), { status: 201 });
+    });
+    const get = vi.fn(async (path: string) =>
+      path.includes("/room_types/") ? providerRoom(f) : created,
+    );
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, { get, create }),
+    ).toMatchObject({ kind: "creation_retained" });
+    expect(create).toHaveBeenCalledOnce();
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, { get, create }),
+    ).toEqual({ kind: "ready" });
+    expect(create).toHaveBeenCalledOnce();
+    expect(
+      (
+        await pool.query(
+          `SELECT count(*)::int AS count FROM pms.channex_offer_create_receipts receipt
+       JOIN pms.channex_offer_create_attempts attempt ON attempt.id=receipt.attempt_id
+       JOIN pms.channex_offer_targets target ON target.id=attempt.target_id
+       WHERE target.property_id=$1`,
+          [f.scope.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+  });
   it("dispatches once through fresh checks and retains a simulated create response", async () => {
     const f = await creationFixture();
     const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);

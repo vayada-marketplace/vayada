@@ -10,8 +10,10 @@ fixtures live in [`deployment-contract`](deployment-contract/).
 ## Activation boundary
 
 Both coordinated workflows require the repository variable
-`COORDINATED_RELEASES_ENABLED=true`. This change intentionally does not set that
-variable and does not disable any existing automatic lane. VAY-2029 installs and
+`COORDINATED_RELEASES_ENABLED=true`. The six legacy `deploy-next-*` automatic jobs skip when that variable is true;
+their explicit `workflow_dispatch` build entrypoints remain available. Setting
+the variable switches all six automatic builders together. It does not grant
+platform mutation ownership, resolve holds, or drain previously started jobs. VAY-2029 installs and
 validates the platform receiver first, inventories and drains old events, then
 switches all six automatic lanes together. Existing per-service
 `workflow_dispatch` entrypoints remain available during preparation.

@@ -1,7 +1,11 @@
+import { createChannexInboxProviderActions } from "./integrations/channexInboxProviderActions.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
+import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
+import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
+import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
 import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./domains/channexPendingRoomAvailabilityReconciliation.js";
@@ -85,6 +89,8 @@ import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel
 import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
 import { createPgFinanceDashboardFacts } from "./domains/financeDashboardFacts.js";
 import { createFinanceDashboardReadModel } from "./domains/financeDashboardReadModel.js";
+import { createPgFinanceProfitLossFacts } from "./domains/financeProfitLossFacts.js";
+import { createFinanceProfitLossReadModel } from "./domains/financeProfitLossReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -224,11 +230,9 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
+import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
-import {
-  createChannexThreadAction,
-  createChannexMessageDelivery,
-} from "./integrations/channexMessageDelivery.js";
+import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
 import { createResendPmsInboxDelivery } from "./integrations/resendPmsInboxDelivery.js";
 import { createPgChannexManagementPlanPort } from "./integrations/channexManagementPlans.js";
 import { runPmsChannexManagementWorkerOnce } from "./jobs/pmsChannexManagementWorker.js";
@@ -693,6 +697,22 @@ const financeDashboardRuntime =
         };
       })()
     : undefined;
+const financeProfitLossRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const facts = createPgFinanceProfitLossFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceProfitLossReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          facts,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), facts.close()]),
+        };
+      })()
+    : undefined;
 const financeFolioRuntime =
   config.financeSource === "target" && config.financeFolioRecipientKms
     ? (() => {
@@ -1042,6 +1062,11 @@ const channexManagementProvider =
           ? (lease, ports) =>
               dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
           : undefined,
+        advancePublishedOffers:
+          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+            ? (lease, ports) =>
+                advancePublishedChannexOfferCreates(channexUploadReconciliationPool, lease, ports)
+            : undefined,
         reconcileClosedUploads: channexUploadReconciliationPool
           ? (lease, get) =>
               reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
@@ -1065,6 +1090,20 @@ const channexManagementProvider =
                   lease,
                 )
             : undefined,
+        activatePublishedOffers:
+          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+            ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
+            : undefined,
+        bootstrapPublishedOffer:
+          channexUploadReconciliationPool && config.channexManagement.stagingPublishedOffersEnabled
+            ? (job, workerId, ports) =>
+                bootstrapPublishedChannexOffer(
+                  channexUploadReconciliationPool,
+                  job,
+                  workerId,
+                  ports,
+                )
+            : undefined,
       })
     : undefined;
 const channexManagementWorkerStore = channexManagementProvider
@@ -1074,8 +1113,16 @@ const channexManagementWorkerStore = channexManagementProvider
       ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
       stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
       stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
+      stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
       stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
+  : undefined;
+const channexOfferSchedule = config.channexManagement.stagingInventoryEnabled &&
+  config.channexManagement.stagingRestrictionsPropertyId
+  ? createPgChannexAriSchedule(
+      targetDatabaseUrl,
+      config.channexManagement.stagingRestrictionsPropertyId,
+    )
   : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
   ? createPgPmsCalendarAutoOpenWorkerStore({
@@ -1560,6 +1607,10 @@ const app = buildApp({
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
+        publishedOfferProvisioningEnabled:
+          config.channexManagement.stagingPublishedOffersEnabled === true,
+        publishedOfferProvisioningPropertyId:
+          config.channexManagement.stagingRestrictionsPropertyId,
         commandPort: pmsChannexManagementCommandPort,
         iframeSessionPort: pmsChannexIframeSessionPort,
       }
@@ -1703,6 +1754,7 @@ const app = buildApp({
     : undefined,
   financeRevenue: financeRevenueRuntime?.routes,
   financeDashboard: financeDashboardRuntime?.routes,
+  financeProfitLoss: financeProfitLossRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -2055,6 +2107,7 @@ app.addHook("onClose", async () => {
     financeExpenseRuntime?.close(),
     financeRevenueRuntime?.close(),
     financeDashboardRuntime?.close(),
+    financeProfitLossRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -2205,6 +2258,19 @@ app.addHook("onClose", async () => {
 });
 
 // VAY-1546: automatic rate delivery resumes with the replacement pricing system.
+let activeChannexOfferSchedule: Promise<void> | undefined;
+const runChannexOfferSchedule = () => {
+  if (!channexOfferSchedule || activeChannexOfferSchedule) return;
+  activeChannexOfferSchedule = channexOfferSchedule.enqueue()
+    .then(() => undefined)
+    .catch((error: unknown) => app.log.warn({ err: error }, "Channex offer schedule failed"))
+    .finally(() => { activeChannexOfferSchedule = undefined; });
+};
+const channexOfferScheduleTimer = channexOfferSchedule
+  ? setInterval(runChannexOfferSchedule, 60_000)
+  : undefined;
+channexOfferScheduleTimer?.unref();
+if (channexOfferSchedule) runChannexOfferSchedule();
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
   if (!config.backgroundWorkersEnabled && !config.channexManagement.stagingRestrictionsPropertyId)
@@ -2234,8 +2300,11 @@ channexManagementTimer?.unref();
 if (channexManagementWorkerStore) runChannexManagement();
 app.addHook("onClose", async () => {
   if (channexManagementTimer) clearInterval(channexManagementTimer);
+  if (channexOfferScheduleTimer) clearInterval(channexOfferScheduleTimer);
+  await activeChannexOfferSchedule;
   await activeChannexManagementRun;
   await Promise.all([
+    channexOfferSchedule?.close(),
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
     channexUploadReconciliationPool?.end(),
@@ -2628,7 +2697,7 @@ const pmsInboxDeliveryWorker =
           await runPmsInboxProviderActions(
             pmsInboxDeliveryPool,
             pmsInboxChannexDelivery
-              ? createChannexThreadAction({
+              ? createChannexInboxProviderActions({
                   apiBaseUrl: config.channexManagement.apiBaseUrl!,
                   apiKey: config.channexManagement.apiKey!,
                 })

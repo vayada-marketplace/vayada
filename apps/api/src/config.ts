@@ -78,6 +78,7 @@ export type ChannexManagementConfig = {
   workerEnabled: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
   stagingNoShowEnabled?: boolean;
   capabilityModes: {
@@ -641,6 +642,21 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   ) {
     throw new Error("Scoped Channex meals require a staging property and mutating provisioning");
   }
+  const stagingPublishedOffersEnabled = readBooleanEnv(
+    env,
+    "PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED",
+    false,
+  );
+  if (
+    stagingPublishedOffersEnabled &&
+    (!stagingRestrictionsPropertyId ||
+      capabilityModes.provisioning !== "mutating" ||
+      !stagingInventoryEnabled)
+  ) {
+    throw new Error(
+      "Scoped Channex published offers require a staging property, inventory, and mutating provisioning",
+    );
+  }
   if (
     stagingRestrictionsPropertyId &&
     (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -652,7 +668,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       Object.entries(capabilityModes).some(
         ([name, mode]) =>
           name !== "ariSync" &&
-          !(stagingMealsEnabled && name === "provisioning") &&
+          !((stagingMealsEnabled || stagingPublishedOffersEnabled) && name === "provisioning") &&
           mode === "mutating",
       ))
   ) {
@@ -698,6 +714,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     bookingMutationOwner,
     stagingRestrictionsPropertyId,
     stagingMealsEnabled,
+    stagingPublishedOffersEnabled,
     stagingInventoryEnabled,
     stagingNoShowEnabled,
     workerEnabled,

@@ -104,3 +104,35 @@ channel list contained one OpenChannel connection, and property-filtered live
 feeds contained zero reservation requests and zero alteration requests. No
 provider decisions or fixture mutations were performed. These reads establish
 credential access and the missing fixture, not Airbnb request behavior.
+
+## PMS staff access and staged activation (VAY-1551)
+
+PMS reads and decisions use
+`/api/pms/properties/:propertyId/reservations/:bookingId/change-request`
+(with `/:changeRequestId/accept` or `/decline` for decisions). Reads require
+`pms.reservation.read`; decisions require `pms.reservation.update`. Every call
+checks current membership property assignments, the canonical PMS resource link,
+and the active `property-management` entitlement. Read-only users receive no
+provider actions. Existing Booking Engine routes retain their own policy.
+
+For activation, first deploy the staff-route fix and repeat owner/front-desk,
+read-only and cross-property verification. Then select a connected Airbnb hotel
+and its canonical property UUID; the shared synthetic hotel has no Airbnb
+request fixture and is not proof of provider readiness.
+
+The runtime requires `AIRBNB_ALTERATIONS_ENABLED=true` and an explicit
+`AIRBNB_ALTERATION_PROPERTY_IDS` allowlist, enabled background/Channex workers,
+`PMS_CHANNEX_BOOKING_SYNC_MODE=mutating`,
+`CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=target-owned`, authenticated
+`CHANNEX_WEBHOOK_INTAKE_MODE=mutating`, provider credentials, target PMS and auth.
+Those booking-sync/webhook settings affect shared processing beyond the Airbnb
+allowlist: do not treat the allowlist as authorization to change global booking
+ownership. Apply them only through the platform's reviewed rollout configuration
+with property/provider mapping and current mutation ownership verified.
+
+On rollback, disable the Airbnb runtime before broadening or removing scope;
+retain durable requests and reconcile sent/unknown decisions before re-enabling.
+Pending tracked modified revisions are held without ACK while their property is
+disabled. Never replay an ambiguous decision as a fresh accept/decline.
+Real Airbnb E2E remains waived for this task; simulated responses and deployed
+read checks must be reported separately from successful live provider decisions.

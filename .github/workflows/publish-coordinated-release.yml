@@ -29,7 +29,7 @@ jobs:
   publish:
     if: >-
       ${{
-        vars.COORDINATED_RELEASES_ENABLED == 'true' &&
+        (vars.COORDINATED_RELEASES_ENABLED == 'true' || github.event.workflow_run.event == 'workflow_dispatch') &&
         (
           github.event_name == 'workflow_dispatch' ||
           (
@@ -56,6 +56,7 @@ jobs:
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
           SOURCE_EVENT: ${{ github.event.workflow_run.event }}
           REDISPATCH_ARTIFACT_ID: ${{ inputs.published_artifact_id }}
+          RELEASES_ENABLED: ${{ vars.COORDINATED_RELEASES_ENABLED }}
         run: |
           set -euo pipefail
           mkdir -p release-work/content
@@ -81,6 +82,13 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
               > release-work/artifact.zip
             unzip -q release-work/artifact.zip -d release-work/content
+            prepare_only="$(cat release-work/content/prepare-only)"
+            case "$prepare_only" in
+              true) test "$SOURCE_EVENT" = workflow_dispatch ;;
+              false) test "$RELEASES_ENABLED" = true ;;
+              *) echo "::error::Invalid preparation mode"; exit 1 ;;
+            esac
+            echo "prepare-only=$prepare_only" >> "$GITHUB_OUTPUT"
             node scripts/coordinated-release/validate.mjs manifest \
               release-work/content/manifest.json \
               "$(awk '{print $1}' release-work/content/manifest.sha256)"
@@ -146,12 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           while IFS=$'\t' read -r repository digest image_source_sha; do
-            verified="$(aws ecr describe-images \
-              --repository-name "$repository" \
-              --image-ids "imageTag=next-${image_source_sha}" \
-              --query 'imageDetails[0].imageDigest' \
-              --output text)"
-            test "$verified" = "$digest"
+            node scripts/coordinated-release/verify-image.mjs "$repository" "$digest" "$image_source_sha"
           done < <(jq -r '.services[] | [.ecrRepository, .digest, .imageSourceSha] | @tsv' release-work/content/manifest.json)
 
       - name: Upload durable published release
@@ -185,6 +188,7 @@ jobs:
           echo "id=$artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch immutable release identity to platform
+        if: ${{ vars.COORDINATED_RELEASES_ENABLED == 'true' && steps.prepare.outputs.prepare-only != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
           PUBLISHED_ARTIFACT_ID: ${{ steps.artifact.outputs.id }}
@@ -203,9 +207,10 @@ jobs:
       - name: Summarize publication
         run: |
           jq -n \
+            --arg prepareOnly "${{ steps.prepare.outputs.prepare-only }}" \
             --arg mode "${{ steps.prepare.outputs.mode }}" \
             --arg manifestId "$(jq -r '.manifestId' release-work/content/manifest.json)" \
             --arg sourceSha "$(jq -r '.source.sha' release-work/content/manifest.json)" \
             --arg artifactId "${{ steps.artifact.outputs.id }}" \
-            '{mode: $mode, manifestId: $manifestId, sourceSha: $sourceSha, publishedArtifactId: $artifactId}' \
+            '{prepareOnly: $prepareOnly, mode: $mode, manifestId: $manifestId, sourceSha: $sourceSha, publishedArtifactId: $artifactId}' \
             >> "$GITHUB_STEP_SUMMARY"

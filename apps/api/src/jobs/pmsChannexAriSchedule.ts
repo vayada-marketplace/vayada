@@ -8,6 +8,7 @@ const sourceTables = [
   "pms.recurring_pricing_sources",
   "pms.recurring_pricing_source_room_values",
   "pms.channel_date_prices",
+  "pms.pricing_v2_heads",
   "pms.room_types",
   "pms.channel_room_type_mappings",
   "pms.channel_rate_plan_mappings",
@@ -16,7 +17,7 @@ const sourceTables = [
   "booking.same_day_booking_policies",
 ];
 
-export function createPgChannexAriSchedule(connectionString: string) {
+export function createPgChannexAriSchedule(connectionString: string, propertyId?: string) {
   const pool = new pg.Pool({ connectionString, max: 1 });
   return {
     async enqueue(now = new Date()) {
@@ -25,6 +26,7 @@ export function createPgChannexAriSchedule(connectionString: string) {
       const result = await pool.query(
         `WITH fingerprints AS (
         SELECT connection.property_id, encode(sha256(convert_to(jsonb_build_array(
+          connection.id, connection.connection_status, connection.binding_generation,
           connection.external_property_id, location.timezone,
           CASE WHEN location.timezone IN (SELECT name FROM pg_timezone_names)
             THEN ($1::timestamptz AT TIME ZONE location.timezone)::date::text
@@ -38,8 +40,8 @@ export function createPgChannexAriSchedule(connectionString: string) {
         )::text,'UTF8')),'hex') AS fingerprint
         FROM pms.channel_connections connection
         LEFT JOIN hotel_catalog.property_locations location ON location.property_id=connection.property_id
-        WHERE connection.provider='channex' AND connection.external_property_id IS NOT NULL
-          AND connection.connection_status IN ('connected','degraded')
+        WHERE connection.provider='channex'
+          AND ($2::uuid IS NULL OR connection.property_id=$2::uuid)
       ), changed AS (
         INSERT INTO pms.channex_ari_schedule_sources(property_id,fingerprint)
         SELECT property_id,fingerprint FROM fingerprints
@@ -52,12 +54,16 @@ export function createPgChannexAriSchedule(connectionString: string) {
         RETURNING property_id,revision
       ) INSERT INTO platform.jobs(job_key,queue_name,job_type,max_attempts,tenant_scope,
           property_id,resource_product,resource_type,resource_id,payload,job_metadata)
-        SELECT 'channex.scheduled:'||property_id||':'||revision,'pms.channex.management','channex.sync_ari',5,'property',
-          property_id,'pms','channex_connection',property_id::text,
-          jsonb_build_object('commandId',gen_random_uuid(),'idempotencyKey','scheduled:'||property_id||':'||revision,'operationType','sync_ari'),
-          jsonb_build_object('source','channex-ari-schedule','sourceRevision',revision)
-        FROM changed RETURNING id`,
-        [now.toISOString()],
+        SELECT 'channex.scheduled:'||changed.property_id||':'||changed.revision,'pms.channex.management','channex.sync_ari',5,'property',
+          changed.property_id,'pms','channex_connection',changed.property_id::text,
+          jsonb_build_object('commandId',gen_random_uuid(),'idempotencyKey','scheduled:'||changed.property_id||':'||changed.revision,'operationType','sync_ari'),
+          jsonb_build_object('source','channex-ari-schedule','sourceRevision',changed.revision)
+        FROM changed JOIN pms.channel_connections connection
+          ON connection.property_id=changed.property_id AND connection.provider='channex'
+        WHERE connection.connection_status IN ('connected','degraded')
+          AND connection.external_property_id IS NOT NULL
+        RETURNING id`,
+        [now.toISOString(), propertyId ?? null],
       );
       return result.rows.length;
     },

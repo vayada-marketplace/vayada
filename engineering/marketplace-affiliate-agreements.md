@@ -264,3 +264,31 @@ and completed idempotency receipt using a server timestamp. Same-key retries ret
 record; changed actors or payloads conflict, and competing keys cannot create a second active
 agreement. The command remains internal. Public transport, lifecycle changes and stable link
 generation are separate slices.
+
+## Initial independent lifecycle history
+
+Migration 0326 adds append-only pause, resume and end events for activated affiliate
+agreements. An activation with no later events is revision zero and reads as active;
+each side's pause must be cleared by that side, and end is terminal. The internal
+reader rejects gaps and invalid transitions instead of treating uncertain history
+as active. Event times are assigned by the database at insert, so callers cannot
+schedule or backdate a lifecycle change. Collaboration status is not consulted.
+
+This is storage and an internal read only. Authorized transition commands, expiry
+policy, replacement-terms history, public status reads and link readiness wiring
+remain separate work. No live link or earning flow is enabled by this migration.
+
+The internal lifecycle command permits the current hotel offer manager or creator
+owner to pause, resume or end their activated agreement. It checks persisted
+resource links before retry recovery, requires the expected event revision and
+stores the event with an idempotency receipt in one transaction. A side may only
+clear its own pause; end is terminal. It does not change collaboration history,
+accepted terms or existing earnings. No public route or earning-link gate uses
+this command yet.
+
+The internal link creation command now requires an active agreement for a new
+link. Existing creators can still retrieve their stable link while paused; the
+internal token eligibility reader rejects paused and ended agreements and can
+make the same link eligible again after resume. Click capture must use that
+reader in a READ COMMITTED transaction before recording an eligible click. No public redirect
+or click capture is enabled by this reader alone.

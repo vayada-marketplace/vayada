@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMaterializationRepository.js";
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
@@ -21,6 +21,78 @@ type Scope = Readonly<{
   roomCount: number;
   dayCount: number;
 }>;
+
+/** Rechecks complete room availability evidence inside a caller-owned activation transaction. */
+export async function lockCurrentChannexRoomAvailability(
+  client: Pick<PoolClient, "query">,
+  input: Readonly<{
+    propertyId: string;
+    connectionId: string;
+    externalPropertyId: string;
+    bindingGeneration: string;
+  }>,
+) {
+  const mappings = await client.query<{ bindingGeneration: string }>(
+    `SELECT c.binding_generation::text AS "bindingGeneration"
+     FROM pms.channel_room_type_mappings m
+     JOIN pms.channel_connections c
+       ON c.id=m.connection_id AND c.property_id=m.property_id
+     JOIN pms.room_types r ON r.id=m.room_type_id AND r.property_id=m.property_id
+     WHERE m.property_id=$1 AND m.connection_id=$2 AND m.status='active' AND r.active
+       AND c.connection_status='connected' AND c.external_property_id=$3
+       AND c.binding_generation=$4::uuid
+       AND m.external_room_type_id<>'' AND m.external_room_type_id=btrim(m.external_room_type_id)
+       AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
+         WHERE closed.property_id=r.property_id AND closed.room_type_id=r.id)
+     ORDER BY m.room_type_id::text COLLATE "C",m.id
+     FOR SHARE OF m,c,r NOWAIT`,
+    [input.propertyId, input.connectionId, input.externalPropertyId, input.bindingGeneration],
+  );
+  if (!mappings.rows.length) return unavailable("room_availability_mapping_unavailable");
+  const coverage = (
+    await client.query<{ through: string; materializedRevision: number; timeZone: string }>(
+      `SELECT coverage.coverage_through::text AS through,
+         coverage.materialized_revision AS "materializedRevision",
+         calendar.property_time_zone AS "timeZone"
+       FROM pms.inventory_materialization_coverage coverage
+       JOIN pms.operating_calendar_revisions calendar
+         ON calendar.property_id=coverage.property_id
+        AND calendar.calendar_revision=coverage.calendar_revision
+       WHERE coverage.property_id=$1
+         AND coverage.calendar_revision=coverage.materialized_revision
+         AND coverage.materialized_day_count=coverage.expected_day_count
+         AND NOT EXISTS (SELECT 1 FROM pms.operating_calendar_revisions newer
+           WHERE newer.property_id=calendar.property_id
+             AND newer.calendar_revision>calendar.calendar_revision)
+       FOR SHARE OF coverage,calendar NOWAIT`,
+      [input.propertyId],
+    )
+  ).rows[0];
+  const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
+  const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
+  if (!coverage || !localToday || !inclusiveDayCount(localToday, coverage.through))
+    return unavailable("room_availability_coverage_unavailable");
+  const candidate = (
+    await client.query<{ valid: boolean | null }>(selectionSql, [
+      input.propertyId,
+      input.connectionId,
+      input.externalPropertyId,
+      input.bindingGeneration,
+      localToday,
+      coverage.through,
+      coverage.materializedRevision,
+    ])
+  ).rows[0];
+  return candidate
+    ? unavailable("room_availability_coverage_unavailable")
+    : {
+        kind: "current" as const,
+        from: localToday,
+        through: coverage.through,
+        roomCount: mappings.rows.length,
+        dayCount: inclusiveDayCount(localToday, coverage.through)!,
+      };
+}
 
 /** Selects and claims one current room/day. It performs no provider IO itself. */
 export async function prepareNextChannexRoomAvailabilityDispatch(
@@ -70,7 +142,10 @@ async function readScope(
     await client.query("SET LOCAL statement_timeout='5s'");
     await client.query("SET LOCAL lock_timeout='150ms'");
     const authority = await lockChannexPricingPropertyAuthority(client, lease);
-    if (authority.kind !== "authorized" || authority.lease.operationType !== "sync_ari")
+    if (
+      authority.kind !== "authorized" ||
+      (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
+    )
       return unavailable("room_availability_authority_unavailable");
     const unrestricted = await client.query(
       `SELECT 1 FROM platform.jobs WHERE id=$1::uuid

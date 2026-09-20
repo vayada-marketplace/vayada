@@ -194,7 +194,7 @@ async function reservationEndpoint(guestBookingId: string, suffix = ""): Promise
 
 async function bookingChangeRequestEndpoint(guestBookingId: string): Promise<string> {
   const propertyId = await resolveSelectedPmsPropertyId("reviewing booking changes");
-  return `/api/booking/hotels/${encodeURIComponent(propertyId)}/reservations/${encodeURIComponent(guestBookingId)}/change-request`;
+  return `/api/pms/properties/${encodeURIComponent(propertyId)}/reservations/${encodeURIComponent(guestBookingId)}/change-request`;
 }
 
 async function bookingChangeDecisionEndpoint(

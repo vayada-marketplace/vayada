@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { normalizeFinanceExpenseAmount } from "@vayada/domain-finance";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -430,6 +432,120 @@ describe.skipIf(!URL)("PostgreSQL Finance manual expense repository", () => {
       ),
     ).resolves.toMatchObject({ rows: [{ deleted: 2 }] });
   }, 15_000);
+
+  it("replays manual expenses stored before supplier-bill evidence was added", async () => {
+    await admin.query("UPDATE finance.expense_categories SET archived_at=NULL WHERE id=$1", [
+      CATEGORY,
+    ]);
+    const input = command(crypto.randomUUID(), "legacy-manual-replay");
+    const created = await repository.create(input);
+    expect(created).toMatchObject({ ok: true, outcome: "created" });
+    if (!created.ok) throw new Error("manual expense creation failed");
+    const { supplierInvoiceNumber: _unused, ...legacyItem } = created.item;
+    const responseHash = createHash("sha256")
+      .update(JSON.stringify(legacyItem, [...Object.keys(legacyItem), "amount", "currency"].sort()))
+      .digest("hex");
+    await admin.query(
+      `UPDATE platform.idempotency_keys
+       SET idempotency_metadata=jsonb_set(idempotency_metadata,'{result,item}', $1::jsonb), response_body_hash=$2
+       WHERE operation='finance.manual_expense.create' AND property_id=$3 AND correlation_id=$4`,
+      [JSON.stringify(legacyItem), responseHash, PROPERTY, input.audit.correlationId],
+    );
+    await expect(repository.create(input)).resolves.toMatchObject({
+      ok: true,
+      outcome: "replayed",
+      item: legacyItem,
+    });
+  });
+
+  it("persists supplier-bill references through replay, correction, and archive", async () => {
+    await admin.query("UPDATE finance.expense_categories SET archived_at=NULL WHERE id=$1", [
+      CATEGORY,
+    ]);
+    const source = crypto.randomUUID();
+    const corrected = crypto.randomUUID();
+    const create = { ...command(source, "supplier-bill-create"), supplierInvoiceNumber: "SUP-001" };
+    await expect(repository.create(create)).resolves.toMatchObject({
+      ok: true,
+      outcome: "created",
+      item: {
+        id: source,
+        origin: "supplier_bill",
+        sourceKey: `supplier_bill:${source}`,
+        supplierInvoiceNumber: "SUP-001",
+      },
+    });
+    await expect(repository.create(create)).resolves.toMatchObject({
+      ok: true,
+      outcome: "replayed",
+      item: { supplierInvoiceNumber: "SUP-001" },
+    });
+    await expect(
+      repository.create({ ...create, supplierInvoiceNumber: "SUP-OTHER" }),
+    ).resolves.toEqual({ ok: false, code: "idempotency_conflict" });
+    const patch = {
+      ...mutation("supplier-bill-correct", 1, source, corrected),
+      supplierInvoiceNumber: "SUP-002",
+    };
+    await expect(repository.update(patch)).resolves.toMatchObject({
+      ok: true,
+      outcome: "corrected",
+      item: {
+        id: corrected,
+        origin: "supplier_bill",
+        reversesExpenseId: source,
+        supplierInvoiceNumber: "SUP-002",
+      },
+    });
+    await expect(repository.update(patch)).resolves.toMatchObject({
+      ok: true,
+      outcome: "replayed",
+      item: { supplierInvoiceNumber: "SUP-002" },
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT id::text,supplier_invoice_number FROM finance.expenses WHERE id=ANY($1::uuid[]) ORDER BY incurred_on,id",
+          [[source, corrected]],
+        )
+      ).rows,
+    ).toEqual(
+      expect.arrayContaining([
+        { id: source, supplier_invoice_number: "SUP-001" },
+        { id: corrected, supplier_invoice_number: "SUP-002" },
+      ]),
+    );
+    await expect(
+      repository.update({ ...mutation("supplier-bill-note", 1, corrected), notes: "Reviewed" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      outcome: "updated",
+      item: { supplierInvoiceNumber: "SUP-002" },
+    });
+    await expect(
+      repository.archive(archiveCommand("supplier-bill-archive", 2, corrected)),
+    ).resolves.toMatchObject({
+      ok: true,
+      outcome: "archived",
+      item: { origin: "supplier_bill", supplierInvoiceNumber: null },
+    });
+
+    const manual = crypto.randomUUID();
+    await repository.create(command(manual, "supplier-bill-manual"));
+    await expect(
+      repository.update({
+        ...mutation("supplier-bill-convert", 1, manual),
+        supplierInvoiceNumber: "SUP-003",
+      }),
+    ).resolves.toEqual({ ok: false, code: "evidence_mismatch" });
+    await expect(
+      repository.update({
+        ...mutation("supplier-bill-cross-property", 1, source),
+        propertyId: OTHER_PROPERTY,
+        supplierInvoiceNumber: "SUP-004",
+      }),
+    ).resolves.toEqual({ ok: false, code: "not_found" });
+  });
 
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;

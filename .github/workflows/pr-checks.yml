@@ -160,6 +160,7 @@ jobs:
       - name: Verify immutable legacy owner bootstrap receipts
         env:
           VAY2017_RECEIPT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_receipt_fixture
+          VAY2017_RECEIPT_READER_TEST_DATABASE_URL: postgresql://vay2017_receipt_reader:reader_test_only@127.0.0.1:5432/vay2017_receipt_fixture
         run: |
           node --input-type=module -e '
             import pg from "pg";
@@ -228,8 +229,11 @@ jobs:
           src/domains/marketplaceAffiliatePublication.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
+          src/domains/marketplaceAffiliateAgreementLifecycleCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
           src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts
