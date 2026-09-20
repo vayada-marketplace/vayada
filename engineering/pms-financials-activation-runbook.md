@@ -145,7 +145,7 @@ revision, rollback time, and remaining work before another attempt.
 VAY-1138 remains In Progress until the evidence record has no unexplained
 blockers and a human explicitly accepts completion.
 
-## Evidence snapshot — 2026-09-20 11:10 UTC
+## Evidence snapshot — 2026-09-20 16:24 UTC
 
 This snapshot documents preparation, not activation or a passing golden path.
 ECS reports one running task and a completed rollout for each service; their
@@ -153,20 +153,21 @@ task definitions reference these exact images:
 
 | Service  | Task definition                | Image digest                                                              | Source SHA                                 |
 | -------- | ------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------ |
-| Next API | `vayada-next-api:1120`         | `sha256:acdf7d35f95b67aa81c530bd50f503d60257d8cadf32d8f95a0fc13101604693` | `dda47a35e4c739ca55dd36f8f98c0339d485f033` |
-| Next PMS | `vayada-next-pms-frontend:578` | `sha256:b4ce6e919a33ca69ad48b19074e1b622aeff485d61add439d3126e832e93bc19` | `a4709fe189a039a2eaa52714a3497e8458bc51ed` |
+| Next API | `vayada-next-api:1121`         | `sha256:25af5d54b304568c2a45a8d0e33a2e8b8af5871af5ddf267762070ce4433255d` | `9dec079aa94f6f3d1529e4cc2dfdeb42be8763e8` |
+| Next PMS | `vayada-next-pms-frontend:584` | `sha256:0bc7305cf9186b1e1a5e15eb7e1a3317bb19171e2b2abf96e35543a84719277e` | `1126c77c0adb846a30ff0d4bbd716da54c728355` |
 
-Both sources contain the merged read-only readiness audit from PR #2486.
-Category-seed PR #2522 is open with green required CI and is not serving.
-VAY-1134 and VAY-1136 remain In Progress; VAY-1137 is Done. VAY-2037 code is
+Readiness PRs #2522, #2531, #2533, #2536, and #2541 are merged, but neither
+serving source includes those merges. Runbook PR #2525 is open and rebuilding
+after a README conflict was resolved. Migration 0402, the Financials navigation
+gate, and Feature Hub control are not yet verified on the serving revisions.
+VAY-1136 and VAY-1137 are Done; VAY-1134 remains In Progress. VAY-2037 code is
 serving, but its monitored real-account smoke stopped at owner login because
 the runtime lacks permission on `platform.product_audit_events` (PostgreSQL
 `42501`). Do not repeat that unchanged blocker.
 
-The `finance_manager` read grant, module-aware Financials navigation, a
-preactivation OTA commission expense projection path, complete reconciliation,
-Feature Hub activation and rollback controls, and five-tab real-account smoke
-are still open gates.
-No live backfill or Financials activation was performed for this snapshot.
+Complete deployed revision and migration verification, property-scoped source
+reconciliation, the reviewed runtime privilege fix, authorized activation, and
+five-tab real-account smoke before acceptance. No VAY-1138 live backfill or
+Financials activation was performed for this snapshot.
 Replace it with a new timestamped record after a relevant change; do not reuse
 these image SHAs as proof of a later deployment.
