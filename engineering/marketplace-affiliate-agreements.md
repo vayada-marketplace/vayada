@@ -277,3 +277,11 @@ schedule or backdate a lifecycle change. Collaboration status is not consulted.
 This is storage and an internal read only. Authorized transition commands, expiry
 policy, replacement-terms history, public status reads and link readiness wiring
 remain separate work. No live link or earning flow is enabled by this migration.
+
+The internal lifecycle command permits the current hotel offer manager or creator
+owner to pause, resume or end their activated agreement. It checks persisted
+resource links before retry recovery, requires the expected event revision and
+stores the event with an idempotency receipt in one transaction. A side may only
+clear its own pause; end is terminal. It does not change collaboration history,
+accepted terms or existing earnings. No public route or earning-link gate uses
+this command yet.
