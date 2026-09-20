@@ -17,7 +17,9 @@ export function createAirbnbAlterationRuntime(options: {
 }) {
   const { config } = options;
   if (!config.airbnbAlterations) return undefined;
-  const propertyIds = [...config.airbnbAlterations.propertyIds];
+  const propertyIds = config.airbnbAlterations.propertyIds
+    ? [...config.airbnbAlterations.propertyIds]
+    : undefined;
   const transport = {
     apiBaseUrl: config.channexManagement.apiBaseUrl!,
     apiKey: config.channexManagement.apiKey!,
@@ -53,7 +55,10 @@ export function createAirbnbAlterationRuntime(options: {
       propertyIds,
       allowUnverifiedAirbnbAlterations: true,
       async decide(input: Parameters<typeof decideChannexAlteration>[1]) {
-        if (!ownsMutation() || !propertyIds.includes(input.propertyId))
+        if (
+          !ownsMutation() ||
+          (propertyIds !== undefined && !propertyIds.includes(input.propertyId))
+        )
           throw new Error("alteration_runtime_unavailable");
         const pending = decideChannexAlteration(
           { pool, journalPool, provider, allowUnverifiedAirbnbAlterations: true },
