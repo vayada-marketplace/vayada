@@ -32,7 +32,7 @@ const CARD_LABELS = {
   profitMtd: "Profit this month",
 } as const;
 
-export function DashboardWorkspace() {
+export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
   const [asOf, setAsOf] = useState("");
   const [reload, setReload] = useState(0);
   const [tab, setTab] = useState<"dashboard" | "revenue" | "expenses">("dashboard");
@@ -79,6 +79,7 @@ export function DashboardWorkspace() {
       ) : (
         <ExpensesTab
           propertyId={state.propertyId}
+          canManage={canManage}
           locale={state.locale}
           generatedAt={state.data.generatedAt}
           timeZone={state.data.timeZone}

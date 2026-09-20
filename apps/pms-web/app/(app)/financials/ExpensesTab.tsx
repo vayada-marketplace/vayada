@@ -19,6 +19,9 @@ import {
   type FinanceExpensesResponse,
 } from "@/services/finance/financialExpenses";
 
+import { ExpenseEntryDialog } from "./ExpenseEntryDialog";
+import { ExpenseCategoriesDialog } from "./ExpenseCategoriesDialog";
+
 type ExpensesState =
   | { kind: "loading" }
   | { kind: "ready"; data: FinanceExpensesResponse; categories: FinanceExpenseCategory[] }
@@ -28,11 +31,13 @@ type ExpensesState =
 
 export function ExpensesTab({
   propertyId,
+  canManage,
   locale,
   generatedAt,
   timeZone,
 }: {
   propertyId: string;
+  canManage: boolean;
   locale: string;
   generatedAt: string;
   timeZone: string;
@@ -49,8 +54,14 @@ export function ExpensesTab({
   const [loadingMore, setLoadingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportInFlight = useRef(false);
+  const writeAttempt = useRef<{ fingerprint: string; id: string } | undefined>(undefined);
+  const categoryAttempt = useRef<{ fingerprint: string; id: string } | undefined>(undefined);
   const [exportJob, setExportJob] = useState<{ id: string; key: string }>();
   const [exportNotice, setExportNotice] = useState<string>();
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [entryNotice, setEntryNotice] = useState("");
+  const [categoryError, setCategoryError] = useState("");
   const [downloadUrl, setDownloadUrl] = useState<string>();
   const exportKey = JSON.stringify(filters);
   const pendingFilters =
@@ -156,6 +167,29 @@ export function ExpensesTab({
           </p>
         </div>
         <div className="flex gap-2">
+          {canManage && (
+            <button
+              className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 disabled:opacity-50"
+              type="button"
+              disabled={state.kind !== "ready"}
+              onClick={() => {
+                setCategoryError("");
+                setCategoriesOpen(true);
+              }}
+            >
+              Categories
+            </button>
+          )}
+          {canManage && (
+            <button
+              className="inline-flex h-10 items-center rounded-lg bg-blue-700 px-3 text-sm font-medium text-white disabled:opacity-50"
+              type="button"
+              disabled={state.kind !== "ready"}
+              onClick={() => setEntryOpen(true)}
+            >
+              Log expense
+            </button>
+          )}
           {downloadUrl && !pendingFilters && (
             <a
               className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -180,6 +214,16 @@ export function ExpensesTab({
       {exportNotice && (
         <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900" role="status">
           {exportNotice}
+        </p>
+      )}
+      {entryNotice && (
+        <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900" role="status">
+          {entryNotice}
+        </p>
+      )}
+      {categoryError && (
+        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">
+          {categoryError}
         </p>
       )}
 
@@ -207,6 +251,41 @@ export function ExpensesTab({
       )}
       {state.kind !== "loading" && state.kind !== "ready" && (
         <StatusPanel kind={state.kind} onRetry={() => setReload((value) => value + 1)} />
+      )}
+      {state.kind === "ready" && entryOpen && (
+        <ExpenseEntryDialog
+          propertyId={propertyId}
+          currency={state.data.currency}
+          today={range.to}
+          categories={state.categories}
+          attempt={writeAttempt}
+          onClose={() => setEntryOpen(false)}
+          onSaved={(recurring) => {
+            setEntryOpen(false);
+            setEntryNotice(recurring ? "Recurring expense scheduled." : "Expense saved.");
+            setReload((value) => value + 1);
+          }}
+        />
+      )}
+      {state.kind === "ready" && categoriesOpen && (
+        <ExpenseCategoriesDialog
+          propertyId={propertyId}
+          categories={state.categories}
+          attempt={categoryAttempt}
+          onClose={() => setCategoriesOpen(false)}
+          onConflict={() => {
+            setCategoriesOpen(false);
+            setCategoryError(
+              "Categories changed elsewhere. The list was refreshed; review it and try again.",
+            );
+            setReload((value) => value + 1);
+          }}
+          onChanged={() => {
+            setCategoriesOpen(false);
+            setEntryNotice("Expense categories updated.");
+            setReload((value) => value + 1);
+          }}
+        />
       )}
     </div>
   );
