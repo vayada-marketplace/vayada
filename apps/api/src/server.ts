@@ -1,3 +1,4 @@
+import { createChannexInboxProviderActions } from "./integrations/channexInboxProviderActions.js";
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
@@ -228,10 +229,7 @@ import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
-import {
-  createChannexThreadAction,
-  createChannexMessageDelivery,
-} from "./integrations/channexMessageDelivery.js";
+import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
 import { createResendPmsInboxDelivery } from "./integrations/resendPmsInboxDelivery.js";
 import { createPgChannexManagementPlanPort } from "./integrations/channexManagementPlans.js";
 import { runPmsChannexManagementWorkerOnce } from "./jobs/pmsChannexManagementWorker.js";
@@ -2653,7 +2651,7 @@ const pmsInboxDeliveryWorker =
           await runPmsInboxProviderActions(
             pmsInboxDeliveryPool,
             pmsInboxChannexDelivery
-              ? createChannexThreadAction({
+              ? createChannexInboxProviderActions({
                   apiBaseUrl: config.channexManagement.apiBaseUrl!,
                   apiKey: config.channexManagement.apiKey!,
                 })
