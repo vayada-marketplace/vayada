@@ -175,6 +175,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
+  financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
   replacementPricingAcceptanceAllowedSlugs: string[];
   bookingHostBase?: string;
@@ -289,6 +290,14 @@ function readSlugAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
     throw new Error(`${key} requires up to 100 canonical lowercase slugs`);
   }
   return slugs;
+}
+
+function readPropertyIdAllowlistEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+  const ids = [...new Set(readOptionalCsvEnv(env, key).map((id) => id.toLowerCase()))];
+  if (ids.length > 100 || ids.some((id) => !z.uuid().safeParse(id).success)) {
+    throw new Error(`${key} requires up to 100 property UUIDs`);
+  }
+  return ids;
 }
 
 function loadMarketplaceCommunicationUnsubscribeConfig(
@@ -1049,6 +1058,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "https://admin.booking.localhost",
       "https://marketplace.localhost",
     ]),
+    financialsActivationPropertyIds: readPropertyIdAllowlistEnv(
+      env,
+      "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
+    ),
     bookingWebEventSink,
     replacementPricingAcceptanceAllowedSlugs: readSlugAllowlistEnv(
       env,

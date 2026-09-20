@@ -1690,6 +1690,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
     guestReviews: createPgGuestReviewCommands({
