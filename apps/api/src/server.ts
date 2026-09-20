@@ -558,7 +558,7 @@ const pmsCalendarAutoOpenSettings =
 
 const pmsModuleActivationRepository = config.auth
   ? createPgPmsModuleActivationRepository({
-      connectionString: config.auth.databaseUrl,
+      connectionString: targetDatabaseUrl,
     })
   : undefined;
 
@@ -1975,7 +1975,7 @@ const app = buildApp({
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({
-          connectionString: config.auth.databaseUrl,
+          connectionString: targetDatabaseUrl,
         })
       : undefined,
   bookingWebAffiliateHotelResolver,
