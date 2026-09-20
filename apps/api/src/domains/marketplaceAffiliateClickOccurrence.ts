@@ -72,14 +72,20 @@ export async function recordSyntheticMarketplaceAffiliateClick(
 export async function readSyntheticMarketplaceAffiliateClick(
   client: pg.PoolClient,
   referenceToken: unknown,
-): Promise<{ clickId: string; propertyId: string } | null> {
+): Promise<{ clickId: string; propertyId: string; referenceValid: boolean } | null> {
   if (typeof referenceToken !== "string" || !/^vc_[A-Za-z0-9_-]{22}$/.test(referenceToken))
     return null;
   const result = await client.query(
-    `SELECT id,property_id FROM marketplace.affiliate_click_occurrences
+    `SELECT id,property_id,
+            clicked_at > clock_timestamp() - interval '15 minutes' AS reference_valid
+     FROM marketplace.affiliate_click_occurrences
      WHERE reference_token=$1 AND synthetic=TRUE FOR SHARE`,
     [referenceToken],
   );
   if (!result.rowCount) return null;
-  return { clickId: result.rows[0].id, propertyId: result.rows[0].property_id };
+  return {
+    clickId: result.rows[0].id,
+    propertyId: result.rows[0].property_id,
+    referenceValid: result.rows[0].reference_valid,
+  };
 }

@@ -53,6 +53,10 @@ export async function admitSyntheticAffiliateClick(
         replayed: true,
       };
     }
+    if (!click.referenceValid) {
+      await client.query("ROLLBACK");
+      return { status: "unavailable" };
+    }
     const inserted = await client.query(
       `INSERT INTO booking.affiliate_click_admissions
          (context_id,property_id,click_id,history_position)
@@ -76,6 +80,11 @@ export async function admitSyntheticAffiliateClick(
         historyPosition: String(winner.rows[0].history_position),
         replayed: true,
       };
+    }
+    // A competing insert may have delayed this transaction past expiry.
+    if (!(await readSyntheticMarketplaceAffiliateClick(client, referenceToken))?.referenceValid) {
+      await client.query("ROLLBACK");
+      return { status: "unavailable" };
     }
     await client.query("COMMIT");
     return {

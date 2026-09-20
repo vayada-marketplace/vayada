@@ -94,6 +94,12 @@ does.
   admission to the exact linked property and destination context, give it a
   short acceptance lifetime, remove it from the browser URL before loading
   third-party resources, and redact it from edge/application access logs.
+- The current internal synthetic reader accepts a reference only for 15 minutes
+  after its server-recorded click for a first destination admission. Expiry
+  blocks new admission but a prior admission can still replay in the same
+  context. It does not delete the click, shorten the hotel-selected attribution
+  window or undo a booking context that already admitted it. Revisit this
+  transport TTL during the live privacy and destination review.
 - Resolve the active agreement and exact accepted terms in the same explicit
   `READ COMMITTED` transaction that inserts the click. Acquire the activation
   lock before reading lifecycle eligibility and hold it through commit. A pause that commits first blocks the
