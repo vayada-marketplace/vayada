@@ -1069,8 +1069,12 @@ TARGET_DATABASE_URL=<target database url> \
 
 ## PMS Financials activation readiness
 
-Run the property-scoped audit after the nightly-revenue backfill and Finance
-expense worker have drained, before Feature Hub activation:
+See the [activation runbook](../../engineering/pms-financials-activation-runbook.md)
+for the full deployment, reconciliation, authorization, browser, and rollback
+gates.
+
+Run the property-scoped audit after the nightly-revenue backfill, before Feature
+Hub activation:
 
 ```bash
 TARGET_DATABASE_URL=<target database url> \
@@ -1081,3 +1085,10 @@ TARGET_DATABASE_URL=<target database url> \
 The command is read-only and blocks on missing category seeds, revenue or
 attribution projections, OTA commission evidence/rules/expenses, or an
 unexpected module state. After activation, rerun it with `--expect-active`.
+For nonzero applied OTA commissions, the ordinary expense worker cannot clear
+`OTA_COMMISSION_EXPENSE_PENDING` while Financials is inactive: OTA/provider fee
+evidence may enqueue jobs, but processing requires the active module
+entitlement (as does recurring discovery). Reconcile queued and dispatched
+jobs with source evidence. Keep activation blocked until a reviewed
+preactivation projection path has materialized and reconciled those expenses.
+Do not activate the module just to drain the worker.
