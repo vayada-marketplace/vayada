@@ -1097,6 +1097,7 @@ const channexManagementWorkerStore = channexManagementProvider
       ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
       stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
       stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
+      stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
       stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
   : undefined;
@@ -1583,6 +1584,8 @@ const app = buildApp({
           : undefined,
         datePrices: createPgChannelDatePrices(targetDatabaseUrl),
         capabilityModes: config.channexManagement.capabilityModes,
+        publishedOfferProvisioningEnabled:
+          config.channexManagement.stagingPublishedOffersEnabled === true,
         commandPort: pmsChannexManagementCommandPort,
         iframeSessionPort: pmsChannexIframeSessionPort,
       }

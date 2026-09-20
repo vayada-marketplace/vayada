@@ -54,6 +54,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   ariSyncMutating?: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
@@ -67,6 +68,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.ariSyncMutating ?? true,
         config.stagingRestrictionsPropertyId ?? null,
         config.stagingMealsEnabled ?? false,
+        config.stagingPublishedOffersEnabled ?? false,
         config.stagingInventoryEnabled ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
@@ -86,6 +88,7 @@ async function claim(
   ariSyncMutating: boolean,
   stagingRestrictionsPropertyId: string | null,
   stagingMealsEnabled: boolean,
+  stagingPublishedOffersEnabled: boolean,
   stagingInventoryEnabled: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
@@ -110,7 +113,9 @@ async function claim(
            AND (($6::boolean AND $3::boolean AND payload->>'operationType' = 'update_inventory_rules')
              OR (payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
              OR ($5::boolean AND payload->>'operationType' = 'provision'
-               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
+               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+             OR ($7::boolean AND payload->>'operationType' = 'provision'
+               AND payload ? 'publishedOffer'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
@@ -130,6 +135,7 @@ async function claim(
         stagingRestrictionsPropertyId,
         stagingMealsEnabled,
         stagingInventoryEnabled,
+        stagingPublishedOffersEnabled,
       ],
     );
     const row = result.rows[0];

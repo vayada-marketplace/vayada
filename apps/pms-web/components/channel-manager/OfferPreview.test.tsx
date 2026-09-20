@@ -7,7 +7,7 @@ import { pmsOperationsClient } from "@/services/api/pmsOperationsClient";
 import { createReplacementPricingClient } from "@/services/api/replacementPricingClient";
 import { OfferPreview } from "./OfferPreview";
 vi.mock("@/services/api/pmsOperationsClient", () => ({
-  pmsOperationsClient: { get: vi.fn() },
+  pmsOperationsClient: { get: vi.fn(), post: vi.fn() },
   pmsOperationsRequestOptions: { cache: "no-store" },
 }));
 vi.mock("@/services/api/replacementPricingClient", () => ({
@@ -68,6 +68,7 @@ async function setup() {
     typeof createReplacementPricingClient
   >);
   vi.mocked(pmsOperationsClient.get).mockResolvedValue(response);
+  vi.mocked(pmsOperationsClient.post).mockResolvedValue({ operationId: "operation" });
   await act(async () => {
     view = create(<OfferPreview propertyId={id} />);
   });
@@ -85,7 +86,7 @@ async function select() {
 }
 const button = () =>
   view.root.findAllByType("button").find((b) => b.children.includes("Preview configuration"))!;
-it("requires explicit selection even for one guest and shows a verified preview without saving", async () => {
+it("requires explicit selection even for one guest and requests setup only after a verified preview", async () => {
   await setup();
   expect(view.root.findAllByType("select").every((s) => s.props.value === "")).toBe(true);
   expect(button().props.disabled).toBe(true);
@@ -97,6 +98,13 @@ it("requires explicit selection even for one guest and shows a verified preview 
   expect(text).toContain("room only");
   expect(text).toContain("nothing has been sent");
   expect(vi.mocked(pmsOperationsClient.get).mock.calls[0][0]).toContain("primaryOccupancy=1");
+  vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("request") });
+  const setupButton = view.root
+    .findAllByType("button")
+    .find((b) => b.children.includes("Request Channex setup"))!;
+  await act(async () => setupButton.props.onClick());
+  expect(vi.mocked(pmsOperationsClient.post)).toHaveBeenCalledOnce();
+  expect(JSON.stringify(view.toJSON())).toContain("Channex setup requested");
   await choose("Published offer", "other");
   expect(view.root.findByProps({ "aria-label": "Primary guest count" }).props.value).toBe("");
   expect(JSON.stringify(view.toJSON())).not.toContain("Currency:");
