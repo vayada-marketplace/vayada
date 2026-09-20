@@ -6,6 +6,8 @@ import type {
   FinanceExpenseOrigin,
   FinanceExpensePaymentStatus,
   FinanceExpenseSort,
+  FinanceExpenseWrite,
+  FinanceRecurringExpenseRule,
   FinanceReportingCountMetric,
   FinanceReportingMoney,
   FinanceReportingMoneyMetric,
@@ -40,6 +42,11 @@ export type FinanceExpensesResponse = FinanceExpenseEnvelope & {
 
 export type ExpenseCategoriesResponse = FinanceExpenseEnvelope & {
   item: FinanceExpenseCategory[];
+};
+
+export type ExpenseWriteResponse<T> = FinanceExpenseEnvelope & {
+  item: T;
+  outcome: "created" | "updated" | "replayed";
 };
 
 type ExportItem = {
@@ -88,6 +95,64 @@ export function getExpenseCategories(
   return pmsOperationsClient.get<ExpenseCategoriesResponse>(
     `${root(propertyId)}/expense-categories`,
     { ...pmsOperationsRequestOptions, signal },
+  );
+}
+
+export function createExpense(
+  propertyId: string,
+  fields: Omit<FinanceExpenseWrite, "commandId" | "idempotencyKey">,
+  id = crypto.randomUUID(),
+): Promise<ExpenseWriteResponse<FinanceExpense | FinanceRecurringExpenseRule>> {
+  return pmsOperationsClient.post<
+    ExpenseWriteResponse<FinanceExpense | FinanceRecurringExpenseRule>
+  >(
+    `${root(propertyId)}/expenses`,
+    { ...fields, commandId: id, idempotencyKey: id },
+    { ...pmsOperationsRequestOptions, headers: { "Idempotency-Key": id } },
+  );
+}
+
+export function createExpenseCategory(
+  propertyId: string,
+  fields: Pick<FinanceExpenseCategory, "name" | "color" | "sortOrder">,
+  id = crypto.randomUUID(),
+): Promise<ExpenseWriteResponse<FinanceExpenseCategory>> {
+  return pmsOperationsClient.post<ExpenseWriteResponse<FinanceExpenseCategory>>(
+    `${root(propertyId)}/expense-categories`,
+    { ...fields, commandId: id, idempotencyKey: id },
+    { ...pmsOperationsRequestOptions, headers: { "Idempotency-Key": id } },
+  );
+}
+
+export function updateExpenseCategory(
+  propertyId: string,
+  category: FinanceExpenseCategory,
+  fields: Partial<Pick<FinanceExpenseCategory, "name" | "color" | "sortOrder">>,
+  id = crypto.randomUUID(),
+): Promise<ExpenseWriteResponse<FinanceExpenseCategory>> {
+  return pmsOperationsClient.patch<ExpenseWriteResponse<FinanceExpenseCategory>>(
+    `${root(propertyId)}/expense-categories/${encodeURIComponent(category.id)}`,
+    { ...fields, expectedRevision: category.revision, commandId: id, idempotencyKey: id },
+    { ...pmsOperationsRequestOptions, headers: { "Idempotency-Key": id } },
+  );
+}
+
+export function archiveExpenseCategory(
+  propertyId: string,
+  category: FinanceExpenseCategory,
+  id = crypto.randomUUID(),
+): Promise<ExpenseWriteResponse<FinanceExpenseCategory>> {
+  return pmsOperationsClient.delete<ExpenseWriteResponse<FinanceExpenseCategory>>(
+    `${root(propertyId)}/expense-categories/${encodeURIComponent(category.id)}`,
+    {
+      ...pmsOperationsRequestOptions,
+      headers: { "Idempotency-Key": id },
+      body: JSON.stringify({
+        expectedRevision: category.revision,
+        commandId: id,
+        idempotencyKey: id,
+      }),
+    },
   );
 }
 

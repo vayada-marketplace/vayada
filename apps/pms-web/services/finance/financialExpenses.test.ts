@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
 const post = vi.fn();
+const patch = vi.fn();
+const remove = vi.fn();
 
 vi.mock("@/services/api/pmsOperationsClient", () => ({
-  pmsOperationsClient: { get, post },
+  pmsOperationsClient: { get, post, patch, delete: remove },
   pmsOperationsRequestOptions: { cache: "no-store" },
 }));
 
@@ -12,6 +14,8 @@ describe("financial expense operations", () => {
   beforeEach(() => {
     get.mockReset();
     post.mockReset();
+    patch.mockReset();
+    remove.mockReset();
     vi.stubGlobal("crypto", { randomUUID: () => "12140000-0000-4000-8000-000000000001" });
   });
 
@@ -89,6 +93,54 @@ describe("financial expense operations", () => {
     expect(get).toHaveBeenCalledWith(
       "/api/finance/properties/property/financials/exports/export%2Fid",
       { cache: "no-store" },
+    );
+  });
+
+  it("creates manual expenses with an idempotency key and property currency", async () => {
+    post.mockResolvedValue({ item: {} });
+    const { createExpense } = await import("./financialExpenses");
+    await createExpense("property", {
+      incurredOn: "2026-09-17",
+      vendor: "Electric Co",
+      categoryId: "category-1",
+      amount: { amount: "50.0000" as never, currency: "EUR" },
+      paymentStatus: "unpaid",
+      paidOn: null,
+    });
+    expect(post).toHaveBeenCalledWith(
+      "/finance/properties/property/financials/expenses",
+      expect.objectContaining({
+        commandId: "12140000-0000-4000-8000-000000000001",
+        idempotencyKey: "12140000-0000-4000-8000-000000000001",
+        amount: { amount: "50.0000", currency: "EUR" },
+      }),
+      expect.objectContaining({
+        headers: { "Idempotency-Key": "12140000-0000-4000-8000-000000000001" },
+      }),
+    );
+  });
+
+  it("passes expected category revision when archiving", async () => {
+    remove.mockResolvedValue({ item: {} });
+    const { archiveExpenseCategory } = await import("./financialExpenses");
+    await archiveExpenseCategory("property", {
+      id: "category-1",
+      systemKey: null,
+      name: "Utilities",
+      color: "#1D4ED8",
+      sortOrder: 1,
+      archived: false,
+      revision: 3,
+    });
+    expect(remove).toHaveBeenCalledWith(
+      "/finance/properties/property/financials/expense-categories/category-1",
+      expect.objectContaining({
+        body: JSON.stringify({
+          expectedRevision: 3,
+          commandId: "12140000-0000-4000-8000-000000000001",
+          idempotencyKey: "12140000-0000-4000-8000-000000000001",
+        }),
+      }),
     );
   });
 });

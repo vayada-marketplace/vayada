@@ -34,6 +34,10 @@ const category = {
 };
 
 test("filters expenses and exports the same selection accessibly", async ({ page }) => {
+  const categories = [category];
+  let createdExpense: Record<string, unknown> | null = null;
+  let firstManualCommandId = "";
+  let failNextCategoryUpdate = false;
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
   await page.route("**/api/identity/staff/self-access", (route) =>
@@ -78,11 +82,99 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   );
   await page.route(
     (url) => url.pathname === `${root}/expense-categories`,
-    (route) => route.fulfill({ json: { ...envelope, item: [category] } }),
+    (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON();
+        expect(body.name).toBe("Utilities");
+        const created = {
+          ...category,
+          id: "12140000-0000-4000-8000-000000000006",
+          name: body.name,
+          color: body.color,
+          sortOrder: body.sortOrder,
+        };
+        categories.push(created);
+        return route.fulfill({
+          status: 201,
+          json: { ...envelope, item: created, outcome: "created" },
+        });
+      }
+      return route.fulfill({ json: { ...envelope, item: categories } });
+    },
+  );
+  await page.route(
+    (url) => url.pathname.startsWith(`${root}/expense-categories/`),
+    (route) => {
+      const body = route.request().postDataJSON();
+      const index = categories.findIndex(
+        (item) => item.id === route.request().url().split("/").at(-1),
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(body.expectedRevision).toBe(categories[index]?.revision);
+      if (route.request().method() === "PATCH" && failNextCategoryUpdate) {
+        failNextCategoryUpdate = false;
+        categories[index] = { ...categories[index]!, revision: categories[index]!.revision + 1 };
+        return route.fulfill({ status: 409, json: { code: "revision_conflict" } });
+      }
+      const updated = {
+        ...categories[index]!,
+        ...(route.request().method() === "PATCH"
+          ? { name: body.name, color: body.color, sortOrder: body.sortOrder }
+          : { archived: true }),
+        revision: categories[index]!.revision + 1,
+      };
+      categories[index] = updated;
+      return route.fulfill({ json: { ...envelope, item: updated, outcome: "updated" } });
+    },
   );
   await page.route(
     (url) => url.pathname === `${root}/expenses`,
     (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON();
+        if (body.recurrence) {
+          expect(body.vendor).toBe("Weekly cleaning");
+          expect(body.recurrence).toEqual({ cadence: "weekly", startsOn: "2026-09-17" });
+          return route.fulfill({
+            status: 201,
+            json: {
+              ...envelope,
+              item: { id: "12140000-0000-4000-8000-000000000008" },
+              outcome: "created",
+            },
+          });
+        }
+        expect(body.vendor).toBe("Electric Co");
+        expect(body.amount).toEqual(money("50.0000"));
+        expect(body.paymentStatus).toBe("paid");
+        expect(body.paidOn).toBe("2026-09-17");
+        expect(body.notes).toBe("September utility bill");
+        expect(body.receiptMediaId).toBe("12140000-0000-4000-8000-000000000009");
+        expect(body.categoryId).toBe(categories[1]?.id);
+        if (!firstManualCommandId) {
+          firstManualCommandId = body.commandId;
+          return route.abort("failed");
+        }
+        expect(body.commandId).toBe(firstManualCommandId);
+        createdExpense = {
+          id: "12140000-0000-4000-8000-000000000007",
+          categoryId: body.categoryId,
+          origin: "manual",
+          incurredOn: body.incurredOn,
+          vendor: body.vendor,
+          amount: body.amount,
+          paymentStatus: "paid",
+          paidOn: body.paidOn,
+          recurringRuleId: null,
+          sourceKey: null,
+          reversesExpenseId: null,
+          revision: 1,
+        };
+        return route.fulfill({
+          status: 201,
+          json: { ...envelope, item: createdExpense, outcome: "created" },
+        });
+      }
       const unpaid = new URL(route.request().url()).searchParams.get("paymentStatus") === "unpaid";
       return route.fulfill({
         json: {
@@ -96,6 +188,7 @@ test("filters expenses and exports the same selection accessibly", async ({ page
           categories: [{ category, amount: money("125.00") }],
           page: {
             items: [
+              ...(createdExpense ? [createdExpense] : []),
               {
                 id: "12140000-0000-4000-8000-000000000003",
                 categoryId: category.id,
@@ -204,4 +297,66 @@ test("filters expenses and exports the same selection accessibly", async ({ page
     "href",
     "https://files.example/expenses.csv",
   );
+  await page.getByLabel("Paid state").selectOption("");
+  await expect(page.getByText("Booking.com")).toBeVisible();
+  await page.getByRole("button", { name: "Categories" }).click();
+  const categoriesDialog = page.getByRole("dialog", { name: "Manage expense categories" });
+  expect((await new AxeBuilder({ page }).include('[role="dialog"]').analyze()).violations).toEqual(
+    [],
+  );
+  await categoriesDialog.getByLabel("Name").fill("Utilities");
+  await categoriesDialog.getByRole("button", { name: "Create category" }).click();
+  await expect(categoriesDialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Log expense" }).click();
+  const expenseDialog = page.getByRole("dialog", { name: "Log expense" });
+  expect((await new AxeBuilder({ page }).include('[role="dialog"]').analyze()).violations).toEqual(
+    [],
+  );
+  await expenseDialog.getByLabel("Vendor").fill("Electric Co");
+  await expenseDialog.getByLabel("Category").selectOption({ label: "Utilities" });
+  await expenseDialog.getByLabel("Amount (EUR)").fill("50");
+  await expenseDialog.getByLabel("Paid state").selectOption("paid");
+  await expenseDialog.getByLabel("Notes (optional)").fill("September utility bill");
+  await expenseDialog.getByLabel(/Receipt media ID/).fill("12140000-0000-4000-8000-000000000009");
+  await expenseDialog.getByRole("button", { name: "Log expense" }).click();
+  await expect(expenseDialog.getByRole("alert")).toContainText("Expense could not be saved");
+  await expenseDialog.getByRole("button", { name: "Log expense" }).click();
+  await expect(expenseDialog).toHaveCount(0);
+  await expect(page.getByText("Electric Co")).toBeVisible();
+  await page.getByRole("button", { name: "Categories" }).click();
+  await categoriesDialog.getByLabel("Category").selectOption({ label: "Utilities" });
+  await categoriesDialog.getByLabel("Name").fill("Utilities & energy");
+  await categoriesDialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(categoriesDialog).toHaveCount(0);
+  await page.getByRole("button", { name: "Categories" }).click();
+  await categoriesDialog.getByLabel("Category").selectOption({ label: "Utilities & energy" });
+  await categoriesDialog.getByRole("button", { name: "Archive category" }).click();
+  await categoriesDialog.getByRole("button", { name: "Confirm" }).click();
+  await expect(categoriesDialog).toHaveCount(0);
+  await expect(
+    page.getByRole("row").filter({ hasText: "Electric Co" }).getByText("Utilities & energy"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Log expense" }).click();
+  await expenseDialog.getByLabel("Vendor").fill("Weekly cleaning");
+  await expenseDialog.getByLabel("Category").selectOption({ label: "Housekeeping" });
+  await expenseDialog.getByLabel("Amount (EUR)").fill("25");
+  await expenseDialog.getByLabel("Repeat").selectOption("weekly");
+  await expenseDialog.getByRole("button", { name: "Save recurring expense" }).click();
+  await expect(expenseDialog).toHaveCount(0);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Recurring expense scheduled." }),
+  ).toBeVisible();
+  failNextCategoryUpdate = true;
+  await page.getByRole("button", { name: "Categories" }).click();
+  await categoriesDialog.getByLabel("Category").selectOption({ label: "Housekeeping" });
+  await categoriesDialog.getByLabel("Name").fill("Housekeeping & linen");
+  await categoriesDialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Categories changed elsewhere" }),
+  ).toContainText("The list was refreshed");
+  await page.getByRole("button", { name: "Categories" }).click();
+  await categoriesDialog.getByLabel("Category").selectOption({ label: "Housekeeping" });
+  await categoriesDialog.getByLabel("Name").fill("Housekeeping & linen");
+  await categoriesDialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(categoriesDialog).toHaveCount(0);
 });

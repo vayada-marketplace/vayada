@@ -104,13 +104,14 @@ describe("ExpensesTab", () => {
     });
   });
 
-  async function render() {
+  async function render(canManage = true) {
     const { ExpensesTab } = await import("./ExpensesTab");
     let view!: ReactTestRenderer;
     await act(async () => {
       view = create(
         createElement(ExpensesTab, {
           propertyId: envelope.propertyId,
+          canManage,
           locale: "en-GB",
           generatedAt: envelope.generatedAt,
           timeZone: envelope.timeZone,
@@ -132,6 +133,14 @@ describe("ExpensesTab", () => {
     ).toBe(true);
     expect(text).toContain("Unpaid");
     expect(text).toContain("Paid");
+  });
+
+  it("hides expense writes from read-only staff", async () => {
+    const view = await render(false);
+    const buttons = view.root.findAllByType("button").map((button) => button.children.join(""));
+    expect(buttons).not.toContain("Log expense");
+    expect(buttons).not.toContain("Categories");
+    expect(buttons.some((value) => value.includes("Export CSV"))).toBe(true);
   });
 
   it("keeps negative correction amounts visible in the category distribution", async () => {
