@@ -55,6 +55,21 @@ function fixture(match: "provider" | "email", protection: unknown = true) {
   return { query, release };
 }
 
+function deletedOwnerFixture(protection: unknown = true) {
+  const query = vi.fn(async (sql: string) => {
+    if (sql.includes("legacy_owner_bootstrap_receipts")) {
+      if (protection instanceof Error) throw protection;
+      return { rows: [{ protected: protection }] };
+    }
+    if (sql.includes("status <> 'deleted'")) return { rows: [] };
+    if (sql.includes("FROM identity.users")) return { rows: [{ id: ownerId }] };
+    return { rows: [], rowCount: 1 };
+  });
+  const release = vi.fn();
+  vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({ query, release } as never);
+  return { query, release };
+}
+
 function expectRolledBackWithoutWrites(query: ReturnType<typeof vi.fn>) {
   const statements = query.mock.calls.map(([sql]) => sql as string);
   expect(statements[0]).toBe("BEGIN");
@@ -85,6 +100,22 @@ describe("prepared-owner signup guard", () => {
       bus.execute({
         ...command,
         payload: { email: command.payload.email, initialStatus: "pending" },
+      }),
+    ).rejects.toThrow("Legacy owner account reconciliation required");
+    expectRolledBackWithoutWrites(query);
+    await bus.close();
+  });
+
+  it("denies a deleted protected owner before it can be recreated", async () => {
+    const { query } = deletedOwnerFixture();
+    const bus = createPgIdentityLifecycleCommandBus({ connectionString: "postgresql://unused" });
+    await expect(
+      bus.execute({
+        ...command,
+        payload: {
+          ...command.payload,
+          providerIdentity: { provider: "workos", providerUserId: "new_workos_user" },
+        },
       }),
     ).rejects.toThrow("Legacy owner account reconciliation required");
     expectRolledBackWithoutWrites(query);

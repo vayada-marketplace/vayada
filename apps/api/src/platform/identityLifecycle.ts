@@ -104,6 +104,17 @@ async function createIdentityUser(
       }
     }
 
+    const matchingEmailUsers = await client.query<{ id: string }>(
+      `SELECT id
+       FROM identity.users
+       WHERE lower(email) = lower($1)
+       ORDER BY created_at ASC`,
+      [command.payload.email],
+    );
+    for (const { id } of matchingEmailUsers.rows) {
+      await assertNotBootstrapProtectedUser(client, id);
+    }
+
     const existingEmail = await client.query<{ id: string }>(
       `SELECT id
        FROM identity.users
