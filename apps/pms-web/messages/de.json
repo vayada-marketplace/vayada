@@ -2304,5 +2304,14 @@
   "settings.team.adminTransferComplete": "Die Kontoadministration wurde erfolgreich übertragen.",
   "settings.team.adminTransferMissing": "Diese Übertragungsanfrage ist abgelaufen. Starte sie erneut mit dem aktuellen Kontoadministrator.",
   "settings.team.adminNeedsReview": "Die Kontoinhaberschaft muss geprüft werden: Es gibt keinen einzelnen aktiven Kontoadministrator mit der aktuellen Rolle. Bestehende Mitgliedschaften bleiben erhalten.",
-  "settings.team.yourAccount": "Dein Konto"
+  "settings.team.yourAccount": "Dein Konto",
+  "inbox.preapproveInquiry": "Anfrage vorab bestätigen",
+  "inbox.confirmPreapproval": "Vorabbestätigung senden",
+  "inbox.preapproval": "Airbnb-Vorabbestätigung",
+  "inbox.errorPreapproval": "Die Anfrage konnte nicht vorab bestätigt werden. Aktualisiere die Unterhaltung und prüfe den Status, bevor du es erneut versuchst.",
+  "inbox.preapprovalNotBooked": "Der Gast muss noch auf Airbnb annehmen. Dies ist keine bestätigte Buchung.",
+  "inbox.preapprovalStay": "{arrival} – {departure} · {adults} Erwachsene · {children} Kinder",
+  "inbox.preapprovalListing": "Airbnb-Inserat: {listing}",
+  "inbox.preapprovalTerms": "Der Gast kann diese Reisedaten für diese Gäste innerhalb von 24 Stunden zum aktuellen Airbnb-Preis buchen. Die Daten bleiben für andere Gäste verfügbar. Dadurch wird keine Buchung erstellt und keine Zahlung eingezogen.",
+  "inbox.preapprovalChanged": "Diese Unterhaltung wurde geändert. Schließe diesen Dialog und prüfe die Anfrage erneut."
 }

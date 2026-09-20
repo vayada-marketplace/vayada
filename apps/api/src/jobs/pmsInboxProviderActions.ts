@@ -85,7 +85,7 @@ export async function runPmsInboxProviderActions(
         AND thread.source_thread_id = $3 AND BTRIM(thread.source_thread_id) <> ''
         AND lower(BTRIM(thread.provider_channel)) IN
           ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
-        AND ($4 = 'channex_close' OR ($4 = 'airbnb_preapprove' AND thread.provider_channel = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($4 = 'booking_com_no_reply_needed'
+        AND ($4 = 'channex_close' OR ($4 = 'airbnb_preapprove' AND lower(BTRIM(thread.provider_channel)) = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($4 = 'booking_com_no_reply_needed'
           AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
         AND EXISTS (SELECT 1 FROM pms.channel_connections connection WHERE connection.property_id = thread.property_id
           AND connection.provider = 'channex' AND connection.connection_status IN ('connected', 'degraded') AND connection.messaging_app_installed)) AS eligible

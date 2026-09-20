@@ -465,7 +465,7 @@ async function lockThread(
                AND thread.delivery_channel = 'ota'
                AND lower(BTRIM(thread.provider_channel)) IN
                  ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
-               AND ($3 = 'channex_close' OR ($3 = 'airbnb_preapprove' AND thread.provider_channel = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($3 = 'booking_com_no_reply_needed' AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
+               AND ($3 = 'channex_close' OR ($3 = 'airbnb_preapprove' AND lower(BTRIM(thread.provider_channel)) = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($3 = 'booking_com_no_reply_needed' AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
              AND BTRIM(thread.source_thread_id) <> ''
 ) AS "providerCapable"
      FROM pms.message_threads thread

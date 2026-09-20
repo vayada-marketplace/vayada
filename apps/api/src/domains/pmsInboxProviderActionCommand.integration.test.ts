@@ -71,7 +71,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
       [PROPERTY, OTHER_PROPERTY],
     );
     await admin.query(
-      `UPDATE pms.message_threads SET provider_channel = 'airbnb', conversation_context_state = 'inquiry',
+      `UPDATE pms.message_threads SET provider_channel = ' AirBnB ', conversation_context_state = 'inquiry',
       inquiry_arrival_date = '2030-12-12', inquiry_departure_date = '2030-12-15', inquiry_adults = 2, inquiry_children = 0 WHERE id = $1`,
       [THREAD],
     );
@@ -82,6 +82,48 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     );
     return evidence;
   }
+
+  it("exposes only complete undecided inquiry context in the Inbox read model", async () => {
+    await seedInquiry();
+    const pool = new pg.Pool({ connectionString: URL });
+    const read = createPgPmsInboxReadPort({
+      connectionString: URL!,
+      pool,
+      providerMutationEnabled: true,
+      attachmentMediaAccessEnabled: false,
+      emailReplyRoutes: {
+        async resolveReplyRoutes() {
+          return [];
+        },
+      },
+    });
+    const detail = () =>
+      read.getThread({
+        propertyId: PROPERTY,
+        threadId: THREAD,
+        canReadGuestContact: false,
+        messageLimit: 20,
+      });
+    try {
+      expect(await detail()).toMatchObject({
+        ok: true,
+        value: {
+          availableProviderActions: expect.arrayContaining(["airbnb_preapprove"]),
+          inquiryPreapproval: { arrivalDate: "2030-12-12", adults: 2 },
+        },
+      });
+      await command.noReplyNeeded({ ...action("read-pending"), action: "airbnb_preapprove" });
+      expect(await detail()).toMatchObject({
+        ok: true,
+        value: {
+          availableProviderActions: expect.not.arrayContaining(["airbnb_preapprove"]),
+          inquiryPreapproval: null,
+        },
+      });
+    } finally {
+      await pool.end();
+    }
+  });
 
   it("serializes pre-approval across keys, retains evidence and executes once", async () => {
     const evidence = await seedInquiry();
