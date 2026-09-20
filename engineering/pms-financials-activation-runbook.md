@@ -24,8 +24,8 @@ mutation route returns 410. Financials cannot be activated or rolled back
 through Feature Hub until a reviewed control and its authorization are shipped
 and verified on the serving revision.
 
-The proposed control is property-scoped and fails closed: the API setting
-`PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list. After the
+The proposed control in PR #2541 is property-scoped and fails closed: the API
+setting `PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list. After the
 control is reviewed and serving, add only the explicitly approved property ID
 to that setting and verify the running API picked it up. The allowlist permits
 activation; it does not replace the readiness audit or production approval.
