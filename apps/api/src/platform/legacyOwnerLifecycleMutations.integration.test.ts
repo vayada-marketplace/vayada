@@ -5,9 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createPgIdentityLifecycleCommandBus } from "./identityLifecycle.js";
 
-const databaseUrl = process.env["TEST_DATABASE_URL"];
+const databaseUrl = process.env["VAY2017_LIFECYCLE_TEST_DATABASE_URL"];
 const hash = "a".repeat(64);
 const roleName = `vay2017_lifecycle_reader_${randomUUID().replaceAll("-", "")}`;
+const databaseName = "vay2017_lifecycle_fixture";
 const rolePassword = "reader_test_only";
 
 describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL", () => {
@@ -16,13 +17,17 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
   let lifecycle: ReturnType<typeof createPgIdentityLifecycleCommandBus>;
   let protectedUserId: string;
   let ordinaryUserId: string;
+  let adminConnected = false;
+  let readerRoleCreated = false;
 
   beforeAll(async () => {
     const parsed = new URL(databaseUrl!);
-    if (parsed.hostname !== "localhost" || parsed.pathname !== "/vayada_api_test" || parsed.search)
-      throw new Error("Dedicated local API integration database required");
+    if (parsed.hostname !== "127.0.0.1" || parsed.pathname !== `/${databaseName}` || parsed.search)
+      throw new Error("Dedicated loopback lifecycle fixture required");
     await admin.connect();
+    adminConnected = true;
     await admin.query(`CREATE ROLE ${roleName} LOGIN PASSWORD '${rolePassword}'`);
+    readerRoleCreated = true;
     await admin.query(`GRANT USAGE ON SCHEMA identity, platform TO ${roleName}`);
     await admin.query(`GRANT SELECT, UPDATE ON identity.users TO ${roleName}`);
     await admin.query(`GRANT SELECT, UPDATE ON identity.external_identities TO ${roleName}`);
@@ -72,14 +77,22 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
 
   afterAll(async () => {
     await lifecycle?.close();
-    await admin.query(
-      `REVOKE SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts FROM ${roleName}`,
-    );
-    await admin.query(`REVOKE SELECT, UPDATE ON identity.external_identities FROM ${roleName}`);
-    await admin.query(`REVOKE SELECT, UPDATE ON identity.users FROM ${roleName}`);
-    await admin.query(`REVOKE USAGE ON SCHEMA identity, platform FROM ${roleName}`);
-    await admin.query(`DROP ROLE ${roleName}`);
-    await admin.end();
+    if (adminConnected && readerRoleCreated) {
+      await admin.query(
+        `REVOKE SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts FROM ${roleName}`,
+      );
+      await admin.query(`REVOKE SELECT, UPDATE ON identity.external_identities FROM ${roleName}`);
+      await admin.query(`REVOKE SELECT, UPDATE ON identity.users FROM ${roleName}`);
+      await admin.query(`REVOKE USAGE ON SCHEMA identity, platform FROM ${roleName}`);
+      await admin.query(`DROP ROLE IF EXISTS ${roleName}`);
+    }
+    if (adminConnected) await admin.end();
+    const cleanupUrl = new URL(databaseUrl!);
+    cleanupUrl.pathname = "/postgres";
+    const cleanup = new pg.Client({ connectionString: cleanupUrl.toString() });
+    await cleanup.connect();
+    await cleanup.query(`DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`);
+    await cleanup.end();
   });
 
   function emailCommand(userId: string, email: string): IdentityLifecycleCommandBusCommand {
@@ -98,16 +111,35 @@ describe.skipIf(!databaseUrl)("prepared-owner lifecycle mutations in PostgreSQL"
     };
   }
 
-  it("denies protected email updates while allowing the restrictive status transition", async () => {
+  function statusCommand(
+    userId: string,
+    status: "active" | "pending" | "suspended",
+  ): IdentityLifecycleCommandBusCommand {
+    return {
+      commandType: "identity.user.status.update",
+      commandId: randomUUID(),
+      idempotencyKey: randomUUID(),
+      audit: {
+        actor: { kind: "system", service: "test" },
+        source: "web",
+        requestId: randomUUID(),
+        reason: "Synthetic PostgreSQL lifecycle guard test",
+        requestedAt: new Date().toISOString(),
+      },
+      payload: { userId, status },
+    };
+  }
+
+  it("denies protected email, active, and pending updates while allowing suspension", async () => {
     await expect(
       lifecycle.execute(emailCommand(protectedUserId, "blocked@example.test")),
     ).rejects.toThrow("Legacy owner account reconciliation required");
+    for (const status of ["active", "pending"] as const)
+      await expect(lifecycle.execute(statusCommand(protectedUserId, status))).rejects.toThrow(
+        "Legacy owner account reconciliation required",
+      );
     await expect(
-      lifecycle.execute({
-        ...emailCommand(protectedUserId, "unused@example.test"),
-        commandType: "identity.user.status.update",
-        payload: { userId: protectedUserId, status: "suspended" },
-      }),
+      lifecycle.execute(statusCommand(protectedUserId, "suspended")),
     ).resolves.toMatchObject({ status: "accepted" });
     expect(
       (
