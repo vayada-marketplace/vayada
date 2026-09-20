@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type { ChannexPricingJobLeaseInput } from "../jobs/pmsChannexPricingJobLease.js";
 import { verifyChannexOfferRoom } from "../integrations/channexOfferConfiguration.js";
+import { retireSupersededChannexOfferIntent } from "./channexSupersededOfferIntent.js";
 import {
   prepareChannexOfferDispatch,
   readPublishedPricingForChannexJob,
@@ -24,6 +26,36 @@ export async function advancePublishedChannexOfferCreates(
   if (current.kind !== "available") return current;
   const propertyId = current.authority.lease.propertyId;
   const connectionId = current.authority.connectionId;
+  const pendingIntents = await pool.query<{
+    id: string;
+    targetId: string;
+    roomTypeId: string;
+    offerId: string;
+  }>(
+    `SELECT i.id,t.id AS "targetId",t.room_type_id AS "roomTypeId",t.offer_id AS "offerId"
+     FROM pms.channex_offer_target_intents i
+     JOIN pms.channex_offer_targets t ON t.id=i.target_id
+     WHERE t.property_id=$1 AND t.connection_id=$2 AND i.status='pending'
+     ORDER BY i.id LIMIT 101`,
+    [propertyId, connectionId],
+  );
+  if (pendingIntents.rows.length > 100)
+    return { kind: "unavailable" as const, reason: "creation_batch_pending" };
+  for (const intent of pendingIntents.rows) {
+    const room = current.publication.rooms.find((item) => item.roomTypeId === intent.roomTypeId);
+    const progress = await retireSupersededChannexOfferIntent(pool, lease, {
+      propertyId,
+      connectionId,
+      claimId: current.authority.claimId,
+      externalPropertyId: current.authority.externalPropertyId,
+      publicationRevision: current.publication.revision,
+      targetId: intent.targetId,
+      intentId: intent.id,
+      roomTypeId: intent.roomTypeId,
+      offerPresent: Boolean(room?.offers.some((offer) => offer.id === intent.offerId)),
+    });
+    if (progress.kind === "unavailable") return progress;
+  }
   const pending = await pool.query<{
     attemptId: string;
     roomTypeId: string;
@@ -67,6 +99,7 @@ export async function advancePublishedChannexOfferCreates(
     if (configured.kind !== "configuration_retained") return configured;
   }
   const targets = await pool.query<{
+    targetId: string;
     roomTypeId: string;
     offerId: string;
     activeVersion: string | null;
@@ -77,8 +110,11 @@ export async function advancePublishedChannexOfferCreates(
     pending: boolean;
     hasAttempt: boolean;
     hasUnconfiguredAttempt: boolean;
+    pendingOperationKey: string | null;
+    pendingIntentId: string | null;
+    pendingPrimaryOccupancy: number | null;
   }>(
-    `SELECT t.room_type_id AS "roomTypeId",t.offer_id AS "offerId",
+    `SELECT t.id AS "targetId",t.room_type_id AS "roomTypeId",t.offer_id AS "offerId",
        t.active_version AS "activeVersion",
        (i.proposal->>'publicationRevision')::int AS "activeRevision",
        v.binding_generation AS "activeBindingGeneration",
@@ -92,7 +128,13 @@ export async function advancePublishedChannexOfferCreates(
        EXISTS (SELECT 1 FROM pms.channex_offer_create_attempts a
          JOIN pms.channex_offer_target_intents i ON i.id=a.intent_id
          WHERE i.target_id=t.id AND i.status='pending' AND a.state<>'released'
-           AND NOT (i.result_evidence ? 'configuration')) AS "hasUnconfiguredAttempt"
+           AND NOT (i.result_evidence ? 'configuration')) AS "hasUnconfiguredAttempt",
+       (SELECT i.operation_key FROM pms.channex_offer_target_intents i
+         WHERE i.target_id=t.id AND i.status='pending') AS "pendingOperationKey",
+       (SELECT i.id FROM pms.channex_offer_target_intents i
+         WHERE i.target_id=t.id AND i.status='pending') AS "pendingIntentId",
+       (SELECT (i.proposal->>'primaryOccupancy')::int FROM pms.channex_offer_target_intents i
+         WHERE i.target_id=t.id AND i.status='pending') AS "pendingPrimaryOccupancy"
      FROM pms.channex_offer_targets t
      LEFT JOIN pms.channex_offer_target_versions v
        ON v.target_id=t.id AND v.version=t.active_version
@@ -156,10 +198,29 @@ export async function advancePublishedChannexOfferCreates(
         (primaryOccupancy as number) > room.capacity.adults
       )
         return { kind: "unavailable" as const, reason: "primary_occupancy_unavailable" };
+      let retired = false;
+      if (target?.pendingIntentId && target.pendingPrimaryOccupancy !== primaryOccupancy) {
+        const progress = await retireSupersededChannexOfferIntent(pool, lease, {
+          propertyId,
+          connectionId,
+          claimId: current.authority.claimId,
+          externalPropertyId: current.authority.externalPropertyId,
+          publicationRevision: current.publication.revision,
+          targetId: target.targetId,
+          intentId: target.pendingIntentId,
+          roomTypeId: room.roomTypeId,
+          offerPresent: true,
+          primaryOccupancy: primaryOccupancy as number,
+        });
+        if (progress.kind === "unavailable") return progress;
+        retired = progress.kind === "retired";
+      }
       const selection = {
         roomTypeId: room.roomTypeId,
         offerId: offer.id,
-        operationKey: `published:${current.publication.revision}:${generation}:${externalRoomTypeId}:${primaryOccupancy}`,
+        operationKey:
+          (!retired ? target?.pendingOperationKey : null) ??
+          `published:${current.publication.revision}:${randomUUID()}`,
         primaryOccupancy: primaryOccupancy as number,
       };
       const prepared = await prepareChannexOfferDispatch(pool, lease, selection);

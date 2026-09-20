@@ -377,28 +377,49 @@ export async function activatePublishedChannexOffers(
 ) {
   const current = await readPublishedPricingForChannexJob(pool, input);
   if (current.kind !== "available") return current;
+  const publishedOffers = JSON.stringify(
+    current.publication.rooms.flatMap((room) =>
+      room.offers.map((offer) => ({ roomTypeId: room.roomTypeId, offerId: offer.id })),
+    ),
+  );
   const readState = () =>
-    pool.query<{ total: number; active: number }>(
-      `SELECT count(*)::int AS total,count(*) FILTER (
+    pool.query<{ expected: number; total: number; active: number }>(
+      `WITH eligible AS (
+         SELECT offered->>'roomTypeId' AS room_type_id,
+           offered->>'offerId' AS offer_id,mapping.external_room_type_id
+         FROM jsonb_array_elements($4::jsonb) offered
+         JOIN pms.channel_room_type_mappings mapping
+           ON mapping.property_id=$1 AND mapping.connection_id=$2 AND mapping.status='active'
+             AND mapping.room_type_id::text=offered->>'roomTypeId'
+       )
+       SELECT count(*)::int AS expected,count(target.id)::int AS total,count(*) FILTER (
          WHERE target.active_version IS NOT NULL
            AND version.binding_generation=connection.binding_generation
+           AND version.external_property_id=$5
+           AND version.external_room_type_id=eligible.external_room_type_id
            AND intent.proposal->'publicationRevision'=$3::jsonb
            AND NOT EXISTS (SELECT 1 FROM pms.channex_offer_target_intents pending
              WHERE pending.target_id=target.id AND pending.status='pending'))::int AS active
-       FROM pms.channex_offer_targets target
-       JOIN pms.channel_connections connection ON connection.id=target.connection_id
+       FROM eligible
+       LEFT JOIN pms.channex_offer_targets target
+         ON target.property_id=$1 AND target.connection_id=$2
+           AND target.room_type_id::text=eligible.room_type_id AND target.offer_id=eligible.offer_id
+       LEFT JOIN pms.channel_connections connection ON connection.id=target.connection_id
        LEFT JOIN pms.channex_offer_target_versions version
          ON version.target_id=target.id AND version.version=target.active_version
-       LEFT JOIN pms.channex_offer_target_intents intent ON intent.id=version.intent_id
-       WHERE target.property_id=$1 AND target.connection_id=$2`,
+       LEFT JOIN pms.channex_offer_target_intents intent ON intent.id=version.intent_id`,
       [
         current.authority.lease.propertyId,
         current.authority.connectionId,
         JSON.stringify(current.publication.revision),
+        publishedOffers,
+        current.authority.externalPropertyId,
       ],
     );
   const state = (await readState()).rows[0];
-  if (!state?.total) return { kind: "no_targets" as const };
+  if (!state?.expected) return { kind: "no_targets" as const };
+  if (state.total !== state.expected)
+    return { kind: "unavailable" as const, reason: "target_activation_pending" };
   const candidates = await pool.query<{
     creationAttemptId: string;
     roomTypeId: string;
@@ -412,13 +433,23 @@ export async function activatePublishedChannexOffers(
      JOIN pms.channex_offer_target_intents i ON i.target_id=t.id AND i.status='pending'
      JOIN pms.channex_offer_create_attempts a ON a.intent_id=i.id AND a.state='identified'
      WHERE t.property_id=$1 AND t.connection_id=$2
+       AND EXISTS (SELECT 1 FROM pms.channel_room_type_mappings mapping
+         WHERE mapping.property_id=t.property_id AND mapping.connection_id=t.connection_id
+           AND mapping.room_type_id=t.room_type_id AND mapping.status='active')
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements($3::jsonb) offered
+         WHERE offered->>'roomTypeId'=t.room_type_id::text
+           AND offered->>'offerId'=t.offer_id)
      ORDER BY t.room_type_id::text COLLATE "C",t.offer_id`,
-    [current.authority.lease.propertyId, current.authority.connectionId],
+    [current.authority.lease.propertyId, current.authority.connectionId, publishedOffers],
   );
-  if (!candidates.rows.length)
-    return state.active === state.total
-      ? { kind: "all_targets_active" as const, count: state.total }
+  if (!candidates.rows.length) {
+    const completed = (await readState()).rows[0];
+    return completed?.expected === state.expected &&
+      completed.total === completed.expected &&
+      completed.active === completed.total
+      ? { kind: "all_targets_active" as const, count: completed.total }
       : { kind: "unavailable" as const, reason: "target_activation_pending" };
+  }
   if (state.active + candidates.rows.length !== state.total)
     return { kind: "unavailable" as const, reason: "target_activation_pending" };
   for (const candidate of candidates.rows) {
@@ -430,7 +461,9 @@ export async function activatePublishedChannexOffers(
     if (!result.activation) throw new Error("Target activation missing");
   }
   const completed = (await readState()).rows[0];
-  return completed?.total === state.total && completed.active === completed.total
+  return completed?.expected === state.expected &&
+    completed.total === completed.expected &&
+    completed.active === completed.total
     ? { kind: "all_targets_active" as const, count: completed.total }
     : { kind: "unavailable" as const, reason: "target_activation_pending" };
 }
