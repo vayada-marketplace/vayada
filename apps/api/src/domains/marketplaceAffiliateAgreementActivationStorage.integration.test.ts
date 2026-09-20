@@ -214,16 +214,20 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
     expect(await lifecycle()).toEqual({ status: "unavailable" });
     await agreement();
     await activate();
-    expect(await lifecycle()).toEqual({ status: "active", revision: 0 });
+    expect(await lifecycle()).toEqual({ status: "active", revision: 0, pausedBy: [] });
     await append(1, "pause", "hotel");
     await append(2, "pause", "creator");
-    expect(await lifecycle()).toEqual({ status: "paused", revision: 2 });
+    expect(await lifecycle()).toEqual({
+      status: "paused",
+      revision: 2,
+      pausedBy: ["hotel", "creator"],
+    });
     await append(3, "resume", "hotel");
-    expect(await lifecycle()).toEqual({ status: "paused", revision: 3 });
+    expect(await lifecycle()).toEqual({ status: "paused", revision: 3, pausedBy: ["creator"] });
     await append(4, "resume", "creator");
-    expect(await lifecycle()).toEqual({ status: "active", revision: 4 });
+    expect(await lifecycle()).toEqual({ status: "active", revision: 4, pausedBy: [] });
     await append(5, "end", "hotel");
-    expect(await lifecycle()).toEqual({ status: "ended", revision: 5 });
+    expect(await lifecycle()).toEqual({ status: "ended", revision: 5, pausedBy: [] });
   });
 
   it("fails closed on invalid history and protects event evidence", async () => {
@@ -281,7 +285,7 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
     const after = (await pool().query("SELECT clock_timestamp() AS now")).rows[0].now.getTime();
     expect(stamped).toBeGreaterThanOrEqual(before);
     expect(stamped).toBeLessThanOrEqual(after);
-    expect(await lifecycle()).toEqual({ status: "ended", revision: 1 });
+    expect(await lifecycle()).toEqual({ status: "ended", revision: 1, pausedBy: [] });
   });
 
   it("stamps a pause after an in-flight active read releases its lock", async () => {
@@ -295,6 +299,7 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
       expect(await readMarketplaceAffiliateAgreementLifecycle(reader, agreementId)).toEqual({
         status: "active",
         revision: 0,
+        pausedBy: [],
       });
       const writerPid = (await writer.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
       pending = writer
@@ -323,7 +328,7 @@ describe.skipIf(!databaseUrl)("affiliate agreement activation storage", () => {
       const beforeRelease = (await reader.query("SELECT clock_timestamp() AS now")).rows[0].now;
       await reader.query("COMMIT");
       expect((await pending).getTime()).toBeGreaterThanOrEqual(beforeRelease.getTime());
-      expect(await lifecycle()).toEqual({ status: "paused", revision: 1 });
+      expect(await lifecycle()).toEqual({ status: "paused", revision: 1, pausedBy: ["hotel"] });
     } finally {
       await reader.query("ROLLBACK");
       if (pending) await pending.catch(() => undefined);

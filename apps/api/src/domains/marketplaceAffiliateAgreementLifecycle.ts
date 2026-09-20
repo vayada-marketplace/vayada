@@ -3,7 +3,11 @@ import type pg from "pg";
 export type AffiliateAgreementLifecycle =
   | { status: "unavailable" }
   | { status: "invalid_history" }
-  | { status: "active" | "paused" | "ended"; revision: number };
+  | {
+      status: "active" | "paused" | "ended";
+      revision: number;
+      pausedBy: ("hotel" | "creator")[];
+    };
 
 /** Read in the caller's transaction when this status gates a write. */
 export async function readMarketplaceAffiliateAgreementLifecycle(
@@ -49,5 +53,8 @@ export async function readMarketplaceAffiliateAgreementLifecycle(
   return {
     status: ended ? "ended" : hotelPaused || creatorPaused ? "paused" : "active",
     revision: events.length,
+    pausedBy: [hotelPaused ? "hotel" : null, creatorPaused ? "creator" : null].filter(
+      (side): side is "hotel" | "creator" => side !== null,
+    ),
   };
 }
