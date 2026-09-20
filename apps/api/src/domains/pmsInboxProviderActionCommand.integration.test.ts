@@ -48,6 +48,214 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     await admin.end();
   });
 
+  async function seedInquiry() {
+    const evidence = {
+      eventId: OTHER_THREAD,
+      providerPropertyId: OTHER_PROPERTY,
+      threadId: SOURCE_CONVERSATION,
+      listingId: "listing",
+      contextDigest: "a".repeat(64),
+      arrivalDate: "2030-12-12",
+      departureDate: "2030-12-15",
+      adults: 2,
+      children: 0,
+      currency: "EUR",
+    };
+    await admin.query(
+      `INSERT INTO pms.channel_binding_claims (property_id, provider, external_property_id, claim_state, claim_source)
+      VALUES ($1, 'channex', $2, 'active', 'repair')`,
+      [PROPERTY, OTHER_PROPERTY],
+    );
+    await admin.query(
+      `UPDATE pms.channel_connections SET external_property_id = $2 WHERE property_id = $1`,
+      [PROPERTY, OTHER_PROPERTY],
+    );
+    await admin.query(
+      `UPDATE pms.message_threads SET provider_channel = 'airbnb', conversation_context_state = 'inquiry',
+      inquiry_arrival_date = '2030-12-12', inquiry_departure_date = '2030-12-15', inquiry_adults = 2, inquiry_children = 0 WHERE id = $1`,
+      [THREAD],
+    );
+    await admin.query(
+      `INSERT INTO pms.messages (property_id, thread_id, source_message_id, direction, sender_type, body, sent_at, raw_payload)
+      VALUES ($1, $2, 'inquiry', 'inbound', 'system', 'inquiry', now(), $3)`,
+      [PROPERTY, THREAD, JSON.stringify({ inquiry: true, airbnbInquiry: evidence })],
+    );
+    return evidence;
+  }
+
+  it("serializes pre-approval across keys, retains evidence and executes once", async () => {
+    const evidence = await seedInquiry();
+    const results = await Promise.all(
+      ["one", "two"].map((key) =>
+        command.noReplyNeeded({ ...action(key), action: "airbnb_preapprove" }),
+      ),
+    );
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect((await state()).job?.payload.inquiry).toEqual(evidence);
+    await admin.query(
+      `UPDATE platform.jobs SET payload = payload || jsonb_build_object('acceptedAt', now()) WHERE property_id = $1`,
+      [PROPERTY],
+    );
+    const pool = new pg.Pool({ connectionString: URL });
+    let calls = 0;
+    try {
+      await runPmsInboxProviderActions(pool, async (input, reconcileOnly) => {
+        calls++;
+        expect(input.inquiry).toEqual(evidence);
+        expect(reconcileOnly).toBe(false);
+        return { ok: true, providerReference: evidence.eventId };
+      });
+      await runPmsInboxProviderActions(pool, async () => {
+        throw new Error("must not repeat");
+      });
+    } finally {
+      await pool.end();
+    }
+    expect(calls).toBe(1);
+    expect((await state()).job?.metadata.outcome).toBe("confirmed");
+    await admin.query(`UPDATE pms.message_threads SET version = 5 WHERE id = $1`, [THREAD]);
+    expect(
+      await command.noReplyNeeded({
+        ...action("after-new-message"),
+        expectedVersion: 5,
+        action: "airbnb_preapprove",
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it.each(["missing", "foreign", "newer-incomplete"])(
+    "rejects %s inquiry evidence",
+    async (kind) => {
+      const evidence = await seedInquiry();
+      if (kind === "missing")
+        await admin.query(`UPDATE pms.messages SET raw_payload = '{}' WHERE property_id = $1`, [
+          PROPERTY,
+        ]);
+      if (kind === "foreign")
+        await admin.query(`UPDATE pms.messages SET raw_payload = $2 WHERE property_id = $1`, [
+          PROPERTY,
+          JSON.stringify({
+            inquiry: true,
+            airbnbInquiry: { ...evidence, providerPropertyId: PROPERTY },
+          }),
+        ]);
+      if (kind === "newer-incomplete")
+        await admin.query(
+          `INSERT INTO pms.messages (property_id, thread_id, source_message_id, direction, sender_type, body, sent_at, raw_payload)
+      VALUES ($1, $2, 'newer', 'inbound', 'system', 'inquiry', now() + interval '1 second', '{"inquiry":true,"airbnbInquiry":null}')`,
+          [PROPERTY, THREAD],
+        );
+      expect(
+        await command.noReplyNeeded({ ...action("invalid"), action: "airbnb_preapprove" }),
+      ).toMatchObject({ ok: false, error: { code: "provider_action_unavailable" } });
+      expect((await state()).job).toBeNull();
+    },
+  );
+
+  it("reconciles a recovered pre-approval without authorizing another send", async () => {
+    const evidence = await seedInquiry();
+    expect(
+      (await command.noReplyNeeded({ ...action("recovery"), action: "airbnb_preapprove" })).ok,
+    ).toBe(true);
+    await admin.query(
+      `UPDATE platform.jobs SET status = 'running', locked_by = 'old', locked_at = now() - interval '3 minutes',
+      job_metadata = '{"dispatched":true}' WHERE property_id = $1`,
+      [PROPERTY],
+    );
+    const pool = new pg.Pool({ connectionString: URL });
+    try {
+      await runPmsInboxProviderActions(pool, async (_input, reconcileOnly) => {
+        expect(reconcileOnly).toBe(true);
+        return { ok: true, providerReference: evidence.eventId };
+      });
+    } finally {
+      await pool.end();
+    }
+    expect((await state()).job?.metadata.outcome).toBe("confirmed");
+  });
+
+  it.each(["stale", "revoked"])(
+    "keeps uncertain pre-approval fenced after %s recovery",
+    async (scenario) => {
+      await seedInquiry();
+      await command.noReplyNeeded({ ...action("recovery-fence"), action: "airbnb_preapprove" });
+      await admin.query(
+        `UPDATE platform.jobs SET status = 'running', locked_by = 'old', locked_at = now() - interval '3 minutes', job_metadata = '{"dispatched":true}' WHERE property_id = $1`,
+        [PROPERTY],
+      );
+      if (scenario === "stale")
+        await admin.query(`UPDATE pms.message_threads SET version = 5 WHERE id = $1`, [THREAD]);
+      else
+        await admin.query(
+          `UPDATE identity.organization_memberships SET status = 'inactive' WHERE id = $1`,
+          [MEMBERSHIP],
+        );
+      const pool = new pg.Pool({ connectionString: URL });
+      let calls = 0;
+      try {
+        await runPmsInboxProviderActions(pool, async () => {
+          calls++;
+          return { ok: true, providerReference: OTHER_THREAD };
+        });
+      } finally {
+        await pool.end();
+      }
+      expect(calls).toBe(0);
+      expect((await state()).job?.metadata).toMatchObject({
+        outcome: "held",
+        reason: "ambiguous_provider_outcome",
+        dispatched: true,
+      });
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status = 'active' WHERE id = $1`,
+        [MEMBERSHIP],
+      );
+      expect(
+        await command.noReplyNeeded({
+          ...action("retry-fenced"),
+          expectedVersion: scenario === "stale" ? 5 : 4,
+          action: "airbnb_preapprove",
+        }),
+      ).toMatchObject({ ok: false });
+    },
+  );
+
+  it("renews the acceptance deadline when a failed pre-approval is reviewed again", async () => {
+    await seedInquiry();
+    const first = await command.noReplyNeeded({
+      ...action("expired"),
+      action: "airbnb_preapprove",
+    });
+    const pool = new pg.Pool({ connectionString: URL });
+    const fresh = createPgPmsInboxProviderActionPort({
+      connectionString: URL!,
+      mutationEnabled: true,
+    });
+    let calls = 0;
+    try {
+      await runPmsInboxProviderActions(pool, async () => {
+        calls++;
+        return { ok: true, providerReference: OTHER_THREAD };
+      });
+      expect(calls).toBe(0);
+      expect((await state()).job?.metadata.reason).toBe("inquiry_changed_or_expired");
+      const retry = await fresh.noReplyNeeded({
+        ...action("fresh-review"),
+        action: "airbnb_preapprove",
+      });
+      expect(first.ok && retry.ok && first.value.jobId === retry.value.jobId).toBe(true);
+      await runPmsInboxProviderActions(pool, async () => {
+        calls++;
+        return { ok: true, providerReference: OTHER_THREAD };
+      });
+      expect(calls).toBe(1);
+      expect((await state()).job?.metadata.outcome).toBe("confirmed");
+    } finally {
+      await pool.end();
+      await fresh.close();
+    }
+  });
+
   it.each(["booking_com_no_reply_needed", "channex_close"] as const)(
     "executes %s and preserves local triage",
     async (providerAction) => {
@@ -851,6 +1059,7 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
         "DELETE FROM pms.messages WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM pms.message_threads WHERE property_id = ANY($1::uuid[])",
         "DELETE FROM pms.channel_connections WHERE property_id = ANY($1::uuid[])",
+        "DELETE FROM pms.channel_binding_claims WHERE property_id = ANY($1::uuid[])",
       ])
         await admin.query(statement, [properties]);
       await admin.query(

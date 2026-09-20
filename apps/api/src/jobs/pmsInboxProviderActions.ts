@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readPmsInboxInquiryContext } from "../domains/pmsInboxInquiryContext.js";
+import type { AirbnbInquiryEvidence } from "../domains/airbnbInquiryEvidence.js";
 import type pg from "pg";
 import type { PmsInboxProviderAction } from "../domains/pmsInbox.js";
 import { lockPmsInboxReplyActorScope } from "../domains/pmsInboxProviderActionCommand.js";
@@ -10,6 +12,8 @@ import {
 
 const JOB = "pms.inbox.provider-action.deliver";
 type Payload = {
+  inquiry?: AirbnbInquiryEvidence;
+  acceptedAt?: string;
   propertyId: string;
   threadId: string;
   action: PmsInboxProviderAction;
@@ -30,7 +34,9 @@ type Job = {
 // Durable dispatch marker prevents lease recovery from repeating an uncertain POST.
 export async function runPmsInboxProviderActions(
   pool: pg.Pool,
-  execute: ((input: Payload) => Promise<PmsInboxDeliveryProviderResult>) | undefined,
+  execute:
+    | ((input: Payload, reconcileOnly?: boolean) => Promise<PmsInboxDeliveryProviderResult>)
+    | undefined,
 ) {
   const worker = `pms-inbox-provider:${randomUUID()}`;
   const client = await pool.connect();
@@ -79,7 +85,7 @@ export async function runPmsInboxProviderActions(
         AND thread.source_thread_id = $3 AND BTRIM(thread.source_thread_id) <> ''
         AND lower(BTRIM(thread.provider_channel)) IN
           ('booking.com', 'booking_com', 'bookingcom', 'airbnb', 'expedia')
-        AND ($4 = 'channex_close' OR ($4 = 'booking_com_no_reply_needed'
+        AND ($4 = 'channex_close' OR ($4 = 'airbnb_preapprove' AND thread.provider_channel = 'airbnb' AND thread.conversation_context_state = 'inquiry' AND thread.guest_booking_id IS NULL) OR ($4 = 'booking_com_no_reply_needed'
           AND lower(BTRIM(thread.provider_channel)) IN ('booking.com', 'booking_com', 'bookingcom')))
         AND EXISTS (SELECT 1 FROM pms.channel_connections connection WHERE connection.property_id = thread.property_id
           AND connection.provider = 'channex' AND connection.connection_status IN ('connected', 'degraded') AND connection.messaging_app_installed)) AS eligible
@@ -88,20 +94,45 @@ export async function runPmsInboxProviderActions(
     );
     let result: PmsInboxDeliveryProviderResult | undefined;
     let reason: string | undefined;
-    if (job.job_metadata.dispatched) result = { ok: false, failure: "ambiguous_provider_outcome" };
+    if (job.job_metadata.dispatched && input.action !== "airbnb_preapprove")
+      result = { ok: false, failure: "ambiguous_provider_outcome" };
     else if (!execute || !thread.rows[0]?.eligible)
       result = { ok: false, failure: "provider_configuration_unavailable" };
     else if (!input.expectedVersion || Number(thread.rows[0].version) !== input.expectedVersion) {
       result = { ok: false, failure: "invalid_delivery_payload" };
       reason = "conversation_changed";
     } else if (!access) result = { ok: false, failure: "access_unavailable" };
+    if (!result && input.action === "airbnb_preapprove") {
+      const current = await readPmsInboxInquiryContext(client, input.propertyId, input.threadId);
+      if (
+        !current ||
+        !input.inquiry ||
+        current.eventId !== input.inquiry.eventId ||
+        current.contextDigest !== input.inquiry.contextDigest ||
+        current.providerPropertyId !== input.inquiry.providerPropertyId ||
+        current.listingId !== input.inquiry.listingId ||
+        current.threadId !== input.inquiry.threadId ||
+        (!job.job_metadata.dispatched &&
+          (!input.acceptedAt ||
+            !Number.isFinite(Date.parse(input.acceptedAt)) ||
+            Date.now() - Date.parse(input.acceptedAt) > 5 * 60_000))
+      ) {
+        result = { ok: false, failure: "invalid_delivery_payload" };
+        reason = "inquiry_changed_or_expired";
+      }
+    }
+    // A failed recovery check cannot establish that the original POST did not succeed.
+    if (result && job.job_metadata.dispatched && input.action === "airbnb_preapprove") {
+      result = { ok: false, failure: "ambiguous_provider_outcome" };
+      reason = undefined;
+    }
     if (!result)
       await client.query(
         `UPDATE platform.jobs SET job_metadata = job_metadata || '{"dispatched":true}'::jsonb WHERE id = $1`,
         [job.id],
       );
     await client.query("COMMIT");
-    result ??= await execute!(input).catch(
+    result ??= await execute!(input, Boolean(job.job_metadata.dispatched)).catch(
       () => ({ ok: false, failure: "ambiguous_provider_outcome" }) as const,
     );
     const projection = result.ok
