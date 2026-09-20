@@ -5,7 +5,7 @@ import type {
   RequestContext,
 } from "@vayada/backend-auth";
 // prettier-ignore
-import { captureFinanceProfitLossExport, financeReportingMoneyMetric, type FinanceExpenseExportSnapshot, type FinanceFolioDetailResponse, type FinanceFolioExportSnapshot, type FinanceFolioListResponse, type FinanceProfitLossResponse } from "@vayada/domain-finance";
+import { captureFinanceProfitLossExport, financeDashboardPeriods, financeReportingMoneyMetric, type FinanceDashboardResponse, type FinanceExpenseExportSnapshot, type FinanceFolioDetailResponse, type FinanceFolioExportSnapshot, type FinanceFolioListResponse, type FinanceProfitLossResponse, type FinanceRevenueResponse } from "@vayada/domain-finance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
@@ -130,6 +130,53 @@ const profitLossBody = {
   format: "csv",
   filters: { year: 2026 },
 };
+const revenueResponse: FinanceRevenueResponse = {
+  ...base,
+  summary: {
+    grossRoom: financeReportingMoneyMetric("0", "0", "EUR"),
+    otaCommission: financeReportingMoneyMetric("0", "0", "EUR"),
+    netRoom: financeReportingMoneyMetric("0", "0", "EUR"),
+    upsell: financeReportingMoneyMetric("0", "0", "EUR"),
+    nights: { value: 0, absoluteChange: 0, percentChange: null },
+    adr: financeReportingMoneyMetric("0", "0", "EUR"),
+    attachRate: { value: "0.0000", absoluteChange: "0.0000", percentChange: null },
+  },
+  channels: [],
+  directSources: [],
+  upsells: [],
+  roomTypes: [],
+};
+const dashboardDaily = financeDashboardPeriods("2026-08-21").daily;
+const dashboardStart = Date.parse(`${dashboardDaily.from}T00:00:00Z`);
+const dashboardResponse: FinanceDashboardResponse = {
+  ...base,
+  cards: {
+    revenueToday: financeReportingMoneyMetric("0", "0", "EUR"),
+    revenueMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    expensesMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    profitMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+  },
+  daily: Array.from({ length: 14 }, (_, index) => ({
+    date: new Date(dashboardStart + index * 86_400_000).toISOString().slice(0, 10),
+    revenue: zero(),
+    expenses: zero(),
+  })),
+  upcoming: [],
+};
+const revenueBody = {
+  commandId: folioId,
+  idempotencyKey: "revenue-export",
+  tab: "revenue",
+  format: "csv",
+  filters: { from: "2026-08-01", to: "2026-08-21" },
+};
+const dashboardBody = {
+  commandId: bookingId,
+  idempotencyKey: "dashboard-export",
+  tab: "dashboard",
+  format: "csv",
+  filters: {},
+};
 
 type Ports = FinanceFolioRoutesOptions["repository"] & {
   list: ReturnType<typeof vi.fn>;
@@ -154,6 +201,12 @@ type ExpenseExports = NonNullable<FinanceFolioRoutesOptions["expenseExports"]> &
 };
 type ProfitLossExports = NonNullable<FinanceFolioRoutesOptions["profitLossExports"]> & {
   profitLoss: ReturnType<typeof vi.fn>;
+};
+type RevenueExports = NonNullable<FinanceFolioRoutesOptions["revenueExports"]> & {
+  revenue: ReturnType<typeof vi.fn>;
+};
+type DashboardExports = NonNullable<FinanceFolioRoutesOptions["dashboardExports"]> & {
+  dashboard: ReturnType<typeof vi.fn>;
 };
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
@@ -186,9 +239,13 @@ function profitLossExports(): ProfitLossExports {
     profitLoss: vi.fn(async () => ({ response: profitLossResponse, categoryRows: [] })),
   } as ProfitLossExports;
 }
+const revenueExports = (): RevenueExports =>
+  ({ revenue: vi.fn(async () => revenueResponse) }) as RevenueExports;
+const dashboardExports = (): DashboardExports =>
+  ({ dashboard: vi.fn(async () => dashboardResponse) }) as DashboardExports;
 
 // prettier-ignore
-async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads, expenses?: ExpenseExports, profitLoss?: ProfitLossExports) {
+async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads, expenses?: ExpenseExports, profitLoss?: ProfitLossExports, revenue?: RevenueExports, dashboard?: DashboardExports) {
   const instance = buildApp({
     logger: false,
     browserAllowedOrigins: ["https://pms.example"],
@@ -200,6 +257,8 @@ async function app(repository: Ports, auth: RequestContext | null = context(), w
       ...(exportDownloads ? { exportDownloads } : {}),
       ...(expenses ? { expenseExports: expenses } : {}),
       ...(profitLoss ? { profitLossExports: profitLoss } : {}),
+      ...(revenue ? { revenueExports: revenue } : {}),
+      ...(dashboard ? { dashboardExports: dashboard } : {}),
     },
   });
   instance.decorateRequest("authContext", null);
@@ -542,6 +601,100 @@ describe("Financials folio export route", () => {
     expect(
       (await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` })).statusCode,
     ).toBe(500);
+  });
+
+  it("captures scoped Revenue and Dashboard reads with pinned export filters", async () => {
+    const repository = ports(),
+      jobs = exportJobs(),
+      revenue = revenueExports(),
+      dashboard = dashboardExports();
+    jobs.enqueue.mockImplementation(async (command) => ({
+      status: "created",
+      exportId,
+      envelope: command.envelope,
+    }));
+    const instance = await app(
+      repository,
+      context(),
+      undefined,
+      jobs,
+      undefined,
+      undefined,
+      undefined,
+      revenue,
+      dashboard,
+    );
+    for (const body of [revenueBody, dashboardBody]) {
+      const response = await instance.inject({ method: "POST", url: exportRoot, payload: body });
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toMatchObject({
+        propertyId,
+        item: { resourceId: exportId, state: "pending" },
+      });
+    }
+    expect(revenue.revenue).toHaveBeenCalledWith(propertyId, revenueBody.filters);
+    expect(dashboard.dashboard).toHaveBeenCalledWith(propertyId, {});
+    expect(jobs.enqueue.mock.calls[0]![0]).toMatchObject({
+      propertyId,
+      filters: revenueBody.filters,
+      snapshot: { formatVersion: "pms-financials-revenue.v1" },
+    });
+    expect(jobs.enqueue.mock.calls[1]![0]).toMatchObject({
+      propertyId,
+      filters: { asOf: "2026-08-21" },
+      snapshot: { formatVersion: "pms-financials-dashboard.v1", asOf: "2026-08-21" },
+    });
+    expect(repository.captureReadyExport).not.toHaveBeenCalled();
+    expect(
+      await instance.inject({
+        method: "POST",
+        url: exportRoot,
+        payload: { ...revenueBody, filters: { ...revenueBody.filters, extra: true } },
+      }),
+    ).toMatchObject({ statusCode: 400 });
+    revenue.revenue.mockResolvedValueOnce({ ...revenueResponse, propertyId: otherPropertyId });
+    expect(
+      await instance.inject({ method: "POST", url: exportRoot, payload: revenueBody }),
+    ).toMatchObject({ statusCode: 500 });
+    expect(jobs.enqueue).toHaveBeenCalledTimes(2);
+    revenue.revenue.mockResolvedValueOnce({
+      ...revenueResponse,
+      generatedAt: "2026-08-21T10:00:00Z",
+    });
+    expect(
+      await instance.inject({ method: "POST", url: exportRoot, payload: revenueBody }),
+    ).toMatchObject({ statusCode: 202 });
+    expect(jobs.enqueue).toHaveBeenCalledTimes(3);
+  });
+
+  it("accepts only property-scoped Revenue and Dashboard private artifacts", async () => {
+    const access = exportDownloads();
+    const instance = await app(ports(), context(), undefined, undefined, access);
+    for (const [version, filename] of [
+      [
+        "pms-financials-revenue.v1",
+        `pms-financials-revenue-${propertyId}-2026-08-01-2026-08-21.csv`,
+      ],
+      ["pms-financials-dashboard.v1", `pms-financials-dashboard-${propertyId}-2026-08-21.csv`],
+    ]) {
+      access.read.find.mockResolvedValueOnce({
+        state: "ready",
+        expiresAt: exportExpiresAt,
+        artifact: {
+          mediaId: exportId,
+          bucketName: "test-private",
+          storageKey: `private/finance/financials-exports/${exportId}/${version}.csv`,
+          visibility: "private",
+          lifecycleStatus: "active",
+          filename,
+          contentType: "text/csv; charset=utf-8",
+          sizeBytes: 42,
+        },
+      });
+      expect(
+        (await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` })).statusCode,
+      ).toBe(200);
+    }
   });
 
   it("fails closed before snapshot capture for malformed requests or unauthorized callers", async () => {

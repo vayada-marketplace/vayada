@@ -5,13 +5,19 @@ import {
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import {
+  FINANCE_DASHBOARD_CSV_VERSION,
   FINANCE_EXPENSE_CSV_CONTENT_TYPE,
   FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
   FINANCE_PROFIT_LOSS_CSV_VERSION,
+  FINANCE_REVENUE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
   captureFinanceProfitLossExport,
+  captureFinanceRevenueExport,
+  captureFinanceDashboardExport,
+  parseFinanceDashboardExportSnapshot,
+  parseFinanceDashboardQuery,
   parseFinanceExpenseExportQuery,
   parseFinanceExpenseExportSnapshot,
   parseFinanceFolioExportFilters,
@@ -21,14 +27,25 @@ import {
   parseFinanceFolioWrite,
   parseFinanceProfitLossExportSnapshot,
   parseFinanceProfitLossQuery,
+  parseFinanceRevenueExportSnapshot,
+  parseFinanceRevenueQuery,
   type FinanceCommandAudit,
   type FinanceFolioDetailResponse,
   type FinanceFolioListResponse,
   type FinanceFolioQuery,
+  type FinanceReportingEnvelope,
 } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
+import {
+  FinanceDashboardEvidenceError,
+  type FinanceDashboardReadModel,
+} from "../domains/financeDashboardReadModel.js";
+import {
+  FinanceRevenueEvidenceError,
+  type FinanceRevenueReadModel,
+} from "../domains/financeRevenueReadModel.js";
 import {
   type FinanceExportCommand,
   type FinanceExportEnqueueResult,
@@ -69,6 +86,8 @@ export type FinanceFolioRoutesOptions = {
   repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
   expenseExports?: Pick<FinanceExpenseReadModel, "captureExport">;
   profitLossExports?: Pick<FinanceProfitLossReadModel, "profitLoss">;
+  revenueExports?: Pick<FinanceRevenueReadModel, "revenue">;
+  dashboardExports?: Pick<FinanceDashboardReadModel, "dashboard">;
   exports?: {
     enqueue(command: FinanceExportCommand): Promise<FinanceExportEnqueueResult>;
   };
@@ -184,7 +203,7 @@ export async function registerFinanceFolioRoutes(
             snapshot: capture.snapshot,
             envelope: capture.envelope,
           });
-        } else {
+        } else if (value.tab === "profit-loss") {
           const raw = await required(options.profitLossExports).profitLoss(
             current.propertyId,
             value.filters,
@@ -232,8 +251,63 @@ export async function registerFinanceFolioRoutes(
             snapshot: capture.snapshot,
             envelope: capture.envelope,
           });
+        } else if (value.tab === "revenue") {
+          const response = await required(options.revenueExports).revenue(
+            current.propertyId,
+            value.filters,
+          );
+          if (!response) return missing(reply);
+          const snapshot = captureFinanceRevenueExport({
+            propertyId: current.propertyId,
+            response,
+            query: value.filters,
+          });
+          const capture = exportCapture(
+            { envelope: reportingEnvelope(response), snapshot },
+            current.propertyId,
+            snapshot.filters,
+            parseFinanceRevenueExportSnapshot,
+            true,
+          );
+          result = await options.exports!.enqueue({
+            ...scoped,
+            filters: snapshot.filters,
+            currency: capture.snapshot.currency,
+            snapshot: capture.snapshot,
+            envelope: capture.envelope,
+          });
+        } else {
+          const response = await required(options.dashboardExports).dashboard(
+            current.propertyId,
+            value.filters,
+          );
+          if (!response) return missing(reply);
+          const snapshot = captureFinanceDashboardExport({
+            propertyId: current.propertyId,
+            response,
+            query: value.filters,
+          });
+          const capture = exportCapture(
+            { envelope: reportingEnvelope(response), snapshot },
+            current.propertyId,
+            snapshot.filters,
+            parseFinanceDashboardExportSnapshot,
+            true,
+          );
+          result = await options.exports!.enqueue({
+            ...scoped,
+            filters: snapshot.filters,
+            currency: capture.snapshot.currency,
+            snapshot: capture.snapshot,
+            envelope: capture.envelope,
+          });
         }
-        return exportResponse(reply, result, current.propertyId, value.tab === "profit-loss");
+        return exportResponse(
+          reply,
+          result,
+          current.propertyId,
+          value.tab === "profit-loss" || value.tab === "revenue" || value.tab === "dashboard",
+        );
       }),
     );
 
@@ -440,7 +514,30 @@ function exportResponse(
 type ExportRequest =
   | { commandId: string; idempotencyKey: string; tab: "folios"; filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>> }
   | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> }
-  | { commandId: string; idempotencyKey: string; tab: "profit-loss"; filters: NonNullable<ReturnType<typeof parseFinanceProfitLossQuery>> };
+  | { commandId: string; idempotencyKey: string; tab: "profit-loss"; filters: NonNullable<ReturnType<typeof parseFinanceProfitLossQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "revenue"; filters: NonNullable<ReturnType<typeof parseFinanceRevenueQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "dashboard"; filters: NonNullable<ReturnType<typeof parseFinanceDashboardQuery>> };
+
+function reportingEnvelope(response: FinanceReportingEnvelope): FinanceReportingEnvelope {
+  const {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  } = response;
+  return {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  };
+}
 
 // prettier-ignore
 function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null, allowForeignIncomplete = false) {
@@ -462,7 +559,11 @@ function exportRequest(value: unknown) {
         ? parseFinanceExpenseExportQuery(value.filters)
         : value.tab === "profit-loss"
           ? parseFinanceProfitLossQuery(value.filters)
-          : null;
+          : value.tab === "revenue"
+            ? parseFinanceRevenueQuery(value.filters)
+            : value.tab === "dashboard"
+              ? parseFinanceDashboardQuery(value.filters)
+              : null;
   if (
     !commandId ||
     typeof value.idempotencyKey !== "string" ||
@@ -501,7 +602,19 @@ function expectedExportArtifact(
       typeof filename === "string" &&
       new RegExp(
         `^pms-financials-profit-loss-${propertyId}-[1-9]\\d{3}-\\d{4}-\\d{2}-\\d{2}\\.csv$`,
-      ).test(filename))
+      ).test(filename)) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_REVENUE_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(
+        `^pms-financials-revenue-${propertyId}-\\d{4}-\\d{2}-\\d{2}-\\d{4}-\\d{2}-\\d{2}\\.csv$`,
+      ).test(filename)) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_DASHBOARD_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(`^pms-financials-dashboard-${propertyId}-\\d{4}-\\d{2}-\\d{2}\\.csv$`).test(
+        filename,
+      ))
   );
 }
 
@@ -786,6 +899,10 @@ async function safe(reply: FastifyReply, work: () => Promise<unknown>) {
     if (cause instanceof FinanceExpenseEvidenceError)
       return reply.status(422).send({ code: cause.code });
     if (cause instanceof FinanceProfitLossEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceRevenueEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceDashboardEvidenceError)
       return reply.status(422).send({ code: cause.code });
     return reply.status(500).send({ code: "finance_folio_port_contract_violation" });
   }

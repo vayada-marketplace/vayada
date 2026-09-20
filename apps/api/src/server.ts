@@ -1761,6 +1761,8 @@ const app = buildApp({
         ...financeFolioRuntime.routes,
         expenseExports: financeExpenseRuntime!.routes.read,
         profitLossExports: financeProfitLossRuntime?.routes.read,
+        revenueExports: financeRevenueRuntime?.routes.read,
+        dashboardExports: financeDashboardRuntime?.routes.read,
         ...(platformMediaRuntime
           ? {
               exportDownloads: {
