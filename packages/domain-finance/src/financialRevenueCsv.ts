@@ -1,3 +1,5 @@
+import { getTimezone } from "countries-and-timezones";
+
 import { financeCsvRow } from "./financialCsv.js";
 import {
   parseFinanceRevenueQuery,
@@ -193,7 +195,8 @@ const instant = (value: string) =>
   Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 function zone(value: string): boolean {
   try {
-    return new Intl.DateTimeFormat("en", { timeZone: value }).resolvedOptions().timeZone === value;
+    const timeZone = getTimezone(value);
+    return timeZone?.name === value && timeZone.aliasOf === null;
   } catch {
     return false;
   }

@@ -107,4 +107,13 @@ describe("Revenue CSV handoff", () => {
       }),
     ).toThrow(TypeError);
   });
+
+  it("uses the GET contract's canonical timezone rule, not Intl aliases", () => {
+    const canonical = response();
+    canonical.timeZone = "Asia/Kolkata";
+    expect(() => build(canonical)).not.toThrow();
+    const alias = response();
+    alias.timeZone = "Asia/Calcutta";
+    expect(() => build(alias)).toThrow(TypeError);
+  });
 });
