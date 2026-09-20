@@ -7,6 +7,13 @@ import {
 
 type RoomTypeListResponse = { items: Array<{ roomTypeId: string; name: string }> };
 
+export function verifyFinancialsAccess(propertyId: string, signal?: AbortSignal): Promise<void> {
+  return pmsOperationsClient.get<void>(
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/access`,
+    { ...pmsOperationsRequestOptions, signal },
+  );
+}
+
 export function getFinanceDashboard(
   propertyId: string,
   input: { asOf?: string; signal?: AbortSignal } = {},
