@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFinanceRevenueCsvArtifact } from "./financialRevenueCsv.js";
+import {
+  buildFinanceRevenueCsvArtifact,
+  captureFinanceRevenueExport,
+  parseFinanceRevenueExportSnapshot,
+} from "./financialRevenueCsv.js";
 import { financeReportingMoneyMetric, type FinanceRevenueResponse } from "./financialReporting.js";
 
 const PROPERTY = "11280000-0000-4000-8000-000000000001";
@@ -115,5 +119,56 @@ describe("Revenue CSV handoff", () => {
     const alias = response();
     alias.timeZone = "Asia/Calcutta";
     expect(() => build(alias)).toThrow(TypeError);
+  });
+
+  it("pins only whitelisted read fields and rebuilds identical CSV after JSON storage", () => {
+    const raw = response();
+    (raw.summary.nights as unknown as Record<string, unknown>)["guestSecret"] = "never-store";
+    const snapshot = captureFinanceRevenueExport({
+      propertyId: PROPERTY,
+      response: raw,
+      query: { from: "2026-08-01", to: "2026-08-04" },
+    });
+    const stored = JSON.stringify(snapshot);
+    expect(stored).not.toMatch(/providerSecret|do-not-export|guestSecret|never-store|USD/);
+    const reorder = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(reorder)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .reverse()
+                .map(([key, part]) => [key, reorder(part)]),
+            )
+          : value;
+    const parsed = parseFinanceRevenueExportSnapshot(reorder(JSON.parse(stored)));
+    expect(parsed).not.toBeNull();
+    expect(
+      buildFinanceRevenueCsvArtifact({
+        propertyId: PROPERTY,
+        response: parsed!.manifest[0].response,
+        query: parsed!.filters,
+      }).body,
+    ).toBe(build(raw).body);
+  });
+
+  it("rejects tampered scope and malformed snapshot rows", () => {
+    const snapshot = captureFinanceRevenueExport({
+      propertyId: PROPERTY,
+      response: response(),
+      query: { from: "2026-08-01", to: "2026-08-04" },
+    });
+    const tampered = JSON.parse(JSON.stringify(snapshot));
+    tampered.currency = "USD";
+    expect(parseFinanceRevenueExportSnapshot(tampered)).toBeNull();
+    tampered.currency = "EUR";
+    tampered.manifest[0].response.channels[0].gross.currency = "USD";
+    expect(parseFinanceRevenueExportSnapshot(tampered)).toBeNull();
+    tampered.manifest[0].response.channels[0].gross.currency = "EUR";
+    tampered.filters.to = "2026-07-31";
+    expect(parseFinanceRevenueExportSnapshot(tampered)).toBeNull();
+    const extra = JSON.parse(JSON.stringify(snapshot));
+    extra.manifest[0].response.channels[0].guestSecret = "never-return";
+    expect(JSON.stringify(parseFinanceRevenueExportSnapshot(extra))).not.toContain("never-return");
   });
 });
