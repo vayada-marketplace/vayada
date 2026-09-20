@@ -126,7 +126,15 @@ test("shows reconciled monthly P&L and exports the selected year", async ({ page
   );
 
   await page.goto("/financials");
-  await page.getByRole("tab", { name: "Profit & Loss" }).click();
+  const profitTab = page.getByRole("tablist", { name: "Financial insights" }).getByRole("tab", {
+    name: "Profit & Loss",
+  });
+  await expect(profitTab).toHaveAttribute("aria-controls", "financial-insights-profit_loss-panel");
+  await profitTab.click();
+  await expect(page.locator("#financial-insights-profit_loss-panel")).toHaveAttribute(
+    "aria-labelledby",
+    "financial-insights-profit_loss-tab",
+  );
   await expect(page.getByRole("heading", { name: "Profit & loss", exact: true })).toBeVisible();
   await expect(page.getByRole("row", { name: /Laundry/ })).toContainText("€20.00");
   await expect(page.getByRole("row", { name: /Net profit/ })).toContainText("€80.00");
