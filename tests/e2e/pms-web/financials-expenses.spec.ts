@@ -37,9 +37,44 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   const categories = [category];
   let createdExpense: Record<string, unknown> | null = null;
   let firstManualCommandId = "";
+  let receiptTargetId = "";
+  let receiptUploads = 0;
   let failNextCategoryUpdate = false;
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
+  await page.route("**/api/media/upload-sessions", (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.purpose).toBe("finance.expense.receipt");
+    expect(body.visibility).toBe("private");
+    expect(body.resource).toMatchObject({
+      product: "pms",
+      resourceType: "pms_property",
+      resourceId: PMS_WEB_PROPERTY_ID,
+      propertyId: PMS_WEB_PROPERTY_ID,
+    });
+    expect(body.files[0]).toMatchObject({ contentType: "image/png", filename: "bill.png" });
+    receiptTargetId = body.resource.targetResourceId;
+    receiptUploads += 1;
+    return route.fulfill({
+      json: {
+        uploadSession: { sessionId: "receipt-session" },
+        uploadTargets: [
+          {
+            uploadTargetId: "receipt-target",
+            clientFileId: "file_1",
+            method: "PUT",
+            uploadUrl: "https://uploads.vayada.localhost/receipt-target",
+            headers: {},
+          },
+        ],
+      },
+    });
+  });
+  await page.route("**/api/media/upload-sessions/receipt-session/finalize", (route) =>
+    route.fulfill({
+      json: { mediaObjects: [{ mediaObjectId: "12140000-0000-4000-8000-000000000009" }] },
+    }),
+  );
   await page.route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
       json: {
@@ -151,7 +186,8 @@ test("filters expenses and exports the same selection accessibly", async ({ page
         expect(body.paymentStatus).toBe("paid");
         expect(body.paidOn).toBe("2026-09-17");
         expect(body.notes).toBe("September utility bill");
-        expect(body.receiptMediaId).toBeUndefined();
+        expect(body.receiptMediaId).toBe("12140000-0000-4000-8000-000000000009");
+        expect(body.commandId).toBe(receiptTargetId);
         expect(body.categoryId).toBe(categories[1]?.id);
         if (!firstManualCommandId) {
           firstManualCommandId = body.commandId;
@@ -320,10 +356,16 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await expenseDialog.getByLabel("Amount (EUR)").fill("50");
   await expenseDialog.getByLabel("Paid state").selectOption("paid");
   await expenseDialog.getByLabel("Notes (optional)").fill("September utility bill");
+  await expenseDialog.getByLabel("Receipt image (optional)").setInputFiles({
+    name: "bill.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("receipt image"),
+  });
   await expenseDialog.getByRole("button", { name: "Log expense" }).click();
   await expect(expenseDialog.getByRole("alert")).toContainText("Expense could not be saved");
   await expenseDialog.getByRole("button", { name: "Log expense" }).click();
   await expect(expenseDialog).toHaveCount(0);
+  expect(receiptUploads).toBe(1);
   await expect(page.getByText("Electric Co")).toBeVisible();
   await page.getByRole("button", { name: "Categories" }).click();
   await categoriesDialog.getByLabel("Category").selectOption({ label: "Utilities" });
@@ -343,9 +385,17 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await expenseDialog.getByLabel("Category").selectOption({ label: "Housekeeping" });
   await expenseDialog.getByLabel("Amount (EUR)").fill("25");
   await expenseDialog.getByLabel("Paid state").selectOption("paid");
+  await expenseDialog.getByLabel("Receipt image (optional)").setInputFiles({
+    name: "ignored.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("discard on repeat"),
+  });
   await expenseDialog.getByLabel("Repeat").selectOption("weekly");
+  await expect(expenseDialog.getByLabel("Receipt image (optional)")).toHaveCount(0);
   await expect(expenseDialog.getByLabel("Paid on")).toHaveCount(0);
-  await expect(expenseDialog.getByText(/Paid recurring entries use each occurrence date/)).toBeVisible();
+  await expect(
+    expenseDialog.getByText(/Paid recurring entries use each occurrence date/),
+  ).toBeVisible();
   await expenseDialog.getByRole("button", { name: "Save recurring expense" }).click();
   await expect(expenseDialog).toHaveCount(0);
   await expect(

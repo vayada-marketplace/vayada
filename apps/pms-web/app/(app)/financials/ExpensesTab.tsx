@@ -54,7 +54,9 @@ export function ExpensesTab({
   const [loadingMore, setLoadingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const exportInFlight = useRef(false);
-  const writeAttempt = useRef<{ fingerprint: string; id: string } | undefined>(undefined);
+  const writeAttempt = useRef<
+    { fingerprint: string; id: string; file: File | null; mediaId?: string } | undefined
+  >(undefined);
   const categoryAttempt = useRef<{ fingerprint: string; id: string } | undefined>(undefined);
   const [exportJob, setExportJob] = useState<{ id: string; key: string }>();
   const [exportNotice, setExportNotice] = useState<string>();
@@ -259,7 +261,10 @@ export function ExpensesTab({
           today={range.to}
           categories={state.categories}
           attempt={writeAttempt}
-          onClose={() => setEntryOpen(false)}
+          onClose={() => {
+            writeAttempt.current = undefined;
+            setEntryOpen(false);
+          }}
           onSaved={(recurring) => {
             setEntryOpen(false);
             setEntryNotice(recurring ? "Recurring expense scheduled." : "Expense saved.");
@@ -370,7 +375,12 @@ function ExpensesWorkspace({
             return;
           }
           onDateError("");
-          onApplyFilters({ ...filters, from: dateFrom, to: dateTo, search: search.trim() || undefined });
+          onApplyFilters({
+            ...filters,
+            from: dateFrom,
+            to: dateTo,
+            search: search.trim() || undefined,
+          });
         }}
         aria-label="Expense filters"
       >
@@ -502,7 +512,9 @@ function CategoryDistribution({ data, locale }: { data: FinanceExpensesResponse;
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
       <h3 className="text-base font-semibold text-gray-900">Net amount by category this month</h3>
-      <p className="mt-1 text-xs text-gray-600">Bar widths show magnitude; amounts retain corrections and reversals.</p>
+      <p className="mt-1 text-xs text-gray-600">
+        Bar widths show magnitude; amounts retain corrections and reversals.
+      </p>
       <div
         className="mt-4 flex h-3 overflow-hidden rounded-full bg-gray-100"
         aria-label="Expense category amount distribution by magnitude"

@@ -11,6 +11,7 @@ import { useState, type MutableRefObject } from "react";
 import Modal from "@/components/Modal";
 import { ApiErrorResponse } from "@/services/api/client";
 import { createExpense } from "@/services/finance/financialExpenses";
+import { uploadFinanceExpenseReceipt } from "@/services/platform-media";
 
 const input =
   "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-100";
@@ -29,7 +30,9 @@ export function ExpenseEntryDialog({
   currency: string;
   today: string;
   categories: FinanceExpenseCategory[];
-  attempt: MutableRefObject<{ fingerprint: string; id: string } | undefined>;
+  attempt: MutableRefObject<
+    { fingerprint: string; id: string; file: File | null; mediaId?: string } | undefined
+  >;
   onClose: () => void;
   onSaved: (recurring: boolean) => void;
 }) {
@@ -40,6 +43,7 @@ export function ExpenseEntryDialog({
   const [paymentStatus, setPaymentStatus] = useState<"paid" | "unpaid">("unpaid");
   const [paidOn, setPaidOn] = useState(today);
   const [notes, setNotes] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [cadence, setCadence] = useState<FinanceExpenseCadence | "">("");
   const [endsOn, setEndsOn] = useState("");
   const [error, setError] = useState("");
@@ -59,6 +63,18 @@ export function ExpenseEntryDialog({
       setError("The recurrence end date must be on or after the expense date.");
       return;
     }
+    if (receiptFile && !["image/jpeg", "image/png", "image/webp"].includes(receiptFile.type)) {
+      setError("Choose a JPEG, PNG, or WebP receipt image.");
+      return;
+    }
+    if (receiptFile && receiptFile.size > 20 * 1024 * 1024) {
+      setError("Receipt images must be 20 MB or smaller.");
+      return;
+    }
+    if (cadence && receiptFile) {
+      setError("Receipts can be attached to one-off expenses only.");
+      return;
+    }
     const fields: Omit<FinanceExpenseWrite, "commandId" | "idempotencyKey"> = {
       incurredOn,
       vendor: vendor.trim(),
@@ -74,15 +90,39 @@ export function ExpenseEntryDialog({
     };
     setError("");
     setSaving(true);
+    let uploadingReceipt = false;
     try {
-      const fingerprint = JSON.stringify(fields);
-      if (attempt.current?.fingerprint !== fingerprint)
-        attempt.current = { fingerprint, id: crypto.randomUUID() };
-      await createExpense(propertyId, fields, attempt.current.id);
+      const fingerprint = JSON.stringify([propertyId, fields]);
+      if (attempt.current?.fingerprint !== fingerprint || attempt.current.file !== receiptFile)
+        attempt.current = { fingerprint, id: crypto.randomUUID(), file: receiptFile };
+      const write = attempt.current;
+      if (receiptFile && !write.mediaId) {
+        uploadingReceipt = true;
+        write.mediaId = await uploadFinanceExpenseReceipt({
+          propertyId,
+          expenseId: write.id,
+          file: receiptFile,
+        });
+        uploadingReceipt = false;
+      }
+      if (attempt.current !== write) return;
+      await createExpense(
+        propertyId,
+        {
+          ...fields,
+          ...(write.mediaId ? { receiptMediaId: write.mediaId } : {}),
+        },
+        write.id,
+      );
       attempt.current = undefined;
       onSaved(Boolean(cadence));
     } catch (cause) {
-      setError(writeError(cause));
+      setError(
+        uploadingReceipt &&
+          !(cause instanceof ApiErrorResponse && [401, 403].includes(cause.status))
+          ? "Receipt upload failed. Check the image and try again."
+          : writeError(cause),
+      );
     } finally {
       setSaving(false);
     }
@@ -90,7 +130,9 @@ export function ExpenseEntryDialog({
 
   return (
     <Modal
-      onClose={onClose}
+      onClose={() => {
+        if (!saving) onClose();
+      }}
       maxWidth="lg"
       ariaLabel="Log expense"
       footer={
@@ -98,6 +140,7 @@ export function ExpenseEntryDialog({
           <button
             type="button"
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm"
+            disabled={saving}
             onClick={onClose}
           >
             Cancel
@@ -128,6 +171,7 @@ export function ExpenseEntryDialog({
         <label className={label}>
           Expense date
           <input
+            disabled={saving}
             className={input}
             type="date"
             required
@@ -138,6 +182,7 @@ export function ExpenseEntryDialog({
         <label className={label}>
           Vendor
           <input
+            disabled={saving}
             className={input}
             required
             maxLength={200}
@@ -148,6 +193,7 @@ export function ExpenseEntryDialog({
         <label className={label}>
           Category
           <select
+            disabled={saving}
             className={input}
             required
             value={categoryId}
@@ -166,6 +212,7 @@ export function ExpenseEntryDialog({
         <label className={label}>
           Amount ({currency})
           <input
+            disabled={saving}
             className={input}
             required
             inputMode="decimal"
@@ -177,6 +224,7 @@ export function ExpenseEntryDialog({
         <label className={label}>
           Paid state
           <select
+            disabled={saving}
             className={input}
             value={paymentStatus}
             onChange={(event) => setPaymentStatus(event.target.value as "paid" | "unpaid")}
@@ -189,6 +237,7 @@ export function ExpenseEntryDialog({
           <label className={label}>
             Paid on
             <input
+              disabled={saving}
               className={input}
               type="date"
               required
@@ -200,18 +249,40 @@ export function ExpenseEntryDialog({
         <label className={`${label} sm:col-span-2`}>
           Notes (optional)
           <textarea
+            disabled={saving}
             className={`${input} h-20 py-2`}
             maxLength={2000}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
           />
         </label>
+        {!cadence && (
+          <label className={`${label} sm:col-span-2`}>
+            Receipt image (optional)
+            <input
+              disabled={saving}
+              className={input}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => setReceiptFile(event.target.files?.[0] ?? null)}
+              aria-describedby="receipt-help"
+            />
+            <span id="receipt-help" className="text-xs font-normal text-gray-500">
+              JPEG, PNG, or WebP up to 20 MB.
+            </span>
+          </label>
+        )}
         <label className={label}>
           Repeat
           <select
+            disabled={saving}
             className={input}
             value={cadence}
-            onChange={(event) => setCadence(event.target.value as FinanceExpenseCadence | "")}
+            onChange={(event) => {
+              const nextCadence = event.target.value as FinanceExpenseCadence | "";
+              if (nextCadence) setReceiptFile(null);
+              setCadence(nextCadence);
+            }}
           >
             <option value="">One-off</option>
             <option value="weekly">Weekly</option>
@@ -228,6 +299,7 @@ export function ExpenseEntryDialog({
           <label className={label}>
             Repeat until (optional)
             <input
+              disabled={saving}
               className={input}
               type="date"
               min={incurredOn}
@@ -248,6 +320,7 @@ export function ExpenseEntryDialog({
 
 function writeError(error: unknown) {
   if (error instanceof ApiErrorResponse) {
+    if (error.status === 401) return "Your session expired. Sign in again to save this expense.";
     if (error.status === 403) return "You do not have permission to manage expenses.";
     if (error.data.code === "currency_mismatch")
       return "The amount must use the property's currency. Refresh and try again.";
