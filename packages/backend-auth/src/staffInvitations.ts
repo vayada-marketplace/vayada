@@ -1272,8 +1272,7 @@ export async function enqueueInboxAssignmentReconciliation(
              $4, $5, jsonb_build_object('membershipId', $4::text),
              jsonb_build_object('identityIdempotencyKeyId', $6::text,
                                 'commandId', $7::text, 'reason', $8::text))
-     ON CONFLICT (queue_name, job_key) DO NOTHING
-     RETURNING id`,
+     ON CONFLICT (queue_name, job_key) DO NOTHING`,
     [
       `${inboxAssignmentReconciliationJobType}:${input.idempotencyId}:${input.membershipId}`,
       inboxAssignmentReconciliationJobType,

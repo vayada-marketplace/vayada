@@ -64,12 +64,14 @@ denied "INSERT INTO platform.idempotency_keys VALUES (3, 'booking', 'in_progress
 general "INSERT INTO platform.jobs VALUES (1, 'booking', 'booking.confirm', 'booking', 'booking', 'pending')" >/dev/null
 identity "INSERT INTO platform.jobs VALUES (2, 'identity.webhooks', 'identity.workos_webhook.reconcile', 'identity', 'workos_webhook', 'pending')" >/dev/null
 identity "INSERT INTO platform.jobs VALUES (3, 'identity-provider', 'workos.organization-membership.delete', 'identity', 'organization_membership', 'pending')" >/dev/null
-identity "INSERT INTO platform.jobs VALUES (4, 'pms-inbox', 'pms.inbox.assignment.reconcile', 'pms', 'inbox_assignment', 'pending')" >/dev/null
+identity "INSERT INTO platform.jobs VALUES (4, 'pms-inbox', 'pms.inbox.assignment.reconcile', 'pms', 'inbox_assignment', 'pending') ON CONFLICT DO NOTHING" >/dev/null
 identity "INSERT INTO platform.jobs VALUES (7, 'identity-admin-transfer', 'identity.membership_role.reconcile', 'identity', 'organization_membership', 'pending')" >/dev/null
 denied "INSERT INTO platform.jobs VALUES (5, 'booking', 'booking.confirm', 'booking', 'booking', 'pending')"
 denied "INSERT INTO platform.jobs VALUES (6, 'pms-inbox', 'pms.reservation.cancel', 'pms', 'inbox_assignment', 'pending')"
-[[ "$(identity 'SELECT count(*) FROM platform.jobs')" == 4 ]]
+[[ "$(identity 'SELECT count(*) FROM platform.jobs')" == 3 ]]
 [[ "$(identity "UPDATE platform.jobs SET status='failed' WHERE id=1 RETURNING id")" == "UPDATE 0" ]]
+[[ "$(identity "UPDATE platform.jobs SET status='failed' WHERE id=4 RETURNING id")" == "UPDATE 0" ]]
+[[ "$(general 'SELECT count(*) FROM platform.jobs WHERE id=4')" == 1 ]]
 
 general "INSERT INTO platform.product_audit_events VALUES (1, 'finance')" >/dev/null
 identity "INSERT INTO platform.product_audit_events VALUES (2, 'identity')" >/dev/null

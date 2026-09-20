@@ -23,8 +23,15 @@ CREATE POLICY identity_runtime_scope ON platform.jobs
         AND resource_product = 'identity')
     OR (queue_name = 'identity-admin-transfer' AND job_type = 'identity.membership_role.reconcile'
         AND resource_product = 'identity')
-    OR (queue_name = 'pms-inbox' AND job_type = 'pms.inbox.assignment.reconcile'
-        AND resource_product = 'pms' AND resource_type = 'inbox_assignment')
+  );
+-- Invitation acceptance enqueues a PMS inbox job, but the identity credential
+-- must never claim, update, or read that PMS worker's rows.
+CREATE POLICY identity_runtime_pms_inbox_enqueue ON platform.jobs
+  FOR INSERT TO PUBLIC
+  WITH CHECK (
+    current_user = 'vayada_next_identity_runtime'
+    AND queue_name = 'pms-inbox' AND job_type = 'pms.inbox.assignment.reconcile'
+    AND resource_product = 'pms' AND resource_type = 'inbox_assignment'
   );
 
 ALTER TABLE platform.product_audit_events ENABLE ROW LEVEL SECURITY;
