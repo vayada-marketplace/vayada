@@ -57,7 +57,9 @@ composite foreign keys can reject substituted ownership; it does not store a cre
 terms version, destination or campaign label. The exact activation is required, and
 database uniqueness prevents another link or token from replacing the canonical one.
 
-The storage row alone does not activate or resolve a link. The later authorized command
-must lock and recheck the current agreement lifecycle, generate the token from server
-randomness and recover retries through existing idempotency infrastructure. Compatibility
-aliases remain separate and must point to this canonical identity after ownership proof.
+The storage row alone does not activate or resolve a link. The internal creator command
+locks the activated agreement, rechecks current creator ownership, and returns the same
+identity on retries. New issuance stays blocked until a trusted lifecycle and booking-
+destination readiness adapter is connected; existing links remain readable by their
+authorized creator. The command uses server randomness and existing idempotency storage.
+Compatibility aliases remain separate and need ownership proof before import.
