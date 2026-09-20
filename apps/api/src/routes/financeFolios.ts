@@ -9,7 +9,9 @@ import {
   FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
+  FINANCE_PROFIT_LOSS_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  captureFinanceProfitLossExport,
   parseFinanceExpenseExportQuery,
   parseFinanceExpenseExportSnapshot,
   parseFinanceFolioExportFilters,
@@ -17,6 +19,8 @@ import {
   parseFinanceFolioQuery,
   parseFinanceFolioRevisionCommand,
   parseFinanceFolioWrite,
+  parseFinanceProfitLossExportSnapshot,
+  parseFinanceProfitLossQuery,
   type FinanceCommandAudit,
   type FinanceFolioDetailResponse,
   type FinanceFolioListResponse,
@@ -34,6 +38,10 @@ import {
   FinanceExpenseEvidenceError,
   type FinanceExpenseReadModel,
 } from "../domains/financeExpenseReadModel.js";
+import {
+  FinanceProfitLossEvidenceError,
+  type FinanceProfitLossReadModel,
+} from "../domains/financeProfitLossReadModel.js";
 import {
   type FinanceFolioCommandResult,
   type CreateFinanceFolioCommand,
@@ -60,6 +68,7 @@ export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
   repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
   expenseExports?: Pick<FinanceExpenseReadModel, "captureExport">;
+  profitLossExports?: Pick<FinanceProfitLossReadModel, "profitLoss">;
   exports?: {
     enqueue(command: FinanceExportCommand): Promise<FinanceExportEnqueueResult>;
   };
@@ -156,7 +165,7 @@ export async function registerFinanceFolioRoutes(
             snapshot: capture.snapshot,
             envelope: capture.envelope,
           });
-        } else {
+        } else if (value.tab === "expenses") {
           const raw = await required(options.expenseExports).captureExport(
             current.propertyId,
             value.filters,
@@ -175,8 +184,56 @@ export async function registerFinanceFolioRoutes(
             snapshot: capture.snapshot,
             envelope: capture.envelope,
           });
+        } else {
+          const raw = await required(options.profitLossExports).profitLoss(
+            current.propertyId,
+            value.filters,
+          );
+          if (!raw) return missing(reply);
+          const { response, categoryRows } = raw;
+          const {
+            contractVersion,
+            propertyId,
+            currency,
+            timeZone,
+            generatedAt,
+            sourceFreshness,
+            incompleteEvidence,
+          } = response;
+          const snapshot = captureFinanceProfitLossExport({
+            propertyId: current.propertyId,
+            response,
+            query: value.filters,
+            asOf: profitLossAsOf(generatedAt, timeZone),
+            categoryRows,
+          });
+          const capture = exportCapture(
+            {
+              envelope: {
+                contractVersion,
+                propertyId,
+                currency,
+                timeZone,
+                generatedAt,
+                sourceFreshness,
+                incompleteEvidence,
+              },
+              snapshot,
+            },
+            current.propertyId,
+            value.filters,
+            parseFinanceProfitLossExportSnapshot,
+            true,
+          );
+          result = await options.exports!.enqueue({
+            ...scoped,
+            filters: value.filters,
+            currency: capture.snapshot.currency,
+            snapshot: capture.snapshot,
+            envelope: capture.envelope,
+          });
         }
-        return exportResponse(reply, result, current.propertyId);
+        return exportResponse(reply, result, current.propertyId, value.tab === "profit-loss");
       }),
     );
 
@@ -350,6 +407,7 @@ function exportResponse(
   reply: FastifyReply,
   value: FinanceExportEnqueueResult,
   propertyId: string,
+  allowForeignIncomplete = false,
 ) {
   if (!record(value)) return commandViolation();
   if (value.status === "conflict")
@@ -364,8 +422,10 @@ function exportResponse(
     !exact(value, ["status", "exportId", "envelope"]) ||
     !parsed.success ||
     parsed.data.propertyId !== propertyId ||
-    parsed.data.incompleteEvidence.some(
-      (item) => item.amount && item.amount.currency !== parsed.data.currency,
+    !validIncompleteCurrency(
+      parsed.data.incompleteEvidence,
+      parsed.data.currency,
+      allowForeignIncomplete,
     )
   )
     return commandViolation();
@@ -379,14 +439,15 @@ function exportResponse(
 // prettier-ignore
 type ExportRequest =
   | { commandId: string; idempotencyKey: string; tab: "folios"; filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>> }
-  | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> };
+  | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "profit-loss"; filters: NonNullable<ReturnType<typeof parseFinanceProfitLossQuery>> };
 
 // prettier-ignore
-function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null) {
+function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null, allowForeignIncomplete = false) {
   if (!record(value) || !exact(value, ["envelope", "snapshot"])) return commandViolation();
   const parsedEnvelope = envelope.safeParse(value.envelope);
   const snapshot = parse(value.snapshot);
-  if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || parsedEnvelope.data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== parsedEnvelope.data.currency) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
+  if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || !validIncompleteCurrency(parsedEnvelope.data.incompleteEvidence, parsedEnvelope.data.currency, allowForeignIncomplete) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
   return { envelope: parsedEnvelope.data, snapshot };
 }
 
@@ -399,7 +460,9 @@ function exportRequest(value: unknown) {
       ? parseFinanceFolioExportFilters(value.filters)
       : value.tab === "expenses"
         ? parseFinanceExpenseExportQuery(value.filters)
-        : null;
+        : value.tab === "profit-loss"
+          ? parseFinanceProfitLossQuery(value.filters)
+          : null;
   if (
     !commandId ||
     typeof value.idempotencyKey !== "string" ||
@@ -424,14 +487,31 @@ function expectedExportArtifact(
   propertyId: string,
   exportId: string,
 ) {
-  return [
-    [FINANCE_FOLIO_CSV_VERSION, `pms-financials-folios-${propertyId}.csv`],
-    [FINANCE_EXPENSE_CSV_VERSION, `pms-financials-expenses-${propertyId}.csv`],
-  ].some(
-    ([version, expectedFilename]) =>
-      storageKey === `private/finance/financials-exports/${exportId}/${version}.csv` &&
-      filename === expectedFilename,
+  return (
+    [
+      [FINANCE_FOLIO_CSV_VERSION, `pms-financials-folios-${propertyId}.csv`],
+      [FINANCE_EXPENSE_CSV_VERSION, `pms-financials-expenses-${propertyId}.csv`],
+    ].some(
+      ([version, expectedFilename]) =>
+        storageKey === `private/finance/financials-exports/${exportId}/${version}.csv` &&
+        filename === expectedFilename,
+    ) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_PROFIT_LOSS_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(
+        `^pms-financials-profit-loss-${propertyId}-[1-9]\\d{3}-\\d{4}-\\d{2}-\\d{2}\\.csv$`,
+      ).test(filename))
   );
+}
+
+function profitLossAsOf(instant: string, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts["year"]}-${parts["month"]}-${parts["day"]}`;
 }
 
 function required<T>(value: T | undefined): T {
@@ -596,7 +676,20 @@ const validInterval = (value: { serviceFrom: string; serviceTo: string }) =>
   value.serviceTo >= value.serviceFrom;
 const folioSummary = z.object(summaryShape).strict().refine(validInterval);
 // prettier-ignore
-const envelope = z.object({ contractVersion: z.literal(PMS_FINANCIALS_CONTRACT_VERSION), propertyId: id, currency, timeZone: z.string().refine(canonicalFinanceFolioZone), generatedAt: instant, sourceFreshness: z.record(z.string(), z.string()), incompleteEvidence: z.array(z.object({ code: z.string(), count: z.number().int().nonnegative(), amount: money.optional() }).strict()) }).strict();
+const envelope = z.object({ contractVersion: z.literal(PMS_FINANCIALS_CONTRACT_VERSION), propertyId: id, currency, timeZone: z.string().refine(canonicalFinanceFolioZone), generatedAt: instant, sourceFreshness: z.record(z.string(), z.string()), incompleteEvidence: z.array(z.union([z.object({ code: z.string(), count: z.number().int().nonnegative(), amount: money }).strict(), z.object({ code: z.string(), count: z.number().int().nonnegative(), currency }).strict(), z.object({ code: z.string(), count: z.number().int().nonnegative() }).strict()])) }).strict();
+function validIncompleteCurrency(
+  evidence: z.infer<typeof envelope>["incompleteEvidence"],
+  propertyCurrency: string,
+  allowForeign: boolean,
+) {
+  return (
+    allowForeign ||
+    evidence.every(
+      (item) =>
+        !("currency" in item) && (!("amount" in item) || item.amount.currency === propertyCurrency),
+    )
+  );
+}
 // prettier-ignore
 const line = z.object({ lineId: id, position: z.number().int().positive(), kind: z.enum(["room", "addon", "fee", "tax", "adjustment"]), description: z.string(), quantity: decimal, unitAmount: money, total: money, serviceOn: date, source: z.object({ type: z.string(), id: z.string(), revision: z.number().int().positive() }).strict() }).strict();
 // prettier-ignore
@@ -628,9 +721,7 @@ function listResponse(
         parsed.data.currency,
         query,
       )) ||
-    parsed.data.incompleteEvidence.some(
-      (item) => item.amount && item.amount.currency !== parsed.data.currency,
-    ) ||
+    !validIncompleteCurrency(parsed.data.incompleteEvidence, parsed.data.currency, false) ||
     parsed.data.page.items.some((item) => item.total.currency !== parsed.data.currency)
   )
     throw new Error("finance_folio_port_contract_violation");
@@ -650,7 +741,7 @@ function detailResponse(value: FinanceFolioDetailResponse, propertyId: string) {
     data.propertyId !== propertyId ||
     data.item.propertyId !== propertyId ||
     data.item.currency !== data.currency ||
-    data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== data.currency) ||
+    !validIncompleteCurrency(data.incompleteEvidence, data.currency, false) ||
     currencies.some((value) => value !== data.currency)
   )
     throw new Error("finance_folio_port_contract_violation");
@@ -693,6 +784,8 @@ async function safe(reply: FastifyReply, work: () => Promise<unknown>) {
     if (cause instanceof FinanceFolioEvidenceError)
       return reply.status(422).send({ code: cause.code });
     if (cause instanceof FinanceExpenseEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceProfitLossEvidenceError)
       return reply.status(422).send({ code: cause.code });
     return reply.status(500).send({ code: "finance_folio_port_contract_violation" });
   }

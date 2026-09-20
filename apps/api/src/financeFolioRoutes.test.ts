@@ -5,7 +5,7 @@ import type {
   RequestContext,
 } from "@vayada/backend-auth";
 // prettier-ignore
-import type { FinanceExpenseExportSnapshot, FinanceFolioDetailResponse, FinanceFolioExportSnapshot, FinanceFolioListResponse } from "@vayada/domain-finance";
+import { captureFinanceProfitLossExport, financeReportingMoneyMetric, type FinanceExpenseExportSnapshot, type FinanceFolioDetailResponse, type FinanceFolioExportSnapshot, type FinanceFolioListResponse, type FinanceProfitLossResponse } from "@vayada/domain-finance";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
@@ -16,6 +16,7 @@ import {
   FinanceFolioEvidenceError,
 } from "./domains/financeFolioReadRepository.js";
 import { FinanceExpenseEvidenceError } from "./domains/financeExpenseReadModel.js";
+import { FinanceProfitLossEvidenceError } from "./domains/financeProfitLossReadModel.js";
 import type { FinanceFolioRoutesOptions } from "./routes/financeFolios.js";
 
 const propertyId = "11320000-0000-4000-8000-000000000001";
@@ -71,6 +72,64 @@ const expenseCapture = {
 };
 // prettier-ignore
 const expenseBody = { commandId: bookingId, idempotencyKey: "expense-export", tab: "expenses", format: "csv", filters: expenseSnapshot.filters };
+const zero = () => ({ amount: "0.0000", currency: "EUR" });
+const profitLossResponse: FinanceProfitLossResponse = {
+  ...base,
+  sourceFreshness: { financeProfitLoss: now },
+  incompleteEvidence: [
+    { code: "expense_currency_mismatch", count: 1, amount: { amount: "99.0000", currency: "USD" } },
+    { code: "room_currency_unknown", count: 1, currency: "USD" },
+  ],
+  summary: {
+    revenueYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    expensesYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    netProfitYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+  },
+  months: Array.from({ length: 8 }, (_, index) => ({
+    month: `2026-${String(index + 1).padStart(2, "0")}`,
+    roomRevenue: zero(),
+    upsellRevenue: zero(),
+    revenue: zero(),
+    expenses: zero(),
+    netProfit: zero(),
+    expenseCategories: Object.fromEntries(
+      ["ota_commission", "staff", "utilities", "maintenance_supplies", "marketing_platform"].map(
+        (key) => [key, zero()],
+      ),
+    ) as FinanceProfitLossResponse["months"][number]["expenseCategories"],
+  })),
+};
+const profitLossEnvelope = (({
+  contractVersion,
+  propertyId,
+  currency,
+  timeZone,
+  generatedAt,
+  sourceFreshness,
+  incompleteEvidence,
+}) => ({
+  contractVersion,
+  propertyId,
+  currency,
+  timeZone,
+  generatedAt,
+  sourceFreshness,
+  incompleteEvidence,
+}))(profitLossResponse);
+const profitLossSnapshot = captureFinanceProfitLossExport({
+  propertyId,
+  response: profitLossResponse,
+  query: { year: 2026 },
+  asOf: "2026-08-21",
+  categoryRows: [],
+});
+const profitLossBody = {
+  commandId: paymentId,
+  idempotencyKey: "profit-loss-export",
+  tab: "profit-loss",
+  format: "csv",
+  filters: { year: 2026 },
+};
 
 type Ports = FinanceFolioRoutesOptions["repository"] & {
   list: ReturnType<typeof vi.fn>;
@@ -92,6 +151,9 @@ type ExportDownloads = NonNullable<FinanceFolioRoutesOptions["exportDownloads"]>
 };
 type ExpenseExports = NonNullable<FinanceFolioRoutesOptions["expenseExports"]> & {
   captureExport: ReturnType<typeof vi.fn>;
+};
+type ProfitLossExports = NonNullable<FinanceFolioRoutesOptions["profitLossExports"]> & {
+  profitLoss: ReturnType<typeof vi.fn>;
 };
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
@@ -119,9 +181,14 @@ function exportJobs(): ExportJobs { return { enqueue: vi.fn(async () => ({ statu
 function exportDownloads(): ExportDownloads { return { read:{find:vi.fn(async()=>({state:"ready",expiresAt:exportExpiresAt,artifact:{mediaId:exportId,bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/pms-financials-folios.v1.csv`,visibility:"private",lifecycleStatus:"active",filename:`pms-financials-folios-${propertyId}.csv`,contentType:"text/csv; charset=utf-8",sizeBytes:42}}))},signer:{signPrivateDownload:vi.fn(async()=>"https://signed.example/folio.csv")},serving:{bucketName:"test-private",cdnBaseUrl:"https://cdn.example",cdnOriginHost:"origin.example",publicPathPrefix:"media",publicCacheControl:"public, max-age=31536000, immutable",privateDownloadTtlSeconds:300,privateDownloadMaxTtlSeconds:900},now:vi.fn(()=>new Date(now))} as ExportDownloads; }
 // prettier-ignore
 function expenseExports(): ExpenseExports { return { captureExport: vi.fn(async () => expenseCapture) } as ExpenseExports; }
+function profitLossExports(): ProfitLossExports {
+  return {
+    profitLoss: vi.fn(async () => ({ response: profitLossResponse, categoryRows: [] })),
+  } as ProfitLossExports;
+}
 
 // prettier-ignore
-async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads, expenses?: ExpenseExports) {
+async function app(repository: Ports, auth: RequestContext | null = context(), write?: Commands, exports?: ExportJobs, exportDownloads?: ExportDownloads, expenses?: ExpenseExports, profitLoss?: ProfitLossExports) {
   const instance = buildApp({
     logger: false,
     browserAllowedOrigins: ["https://pms.example"],
@@ -132,6 +199,7 @@ async function app(repository: Ports, auth: RequestContext | null = context(), w
       ...(exports ? { exports } : {}),
       ...(exportDownloads ? { exportDownloads } : {}),
       ...(expenses ? { expenseExports: expenses } : {}),
+      ...(profitLoss ? { profitLossExports: profitLoss } : {}),
     },
   });
   instance.decorateRequest("authContext", null);
@@ -373,6 +441,107 @@ describe("Financials folio export route", () => {
     expect(malformed).toMatchObject({ statusCode: 400 });
     expect(JSON.stringify(malformed.json())).not.toContain("private");
     expect(expenses.captureExport).toHaveBeenCalledTimes(2);
+  });
+
+  it("captures a property-scoped P&L read and enqueues its pinned CSV snapshot", async () => {
+    const repository = ports(),
+      jobs = exportJobs(),
+      profitLoss = profitLossExports();
+    jobs.enqueue.mockResolvedValue({ status: "created", exportId, envelope: profitLossEnvelope });
+    const instance = await app(
+      repository,
+      context(),
+      undefined,
+      jobs,
+      undefined,
+      undefined,
+      profitLoss,
+    );
+    const response = await instance.inject({
+      method: "POST",
+      url: exportRoot,
+      payload: profitLossBody,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({
+      ...profitLossEnvelope,
+      item: { resourceId: exportId, state: "pending" },
+      outcome: "created",
+    });
+    expect(profitLoss.profitLoss).toHaveBeenCalledWith(propertyId, { year: 2026 });
+    expect(repository.captureReadyExport).not.toHaveBeenCalled();
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyId,
+        currency: "EUR",
+        filters: { year: 2026 },
+        snapshot: profitLossSnapshot,
+        envelope: profitLossEnvelope,
+      }),
+    );
+    expect(
+      await instance.inject({
+        method: "POST",
+        url: exportRoot,
+        payload: { ...profitLossBody, filters: { year: 2026, extra: true } },
+      }),
+    ).toMatchObject({ statusCode: 400 });
+    expect(profitLoss.profitLoss).toHaveBeenCalledTimes(1);
+    profitLoss.profitLoss.mockResolvedValueOnce({
+      response: { ...profitLossResponse, propertyId: otherPropertyId },
+      categoryRows: [],
+    });
+    expect(
+      await instance.inject({ method: "POST", url: exportRoot, payload: profitLossBody }),
+    ).toMatchObject({ statusCode: 500 });
+    expect(jobs.enqueue).toHaveBeenCalledTimes(1);
+    profitLoss.profitLoss.mockRejectedValueOnce(new FinanceProfitLossEvidenceError("private"));
+    const unavailable = await instance.inject({
+      method: "POST",
+      url: exportRoot,
+      payload: profitLossBody,
+    });
+    expect(unavailable).toMatchObject({ statusCode: 422 });
+    expect(JSON.stringify(unavailable.json())).not.toContain("private");
+  });
+
+  it("accepts only the scoped private P&L artifact on status lookup", async () => {
+    const access = exportDownloads();
+    access.read.find.mockResolvedValue({
+      state: "ready",
+      expiresAt: exportExpiresAt,
+      artifact: {
+        mediaId: exportId,
+        bucketName: "test-private",
+        storageKey: `private/finance/financials-exports/${exportId}/pms-financials-profit-loss.v1.csv`,
+        visibility: "private",
+        lifecycleStatus: "active",
+        filename: `pms-financials-profit-loss-${propertyId}-2026-2026-08-21.csv`,
+        contentType: "text/csv; charset=utf-8",
+        sizeBytes: 42,
+      },
+    });
+    const instance = await app(ports(), context(), undefined, undefined, access);
+    expect(
+      (await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` })).statusCode,
+    ).toBe(200);
+    access.read.find.mockResolvedValueOnce({
+      state: "ready",
+      expiresAt: exportExpiresAt,
+      artifact: {
+        mediaId: exportId,
+        bucketName: "test-private",
+        storageKey: `private/finance/financials-exports/${exportId}/pms-financials-profit-loss.v1.csv`,
+        visibility: "private",
+        lifecycleStatus: "active",
+        filename: `pms-financials-profit-loss-${otherPropertyId}-2026-2026-08-21.csv`,
+        contentType: "text/csv; charset=utf-8",
+        sizeBytes: 42,
+      },
+    });
+    expect(
+      (await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` })).statusCode,
+    ).toBe(500);
   });
 
   it("fails closed before snapshot capture for malformed requests or unauthorized callers", async () => {
