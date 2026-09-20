@@ -99,21 +99,22 @@ outside this credential proposal until their own route inventories are reviewed.
    `AUTH_DATABASE_URL` role unchanged. Do not reuse the identity role as the
    pricing credential.
 2. Derive exact schema usage, SELECT, and intentional-write rights from the
-   inventory, but **do not grant UPDATE merely to satisfy row locking**. That
-   would permit direct mutation of every locked authorization, financial,
-   public, and pricing-evidence table. Even column-scoped UPDATE is a write
-   grant; table ACLs alone cannot confine writes to the current property. No
+   inventory, but **do not grant UPDATE merely to satisfy row locking** without
+   a separately proven database-enforced write denial. The bare grant would
+   permit direct mutation of every locked authorization, financial, public,
+   and pricing-evidence table. Even column-scoped UPDATE is a write grant;
+   table ACLs alone cannot confine writes to the current property. No
    owner membership, BYPASSRLS, CREATE, DELETE, broad schema DML, or arbitrary
    `SECURITY DEFINER` execution. Encode the final allowlist and its inverse in
    the platform runtime preflight before provisioning.
 3. Resolve **all** row-lock-to-write escalations before any grant. The current
    `identity.organizations FOR UPDATE` additionally serializes FK-backed
-   entitlement inserts. An audited, narrowly scoped lock-only database
-   capability might avoid direct UPDATE grants, but it would require separate
-   threat review, explicit preflight exception, and proof that it cannot
-   mutate protected rows, return privileged data, or accept forgeable client
-   identity claims. The intentional authority-head and quote writes also need
-   property-scope enforcement or an explicitly reviewed risk decision. A
+   entitlement inserts. A role-specific RLS write denial or an audited
+   lock-only definer capability might close this gap, but either requires
+   separate threat review, exact preflight assertions, and proof that it
+   cannot mutate protected rows, return privileged data, or accept forgeable
+   client identity claims. The intentional authority-head and quote writes
+   also need property-scope enforcement or an explicitly reviewed risk decision. A
    shared advisory-lock protocol would require all competing writers to
    participate and is not presently a drop-in substitute. Until these
    mechanisms are reviewed, this design is **no-go**.
@@ -127,6 +128,27 @@ This boundary is distinct from VAY-2038's identity-runtime proposal (app PR
 #2520), which isolates staff-login identity writes. That proposal does not
 authorize the general product role to lock booking pricing rows; the two
 designs need coordinated review of shared `identity.*` access and secrets.
+
+### Local lock-only RLS feasibility, not rollout approval
+
+A disposable PostgreSQL 16/17 experiment granted a non-owner, `NOBYPASSRLS`
+test role `SELECT` and `UPDATE` on one table. A permissive visibility policy
+preserved existing-role access; a **restrictive** `FOR UPDATE` policy for the
+test role used `USING (true) WITH CHECK (false)`. Both `SELECT ... FOR SHARE`
+and `FOR UPDATE` returned the row, while direct `UPDATE` failed and the row
+remained unchanged; a separate general role could still update it. Adding a
+second permissive UPDATE policy did not bypass the restrictive denial. This
+matches PostgreSQL's [policy-command and policy-composition rules](https://www.postgresql.org/docs/current/sql-createpolicy.html).
+
+That proves only one-table semantics. It does **not** prove the full pricing
+queries, all joined lock targets, existing role behavior after enabling RLS
+across domains, permission inheritance/definer bypass, tenant visibility,
+authority-head/quote write scope, or future policy compatibility. Any RLS
+implementation must enumerate and assert every applicable policy and role
+attribute on PostgreSQL 16/17, test the real route SQL and cross-property
+negative cases, audit `BEFORE UPDATE` triggers for side effects, and preserve
+VAY-2038's separate identity role boundary. No RLS migration, grant, or
+credential mapping is approved by this experiment.
 
 ## Required proof before deployment
 
