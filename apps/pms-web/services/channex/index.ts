@@ -114,7 +114,9 @@ async function endpoint(action: string, suffix = "channex") {
   return `/api/pms/properties/${encodeURIComponent(propertyId)}/${suffix}`;
 }
 
-async function command(operationType: Exclude<ChannexOperationType, "update_markups" | "update_inventory_rules">) {
+async function command(
+  operationType: Exclude<ChannexOperationType, "update_markups" | "update_inventory_rules">,
+) {
   return pmsOperationsClient.post<ChannexOperation>(
     await endpoint(`starting Channex ${operationType}`, "channex/commands"),
     identity(operationType),
@@ -147,7 +149,31 @@ export interface ChannexAlert {
   }[];
 }
 
+export interface ChannexAlertDiagnostics {
+  alertId: string;
+  recoveryRound: number;
+  observedAt: string;
+  newerOccurrence: boolean;
+  linkedJobCount: number;
+  latestReceipt: { receiptId: string; occurredAt: string; receivedAt: string } | null;
+  recovery: {
+    jobId: string;
+    operation: "booking_import" | "sync_bookings" | "sync_ari";
+    status: string;
+    updatedAt: string;
+    attemptsMade: number;
+    failure: string | null;
+  }[];
+}
+
 export const channexService = {
+  async getAlertDiagnostics(propertyId: string, alertId: string) {
+    return pmsOperationsClient.get<ChannexAlertDiagnostics>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/channex/alerts/${encodeURIComponent(alertId)}/diagnostics`,
+      pmsOperationsRequestOptions,
+    );
+  },
+
   async updateInventoryRules(
     rules: ChannexInventoryRule[],
     expectedOperationId: string | null,
