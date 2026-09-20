@@ -219,7 +219,9 @@ export function parseFinanceProfitLossExportSnapshot(
     filters,
     snapshotAt: value.snapshotAt,
     asOf: value.asOf,
-    manifest: [{ response: selection.response, categoryRows: [...selection.categoryRows] }],
+    manifest: [
+      { response: copyResponse(selection.response), categoryRows: [...selection.categoryRows] },
+    ],
   };
 }
 
@@ -290,7 +292,9 @@ function copyResponse(response: FinanceProfitLossResponse): FinanceProfitLossRes
       expenses: money(month.expenses),
       netProfit: money(month.netProfit),
       expenseCategories: Object.fromEntries(
-        Object.entries(month.expenseCategories).map(([key, value]) => [key, money(value)]),
+        Object.entries(month.expenseCategories)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => [key, money(value)]),
       ) as FinanceProfitLossResponse["months"][number]["expenseCategories"],
     })),
   };

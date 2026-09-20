@@ -123,6 +123,19 @@ describe("profit and loss CSV handoff", () => {
     });
     const parsed = parseFinanceProfitLossExportSnapshot(JSON.parse(JSON.stringify(snapshot)));
     expect(parsed).toEqual(snapshot);
+    const jsonbOrder = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(jsonbOrder)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .reverse()
+                .map(([key, part]) => [key, jsonbOrder(part)]),
+            )
+          : value;
+    expect(JSON.stringify(parseFinanceProfitLossExportSnapshot(jsonbOrder(snapshot)))).toBe(
+      JSON.stringify(snapshot),
+    );
     read.months[0]!.roomRevenue.amount = "999.0000";
     expect(parsed!.manifest[0].response.sourceFreshness).toEqual({});
     expect(JSON.stringify(parsed)).not.toContain("secret-source-id");
