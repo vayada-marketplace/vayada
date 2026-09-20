@@ -252,6 +252,41 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
 ) => {
   const emailSendCooldowns = new Map<string, number>();
 
+  // WorkOS-hosted invitations and password recovery still return here. Exchange
+  // the one-time code, then use Vayada's first-party login for PMS.
+  app.get("/workos/callback", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store").header("Referrer-Policy", "no-referrer");
+    const pmsOrigin = options.surfacePolicies?.["pms-web"]?.publicOrigin;
+    if (!pmsOrigin || !options.allowedOrigins.includes(pmsOrigin)) {
+      return reply.code(503).send({
+        error: "invitation_return_unavailable",
+        message: "Sign-in is temporarily unavailable. Please try again later.",
+      });
+    }
+    const query = request.query as { code?: unknown; error?: unknown };
+    const returnUrl = new URL("/login", pmsOrigin);
+    const code = typeof query.code === "string" ? query.code : "";
+    if (!code || query.error) {
+      returnUrl.searchParams.set("workos_return", "failed");
+    } else {
+      try {
+        await authenticateGoogleForSurface(options, getSurfacePolicy("pms-web", options), {
+          code,
+          ipAddress: request.ip,
+          userAgent: request.headers["user-agent"],
+        });
+        returnUrl.searchParams.set("workos_return", "complete");
+      } catch (error) {
+        request.log.warn(
+          { workos: workosErrorDiagnostics(error) },
+          "WorkOS invitation code exchange failed",
+        );
+        returnUrl.searchParams.set("workos_return", "failed");
+      }
+    }
+    return reply.redirect(returnUrl.toString());
+  });
+
   if (options.adminTransfer) {
     const surfacePolicy = getSurfacePolicy("pms-web", options);
     if (!surfacePolicy.firstPartySession || !surfacePolicy.publicOrigin)
@@ -685,12 +720,10 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
 
     if (parsed.organizationId && resolution.session.organizationId !== parsed.organizationId) {
-      return reply
-        .code(403)
-        .send({
-          state: "auth_failed",
-          message: "Selected workspace is not available on this surface.",
-        });
+      return reply.code(403).send({
+        state: "auth_failed",
+        message: "Selected workspace is not available on this surface.",
+      });
     }
 
     await options.productAuditSink.record({

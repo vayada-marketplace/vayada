@@ -129,6 +129,15 @@ name, inviter, role, overrides, property scope, provider ID/expiry, state,
 configuration revision, idempotency key, and accepted user/membership IDs—never
 provider tokens or acceptance URLs.
 
+WorkOS-hosted invitation and password-reset journeys return to the WorkOS
+application callback at `/auth/workos/callback`. The API exchanges the one-time
+authorization code to finish the provider flow, then redirects to the configured
+PMS login origin without forwarding the code or creating a Vayada browser
+session. The invitee signs in through the first-party PMS form using the invited
+email; Vayada grants access only after the `invitation.accepted` webhook has
+activated the local membership. A provider exchange failure returns to PMS
+login with a retry message, not an authenticated session.
+
 WorkOS does not deduplicate invitation writes by `Idempotency-Key`. Delivery is
 therefore at-most-once: claim only `status = pending AND delivery_state = ready`,
 commit `ready -> sending` before the provider call, disable SDK retries, and
