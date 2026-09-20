@@ -7,7 +7,7 @@ const detailsSchema = z
     listing_id: z.string().min(1),
     checkin_date: z.iso.date(),
     checkout_date: z.iso.date().optional(),
-    nights: z.number().int().positive(),
+    nights: z.number().int().positive().max(3650),
     currency: z.string().regex(/^[A-Z]{3}$/),
     adults: z.number().int().positive().optional(),
     number_of_adults: z.number().int().positive().optional(),

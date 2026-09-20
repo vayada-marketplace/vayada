@@ -66,6 +66,32 @@ describe("retained Airbnb inquiry evidence", () => {
         airbnbInquiryEvidence({ ...input, bookingDetails: { ...details, ...overrides } }),
       ).toBeNull();
   });
+  it("rejects an unsupported stay even when explicit checkout matches", () => {
+    const departure = new Date(`${details.checkin_date}T00:00:00Z`);
+    departure.setUTCDate(departure.getUTCDate() + 5000);
+    expect(
+      airbnbInquiryEvidence({
+        ...input,
+        bookingDetails: {
+          ...details,
+          nights: 5000,
+          checkout_date: departure.toISOString().slice(0, 10),
+        },
+      }),
+    ).toBeNull();
+    expect(
+      airbnbInquiryEvidence({ ...input, bookingDetails: { ...details, nights: 3650 } }),
+    ).not.toBeNull();
+  });
+  it("does not turn a synthetic non-UUID property ID into provider decision evidence", () => {
+    expect(
+      airbnbInquiryEvidence({
+        ...input,
+        providerPropertyId: "chx-vay-1372",
+        bookingDetails: { ...details, property_id: "chx-vay-1372" },
+      }),
+    ).toBeNull();
+  });
   it("retains every provider context change in the review digest", () => {
     expect(airbnbInquiryEvidence(input)?.contextDigest).not.toBe(
       airbnbInquiryEvidence({ ...input, bookingDetails: { ...details, number_of_adults: 3 } })
