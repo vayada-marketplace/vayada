@@ -8,7 +8,7 @@ import {
   PMS_WEB_PROPERTY_ID,
 } from "../support/pmsWebMocks";
 
-const root = `/finance/properties/${PMS_WEB_PROPERTY_ID}/financials`;
+const root = `/api/finance/properties/${PMS_WEB_PROPERTY_ID}/financials`;
 const categoryId = "12140000-0000-4000-8000-0000000000aa";
 const money = (amount: string) => ({ amount, currency: "EUR" });
 const metric = (amount: string) => ({
@@ -134,6 +134,9 @@ test("shows reconciled monthly P&L and exports the selected year", async ({ page
 
   await page.getByRole("spinbutton", { name: "Year" }).fill("2025");
   await page.getByRole("button", { name: "Apply" }).click();
+  await expect(
+    page.getByText("Full-year performance by month and expense category."),
+  ).toBeVisible();
   await expect(page.getByRole("table", { name: /Monthly profit and loss for 2025/ })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export CSV" }).click();

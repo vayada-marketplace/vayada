@@ -34,6 +34,18 @@ describe("financial report reads", () => {
     );
   });
 
+  it("uses the scoped Profit and Loss route for the selected year", async () => {
+    get.mockResolvedValue({});
+    const { getFinanceProfitLoss } = await import("./financialReports");
+
+    await getFinanceProfitLoss("property/id", { year: 2026 });
+
+    expect(get).toHaveBeenCalledWith(
+      "/api/finance/properties/property%2Fid/financials/profit-loss?year=2026",
+      { cache: "no-store", signal: undefined },
+    );
+  });
+
   it("looks up room type names without blocking Revenue reporting", async () => {
     get.mockResolvedValue({ items: [] });
     const { getRoomTypeNames } = await import("./financialReports");

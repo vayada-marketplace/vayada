@@ -109,7 +109,8 @@ export function ProfitLossTab({
         <div>
           <h2 className="text-base font-semibold text-gray-900">Profit & loss</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Year-to-date performance by month and expense category.
+            {year === currentYear ? "Year-to-date" : "Full-year"} performance by month and expense
+            category.
           </p>
         </div>
         <div className="flex items-end gap-2">
@@ -334,7 +335,13 @@ function SummaryCard({
       </p>
       <p className="mt-1 text-xs text-gray-500">
         {formatMoney(metric.absoluteChange, locale)} vs prior year
-        {metric.percentChange === null ? "" : ` · ${metric.percentChange}%`}
+        {metric.percentChange === null
+          ? ""
+          : ` · ${new Intl.NumberFormat(locale, {
+              style: "percent",
+              maximumFractionDigits: 1,
+              signDisplay: "always",
+            }).format(Number(metric.percentChange))}`}
       </p>
     </article>
   );

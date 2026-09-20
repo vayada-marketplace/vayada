@@ -85,6 +85,34 @@ describe("ProfitLossTab", () => {
       data.propertyId,
       expect.objectContaining({ year: 2025 }),
     );
+    expect(
+      view.root
+        .findAllByType("p")
+        .some((paragraph) => paragraph.children.join("").includes("Full-year performance")),
+    ).toBe(true);
+  });
+
+  it("formats the API change ratio as a localized percentage", async () => {
+    getFinanceProfitLoss.mockResolvedValue({
+      ...data,
+      summary: {
+        ...data.summary,
+        revenueYtd: { ...data.summary.revenueYtd, percentChange: "0.5000" },
+      },
+    });
+    const { ProfitLossTab } = await import("./ProfitLossTab");
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        createElement(ProfitLossTab, {
+          propertyId: data.propertyId,
+          locale: "en-GB",
+          generatedAt: data.generatedAt,
+          timeZone: data.timeZone,
+        }),
+      );
+    });
+    expect(JSON.stringify(view.toJSON())).toContain("+50%");
   });
 
   it("exports the selected year with currency and safe category labels without altering negative amounts", async () => {

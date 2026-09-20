@@ -39,7 +39,7 @@ export function getFinanceProfitLoss(
 ): Promise<FinanceProfitLossResponse> {
   const query = new URLSearchParams({ year: String(input.year) });
   return pmsOperationsClient.get<FinanceProfitLossResponse>(
-    `/finance/properties/${encodeURIComponent(propertyId)}/financials/profit-loss?${query}`,
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/profit-loss?${query}`,
     { ...pmsOperationsRequestOptions, signal: input.signal },
   );
 }
