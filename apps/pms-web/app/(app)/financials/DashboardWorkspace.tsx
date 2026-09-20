@@ -64,7 +64,7 @@ export function DashboardWorkspace() {
   }, [asOf, reload]);
 
   return (
-    <main className="mx-auto max-w-7xl p-4 md:p-6">
+    <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-blue-700">Financials</p>
@@ -155,7 +155,7 @@ export function DashboardWorkspace() {
       {state.kind !== "loading" && state.kind !== "ready" && (
         <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
       )}
-    </main>
+    </div>
   );
 }
 

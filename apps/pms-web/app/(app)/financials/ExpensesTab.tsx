@@ -7,7 +7,7 @@ import type {
   FinanceExpenseOrigin,
   FinanceReportingMoney,
 } from "@vayada/domain-finance";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiErrorResponse } from "@/services/api/client";
 import {
@@ -39,14 +39,20 @@ export function ExpensesTab({
 }) {
   const range = useMemo(() => currentMonthRange(generatedAt, timeZone), [generatedAt, timeZone]);
   const [filters, setFilters] = useState<ExpenseFilters>({ ...range, sort: "incurredOn_desc" });
+  const [dateFrom, setDateFrom] = useState(range.from);
+  const [dateTo, setDateTo] = useState(range.to);
+  const [dateError, setDateError] = useState("");
   const [search, setSearch] = useState("");
   const [reload, setReload] = useState(0);
   const [state, setState] = useState<ExpensesState>({ kind: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const exportInFlight = useRef(false);
   const [exportJob, setExportJob] = useState<{ id: string; key: string }>();
   const [exportNotice, setExportNotice] = useState<string>();
   const [downloadUrl, setDownloadUrl] = useState<string>();
   const exportKey = JSON.stringify(filters);
+  const activeKey = useRef(exportKey);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +73,8 @@ export function ExpensesTab({
   }, [filters, propertyId, reload]);
 
   useEffect(() => {
+    activeKey.current = exportKey;
+    setLoadingMore(false);
     setExportJob(undefined);
     setDownloadUrl(undefined);
     setExportNotice(undefined);
@@ -79,6 +87,7 @@ export function ExpensesTab({
       const next = await getFinanceExpenses(propertyId, filters, {
         cursor: state.data.page.nextCursor,
       });
+      if (activeKey.current !== exportKey) return;
       setState((current) =>
         current.kind === "ready"
           ? {
@@ -91,20 +100,26 @@ export function ExpensesTab({
           : current,
       );
     } catch {
-      setExportNotice("More expenses could not be loaded. Try again.");
+      if (activeKey.current === exportKey)
+        setExportNotice("More expenses could not be loaded. Try again.");
     } finally {
-      setLoadingMore(false);
+      if (activeKey.current === exportKey) setLoadingMore(false);
     }
   };
 
   const exportCsv = async () => {
+    if (exportInFlight.current) return;
+    exportInFlight.current = true;
+    setExporting(true);
     try {
       const id =
         exportJob?.key === exportKey
           ? exportJob.id
           : (await requestExpenseCsv(propertyId, filters)).item.resourceId;
+      if (activeKey.current !== exportKey) return;
       setExportJob({ id, key: exportKey });
       const result = await getExpenseCsv(propertyId, id);
+      if (activeKey.current !== exportKey) return;
       if (result.item.download?.url) {
         setDownloadUrl(result.item.download.url);
         setExportNotice("Filtered expense CSV is ready.");
@@ -115,7 +130,11 @@ export function ExpensesTab({
         setExportNotice("CSV preparation started. Check again shortly.");
       }
     } catch (error) {
-      setExportNotice(message(error, "The filtered CSV could not be requested."));
+      if (activeKey.current === exportKey)
+        setExportNotice(message(error, "The filtered CSV could not be requested."));
+    } finally {
+      exportInFlight.current = false;
+      setExporting(false);
     }
   };
 
@@ -140,7 +159,7 @@ export function ExpensesTab({
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             type="button"
-            disabled={state.kind !== "ready"}
+            disabled={state.kind !== "ready" || exporting}
             onClick={exportCsv}
           >
             <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />
@@ -162,9 +181,15 @@ export function ExpensesTab({
           categories={state.categories}
           locale={locale}
           filters={filters}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          dateError={dateError}
           search={search}
           loadingMore={loadingMore}
           onSearch={setSearch}
+          onDateFrom={setDateFrom}
+          onDateTo={setDateTo}
+          onDateError={setDateError}
           onFilters={setFilters}
           onLoadMore={loadMore}
         />
@@ -181,9 +206,15 @@ function ExpensesWorkspace({
   categories,
   locale,
   filters,
+  dateFrom,
+  dateTo,
+  dateError,
   search,
   loadingMore,
   onSearch,
+  onDateFrom,
+  onDateTo,
+  onDateError,
   onFilters,
   onLoadMore,
 }: {
@@ -191,9 +222,15 @@ function ExpensesWorkspace({
   categories: FinanceExpenseCategory[];
   locale: string;
   filters: ExpenseFilters;
+  dateFrom: string;
+  dateTo: string;
+  dateError: string;
   search: string;
   loadingMore: boolean;
   onSearch: (value: string) => void;
+  onDateFrom: (value: string) => void;
+  onDateTo: (value: string) => void;
+  onDateError: (value: string) => void;
   onFilters: (value: ExpenseFilters) => void;
   onLoadMore: () => void;
 }) {
@@ -208,7 +245,13 @@ function ExpensesWorkspace({
           Some expense evidence is incomplete. Totals may exclude mismatched source currency.
         </p>
       )}
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Expense summary">
+      <p className="text-xs text-gray-500">
+        Summary and categories are month to date. Filters apply to the ledger and CSV export.
+      </p>
+      <section
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Expense summary, month to date"
+      >
         <Metric label="Spend this month" value={formatMoney(data.summary.totalMtd.value, locale)} />
         <Metric
           label="Per occupied night"
@@ -228,7 +271,12 @@ function ExpensesWorkspace({
         className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 md:grid-cols-2 xl:grid-cols-7"
         onSubmit={(event) => {
           event.preventDefault();
-          onFilters({ ...filters, search: search.trim() || undefined });
+          if (!dateFrom || !dateTo || dateFrom > dateTo) {
+            onDateError("Choose a valid date range with From on or before To.");
+            return;
+          }
+          onDateError("");
+          onFilters({ ...filters, from: dateFrom, to: dateTo, search: search.trim() || undefined });
         }}
         aria-label="Expense filters"
       >
@@ -237,8 +285,8 @@ function ExpensesWorkspace({
           <input
             className={control}
             type="date"
-            value={filters.from}
-            onChange={(event) => onFilters({ ...filters, from: event.target.value })}
+            value={dateFrom}
+            onChange={(event) => onDateFrom(event.target.value)}
           />
         </label>
         <label className="grid gap-1 text-xs font-medium text-gray-600">
@@ -246,8 +294,8 @@ function ExpensesWorkspace({
           <input
             className={control}
             type="date"
-            value={filters.to}
-            onChange={(event) => onFilters({ ...filters, to: event.target.value })}
+            value={dateTo}
+            onChange={(event) => onDateTo(event.target.value)}
           />
         </label>
         <FilterSelect
@@ -256,13 +304,12 @@ function ExpensesWorkspace({
           onChange={(value) => onFilters({ ...filters, categoryId: value || undefined })}
         >
           <option value="">All categories</option>
-          {categories
-            .filter((category) => !category.archived)
-            .map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+              {category.archived ? " (archived)" : ""}
+            </option>
+          ))}
         </FilterSelect>
         <FilterSelect
           label="Paid state"
@@ -310,6 +357,7 @@ function ExpensesWorkspace({
               <MagnifyingGlassIcon className="mr-2 h-4 w-4 text-gray-400" aria-hidden="true" />
               <input
                 className="min-w-0 flex-1 border-0 p-0 text-sm outline-none"
+                maxLength={200}
                 value={search}
                 onChange={(event) => onSearch(event.target.value)}
                 placeholder="Vendor or category"
@@ -324,6 +372,11 @@ function ExpensesWorkspace({
           </button>
         </div>
       </form>
+      {dateError && (
+        <p className="text-sm text-red-700" role="alert">
+          {dateError}
+        </p>
+      )}
       <ExpenseTable items={data.page.items} categoryNames={categoryNames} locale={locale} />
       {data.page.nextCursor && (
         <div className="text-center">
@@ -343,10 +396,13 @@ function ExpensesWorkspace({
 }
 
 function CategoryDistribution({ data, locale }: { data: FinanceExpensesResponse; locale: string }) {
-  const total = data.categories.reduce((sum, item) => sum + numeric(item.amount.amount), 0);
+  const total = data.categories.reduce(
+    (sum, item) => sum + Math.max(0, numeric(item.amount.amount)),
+    0,
+  );
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h3 className="text-base font-semibold text-gray-900">Spend by category</h3>
+      <h3 className="text-base font-semibold text-gray-900">Spend by category this month</h3>
       <div
         className="mt-4 flex h-3 overflow-hidden rounded-full bg-gray-100"
         aria-label="Expense category distribution"
@@ -356,7 +412,7 @@ function CategoryDistribution({ data, locale }: { data: FinanceExpensesResponse;
             key={category.id}
             style={{
               backgroundColor: category.color,
-              width: `${total ? (numeric(amount.amount) / total) * 100 : 0}%`,
+              width: `${total ? (Math.max(0, numeric(amount.amount)) / total) * 100 : 0}%`,
             }}
             title={`${category.name}: ${formatMoney(amount, locale)}`}
           />
