@@ -18,6 +18,11 @@ Stop before activation if any dependency is unmerged, its revision is not
 serving, its migration has not applied, or an acceptance check below is
 blocked. The approved Feature Hub path and explicit production authority are
 required for activation; do not insert entitlements directly to bypass it.
+As of this snapshot, that path does not exist: the Feature Hub registry has no
+modules, the PMS activation API advertises no supported modules, and its
+mutation route returns 410. Financials cannot be activated or rolled back
+through Feature Hub until a reviewed control and its authorization are shipped
+and verified on the serving revision.
 
 ## 1. Verify deployment and authorization
 
@@ -142,7 +147,8 @@ the runtime lacks permission on `platform.product_audit_events` (PostgreSQL
 
 The `finance_manager` read grant, module-aware Financials navigation, a
 preactivation OTA commission expense projection path, complete reconciliation,
-approved activation path, and five-tab real-account smoke are still open gates.
+Feature Hub activation and rollback controls, and five-tab real-account smoke
+are still open gates.
 No live backfill or Financials activation was performed for this snapshot.
 Replace it with a new timestamped record after a relevant change; do not reuse
 these image SHAs as proof of a later deployment.
