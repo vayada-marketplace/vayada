@@ -139,6 +139,80 @@ its outage does not imply that URL safety evidence was revoked. Native Booking
 and external providers must pass the same safety rule, with provider-specific
 evidence where needed.
 
+## Native Booking arrival-to-checkout contract
+
+The current Booking Web `?ref` flow is legacy diagnostic traffic. Middleware
+stores its value in a 30-day `ref` cookie; `AffiliateClickTracker` posts a
+browser-supplied referral code, session ID, landing URL and referrer to the
+diagnostic click endpoint. Neither that cookie nor those fields may identify a
+creator in the new attribution path. Native pricing checkout currently posts to
+a same-origin `/api/booking-web/.../accept` URL, which Next.js rewrites to the
+TypeScript Booking API. Its public command contains no affiliate context. The
+synthetic server-only context argument added to the pricing writer is not a
+guest-facing API field.
+
+For a live native destination, use the following sequence only after the
+redirect, privacy and retention gates above are met:
+
+1. The Marketplace redirect appends one opaque, short-lived click reference to
+   the exact approved Booking URL using a new parameter distinct from `ref`.
+   It must preserve the approved URL's existing query and fragment, reject a
+   pre-existing conflicting reference parameter, and never take a destination
+   URL from the visitor. The reference contains no creator, property, campaign
+   or guest data. Its presence alone is not an eligible booking.
+2. Resolve any approved fallback-host → canonical-host redirect **before**
+   admitting the reference or setting a cookie. Preserve the opaque reference
+   only across that verified host transition; never forward it to a new or
+   unverified domain. The current canonical redirect is a cacheable 308: a
+   reference-bearing transition must instead use a temporary, `no-store`
+   redirect or land directly on the currently verified canonical host, so a
+   later domain change cannot replay a cached destination. On the final host,
+   Booking resolves the reference through
+   the trusted Marketplace click reader and checks its property against the
+   property resolved from that host. Where destination privacy rules permit,
+   it creates or reuses a first-party Booking context, serializes admission of
+   this click to that context, and stores only an opaque context handle in a
+   host-only, `HttpOnly`, `Secure`, `SameSite=Lax` cookie. Re-delivery of the
+   same reference to the same context is idempotent; delivery to another
+   context is a conflict. A bad, expired, or mismatched reference cannot set
+   or replace the cookie. The page must still load if admission or cookie
+   storage is unavailable.
+3. Process arrival before rendering the booking page, then redirect on the
+   same host to the URL with only the transport reference removed. Preserve
+   hotel, locale, dates and other approved booking parameters. This keeps the
+   reference out of third-party asset requests and analytics URLs; also do not
+   retain it in guest drafts, `localStorage`, `sessionStorage`, or the legacy
+   `ref` cookie. If destination context storage is not permitted on arrival,
+   continue untracked and discard this reference; later permission cannot
+   retroactively credit this visit. The redirect adds no guest screen.
+4. At native quote acceptance, the same-origin Booking API receives the
+   first-party cookie through the existing Next.js rewrite. It resolves the
+   opaque handle to a Booking-owned context for the quote's property and passes
+   that context to the pricing writer as a **server-derived** internal argument.
+   The writer locks the context, inserts the original booking and freezes its
+   admitted-click cutoff in one transaction. The public request body and
+   `Idempotency-Key` cannot supply or override the handle, click, creator,
+   agreement, terms or cutoff. A missing or invalid cookie leaves attribution
+   pending/unbound without blocking an otherwise valid booking.
+5. If the rewrite does not reliably forward a host-only cookie or preserve its
+   `Set-Cookie` response on every supported custom domain, use a narrowly scoped
+   same-origin Next route for arrival and acceptance instead. Do not broaden
+   the cookie to `.vayada.com`: hotel custom domains cannot use it and a shared
+   domain would widen the tracking scope. Test cookie behavior over HTTPS on a
+   real custom-domain fixture before enabling live traffic.
+
+Native readiness must prove the entire reference → first-party context →
+original-booking cutoff round trip, including a second visit through another
+creator's link, replay, a bad property, blocked storage, and a late click that
+cannot move an existing cutoff. It must also cover fallback → custom-domain
+canonicalization, changed or revoked custom domains, and arrival without
+destination storage permission. A single
+click event or the old `?ref` path is
+not such proof. The older Booking Web upsert checkout path needs its own
+atomic binding before it may claim native affiliate conversions. Until both
+privacy approval and these transport checks exist, keep the live capture route
+disabled and the existing synthetic records excluded from Finance.
+
 ## Privacy and retention proposal requiring approval
 
 Product direction now permits recording a link tap without an extra guest
