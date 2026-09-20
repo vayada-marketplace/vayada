@@ -162,14 +162,19 @@ function validDashboard(response: FinanceDashboardResponse, asOf: string): boole
 }
 
 function localDate(instant: string, timeZone: string, requested?: string): string | null {
-  if (!Number.isFinite(Date.parse(instant)) || new Date(instant).toISOString() !== instant)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(instant)) return null;
+  const generated = new Date(instant);
+  if (
+    !Number.isFinite(generated.getTime()) ||
+    generated.toISOString().slice(0, 19) !== instant.slice(0, 19)
+  )
     return null;
   try {
     const zone = getTimezone(timeZone);
     if (zone?.name !== timeZone || zone.aliasOf !== null) return null;
     const parts = Object.fromEntries(
       new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
-        .formatToParts(new Date(instant))
+        .formatToParts(generated)
         .map((part) => [part.type, part.value]),
     );
     const asOf = requested ?? `${parts["year"]}-${parts["month"]}-${parts["day"]}`;

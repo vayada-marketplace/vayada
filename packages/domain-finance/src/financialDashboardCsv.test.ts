@@ -80,6 +80,14 @@ describe("Dashboard CSV handoff", () => {
     expect(artifact.body).not.toContain('"\'-3.0000"');
   });
 
+  it("accepts UTC timestamp precision accepted by Dashboard GET", () => {
+    for (const generatedAt of ["2026-08-04T14:00:00Z", "2026-08-04T14:00:00.1Z"]) {
+      const value = response();
+      value.generatedAt = generatedAt;
+      expect(build(value).generatedAt).toBe(generatedAt);
+    }
+  });
+
   it("rejects different properties, malformed scope, incomplete days, and wrong-currency money", () => {
     const wrongProperty = response();
     wrongProperty.propertyId = "11280000-0000-4000-8000-000000000002";
