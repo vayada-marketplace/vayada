@@ -348,6 +348,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsManualBookingPreview?: PmsManualBookingPreviewRoutesOptions;
   pmsManualBookingCreate?: PmsManualBookingCreateRoutesOptions;
   pmsModuleActivationRepository?: PmsModuleActivationRepository;
+  financialsActivationPropertyIds?: readonly string[];
   pmsReviewRepository?: PmsReviewRepository;
   pmsChannexManagement?: PmsChannexManagementRoutesOptions;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
@@ -1025,6 +1026,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/pms",
       repository: options.pmsModuleActivationRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+      financialsActivationPropertyIds: options.financialsActivationPropertyIds,
+      propertyAccessRepository: options.auth?.propertyAccessRepository,
     });
   }
   if (options.pmsReviewRepository) {

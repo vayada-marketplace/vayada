@@ -841,10 +841,16 @@ function InboxVisual() {
 
 function FinancialsVisual() {
   const bars = [64, 92, 74, 128, 104, 148, 118, 168, 134, 184, 158, 204];
+  const cards = [
+    ["Revenue", "42k"],
+    ["Expenses", "13k"],
+    ["Profit", "29k"],
+    ["Folios", "12"],
+  ];
   return (
     <svg viewBox="0 0 760 300" className="h-auto w-full" role="img" aria-label="Financials preview">
       <rect width="760" height="300" fill="#f8faf8" />
-      {["RevPAR", "ADR", "Occupancy", "Revenue"].map((label, index) => (
+      {cards.map(([label, value], index) => (
         <g key={label}>
           <rect
             x={34 + index * 178}
@@ -859,10 +865,7 @@ function FinancialsVisual() {
             {label}
           </text>
           <text x={50 + index * 178} y="88" fontSize="23" fontWeight="700" fill="#111827">
-            {index === 2 ? "79%" : index === 3 ? "42k" : `${110 + index * 24}`}
-          </text>
-          <text x={125 + index * 178} y="88" fontSize="11" fontWeight="700" fill="#16a34a">
-            +{index + 3}%
+            {value}
           </text>
         </g>
       ))}
@@ -1149,8 +1152,13 @@ export const featureHubMessages = {
     "Let partners earn commission on the bookings they refer to you.",
   "featureHub.module.affiliates.headline":
     "Open a partner channel without adding manual commission tracking.",
+  "featureHub.module.financials.name": "Financials",
+  "featureHub.module.financials.description":
+    "Revenue, expenses, profit and loss, and operational folios for your property.",
+  "featureHub.module.financials.headline": "Review your property's finances in one place.",
   "featureHub.category.All": "All",
   "featureHub.category.Distribution": "Distribution",
+  "featureHub.category.Operations": "Operations",
   "featureHub.product.pms": "PMS Modules",
   "featureHub.product.booking_engine": "Booking Engine Modules",
   "featureHub.navigation.pms": "PMS navigation",
@@ -1159,6 +1167,9 @@ export const featureHubMessages = {
   "featureHub.module.affiliates.feature.1": "See clicks, bookings, revenue, and commission earned.",
   "featureHub.module.affiliates.feature.2": "Issue partner links tied to your booking engine.",
   "featureHub.module.affiliates.feature.3": "Prepare payout-ready commission records.",
+  "featureHub.module.financials.feature.0": "Reconcile stay revenue and channel attribution.",
+  "featureHub.module.financials.feature.1": "Track manual and generated expenses.",
+  "featureHub.module.financials.feature.2": "Export reports and operational folios.",
   "featureHub.navigationItem.Dashboard": "Dashboard",
   "featureHub.navigationItem.Calendar": "Calendar",
   "featureHub.navigationItem.Reservations": "Reservations",
@@ -1170,6 +1181,7 @@ export const featureHubMessages = {
   "featureHub.navigationItem.Booking Flow": "Booking Flow",
   "featureHub.navigationItem.Promo Codes": "Promo Codes",
   "featureHub.navigationItem.Affiliates": "Affiliates",
+  "featureHub.navigationItem.Financials": "Financials",
   "featureHub.copy.couldNotUpdateModuleActivation": "Could not update module activation.",
   "featureHub.copy.featureHub": "Feature Hub",
   "featureHub.copy.activatePropertyModulesAndKeepNavigationFocusedOnTheTools":

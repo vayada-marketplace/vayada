@@ -558,7 +558,7 @@ const pmsCalendarAutoOpenSettings =
 
 const pmsModuleActivationRepository = config.auth
   ? createPgPmsModuleActivationRepository({
-      connectionString: config.auth.databaseUrl,
+      connectionString: targetDatabaseUrl,
     })
   : undefined;
 
@@ -1690,6 +1690,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
     guestReviews: createPgGuestReviewCommands({
@@ -1974,7 +1975,7 @@ const app = buildApp({
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({
-          connectionString: config.auth.databaseUrl,
+          connectionString: targetDatabaseUrl,
         })
       : undefined,
   bookingWebAffiliateHotelResolver,

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
+import { hasActiveEntitlement } from "@vayada/backend-authorization";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
@@ -32,6 +33,10 @@ describe.skipIf(!databaseUrl)("Feature Hub data preservation", () => {
       `INSERT INTO identity.organizations (id, kind, name, slug, status) VALUES ($1, 'hotel_group', 'Toggle test', $2, 'active')`,
       [organizationId, slug],
     );
+    await client.query("INSERT INTO identity.users (id, email) VALUES ($1, $2)", [
+      context.actor.internalUserId,
+      `toggle-${propertyId}@example.test`,
+    ]);
     await client.query(
       `INSERT INTO hotel_catalog.properties (id, public_id, display_name) VALUES ($1, $2, 'Toggle test')`,
       [propertyId, slug],
@@ -74,5 +79,151 @@ describe.skipIf(!databaseUrl)("Feature Hub data preservation", () => {
       hotel: { capabilities: { referralCodes: true } },
     });
     expect((await snapshot()).rows).toEqual(before);
+  });
+
+  it("writes Financials activation and rollback with atomic audit evidence", async () => {
+    const activated = await repository.updateFinancials(context, propertyId, true);
+    expect(activated).toMatchObject({ moduleId: "financials", isActive: true });
+    expect(
+      (await repository.list(context, propertyId)).find((row) => row.moduleId === "financials"),
+    ).toMatchObject({ isActive: true });
+
+    const badActor = {
+      ...context,
+      actor: { internalUserId: randomUUID() },
+    } as RequestContext;
+    await client.query("SAVEPOINT before_bad_actor");
+    await expect(repository.updateFinancials(badActor, propertyId, false)).rejects.toThrow();
+    await client.query("ROLLBACK TO SAVEPOINT before_bad_actor");
+    expect(
+      (await repository.list(context, propertyId)).find((row) => row.moduleId === "financials"),
+    ).toMatchObject({ isActive: true });
+
+    const deactivated = await repository.updateFinancials(context, propertyId, false);
+    expect(deactivated).toMatchObject({ moduleId: "financials", isActive: false });
+    const audit = await client.query(
+      `SELECT action, redacted_payload, audit_metadata
+         FROM platform.product_audit_events
+        WHERE product = 'pms'
+          AND property_id = $1
+          AND action LIKE 'financials_module_%'
+        ORDER BY action`,
+      [propertyId],
+    );
+    expect(audit.rows.map((row) => row.action)).toEqual([
+      "financials_module_activated",
+      "financials_module_deactivated",
+    ]);
+    expect(audit.rows.every((row) => row.redacted_payload.moduleId === "financials")).toBe(true);
+    expect(
+      audit.rows.every(
+        (row) =>
+          row.audit_metadata.organizationId === organizationId &&
+          typeof row.audit_metadata.entitlementId === "string",
+      ),
+    ).toBe(true);
+    const count = await client.query(
+      `SELECT count(*)::integer AS count FROM identity.product_entitlements
+        WHERE organization_id = $1 AND resource_id = $2 AND entitlement_key = 'module:financials'`,
+      [organizationId, propertyId],
+    );
+    expect(count.rows[0].count).toBe(1);
+  });
+
+  it("rolls back a global grant for one property without changing the global row", async () => {
+    await client.query("SAVEPOINT before_global_grant_rollback");
+    try {
+      await client.query(
+        `DELETE FROM identity.product_entitlements
+          WHERE organization_id = $1 AND resource_id = $2
+            AND entitlement_key = 'module:financials'`,
+        [organizationId, propertyId],
+      );
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+          (organization_id, product, entitlement_key, status)
+         VALUES ($1, 'pms', 'module:financials', 'active')`,
+        [organizationId],
+      );
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+          (organization_id, product, entitlement_key, status,
+           resource_product, resource_type, resource_id, starts_at)
+         VALUES ($1, 'pms', 'module:financials', 'active',
+                 'pms', 'pms_property', $2, now() + interval '1 day')`,
+        [organizationId, propertyId],
+      );
+      expect(await repository.updateFinancials(context, propertyId, false)).toMatchObject({
+        moduleId: "financials",
+        isActive: false,
+      });
+      const rows = await client.query(
+        `SELECT status, resource_id AS "resourceId", starts_at AS "startsAt", expires_at AS "expiresAt"
+           FROM identity.product_entitlements
+          WHERE organization_id = $1 AND entitlement_key = 'module:financials'
+          ORDER BY resource_id NULLS FIRST`,
+        [organizationId],
+      );
+      expect(rows.rows).toEqual([
+        { status: "active", resourceId: null, startsAt: null, expiresAt: null },
+        { status: "suspended", resourceId: propertyId, startsAt: null, expiresAt: null },
+      ]);
+      const loaded = await client.query(
+        `SELECT
+           CASE WHEN expires_at IS NOT NULL AND expires_at <= now()
+             THEN 'expired' ELSE status END AS status,
+           resource_id AS "resourceId"
+         FROM identity.product_entitlements
+         WHERE organization_id = $1 AND entitlement_key = 'module:financials'
+           AND (starts_at IS NULL OR starts_at <= now())`,
+        [organizationId],
+      );
+      const entitlements = loaded.rows.map((row) => ({
+        product: "pms" as const,
+        key: "module:financials",
+        status: row.status as "active" | "suspended" | "expired",
+        ...(row.resourceId
+          ? {
+              resource: {
+                product: "pms" as const,
+                resourceType: "pms_property" as const,
+                resourceId: row.resourceId as string,
+              },
+            }
+          : {}),
+      }));
+      expect(
+        hasActiveEntitlement(
+          { ...context, entitlements },
+          {
+            product: "pms",
+            key: "module:financials",
+            resource: { product: "pms", resourceType: "pms_property", resourceId: propertyId },
+          },
+        ),
+      ).toBe(false);
+      const readiness = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM identity.product_entitlements active
+           WHERE active.organization_id = $1 AND active.product = 'pms'
+             AND active.entitlement_key = 'module:financials'
+             AND active.status = 'active' AND active.resource_product IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM identity.product_entitlements suspended
+               WHERE suspended.organization_id = $1 AND suspended.product = 'pms'
+                 AND suspended.entitlement_key = 'module:financials'
+                 AND suspended.status = 'suspended'
+                 AND suspended.resource_product = 'pms'
+                 AND suspended.resource_type = 'pms_property'
+                 AND suspended.resource_id = $2
+                 AND (suspended.expires_at IS NULL OR suspended.expires_at > now())
+             )
+         ) AS enabled`,
+        [organizationId, propertyId],
+      );
+      expect(readiness.rows[0].enabled).toBe(false);
+    } finally {
+      await client.query("ROLLBACK TO SAVEPOINT before_global_grant_rollback");
+    }
   });
 });

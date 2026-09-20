@@ -1073,8 +1073,23 @@ See the [activation runbook](../../engineering/pms-financials-activation-runbook
 for the full deployment, reconciliation, authorization, browser, and rollback
 gates.
 
-Run the property-scoped audit after the nightly-revenue backfill, before Feature
-Hub activation:
+For a property with PMS pricing settings, preview missing default expense
+categories before the readiness audit:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:financials:seed-categories:dist -- \
+    --property-id <property id>
+```
+
+After reviewing the report, repeat with
+`--apply --confirm financials-categories:<property id>` to insert missing defaults. Replays insert
+nothing. Existing names, colors, and archived categories are preserved; archived
+defaults remain a readiness blocker for manual review. This command creates no
+expense rows and does not activate Financials.
+
+Run the property-scoped audit after the nightly-revenue backfill and any
+approved preactivation OTA commission projection, before Feature Hub activation:
 
 ```bash
 TARGET_DATABASE_URL=<target database url> \
