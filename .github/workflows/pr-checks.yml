@@ -228,7 +228,8 @@ jobs:
           src/domains/marketplaceAffiliatePublication.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
