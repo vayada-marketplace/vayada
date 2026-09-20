@@ -161,18 +161,20 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
     )
       throw new Error("Dedicated loopback receipt reader fixture required");
 
-    await client.query("CREATE ROLE vay2017_receipt_reader LOGIN PASSWORD 'reader_test_only'");
-    await client.query(
-      "GRANT CONNECT ON DATABASE vay2017_receipt_fixture TO vay2017_receipt_reader",
-    );
-    await client.query("GRANT USAGE ON SCHEMA platform TO vay2017_receipt_reader");
-    await client.query(
-      "GRANT SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts TO vay2017_receipt_reader",
-    );
-
-    const reader = new pg.Client({ connectionString: readerUrl });
-    await reader.connect();
+    let reader: pg.Client | undefined;
     try {
+      await client.query("DROP ROLE IF EXISTS vay2017_receipt_reader");
+      await client.query("CREATE ROLE vay2017_receipt_reader LOGIN PASSWORD 'reader_test_only'");
+      await client.query(
+        "GRANT CONNECT ON DATABASE vay2017_receipt_fixture TO vay2017_receipt_reader",
+      );
+      await client.query("GRANT USAGE ON SCHEMA platform TO vay2017_receipt_reader");
+      await client.query(
+        "GRANT SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts TO vay2017_receipt_reader",
+      );
+
+      reader = new pg.Client({ connectionString: readerUrl });
+      await reader.connect();
       const role = await reader.query(`SELECT current_user AS current_user,
         r.rolsuper,
         pg_get_userbyid(c.relowner) AS table_owner,
@@ -214,7 +216,8 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
             : reader.query(sql),
         ).rejects.toMatchObject({ code: "42501" });
     } finally {
-      await reader.end();
+      await reader?.end();
+      await client.query("DROP ROLE IF EXISTS vay2017_receipt_reader");
     }
   });
 });
