@@ -18,8 +18,10 @@ export type FinanceRevenueAddonFactsPool = Pick<Client, "query"> & {
   connect(): Promise<Client>;
   end?(): Promise<void>;
 };
+export type FinanceRevenueAddonFactsClient = Pick<Client, "query">;
 export type FinanceRevenueAddonFact = {
   period: "current" | "comparison";
+  recognizedOn: string;
   ownership: "property" | "partner";
   revenueAmount: string;
 };
@@ -43,12 +45,13 @@ export type FinanceRevenueAddonFacts = {
   };
   incompleteEvidence: FinanceRevenueAddonGap[];
 };
+export type FinanceRevenueAddonFactsInput = {
+  propertyId: string;
+  currency: string;
+  periods: FinanceReportingComparison;
+};
 export type FinanceRevenueAddonFactsReadPort = {
-  read(input: {
-    propertyId: string;
-    currency: string;
-    periods: FinanceReportingComparison;
-  }): Promise<FinanceRevenueAddonFacts>;
+  read(input: FinanceRevenueAddonFactsInput): Promise<FinanceRevenueAddonFacts>;
   close(): Promise<void>;
 };
 
@@ -84,34 +87,7 @@ export function createPgFinanceRevenueAddonFacts(config: {
     config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: config.max });
   return {
     async read(input) {
-      const propertyId = uuid(input.propertyId);
-      if (!/^[A-Z]{3}$/.test(input.currency))
-        throw new TypeError("Finance revenue currency is malformed");
-      const current = parseFinanceRevenueQuery(input.periods.current);
-      const comparison = parseFinanceRevenueQuery(input.periods.comparison);
-      if (!current || !comparison || comparison.to >= current.from)
-        throw new TypeError("Finance revenue comparison periods are malformed");
-      return consistentRead(pool, async (client) => {
-        const values = [
-          propertyId,
-          input.currency,
-          current.from,
-          current.to,
-          comparison.from,
-          comparison.to,
-        ];
-        const rows = await readFacts(client, values);
-        const freshness = await readFreshness(client, values);
-        return {
-          rows: rows.map(fact),
-          fulfilledBookings: await readFulfilledBookings(client, values),
-          sourceFreshness: {
-            bookingAddonRevenueThrough: freshness.bookingAddonRevenueThrough,
-            bookingAddonRevenueAt: instant(freshness.bookingAddonRevenueAt),
-          },
-          incompleteEvidence: (await readGaps(client, values)).map(gap),
-        };
-      });
+      return consistentRead(pool, (client) => readFinanceRevenueAddonFacts(client, input));
     },
     async close() {
       if (ownsPool) await pool.end?.();
@@ -119,10 +95,42 @@ export function createPgFinanceRevenueAddonFacts(config: {
   };
 }
 
+export async function readFinanceRevenueAddonFacts(
+  client: FinanceRevenueAddonFactsClient,
+  input: FinanceRevenueAddonFactsInput,
+): Promise<FinanceRevenueAddonFacts> {
+  const propertyId = uuid(input.propertyId);
+  if (!/^[A-Z]{3}$/.test(input.currency))
+    throw new TypeError("Finance revenue currency is malformed");
+  const current = parseFinanceRevenueQuery(input.periods.current);
+  const comparison = parseFinanceRevenueQuery(input.periods.comparison);
+  if (!current || !comparison || comparison.to >= current.from)
+    throw new TypeError("Finance revenue comparison periods are malformed");
+  const values = [
+    propertyId,
+    input.currency,
+    current.from,
+    current.to,
+    comparison.from,
+    comparison.to,
+  ];
+  const rows = await readFacts(client, values);
+  const freshness = await readFreshness(client, values);
+  return {
+    rows: rows.map(fact),
+    fulfilledBookings: await readFulfilledBookings(client, values),
+    sourceFreshness: {
+      bookingAddonRevenueThrough: freshness.bookingAddonRevenueThrough,
+      bookingAddonRevenueAt: instant(freshness.bookingAddonRevenueAt),
+    },
+    incompleteEvidence: (await readGaps(client, values)).map(gap),
+  };
+}
+
 // Curated Finance-safe Booking views are the integration boundary; this adapter never reads guest PII.
 // prettier-ignore
 async function readFacts(client: Pick<Client, "query">, values: readonly unknown[]): Promise<FactRow[]> {
-  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,ownership_kind AS ownership,COALESCE(sum(${PROPERTY_REVENUE}),0)::text AS "revenueAmount" FROM reporting GROUP BY period,ownership_kind ORDER BY period,ownership_kind`, values)).rows;
+  return (await client.query<FactRow>(`WITH scoped AS (${SCOPED}),reporting AS (SELECT *,CASE WHEN recognized_on BETWEEN $3::date AND $4::date THEN 'current' ELSE 'comparison' END AS period FROM scoped WHERE currency=$2) SELECT period,recognized_on::text AS "recognizedOn",ownership_kind AS ownership,COALESCE(sum(${PROPERTY_REVENUE}),0)::text AS "revenueAmount" FROM reporting GROUP BY period,recognized_on,ownership_kind HAVING count(${PROPERTY_REVENUE})>0 ORDER BY period,recognized_on,ownership_kind`, values)).rows;
 }
 
 // Attach rate is non-monetary: intersect fulfilled add-ons with occupied bookings, independent of currency.
@@ -151,14 +159,21 @@ async function readGaps(client: Pick<Client, "query">, values: readonly unknown[
 function fact(row: FactRow): FinanceRevenueAddonFact {
   if (
     (row.period !== "current" && row.period !== "comparison") ||
+    !localDate(row.recognizedOn) ||
     (row.ownership !== "property" && row.ownership !== "partner")
   )
     throw new Error("Finance revenue add-on facts are invalid");
   return {
     period: row.period,
+    recognizedOn: row.recognizedOn,
     ownership: row.ownership,
     revenueAmount: normalizeFinanceReportingDecimal(row.revenueAmount),
   };
+}
+function localDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 function gap(row: GapRow): FinanceRevenueAddonGap {
   if (!Number.isSafeInteger(row.count) || row.count < 1)

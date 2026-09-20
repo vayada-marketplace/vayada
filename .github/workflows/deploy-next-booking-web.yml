@@ -29,6 +29,7 @@ env:
 
 jobs:
   build-and-push:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.COORDINATED_RELEASES_ENABLED != 'true' }}
     name: Build and Push to ECR
     runs-on: ubuntu-latest
 
@@ -59,6 +60,7 @@ jobs:
             NEXT_PUBLIC_BOOKING_WEB_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_BROWSER_API_KEY }}
+            NEXT_PUBLIC_REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS=codex-test-hotel-not-bookable
             NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_51T4q9THtaQeEOmq25xCQRtxOCZ7WKDN8Bpmo2jMuQCKGLPxjoU7cApWRR0fysdKgxjLsEs7zoL00qaAB6boaNMC600tH1jDPWD
             BOOKING_WEB_BUILD_SHA=${{ github.sha }}
           tags: |

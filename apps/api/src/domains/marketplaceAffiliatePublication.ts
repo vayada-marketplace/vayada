@@ -9,17 +9,17 @@ import {
 import { readBookingAffiliateDestinations } from "./bookingAffiliateDestinationRepository.js";
 import { resolvePgFinanceAffiliatePercentagePolicy } from "./financeAffiliatePercentagePolicyResolver.js";
 
-type Scope = {
+export type AffiliatePublicationScope = {
   propertyId: string;
   organizationId: string;
   offerId: string;
   draftId: string;
   terms: MarketplaceAffiliateOfferTerms;
 };
-type Proof =
+export type AffiliatePublicationProof =
   | {
       status: "ready";
-      scope: Scope;
+      scope: AffiliatePublicationScope;
       conditionsText: string;
       attributionPolicyVersion: string;
       evidenceReferences: string[];
@@ -31,8 +31,8 @@ type Proof =
  */
 export type AffiliatePublicationPrerequisites = (
   client: pg.PoolClient,
-  scope: Scope,
-) => Promise<Proof>;
+  scope: AffiliatePublicationScope,
+) => Promise<AffiliatePublicationProof>;
 export const unresolvedAffiliatePublicationPrerequisites: AffiliatePublicationPrerequisites =
   async () => ({
     status: "blocked",

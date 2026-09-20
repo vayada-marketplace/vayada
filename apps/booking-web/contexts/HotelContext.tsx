@@ -14,6 +14,7 @@ import { usePathname } from "next/navigation";
 import { AffiliateClickTracker } from "@/components/AffiliateClickTracker";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
+import { ApiError } from "@/services/api/client";
 import { generateColorPalette } from "@/lib/utils/colors";
 
 const FONT_PAIRINGS: Record<string, { heading: string; body: string; googleFamilies: string[] }> = {
@@ -158,16 +159,32 @@ export function HotelProvider({
     Promise.all([
       hotelService.getHotel(slug, locale),
       quoteEntry
-        ? Promise.resolve([] as RoomType[])
-        : hotelService.getRooms(slug, undefined, undefined, undefined, undefined, locale),
+        ? Promise.resolve({ rooms: [] as RoomType[], searchMessage: null })
+        : hotelService
+            .getRooms(slug, undefined, undefined, undefined, undefined, locale)
+            .then((rooms) => ({ rooms, searchMessage: null }))
+            .catch((error: unknown) => {
+              if (
+                !(error instanceof ApiError) ||
+                error.status !== 503 ||
+                !error.detail ||
+                typeof error.detail !== "object" ||
+                !("code" in error.detail) ||
+                error.detail.code !== "PRICING_UNAVAILABLE"
+              ) {
+                throw error;
+              }
+              return { rooms: [] as RoomType[], searchMessage: "availabilityError" };
+            }),
       quoteEntry
         ? Promise.resolve([] as Addon[])
         : hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
-      .then(([hotelData, roomsData, addonsData]) => {
+      .then(([hotelData, roomsResult, addonsData]) => {
         if (canceled) return;
         setHotel(hotelData);
-        setRooms(roomsData);
+        setRooms(roomsResult.rooms);
+        setSearchMessage(roomsResult.searchMessage);
         setAddons(addonsData);
         setLoading(false);
         // VAY-394: API returned a different canonical slug than we

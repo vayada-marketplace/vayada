@@ -1759,6 +1759,30 @@ async function enqueueProjectionRefresh(
   );
   const outboxEventId = outbox.rows[0]?.outboxEventId;
   if (!outboxEventId) throw new Error("PMS inventory reservation outbox insert failed");
+  await client.query(
+    `INSERT INTO platform.outbox_events (
+       domain_event_id, outbox_key, destination, event_type, tenant_scope,
+       organization_id, property_id, resource_product, resource_type,
+       resource_id, correlation_id, idempotency_key_hash, payload, outbox_metadata
+     ) VALUES (
+       $1::uuid, $2, 'pms.channel-manager', 'pms.inventory.ari_changed',
+       'property', NULL, $3::uuid, 'pms', $4, $5, $6, $7, $8::jsonb, $9::jsonb
+     ) ON CONFLICT (destination, outbox_key) DO NOTHING`,
+    [
+      eventId,
+      `pms.channel-manager.inventory.receipt.${receiptId}.${suffix}.key.${keyHash}.v1`,
+      propertyId,
+      RESOURCE_TYPE,
+      receiptId,
+      audit.correlationId ?? audit.requestId,
+      keyHash,
+      JSON.stringify(intent),
+      JSON.stringify({
+        contractVersion: PMS_INVENTORY_RESERVATION_LIFECYCLE_CONTRACT_VERSION,
+        sourceReadRequired: true,
+      }),
+    ],
+  );
   return Object.freeze({ eventId, outboxEventId });
 }
 

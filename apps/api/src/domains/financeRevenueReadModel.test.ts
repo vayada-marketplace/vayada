@@ -127,12 +127,14 @@ function harness() {
       rows: [
         {
           period: "current" as const,
+          recognizedOn: "2026-08-01",
           channel: "direct",
           directSource: "email",
           roomTypeId: ROOM,
           grossRoomAmount: "100.0000",
           otaCommissionAmount: "0.0000",
           occupiedRoomNights: 1,
+          pricedOccupiedRoomNights: 1,
         },
       ],
       eligibleBookings: { current: 1, comparison: 0 },
@@ -144,7 +146,12 @@ function harness() {
   const addOns = {
     read: vi.fn(async () => ({
       rows: [
-        { period: "current" as const, ownership: "property" as const, revenueAmount: "10.0000" },
+        {
+          period: "current" as const,
+          recognizedOn: "2026-08-01",
+          ownership: "property" as const,
+          revenueAmount: "10.0000",
+        },
       ],
       fulfilledBookings: { current: 1, comparison: 0 },
       sourceFreshness: {

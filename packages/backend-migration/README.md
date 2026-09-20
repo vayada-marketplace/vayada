@@ -10,6 +10,14 @@ the CLI stores that value in `platform.schema_migrations.git_sha`. See
 [`engineering/target-database-deployment-migrations.md`](../../engineering/target-database-deployment-migrations.md)
 for normal deployment, verification, and failure recovery.
 
+`TARGET_DATABASE_URL` is the long-running API credential. During a staged
+credential split, set `TARGET_DATABASE_MIGRATION_URL` to the migration-owner
+credential; the startup script supplies it only to the migration child and
+removes it before `exec` starts the API. When omitted, migrations temporarily
+fall back to `TARGET_DATABASE_URL` for backward-compatible rollout.
+`AUTH_DATABASE_URL` and every other long-lived database variable must use the
+runtime credential after the split; none may alias the migration-owner secret.
+
 ## Target Manual-Booking Readiness
 
 Run the read-only VAY-1259 gate with a reviewed rehearsal manifest:
@@ -1058,3 +1066,18 @@ Run the global audit after the targeted backfill:
 TARGET_DATABASE_URL=<target database url> \
   npm --workspace @vayada/backend-migration run target:workos:audit:dist
 ```
+
+## PMS Financials activation readiness
+
+Run the property-scoped audit after the nightly-revenue backfill and Finance
+expense worker have drained, before Feature Hub activation:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:financials:readiness:dist -- \
+    --property-id <property id> --expect-inactive --pretty
+```
+
+The command is read-only and blocks on missing category seeds, revenue or
+attribution projections, OTA commission evidence/rules/expenses, or an
+unexpected module state. After activation, rerun it with `--expect-active`.

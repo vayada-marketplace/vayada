@@ -5,6 +5,7 @@ import {
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
 import type { PmsOperationsCommandClient } from "./pmsOperationsCommandRepository.js";
 import { reconcilePmsOccupiedInventory } from "./pmsOccupiedInventory.js";
+import type { PmsOccupiedInventoryChange } from "./pmsOccupiedInventory.js";
 import type { PmsManualStayCorrectionCommand } from "../routes/pmsOperations.js";
 
 type Assignment = {
@@ -28,7 +29,7 @@ export async function correctPmsManualStays(
   command: PmsManualStayCorrectionCommand,
   acceptedAt: string,
   nextVersion: string,
-): Promise<void> {
+): Promise<readonly PmsOccupiedInventoryChange[]> {
   const assignments = await transaction.query<Assignment>(
     `SELECT id::text AS "assignmentId",position,room_type_id::text AS "roomTypeId",
        rate_plan_id::text AS "ratePlanId",assignment_status AS "assignmentStatus",source,
@@ -91,7 +92,7 @@ export async function correctPmsManualStays(
   if (updated.rowCount !== verified.length)
     throw new ManualStayCorrectionScopeError("Manual stay correction assignments changed");
   await correctBookingPmsManualStays(transaction, command, verified, acceptedAt);
-  await reconcilePmsOccupiedInventory(
+  return reconcilePmsOccupiedInventory(
     transaction,
     command.propertyId,
     [

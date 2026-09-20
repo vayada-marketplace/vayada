@@ -264,3 +264,16 @@ and completed idempotency receipt using a server timestamp. Same-key retries ret
 record; changed actors or payloads conflict, and competing keys cannot create a second active
 agreement. The command remains internal. Public transport, lifecycle changes and stable link
 generation are separate slices.
+
+## Initial independent lifecycle history
+
+Migration 0326 adds append-only pause, resume and end events for activated affiliate
+agreements. An activation with no later events is revision zero and reads as active;
+each side's pause must be cleared by that side, and end is terminal. The internal
+reader rejects gaps and invalid transitions instead of treating uncertain history
+as active. Event times are assigned by the database at insert, so callers cannot
+schedule or backdate a lifecycle change. Collaboration status is not consulted.
+
+This is storage and an internal read only. Authorized transition commands, expiry
+policy, replacement-terms history, public status reads and link readiness wiring
+remain separate work. No live link or earning flow is enabled by this migration.

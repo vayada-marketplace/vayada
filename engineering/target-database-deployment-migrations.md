@@ -17,8 +17,29 @@ migration procedures are unchanged.
    the immutable task definition.
 3. `scripts/start-next-api.sh` runs all pending target migrations with
    `--env production --git-sha "$APPLICATION_RELEASE"`.
+   When `TARGET_DATABASE_MIGRATION_URL` is set, only the migration child receives
+   that owner credential; the long-running API receives `TARGET_DATABASE_URL`.
+   Omitting it temporarily preserves the original single-credential rollout.
 4. Only an exit code of zero starts `apps/api`. The runner advisory lock and
    migration ledger make repeated or overlapping task starts idempotent.
+
+Do not enable the split until the runtime role has all reviewed application
+privileges and the release-specific least-privilege checks pass. After enabling
+it, never place the migration-owner URL in `TARGET_DATABASE_URL`,
+`AUTH_DATABASE_URL`, or any other variable inherited by the API process.
+
+Roll out in two phases. First deploy this compatible launcher while every
+database variable still uses the original credential. Only after that revision
+is healthy may the platform add `TARGET_DATABASE_MIGRATION_URL` and replace all
+long-lived database variables with the runtime credential. Retain the complete
+pre-split task definition through the rollback window. A rollback must restore
+both its image and its original credential mapping; rolling back only the image
+would make the old launcher attempt migrations with the restricted runtime role.
+Keep receipt-backed owner preparation and every other security-sensitive write
+disabled while that pre-split rollback remains eligible. Close the rollback
+window only after a split-compatible known-good task is retained. From that
+point onward, every rollback must preserve the split credential mapping and
+must never restore an owner URL to `TARGET_DATABASE_URL` or `AUTH_DATABASE_URL`.
 
 CloudWatch group `/ecs/vayada-next-api` records the release SHA and the applied,
 already-applied, or failed migration versions. The durable ledger is

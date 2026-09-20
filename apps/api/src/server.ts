@@ -1,6 +1,12 @@
 import { createReplacementPricingPublicationReader } from "./domains/replacementPricingPublicationReader.js";
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
+import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
+import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
+import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
+import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoomAvailabilityCoordinator.js";
+import { reconcilePendingChannexRoomAvailability } from "./domains/channexPendingRoomAvailabilityReconciliation.js";
+import { readChannexOfferPreview } from "./domains/channexOfferPreviewReader.js";
 import { createReplacementPricingCommands } from "./domains/replacementPricingCommands.js";
 import { createPgMarketplaceAffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { externalBookingChanges } from "./integrations/externalBookingChanges.js";
@@ -64,6 +70,9 @@ import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1
 import { createPgFinanceAffiliatePercentagePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { createPgMarketplaceAffiliateDraftRepository } from "./domains/marketplaceAffiliateDraftRepository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
+import { createPgMarketplaceCommunicationPreferencesRepository } from "./domains/marketplaceCommunicationPreferencesRepository.js";
+import { createMarketplaceCommunicationUnsubscribeTokenService } from "./domains/marketplaceCommunicationUnsubscribeToken.js";
+import { MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY } from "@vayada/domain-marketplace";
 import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createBankTransferCodec } from "./domains/financeBankTransferCodec.js";
 import { createBankTransferRepository } from "./domains/financeBankTransferRepository.js";
@@ -72,6 +81,13 @@ import { createPgFinanceManualExpenseRepository } from "./domains/financeManualE
 import { createPgFinanceRecurringExpenseRuleRepository } from "./domains/financeRecurringExpenseRuleRepository.js";
 // prettier-ignore
 import { createPgFinanceExpensePropertyContextReadPort, createPgFinanceExpenseReadModel } from "./domains/financeExpenseReadModel.js";
+import { createPgFinanceRevenueAddonFacts } from "./domains/financeRevenueAddonFacts.js";
+import { createFinanceRevenueReadModel } from "./domains/financeRevenueReadModel.js";
+import { createPgFinanceRevenueRoomFacts } from "./domains/financeRevenueRoomFacts.js";
+import { createPgFinanceDashboardFacts } from "./domains/financeDashboardFacts.js";
+import { createFinanceDashboardReadModel } from "./domains/financeDashboardReadModel.js";
+import { createPgFinanceProfitLossFacts } from "./domains/financeProfitLossFacts.js";
+import { createFinanceProfitLossReadModel } from "./domains/financeProfitLossReadModel.js";
 import { createPgFinanceFolioCommandRepository } from "./domains/financeFolioCommandRepository.js";
 import {
   createKmsFinanceFolioExportSearchDigest,
@@ -442,6 +458,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
   mixedRoomSelectionsEnabled: true,
+  replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
@@ -645,6 +662,56 @@ const financeExpenseRuntime = config.financeSource === "target" ? (() => {
   const categories = createPgFinanceExpenseCategoryRepository(targetDatabaseUrl), expenses = createPgFinanceManualExpenseRepository(targetDatabaseUrl), recurring = createPgFinanceRecurringExpenseRuleRepository(targetDatabaseUrl);
   return { routes: { read, categories, expenses, recurring }, close: () => Promise.all([read.close(), propertyContext.close(), categories.close(), expenses.close(), recurring.close()]) };
 })() : undefined;
+const financeRevenueRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const rooms = createPgFinanceRevenueRoomFacts({ connectionString: targetDatabaseUrl });
+        const addOns = createPgFinanceRevenueAddonFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceRevenueReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          rooms,
+          addOns,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), rooms.close(), addOns.close()]),
+        };
+      })()
+    : undefined;
+const financeDashboardRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const facts = createPgFinanceDashboardFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceDashboardReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          facts,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), facts.close()]),
+        };
+      })()
+    : undefined;
+const financeProfitLossRuntime =
+  config.financeSource === "target"
+    ? (() => {
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(targetDatabaseUrl);
+        const facts = createPgFinanceProfitLossFacts({ connectionString: targetDatabaseUrl });
+        const read = createFinanceProfitLossReadModel({
+          pricing: pmsPricingReadModel,
+          propertyContext,
+          facts,
+        });
+        return {
+          routes: { read },
+          close: () => Promise.all([propertyContext.close(), facts.close()]),
+        };
+      })()
+    : undefined;
 const financeFolioRuntime =
   config.financeSource === "target" && config.financeFolioRecipientKms
     ? (() => {
@@ -759,26 +826,10 @@ const channexManagementPlans =
         },
       })
     : undefined;
-const channexManagementProvider =
-  channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
-    ? createChannexManagementProvider({
-        apiBaseUrl: config.channexManagement.apiBaseUrl,
-        apiKey: config.channexManagement.apiKey,
-        plans: channexManagementPlans,
-        canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
-      })
+const channexUploadReconciliationPool =
+  channexManagementPlans && config.channexManagement.capabilityModes.ariSync === "mutating"
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
     : undefined;
-const channexManagementWorkerStore = channexManagementProvider
-  ? createPgPmsChannexManagementWorkerStore({
-      connectionString: targetDatabaseUrl,
-      targetState: createPmsChannexManagementTargetState(),
-      ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
-      stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
-      stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
-      stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
-    })
-  : undefined;
-
 const bookingWebAffiliateRepository =
   config.affiliatePublicSource === "target"
     ? createPgBookingWebAffiliateRepository({
@@ -804,6 +855,16 @@ const marketplaceHotelCollaborationPreferencesRepository =
   createPgMarketplaceHotelCollaborationPreferencesRepository({
     connectionString: targetDatabaseUrl,
   });
+const marketplaceCommunicationPreferencesRepository =
+  createPgMarketplaceCommunicationPreferencesRepository({
+    connectionString: targetDatabaseUrl,
+    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
+  });
+const marketplaceCommunicationUnsubscribeTokenService = config.marketplaceCommunicationUnsubscribe
+  ? createMarketplaceCommunicationUnsubscribeTokenService(
+      config.marketplaceCommunicationUnsubscribe,
+    )
+  : undefined;
 const bookingDesignRepository = createPgBookingDesignRepository({
   connectionString: targetDatabaseUrl,
 });
@@ -989,6 +1050,56 @@ const pmsOperatingCalendarRuntime = createPmsOperatingCalendarProductionRuntime(
   },
   operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
 });
+const channexManagementProvider =
+  channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
+    ? createChannexManagementProvider({
+        apiBaseUrl: config.channexManagement.apiBaseUrl,
+        apiKey: config.channexManagement.apiKey,
+        plans: channexManagementPlans,
+        canSyncAri: config.channexManagement.capabilityModes.ariSync === "mutating",
+        dispatchClosedUpload: channexUploadReconciliationPool
+          ? (lease, ports) =>
+              dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
+          : undefined,
+        reconcileClosedUploads: channexUploadReconciliationPool
+          ? (lease, get) =>
+              reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
+          : undefined,
+        reconcileRoomAvailability:
+          channexUploadReconciliationPool && pmsOperatingCalendarRuntime
+            ? (lease, get) =>
+                reconcilePendingChannexRoomAvailability(
+                  channexUploadReconciliationPool,
+                  pmsOperatingCalendarRuntime.inventory,
+                  lease,
+                  get,
+                )
+            : undefined,
+        prepareRoomAvailability:
+          channexUploadReconciliationPool && pmsOperatingCalendarRuntime
+            ? (lease) =>
+                prepareNextChannexRoomAvailabilityDispatch(
+                  channexUploadReconciliationPool,
+                  pmsOperatingCalendarRuntime.inventory,
+                  lease,
+                )
+            : undefined,
+        activatePublishedOffers:
+          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+            ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
+            : undefined,
+      })
+    : undefined;
+const channexManagementWorkerStore = channexManagementProvider
+  ? createPgPmsChannexManagementWorkerStore({
+      connectionString: targetDatabaseUrl,
+      targetState: createPmsChannexManagementTargetState(),
+      ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
+      stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
+      stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
+      stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
+    })
+  : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
   ? createPgPmsCalendarAutoOpenWorkerStore({
       connectionString: targetDatabaseUrl,
@@ -1501,6 +1612,13 @@ const app = buildApp({
   pmsManualBookingCreate: pmsManualBookingCommandRepository
     ? { command: pmsManualBookingCommandRepository }
     : undefined,
+  channexOfferPreview:
+    config.pmsOperationsSource === "target"
+      ? {
+          read: (context, propertyId) =>
+            readChannexOfferPreview(propertySetupOwnerPool, context, propertyId),
+        }
+      : undefined,
   replacementPricing:
     config.pmsOperationsSource === "target"
       ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
@@ -1606,6 +1724,9 @@ const app = buildApp({
           : {}),
       }
     : undefined,
+  financeRevenue: financeRevenueRuntime?.routes,
+  financeDashboard: financeDashboardRuntime?.routes,
+  financeProfitLoss: financeProfitLossRuntime?.routes,
   financeFolios: financeFolioRuntime
     ? {
         ...financeFolioRuntime.routes,
@@ -1770,6 +1891,19 @@ const app = buildApp({
     commandPort: marketplaceHotelCollaborationPreferencesRepository,
     readPort: marketplaceHotelCollaborationPreferencesRepository,
   },
+  marketplaceCommunicationPreferences: {
+    commandPort: marketplaceCommunicationPreferencesRepository,
+    readPort: marketplaceCommunicationPreferencesRepository,
+    policy: MARKETPLACE_COMMUNICATIONS_INITIAL_POLICY,
+    ...(marketplaceCommunicationUnsubscribeTokenService
+      ? {
+          unsubscribe: {
+            commandPort: marketplaceCommunicationPreferencesRepository,
+            tokenPort: marketplaceCommunicationUnsubscribeTokenService,
+          },
+        }
+      : {}),
+  },
   bookingDesign: {
     commandPort: bookingDesignRepository,
     propertyAccessRepository: bookingPropertyAccessRepository,
@@ -1932,6 +2066,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     marketplaceSubmissionRepository.close(),
     marketplaceHotelCollaborationPreferencesRepository.close(),
+    marketplaceCommunicationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
     bookingPropertyAccessRepository.close?.(),
@@ -1942,6 +2077,9 @@ app.addHook("onClose", async () => {
     adminTransferPool?.end(),
     financeOtaCommissionSettingsRepository?.close(),
     financeExpenseRuntime?.close(),
+    financeRevenueRuntime?.close(),
+    financeDashboardRuntime?.close(),
+    financeProfitLossRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),
@@ -2125,6 +2263,7 @@ app.addHook("onClose", async () => {
   await Promise.all([
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
+    channexUploadReconciliationPool?.end(),
     channexBookingRevisionStore?.close?.(),
   ]);
 });

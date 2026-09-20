@@ -62,6 +62,10 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       "INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key) VALUES('hotel_group',$1,'pms.rooms_rates.manage')",
       [roleKey],
     );
+    await pool.query(
+      "INSERT INTO identity.role_permission_grants(organization_kind,role_key,permission_key) VALUES('hotel_group',$1,'pms.rooms_rates.read')",
+      [roleKey],
+    );
     const context: RequestContext = {
       actor: {
         internalUserId: actorUserId,
@@ -75,7 +79,7 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
         status: "active",
         roleKey,
         workosRoleSlugs: [],
-        permissions: ["pms.rooms_rates.manage"],
+        permissions: ["pms.rooms_rates.manage", "pms.rooms_rates.read"],
       },
       linkedResources: [
         {
@@ -113,12 +117,14 @@ describe.skipIf(!url)("Booking pricing authority PostgreSQL owner", () => {
       revision: null,
       organizationId: null,
     });
+    expect(await f.store.read(f.context, f.scope)).toEqual(await f.read());
     const first = await f.store.save(f.context, f.scope, f.command);
     expect(await f.read()).toEqual({
       authority: "vayada",
       revision: first.revision,
       organizationId: f.scope.organizationId,
     });
+    expect(await f.store.read(f.context, f.scope)).toEqual(await f.read());
     const second = await f.store.save(f.context, f.scope, {
       requestId: randomUUID(),
       expectedRevision: first.revision,

@@ -251,3 +251,140 @@ same correlation cannot be replayed for any configuration. A later authorized
 verifier must create rows from real provider evidence. A later reader must define and
 enforce freshness, reject revoked or changed configuration, and require the matching
 current adapter certification before publication can consume the result.
+
+## Initial referral production preflight command
+
+Migration 0219 and the internal production preflight command add retry identity to the
+stored evidence and invoke a generic provider verifier. The command authorizes the hotel
+and exact saved destination before any provider call, generates the opaque correlation
+on the server, and accepts success only when the verifier returns that exact correlation
+for the configured live connection and adapter version with bounded source references.
+The verifier call has a server-owned timeout and receives an abort signal.
+
+The command serializes the same hotel retry key through the provider call, so concurrent
+retries produce one check and one immutable evidence row. A retry with changed actor,
+destination, connection or adapter is a conflict. Provider failure, mismatched evidence
+or timeout records nothing. The provider port is intentionally generic: Channex, another
+PMS adapter or a native Booking implementation supplies the same non-mutating contract.
+No provider-specific table is part of the command.
+
+This command still does not grant readiness. It creates no reservation, inventory,
+payment, creator, agreement, click, attribution or Finance record. A later reader must
+apply an explicit freshness policy and require current non-revoked production evidence,
+unchanged configuration and matching current diagnostic certification.
+
+## Initial referral readiness reader
+
+The Booking-owned `referral_round_trip` reader requires both an unrevoked diagnostic
+certification and an unrevoked production preflight for the exact property, destination,
+organization and adapter version. The server supplies the exact local/sandbox certification
+environment and connection separately from the selected production connection; one is never
+relabeled as the other. Both proofs must have completed within the previous 24 hours under
+`booking-affiliate-referral-readiness.v1`. This window is capability-evidence freshness only;
+it is not the probe lifetime, click-attribution window, data retention, or a general
+provider-health promise. The reader requires an explicit `READ COMMITTED` transaction;
+row locks then serialize each final currentness check with permanent revocation without
+allowing an older repeatable-read snapshot to hide a committed revocation. The result
+exposes only opaque evidence references.
+
+This reader covers only `referral_round_trip`. Publication and agreement activation remain
+blocked until equivalent two-part evidence exists for reservation lifecycle, stay completion
+and accommodation revenue and the existing four-purpose assessment accepts all four.
+
+## Remaining source-capability evidence storage
+
+Migration 0220 adds the same two-part evidence boundary for `reservation_lifecycle`,
+`stay_completion` and `accommodation_revenue`. One immutable certification row records a
+successful isolated synthetic fixture for one capability and remains pinned to the exact
+diagnostic probe, booking binding, property, destination, organization, connection and
+adapter version. One immutable production preflight row records a documented authenticated
+read for one capability and remains pinned to the exact production destination and source
+configuration. Fixed capability-specific assertions and a globally unique evidence
+fingerprint prevent one source check from being relabeled as another purpose. Permanent
+preflight revocations preserve the old evidence.
+
+These tables are validation inputs only. They contain no creator, agreement, click,
+attribution, commission, payment or Finance journal association, and they do not make a
+destination ready. Authorized commands still need to obtain and verify the evidence through
+each adapter. A later reader must apply freshness, reject revoked or changed configuration,
+require both matching rows per capability and then supply the three results alongside
+`referral_round_trip` to the existing four-purpose assessment.
+
+## Remaining source-capability production preflight command
+
+Migration 0221 and the internal source-capability preflight command add retry identity to
+the three remaining production evidence types. The command reauthorizes the exact hotel and
+saved destination before invoking a server-owned adapter for one explicit capability. The
+adapter must use a documented authenticated read and return the exact capability, current
+connection and adapter version, bounded source references and a globally namespaced,
+capability-independent identity for the underlying provider snapshot. Vayada hashes that
+identity before storage; global uniqueness prevents the same source snapshot from proving a
+second capability.
+
+Concurrent retries run one adapter check. Reusing a retry key with another actor, capability,
+destination or adapter configuration is a conflict. Unavailable, timed-out, mismatched or
+malformed evidence records nothing. The command creates no reservation, inventory, payment,
+creator, agreement, click, attribution or Finance record and does not grant readiness. The
+diagnostic certification commands and the freshness-aware aggregate reader remain separate
+required slices.
+
+## Remaining source-capability certification command
+
+The internal source-capability certification command completes the diagnostic writer for
+`reservation_lifecycle`, `stay_completion` and `accommodation_revenue`. It reauthorizes the
+hotel and exact destination, locks and rechecks the unexpired, unrevoked probe, and requires
+exactly one bound booking that remains explicitly marked as an isolated affiliate-validation
+fixture. A server-owned adapter then verifies one named capability against that exact probe
+and booking with a bounded call. Scope, capability, booking identity and evidence references
+must all match before the immutable certification is stored.
+
+One probe may certify each capability once; concurrent retries perform one adapter check and
+return the same certification. Expiry or revocation during verification prevents insertion.
+The bound booking remains permanently excluded from the Finance affiliate journal. The
+command creates no production reservation, attribution, readiness, payment or earning data.
+The aggregate freshness-aware reader remains the next required slice.
+
+## Aggregate destination tracking readiness
+
+The Booking-owned aggregate reader applies the existing 24-hour evidence policy to all four
+tracking purposes and then calls the existing `assessAffiliateDestinationTracking` domain
+decision. Server-owned configuration supplies the exact diagnostic and production connection
+plus adapter version separately for each purpose. A purpose contributes one healthy validated
+item only when both its exact current certification and production preflight are present,
+fresh and unrevoked. Missing, stale, revoked or configuration-mismatched evidence leaves that
+purpose pending; success for another purpose cannot substitute for it.
+
+The caller owns an explicit `READ COMMITTED` transaction. Destination, certification, probe
+and preflight row locks serialize final currentness checks with permanent revocation, including
+revoker-first fallback to an older current proof. The result exposes one opaque combined
+reference per ready purpose and never exposes provider evidence payloads. It performs no
+network call or write and creates no booking, attribution, agreement, readiness override,
+payment or earning. Publication consumption remains a separate slice.
+
+## Authorized destination readiness consumption
+
+The private hotel destination repository can now evaluate the aggregate reader inside one
+explicit `READ COMMITTED` transaction when a trusted server-owned source configuration is
+installed. The destination and active property are locked with the evidence rows so a
+concurrent revocation or property change cannot produce a mixed readiness response.
+
+Only the exact current policy with one distinct, fresh, purpose-bound opaque reference for
+each of the four purposes may be returned as validated. Malformed, partial, duplicated,
+future or stale port results are redacted to the existing pending response. Without a current
+source-selection provider, the production repository continues to report pending; request
+payloads cannot supply configuration or readiness.
+
+## Publication prerequisite composition
+
+The internal Marketplace publication command can compose complete commercial conditions
+with the Booking-owned aggregate reader inside its existing `READ COMMITTED` transaction.
+It derives the destination from the locked draft, obtains source selection from a trusted
+server port and retains the four opaque tracking references with commercial evidence in the
+immutable published terms.
+
+Missing configuration, commercial conditions or a tracking purpose blocks publication and
+writes nothing. Pending purposes remain explicit; malformed port responses return a safe
+`tracking_readiness_invalid` blocker rather than throwing or storing partial proof. The
+default publication resolver remains blocking because the commercial-conditions and current
+source-selection providers do not yet exist. This composition adds no HTTP publication route,
+agreement or link activation, and no request payload can supply readiness.

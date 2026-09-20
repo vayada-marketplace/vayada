@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AFFILIATE_TRACKING_PURPOSES } from "@vayada/domain-booking";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   context,
@@ -12,6 +13,8 @@ import {
   publishMarketplaceAffiliateTerms as publish,
   type AffiliatePublicationPrerequisites,
 } from "./marketplaceAffiliatePublication.js";
+import { createAffiliatePublicationPrerequisites } from "./marketplaceAffiliatePublicationPrerequisites.js";
+import type { AffiliateDestinationTrackingReadinessInput } from "./bookingAffiliateDestinationTrackingReadiness.js";
 
 // Synthetic owner-domain proof only; not a live adapter or real provider validation.
 const ready: AffiliatePublicationPrerequisites = async (_client, scope) => ({
@@ -67,6 +70,66 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
       ok: true,
       replayed: false,
     });
+  });
+  it("consumes complete four-purpose tracking evidence in the publication transaction", async () => {
+    const purposes = Object.fromEntries(
+      AFFILIATE_TRACKING_PURPOSES.map((purpose) => [
+        purpose,
+        {
+          certificationConnectionReference: `diagnostic:${purpose}`,
+          productionConnectionReference: `production:${purpose}`,
+          adapterVersion: `${purpose}-v1`,
+        },
+      ]),
+    ) as AffiliateDestinationTrackingReadinessInput["purposes"];
+    const resolve = createAffiliatePublicationPrerequisites({
+      commercialConditions: async () => ({
+        status: "ready",
+        conditionsText: "Complete creator-visible conditions",
+        attributionPolicyVersion: "last-eligible-click.v1",
+        evidenceReferences: ["commercial:conditions:1"],
+      }),
+      trackingConfiguration: async () => ({
+        certificationEnvironment: "sandbox",
+        purposes,
+      }),
+      trackingReadiness: async (_client, trackingScope) => {
+        expect(trackingScope).toEqual({
+          propertyId: id(3),
+          destinationVersionId: terms.bookingDestinationId,
+          organizationId: id(4),
+          certificationEnvironment: "sandbox",
+          purposes,
+        });
+        return {
+          status: "verified",
+          missing: [],
+          policyVersion: "booking-affiliate-destination-tracking-readiness.v1",
+          evidence: AFFILIATE_TRACKING_PURPOSES.map((purpose, index) => ({
+            purpose,
+            evidenceReference:
+              `booking:affiliate-destination-capability-readiness:${purpose}:` +
+              `${id(100 + index)}:${id(200 + index)}`,
+            validatedAt: new Date().toISOString(),
+          })),
+        };
+      },
+    });
+
+    await expect(publish(fixture.pool(), input(), resolve)).resolves.toMatchObject({ ok: true });
+    const stored = (
+      await fixture
+        .pool()
+        .query("SELECT evidence_references FROM marketplace.affiliate_published_terms")
+    ).rows[0];
+    expect(stored.evidence_references).toEqual([
+      "commercial:conditions:1",
+      ...AFFILIATE_TRACKING_PURPOSES.map(
+        (purpose, index) =>
+          `booking:affiliate-destination-capability-readiness:${purpose}:` +
+          `${id(100 + index)}:${id(200 + index)}`,
+      ),
+    ]);
   });
   it("persists exact disclosure, scope, proof and audit and replays without rechecking proof", async () => {
     const first = await publish(fixture.pool(), input(), ready);

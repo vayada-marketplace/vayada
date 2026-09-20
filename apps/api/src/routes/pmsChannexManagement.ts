@@ -162,6 +162,22 @@ export async function registerPmsChannexManagementRoutes(
       return options.repository.getAlerts(request.params.propertyId);
     },
   );
+  app.get<{ Params: { propertyId: string; alertId: string } }>(
+    "/properties/:propertyId/channex/alerts/:alertId/diagnostics",
+    async (request, reply) => {
+      const { propertyId, alertId } = request.params;
+      enforcePmsChannexPolicy(request, propertyId, "pms.operations.read");
+      reply.header("Cache-Control", "no-store");
+      if (!z.uuid().safeParse(alertId).success || !z.uuid().safeParse(propertyId).success)
+        return reply.code(400).send({ code: "invalid_alert" });
+      if (!options.repository.getAlertDiagnostics)
+        return reply.code(503).send({ code: "diagnostics_unavailable" });
+      return (
+        (await options.repository.getAlertDiagnostics(propertyId, alertId)) ??
+        reply.code(404).send({ code: "alert_not_found" })
+      );
+    },
+  );
   app.post<{ Params: { propertyId: string; alertId: string }; Body: { round?: unknown } }>(
     "/properties/:propertyId/channex/alerts/:alertId/:action",
     async (request, reply) => {

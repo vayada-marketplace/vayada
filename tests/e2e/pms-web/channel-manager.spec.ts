@@ -7,6 +7,37 @@ import {
 } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
+test.beforeEach(async ({ page }) => {
+  const token = "a".repeat(64);
+  await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/pricing-v2`, (route) =>
+    route.fulfill({ json: {
+      currency: "EUR", revision: 1, stale: false,
+      ownerReferences: { finance: `finance.pricing.v2:${token}` },
+      sources: { room: `pms.pricing.rooms.v2:${token}`, terms: `booking.pricing.terms.v2:${token}`, finance: `finance.pricing.source.v2:${token}` },
+      rooms: [{
+        version: "pricing.v2", propertyId: PMS_WEB_PROPERTY_ID, roomTypeId: PMS_WEB_PROPERTY_ID,
+        revision: 1, currency: "EUR", capacity: { total: 2, adults: 2, children: 0 },
+        children: { adultFromAge: 12, bands: [{ fromAge: 0, throughAge: 11, nightlyMinor: "0", countsTowardCapacity: true }] },
+        offers: [{
+          id: "flex", termsRevision: "61000000-0000-4000-8000-000000000002",
+          meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
+          price: { kind: "independent", calendar: { base: { mode: "flat", amountMinor: "10000" }, months: [], seasons: [], weekdays: [], dates: [] } },
+          restrictions: { kind: "own", rules: { minArrivalNights: 1, maxStayNights: null, closedToArrival: false, closedToDeparture: false, stopSell: false }, seasons: [], dates: [] },
+        }],
+      }],
+    } }),
+  );
+  await page.route("**/api/identity/staff/self-access", (route) =>
+    route.fulfill({
+      json: {
+        membershipId: "test-owner",
+        roleKey: "hotel_owner",
+        permissions: ["pms.operations.read", "pms.operations.manage"],
+      },
+    }),
+  );
+});
+
 const routeBase = `**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/channex`;
 
 test("shows guarded target state and disables observe-only controls", async ({
@@ -227,4 +258,73 @@ test("guides mapping recovery and keeps seen or queued alerts open", async ({ pa
     fullPage: true,
   });
   await healthy();
+});
+
+test("reads diagnostic evidence for alerts without triggering recovery", async ({ page }) => {
+  await mockPmsWebAuthenticatedSession(page);
+  await mockPmsWebTargetRoutes(page);
+  const events = ["non_acked_booking", "rate_error", "disconnected_channel"];
+  const alerts = events.map((eventType, index) => ({
+    id: `diagnostic-${index}`,
+    eventType,
+    impact: {},
+    firstOccurredAt: "2026-09-17T10:00:00Z",
+    lastOccurredAt: "2026-09-17T10:00:00Z",
+    acknowledgedAt: null,
+    resolvedAt: null,
+    recoveryRound: 1,
+    occurrences: 1,
+    recovery: [],
+  }));
+  let writes = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/channex/") && request.method() !== "GET") writes++;
+  });
+  await page.route(`${routeBase}/alerts`, (route) => route.fulfill({ json: alerts }));
+  let fail = false;
+  await page.route(`${routeBase}/alerts/*/diagnostics`, (route) => {
+    if (fail) return route.fulfill({ status: 503, json: { code: "diagnostics_unavailable" } });
+    const alertId = route.request().url().split("/").at(-2);
+    return route.fulfill({
+      json: {
+        alertId,
+        recoveryRound: 1,
+        observedAt: "2026-09-17T10:05:00Z",
+        newerOccurrence: false,
+        linkedJobCount: 1,
+        latestReceipt: {
+          receiptId: "receipt-reference",
+          occurredAt: "2026-09-17T10:00:00Z",
+          receivedAt: "2026-09-17T10:00:01Z",
+        },
+        recovery: [
+          {
+            jobId: "job-reference",
+            operation: "sync_ari",
+            status: "dead_lettered",
+            updatedAt: "2026-09-17T10:01:00Z",
+            attemptsMade: 1,
+            failure: "A required room or rate mapping is missing.",
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/channel-manager");
+  const cards = page.getByRole("region", { name: "Channel alerts" }).locator("article");
+  await expect(cards).toHaveCount(3);
+  for (const card of await cards.all()) {
+    await card.getByText("Diagnostic details", { exact: true }).click();
+    await expect(card.getByText("A required room or rate mapping is missing.")).toBeVisible();
+    await expect(card.getByText(/These do not confirm current delivery/)).toBeVisible();
+    await expect(card.getByText(/Receipt reference: receipt-reference/)).toBeVisible();
+  }
+  fail = true;
+  await cards.first().getByRole("button", { name: "Refresh evidence" }).click();
+  await expect(cards.first().getByText(/Diagnostic details are unavailable/)).toBeVisible();
+  await expect(cards.first().getByText("A required room or rate mapping is missing.")).toHaveCount(
+    0,
+  );
+  await expect(page.getByText("Recovery verified", { exact: true })).toHaveCount(0);
+  expect(writes).toBe(0);
 });

@@ -1,3 +1,4 @@
+import { registerPmsBookingChangeRequestRoutes } from "./routes/pmsBookingChangeRequests.js";
 import {
   registerBookingGuestChoiceRoutes,
   type BookingGuestChoiceRoutesOptions,
@@ -8,6 +9,10 @@ import {
 } from "./routes/replacementPricing.js";
 import type { AffiliateAssentRepository } from "./domains/marketplaceAffiliateAssentRepository.js";
 import { registerMarketplaceAffiliateAssentRoutes } from "./routes/marketplaceAffiliateAssent.js";
+import {
+  registerChannexOfferPreviewRoutes,
+  type ChannexOfferPreviewRoutesOptions,
+} from "./routes/channexOfferPreview.js";
 import {
   registerAirbnbImportRoutes,
   type AirbnbImportRoutesOptions,
@@ -154,6 +159,10 @@ import {
   type MarketplaceHotelCollaborationPreferencesRoutesOptions,
 } from "./routes/marketplaceHotelCollaborationPreferences.js";
 import {
+  registerMarketplaceCommunicationPreferencesRoutes,
+  type MarketplaceCommunicationPreferencesRoutesOptions,
+} from "./routes/marketplaceCommunicationPreferences.js";
+import {
   registerBookingDesignRoutes,
   type BookingDesignRoutesOptions,
 } from "./routes/bookingDesign.js";
@@ -202,6 +211,8 @@ import {
 import { registerFinanceSubscriptionRoutes } from "./routes/financeSubscriptions.js";
 import { registerFinanceExpenseRoutes } from "./routes/financeExpenses.js";
 import { registerFinanceFolioRoutes } from "./routes/financeFolios.js";
+import { registerFinanceDashboardRoutes } from "./routes/financeDashboard.js";
+import { registerFinanceProfitLossRoutes } from "./routes/financeProfitLoss.js";
 import { registerFinanceRevenueRoutes } from "./routes/financeRevenue.js";
 import { registerFinanceBankTransferRoutes } from "./routes/financeBankTransfer.js";
 import {
@@ -354,6 +365,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   pmsCalendarAutoOpenSettings?: PmsCalendarAutoOpenSettingsPort;
   pmsRoomPublication?: PmsRoomPublicationRoutesOptions;
   replacementPricing?: ReplacementPricingRoutesOptions;
+  channexOfferPreview?: ChannexOfferPreviewRoutesOptions;
   pmsPricing?: PmsPricingRoutesOptions;
   pmsRecurringPricing?: PmsRecurringPricingRoutesOptions;
   pmsMandatoryChargeConfirmation?: PmsMandatoryChargeConfirmationRoutesOptions;
@@ -416,6 +428,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceSubmission?: MarketplaceSubmissionRoutesOptions;
   marketplacePublicHotel?: MarketplacePublicHotelRoutesOptions;
   marketplaceHotelCollaborationPreferences?: MarketplaceHotelCollaborationPreferencesRoutesOptions;
+  marketplaceCommunicationPreferences?: MarketplaceCommunicationPreferencesRoutesOptions;
   bookingDesign?: BookingDesignRoutesOptions;
   bookingDesignReadiness?: BookingDesignReadinessRoutesOptions;
   propertySetupDraftCommandRepository?: PropertySetupDraftCommandRepository;
@@ -448,6 +461,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   financeOtaCommissionSettingsRepository?: Parameters<typeof registerOtaSettings>[1]["repository"];
   financeExpenses?: Parameters<typeof registerFinanceExpenseRoutes>[1];
   financeFolios?: Parameters<typeof registerFinanceFolioRoutes>[1];
+  financeDashboard?: Parameters<typeof registerFinanceDashboardRoutes>[1];
+  financeProfitLoss?: Parameters<typeof registerFinanceProfitLossRoutes>[1];
   financeRevenue?: Parameters<typeof registerFinanceRevenueRoutes>[1];
   financeBankTransfer?: Parameters<typeof registerFinanceBankTransferRoutes>[1];
   pmsFinanceCompatibilityRepository?: PmsFinanceCompatibilityRoutesOptions["repository"];
@@ -464,6 +479,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     },
     trustProxy: options.trustProxy ?? false,
     disableRequestLogging: (request) =>
+      request.url.startsWith("/api/marketplace/communication-unsubscribe") ||
       request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
       (request.url.startsWith("/api/pms/properties/") &&
         request.url.split("?", 1)[0]?.endsWith("/messaging/threads") === true),
@@ -768,6 +784,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.marketplaceHotelCollaborationPreferences,
     });
   }
+  if (options.marketplaceCommunicationPreferences) {
+    app.register(registerMarketplaceCommunicationPreferencesRoutes, {
+      prefix: "/api/marketplace",
+      ...options.marketplaceCommunicationPreferences,
+    });
+  }
   if (options.bookingDesign) {
     app.register(registerBookingDesignRoutes, {
       prefix: "/api/booking",
@@ -869,6 +891,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
+  if (
+    options.pmsOperationsRepository &&
+    options.bookingChangeRequestRepository &&
+    options.auth?.propertyAccessRepository
+  ) {
+    app.register(registerPmsBookingChangeRequestRoutes, {
+      prefix: "/api/pms",
+      repository: options.bookingChangeRequestRepository,
+      propertyAccessRepository: options.auth.propertyAccessRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins ?? [],
+    });
+  }
   if (options.pmsOperationsRepository) {
     app.register(registerPmsOperationsRoutes, {
       prefix: "/api/pms",
@@ -916,6 +950,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.pmsRoomPublication,
     });
   }
+  if (options.channexOfferPreview)
+    app.register(registerChannexOfferPreviewRoutes, {
+      prefix: "/api/pms",
+      ...options.channexOfferPreview,
+    });
   if (options.replacementPricing)
     app.register(registerReplacementPricingRoutes, {
       prefix: "/api/pms",
@@ -1058,6 +1097,23 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.financeRevenue,
       propertyAccessRepository:
         options.auth?.propertyAccessRepository ?? options.financeRevenue.propertyAccessRepository,
+    });
+  }
+  if (options.financeDashboard) {
+    app.register(registerFinanceDashboardRoutes, {
+      prefix: "/api",
+      ...options.financeDashboard,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ?? options.financeDashboard.propertyAccessRepository,
+    });
+  }
+  if (options.financeProfitLoss) {
+    app.register(registerFinanceProfitLossRoutes, {
+      prefix: "/api",
+      ...options.financeProfitLoss,
+      propertyAccessRepository:
+        options.auth?.propertyAccessRepository ??
+        options.financeProfitLoss.propertyAccessRepository,
     });
   }
   if (options.financeBankTransfer) {

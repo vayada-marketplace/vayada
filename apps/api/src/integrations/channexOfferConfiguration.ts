@@ -1,0 +1,244 @@
+import { isDeepStrictEqual } from "node:util";
+import { parsePricingConfiguration, pricingObject } from "@vayada/domain-pms";
+import { ChannexMealSyncError, verifyChannexMealReadback } from "./channexMealSync.js";
+
+/** Closed configuration fragment, not an HTTP request or a capability/send permit.
+ * Daily prices and restrictions must be verified separately before opening sales.
+ */
+export function planChannexOfferConfiguration(
+  room: unknown,
+  offerId: string,
+  primaryOccupancy: number,
+) {
+  const unavailable = (reason: string) => ({ kind: "unavailable" as const, reason });
+  const configuration = parsePricingConfiguration(room);
+  if (!configuration) return unavailable("invalid_configuration");
+  const offer = configuration.offers.find((offer) => offer.id === offerId);
+  if (!offer) return unavailable("selection_unavailable");
+  const capacity = configuration.capacity.adults;
+  if (
+    !Number.isSafeInteger(primaryOccupancy) ||
+    primaryOccupancy < 1 ||
+    primaryOccupancy > capacity
+  )
+    return unavailable("invalid_primary_occupancy");
+  if (configuration.capacity.children > 0) return unavailable("child_representation_unavailable");
+  // Same local work ceiling as the nightly candidate adapter, not provider capability.
+  if (capacity > 100) return unavailable("candidate_limit");
+  return {
+    kind: "planned" as const,
+    configuration: {
+      sell_mode: "per_person" as const,
+      rate_mode: "manual" as const,
+      parent_rate_plan_id: null,
+      inherit_rate: false,
+      currency: configuration.currency,
+      meal_type: offer.meal.kind,
+      options: Array.from({ length: capacity }, (_, index) => ({
+        occupancy: index + 1,
+        is_primary: index + 1 === primaryOccupancy,
+      })),
+      stop_sell: Array<boolean>(7).fill(true),
+    },
+  };
+}
+
+/** Metadata observation only: default closure is not daily ARI or activation proof. */
+export async function verifyChannexOfferConfiguration(
+  room: unknown,
+  offerId: string,
+  primaryOccupancy: number,
+  identity: { externalPropertyId: string; externalRoomTypeId: string; externalRatePlanId: string },
+  request: (method: "GET", path: string) => Promise<unknown>,
+) {
+  const plan = planChannexOfferConfiguration(room, offerId, primaryOccupancy);
+  if (plan.kind !== "planned") throw new ChannexMealSyncError(plan.reason);
+  const expected = plan.configuration;
+  const scope = { ...identity };
+  const observed = await verifyChannexMealReadback(
+    scope.externalPropertyId,
+    { ...scope, mealType: expected.meal_type },
+    async (method, path) => {
+      const response = structuredClone(await request(method, path));
+      requireCleanMetadata(response);
+      const data = record(record(response).data);
+      const attributes = record(data.attributes);
+      const parentRelationship = record(data.relationships).parent_rate_plan;
+      const parent = record(parentRelationship).data;
+      const options = attributes.options;
+      const mismatch = () => {
+        throw new ChannexMealSyncError("Channex offer configuration readback mismatch");
+      };
+      let parentAbsenceVerified = attributes.parent_rate_plan_id === null || parent === null;
+      if (attributes.parent_rate_plan_id === undefined && parentRelationship === undefined) {
+        // Channex's detail response omits an absent parent; options exposes explicit null.
+        const optionsResponse = record(
+          await request(
+            "GET",
+            `/api/v1/rate_plans/options?filter[property_id]=${encodeURIComponent(scope.externalPropertyId)}`,
+          ),
+        );
+        requireCleanMetadata(optionsResponse);
+        if (!Array.isArray(optionsResponse.data)) mismatch();
+        const matches = (optionsResponse.data as unknown[]).filter(
+          (raw) => record(raw).id === scope.externalRatePlanId,
+        );
+        const match = record(matches[0]),
+          details = record(match.attributes);
+        parentAbsenceVerified =
+          matches.length === 1 &&
+          match.type === "rate_plan" &&
+          details.id === scope.externalRatePlanId &&
+          details.property_id === scope.externalPropertyId &&
+          details.room_type_id === scope.externalRoomTypeId &&
+          details.parent_rate_plan_id === null &&
+          details.currency === expected.currency &&
+          details.sell_mode === expected.sell_mode;
+      }
+      if (
+        attributes.sell_mode !== expected.sell_mode ||
+        attributes.rate_mode !== expected.rate_mode ||
+        attributes.currency !== expected.currency ||
+        attributes.inherit_rate !== false ||
+        attributes.inherit_stop_sell !== false ||
+        attributes.auto_rate_settings !== null ||
+        !parentAbsenceVerified ||
+        (attributes.parent_rate_plan_id !== undefined && attributes.parent_rate_plan_id !== null) ||
+        (parentRelationship !== undefined && parent !== null) ||
+        (attributes.id !== undefined && attributes.id !== scope.externalRatePlanId) ||
+        !Array.isArray(attributes.stop_sell) ||
+        attributes.stop_sell.length !== 7 ||
+        !Array.from(attributes.stop_sell).every((closed) => closed === true) ||
+        !Array.isArray(options) ||
+        options.length !== expected.options.length
+      )
+        mismatch();
+      // Compare by occupancy: provider ordering and unrelated option metadata may differ.
+      // Manual non-primary options can expose an empty derivation container.
+      // Accept only that observed shape with explicit independent pricing.
+      const remaining = new Map(
+        expected.options.map((option) => [option.occupancy, option.is_primary]),
+      );
+      for (const raw of options as unknown[]) {
+        const option = record(raw);
+        const occupancy = option.occupancy as number;
+        if (
+          !remaining.has(occupancy) ||
+          option.is_primary !== remaining.get(occupancy) ||
+          (option.inherit_rate !== undefined && option.inherit_rate !== false) ||
+          (option.derived_option !== null &&
+            !(
+              option.is_primary === false &&
+              option.inherit_rate === false &&
+              isDeepStrictEqual(option.derived_option, { rate: [] })
+            ))
+        )
+          mismatch();
+        remaining.delete(occupancy);
+      }
+      return response;
+    },
+  );
+  return { ...observed, configuration: expected };
+}
+
+/** Room metadata only; not current job authority, rate-primary selection or OTA proof. */
+export async function verifyChannexOfferRoom(
+  room: unknown,
+  identity: { externalPropertyId: string; externalRoomTypeId: string },
+  request: (method: "GET", path: string) => Promise<unknown>,
+) {
+  const configuration = parsePricingConfiguration(room);
+  if (!configuration || configuration.capacity.children !== 0)
+    throw new ChannexMealSyncError("Channex adult room configuration unavailable");
+  const expected = {
+    externalPropertyId: identity?.externalPropertyId,
+    externalRoomTypeId: identity?.externalRoomTypeId,
+    adults: configuration.capacity.adults,
+  };
+  if (
+    ![expected.externalPropertyId, expected.externalRoomTypeId].every(
+      (id) => typeof id === "string" && id.length > 0 && id === id.trim(),
+    )
+  )
+    throw new ChannexMealSyncError("Invalid Channex room identity");
+  const response = structuredClone(
+    await request("GET", `/api/v1/room_types/${encodeURIComponent(expected.externalRoomTypeId)}`),
+  );
+  requireCleanMetadata(response);
+  const data = record(record(response).data);
+  const attributes = record(data.attributes);
+  const propertyRelationship = record(data.relationships).property;
+  const relatedProperty = record(record(propertyRelationship).data).id;
+  if (
+    data.type !== "room_type" ||
+    data.id !== expected.externalRoomTypeId ||
+    (attributes.id !== undefined && attributes.id !== expected.externalRoomTypeId) ||
+    (attributes.property_id !== expected.externalPropertyId &&
+      relatedProperty !== expected.externalPropertyId) ||
+    (attributes.property_id !== undefined &&
+      attributes.property_id !== expected.externalPropertyId) ||
+    (propertyRelationship !== undefined && relatedProperty !== expected.externalPropertyId) ||
+    attributes.room_kind !== "room" ||
+    attributes.capacity !== null ||
+    attributes.occ_adults !== expected.adults ||
+    attributes.occ_children !== 0 ||
+    attributes.occ_infants !== 0
+  )
+    throw new ChannexMealSyncError("Channex room identity or adult capacity mismatch");
+  return { ...expected, children: 0 as const, infants: 0 as const, roomKind: "room" as const };
+}
+
+/** Creation identity observation only, not configuration/ARI acceptance. */
+export function readChannexCreatedRateIdentity(response: unknown) {
+  const data = record(record(response).data),
+    attributes = record(data.attributes);
+  const relationships = record(data.relationships);
+  const valid = (id: unknown): id is string =>
+    typeof id === "string" && id.length > 0 && id === id.trim();
+  const mismatch = () => {
+    throw new ChannexMealSyncError("Invalid Channex creation identity");
+  };
+  const scopedId = (attribute: string, relationship: string) => {
+    const direct = attributes[attribute],
+      relation = relationships[relationship];
+    const related = record(record(relation).data).id,
+      value = direct ?? related;
+    if (
+      !valid(value) ||
+      (direct !== undefined && direct !== value) ||
+      (relation !== undefined && related !== value)
+    )
+      return mismatch();
+    return value;
+  };
+  if (
+    data.type !== "rate_plan" ||
+    !valid(data.id) ||
+    (attributes.id !== undefined && attributes.id !== data.id)
+  )
+    return mismatch();
+  return {
+    externalRatePlanId: data.id,
+    externalPropertyId: scopedId("property_id", "property"),
+    externalRoomTypeId: scopedId("room_type_id", "room_type"),
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function requireCleanMetadata(response: unknown) {
+  if (
+    !pricingObject(response) ||
+    Object.hasOwn(response, "errors") ||
+    Object.hasOwn(response, "warnings") ||
+    (response.meta !== undefined &&
+      (!pricingObject(response.meta) ||
+        (response.meta.warnings !== undefined && !isDeepStrictEqual(response.meta.warnings, []))))
+  )
+    throw new ChannexMealSyncError("Channex metadata response ambiguous");
+}

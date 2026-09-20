@@ -75,6 +75,14 @@ Invalid state/payload and provider rejection are non-retryable. Exhausted or
 non-retryable jobs create `platform.dead_letter_events` and an audit-visible
 failure outcome.
 
+Retained room-availability writes are reconciled from storage before another
+room/date can be claimed. Reconciliation derives the property from the current
+worker lease, processes at most ten oldest clean receipts per continuation, and
+performs no provider read for missing or non-clean receipt evidence.
+After pricing uploads are current, each unrestricted ARI continuation sends at
+most one current room/date availability value. Its retained receipt schedules
+the next bounded continuation; restrictions-only jobs do not enter this lane.
+
 Manual ARI and booking sync are commands, not inline work. Booking sync wakes
 the pull/feed-owned ingestion path; it does not implement webhook receipt
 promotion. Markup changes persist target PMS state and enqueue provisioning/ARI

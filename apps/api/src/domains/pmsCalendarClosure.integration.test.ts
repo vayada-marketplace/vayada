@@ -291,7 +291,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           keyHash: "d".repeat(64),
           requestId: "closure-test",
         },
-        { calendarRevision: 2, cutoffDate: "2026-08-05", phase: "publication_refresh_required" },
+        {
+          calendarRevision: 2,
+          cutoffDate: "2026-08-05",
+          coverageThroughExclusive: "2026-08-07",
+          phase: "publication_refresh_required",
+        },
         new Date("2026-08-05T10:00:00.000Z"),
       );
       expect(
@@ -302,6 +307,26 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL room closure calendar fence", ()
           )
         ).rows[0].count,
       ).toBe(1);
+      expect(
+        (
+          await admin.query(
+            `SELECT payload FROM platform.outbox_events
+             WHERE domain_event_id=$1 AND destination='pms.channel-manager'
+               AND event_type='pms.inventory.ari_changed'`,
+            [events.domainEventId],
+          )
+        ).rows,
+      ).toEqual([
+        {
+          payload: {
+            propertyId,
+            roomTypeId: roomTypeA,
+            coverageFrom: "2026-08-05",
+            coverageThroughExclusive: "2026-08-07",
+            reason: "room_closure",
+          },
+        },
+      ]);
       await seedChannelConnection();
       await admin.query("SAVEPOINT incomplete");
       await admin.query(

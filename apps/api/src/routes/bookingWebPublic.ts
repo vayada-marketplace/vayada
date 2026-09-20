@@ -1355,8 +1355,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
-  /** Keep false until replacement acceptance is ready for public checkout traffic. */
-  replacementPricingAcceptanceEnabled?: boolean;
+  /** Empty by default; use only for explicitly approved synthetic/public rollout slugs. */
+  replacementPricingAcceptanceAllowedSlugs?: readonly string[];
   externalChanges: ExternalChangePresentationPort;
   /** Register only with the reviewed provider runtime; absent keeps Airbnb actions disabled. */
   airbnbAlterations?: {
@@ -1990,7 +1990,7 @@ export function createTargetBookingWebCheckoutAdapter(
       return disclosure;
     },
     async acceptPricingQuote(slug, request) {
-      if (!config.replacementPricingAcceptanceEnabled)
+      if (!config.replacementPricingAcceptanceAllowedSlugs?.includes(slug))
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
         return await writePricingAcceptance(pool, { slug, command: request });

@@ -43,6 +43,27 @@ const financeFolioKmsEnv = {
 };
 
 describe("api config", () => {
+  it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
+    const keys = {
+      "key-1": Buffer.alloc(32, 1).toString("base64url"),
+      "key-2": Buffer.alloc(32, 2).toString("base64url"),
+    };
+    const config = (current = "key-2", encoded = JSON.stringify(keys)) =>
+      loadConfig({
+        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: current,
+        MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_KEYS_JSON: encoded,
+      });
+    expect(config().marketplaceCommunicationUnsubscribe).toEqual({
+      currentKeyVersion: "key-2",
+      keys,
+    });
+    expect(() =>
+      loadConfig({ MARKETPLACE_COMMUNICATION_UNSUBSCRIBE_CURRENT_KEY_VERSION: "key-2" }),
+    ).toThrow("Incomplete Marketplace communication unsubscribe signing config");
+    expect(() => config("missing")).toThrow("signing keys are invalid");
+    expect(() => config("key-2", "not-json")).toThrow("must be valid JSON");
+  });
+
   it("parses a review-only webhook override without changing other intake modes", () => {
     expect(loadConfig({}).providerWebhooks.channexReviewMode).toBeUndefined();
     const config = loadConfig({ CHANNEX_REVIEW_WEBHOOK_INTAKE_MODE: "mutating" });
@@ -646,6 +667,23 @@ describe("api config", () => {
       }),
     ).toThrow(
       "apps/api no longer supports legacy Python integration envs: BOOKING_PUBLIC_API_URL, PMS_API_URL, PMS_PUBLIC_API_URL",
+    );
+  });
+
+  it("loads a canonical replacement-pricing acceptance slug allowlist", () => {
+    expect(
+      loadConfig({
+        REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "Test-Hotel, other-hotel,test-hotel",
+      }).replacementPricingAcceptanceAllowedSlugs,
+    ).toEqual(["test-hotel", "other-hotel"]);
+    expect(loadConfig({}).replacementPricingAcceptanceAllowedSlugs).toEqual([]);
+  });
+
+  it("rejects malformed replacement-pricing acceptance slugs", () => {
+    expect(() =>
+      loadConfig({ REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS: "test-hotel,*.vayada.com" }),
+    ).toThrow(
+      "REPLACEMENT_PRICING_ACCEPTANCE_ALLOWED_SLUGS requires up to 100 canonical lowercase slugs",
     );
   });
 

@@ -1,0 +1,26 @@
+{
+  "next-target-backend": {
+    "appPath": "apps/api",
+    "ecrRepository": "vayada-next-api"
+  },
+  "next-pms-frontend": {
+    "appPath": "apps/pms-web",
+    "ecrRepository": "vayada-next-pms-frontend"
+  },
+  "next-booking-frontend": {
+    "appPath": "apps/booking-web",
+    "ecrRepository": "vayada-next-booking-frontend"
+  },
+  "next-booking-admin": {
+    "appPath": "apps/booking-admin",
+    "ecrRepository": "vayada-next-booking-admin-frontend"
+  },
+  "next-marketplace-frontend": {
+    "appPath": "apps/marketplace-web",
+    "ecrRepository": "vayada-next-marketplace-frontend"
+  },
+  "next-marketplace-admin": {
+    "appPath": "apps/vayada-admin",
+    "ecrRepository": "vayada-next-admin-frontend"
+  }
+}

@@ -62,6 +62,8 @@ function Policy({ terms }: { terms: ReplacementOfferTerms }) {
       <p>Deposit: {payment.basisPoints / 100}% of the final total. Balance due {payment.balanceDaysBeforeArrival} days before arrival.</p>
       <p>Deposit collection is not enabled by displaying this policy.</p>
     </>}
+    {payment.acceptedMethods?.length ? <p>Accepted payment methods: {payment.acceptedMethods.map((method) => method === "card" ? "card online" : "pay at property").join(", ")}.</p>
+      : <p className="text-amber-900">No accepted payment method is saved; this offer cannot be booked.</p>}
     <p className="text-xs text-gray-500">Policy settings only; this does not calculate a cancellation refund.</p>
   </div>;
 }

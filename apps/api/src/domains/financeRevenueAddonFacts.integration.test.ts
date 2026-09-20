@@ -67,9 +67,11 @@ describe.skipIf(!DB_URL)("PostgreSQL Finance add-on revenue facts", () => {
   it("returns scoped ownership revenue, dated adjustments, attach facts, and evidence gaps", async () => {
     const result = await read.read({ propertyId: P.toUpperCase(), currency: "EUR", periods: periods() });
     expect(result.rows).toEqual([
-      { period: "comparison", ownership: "property", revenueAmount: "80.0000" },
-      { period: "current", ownership: "partner", revenueAmount: "3.1200" },
-      { period: "current", ownership: "property", revenueAmount: "140.0000" },
+      { period: "comparison", recognizedOn: "2026-07-29", ownership: "property", revenueAmount: "80.0000" },
+      { period: "current", recognizedOn: "2026-08-01", ownership: "property", revenueAmount: "100.0000" },
+      { period: "current", recognizedOn: "2026-08-02", ownership: "partner", revenueAmount: "3.7500" },
+      { period: "current", recognizedOn: "2026-08-02", ownership: "property", revenueAmount: "40.0000" },
+      { period: "current", recognizedOn: "2026-08-03", ownership: "partner", revenueAmount: "-0.6300" },
     ]);
     expect(result.fulfilledBookings).toEqual({ current: 2, comparison: 1 });
     expect(result.sourceFreshness).toEqual({ bookingAddonRevenueThrough: "2026-08-03", bookingAddonRevenueAt: "2026-08-05T14:00:00.000Z" });

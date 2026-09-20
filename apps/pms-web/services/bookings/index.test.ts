@@ -601,7 +601,7 @@ describe("PMS booking date-change requests", () => {
       status: "approved",
     });
     expect(mocks.get).toHaveBeenCalledWith(
-      "/api/booking/hotels/property-1/reservations/booking-1/change-request",
+      "/api/pms/properties/property-1/reservations/booking-1/change-request",
       expect.any(Object),
     );
   });
@@ -621,7 +621,7 @@ describe("PMS booking date-change requests", () => {
     ).resolves.toMatchObject({ status: "declined", declineReason: "Dates are closed" });
 
     expect(mocks.post.mock.calls[0]?.[0]).toBe(
-      "/api/booking/hotels/property-1/reservations/booking-1/change-request/change-1/accept",
+      "/api/pms/properties/property-1/reservations/booking-1/change-request/change-1/accept",
     );
     expect(mocks.post.mock.calls[0]?.[2]).toMatchObject({
       headers: expect.objectContaining({
@@ -629,7 +629,7 @@ describe("PMS booking date-change requests", () => {
       }),
     });
     expect(mocks.post.mock.calls[1]?.[0]).toBe(
-      "/api/booking/hotels/property-1/reservations/booking-1/change-request/change-1/decline",
+      "/api/pms/properties/property-1/reservations/booking-1/change-request/change-1/decline",
     );
     expect(mocks.post.mock.calls[1]?.[1]).toMatchObject({ reason: "Dates are closed" });
     expect(mocks.post.mock.calls[1]?.[2]).toMatchObject({

@@ -9,6 +9,7 @@ import {
 } from "./operatingCalendar.js";
 import {
   planPmsInventoryMaterialization,
+  isPmsInventoryDayConsistent,
   type PmsInventoryMaterializationPlannerInput,
 } from "./inventoryMaterializationPlanner.js";
 import type { PmsInventoryDaySnapshot } from "./inventoryMaterialization.js";
@@ -107,6 +108,24 @@ function currentDay(
 }
 
 describe("PMS inventory materialization planner", () => {
+  it("validates owned daily availability without filling missing or inconsistent values", () => {
+    const binding = configuration.sourceInputs.roomBindings[0]!;
+    const closed = currentDay(ROOM_A, "2026-12-19");
+    expect(isPmsInventoryDayConsistent(closed, binding)).toBe(true);
+    expect(isPmsInventoryDayConsistent({ ...closed, availableCount: 1 }, binding)).toBe(false);
+    expect(isPmsInventoryDayConsistent(undefined, binding)).toBe(false);
+    expect(isPmsInventoryDayConsistent({ ...closed, roomTypeId: ROOM_B }, binding)).toBe(false);
+    expect(isPmsInventoryDayConsistent({ ...closed, inventoryRevision: null }, binding)).toBe(
+      false,
+    );
+    const open = currentDay(ROOM_A, "2026-12-20", {
+      assignedCount: 2,
+      blockedCount: 1,
+      availableCount: 5,
+    });
+    expect(isPmsInventoryDayConsistent(open, binding)).toBe(true);
+    expect(isPmsInventoryDayConsistent({ ...open, availableCount: 6 }, binding)).toBe(false);
+  });
   it("materializes newly configured rooms without losing existing reservations", () => {
     const previousConfiguration = {
       ...configuration,

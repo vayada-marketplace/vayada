@@ -42,6 +42,8 @@ const organizationId = uuid(1),
 const otherPropertyId = uuid(4),
   roomTypeId = uuid(5),
   roomIds = [uuid(6), uuid(7), uuid(9)];
+const otherRoomTypeId = uuid(10),
+  otherRoomId = uuid(11);
 const addonId = uuid(8);
 const acceptedAt = new Date("2026-08-12T22:30:00.000Z");
 
@@ -104,15 +106,18 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     await admin.query(
       `INSERT INTO pms.room_types (
          id, property_id, name, occupancy_limits, base_rate_amount, currency
-       ) VALUES ($1::uuid, $2::uuid, 'Studio', '{"adults":4,"children":4,"total":4}', 100, 'EUR')`,
-      [roomTypeId, propertyId],
+       ) VALUES
+         ($1::uuid, $3::uuid, 'Studio', '{"adults":4,"children":4,"total":4}', 100, 'EUR'),
+         ($2::uuid, $3::uuid, 'Suite', '{"adults":4,"children":4,"total":4}', 150, 'EUR')`,
+      [roomTypeId, otherRoomTypeId, propertyId],
     );
     await admin.query(
       `INSERT INTO pms.rooms (id, property_id, room_type_id, room_number,operational_label_status)
        VALUES ($1::uuid, $3::uuid, $4::uuid, '101','verified'),
               ($2::uuid, $3::uuid, $4::uuid, '102','verified'),
-              ($5::uuid, $3::uuid, $4::uuid, '103','verified')`,
-      [roomIds[0], roomIds[1], propertyId, roomTypeId, roomIds[2]],
+              ($5::uuid, $3::uuid, $4::uuid, '103','verified'),
+              ($6::uuid, $3::uuid, $7::uuid, '201','verified')`,
+      [roomIds[0], roomIds[1], propertyId, roomTypeId, roomIds[2], otherRoomId, otherRoomTypeId],
     );
     await seedInventory();
     await admin.query(
@@ -149,6 +154,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       ...created,
       outcome: "replayed",
     });
+    await expectOccupiedAriEvents(input, "manual_booking_created", [
+      [roomTypeId, "2027-01-01", "2027-01-04"],
+    ]);
 
     const stored = await admin.query(
       `SELECT booking.expected_payment_method AS method, booking.payment_status AS payment,
@@ -288,12 +296,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       to: "2027-01-03",
     });
     expect(
-      calendar.items.map(({ stayDate, assignedCount, availableCount, assignmentRefs }) => [
-        stayDate,
-        assignedCount,
-        availableCount,
-        assignmentRefs,
-      ]),
+      calendar.items
+        .filter((day) => day.roomTypeId === roomTypeId)
+        .map(({ stayDate, assignedCount, availableCount, assignmentRefs }) => [
+          stayDate,
+          assignedCount,
+          availableCount,
+          assignmentRefs,
+        ]),
     ).toEqual([
       ["2027-01-01", 1, 2, [projection!.assignments[0]!.assignmentId]],
       ["2027-01-02", 2, 1, projection!.assignments.map(({ assignmentId }) => assignmentId)],
@@ -332,7 +342,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       booking: "1",
       nightly: "4",
       payment: "0",
-      outbox: "4",
+      outbox: "5",
       audit: "1",
       commands: "1",
     });
@@ -360,6 +370,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       ok: true,
       replayed: true,
     });
+    await expectOccupiedAriEvents(noShow, "manual_booking_no_show", [
+      [roomTypeId, "2026-08-10", "2026-08-13"],
+    ]);
     await expect(
       operations.executeNoShowCommand({ ...noShow, reason: "changed" }),
     ).resolves.toMatchObject({ ok: false, code: "idempotency_conflict" });
@@ -550,6 +563,10 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       ok: true,
       replayed: true,
     });
+    await expectOccupiedAriEvents(correction, "manual_booking_stay_corrected", [
+      [roomTypeId, "2026-08-20", "2026-08-22"],
+      [roomTypeId, "2026-08-23", "2026-08-25"],
+    ]);
     await expect(
       operations.correctManualBookingStays!({ ...correction, accountingDate: "2026-08-22" }),
     ).resolves.toMatchObject({ ok: false, code: "idempotency_conflict" });
@@ -653,6 +670,28 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       evidence: 2,
       keys: 0,
     });
+  });
+
+  it("emits exact source and target room-type ranges for a cross-type stay correction", async () => {
+    const created = await repository.createManualBooking(
+      command("cross-type-correction", "unpaid", "cash", "2026-08-20", false),
+    );
+    const correction = await stayCorrection(created.guestBookingId, "cross-type", [
+      { roomId: otherRoomId, checkIn: "2026-08-20" },
+    ]);
+
+    await expect(operations.correctManualBookingStays!(correction)).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(operations.correctManualBookingStays!(correction)).resolves.toMatchObject({
+      ok: true,
+      replayed: true,
+    });
+
+    await expectOccupiedAriEvents(correction, "manual_booking_stay_corrected", [
+      [roomTypeId, "2026-08-20", "2026-08-22"],
+      [otherRoomTypeId, "2026-08-20", "2026-08-22"],
+    ]);
   });
 
   it("fails closed when canonical inventory closes a corrected night", async () => {
@@ -1183,6 +1222,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
       ok: true,
       replayed: true,
     });
+    await expectOccupiedAriEvents(cancellation, "manual_booking_cancelled", [
+      [roomTypeId, "2026-08-20", "2026-08-22"],
+    ]);
     await expect(
       operations.cancelManualBooking!({ ...cancellation, reason: "changed" }),
     ).resolves.toMatchObject({ ok: false, code: "idempotency_conflict" });
@@ -1736,7 +1778,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     await expect(counts()).resolves.toMatchObject({
       booking: "10",
       payment: "5",
-      outbox: "40",
+      outbox: "50",
       audit: "10",
       commands: "10",
     });
@@ -2085,6 +2127,41 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
     return result.rows[0];
   }
 
+  async function occupiedAriEvents(triggerRefId: string) {
+    const result = await admin.query(
+      `SELECT resource_id AS "roomTypeId",payload
+       FROM platform.outbox_events
+       WHERE property_id=$1::uuid AND destination='pms.channel-manager'
+         AND event_type='pms.inventory.ari_changed'
+         AND payload->>'triggerRefId'=$2
+       ORDER BY payload->>'coverageFrom',resource_id`,
+      [propertyId, triggerRefId],
+    );
+    return result.rows;
+  }
+
+  async function expectOccupiedAriEvents(
+    command: { commandId: string; idempotencyKey: string },
+    reason: string,
+    ranges: ReadonlyArray<readonly [string, string, string]>,
+  ) {
+    const inventoryVersion = createHash("sha256").update(command.idempotencyKey).digest("hex");
+    await expect(occupiedAriEvents(command.commandId)).resolves.toEqual(
+      ranges.map(([targetRoomTypeId, coverageFrom, coverageThroughExclusive]) => ({
+        roomTypeId: targetRoomTypeId,
+        payload: {
+          propertyId,
+          roomTypeId: targetRoomTypeId,
+          coverageFrom,
+          coverageThroughExclusive,
+          reason,
+          inventoryVersion,
+          triggerRefId: command.commandId,
+        },
+      })),
+    );
+  }
+
   async function inventory(from: string, to: string) {
     const result = await admin.query(
       `SELECT stay_date::text AS date,assigned_count AS assigned,available_count AS available
@@ -2097,14 +2174,15 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
 
   async function seedInventory() {
     await fixtureQuery(
-      `WITH revision AS (INSERT INTO pms.operating_calendar_revisions (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at) VALUES (gen_random_uuid(),$1,1,'pms-operating-calendar.v1',1,'Europe/Athens','year_round',0,1,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now()) RETURNING property_id,calendar_revision), binding AS (INSERT INTO pms.operating_calendar_room_bindings (property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) SELECT property_id,calendar_revision,$2,1,1,3,3 FROM revision) INSERT INTO pms.inventory_days
+      `WITH revision AS (INSERT INTO pms.operating_calendar_revisions (organization_id,property_id,calendar_revision,contract_version,property_profile_revision,property_time_zone,schedule_mode,recurring_period_count,room_binding_count,default_minimum_stay_nights,idempotency_key_id,domain_event_id,outbox_event_id,created_by_user_id,created_at,updated_at) VALUES (gen_random_uuid(),$1,1,'pms-operating-calendar.v1',1,'Europe/Athens','year_round',0,2,1,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now()) RETURNING property_id,calendar_revision), binding AS (INSERT INTO pms.operating_calendar_room_bindings (property_id,calendar_revision,room_type_id,source_room_facts_revision,source_room_units_revision,physical_capacity_count,starting_sellable_limit_count) SELECT property_id,calendar_revision,room_type_id,1,1,capacity,capacity FROM revision CROSS JOIN (VALUES ($2::uuid,3),($3::uuid,1)) room_type(room_type_id,capacity)) INSERT INTO pms.inventory_days
         (property_id,room_type_id,stay_date,total_count,available_count,calendar_revision,
          inventory_revision,generated_sellable_limit_count,effective_sellable_limit_count,
          generated_source_revision,channel_source_revision,manual_source_revision,
          block_source_revision,booking_source_revision)
-       SELECT $1::uuid,$2::uuid,day,3,3,1,1,3,3,1,0,0,0,0
-       FROM generate_series('2026-08-01'::date,'2027-12-31','1 day') day`,
-      [propertyId, roomTypeId],
+       SELECT $1::uuid,room_type_id,day,capacity,capacity,1,1,capacity,capacity,1,0,0,0,0
+       FROM (VALUES ($2::uuid,3),($3::uuid,1)) room_type(room_type_id,capacity)
+       CROSS JOIN generate_series('2026-08-01'::date,'2027-12-31','1 day') day`,
+      [propertyId, roomTypeId, otherRoomTypeId],
     );
   }
 
@@ -2149,10 +2227,11 @@ describe.skipIf(!TEST_DATABASE_URL)("target manual-booking PostgreSQL transactio
         await admin.query(sql, [propertyId]);
       await admin.query(
         `UPDATE pms.inventory_days SET status='open',manual_sellable_limit_count=NULL,
-           effective_sellable_limit_count=3,assigned_count=0,available_count=3,
+           effective_sellable_limit_count=CASE WHEN room_type_id=$2::uuid THEN 1 ELSE 3 END,
+           assigned_count=0,available_count=CASE WHEN room_type_id=$2::uuid THEN 1 ELSE 3 END,
            inventory_revision=1,booking_source_revision=0
          WHERE property_id=$1::uuid`,
-        [propertyId],
+        [propertyId, otherRoomTypeId],
       );
       if (full) {
         await admin.query("DELETE FROM pms.inventory_days WHERE property_id = $1::uuid", [

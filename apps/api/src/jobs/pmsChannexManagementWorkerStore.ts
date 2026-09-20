@@ -1,16 +1,17 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { CHANNEX_JOB_LEASE_MS as LEASE_MS } from "./pmsChannexPricingJobLease.js";
 
 import type { PmsChannexManagementCommandInput } from "../domains/pmsChannexManagementCommands.js";
 import { PMS_CHANNEX_MANAGEMENT_QUEUE } from "../domains/pmsChannexManagementReadModel.js";
 import type {
   ChannexManagementJob,
   ChannexManagementProviderFailure,
+  ChannexManagementProviderProgress,
   ChannexManagementProviderSuccess,
   ChannexManagementWorkerStore,
 } from "./pmsChannexManagementWorker.js";
 
-const LEASE_MS = 5 * 60_000;
 export type ChannexManagementQueryClient = {
   query<T extends pg.QueryResultRow = pg.QueryResultRow>(
     text: string,
@@ -69,6 +70,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.stagingInventoryEnabled ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
+    continueUpload: (job, progress, input) => continueUpload(pool, job, progress, input),
     succeed: (job, result, input) => complete(pool, config.targetState, job, result, input),
     fail: (job, failure, input) => fail(pool, config.targetState, job, failure, input),
     async close() {
@@ -154,6 +156,13 @@ async function claim(
         [row.jobId, row.attemptsCount],
       );
     }
+    // A receipt committed before a crash earns the same single continuation credit.
+    if (row.status === "running" && (await retainedUpload(client, row.jobId, row.attemptsCount))) {
+      await client.query("UPDATE platform.jobs SET max_attempts=max_attempts+1 WHERE id=$1::uuid", [
+        row.jobId,
+      ]);
+      row.maxAttempts += 1;
+    }
     const attemptNumber = row.attemptsCount + 1;
     if (attemptNumber > row.maxAttempts) {
       const expiredJob = toJob(row, row.attemptsCount);
@@ -193,6 +202,84 @@ async function claim(
       [row.jobId, attemptNumber, input.workerId],
     );
     return toJob(row, attemptNumber);
+  });
+}
+
+/** Correlate progress to persisted job ownership, not provider/caller property fields. */
+async function retainedUpload(
+  client: Client,
+  jobId: string,
+  attemptNumber: number,
+  attemptId: string | null = null,
+  progressCode: ChannexManagementProviderProgress["code"] | null = null,
+) {
+  const result = await client.query(
+    `SELECT retained.id FROM (
+       SELECT a.id,'initial_upload_retained'::text AS progress_code
+       FROM pms.channex_offer_ari_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id AND t.property_id=j.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_offer_ari_receipts r WHERE r.attempt_id=a.id)=1
+       UNION ALL
+       SELECT a.id,'availability_upload_retained'::text AS progress_code
+       FROM pms.channex_room_availability_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id AND j.property_id=a.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_room_availability_receipts r WHERE r.attempt_id=a.id)=1
+     ) retained JOIN platform.jobs j ON j.id=$1::uuid
+     WHERE ($3::uuid IS NULL OR retained.id=$3::uuid)
+       AND ($5::text IS NULL OR retained.progress_code=$5::text)
+       AND j.queue_name=$4 AND j.payload->>'operationType'='sync_ari'
+       AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb
+     LIMIT 1`,
+    [jobId, attemptNumber, attemptId, PMS_CHANNEX_MANAGEMENT_QUEUE, progressCode],
+  );
+  return result.rows.length === 1;
+}
+
+async function continueUpload(
+  pool: Pool,
+  job: ChannexManagementJob,
+  progress: ChannexManagementProviderProgress,
+  input: { workerId: string; now: Date },
+) {
+  await transaction(pool, async (client) => {
+    const live = await client.query(
+      `SELECT id FROM platform.jobs WHERE id=$1::uuid AND status='running'
+       AND locked_by=$2 AND attempts_count=$3 AND locked_at > now()-($4::bigint * interval '1 millisecond')
+       FOR UPDATE`,
+      [job.jobId, input.workerId, job.attemptNumber, LEASE_MS],
+    );
+    if (
+      live.rows.length !== 1 ||
+      !(await retainedUpload(
+        client,
+        job.jobId,
+        job.attemptNumber,
+        progress.attemptId,
+        progress.code,
+      ))
+    )
+      throw new Error("Current retained Channex upload required for continuation");
+    const attempt = await client.query(
+      `UPDATE platform.job_attempts SET status = 'succeeded', finished_at=$4::timestamptz,
+       error_metadata=error_metadata || jsonb_build_object('partialUpload', $5::text)
+       WHERE job_id=$1::uuid AND attempt_number=$2 AND worker_id=$3 AND status='running' AND finished_at IS NULL`,
+      [job.jobId, job.attemptNumber, input.workerId, input.now.toISOString(), progress.attemptId],
+    );
+    assertLeaseUpdated(attempt);
+    const updated = await client.query(
+      `UPDATE platform.jobs SET status = 'pending', max_attempts=max_attempts+1,
+       run_after=$4::timestamptz + interval '1 second', locked_at=NULL, locked_by=NULL,
+       finished_at=NULL, updated_at=$4::timestamptz,
+       job_metadata=job_metadata || jsonb_build_object('partialUpload', $5::text)
+       WHERE id=$1::uuid AND locked_by = $2 AND attempts_count=$3 AND status='running'`,
+      [job.jobId, input.workerId, job.attemptNumber, input.now.toISOString(), progress.attemptId],
+    );
+    assertLeaseUpdated(updated);
   });
 }
 

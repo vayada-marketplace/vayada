@@ -121,14 +121,14 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
           blocked_count=0,available_count=effective_sellable_limit_count-assigned_count
           WHERE property_id='${I.property}';
           ${receiptSql("reserved", I.targetType)}`);
-        await transaction((client) =>
-          reconcilePmsOccupiedInventory(
+        await transaction(async (client) => {
+          await reconcilePmsOccupiedInventory(
             client,
             I.property,
             [{ roomTypeId: I.targetType, checkIn: "2026-09-02", checkOut: "2026-09-04" }],
             acceptedAt,
-          ),
-        );
+          );
+        });
       } else {
         await fixture(
           kind === "closed"
@@ -475,7 +475,7 @@ describe.skipIf(!DATABASE_URL)("PostgreSQL cross-room-type assignment moves", ()
   async function reconcileLinked() { await transaction(async (client) => { await reconcilePmsLinkedInventory(client, I.property, acceptedAt); }); }
 
   // prettier-ignore
-  async function reconcileOccupied() { await transaction((client) => reconcilePmsOccupiedInventory(client, I.property, [{ roomTypeId: I.sourceType, checkIn: "2026-09-02", checkOut: "2026-09-04" }, { roomTypeId: I.targetType, checkIn: "2026-09-02", checkOut: "2026-09-04" }], acceptedAt)); }
+  async function reconcileOccupied() { await transaction(async (client) => { await reconcilePmsOccupiedInventory(client, I.property, [{ roomTypeId: I.sourceType, checkIn: "2026-09-02", checkOut: "2026-09-04" }, { roomTypeId: I.targetType, checkIn: "2026-09-02", checkOut: "2026-09-04" }], acceptedAt); }); }
 
   async function inventory() {
     const result = await pool.query(

@@ -71,7 +71,7 @@ async function mount(available = true, acceptance = false) {
         externalChanges: externalBookingChanges,
         connectionString: "postgresql://unused",
         inventoryReservationPort: {} as never,
-        replacementPricingAcceptanceEnabled: acceptance,
+        replacementPricingAcceptanceAllowedSlugs: acceptance ? ["hotel"] : [],
         pool: { query, connect: async () => ({ query, release }), end: async () => {} } as never,
       })
     : unusedBookingWebCheckoutAdapter;
@@ -141,6 +141,17 @@ it("keeps quote acceptance disabled until explicitly enabled", async () => {
   const response = await app.inject({
     method: "POST",
     url: `/api/booking-web/hotels/hotel/bookings/quotes/${id}/accept`,
+    headers: { "idempotency-key": "accept-1" },
+    payload: { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id },
+  });
+  expect(response.statusCode).toBe(404);
+  expect(writePricingAcceptance).not.toHaveBeenCalled();
+});
+it("keeps quote acceptance disabled outside the explicit slug allowlist", async () => {
+  await mount(true, true);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/booking-web/hotels/other-hotel/bookings/quotes/${id}/accept`,
     headers: { "idempotency-key": "accept-1" },
     payload: { version: "booking-quote-acceptance.v1", requestId: "accept-1", quoteId: id },
   });

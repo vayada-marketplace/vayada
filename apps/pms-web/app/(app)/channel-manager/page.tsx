@@ -8,6 +8,7 @@ import {
   ExclamationTriangleIcon,
   LinkIcon,
 } from "@heroicons/react/24/outline";
+import { OfferPreview } from "@/components/channel-manager/OfferPreview";
 import { OperationalAlerts } from "@/components/channel-manager/OperationalAlerts";
 import { useTranslation } from "@/lib/i18n";
 import { channexService } from "@/services/channex";
@@ -111,6 +112,7 @@ export default function ChannelManagerPage() {
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
           <div className="space-y-5">
+            <OfferPreview propertyId={snapshot.propertyId} />
             <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex gap-3">

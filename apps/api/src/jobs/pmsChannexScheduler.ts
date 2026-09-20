@@ -1,3 +1,4 @@
+import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "./pmsChannexAriHorizon.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -14,7 +15,7 @@ export const PMS_CHANNEX_SCHEDULER_QUEUE = "pms.channex.scheduler";
 export const PMS_CALENDAR_AUTO_OPEN_QUEUE = "pms.inventory.scheduler";
 export const DEFAULT_PMS_CHANNEX_LIMIT = 100;
 export const DEFAULT_CHANNEX_ARI_MAX_ATTEMPTS = 5;
-export const DEFAULT_FULL_ARI_DAYS_AHEAD = 548;
+export { DEFAULT_FULL_ARI_DAYS_AHEAD } from "./pmsChannexAriHorizon.js";
 
 export type PmsChannexSchedulerRunName = "incrementalAriPush" | "fullAriPush" | "calendarAutoOpen";
 

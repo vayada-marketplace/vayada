@@ -4,6 +4,12 @@ import {
   parseAffiliateBookingDestinationConfiguration,
 } from "@vayada/domain-booking";
 import { saveBookingAffiliateDestinationFromMarketplace as save } from "./bookingAffiliateDestinationSave.js";
+import {
+  isVerifiedAffiliateDestinationTrackingReadiness,
+  readAffiliateDestinationTrackingReadiness,
+  type AffiliateDestinationTrackingConfigurationPort,
+  type AffiliateDestinationTrackingReadinessPort,
+} from "./bookingAffiliateDestinationTrackingReadiness.js";
 
 export async function readBookingAffiliateDestinations(
   database: Pick<pg.Pool, "query">,
@@ -21,7 +27,7 @@ export async function readBookingAffiliateDestinations(
        FROM booking.affiliate_destination_versions d
        JOIN hotel_catalog.properties p ON p.id=d.property_id AND p.profile_status <> 'disabled'
        WHERE d.property_id=$1 AND d.created_by_organization_id=$2 AND ($3::uuid IS NULL OR d.id=$3)
-       ORDER BY d.recorded_at DESC,d.id DESC LIMIT 20`,
+       ORDER BY d.recorded_at DESC,d.id DESC LIMIT 20 FOR SHARE OF d,p`,
     [propertyId, organizationId, versionId ?? null],
   );
   return result.rows.map((row) => {
@@ -44,20 +50,67 @@ export async function readBookingAffiliateDestinations(
   });
 }
 
-export function createPgBookingAffiliateDestinationRepository(connectionString: string) {
+export function createPgBookingAffiliateDestinationRepository(
+  connectionString: string,
+  tracking?: {
+    configuration: AffiliateDestinationTrackingConfigurationPort;
+    readiness?: AffiliateDestinationTrackingReadinessPort;
+  },
+) {
   const pool = new pg.Pool({ connectionString, max: 3 });
-  return {
-    save: (input: Parameters<typeof save>[1]) => save(pool, input),
-    list: async (propertyId: string, organizationId: string) => ({
-      destinations: await readBookingAffiliateDestinations(pool, propertyId, organizationId),
-    }),
-    async get(propertyId: string, organizationId: string, versionId: string) {
-      const rows = await readBookingAffiliateDestinations(
-        pool,
+  const read = async (propertyId: string, organizationId: string, versionId?: string) => {
+    if (!tracking)
+      return readBookingAffiliateDestinations(pool, propertyId, organizationId, versionId);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      const destinations = await readBookingAffiliateDestinations(
+        client,
         propertyId,
         organizationId,
         versionId,
       );
+      const results = [];
+      for (const destination of destinations) {
+        const scope = {
+          propertyId,
+          destinationVersionId: destination.destinationVersionId,
+          organizationId,
+        };
+        const configuration = await tracking.configuration(client, scope);
+        if (!configuration) {
+          results.push(destination);
+          continue;
+        }
+        const trackingReadiness = await (
+          tracking.readiness ?? readAffiliateDestinationTrackingReadiness
+        )(client, { ...scope, ...configuration });
+        if (!isVerifiedAffiliateDestinationTrackingReadiness(trackingReadiness)) {
+          results.push(destination);
+          continue;
+        }
+        results.push({
+          ...destination,
+          trackingStatus: "validated" as const,
+          trackingReadiness,
+        });
+      }
+      await client.query("COMMIT");
+      return results;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+  return {
+    save: (input: Parameters<typeof save>[1]) => save(pool, input),
+    list: async (propertyId: string, organizationId: string) => ({
+      destinations: await read(propertyId, organizationId),
+    }),
+    async get(propertyId: string, organizationId: string, versionId: string) {
+      const rows = await read(propertyId, organizationId, versionId);
       return rows.length ? rows[0]! : null;
     },
     close: () => pool.end(),

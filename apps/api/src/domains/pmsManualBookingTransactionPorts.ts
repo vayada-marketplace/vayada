@@ -10,6 +10,7 @@ import type { QueryResult, QueryResultRow } from "pg";
 import type { ManualBookingPreviewResult } from "../routes/pmsManualBookingPreview.js";
 import type { PmsManualBookingPreviewRoutesOptions } from "../routes/pmsManualBookingPreviewCalculation.js";
 import type { PmsRoomAssignmentOptimizationTriggerPort } from "./pmsRoomAssignmentOptimizationTriggers.js";
+import type { PmsOccupiedInventoryChange } from "./pmsOccupiedInventory.js";
 
 export type PmsManualBookingTransaction = {
   query<Row extends QueryResultRow = QueryResultRow>(
@@ -69,7 +70,7 @@ export interface PmsManualBookingOperationsOwnerPort {
     rooms: readonly PmsManualBookingRoom[];
     guestBookingId: string;
     acceptedAt: string;
-  }): Promise<void>;
+  }): Promise<readonly PmsOccupiedInventoryChange[]>;
 }
 
 export interface PmsManualBookingPlatformOwnerPort {

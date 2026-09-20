@@ -13,11 +13,13 @@ export * from "./hotelCollaborationPreferences.js";
 export * from "./hotelCollaborationPreferenceCommands.js";
 export * from "./legacyHotelCollaborationPreferenceDraft.js";
 export * from "./affiliateAdmin.js";
+export * from "./affiliateLink.js";
 export * from "./affiliateOfferTerms.js";
 export * from "./creatorProfileModeration.js";
 export * from "./creatorMatchingPreferences.js";
 export * from "./offerMatchingCriteria.js";
 export * from "./matchingEvents.js";
+export * from "./communicationPreferences.js";
 
 import type {
   MarketplaceOfferMatchingCriteria,

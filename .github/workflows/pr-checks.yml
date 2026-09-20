@@ -33,6 +33,9 @@ jobs:
       - name: Architecture boundaries
         run: npm run check:architecture-boundaries
 
+      - name: Coordinated release contracts
+        run: npm run test:coordinated-release
+
       - name: Finance domain contracts
         run: npm --workspace @vayada/domain-finance run test
 
@@ -215,10 +218,20 @@ jobs:
           src/domains/bookingAffiliateReferralTransportCertificationStorage.integration.test.ts
           src/domains/bookingAffiliateReferralTransportCertification.integration.test.ts
           src/domains/bookingAffiliateReferralProductionPreflightStorage.integration.test.ts
+          src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
+          src/domains/bookingAffiliateReferralReadiness.integration.test.ts
+          src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
+          src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
+          src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
+          src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
           src/domains/marketplaceAffiliateDraftCommand.integration.test.ts
+          src/domains/marketplaceAffiliatePublicationPrerequisites.test.ts
+          src/domains/marketplaceAffiliatePublication.integration.test.ts
           src/domains/marketplaceAffiliatePublicationStorage.integration.test.ts
           src/domains/marketplaceAffiliateAssentStorage.integration.test.ts
-          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts \
+          src/domains/marketplaceAffiliateAgreementActivationStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
+          src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts

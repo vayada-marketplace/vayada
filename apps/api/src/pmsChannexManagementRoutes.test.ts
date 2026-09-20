@@ -73,6 +73,7 @@ describe("PMS Channex management command routes", () => {
     ).toBe(statusCode);
     for (const [method, path] of [
       ["GET", "alerts"],
+      ["GET", `alerts/${operationId}/diagnostics`],
       ["POST", `alerts/${operationId}/recover`],
       ["POST", `alerts/${operationId}/acknowledge`],
     ] as const) {
@@ -104,6 +105,7 @@ describe("PMS Channex management command routes", () => {
         })
       ).statusCode,
     ).toBe(statusCode);
+    expect(harness.getAlertDiagnostics).not.toHaveBeenCalled();
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(
       (
@@ -116,6 +118,40 @@ describe("PMS Channex management command routes", () => {
       ).statusCode,
     ).toBe(statusCode);
     expect(harness.reportSubmit).not.toHaveBeenCalled();
+  });
+
+  it("reads diagnostics with read permission, validates identity and never invokes recovery", async () => {
+    const h = await testApp({ permissions: ["pms.operations.read"] });
+    app = h.app;
+    const request = {
+      method: "GET" as const,
+      url: `/properties/${propertyId}/channex/alerts/${operationId}/diagnostics`,
+      headers: { authorization: "Bearer valid" },
+    };
+    expect(
+      (await app.inject({ ...request, headers: { authorization: "Bearer invalid" } })).statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ ...request, url: request.url.replace(propertyId, operationId) }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          ...request,
+          url: request.url.replace(`/alerts/${operationId}`, "/alerts/invalid"),
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(h.getAlertDiagnostics).not.toHaveBeenCalled();
+    expect((await app.inject(request)).statusCode).toBe(404);
+    h.getAlertDiagnostics.mockResolvedValueOnce({ alertId: operationId });
+    const response = await app.inject(request);
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(h.getAlertDiagnostics).toHaveBeenLastCalledWith(propertyId, operationId);
+    expect(h.enqueue).not.toHaveBeenCalled();
+    expect(h.recoverAlert).not.toHaveBeenCalled();
   });
 
   it("denies an authorized property outside the staged reporting scope on GET and POST", async () => {
@@ -506,6 +542,7 @@ async function testApp(
   stagingRecovery = false,
 ) {
   const app = Fastify({ logger: false });
+  const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
   const recoverAlert = vi.fn().mockResolvedValue({ ok: true });
   const recoverStagingAlert = vi
     .fn()
@@ -532,6 +569,7 @@ async function testApp(
     datePrices: { put: putDatePrice, get: vi.fn().mockResolvedValue(null), close: vi.fn() },
     repository: {
       ...repository(),
+      getAlertDiagnostics,
       getAlerts: async () => [
         {
           id: operationId,
@@ -566,7 +604,15 @@ async function testApp(
     noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
     noShowReportingPropertyId: reportScope,
   });
-  return { app, enqueue, putDatePrice, recoverAlert, recoverStagingAlert, reportSubmit };
+  return {
+    app,
+    enqueue,
+    putDatePrice,
+    recoverAlert,
+    recoverStagingAlert,
+    reportSubmit,
+    getAlertDiagnostics,
+  };
 }
 
 function context(access: Access): RequestContext {

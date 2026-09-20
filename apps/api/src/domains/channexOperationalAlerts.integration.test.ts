@@ -1,3 +1,4 @@
+import { getChannexAlertDiagnostics } from "./channexAlertDiagnostics.js";
 import {
   clearChannexAssignmentFixture,
   seedChannexAssignmentFixture,
@@ -344,6 +345,124 @@ describe.skipIf(!url)("operational alert receipt and canonical recovery", () => 
     expect(alerts).toHaveLength(2);
     expect(alerts.find((a) => a.id !== original.id)?.resolvedAt).toBeNull();
   });
+  it("projects only scoped current-round diagnostics without reconciling resolution or exposing payloads", async () => {
+    const client = await db.connect();
+    await client.query("BEGIN");
+    try {
+      const {
+        rows: [alert],
+      } = await client.query(
+        "SELECT * FROM pms.channel_operational_alerts WHERE property_id=$1 AND event_type='disconnected_channel' LIMIT 1",
+        [P],
+      );
+      await client.query("UPDATE pms.channel_operational_alerts SET resolved_at=NULL WHERE id=$1", [
+        alert.id,
+      ]);
+      const read = () => getChannexAlertDiagnostics(client, P, alert.id);
+      const {
+        rows: [booking],
+      } = await client.query(
+        "SELECT id FROM pms.channel_operational_alerts WHERE property_id=$1 AND event_type='non_acked_booking' AND cardinality(recovery_jobs)>0 LIMIT 1",
+        [P],
+      );
+      const bookingEvidence = (await getChannexAlertDiagnostics(client, P, booking.id))!;
+      expect(bookingEvidence.recovery).toHaveLength(1);
+      expect(bookingEvidence.recovery[0]).toMatchObject({
+        operation: "booking_import",
+        status: "succeeded",
+        failure: null,
+      });
+      for (const patch of [
+        { propertyId: OTHER },
+        { providerPropertyId: "wrong-property" },
+        { bindingGeneration: OTHER },
+      ]) {
+        await client.query("SAVEPOINT wrong_job");
+        await client.query("UPDATE platform.jobs SET payload=payload||$2::jsonb WHERE id=$1", [
+          bookingEvidence.recovery[0]!.jobId,
+          JSON.stringify(patch),
+        ]);
+        expect((await getChannexAlertDiagnostics(client, P, booking.id))!.recovery).toEqual([]);
+        await client.query("ROLLBACK TO SAVEPOINT wrong_job");
+      }
+      const {
+        rows: [rate],
+      } = await client.query(
+        "SELECT id FROM pms.channel_operational_alerts WHERE property_id=$1 AND event_type='rate_error' LIMIT 1",
+        [P],
+      );
+      expect(await getChannexAlertDiagnostics(client, P, rate.id)).toMatchObject({
+        linkedJobCount: 0,
+        recovery: [],
+        latestReceipt: { receiptId: expect.any(String) },
+      });
+      const initial = (await read())!;
+      expect(initial.latestReceipt?.receiptId).toBeTruthy();
+      expect(initial.recovery).toHaveLength(2);
+      expect(initial.linkedJobCount).toBe(2);
+      expect(initial.recovery.every((j) => j.status === "succeeded")).toBe(true);
+      // Existing verified jobs would resolve this incident through listChannexAlerts; diagnostics must not.
+      expect(
+        (
+          await client.query("SELECT resolved_at FROM pms.channel_operational_alerts WHERE id=$1", [
+            alert.id,
+          ])
+        ).rows[0].resolved_at,
+      ).toBeNull();
+      expect(await getChannexAlertDiagnostics(client, OTHER, alert.id)).toBeNull();
+      expect(await getChannexAlertDiagnostics(client, P, OTHER)).toBeNull();
+      const job = initial.recovery[0]!;
+      await client.query(
+        "UPDATE platform.jobs SET status='dead_lettered',job_metadata=job_metadata||$2::jsonb WHERE id=$1",
+        [
+          job.jobId,
+          JSON.stringify({
+            lastErrorCode: "mapping_missing",
+            lastErrorMessage: "secret guest@example.test",
+            providerRequestId: "secret-token",
+          }),
+        ],
+      );
+      expect((await read())!.recovery.find((j) => j.jobId === job.jobId)?.failure).toBe(
+        "A required room or rate mapping is missing.",
+      );
+      await client.query(
+        "UPDATE platform.jobs SET job_metadata=job_metadata||$2::jsonb WHERE id=$1",
+        [job.jobId, JSON.stringify({ lastErrorCode: "secret guest@example.test" })],
+      );
+      expect(JSON.stringify(await read())).not.toMatch(
+        /secret|guest@example|providerRequestId|alertRecoveryVerified|failureCode/,
+      );
+      await client.query(
+        "UPDATE platform.jobs SET status='running',locked_at=now(),locked_by='diagnostics-test',finished_at=NULL WHERE id=$1",
+        [job.jobId],
+      );
+      expect((await read())!.recovery.find((j) => j.jobId === job.jobId)?.failure).toBeNull();
+      await client.query(
+        `UPDATE platform.jobs SET payload=jsonb_set(payload,'{recoveryAlertId}','"wrong-alert"') WHERE id=$1`,
+        [job.jobId],
+      );
+      expect((await read())!.recovery).toHaveLength(1);
+      await client.query(
+        "UPDATE pms.channel_operational_alerts SET recovery_round=recovery_round+1,last_occurred_at=now()+interval '1 hour' WHERE id=$1",
+        [alert.id],
+      );
+      expect(await read()).toMatchObject({
+        recovery: [],
+        linkedJobCount: 2,
+        newerOccurrence: true,
+      });
+      await client.query(
+        "UPDATE pms.channel_connections SET binding_generation=gen_random_uuid() WHERE id=$1",
+        [alert.connection_id],
+      );
+      expect(await read()).toBeNull();
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
   it("rejects unmapped authoritative revisions, then imports exactly once after correction", async () => {
     const alert = (await listChannexAlerts(db, P)).find(
       (a) => a.eventType === "booking_unmapped_room",

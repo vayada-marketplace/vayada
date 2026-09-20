@@ -4,6 +4,7 @@ export const FINANCE_DASHBOARD_WINDOW_DAYS = 14;
 
 export type FinanceDashboardQuery = { asOf?: string };
 export type FinanceRevenueQuery = { from: string; to: string };
+export type FinanceProfitLossQuery = { year: number };
 export type FinanceReportingRange = { from: string; to: string };
 export type FinanceReportingComparison = {
   current: FinanceReportingRange;
@@ -26,7 +27,8 @@ export type FinanceReportingRatioMetric = {
   percentChange: string | null;
 };
 export type FinanceReportingIncompleteEvidence = { code: string; count: number } & (
-  { amount?: FinanceReportingMoney; currency?: never } | { amount?: never; currency: string }
+  | { amount?: FinanceReportingMoney; currency?: never }
+  | { amount?: never; currency: string }
 );
 export type FinanceReportingEnvelope = {
   contractVersion: typeof PMS_FINANCIALS_CONTRACT_VERSION;
@@ -82,6 +84,36 @@ export type FinanceRevenueResponse = FinanceReportingEnvelope & {
     adr: FinanceReportingMoney;
   }>;
 };
+export const FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS = {
+  ota_commission: "ota_commission",
+  staff: "staff",
+  utilities: "utilities",
+  maintenance: "maintenance_supplies",
+  supplies: "maintenance_supplies",
+  marketing: "marketing_platform",
+  platform_fees: "marketing_platform",
+} as const;
+export type FinanceProfitLossSystemCategoryRow =
+  (typeof FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS)[keyof typeof FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS];
+export type FinanceProfitLossExpenseCategoryRow =
+  | FinanceProfitLossSystemCategoryRow
+  | `custom:${string}`;
+export type FinanceProfitLossResponse = FinanceReportingEnvelope & {
+  summary: {
+    revenueYtd: FinanceReportingMoneyMetric;
+    expensesYtd: FinanceReportingMoneyMetric;
+    netProfitYtd: FinanceReportingMoneyMetric;
+  };
+  months: Array<{
+    month: string;
+    roomRevenue: FinanceReportingMoney;
+    upsellRevenue: FinanceReportingMoney;
+    revenue: FinanceReportingMoney;
+    expenses: FinanceReportingMoney;
+    netProfit: FinanceReportingMoney;
+    expenseCategories: Record<FinanceProfitLossExpenseCategoryRow, FinanceReportingMoney>;
+  }>;
+};
 
 export function parseFinanceDashboardQuery(value: unknown): FinanceDashboardQuery | null {
   if (!record(value)) return null;
@@ -95,6 +127,132 @@ export function parseFinanceRevenueQuery(value: unknown): FinanceRevenueQuery | 
   return localDate(value.from) && localDate(value.to) && value.from <= value.to
     ? { from: value.from, to: value.to }
     : null;
+}
+
+export function parseFinanceProfitLossQuery(value: unknown): FinanceProfitLossQuery | null {
+  if (!record(value) || !exactKeys(value, ["year"])) return null;
+  const year =
+    typeof value.year === "string" && /^[1-9]\d{3}$/.test(value.year)
+      ? Number(value.year)
+      : value.year;
+  return Number.isSafeInteger(year) && Number(year) >= 1001 && Number(year) <= 9999
+    ? { year: Number(year) }
+    : null;
+}
+
+export function financeProfitLossPeriods(
+  query: FinanceProfitLossQuery,
+  asOf: string,
+): FinanceReportingComparison {
+  const parsed = parseFinanceProfitLossQuery(query);
+  assertLocalDate(asOf);
+  if (!parsed) throw new TypeError("Finance profit and loss year is malformed");
+  const asOfDate = dateValue(asOf);
+  if (parsed.year > asOfDate.getUTCFullYear())
+    throw new TypeError("Finance profit and loss year is in the future");
+  const to =
+    parsed.year === asOfDate.getUTCFullYear()
+      ? formatDate(new Date(Date.UTC(parsed.year, asOfDate.getUTCMonth(), asOfDate.getUTCDate())))
+      : `${parsed.year}-12-31`;
+  const toDate = dateValue(to);
+  const comparisonYear = parsed.year - 1;
+  const comparisonDay = Math.min(
+    toDate.getUTCDate(),
+    new Date(Date.UTC(comparisonYear, toDate.getUTCMonth() + 1, 0)).getUTCDate(),
+  );
+  return {
+    current: { from: `${parsed.year}-01-01`, to },
+    comparison: {
+      from: `${comparisonYear}-01-01`,
+      to: formatDate(new Date(Date.UTC(comparisonYear, toDate.getUTCMonth(), comparisonDay))),
+    },
+  };
+}
+
+export function financeProfitLossExpenseCategoryRow(category: {
+  id: string;
+  systemKey: string | null;
+}): FinanceProfitLossExpenseCategoryRow {
+  if (category.systemKey !== null) {
+    const row =
+      FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS[
+        category.systemKey as keyof typeof FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS
+      ];
+    if (!row) throw new TypeError("Finance profit and loss system category is invalid");
+    return row;
+  }
+  if (!UUID.test(category.id))
+    throw new TypeError("Finance profit and loss custom category id is malformed");
+  return `custom:${category.id.toLowerCase()}`;
+}
+
+export function assertFinanceProfitLossResponse(
+  response: FinanceProfitLossResponse,
+  query: FinanceProfitLossQuery,
+  asOf: string,
+  propertyCategoryRows: readonly FinanceProfitLossExpenseCategoryRow[],
+): void {
+  const periods = financeProfitLossPeriods(query, asOf);
+  const currency = response.currency;
+  const expectedMonths = Array.from(
+    { length: Number(periods.current.to.slice(5, 7)) },
+    (_, index) => `${query.year}-${String(index + 1).padStart(2, "0")}`,
+  );
+  if (!/^[A-Z]{3}$/.test(currency) || response.months.length !== expectedMonths.length)
+    throw new TypeError("Finance profit and loss response scope is invalid");
+  const requiredRows = new Set<string>(Object.values(FINANCE_PROFIT_LOSS_SYSTEM_CATEGORY_ROWS));
+  const expectedRows = [...new Set([...requiredRows, ...propertyCategoryRows])].sort();
+  if (
+    !propertyCategoryRows.every(
+      (row) =>
+        requiredRows.has(row) ||
+        /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          row,
+        ),
+    )
+  )
+    throw new TypeError("Finance profit and loss property categories are invalid");
+  let revenueYtd = 0n;
+  let expensesYtd = 0n;
+  let netProfitYtd = 0n;
+  response.months.forEach((month, index) => {
+    if (month.month !== expectedMonths[index])
+      throw new TypeError("Finance profit and loss months are invalid");
+    const roomRevenue = profitLossMoneyUnits(month.roomRevenue, currency);
+    const upsellRevenue = profitLossMoneyUnits(month.upsellRevenue, currency);
+    const revenue = profitLossMoneyUnits(month.revenue, currency);
+    const expenses = profitLossMoneyUnits(month.expenses, currency);
+    const netProfit = profitLossMoneyUnits(month.netProfit, currency);
+    const rows = (
+      Object.keys(month.expenseCategories) as FinanceProfitLossExpenseCategoryRow[]
+    ).sort();
+    if (rows.join() !== expectedRows.join())
+      throw new TypeError("Finance profit and loss category rows are invalid");
+    const categoryExpenses = rows.reduce(
+      (total, row) => total + profitLossMoneyUnits(month.expenseCategories[row]!, currency),
+      0n,
+    );
+    if (
+      revenue !== roomRevenue + upsellRevenue ||
+      expenses !== categoryExpenses ||
+      netProfit !== revenue - expenses
+    )
+      throw new TypeError("Finance profit and loss month does not reconcile");
+    revenueYtd += revenue;
+    expensesYtd += expenses;
+    netProfitYtd += netProfit;
+  });
+  const revenue = assertProfitLossMetric(response.summary.revenueYtd, currency);
+  const expenses = assertProfitLossMetric(response.summary.expensesYtd, currency);
+  const netProfit = assertProfitLossMetric(response.summary.netProfitYtd, currency);
+  if (
+    revenue.value !== revenueYtd ||
+    expenses.value !== expensesYtd ||
+    netProfit.value !== netProfitYtd ||
+    netProfit.value !== revenue.value - expenses.value ||
+    netProfit.change !== revenue.change - expenses.change
+  )
+    throw new TypeError("Finance profit and loss YTD totals do not reconcile");
 }
 
 export function financeDashboardPeriods(asOf: string): {
@@ -202,6 +360,7 @@ export function financeReportingRatioMetric(
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]) {
   return (
     Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key))
@@ -234,6 +393,18 @@ function decimalUnits(value: string): bigint {
   const [whole, fraction = ""] = value.replace("-", "").split(".");
   const units = BigInt(whole!) * 10_000n + BigInt(fraction.padEnd(4, "0"));
   return negative ? -units : units;
+}
+function profitLossMoneyUnits(value: FinanceReportingMoney, currency: string): bigint {
+  if (value.currency !== currency || !/^-?(?:0|[1-9]\d*)\.\d{4}$/.test(value.amount))
+    throw new TypeError("Finance profit and loss money is invalid");
+  return decimalUnits(value.amount);
+}
+function assertProfitLossMetric(value: FinanceReportingMoneyMetric, currency: string) {
+  const current = profitLossMoneyUnits(value.value, currency);
+  const delta = profitLossMoneyUnits(value.absoluteChange, currency);
+  if (value.percentChange !== change(current, current - delta))
+    throw new TypeError("Finance profit and loss comparison is invalid");
+  return { value: current, change: delta };
 }
 function decimal(value: bigint): string {
   const negative = value < 0n;

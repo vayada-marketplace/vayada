@@ -1,3 +1,7 @@
+import {
+  getChannexAlertDiagnostics,
+  type ChannexAlertDiagnostics,
+} from "./channexAlertDiagnostics.js";
 import { listChannexAlerts, type ChannexAlert } from "./channexOperationalAlerts.js";
 import {
   CHANNEX_MANAGEMENT_CONTRACT_VERSION,
@@ -43,6 +47,10 @@ export type PmsChannexManagementReadRepository = {
     capabilityModes: ChannexManagementCapabilityModes,
   ): Promise<ChannexManagementSnapshot>;
   getOperation(propertyId: string, operationId: string): Promise<ChannexManagementOperation | null>;
+  getAlertDiagnostics?(
+    propertyId: string,
+    alertId: string,
+  ): Promise<ChannexAlertDiagnostics | null>;
   getAlerts?(propertyId: string): Promise<ChannexAlert[]>;
   acknowledgeAlert?(propertyId: string, alertId: string, userId: string): Promise<boolean>;
   close?(): Promise<void>;
@@ -66,7 +74,10 @@ export function createPgPmsChannexManagementReadRepository(config: {
         )
       ).rows;
     },
-    getAlerts: (propertyId) => listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
+    getAlertDiagnostics: (propertyId, alertId) =>
+      getChannexAlertDiagnostics(pool, propertyId, alertId),
+    getAlerts: (propertyId) =>
+      listChannexAlerts(pool, propertyId, propertyId === config.stagingAlertPropertyId),
     async acknowledgeAlert(propertyId, alertId, userId) {
       const result = await pool.query(
         `UPDATE pms.channel_operational_alerts SET acknowledged_at=COALESCE(acknowledged_at,now()),acknowledged_by=COALESCE(acknowledged_by,$3::uuid) WHERE property_id=$1::uuid AND id=$2::uuid RETURNING id`,
