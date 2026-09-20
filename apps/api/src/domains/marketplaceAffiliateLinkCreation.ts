@@ -7,6 +7,7 @@ import {
   MARKETPLACE_AFFILIATE_LINK_CONTRACT_VERSION,
   type MarketplaceAffiliateLink,
 } from "@vayada/domain-marketplace";
+import { readMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycle.js";
 
 type Scope = {
   agreementId: string;
@@ -99,7 +100,7 @@ export async function createMarketplaceAffiliateLink(
   };
 
   try {
-    await client.query("BEGIN");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const target = (
       await client.query(
         `SELECT g.id AS agreement_id,g.property_id,g.program_id,g.creator_profile_id,
@@ -177,6 +178,9 @@ export async function createMarketplaceAffiliateLink(
       await client.query("ROLLBACK");
       return { ...result, replayed: true };
     }
+
+    const lifecycle = await readMarketplaceAffiliateAgreementLifecycle(client, agreementId);
+    if (lifecycle.status !== "active") return await fail("agreement_not_active");
 
     const scope: Scope = {
       agreementId,
