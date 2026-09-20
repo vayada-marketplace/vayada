@@ -16,6 +16,7 @@ import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getFinanceDashboard } from "@/services/finance/financialReports";
 
 import { RevenueTab } from "./RevenueTab";
+import { ExpensesTab } from "./ExpensesTab";
 
 type LoadState =
   | { kind: "loading" }
@@ -34,7 +35,7 @@ const CARD_LABELS = {
 export function DashboardWorkspace() {
   const [asOf, setAsOf] = useState("");
   const [reload, setReload] = useState(0);
-  const [tab, setTab] = useState<"dashboard" | "revenue">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "revenue" | "expenses">("dashboard");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -62,18 +63,45 @@ export function DashboardWorkspace() {
     return () => controller.abort();
   }, [asOf, reload]);
 
+  const content =
+    state.kind === "loading" ? (
+      <DashboardSkeleton />
+    ) : state.kind === "ready" ? (
+      tab === "dashboard" ? (
+        <Dashboard data={state.data} locale={state.locale} />
+      ) : tab === "revenue" ? (
+        <RevenueTab
+          propertyId={state.propertyId}
+          locale={state.locale}
+          generatedAt={state.data.generatedAt}
+          timeZone={state.data.timeZone}
+        />
+      ) : (
+        <ExpensesTab
+          propertyId={state.propertyId}
+          locale={state.locale}
+          generatedAt={state.data.generatedAt}
+          timeZone={state.data.timeZone}
+        />
+      )
+    ) : (
+      <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
+    );
+
   return (
-    <main className="mx-auto max-w-7xl p-4 md:p-6">
+    <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-blue-700">Financials</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
-            {tab === "dashboard" ? "Dashboard" : "Revenue"}
+            {tab === "dashboard" ? "Dashboard" : tab === "revenue" ? "Revenue" : "Expenses"}
           </h1>
           <p className="mt-1 text-sm text-gray-600">
             {tab === "dashboard"
               ? "Revenue, costs, and upcoming property transactions."
-              : "Where money comes from."}
+              : tab === "revenue"
+                ? "Where money comes from."
+                : "Where property spend goes."}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -88,14 +116,16 @@ export function DashboardWorkspace() {
               />
             </label>
           )}
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500"
-            type="button"
-            disabled
-            title="Exports will be added through the Financials export flow."
-          >
-            <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" /> Export
-          </button>
+          {tab !== "expenses" && (
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500"
+              type="button"
+              disabled
+              title="Exports will be added through the Financials export flow."
+            >
+              <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" /> Export
+            </button>
+          )}
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-700 px-3 text-sm font-medium text-white disabled:opacity-60"
             type="button"
@@ -114,35 +144,34 @@ export function DashboardWorkspace() {
         role="tablist"
         aria-label="Financial insights"
       >
-        {(["dashboard", "revenue"] as const).map((item) => (
+        {(["dashboard", "revenue", "expenses"] as const).map((item) => (
           <button
             key={item}
             type="button"
             role="tab"
+            id={`financial-insights-${item}-tab`}
+            aria-controls={`financial-insights-${item}-panel`}
             aria-selected={tab === item}
             className={`rounded-t-lg px-4 py-2 text-sm font-medium ${tab === item ? "bg-blue-50 text-blue-800" : "text-gray-600 hover:bg-gray-50"}`}
             onClick={() => setTab(item)}
           >
-            {item === "dashboard" ? "Dashboard" : "Revenue"}
+            {item === "dashboard" ? "Dashboard" : item === "revenue" ? "Revenue" : "Expenses"}
           </button>
         ))}
       </div>
-      {state.kind === "loading" && <DashboardSkeleton />}
-      {state.kind === "ready" && tab === "dashboard" && (
-        <Dashboard data={state.data} locale={state.locale} />
-      )}
-      {state.kind === "ready" && tab === "revenue" && (
-        <RevenueTab
-          propertyId={state.propertyId}
-          locale={state.locale}
-          generatedAt={state.data.generatedAt}
-          timeZone={state.data.timeZone}
-        />
-      )}
-      {state.kind !== "loading" && state.kind !== "ready" && (
-        <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
-      )}
-    </main>
+      {(["dashboard", "revenue", "expenses"] as const).map((item) => (
+        <div
+          key={item}
+          id={`financial-insights-${item}-panel`}
+          role="tabpanel"
+          aria-labelledby={`financial-insights-${item}-tab`}
+          tabIndex={0}
+          hidden={tab !== item}
+        >
+          {tab === item && content}
+        </div>
+      ))}
+    </div>
   );
 }
 
