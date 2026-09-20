@@ -17,6 +17,7 @@ import { getFinanceDashboard } from "@/services/finance/financialReports";
 
 import { RevenueTab } from "./RevenueTab";
 import { ExpensesTab } from "./ExpensesTab";
+import { ProfitLossTab } from "./ProfitLossTab";
 
 type LoadState =
   | { kind: "loading" }
@@ -35,7 +36,7 @@ const CARD_LABELS = {
 export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
   const [asOf, setAsOf] = useState("");
   const [reload, setReload] = useState(0);
-  const [tab, setTab] = useState<"dashboard" | "revenue" | "expenses">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "revenue" | "expenses" | "profit_loss">("dashboard");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -76,10 +77,17 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
           generatedAt={state.data.generatedAt}
           timeZone={state.data.timeZone}
         />
-      ) : (
+      ) : tab === "expenses" ? (
         <ExpensesTab
           propertyId={state.propertyId}
           canManage={canManage}
+          locale={state.locale}
+          generatedAt={state.data.generatedAt}
+          timeZone={state.data.timeZone}
+        />
+      ) : (
+        <ProfitLossTab
+          propertyId={state.propertyId}
           locale={state.locale}
           generatedAt={state.data.generatedAt}
           timeZone={state.data.timeZone}
@@ -95,14 +103,22 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
         <div>
           <p className="text-sm font-medium text-blue-700">Financials</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
-            {tab === "dashboard" ? "Dashboard" : tab === "revenue" ? "Revenue" : "Expenses"}
+            {tab === "dashboard"
+              ? "Dashboard"
+              : tab === "revenue"
+                ? "Revenue"
+                : tab === "expenses"
+                  ? "Expenses"
+                  : "Profit & Loss"}
           </h1>
           <p className="mt-1 text-sm text-gray-600">
             {tab === "dashboard"
               ? "Revenue, costs, and upcoming property transactions."
               : tab === "revenue"
                 ? "Where money comes from."
-                : "Where property spend goes."}
+                : tab === "expenses"
+                  ? "Where property spend goes."
+                  : "How revenue and costs add up."}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -117,7 +133,7 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
               />
             </label>
           )}
-          {tab !== "expenses" && (
+          {(tab === "dashboard" || tab === "revenue") && (
             <button
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-500"
               type="button"
@@ -145,7 +161,7 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
         role="tablist"
         aria-label="Financial insights"
       >
-        {(["dashboard", "revenue", "expenses"] as const).map((item) => (
+        {(["dashboard", "revenue", "expenses", "profit_loss"] as const).map((item) => (
           <button
             key={item}
             type="button"
@@ -156,11 +172,17 @@ export function DashboardWorkspace({ canManage }: { canManage: boolean }) {
             className={`rounded-t-lg px-4 py-2 text-sm font-medium ${tab === item ? "bg-blue-50 text-blue-800" : "text-gray-600 hover:bg-gray-50"}`}
             onClick={() => setTab(item)}
           >
-            {item === "dashboard" ? "Dashboard" : item === "revenue" ? "Revenue" : "Expenses"}
+            {item === "dashboard"
+              ? "Dashboard"
+              : item === "revenue"
+                ? "Revenue"
+                : item === "expenses"
+                  ? "Expenses"
+                  : "Profit & Loss"}
           </button>
         ))}
       </div>
-      {(["dashboard", "revenue", "expenses"] as const).map((item) => (
+      {(["dashboard", "revenue", "expenses", "profit_loss"] as const).map((item) => (
         <div
           key={item}
           id={`financial-insights-${item}-panel`}
