@@ -2,6 +2,8 @@ import { createReplacementPricingPublicationReader } from "./domains/replacement
 import { createBookingGuestChoicePublicationReader } from "./domains/bookingGuestChoicePublication.js";
 import { createBookingGuestChoiceStore } from "./domains/bookingGuestChoiceStore.js";
 import { dispatchNextChannexClosedUpload } from "./domains/channexNextClosedUpload.js";
+import { advancePublishedChannexOfferCreates } from "./domains/channexPublishedOfferCreate.js";
+import { createPgChannexAriSchedule } from "./jobs/pmsChannexAriSchedule.js";
 import { activatePublishedChannexOffers } from "./domains/replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./domains/channexPendingUploadReconciliation.js";
 import { prepareNextChannexRoomAvailabilityDispatch } from "./domains/channexRoomAvailabilityCoordinator.js";
@@ -1061,6 +1063,11 @@ const channexManagementProvider =
           ? (lease, ports) =>
               dispatchNextChannexClosedUpload(channexUploadReconciliationPool, lease, ports)
           : undefined,
+        advancePublishedOffers:
+          channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
+            ? (lease, ports) =>
+                advancePublishedChannexOfferCreates(channexUploadReconciliationPool, lease, ports)
+            : undefined,
         reconcileClosedUploads: channexUploadReconciliationPool
           ? (lease, get) =>
               reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
@@ -1099,6 +1106,13 @@ const channexManagementWorkerStore = channexManagementProvider
       stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
       stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
+  : undefined;
+const channexOfferSchedule = config.channexManagement.stagingInventoryEnabled &&
+  config.channexManagement.stagingRestrictionsPropertyId
+  ? createPgChannexAriSchedule(
+      targetDatabaseUrl,
+      config.channexManagement.stagingRestrictionsPropertyId,
+    )
   : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
   ? createPgPmsCalendarAutoOpenWorkerStore({
@@ -2230,6 +2244,19 @@ app.addHook("onClose", async () => {
 });
 
 // VAY-1546: automatic rate delivery resumes with the replacement pricing system.
+let activeChannexOfferSchedule: Promise<void> | undefined;
+const runChannexOfferSchedule = () => {
+  if (!channexOfferSchedule || activeChannexOfferSchedule) return;
+  activeChannexOfferSchedule = channexOfferSchedule.enqueue()
+    .then(() => undefined)
+    .catch((error: unknown) => app.log.warn({ err: error }, "Channex offer schedule failed"))
+    .finally(() => { activeChannexOfferSchedule = undefined; });
+};
+const channexOfferScheduleTimer = channexOfferSchedule
+  ? setInterval(runChannexOfferSchedule, 60_000)
+  : undefined;
+channexOfferScheduleTimer?.unref();
+if (channexOfferSchedule) runChannexOfferSchedule();
 let activeChannexManagementRun: Promise<void> | undefined;
 const runChannexManagement = () => {
   if (!config.backgroundWorkersEnabled && !config.channexManagement.stagingRestrictionsPropertyId)
@@ -2259,8 +2286,11 @@ channexManagementTimer?.unref();
 if (channexManagementWorkerStore) runChannexManagement();
 app.addHook("onClose", async () => {
   if (channexManagementTimer) clearInterval(channexManagementTimer);
+  if (channexOfferScheduleTimer) clearInterval(channexOfferScheduleTimer);
+  await activeChannexOfferSchedule;
   await activeChannexManagementRun;
   await Promise.all([
+    channexOfferSchedule?.close(),
     channexManagementWorkerStore?.close?.(),
     channexManagementPlans?.close(),
     channexUploadReconciliationPool?.end(),

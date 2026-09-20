@@ -109,6 +109,8 @@ async function claim(
          AND ($4::uuid IS NULL OR (property_id = $4::uuid
            AND (($6::boolean AND $3::boolean AND payload->>'operationType' = 'update_inventory_rules')
              OR (payload->>'operationType' = 'sync_ari' AND payload->'restrictionsOnly' = 'true'::jsonb)
+             OR ($6::boolean AND $3::boolean AND payload->>'operationType' = 'sync_ari'
+               AND COALESCE(payload->'restrictionsOnly','false'::jsonb) = 'false'::jsonb)
              OR ($5::boolean AND payload->>'operationType' = 'provision'
                AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
@@ -215,6 +217,14 @@ async function retainedUpload(
 ) {
   const result = await client.query(
     `SELECT retained.id FROM (
+       SELECT a.id,'offer_create_retained'::text AS progress_code
+       FROM pms.channex_offer_create_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id AND t.property_id=j.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_offer_create_receipts r WHERE r.attempt_id=a.id)=1
+       UNION ALL
        SELECT a.id,'initial_upload_retained'::text AS progress_code
        FROM pms.channex_offer_ari_attempts a
        JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
