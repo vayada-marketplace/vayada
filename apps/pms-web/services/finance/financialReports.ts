@@ -13,7 +13,7 @@ export function getFinanceDashboard(
 ): Promise<FinanceDashboardResponse> {
   const query = input.asOf ? `?${new URLSearchParams({ asOf: input.asOf })}` : "";
   return pmsOperationsClient.get<FinanceDashboardResponse>(
-    `/finance/properties/${encodeURIComponent(propertyId)}/financials/dashboard${query}`,
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/dashboard${query}`,
     { ...pmsOperationsRequestOptions, signal: input.signal },
   );
 }
@@ -24,7 +24,7 @@ export function getFinanceRevenue(
 ): Promise<FinanceRevenueResponse> {
   const query = new URLSearchParams({ from: input.from, to: input.to });
   return pmsOperationsClient.get<FinanceRevenueResponse>(
-    `/finance/properties/${encodeURIComponent(propertyId)}/financials/revenue?${query}`,
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/revenue?${query}`,
     { ...pmsOperationsRequestOptions, signal: input.signal },
   );
 }
