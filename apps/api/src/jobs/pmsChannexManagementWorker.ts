@@ -45,6 +45,7 @@ export type ChannexManagementProviderFailure = {
 };
 
 export type ChannexManagementProviderProgress =
+  | { ok: false; code: "offer_create_retained"; attemptId: string }
   | { ok: false; code: "offer_creation_retained"; attemptId: string }
   | { ok: false; code: "initial_upload_retained"; attemptId: string }
   | { ok: false; code: "availability_upload_retained"; attemptId: string };
@@ -125,6 +126,7 @@ export async function runPmsChannexManagementWorkerOnce(input: {
   }
 
   if (
+    result.code === "offer_create_retained" ||
     result.code === "offer_creation_retained" ||
     result.code === "initial_upload_retained" ||
     result.code === "availability_upload_retained"

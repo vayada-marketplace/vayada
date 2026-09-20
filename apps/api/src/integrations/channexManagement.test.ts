@@ -9,6 +9,43 @@ import {
 } from "./channexManagement.js";
 
 describe("Channex management provider", () => {
+  it("sends one retained published rate creation before the ordinary ARI plan", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(201, { data: {} }));
+    const unused = async (): Promise<never> => { throw new Error("ARI must wait for creation"); };
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "test",
+      fetch: fetcher,
+      plans: { plan: async () => { throw new Error("ARI plan must wait for rate creation"); } },
+      reconcileClosedUploads: unused,
+      dispatchClosedUpload: unused,
+      reconcileRoomAvailability: unused,
+      prepareRoomAvailability: unused,
+      advancePublishedOffers: async (_lease, ports) => {
+        await ports.create({ method: "POST", path: "/api/v1/rate_plans", body: { rate_plan: {} } }, new AbortController().signal);
+        return { kind: "retained", attemptId: "saved-rate" };
+      },
+    });
+    expect(await provider.execute(job("sync_ari"), { workerId: "worker" })).toEqual({
+      ok: false, code: "offer_create_retained", attemptId: "saved-rate",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/api/v1/rate_plans", "https://staging.channex.io"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  it("refuses rate creation without the complete ARI continuation bundle", async () => {
+    const advance = vi.fn(async () => ({ kind: "offer_creates_current" as const }));
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io", apiKey: "test",
+      plans: { plan: async () => ({ requests: [] }) },
+      advancePublishedOffers: advance,
+    });
+    expect(await provider.execute(job("sync_ari"), { workerId: "worker" })).toMatchObject({
+      ok: false, code: "invalid_state",
+    });
+    expect(advance).not.toHaveBeenCalled();
+  });
   it("continues a saved published offer only from its retained creation receipt", async () => {
     const bootstrap = vi.fn().mockResolvedValue({
       kind: "creation_retained" as const,

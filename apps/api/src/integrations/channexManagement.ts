@@ -1,5 +1,6 @@
 import type { dispatchNextChannexClosedUpload } from "../domains/channexNextClosedUpload.js";
 import type { activatePublishedChannexOffers } from "../domains/replacementPricingOfferOwners.js";
+import type { advancePublishedChannexOfferCreates } from "../domains/channexPublishedOfferCreate.js";
 import type { prepareNextChannexRoomAvailabilityDispatch } from "../domains/channexRoomAvailabilityCoordinator.js";
 import type { reconcilePendingChannexRoomAvailability } from "../domains/channexPendingRoomAvailabilityReconciliation.js";
 import { readChannexResponse } from "./channexResponseBody.js";
@@ -132,6 +133,10 @@ export function createChannexManagementProvider(config: {
   activatePublishedOffers?: (
     lease: Parameters<typeof activatePublishedChannexOffers>[1],
   ) => ReturnType<typeof activatePublishedChannexOffers>;
+  advancePublishedOffers?: (
+    lease: Parameters<typeof advancePublishedChannexOfferCreates>[1],
+    ports: Parameters<typeof advancePublishedChannexOfferCreates>[2],
+  ) => ReturnType<typeof advancePublishedChannexOfferCreates>;
   bootstrapPublishedOffer?: (
     job: ChannexManagementJob,
     workerId: string,
@@ -237,13 +242,51 @@ export function createChannexManagementProvider(config: {
       if (
         pricingDelivery &&
         !job.input.restrictionsOnly &&
-        ariContinuationHooks.some(Boolean) &&
+        (ariContinuationHooks.some(Boolean) || Boolean(config.advancePublishedOffers)) &&
         !ariContinuationHooks.every(Boolean)
       )
         return failure(
           "invalid_state",
           new Error("Complete pricing and availability reconciliation bundle required."),
         );
+      if (job.input.operationType === "sync_ari" && !job.input.restrictionsOnly &&
+          config.advancePublishedOffers) {
+        if (!input?.workerId)
+          return failure("invalid_state", new Error("Current offer worker lease required."));
+        try {
+          const result = await config.advancePublishedOffers(
+            { jobId: job.jobId, attemptNumber: job.attemptNumber, workerId: input.workerId },
+            {
+              get: readClosedUpload,
+              create: async (request, signal) => {
+                if (request.method !== "POST" || request.path !== "/api/v1/rate_plans")
+                  throw new Error("Invalid Channex rate creation scope.");
+                signal.throwIfAborted();
+                return fetcher(new URL(request.path, apiBaseUrl), {
+                  method: "POST",
+                  headers: { "user-api-key": apiKey, "content-type": "application/json" },
+                  body: JSON.stringify(request.body),
+                  signal,
+                  redirect: "error",
+                });
+              },
+            },
+          );
+          if (result.kind === "retained" || result.kind === "receipt_pending") {
+            if (result.kind === "receipt_pending") await result.persist();
+            return { ok: false, code: "offer_create_retained", attemptId: result.attemptId };
+          }
+          if (result.kind !== "offer_creates_current")
+            return failure(
+              result.kind === "unavailable" &&
+                ["creation_reconciliation_required", "creation_batch_pending"].includes(result.reason)
+                ? "provider_unavailable" : "invalid_state",
+              new Error("Published Channex offer creation is unavailable."),
+            );
+        } catch {
+          return failure("provider_unavailable", new Error("Channex offer creation unavailable."));
+        }
+      }
       if (pricingDelivery && config.reconcileClosedUploads) {
         if (!input?.workerId)
           return failure("invalid_state", new Error("Current worker lease required."));
