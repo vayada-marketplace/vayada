@@ -70,6 +70,14 @@ export async function registerReplacementPricingRoutes(app: FastifyInstance, opt
     });
   }
   route("GET", "/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => commands.readTerms(id, request.params.roomTypeId!, request.params.offerId!));
+  route("GET", "/authority", (commands, id) => commands.readAuthority(id));
+  route("PUT", "/authority", (commands, id, request) => {
+    const requestId = key(request), body = request.body;
+    if (!exact(body, ["expectedRevision", "authority"]) ||
+        !(body.expectedRevision === null || uuid(body.expectedRevision)) ||
+        !["vayada", "external", "unconfigured"].includes(body.authority as string)) return invalid();
+    return commands.chooseAuthority(id, { requestId, expectedRevision: body.expectedRevision, authority: body.authority });
+  });
   route("PUT", "/rooms/:roomTypeId/offers/:offerId/terms", async () => { throw new PricingStorageError("denied"); });
   route("PUT", "/drafts/:draftId/rooms/:roomTypeId/offers/:offerId/terms", (commands, id, request) => {
     const requestId = key(request), body = request.body;

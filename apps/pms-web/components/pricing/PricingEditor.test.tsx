@@ -34,7 +34,7 @@ const sources = { room: "room", terms: "terms", finance: "finance" };
 let view: ReactTestRenderer;
 let saved: PricingDraft;
 const confirm = vi.fn(), publish = vi.fn();
-const client = { termsAction: vi.fn(), readTerms: vi.fn(), read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn() };
+const client = { termsAction: vi.fn(), readTerms: vi.fn(), read: vi.fn(), prepare: vi.fn(), saveDraft: vi.fn(), reviewCharges: vi.fn(), confirmationAction: vi.fn(() => confirm), publicationAction: vi.fn<(draft: PricingDraft) => typeof publish>(), readDraft: vi.fn(), readAuthority: vi.fn(), authorityAction: vi.fn() };
 const button = (label: string) => view.root.findAllByType("button").find((node) => node.children.join("") === label)!;
 const click = async (label: string) => { await act(async () => { button(label).props.onClick(); }); };
 const input = () => view.root.findAllByType("input").find((node) => node.props.inputMode === "decimal")!;
@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.stubGlobal("document", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   client.readTerms.mockImplementation(async (roomTypeId, offerId, revision) => ({ roomTypeId, offerId, revision, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }));
   client.read.mockResolvedValue({ ...snapshot, revision: 1, sources, stale: false });
+  client.readAuthority.mockResolvedValue({ authority: "unconfigured", revision: null, organizationId: null });
   client.prepare.mockImplementation(async (value) => ({ sources, snapshot: { ...snapshot, ...value } }));
   client.saveDraft.mockImplementation(async ({ draftId, expectedDraftRevision, baseRevision, snapshot: value }) => {
     saved = { draftId, revision: expectedDraftRevision + 1, baseRevision, snapshot: value, sources, stale: false }; return saved.revision;
@@ -54,6 +55,28 @@ beforeEach(() => {
   confirm.mockResolvedValue({ id: "declaration" }); publish.mockResolvedValue({ revision: 2, replayed: false });
 });
 afterEach(() => { if (view) act(() => view.unmount()); vi.unstubAllGlobals(); });
+it("protects an uncertain source change and lets a new owner reaffirm the same source", async () => {
+  const id = "61000000-0000-4000-8000-000000000001", draftId = "61000000-0000-4000-8000-000000000002";
+  const action = vi.fn().mockRejectedValueOnce(new Error("lost response")).mockResolvedValue({ revision: draftId, replayed: true });
+  client.authorityAction.mockReturnValue(action);
+  client.readAuthority.mockResolvedValueOnce({ authority: "unconfigured", revision: null, organizationId: null })
+    .mockResolvedValue({ authority: "vayada", revision: draftId, organizationId: id });
+  vi.mocked(window.confirm).mockReturnValue(true);
+  await mount();
+  await act(async () => view.root.findByProps({ "aria-label": "Price source" }).props.onChange({ target: { value: "vayada" } }));
+  await click("Save price source");
+  expect(button("Retry same change").props.disabled).toBe(false);
+  expect(button("Save draft").props.disabled).toBe(true);
+  const warn = vi.mocked(window.addEventListener).mock.calls.filter(([name]) => name === "beforeunload").at(-1)![1] as (event: unknown) => void;
+  const event = { preventDefault: vi.fn(), returnValue: undefined }; warn(event);
+  expect(event.preventDefault).toHaveBeenCalled();
+  await click("Retry same change");
+  expect(action).toHaveBeenCalledTimes(2);
+  expect(client.authorityAction).toHaveBeenCalledTimes(1);
+  expect(button("Reaffirm price source").props.disabled).toBe(false);
+  await click("Reaffirm price source");
+  expect(client.authorityAction).toHaveBeenLastCalledWith(draftId, "vayada");
+});
 it("saves edited amounts, shows charges, requires acknowledgment and retries the exact publication", async () => {
   await mount(); await act(async () => input().props.onChange({ target: { value: "123.45" } }));
   expect(button("Review saved charges").props.disabled).toBe(true);

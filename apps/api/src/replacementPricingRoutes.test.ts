@@ -30,6 +30,7 @@ const endpoints = [
   ["PUT", `/drafts/${draftId}/rooms/${id}/offers/flex/terms`, { baseRevision: 0, expectedRevision: null, cancellation: { kind: "non_refundable" }, payment: { kind: "full" } }],
   ["GET", `/drafts/${draftId}/charge-review`, undefined],
   ["GET", `/drafts/${draftId}/rooms/${id}/offers/flex/terms?revision=1`, undefined],
+  ["GET", "/authority", undefined], ["PUT", "/authority", { expectedRevision: null, authority: "vayada" }],
 ] as const;
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
@@ -37,6 +38,7 @@ async function fixture(auth: RequestContext | null = context) {
   const app = Fastify(); apps.push(app); app.decorateRequest("authContext", null);
   app.addHook("onRequest", async (request) => { if (request.headers.authorization === "Bearer valid") request.authContext = auth; });
   const commands = { readTerms: vi.fn().mockResolvedValue({ revision: draftId }), readDraftTerms: vi.fn().mockResolvedValue({ revision: draftId }), stageTerms: vi.fn().mockResolvedValue({ revision: draftId }),
+    readAuthority: vi.fn().mockResolvedValue({ authority: "unconfigured", revision: null, organizationId: null }), chooseAuthority: vi.fn().mockResolvedValue({ revision: draftId, replayed: false }),
     reviewCharges: vi.fn().mockResolvedValue({ fingerprint: "a".repeat(64) }), read: vi.fn().mockResolvedValue(snapshot), readDraft: vi.fn().mockResolvedValue({ snapshot, revision: 2 }),
     prepare: vi.fn().mockResolvedValue({ snapshot, sources }), saveDraft: vi.fn().mockResolvedValue(1),
     confirmCharges: vi.fn().mockResolvedValue({ id: draftId }), publish: vi.fn().mockResolvedValue({ revision: 1, replayed: false }) };
@@ -86,7 +88,7 @@ describe("replacement pricing HTTP boundary", () => {
       { ...publish, snapshot: { ...snapshot, ownerReferences: { charges: draftId } } },
       { ...publish, expectedRevision: -1 }, { ...publish, snapshot: { ...snapshot, rooms: [null] } }])
       expect((await f.inject(5, body)).statusCode).toBe(400);
-    for (const index of [4, 5, 7]) expect((await f.inject(index, endpoints[index][2], { "idempotency-key": "" })).statusCode).toBe(400);
+    for (const index of [4, 5, 7, 11]) expect((await f.inject(index, endpoints[index][2], { "idempotency-key": "" })).statusCode).toBe(400);
     expect((await f.app.inject({ method: "POST", url: `/api/pms/properties/${id}/pricing-v2/publish`, payload: publish,
       headers: { authorization: "Bearer valid", "idempotency-key": ["a", "b"] } })).statusCode).toBe(400);
     expect(f.commands.publish).not.toHaveBeenCalled();
@@ -104,6 +106,18 @@ describe("replacement pricing HTTP boundary", () => {
     expect((await f.inject(8)).statusCode).toBe(404);
     f.commands.reviewCharges.mockRejectedValue(new PricingStorageError("stale"));
     expect((await f.inject(8)).statusCode).toBe(409);
+  });
+  it("keeps the explicit price-source choice scoped and revisioned", async () => {
+    const f = await fixture();
+    expect((await f.inject(10)).json()).toEqual({ authority: "unconfigured", revision: null, organizationId: null });
+    expect((await f.inject(11)).statusCode).toBe(200);
+    expect(f.commands.chooseAuthority).toHaveBeenCalledWith(id, { requestId: "request-1", expectedRevision: null, authority: "vayada" });
+    for (const body of [{ authority: "vayada" }, { expectedRevision: null, authority: "other" },
+      { expectedRevision: null, authority: "vayada", organizationId: id }, { expectedRevision: 1, authority: "vayada" }])
+      expect((await f.inject(11, body)).statusCode).toBe(400);
+    expect(f.commands.chooseAuthority).toHaveBeenCalledTimes(1);
+    f.commands.chooseAuthority.mockRejectedValue(new PricingStorageError("stale"));
+    expect((await f.inject(11)).statusCode).toBe(409);
   });
   it("retires immediate policy mutation and validates candidate binding and effective evidence", async () => {
     const f = await fixture(), base = `/api/pms/properties/${id}/pricing-v2`;
