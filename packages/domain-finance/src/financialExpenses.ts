@@ -50,7 +50,8 @@ export type FinanceExpenseCategory = {
 // prettier-ignore
 export type FinanceExpense = { id: string; categoryId: string; origin: FinanceExpenseOrigin;
   incurredOn: string; vendor: string; amount: FinanceExpenseMoney; recurringRuleId: string | null;
-  sourceKey: string | null; reversesExpenseId: string | null; revision: number } & FinanceExpensePayment;
+  sourceKey: string | null; reversesExpenseId: string | null; revision: number;
+  supplierInvoiceNumber?: string | null } & FinanceExpensePayment;
 // prettier-ignore
 export type FinanceRecurringExpenseRule = { id: string; categoryId: string; vendor: string;
   amount: FinanceExpenseMoney; notes?: string; paymentStatus: FinanceExpensePaymentStatus;
