@@ -35,7 +35,7 @@ describe("financial expense operations", () => {
     });
 
     expect(get).toHaveBeenCalledWith(
-      "/finance/properties/property%2Fid/financials/expenses?from=2026-09-01&to=2026-09-17&sort=amount_desc&categoryId=category-1&paymentStatus=unpaid&recurring=true&origin=recurring&search=Laundry&limit=50",
+      "/api/finance/properties/property%2Fid/financials/expenses?from=2026-09-01&to=2026-09-17&sort=amount_desc&categoryId=category-1&paymentStatus=unpaid&recurring=true&origin=recurring&search=Laundry&limit=50",
       { cache: "no-store", signal: undefined },
     );
   });
@@ -54,7 +54,7 @@ describe("financial expense operations", () => {
     });
 
     expect(post).toHaveBeenCalledWith(
-      "/finance/properties/property/financials/exports",
+      "/api/finance/properties/property/financials/exports",
       {
         commandId: "12140000-0000-4000-8000-000000000001",
         idempotencyKey: "12140000-0000-4000-8000-000000000001",
@@ -87,7 +87,7 @@ describe("financial expense operations", () => {
     await getExpenseCsv("property", "export/id");
 
     expect(get).toHaveBeenCalledWith(
-      "/finance/properties/property/financials/exports/export%2Fid",
+      "/api/finance/properties/property/financials/exports/export%2Fid",
       { cache: "no-store" },
     );
   });

@@ -65,7 +65,7 @@ type ExportStatusResponse = {
 };
 
 const root = (propertyId: string) =>
-  `/finance/properties/${encodeURIComponent(propertyId)}/financials`;
+  `/api/finance/properties/${encodeURIComponent(propertyId)}/financials`;
 
 export function getFinanceExpenses(
   propertyId: string,
