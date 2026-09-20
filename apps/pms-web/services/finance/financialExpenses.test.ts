@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
 const post = vi.fn();
@@ -13,6 +13,10 @@ describe("financial expense operations", () => {
     get.mockReset();
     post.mockReset();
     vi.stubGlobal("crypto", { randomUUID: () => "12140000-0000-4000-8000-000000000001" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("preserves every ledger filter while reading expenses", async () => {
