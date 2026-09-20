@@ -151,11 +151,22 @@ TypeScript Booking API. Its public command contains no affiliate context. The
 synthetic server-only context argument added to the pricing writer is not a
 guest-facing API field.
 
+The reserved native query parameter is `vref`. Until the arrival/admission
+handler and privacy gates are live, Booking Web removes every `vref` value on
+booking page routes with a same-host, non-cacheable redirect before rendering
+or canonicalizing the hotel host. Such a visit remains untracked. The current
+native URL safety candidate accepts only the Booking root URL, which is covered
+by this middleware. API, static, and dotted paths are outside that approved
+destination contract; expanding allowed destination paths requires extending
+the guard before any public affiliate redirect is enabled. The cleanup redirect
+uses the browser-facing proxy host only when it is a recognized Booking host or
+a domain resolved to a hotel; an unknown host fails closed.
+
 For a live native destination, use the following sequence only after the
 redirect, privacy and retention gates above are met:
 
 1. The Marketplace redirect appends one opaque, short-lived click reference to
-   the exact approved Booking URL using a new parameter distinct from `ref`.
+   the exact approved Booking URL using `vref`, distinct from `ref`.
    It must preserve the approved URL's existing query and fragment, reject a
    pre-existing conflicting reference parameter, and never take a destination
    URL from the visitor. The reference contains no creator, property, campaign
