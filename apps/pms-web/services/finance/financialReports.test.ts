@@ -33,4 +33,16 @@ describe("financial report reads", () => {
       { cache: "no-store", signal: undefined },
     );
   });
+
+  it("looks up room type names without blocking Revenue reporting", async () => {
+    get.mockResolvedValue({ items: [] });
+    const { getRoomTypeNames } = await import("./financialReports");
+
+    await getRoomTypeNames("property");
+
+    expect(get).toHaveBeenCalledWith("/api/pms/properties/property/room-types", {
+      cache: "no-store",
+      signal: undefined,
+    });
+  });
 });

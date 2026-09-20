@@ -5,6 +5,8 @@ import {
   pmsOperationsRequestOptions,
 } from "@/services/api/pmsOperationsClient";
 
+type RoomTypeListResponse = { items: Array<{ roomTypeId: string; name: string }> };
+
 export function getFinanceDashboard(
   propertyId: string,
   input: { asOf?: string; signal?: AbortSignal } = {},
@@ -24,5 +26,15 @@ export function getFinanceRevenue(
   return pmsOperationsClient.get<FinanceRevenueResponse>(
     `/finance/properties/${encodeURIComponent(propertyId)}/financials/revenue?${query}`,
     { ...pmsOperationsRequestOptions, signal: input.signal },
+  );
+}
+
+export function getRoomTypeNames(
+  propertyId: string,
+  signal?: AbortSignal,
+): Promise<RoomTypeListResponse> {
+  return pmsOperationsClient.get<RoomTypeListResponse>(
+    `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
+    { ...pmsOperationsRequestOptions, signal },
   );
 }
