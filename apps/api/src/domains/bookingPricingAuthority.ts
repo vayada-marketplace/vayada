@@ -44,6 +44,24 @@ export async function lockBookingPricingAuthority(
 /** Staff-only explicit choice. No publication/channel connection implicitly calls this command. */
 export function createBookingPricingAuthorityStore(pool: Pool) {
   return {
+    async read(context: RequestContext | null, scope: PricingStorageScope) {
+      if (![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid))
+        return fail("invalid");
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        if (!(await lockReplacementPricingAuthorization(client, context, scope, "read")))
+          return fail("denied");
+        const current = await lockBookingPricingAuthority(client, scope.propertyId);
+        await client.query("COMMIT");
+        return current;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async save(context: RequestContext | null, scope: PricingStorageScope, input: unknown) {
       if (
         ![scope.propertyId, scope.organizationId, scope.actorUserId].every(uuid) ||
