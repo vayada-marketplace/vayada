@@ -285,3 +285,10 @@ stores the event with an idempotency receipt in one transaction. A side may only
 clear its own pause; end is terminal. It does not change collaboration history,
 accepted terms or existing earnings. No public route or earning-link gate uses
 this command yet.
+
+The internal link creation command now requires an active agreement for a new
+link. Existing creators can still retrieve their stable link while paused; the
+internal token eligibility reader rejects paused and ended agreements and can
+make the same link eligible again after resume. Click capture must use that
+reader in a READ COMMITTED transaction before recording an eligible click. No public redirect
+or click capture is enabled by this reader alone.
