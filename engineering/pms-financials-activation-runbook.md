@@ -24,6 +24,19 @@ mutation route returns 410. Financials cannot be activated or rolled back
 through Feature Hub until a reviewed control and its authorization are shipped
 and verified on the serving revision.
 
+The proposed control is property-scoped and fails closed: the API setting
+`PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS` defaults to an empty list. After the
+control is reviewed and serving, add only the explicitly approved property ID
+to that setting and verify the running API picked it up. The allowlist permits
+activation; it does not replace the readiness audit or production approval.
+Only an active property owner with `pms.finance.manage`, a PMS base entitlement,
+and effective property access can change the module. A global Financials
+suspension blocks activation. Removing a property from the allowlist must not
+remove its rollback path: an owner can still deactivate an active property row
+or an effective organization-wide grant. Record the corresponding redacted
+`platform.product_audit_events` event and verify runtime database write grants
+for both entitlement and audit tables before adding any live property ID.
+
 ## 1. Verify deployment and authorization
 
 1. Confirm the exact running API and PMS image digests and map them to source
@@ -39,6 +52,11 @@ and verified on the serving revision.
    status, and downloads. Missing permission, property link, base entitlement,
    or active module entitlement must each deny Owner and Manager access. Repeat
    the allowed Owner/Manager cases only after activation.
+5. Confirm the Feature Hub card and state are visible only for the approved
+   owner/property, that activation persists an effective property-scoped
+   entitlement and audit event, and that deactivation hides navigation and
+   denies direct Financials access. Verify that a property outside the allowlist
+   cannot activate, while rollback remains possible after allowlist removal.
 
 ## 2. Rehearse data and reconcile
 
