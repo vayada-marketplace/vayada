@@ -63,6 +63,31 @@ export function DashboardWorkspace() {
     return () => controller.abort();
   }, [asOf, reload]);
 
+  const content =
+    state.kind === "loading" ? (
+      <DashboardSkeleton />
+    ) : state.kind === "ready" ? (
+      tab === "dashboard" ? (
+        <Dashboard data={state.data} locale={state.locale} />
+      ) : tab === "revenue" ? (
+        <RevenueTab
+          propertyId={state.propertyId}
+          locale={state.locale}
+          generatedAt={state.data.generatedAt}
+          timeZone={state.data.timeZone}
+        />
+      ) : (
+        <ExpensesTab
+          propertyId={state.propertyId}
+          locale={state.locale}
+          generatedAt={state.data.generatedAt}
+          timeZone={state.data.timeZone}
+        />
+      )
+    ) : (
+      <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
+    );
+
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -124,6 +149,8 @@ export function DashboardWorkspace() {
             key={item}
             type="button"
             role="tab"
+            id={`financial-insights-${item}-tab`}
+            aria-controls={`financial-insights-${item}-panel`}
             aria-selected={tab === item}
             className={`rounded-t-lg px-4 py-2 text-sm font-medium ${tab === item ? "bg-blue-50 text-blue-800" : "text-gray-600 hover:bg-gray-50"}`}
             onClick={() => setTab(item)}
@@ -132,29 +159,18 @@ export function DashboardWorkspace() {
           </button>
         ))}
       </div>
-      {state.kind === "loading" && <DashboardSkeleton />}
-      {state.kind === "ready" && tab === "dashboard" && (
-        <Dashboard data={state.data} locale={state.locale} />
-      )}
-      {state.kind === "ready" && tab === "revenue" && (
-        <RevenueTab
-          propertyId={state.propertyId}
-          locale={state.locale}
-          generatedAt={state.data.generatedAt}
-          timeZone={state.data.timeZone}
-        />
-      )}
-      {state.kind === "ready" && tab === "expenses" && (
-        <ExpensesTab
-          propertyId={state.propertyId}
-          locale={state.locale}
-          generatedAt={state.data.generatedAt}
-          timeZone={state.data.timeZone}
-        />
-      )}
-      {state.kind !== "loading" && state.kind !== "ready" && (
-        <StatusPanel kind={state.kind} onRetry={() => setReload((current) => current + 1)} />
-      )}
+      {(["dashboard", "revenue", "expenses"] as const).map((item) => (
+        <div
+          key={item}
+          id={`financial-insights-${item}-panel`}
+          role="tabpanel"
+          aria-labelledby={`financial-insights-${item}-tab`}
+          tabIndex={0}
+          hidden={tab !== item}
+        >
+          {tab === item && content}
+        </div>
+      ))}
     </div>
   );
 }

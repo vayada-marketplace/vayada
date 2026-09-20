@@ -176,6 +176,18 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   );
 
   await page.goto("/financials");
+  const insightTabs = page.getByRole("tablist", { name: "Financial insights" });
+  for (const name of ["Dashboard", "Revenue", "Expenses"]) {
+    const id = name.toLowerCase();
+    await expect(insightTabs.getByRole("tab", { name })).toHaveAttribute(
+      "aria-controls",
+      `financial-insights-${id}-panel`,
+    );
+    await expect(page.locator(`#financial-insights-${id}-panel`)).toHaveAttribute(
+      "aria-labelledby",
+      `financial-insights-${id}-tab`,
+    );
+  }
   await page.getByRole("tab", { name: "Expenses" }).click();
   await expect(page.getByRole("heading", { name: "Expense ledger" })).toBeVisible();
   await expect(page.getByText("Booking.com")).toBeVisible();
