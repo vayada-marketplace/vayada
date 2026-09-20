@@ -47,6 +47,7 @@ import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManag
 import { prepareNextChannexInitialAriDispatch } from "./replacementPricingOfferOwners.js";
 import { reconcilePendingChannexUploads } from "./channexPendingUploadReconciliation.js";
 import { createChannexManagementProvider } from "../integrations/channexManagement.js";
+import { bootstrapPublishedChannexOffer } from "../integrations/channexPublishedOfferBootstrap.js";
 import { reconcileCurrentChannexInitialAri } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexStagedPrices } from "./replacementPricingOfferOwners.js";
 import { readCurrentChannexAriTaskFinishes } from "./replacementPricingOfferOwners.js";
@@ -478,11 +479,19 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       serviceRead: () => readPublishedPricingForChannexJob(pool, input),
     };
   }
-  async function creationFixture(baseMinor = "10000") {
+  async function creationFixture(baseMinor = "10000", savedOffer = false) {
     const f = await serviceFixture(2, 2, baseMinor);
     await f.publish();
     const roomTypeId = f.snapshot.rooms[0].roomTypeId,
       externalRoomTypeId = randomUUID();
+    if (savedOffer)
+      await pool.query(
+        `UPDATE platform.jobs SET job_type='channex.provision',
+           payload=jsonb_build_object('operationType','provision','publishedOffer',
+             jsonb_build_object('roomTypeId',$2::text,'offerId','flex',
+               'publicationRevision',1,'primaryOccupancy',1)) WHERE id=$1`,
+        [f.input.jobId, roomTypeId],
+      );
     await pool.query(
       `INSERT INTO pms.channel_room_type_mappings
       (property_id,connection_id,room_type_id,external_room_type_id)
@@ -492,7 +501,12 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     return {
       ...f,
       externalRoomTypeId,
-      selection: { roomTypeId, offerId: "flex", operationKey: "create", primaryOccupancy: 1 },
+      selection: {
+        roomTypeId,
+        offerId: "flex",
+        operationKey: savedOffer ? f.input.jobId : "create",
+        primaryOccupancy: 1,
+      },
     };
   }
   function createdResponse(body: unknown) {
@@ -508,14 +522,14 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     };
     return { data: { type: "rate_plan", id, attributes } };
   }
-  async function recordingFixture(baseMinor = "10000") {
-    const f = await creationFixture(baseMinor);
+  async function recordingFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await creationFixture(baseMinor, savedOffer);
     const claim = await claimPublishedChannexOfferCreate(pool, f.input, f.selection);
     if (claim.kind !== "claimed") throw new Error(`claim required: ${JSON.stringify(claim)}`);
     return { ...f, claim, response: createdResponse(claim.request.body) };
   }
-  async function receiptFixture(baseMinor = "10000") {
-    const f = await recordingFixture(baseMinor);
+  async function receiptFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await recordingFixture(baseMinor, savedOffer);
     const connectionId = (
       await pool.query("SELECT connection_id FROM pms.channex_offer_targets WHERE id=$1", [
         f.claim.targetId,
@@ -612,8 +626,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
     expect(await prepared.dispatch(ports)).toMatchObject({ reason: "dispatch_already_used" });
     expect(create).toHaveBeenCalledOnce();
   }, 30000);
-  async function configurationFixture(baseMinor = "10000") {
-    const f = await receiptFixture(baseMinor);
+  async function configurationFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await receiptFixture(baseMinor, savedOffer);
     await (
       await prepareChannexReceiptPersistence(pool, f.correlation, f.response())
     )();
@@ -624,8 +638,8 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
   }
   const initialAriDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const nextAriDate = new Date(Date.now() + 4 * 86400000).toISOString().slice(0, 10);
-  async function initialAriFixture(baseMinor = "10000") {
-    const f = await configurationFixture(baseMinor);
+  async function initialAriFixture(baseMinor = "10000", savedOffer = false) {
+    const f = await configurationFixture(baseMinor, savedOffer);
     await pool.query(
       "INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES($1,'Etc/UTC')",
       [f.scope.propertyId],
@@ -2132,6 +2146,39 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ariThrough: through.toISOString().slice(0, 10),
     });
   });
+  it("recognizes the saved operation after activation commits but before job completion", async () => {
+    const f = await initialAriFixture("10000", true);
+    await seedCurrentAvailability(f);
+    await seedCompletedInitialAri(f);
+    expect(await activatePublishedChannexOffers(pool, f.input)).toMatchObject({
+      kind: "all_targets_active",
+    });
+    const job = {
+      ...f.input,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      maxAttempts: 3,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "provision" as const,
+        publishedOffer: {
+          roomTypeId: f.selection.roomTypeId,
+          offerId: f.selection.offerId,
+          publicationRevision: 1,
+          primaryOccupancy: 1,
+        },
+      },
+    };
+    const create = vi.fn();
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, {
+        get: vi.fn(),
+        create,
+      }),
+    ).toEqual({ kind: "ready" });
+    expect(create).not.toHaveBeenCalled();
+  });
   it.each(["availability", "binding"])(
     "keeps the target pending when current %s evidence changes",
     async (changed) => {
@@ -3583,6 +3630,54 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       },
     };
   }
+  it("replays a saved-offer creation receipt without creating a second Channex rate", async () => {
+    const f = await creationFixture("10000", true);
+    const selection = f.selection;
+    const job = {
+      ...f.input,
+      propertyId: f.scope.propertyId,
+      correlationId: null,
+      maxAttempts: 3,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "provision" as const,
+        publishedOffer: {
+          roomTypeId: selection.roomTypeId,
+          offerId: selection.offerId,
+          publicationRevision: 1,
+          primaryOccupancy: 1,
+        },
+      },
+    };
+    let created: unknown;
+    const create = vi.fn(async (request: { body: unknown }) => {
+      created = createdResponse(request.body);
+      return new Response(JSON.stringify(created), { status: 201 });
+    });
+    const get = vi.fn(async (path: string) =>
+      path.includes("/room_types/") ? providerRoom(f) : created,
+    );
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, { get, create }),
+    ).toMatchObject({ kind: "creation_retained" });
+    expect(create).toHaveBeenCalledOnce();
+    expect(
+      await bootstrapPublishedChannexOffer(pool, job, f.input.workerId, { get, create }),
+    ).toEqual({ kind: "ready" });
+    expect(create).toHaveBeenCalledOnce();
+    expect(
+      (
+        await pool.query(
+          `SELECT count(*)::int AS count FROM pms.channex_offer_create_receipts receipt
+       JOIN pms.channex_offer_create_attempts attempt ON attempt.id=receipt.attempt_id
+       JOIN pms.channex_offer_targets target ON target.id=attempt.target_id
+       WHERE target.property_id=$1`,
+          [f.scope.propertyId],
+        )
+      ).rows[0].count,
+    ).toBe(1);
+  });
   it("dispatches once through fresh checks and retains a simulated create response", async () => {
     const f = await creationFixture();
     const prepared = await prepareChannexOfferDispatch(pool, f.input, f.selection);

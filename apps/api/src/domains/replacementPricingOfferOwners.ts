@@ -1006,7 +1006,7 @@ export async function prepareChannexOfferDispatch(
           return { kind: "unavailable" as const, reason: "creation_reconciliation_required" };
         return { kind: "retained" as const, attemptId: claim.attemptId };
       } catch {
-        return { kind: "receipt_pending" as const, persist };
+        return { kind: "receipt_pending" as const, persist, attemptId: claim.attemptId };
       }
     },
   };

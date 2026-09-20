@@ -9,6 +9,77 @@ import {
 } from "./channexManagement.js";
 
 describe("Channex management provider", () => {
+  it("continues a saved published offer only from its retained creation receipt", async () => {
+    const bootstrap = vi.fn().mockResolvedValue({
+      kind: "creation_retained" as const,
+      attemptId: "attempt-1",
+    });
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      plans: { plan: async () => ({ requests: [] }) },
+      bootstrapPublishedOffer: bootstrap,
+      canSyncAri: true,
+      reconcileClosedUploads: vi.fn(),
+      dispatchClosedUpload: vi.fn(),
+      reconcileRoomAvailability: vi.fn(),
+      prepareRoomAvailability: vi.fn(),
+      activatePublishedOffers: vi.fn(),
+    });
+    const saved = {
+      ...job("provision"),
+      input: {
+        ...job("provision").input,
+        publishedOffer: {
+          roomTypeId: "room-1",
+          offerId: "breakfast",
+          publicationRevision: 1,
+          primaryOccupancy: 2,
+        },
+      },
+    };
+    await expect(provider.execute(saved, { workerId: "worker" })).resolves.toEqual({
+      ok: false,
+      code: "offer_creation_retained",
+      attemptId: "attempt-1",
+    });
+    expect(bootstrap).toHaveBeenCalledWith(
+      saved,
+      "worker",
+      expect.objectContaining({ get: expect.any(Function), create: expect.any(Function) }),
+    );
+  });
+
+  it("does not create a published rate without the complete delivery bundle", async () => {
+    const bootstrap = vi.fn();
+    const plan = vi.fn();
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      plans: { plan },
+      bootstrapPublishedOffer: bootstrap,
+      canSyncAri: true,
+    });
+    const saved = {
+      ...job("provision"),
+      input: {
+        ...job("provision").input,
+        publishedOffer: {
+          roomTypeId: "room-1",
+          offerId: "breakfast",
+          publicationRevision: 1,
+          primaryOccupancy: 2,
+        },
+      },
+    };
+    await expect(provider.execute(saved, { workerId: "worker" })).resolves.toMatchObject({
+      ok: false,
+      code: "invalid_state",
+    });
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(plan).not.toHaveBeenCalled();
+  });
+
   it.each([
     [new ChannexAriMappingMissingError(), "mapping_missing"],
     [new Error("Missing property binding"), "invalid_state"],

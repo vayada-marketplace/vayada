@@ -221,6 +221,14 @@ async function retainedUpload(
 ) {
   const result = await client.query(
     `SELECT retained.id FROM (
+       SELECT a.id,'offer_creation_retained'::text AS progress_code
+       FROM pms.channex_offer_create_attempts a
+       JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
+       JOIN platform.jobs j ON j.id=ja.job_id
+       JOIN pms.channex_offer_targets t ON t.id=a.target_id AND t.property_id=j.property_id
+       WHERE j.id=$1::uuid AND ja.attempt_number=$2
+         AND (SELECT count(*) FROM pms.channex_offer_create_receipts r WHERE r.attempt_id=a.id)=1
+       UNION ALL
        SELECT a.id,'initial_upload_retained'::text AS progress_code
        FROM pms.channex_offer_ari_attempts a
        JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
@@ -238,8 +246,9 @@ async function retainedUpload(
      ) retained JOIN platform.jobs j ON j.id=$1::uuid
      WHERE ($3::uuid IS NULL OR retained.id=$3::uuid)
        AND ($5::text IS NULL OR retained.progress_code=$5::text)
-       AND j.queue_name=$4 AND j.payload->>'operationType'='sync_ari'
-       AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb
+       AND j.queue_name=$4
+       AND ((j.payload->>'operationType'='sync_ari' AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb)
+         OR (j.payload->>'operationType'='provision' AND j.payload ? 'publishedOffer'))
      LIMIT 1`,
     [jobId, attemptNumber, attemptId, PMS_CHANNEX_MANAGEMENT_QUEUE, progressCode],
   );

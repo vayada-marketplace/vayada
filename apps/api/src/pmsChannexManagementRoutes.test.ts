@@ -411,6 +411,27 @@ describe("PMS Channex management command routes", () => {
           })
         ).statusCode,
       ).toBe(400);
+    await app.close();
+    const wrongScope = await testApp(
+      {},
+      mutating,
+      undefined,
+      false,
+      true,
+      "99999999-9999-4999-8999-999999999999",
+    );
+    app = wrongScope.app;
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/properties/${propertyId}/channex/published-offers/provision`,
+          headers: { authorization: "Bearer valid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(wrongScope.enqueue).not.toHaveBeenCalled();
   });
 
   it("fails closed for observe-only capabilities and invalid payloads", async () => {
@@ -604,6 +625,7 @@ async function testApp(
   reportScope?: string,
   stagingRecovery = false,
   publishedOfferProvisioningEnabled = false,
+  publishedOfferProvisioningPropertyId = propertyId,
 ) {
   const app = Fastify({ logger: false });
   const getAlertDiagnostics = vi.fn().mockResolvedValue(null);
@@ -668,6 +690,7 @@ async function testApp(
     noShowReportingEnabled: Boolean(reportScope) || capabilityModes.bookingSync === "mutating",
     noShowReportingPropertyId: reportScope,
     publishedOfferProvisioningEnabled,
+    publishedOfferProvisioningPropertyId,
   });
   return {
     app,

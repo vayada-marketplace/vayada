@@ -649,10 +649,12 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   );
   if (
     stagingPublishedOffersEnabled &&
-    (!stagingRestrictionsPropertyId || capabilityModes.provisioning !== "mutating")
+    (!stagingRestrictionsPropertyId ||
+      capabilityModes.provisioning !== "mutating" ||
+      !stagingInventoryEnabled)
   ) {
     throw new Error(
-      "Scoped Channex published offers require a staging property and mutating provisioning",
+      "Scoped Channex published offers require a staging property, inventory, and mutating provisioning",
     );
   }
   if (
@@ -666,9 +668,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
       Object.entries(capabilityModes).some(
         ([name, mode]) =>
           name !== "ariSync" &&
-          !(
-            (stagingMealsEnabled || stagingPublishedOffersEnabled) && name === "provisioning"
-          ) &&
+          !((stagingMealsEnabled || stagingPublishedOffersEnabled) && name === "provisioning") &&
           mode === "mutating",
       ))
   ) {

@@ -227,6 +227,7 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
+import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
 import {
   createChannexThreadAction,
@@ -1088,6 +1089,16 @@ const channexManagementProvider =
           channexUploadReconciliationPool && config.channexManagement.stagingInventoryEnabled
             ? (lease) => activatePublishedChannexOffers(channexUploadReconciliationPool, lease)
             : undefined,
+        bootstrapPublishedOffer:
+          channexUploadReconciliationPool && config.channexManagement.stagingPublishedOffersEnabled
+            ? (job, workerId, ports) =>
+                bootstrapPublishedChannexOffer(
+                  channexUploadReconciliationPool,
+                  job,
+                  workerId,
+                  ports,
+                )
+            : undefined,
       })
     : undefined;
 const channexManagementWorkerStore = channexManagementProvider
@@ -1586,6 +1597,8 @@ const app = buildApp({
         capabilityModes: config.channexManagement.capabilityModes,
         publishedOfferProvisioningEnabled:
           config.channexManagement.stagingPublishedOffersEnabled === true,
+        publishedOfferProvisioningPropertyId:
+          config.channexManagement.stagingRestrictionsPropertyId,
         commandPort: pmsChannexManagementCommandPort,
         iframeSessionPort: pmsChannexIframeSessionPort,
       }

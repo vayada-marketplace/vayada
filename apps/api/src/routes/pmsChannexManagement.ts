@@ -28,6 +28,7 @@ export type PmsChannexManagementRoutesOptions = {
   iframeSessionPort?: PmsChannexIframeSessionPort;
   datePrices?: ChannelDatePricesPort;
   publishedOfferProvisioningEnabled?: boolean;
+  publishedOfferProvisioningPropertyId?: string;
 };
 
 export async function registerPmsChannexManagementRoutes(
@@ -277,7 +278,8 @@ export async function registerPmsChannexManagementRoutes(
       if (!input) return reply.code(400).send({ code: "invalid_published_offer_provision" });
       if (
         options.capabilityModes.provisioning !== "mutating" ||
-        !options.publishedOfferProvisioningEnabled
+        !options.publishedOfferProvisioningEnabled ||
+        request.params.propertyId !== options.publishedOfferProvisioningPropertyId
       )
         return reply.code(409).send({ code: "channex_capability_not_mutating" });
       if (!options.commandPort)

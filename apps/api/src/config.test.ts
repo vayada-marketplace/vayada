@@ -241,17 +241,20 @@ describe("api config", () => {
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
       PMS_CHANNEX_PROVISIONING_MODE: "mutating",
       PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED: "true",
+      PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "true",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingPublishedOffersEnabled).toBe(true);
     for (const invalid of [
       { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
       { PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED: "false" },
+      { PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "false" },
       { PMS_CHANNEX_PROVISIONING_MODE: "observe_only" },
       { CHANNEX_API_BASE_URL: "https://app.channex.io" },
       { API_BACKGROUND_WORKERS_ENABLED: "true" },
       { PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating" },
-    ]) expect(() => loadConfig({ ...base, ...invalid })).toThrow();
+    ])
+      expect(() => loadConfig({ ...base, ...invalid })).toThrow();
   });
 
   it.each([false, true])("loads a paused isolated staging runtime (meals=%s)", (meals) => {
