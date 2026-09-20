@@ -17,7 +17,7 @@ describe("financial report reads", () => {
     await getFinanceDashboard("property/id", { asOf: "2026-09-17" });
 
     expect(get).toHaveBeenCalledWith(
-      "/finance/properties/property%2Fid/financials/dashboard?asOf=2026-09-17",
+      "/api/finance/properties/property%2Fid/financials/dashboard?asOf=2026-09-17",
       { cache: "no-store", signal: undefined },
     );
   });
@@ -29,7 +29,7 @@ describe("financial report reads", () => {
     await getFinanceRevenue("property", { from: "2026-09-01", to: "2026-09-17" });
 
     expect(get).toHaveBeenCalledWith(
-      "/finance/properties/property/financials/revenue?from=2026-09-01&to=2026-09-17",
+      "/api/finance/properties/property/financials/revenue?from=2026-09-01&to=2026-09-17",
       { cache: "no-store", signal: undefined },
     );
   });

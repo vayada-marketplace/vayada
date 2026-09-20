@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import SharedHotelLoginForm from "@vayada/product-onboarding/SharedHotelLoginForm";
 import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
 import {
   isAuthOrganizationSelectionResponse,
   type AuthOrganizationSelectionResponse,
@@ -15,18 +16,21 @@ type LoginContentProps = {
   returnTo?: string;
   resumeSession?: boolean;
   authError?: string;
+  workosReturn?: "complete" | "failed";
 };
 
 export function LoginContent({
   returnTo = "/dashboard",
   resumeSession = false,
   authError,
+  workosReturn,
 }: LoginContentProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitError, setSubmitError] = useState(authError ?? "");
+  const [showReturnFailure, setShowReturnFailure] = useState(workosReturn === "failed");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationSelection, setOrganizationSelection] =
     useState<AuthOrganizationSelectionResponse | null>(null);
@@ -67,6 +71,7 @@ export function LoginContent({
   const handleLogin = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
+      setShowReturnFailure(false);
       setSubmitError("");
       setIsSubmitting(true);
       try {
@@ -77,12 +82,18 @@ export function LoginContent({
         }
         await redirectAfterLogin();
       } catch (error) {
-        setSubmitError(error instanceof Error ? error.message : t("auth.login.unexpectedError"));
+        setSubmitError(
+          workosReturn === "complete" && error instanceof ApiErrorResponse && error.status === 403
+            ? t("auth.login.invitationPending")
+            : error instanceof Error
+              ? error.message
+              : t("auth.login.unexpectedError"),
+        );
       } finally {
         setIsSubmitting(false);
       }
     },
-    [email, password, redirectAfterLogin, t],
+    [email, password, redirectAfterLogin, t, workosReturn],
   );
 
   useEffect(() => {
@@ -117,7 +128,10 @@ export function LoginContent({
     <SharedHotelLoginForm
       copy={{
         title: t("auth.login.formTitle"),
-        subtitle: t("auth.login.formSubtitle"),
+        subtitle:
+          workosReturn === "complete"
+            ? t("auth.login.workosReturnComplete")
+            : t("auth.login.formSubtitle"),
         chooseOrganizationTitle: t("auth.login.chooseHotelGroup"),
         chooseOrganizationSubtitle: t("auth.login.chooseHotelGroupSubtitle"),
         emailLabel: t("auth.login.emailLabel"),
@@ -133,7 +147,7 @@ export function LoginContent({
       email={email}
       password={password}
       isSubmitting={isSubmitting}
-      submitError={submitError}
+      submitError={submitError || (showReturnFailure ? t("auth.login.workosReturnFailed") : "")}
       organizations={organizationSelection?.organizations ?? null}
       forgotPasswordHref="/forgot-password"
       onEmailChange={setEmail}

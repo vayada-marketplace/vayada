@@ -232,6 +232,7 @@ jobs:
           src/domains/marketplaceAffiliateLinkStorage.integration.test.ts
           src/domains/marketplaceAffiliateLinkCreation.integration.test.ts
           src/domains/marketplaceAffiliateAgreementActivation.integration.test.ts
+          src/domains/marketplaceAffiliateAgreementLifecycleCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentCommand.integration.test.ts
           src/domains/marketplaceAffiliateAssentRead.integration.test.ts
           src/domains/marketplaceAffiliateCollaborationRead.integration.test.ts

@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { pmsOperationsClient } from "@/services/api/pmsOperationsClient";
-import { readOfferPreview } from "./offerPreview";
+import { readOfferPreview, requestOfferProvisioning } from "./offerPreview";
 vi.mock("@/services/api/pmsOperationsClient", () => ({
-  pmsOperationsClient: { get: vi.fn() },
+  pmsOperationsClient: { get: vi.fn(), post: vi.fn() },
   pmsOperationsRequestOptions: { cache: "no-store" },
 }));
 afterEach(() => vi.resetAllMocks());
@@ -56,4 +56,24 @@ it("validates scope, read-only flags and bounded occupancy before showing server
     kind: "unsupported",
     reason: "child_representation_unavailable",
   });
+});
+
+it("submits only the explicit selected offer without provider identities", async () => {
+  vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce("command").mockReturnValueOnce("key") });
+  vi.mocked(pmsOperationsClient.post).mockResolvedValue({ operationId: "operation" });
+  await expect(requestOfferProvisioning(id, room, "flex", 1)).resolves.toEqual({
+    operationId: "operation",
+  });
+  expect(vi.mocked(pmsOperationsClient.post)).toHaveBeenCalledWith(
+    expect.stringContaining(`/properties/${id}/channex/published-offers/provision`),
+    {
+      commandId: "command",
+      idempotencyKey: "key",
+      roomTypeId: id,
+      offerId: "flex",
+      publicationRevision: 1,
+      primaryOccupancy: 1,
+    },
+    expect.anything(),
+  );
 });

@@ -150,6 +150,26 @@ describe.skipIf(!URL)("PostgreSQL Finance expense read model", () => {
     await expect(read.exportCsv(PROPERTY, "USD", result!.snapshot)).rejects.toBeInstanceOf(FinanceExpenseEvidenceError);
   });
 
+  it("returns supplier-bill references from current and historical ledger rows", async () => {
+    const original = "12130000-0000-4000-8000-000000000024";
+    const correction = "12130000-0000-4000-8000-000000000025";
+    await admin.query(
+      `INSERT INTO finance.expenses
+       (id,property_id,category_id,origin,entry_kind,incurred_on,vendor,amount,currency,
+        source_key,reverses_expense_id,supplier_invoice_number)
+       VALUES ($1,$3,$4,'supplier_bill','expense','2026-08-09','Supplier',12,'EUR',
+         'supplier_bill:24',NULL,'SUP-001'),
+         ($2,$3,$4,'supplier_bill','correction','2026-08-10','Supplier',12,'EUR',
+         'supplier_bill:25',$1,'SUP-002')`,
+      [original, correction, PROPERTY, CATEGORY],
+    );
+    await expect(read.expense(PROPERTY, original)).resolves.toMatchObject({ item: { supplierInvoiceNumber: "SUP-001" } });
+    await expect(read.expense(PROPERTY, correction)).resolves.toMatchObject({ item: { origin: "supplier_bill", supplierInvoiceNumber: "SUP-002" } });
+    await expect(read.expense(OTHER, correction)).resolves.toBeNull();
+    const list = await read.expenses(PROPERTY, query({ origin: "supplier_bill", limit: 10 }));
+    expect(list?.page.items).toMatchObject([{ id: correction, supplierInvoiceNumber: "SUP-002" }]);
+  });
+
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM booking.nightly_revenue_evidence WHERE property_id IN ('${PROPERTY}','${EMPTY}','${OTHER}');

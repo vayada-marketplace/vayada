@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import pg from "pg";
 import { beforeEach, describe, expect, it } from "vitest";
 import { assentCommandFixture, assentInput } from "./affiliateAssentCommandTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
@@ -7,10 +8,12 @@ import {
   type AffiliateAgreementActivationReadiness,
 } from "./marketplaceAffiliateAgreementActivation.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
+import { changeMarketplaceAffiliateAgreementLifecycle } from "./marketplaceAffiliateAgreementLifecycleCommand.js";
 import {
   createMarketplaceAffiliateLink,
   type AffiliateLinkCreationReadiness,
 } from "./marketplaceAffiliateLinkCreation.js";
+import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -70,6 +73,12 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await pool().query(
       await readFile(new URL("0325_marketplace_affiliate_links.sql", migrations), "utf8"),
     );
+    await pool().query(
+      await readFile(
+        new URL("0326_marketplace_affiliate_agreement_lifecycle.sql", migrations),
+        "utf8",
+      ),
+    );
   });
 
   it("creates one stable creator-owned link with a default share path", async () => {
@@ -107,6 +116,142 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(results.filter((result) => result.ok && !result.replayed)).toHaveLength(1);
     expect(results.filter((result) => result.ok && result.replayed)).toHaveLength(1);
     expect(results[0]).toMatchObject({ linkId: (results[1] as { linkId: string }).linkId });
+  });
+
+  it("uses READ COMMITTED even when the database session defaults to REPEATABLE READ", async () => {
+    const rrPool = new pg.Pool({ connectionString: pool().options.connectionString, max: 1 });
+    try {
+      await rrPool.query(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+      );
+      expect(
+        (await rrPool.query("SHOW default_transaction_isolation")).rows[0]
+          .default_transaction_isolation,
+      ).toBe("repeatable read");
+      expect(await createMarketplaceAffiliateLink(rrPool, input(), ready)).toMatchObject({
+        ok: true,
+        agreementId,
+      });
+    } finally {
+      await rrPool.end();
+    }
+  });
+
+  it("blocks new links while paused and resolves the stable link only while active", async () => {
+    const change = async (
+      hotel: boolean,
+      action: "pause" | "resume" | "end",
+      expectedRevision: number,
+    ) =>
+      changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput(hotel).context,
+        agreementId,
+        action,
+        reason: `${hotel ? "Hotel" : "Creator"} ${action}`,
+        expectedRevision,
+        idempotencyKey: `${action}-${expectedRevision}`,
+      });
+    const read = async (token: string) => {
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const result = await readMarketplaceAffiliateLinkEligibility(client, token);
+        await client.query("COMMIT");
+        return result;
+      } finally {
+        client.release();
+      }
+    };
+
+    expect(await change(true, "pause", 0)).toMatchObject({ ok: true, revision: 1 });
+    expect(await createMarketplaceAffiliateLink(pool(), input(), ready)).toEqual({
+      ok: false,
+      code: "agreement_not_active",
+    });
+    expect(await change(true, "resume", 1)).toMatchObject({ ok: true, revision: 2 });
+    const created = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!created.ok) throw new Error("Expected link after resume");
+    expect(await read(created.publicToken)).toMatchObject({
+      status: "eligible",
+      linkId: created.linkId,
+    });
+    expect(await read("invalid")).toEqual({ status: "unavailable" });
+
+    expect(await change(false, "pause", 2)).toMatchObject({ ok: true, revision: 3 });
+    expect(await read(created.publicToken)).toEqual({ status: "unavailable" });
+    expect(await createMarketplaceAffiliateLink(pool(), input())).toMatchObject({
+      ok: true,
+      linkId: created.linkId,
+      replayed: true,
+    });
+    expect(await change(false, "resume", 3)).toMatchObject({ ok: true, revision: 4 });
+    expect(await read(created.publicToken)).toMatchObject({
+      status: "eligible",
+      linkId: created.linkId,
+    });
+    expect(await change(true, "end", 4)).toMatchObject({ ok: true, revision: 5 });
+    expect(await read(created.publicToken)).toEqual({ status: "unavailable" });
+  });
+
+  it("orders a click eligibility read before a competing pause and rejects stale isolation", async () => {
+    const created = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!created.ok) throw new Error("Expected link");
+    const reader = await pool().connect();
+    let committed = false;
+    let waiting = false;
+    let pause: ReturnType<typeof changeMarketplaceAffiliateAgreementLifecycle> | undefined;
+    try {
+      await reader.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(
+        await readMarketplaceAffiliateLinkEligibility(reader, created.publicToken),
+      ).toMatchObject({ status: "eligible", linkId: created.linkId });
+      pause = changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput().context,
+        agreementId,
+        action: "pause",
+        reason: "Hotel pause",
+        expectedRevision: 0,
+        idempotencyKey: "pause-behind-click",
+      });
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        waiting = (
+          await pool().query(
+            `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE datname=current_database() AND wait_event_type='Lock'
+               AND query LIKE '%JOIN marketplace.affiliate_agreement_activations a ON a.agreement_id=g.id%') AS waiting`,
+          )
+        ).rows[0].waiting;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await reader.query("COMMIT");
+      committed = true;
+    } finally {
+      if (!committed) await reader.query("ROLLBACK");
+      reader.release();
+    }
+    expect(await pause).toMatchObject({ ok: true, revision: 1 });
+    expect(waiting).toBe(true);
+
+    const stale = await pool().connect();
+    try {
+      await expect(
+        readMarketplaceAffiliateLinkEligibility(stale, created.publicToken),
+      ).rejects.toMatchObject({
+        code: "25P01",
+      });
+      await stale.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await expect(
+        readMarketplaceAffiliateLinkEligibility(stale, created.publicToken),
+      ).rejects.toThrow("Affiliate link eligibility requires READ COMMITTED");
+      await stale.query("ROLLBACK");
+      await stale.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await readMarketplaceAffiliateLinkEligibility(stale, created.publicToken)).toEqual({
+        status: "unavailable",
+      });
+      await stale.query("COMMIT");
+    } finally {
+      stale.release();
+    }
   });
 
   it("fails closed when readiness is unavailable and creates no partial link", async () => {

@@ -16,6 +16,13 @@ export type PmsChannexManagementCommandInput = {
   recoveryAlertId?: string;
   markups?: Array<{ channel: string; markupPercent: number }>;
   inventoryRules?: import("@vayada/domain-pms-channex").ChannexInventoryRulesInput;
+  /** A hotel-selected published offer. Provider identities are deliberately absent. */
+  publishedOffer?: {
+    roomTypeId: string;
+    offerId: string;
+    publicationRevision: number;
+    primaryOccupancy: number;
+  };
 };
 
 export type PmsChannexManagementCommandResult =

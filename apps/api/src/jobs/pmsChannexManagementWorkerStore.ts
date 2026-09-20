@@ -54,6 +54,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
   ariSyncMutating?: boolean;
   stagingRestrictionsPropertyId?: string;
   stagingMealsEnabled?: boolean;
+  stagingPublishedOffersEnabled?: boolean;
   stagingInventoryEnabled?: boolean;
 }): ChannexManagementWorkerStore {
   const pool =
@@ -67,6 +68,7 @@ export function createPgPmsChannexManagementWorkerStore(config: {
         config.ariSyncMutating ?? true,
         config.stagingRestrictionsPropertyId ?? null,
         config.stagingMealsEnabled ?? false,
+        config.stagingPublishedOffersEnabled ?? false,
         config.stagingInventoryEnabled ?? false,
       ),
     heartbeat: (job, input) => heartbeat(pool, job, input),
@@ -86,6 +88,7 @@ async function claim(
   ariSyncMutating: boolean,
   stagingRestrictionsPropertyId: string | null,
   stagingMealsEnabled: boolean,
+  stagingPublishedOffersEnabled: boolean,
   stagingInventoryEnabled: boolean,
 ): Promise<ChannexManagementJob | null> {
   return transaction(pool, async (client) => {
@@ -112,7 +115,9 @@ async function claim(
              OR ($6::boolean AND $3::boolean AND payload->>'operationType' = 'sync_ari'
                AND COALESCE(payload->'restrictionsOnly','false'::jsonb) = 'false'::jsonb)
              OR ($5::boolean AND payload->>'operationType' = 'provision'
-               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))))
+               AND payload->>'mealRatePlanId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+             OR ($7::boolean AND payload->>'operationType' = 'provision'
+               AND payload ? 'publishedOffer'))))
          AND ($3::boolean OR payload->>'operationType' NOT IN ('sync_ari','update_markups'))
          AND NOT EXISTS (
          SELECT 1 FROM platform.jobs active
@@ -132,6 +137,7 @@ async function claim(
         stagingRestrictionsPropertyId,
         stagingMealsEnabled,
         stagingInventoryEnabled,
+        stagingPublishedOffersEnabled,
       ],
     );
     const row = result.rows[0];
@@ -217,7 +223,8 @@ async function retainedUpload(
 ) {
   const result = await client.query(
     `SELECT retained.id FROM (
-       SELECT a.id,'offer_create_retained'::text AS progress_code
+       SELECT a.id,CASE WHEN j.payload->>'operationType'='provision'
+         THEN 'offer_creation_retained' ELSE 'offer_create_retained' END AS progress_code
        FROM pms.channex_offer_create_attempts a
        JOIN platform.job_attempts ja ON ja.id=a.job_attempt_id AND ja.worker_id=a.worker_id
        JOIN platform.jobs j ON j.id=ja.job_id
@@ -242,8 +249,9 @@ async function retainedUpload(
      ) retained JOIN platform.jobs j ON j.id=$1::uuid
      WHERE ($3::uuid IS NULL OR retained.id=$3::uuid)
        AND ($5::text IS NULL OR retained.progress_code=$5::text)
-       AND j.queue_name=$4 AND j.payload->>'operationType'='sync_ari'
-       AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb
+       AND j.queue_name=$4
+       AND ((j.payload->>'operationType'='sync_ari' AND COALESCE(j.payload->'restrictionsOnly','false'::jsonb)='false'::jsonb)
+         OR (j.payload->>'operationType'='provision' AND j.payload ? 'publishedOffer'))
      LIMIT 1`,
     [jobId, attemptNumber, attemptId, PMS_CHANNEX_MANAGEMENT_QUEUE, progressCode],
   );

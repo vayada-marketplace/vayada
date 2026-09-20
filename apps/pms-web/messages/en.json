@@ -84,6 +84,9 @@
   "auth.login.signOut": "Sign Out",
   "auth.login.formTitle": "Sign in to vayada",
   "auth.login.formSubtitle": "Use your email and password to continue.",
+  "auth.login.workosReturnComplete": "Continue by signing in with your email address. If you were invited to a team, use the invited address.",
+  "auth.login.workosReturnFailed": "We could not finish this sign-in or invitation. Please reopen the email link or request a new one.",
+  "auth.login.invitationPending": "We could not open this account. If you just accepted a team invitation, wait a moment and try again. Otherwise, contact your team admin.",
   "auth.login.googleLogin": "Continue with Google",
   "auth.login.or": "or",
   "auth.register.title": "vayada PMS",
@@ -2287,5 +2290,14 @@
   "settings.team.adminTransferComplete": "Account administration was transferred successfully.",
   "settings.team.adminTransferMissing": "This transfer request expired. Start again with the current account admin.",
   "settings.team.adminNeedsReview": "Account ownership needs review: there is no single active account admin with the current role. Existing memberships have been preserved.",
-  "settings.team.yourAccount": "Your account"
+  "settings.team.yourAccount": "Your account",
+  "inbox.preapproveInquiry": "Pre-approve inquiry",
+  "inbox.confirmPreapproval": "Confirm pre-approval",
+  "inbox.preapproval": "Airbnb pre-approval",
+  "inbox.errorPreapproval": "Could not pre-approve this inquiry. Refresh the conversation and check its status before trying again.",
+  "inbox.preapprovalNotBooked": "The guest still needs to accept on Airbnb. This is not a confirmed booking.",
+  "inbox.preapprovalStay": "{arrival} – {departure} · {adults} adults · {children} children",
+  "inbox.preapprovalListing": "Airbnb listing: {listing}",
+  "inbox.preapprovalTerms": "The guest can book these dates for these guests at the current Airbnb price within 24 hours. Dates stay available to other guests. This does not create a booking or take payment.",
+  "inbox.preapprovalChanged": "This conversation changed. Close this dialog and review the inquiry again."
 }

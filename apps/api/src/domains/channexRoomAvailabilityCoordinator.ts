@@ -142,7 +142,10 @@ async function readScope(
     await client.query("SET LOCAL statement_timeout='5s'");
     await client.query("SET LOCAL lock_timeout='150ms'");
     const authority = await lockChannexPricingPropertyAuthority(client, lease);
-    if (authority.kind !== "authorized" || authority.lease.operationType !== "sync_ari")
+    if (
+      authority.kind !== "authorized" ||
+      (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
+    )
       return unavailable("room_availability_authority_unavailable");
     const unrestricted = await client.query(
       `SELECT 1 FROM platform.jobs WHERE id=$1::uuid

@@ -85,6 +85,9 @@
   "auth.login.signOut": "Abmelden",
   "auth.login.formTitle": "Bei vayada anmelden",
   "auth.login.formSubtitle": "Melden Sie sich mit Ihrer E-Mail-Adresse und Ihrem Passwort an.",
+  "auth.login.workosReturnComplete": "Melden Sie sich mit Ihrer E-Mail-Adresse an. Wenn Sie zu einem Team eingeladen wurden, verwenden Sie die eingeladene Adresse.",
+  "auth.login.workosReturnFailed": "Die Anmeldung oder Einladung konnte nicht abgeschlossen werden. Öffnen Sie den Link in der E-Mail erneut oder fordern Sie einen neuen an.",
+  "auth.login.invitationPending": "Dieses Konto konnte nicht geöffnet werden. Wenn Sie gerade eine Teameinladung angenommen haben, warten Sie einen Moment und versuchen Sie es erneut. Andernfalls wenden Sie sich an Ihre Team-Administration.",
   "auth.login.googleLogin": "Mit Google fortfahren",
   "auth.login.or": "oder",
   "auth.register.title": "vayada PMS",
@@ -2301,5 +2304,14 @@
   "settings.team.adminTransferComplete": "Die Kontoadministration wurde erfolgreich übertragen.",
   "settings.team.adminTransferMissing": "Diese Übertragungsanfrage ist abgelaufen. Starte sie erneut mit dem aktuellen Kontoadministrator.",
   "settings.team.adminNeedsReview": "Die Kontoinhaberschaft muss geprüft werden: Es gibt keinen einzelnen aktiven Kontoadministrator mit der aktuellen Rolle. Bestehende Mitgliedschaften bleiben erhalten.",
-  "settings.team.yourAccount": "Dein Konto"
+  "settings.team.yourAccount": "Dein Konto",
+  "inbox.preapproveInquiry": "Anfrage vorab bestätigen",
+  "inbox.confirmPreapproval": "Vorabbestätigung senden",
+  "inbox.preapproval": "Airbnb-Vorabbestätigung",
+  "inbox.errorPreapproval": "Die Anfrage konnte nicht vorab bestätigt werden. Aktualisiere die Unterhaltung und prüfe den Status, bevor du es erneut versuchst.",
+  "inbox.preapprovalNotBooked": "Der Gast muss noch auf Airbnb annehmen. Dies ist keine bestätigte Buchung.",
+  "inbox.preapprovalStay": "{arrival} – {departure} · {adults} Erwachsene · {children} Kinder",
+  "inbox.preapprovalListing": "Airbnb-Inserat: {listing}",
+  "inbox.preapprovalTerms": "Der Gast kann diese Reisedaten für diese Gäste innerhalb von 24 Stunden zum aktuellen Airbnb-Preis buchen. Die Daten bleiben für andere Gäste verfügbar. Dadurch wird keine Buchung erstellt und keine Zahlung eingezogen.",
+  "inbox.preapprovalChanged": "Diese Unterhaltung wurde geändert. Schließe diesen Dialog und prüfe die Anfrage erneut."
 }

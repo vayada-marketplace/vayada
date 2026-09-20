@@ -68,7 +68,7 @@ describe("AuthKit session routes", () => {
     app = undefined;
   });
 
-  it.each(["/auth/workos/login", "/auth/workos/signup", "/auth/workos/callback"])(
+  it.each(["/auth/workos/login", "/auth/workos/signup"])(
     "does not expose hosted AuthKit route %s",
     async (url) => {
       app = buildAuthSessionApp();
@@ -81,6 +81,96 @@ describe("AuthKit session routes", () => {
       expect(response.statusCode).toBe(404);
     },
   );
+
+  it("returns hosted invitation users to the configured PMS login without forwarding the auth code", async () => {
+    const authenticateWithCode = vi.fn(async () => session);
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=complete");
+    expect(authenticateWithCode).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "one-time-workos-code" }),
+    );
+    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(response.headers["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("returns an error to PMS login if hosted invitation code exchange fails", async () => {
+    const authenticateWithCode = vi.fn(async () => {
+      throw new Error("provider-secret");
+    });
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=failed");
+    expect(response.headers.location).not.toContain("provider-secret");
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("does not exchange a hosted callback without a code", async () => {
+    const authenticateWithCode = vi.fn(async () => session);
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({ authenticateWithCode }),
+      allowedOrigins: ["https://pms.localhost"],
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          publicOrigin: "https://pms.localhost",
+        },
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/auth/workos/callback?error=denied" });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://pms.localhost/login?workos_return=failed");
+    expect(authenticateWithCode).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect hosted callbacks to an unconfigured origin", async () => {
+    app = buildAuthSessionApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=one-time-workos-code",
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers.location).toBeUndefined();
+    expect(response.json()).toEqual({
+      error: "invitation_return_unavailable",
+      message: "Sign-in is temporarily unavailable. Please try again later.",
+    });
+  });
 
   it("keeps legacy password register absent from next-api", async () => {
     app = buildAuthSessionApp();
