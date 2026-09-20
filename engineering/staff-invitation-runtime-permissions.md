@@ -1,73 +1,93 @@
-# Staff invitation runtime permissions (VAY-2038)
+# Identity runtime boundary for staff invitations (VAY-2038)
 
 ## Decision
 
-The `vayada_next_api_runtime` role must be able to create and accept staff
-invitations without becoming an unrestricted writer of identity state. WorkOS
-delivers the invitation; the identity domain owns the local invitation,
-membership, property assignment, and audit changes. The current runtime
-preflight intentionally rejects all identity writes and all callable
-`SECURITY DEFINER` functions. That policy must change deliberately, with an
-exact allowlist, before the invitation flow can work on the hosted stack.
+Keep `vayada_next_api_runtime` as the restricted credential for general
+product repositories. Use a separate, non-owner `vayada_next_identity_runtime`
+credential for the identity-owned repositories already wired through
+`AUTH_DATABASE_URL`. Never give either long-lived role the target database
+migration-owner credential.
 
-A direct `INSERT` grant on `organization_memberships` is **not acceptable**:
-the role could insert an active `hotel_manager` membership for an arbitrary
-user and organization. Column-limited `UPDATE` is also insufficient because
-changing `role_key`, `status`, or `permission_overrides` can elevate or revoke
-access across tenants. The first PostgreSQL
-fixture proved that such grants make the existing-user flow work, but the
-adversarial review rejected them as an authorization boundary. Do not deploy
-that prototype.
+The identity role may write only the reviewed identity lifecycle tables.
+Shared platform webhook, job, dead-letter, and audit writes require a separate
+provider- or queue-scoped database boundary; ordinary table grants are not
+enough, because those tables also hold non-identity work. It must not own
+tables or functions, create schemas or temporary tables, inherit a more
+powerful role, write migration/evidence/legacy-owner receipt tables, or write
+booking, PMS, marketplace, or finance product data. The general API role must
+remain unable to insert or update organization memberships, users, provider
+identities, or staff invitations.
 
-Do **not** grant table-wide `UPDATE` on `identity.users`,
-`identity.organizations`, `identity.external_identities`,
-`identity.organization_roles`, `identity.organization_resource_links`, or
-`hotel_catalog.properties` just to satisfy `SELECT ... FOR UPDATE/SHARE`.
-PostgreSQL requires `UPDATE` privilege on at least one column for these locks;
-even a column-level grant permits a real write to that column. Locking through
-an audited, narrowly scoped `SECURITY DEFINER` function is preferable.
+`apps/api` already supplies `config.auth.databaseUrl` to staff invitation,
+WorkOS identity, lifecycle, and auth-session repositories. Two product
+consumers currently use it as well: PMS module activation and the booking-web
+attribution sink. Route those through `TARGET_DATABASE_URL` before changing the
+deployed mapping. Verify the general role can read
+`identity.product_entitlements` and can insert/select `platform.domain_events`
+and insert `platform.product_audit_events`; the current preflight does not
+establish the `domain_events` privileges. Keep attribution disabled until a
+reviewed product-role grant and real-role test pass. Audit all other
+`config.auth.databaseUrl` consumers,
+including platform audit/outbox and workers, against the privilege matrix;
+the split is a credential boundary, not permission for cross-domain calls.
 
-## Required operations
+## Why the alternatives are unsafe
 
-| Stage | Current SQL operations | Runtime authority to add |
-| --- | --- | --- |
-| Create | Lock active hotel organization, active inviter membership and user; lock any existing invitation and selected custom role; insert or supersede invitation and property assignments | Restricted lock functions plus a guarded create transition; no direct invitation or assignment write grant until its scope is proven safe |
-| Deliver | Claim invitation, call WorkOS, record provider invitation ID or uncertain delivery | A guarded pending-invitation delivery transition; no provider credential in database |
-| Accept | Lock organization, invitation, provider identity and user, manager, invitation assignments and active property links; upsert membership; replace property assignments; mark invitation accepted; append audit; enqueue inbox reconciliation | Restricted lock functions; a guarded identity-owned acceptance transition that enforces provider binding, recipient, inviter, staff role, property scope, and protected-membership checks; existing audit `INSERT` |
-| New user | WorkOS callback resolves or creates the internal user and provider mapping before acceptance | A separate guarded identity-owned WorkOS user-provisioning transition; never grant unrestricted `users`/`external_identities` writes merely to make the callback work |
-| Worker | Consume the fixed PMS inbox reconciliation job | A reviewed worker role/privilege boundary for `platform.jobs`, `platform.job_attempts`, and terminal dead-letter events; enqueue success alone is not end-to-end completion |
+- Granting membership `INSERT` or role/status `UPDATE` to the general runtime
+  role permits manager access changes across tenants. PostgreSQL also requires
+  `UPDATE` privilege to run `SELECT ... FOR UPDATE/SHARE` on a table; a
+  column-level grant still permits a real write to that column.
+- A callable `SECURITY DEFINER` transition cannot itself prove that a claimed
+  WorkOS user or webhook was authenticated. If the same general runtime role
+  can call it with arbitrary parameters, it can forge the context unless an
+  additional verifiable command-proof system is built. That is more complex
+  than isolating the existing identity connection.
+- Mapping `AUTH_DATABASE_URL` to the migration-owner URL would bypass the
+  runtime split and expose schema, receipt, and evidence authority to the API.
 
-The invitation endpoint must not send a WorkOS invitation until local
-`persist()` commits. The accepted-invitation webhook remains the only path that
-activates the local membership. Denied, expired, conflicting, and replayed
-events must retain their existing behavior.
+The identity role is not a substitute for route authorization, WorkOS event
+verification, tenant checks, parameterized SQL, audit, or protected-account
+guards. A SQL injection in an identity endpoint would still be dangerous;
+the new boundary limits unrelated product queries from becoming identity
+writers. It must be independently security-reviewed before deployment.
 
-## Rollout gates
+## Scope and rollout
 
-1. Add specific lock functions in the identity-owned schema, each with fixed
-   schema-qualified SQL, `search_path = pg_catalog`, no dynamic SQL, no
-   provider secrets, and revoked `PUBLIC` execution. Verify they hold locks
-   for the caller's transaction and cannot mutate rows.
-2. Implement guarded transitions for invitation creation/delivery/acceptance
-   and new-user provisioning. The acceptance transition must take values from
-   a pending, delivered, unexpired invitation and verified provider identity,
-   not accept arbitrary role, organization, or job arguments from the caller.
-   Test that direct runtime creation of a manager membership and cross-tenant
-   updates fail.
-3. Add only the resulting function-execution and unavoidable append-only
-   privileges to the platform grant runner and restricted-runtime preflight.
-   Require ownership and negative privilege checks. Keep receipt/evidence
-   tables, role escalation, arbitrary functions, schema creation, and
-   unrelated writes forbidden.
-4. Deploy the schema before granting execution. Grant and run the hosted
-   preflight before switching the app to the lock functions. Fail closed if
-   any stage is absent. Review each PR independently; no ad-hoc live grant.
-5. Run PostgreSQL 16 and 17 restricted-role tests for create, delivery,
-   acceptance, replay, invalid scope, and cross-organization denial. Then
-   verify the exact deployed image and coordinate a single real hosted
-   invitation using the reusable QA users and property. Do not create new
-   accounts or retry an unchanged hosted 500.
+1. Inventory every identity-owned query reached by WorkOS JIT, invitation
+   create/delivery/acceptance, role editing, removal, and inbox reconciliation.
+   Define an explicit table/column privilege matrix. The identity role must
+   cover new-user creation and provider mapping as well as existing users.
+   Handle shared `platform.external_webhook_events` row locks,
+   `platform.dead_letter_events` updates, and `platform.jobs` claim/updates
+   with provider- or queue-scoped transitions or equivalent database-enforced
+   isolation. Application `WHERE` clauses alone are not a privilege boundary.
+   Negative fixtures must prove the identity credential cannot modify Stripe,
+   Channex, booking, or other product rows/jobs.
+2. Add a separate role-creation/grant mechanism with a dedicated secret and
+   PostgreSQL 16/17 preflight. The role and secret are provisioned without
+   printing a password; the grant runner requires table ownership and refuses
+   unreviewed effective privileges. The general-runtime preflight must still
+   reject identity writes. No ad-hoc production grant.
+3. Deploy the grants and preflight first. Canary-check that both *deployed*
+   `AUTH_DATABASE_URL` and `TARGET_DATABASE_URL` resolve to the intended
+   distinct roles on the same target database; checking a separately supplied
+   URL is insufficient. Then change only the long-lived
+   `AUTH_DATABASE_URL` secret mapping to the identity role; keep
+   `TARGET_DATABASE_URL` on the general role and
+   `TARGET_DATABASE_MIGRATION_URL` child-process-only. Roll back to the healthy
+   task definition *after* the migration-owner split but before the identity
+   split; do not roll back to an owner URL.
+4. Exercise restricted-role integration tests for existing and new users,
+   invitation creation, at-most-once WorkOS delivery, accepted-webhook
+   membership, replay/failure, and multi-organization denial. Verify the
+   exact deployed task revision and coordinate one hosted QA invitation using
+   reusable users/property. Do not create accounts or retry the unchanged 500.
 
-The existing VAY-2038 ticket remains In Progress until the real hosted
-invite → WorkOS callback → accepted webhook → local membership → PMS login
-flow is demonstrated and accepted by a human.
+`platform.jobs` consumption is a separate shared worker permission problem:
+the invitation path can enqueue a PMS inbox reconciliation job, but the worker
+currently lacks its own required write privileges. Coordinate its reviewed
+fix; do not describe enqueue alone as a complete invitation smoke.
+
+VAY-2038 stays In Progress until the hosted invite → WorkOS callback →
+accepted webhook → local membership → PMS login path and required failure
+case pass, followed by explicit human acceptance.
