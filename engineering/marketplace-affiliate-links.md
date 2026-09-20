@@ -51,7 +51,7 @@ modify the agreement or link; the independent agreement lifecycle remains author
 
 ## Initial canonical-link storage
 
-Migration 0324 stores one immutable canonical link for one exact activated agreement.
+Migrations 0324–0325 store one immutable canonical link for one exact activated agreement.
 The row repeats only the agreement's participation, program and property scope so
 composite foreign keys can reject substituted ownership; it does not store a creator,
 terms version, destination or campaign label. The exact activation is required, and

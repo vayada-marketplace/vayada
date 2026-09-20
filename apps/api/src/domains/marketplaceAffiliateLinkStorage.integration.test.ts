@@ -8,8 +8,12 @@ const agreementMigration = new URL(
   "../../../../packages/backend-migration/migrations/0214_marketplace_affiliate_agreement_activation.sql",
   import.meta.url,
 );
-const linkMigration = new URL(
+const linkIndexMigration = new URL(
   "../../../../packages/backend-migration/migrations/0324_marketplace_affiliate_links.sql",
+  import.meta.url,
+);
+const linkMigration = new URL(
+  "../../../../packages/backend-migration/migrations/0325_marketplace_affiliate_links.sql",
   import.meta.url,
 );
 
@@ -25,6 +29,10 @@ describe.skipIf(!databaseUrl)("affiliate link storage", () => {
 
   beforeEach(async () => {
     await pool().query(await readFile(agreementMigration, "utf8"));
+    for (const statement of (await readFile(linkIndexMigration, "utf8")).split(
+      "-- vayada:next-statement",
+    ))
+      await pool().query(statement);
     await pool().query(await readFile(linkMigration, "utf8"));
     await pool().query("INSERT INTO marketplace.affiliate_participations VALUES ($1,$2,$3,$4)", [
       participationId,
