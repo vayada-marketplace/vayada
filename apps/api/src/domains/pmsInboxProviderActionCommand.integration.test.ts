@@ -83,6 +83,48 @@ describe.skipIf(!URL)("PostgreSQL PMS Inbox provider action", () => {
     return evidence;
   }
 
+  it("exposes only complete undecided inquiry context in the Inbox read model", async () => {
+    await seedInquiry();
+    const pool = new pg.Pool({ connectionString: URL });
+    const read = createPgPmsInboxReadPort({
+      connectionString: URL!,
+      pool,
+      providerMutationEnabled: true,
+      attachmentMediaAccessEnabled: false,
+      emailReplyRoutes: {
+        async resolveReplyRoutes() {
+          return [];
+        },
+      },
+    });
+    const detail = () =>
+      read.getThread({
+        propertyId: PROPERTY,
+        threadId: THREAD,
+        canReadGuestContact: false,
+        messageLimit: 20,
+      });
+    try {
+      expect(await detail()).toMatchObject({
+        ok: true,
+        value: {
+          availableProviderActions: expect.arrayContaining(["airbnb_preapprove"]),
+          inquiryPreapproval: { arrivalDate: "2030-12-12", adults: 2 },
+        },
+      });
+      await command.noReplyNeeded({ ...action("read-pending"), action: "airbnb_preapprove" });
+      expect(await detail()).toMatchObject({
+        ok: true,
+        value: {
+          availableProviderActions: expect.not.arrayContaining(["airbnb_preapprove"]),
+          inquiryPreapproval: null,
+        },
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("serializes pre-approval across keys, retains evidence and executes once", async () => {
     const evidence = await seedInquiry();
     const results = await Promise.all(

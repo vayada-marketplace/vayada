@@ -1,3 +1,4 @@
+import { readPmsInboxInquiryContext } from "./pmsInboxInquiryContext.js";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import type {
@@ -373,12 +374,40 @@ export function createPgPmsInboxReadPort(config: {
           : [],
       );
 
+      const inquiry =
+        config.providerMutationEnabled && threadRow.providerChannel === "airbnb"
+          ? await readPmsInboxInquiryContext(
+              pool,
+              input.propertyId,
+              input.threadId,
+              Number(threadRow.version),
+            )
+          : null;
+      const priorInquiryDecision = inquiry
+        ? await pool.query(
+            `SELECT 1 FROM platform.jobs WHERE property_id = $1 AND job_type = 'pms.inbox.provider-action.deliver'
+          AND payload->>'action' = 'airbnb_preapprove' AND payload->'inquiry'->>'eventId' = $2
+          AND (status <> 'failed' OR job_metadata->>'reason' = 'ambiguous_provider_outcome') LIMIT 1`,
+            [input.propertyId, inquiry.eventId],
+          )
+        : null;
+      const canPreapprove = inquiry && !priorInquiryDecision?.rows.length;
       return {
         ok: true,
         value: {
           propertyId: input.propertyId,
           thread: toSummary(threadRow, emailRoutes.get(threadRow.id)),
           providerActions: threadRow.providerActions ?? [],
+          inquiryPreapproval: canPreapprove
+            ? {
+                listingId: inquiry.listingId,
+                arrivalDate: inquiry.arrivalDate,
+                departureDate: inquiry.departureDate,
+                adults: inquiry.adults,
+                children: inquiry.children,
+                currency: inquiry.currency,
+              }
+            : null,
           availableProviderActions:
             config.providerMutationEnabled &&
             threadRow.providerActionAvailable &&
@@ -386,6 +415,7 @@ export function createPgPmsInboxReadPort(config: {
               ? (
                   [
                     "channex_close",
+                    ...(canPreapprove ? ["airbnb_preapprove"] : []),
                     ...(["booking.com", "booking_com", "bookingcom"].includes(
                       threadRow.providerChannel?.trim().toLowerCase() ?? "",
                     )

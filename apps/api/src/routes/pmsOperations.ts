@@ -2369,6 +2369,10 @@ export async function registerPmsOperationsRoutes(
           availableProviderActions:
             options.inboxSendingEnabled === false ? [] : result.value.availableProviderActions,
           providerActions: result.value.providerActions ?? [],
+          inquiryPreapproval:
+            options.inboxSendingEnabled === false
+              ? null
+              : (result.value.inquiryPreapproval ?? null),
           timeline: result.value.timeline.map((item) => item.item),
           previousCursor: result.value.previousCursor,
         };
@@ -2609,7 +2613,7 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  for (const providerAction of ["no-reply-needed", "close"] as const)
+  for (const providerAction of ["no-reply-needed", "close", "preapprove"] as const)
     app.post<{ Params: PmsInboxThreadParams; Body: unknown }>(
       `/properties/:propertyId/messaging/threads/:threadId/provider-actions/${providerAction}`,
       { onRequest: inboxStaffCommandAuthorization(options) },
@@ -2628,7 +2632,12 @@ export async function registerPmsOperationsRoutes(
             propertyId,
             threadId,
             expectedVersion: input.value.expectedVersion,
-            action: providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed",
+            action:
+              providerAction === "preapprove"
+                ? "airbnb_preapprove"
+                : providerAction === "close"
+                  ? "channex_close"
+                  : "booking_com_no_reply_needed",
             ...inboxCommandActor(request.authContext!),
             idempotencyKey: input.value.idempotencyKey,
           });
@@ -2636,7 +2645,11 @@ export async function registerPmsOperationsRoutes(
           if (
             !validInboxProviderAction(result.value, propertyId, threadId) ||
             result.value.action !==
-              (providerAction === "close" ? "channex_close" : "booking_com_no_reply_needed")
+              (providerAction === "preapprove"
+                ? "airbnb_preapprove"
+                : providerAction === "close"
+                  ? "channex_close"
+                  : "booking_com_no_reply_needed")
           )
             throw new Error("Inbox provider-action scope mismatch");
           return reply.code(202).send({
@@ -6806,7 +6819,7 @@ function validInboxProviderAction(
   return (
     value.propertyId === propertyId &&
     value.threadId === threadId &&
-    ["booking_com_no_reply_needed", "channex_close"].includes(value.action) &&
+    ["booking_com_no_reply_needed", "channex_close", "airbnb_preapprove"].includes(value.action) &&
     isUuid(value.jobId) &&
     isCanonicalInboxInstant(value.acceptedAt) &&
     value.attentionStateChanged === false
@@ -7218,15 +7231,16 @@ function toCheckOutCommand(
   if (!Array.isArray(raw.chargesSettled)) {
     return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
   }
-  const fulfilledAddonSelectionIds = raw.fulfilledAddonSelectionIds === undefined ? [] : raw.fulfilledAddonSelectionIds;
+  const fulfilledAddonSelectionIds =
+    raw.fulfilledAddonSelectionIds === undefined ? [] : raw.fulfilledAddonSelectionIds;
   if (
     !Array.isArray(fulfilledAddonSelectionIds) ||
     !fulfilledAddonSelectionIds.every(
       (selectionId): selectionId is string =>
         typeof selectionId === "string" && isUuid(selectionId.trim()),
     ) ||
-    new Set(fulfilledAddonSelectionIds.map((selectionId) => selectionId.trim().toLowerCase())).size !==
-      fulfilledAddonSelectionIds.length
+    new Set(fulfilledAddonSelectionIds.map((selectionId) => selectionId.trim().toLowerCase()))
+      .size !== fulfilledAddonSelectionIds.length
   ) {
     return {
       error: invalidBody("fulfilledAddonSelectionIds entries must be unique UUIDs."),
@@ -7629,7 +7643,8 @@ function toManualPriceCorrectionCommand(
   const reason = optionalStringField(raw.reason);
   const pricing = raw.pricing === undefined ? undefined : objectBody(raw.pricing);
   const parsed = pricing && parseManualPriceCorrectionPricing(pricing);
-  const addOns = raw.addOns === undefined ? undefined : parseManualAddonPriceCorrections(raw.addOns);
+  const addOns =
+    raw.addOns === undefined ? undefined : parseManualAddonPriceCorrections(raw.addOns);
   if (
     !accountingDate ||
     !isDateOnly(accountingDate) ||
