@@ -188,6 +188,22 @@ jobs:
           '
           npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/legacyOwnerEmailIndexPlan.test.ts
 
+      - name: Verify prepared owner lifecycle guard
+        env:
+          VAY2017_LIFECYCLE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_lifecycle_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_LIFECYCLE_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_lifecycle_fixture");
+            await client.end();
+          '
+          TARGET_DATABASE_URL="$VAY2017_LIFECYCLE_TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/platform/legacyOwnerLifecycleMutations.integration.test.ts
+
       - name: Verify Marketplace matching event storage
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/matchingEventProjections.test.ts src/affiliatePercentagePolicyStorage.test.ts
         env:
