@@ -116,6 +116,9 @@ evidence where needed.
 
 ## Privacy and retention proposal requiring approval
 
+Product direction now permits recording a link tap without an extra guest
+screen. The following live-data conditions remain to be verified.
+
 An immediate redirect does not itself establish permission to record a click,
 send a cross-domain reference, store a browser identifier or join a click to a
 booking. Before live capture, the privacy owner must confirm a lawful basis and
