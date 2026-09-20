@@ -44,7 +44,20 @@ cannot choose aliases, attach old codes to agreements or replace canonical token
 Aliases resolve through the same agreement, lifecycle and destination checks as the
 canonical token and must never create a second beneficiary.
 
-This slice defines the public value contract only. Persistence, authorized creation,
-alias import, public resolution, click capture and lifecycle commands are separate
-reviewable changes. Collaboration completion alone does not modify the agreement or
-link; the independent agreement lifecycle remains authoritative.
+The public value contract above does not implement link creation or resolution.
+Authorized creation, alias import, public resolution, click capture and lifecycle
+commands are separate reviewable changes. Collaboration completion alone does not
+modify the agreement or link; the independent agreement lifecycle remains authoritative.
+
+## Initial canonical-link storage
+
+Migrations 0324–0325 store one immutable canonical link for one exact activated agreement.
+The row repeats only the agreement's participation, program and property scope so
+composite foreign keys can reject substituted ownership; it does not store a creator,
+terms version, destination or campaign label. The exact activation is required, and
+database uniqueness prevents another link or token from replacing the canonical one.
+
+The storage row alone does not activate or resolve a link. The later authorized command
+must lock and recheck the current agreement lifecycle, generate the token from server
+randomness and recover retries through existing idempotency infrastructure. Compatibility
+aliases remain separate and must point to this canonical identity after ownership proof.
