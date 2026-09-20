@@ -4,15 +4,17 @@ import { parsePricingConfiguration, pricingCurrencyScale, type PricingConfigurat
 import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
 import { IncludedPricing, includedPrice, type IncludedInput } from "./IncludedPricing";
+import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { parseMinorInput } from "./pricingAmounts";
 
 export type SetupRoom = { roomTypeId: string; name: string; capacity: PricingConfiguration["capacity"] };
-type Values = Record<"mode" | "room" | "currency" | "base" | "adultAge" | "childPrice" | "countChildren" | "minimum" | "maximum" | "cancellation" | "freeDays" | "payment", string> & { occupancy: string[]; included: IncludedInput };
+type Values = Record<"mode" | "room" | "currency" | "base" | "adultAge" | "childPrice" | "countChildren" | "minimum" | "maximum" | "cancellation" | "freeDays" | "payment", string> & { occupancy: string[]; included: IncludedInput; methods: PaymentMethod[] };
 export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: string, values: Values, existingRoom?: PricingConfiguration) {
   if (existingRoom && (existingRoom.propertyId !== propertyId || existingRoom.roomTypeId !== room.roomTypeId || existingRoom.currency !== values.currency)) throw new Error("Keep the existing room and pricing currency.");
   const scale = pricingCurrencyScale(values.currency);
   const integer = (value: string) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : NaN;
   if (scale === null || (!existingRoom && !["yes", "no"].includes(values.countChildren)) || values.payment !== "full" || !["non_refundable", "flexible"].includes(values.cancellation)) throw new Error("Complete every required pricing and policy setting.");
+  if (!values.methods.length) throw new Error("Choose at least one accepted payment method.");
   if (!["flat", "occupancy", "per_person", "included_guests"].includes(values.mode)) throw new Error("Choose how to price this room.");
   if (values.mode === "occupancy" && values.occupancy.length !== room.capacity.adults) throw new Error("Enter a price for every adult count.");
   const base = values.mode === "included_guests" ? includedPrice(values.included, values.base, room.capacity.adults, scale) : values.mode === "occupancy" ? { mode: "occupancy", amountsMinor: Array.from(values.occupancy, (amount) => parseMinorInput(amount, scale)) }
@@ -21,7 +23,7 @@ export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: 
   const adultFromAge = integer(values.adultAge), minArrivalNights = integer(values.minimum);
   const cancellation: PricingTermsInput["cancellation"] = values.cancellation === "non_refundable" ? { kind: "non_refundable" } : { kind: "flexible", terms: {
     type: "free_until_days_before_arrival", freeCancellationDeadlineDays: integer(values.freeDays), afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } };
-  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full" } };
+  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full", acceptedMethods: values.methods } };
   const configuration = parsePricingConfiguration({ version: "pricing.v2", propertyId, roomTypeId: room.roomTypeId, revision: existingRoom?.revision ?? 1, currency: values.currency, capacity: room.capacity,
     children: existingRoom?.children ?? { adultFromAge, bands: [{ fromAge: 0, throughAge: adultFromAge - 1, nightlyMinor: parseMinorInput(values.childPrice, scale, true), countsTowardCapacity: values.countChildren === "yes" }] },
     offers: [...(existingRoom?.offers ?? []), { id: offerId, termsRevision: offerId, meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } },
@@ -34,11 +36,11 @@ export function firstPricingInput(propertyId: string, room: SetupRoom, offerId: 
 }
 export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCreate, fixedCurrency, existingRoom }: { propertyId: string; rooms: readonly SetupRoom[]; disabled: boolean; onDirty: () => void;
   onCreate: (input: ReturnType<typeof firstPricingInput>) => void; fixedCurrency?: string; existingRoom?: PricingConfiguration }) {
-  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], included: { adults: "", adjustments: [] }, room: existingRoom?.roomTypeId ?? "", currency: fixedCurrency ?? "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
+  const [values, setValues] = useState<Values>({ mode: "", occupancy: [], included: { adults: "", adjustments: [] }, methods: [], room: existingRoom?.roomTypeId ?? "", currency: fixedCurrency ?? "", base: "", adultAge: "", childPrice: "", countChildren: "", minimum: "", maximum: "", cancellation: "", freeDays: "", payment: "" });
   const [error, setError] = useState("");
-  const change = (key: Exclude<keyof Values, "occupancy" | "included">, value: string) => { setValues({ ...values, [key]: value, ...(["room", "mode"].includes(key) ? { base: "", occupancy: [], included: { adults: "", adjustments: [] } } : {}) }); setError(""); onDirty(); };
-  const field = (key: Exclude<keyof Values, "occupancy" | "included">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled || (key === "currency" && !!fixedCurrency)} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
-  const select = (key: Exclude<keyof Values, "occupancy" | "included">, label: string, options: [string, string][]) => <label className="block text-sm">{label}<select aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
+  const change = (key: Exclude<keyof Values, "occupancy" | "included" | "methods">, value: string) => { setValues({ ...values, [key]: value, ...(["room", "mode"].includes(key) ? { base: "", occupancy: [], included: { adults: "", adjustments: [] } } : {}) }); setError(""); onDirty(); };
+  const field = (key: Exclude<keyof Values, "occupancy" | "included" | "methods">, label: string) => <label className="block text-sm">{label}<input aria-label={label} disabled={disabled || (key === "currency" && !!fixedCurrency)} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)} /></label>;
+  const select = (key: Exclude<keyof Values, "occupancy" | "included" | "methods">, label: string, options: [string, string][]) => <label className="block text-sm">{label}<select aria-label={label} disabled={disabled} value={values[key]} className="mt-1 block w-full rounded-lg border px-3 py-2" onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
   if (!rooms.length) return <p>No active room types with complete capacity settings are available. Complete room setup first.</p>;
   const room = rooms.find((candidate) => candidate.roomTypeId === values.room);
   return <form className="mt-4 space-y-4" onSubmit={(event) => {
@@ -69,6 +71,7 @@ export function FirstPricingSetup({ propertyId, rooms, disabled, onDirty, onCrea
       {values.cancellation === "flexible" && field("freeDays", "Free cancellation until days before arrival (0–365)")}
       {select("payment", "Payment policy", [["full", "Full payment"]])}
     </div>
+    <AcceptedPaymentMethods methods={values.methods} disabled={disabled} onChange={(methods) => { setValues({ ...values, methods }); setError(""); onDirty(); }} />
     <p className="text-sm text-gray-600">Guests at or above the adult-pricing age use adult prices. Younger guests use the separate child price, even when they count toward capacity. An occupancy price is the room total for that adult count; a per-adult price is multiplied by the adult count. Child charges are added separately.</p>
     {room && <p className="text-sm">Room capacity: {room.capacity.total} total, up to {room.capacity.adults} adults and {room.capacity.children} children. {existingRoom ? "The existing child age bands and charges apply to this offer and remain unchanged." : "One child band covers age 0 through the year before adult pricing starts."}</p>}
     {values.cancellation === "flexible" && <p className="text-sm">After the cancellation deadline and for no-shows, the penalty is the full booking amount.</p>}

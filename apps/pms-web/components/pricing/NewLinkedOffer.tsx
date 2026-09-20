@@ -3,14 +3,16 @@ import { useState } from "react";
 import { parsePricingConfiguration, type PricingConfiguration } from "@vayada/domain-pms/replacement-pricing";
 import { parseBookingPricingOfferTerms } from "@vayada/domain-booking/replacement-pricing";
 import type { PricingTermsInput } from "@/services/api/replacementPricingClient";
+import { AcceptedPaymentMethods, type PaymentMethod } from "./AcceptedPaymentMethods";
 import { parseAdjustmentInput } from "./pricingAmounts";
 
-type Values = { parent: string; kind: string; value: string; cancellation: string; deadline: string; payment: string };
+type Values = { parent: string; kind: string; value: string; cancellation: string; deadline: string; payment: string; methods: PaymentMethod[] };
 export function linkedOfferInput(room: PricingConfiguration, offerId: string, values: Values) {
   if (!room.offers.some((offer) => offer.id === values.parent) || values.payment !== "full" || !["non_refundable", "flexible"].includes(values.cancellation)) throw new Error("Choose a parent, cancellation policy and payment policy.");
+  if (!values.methods.length) throw new Error("Choose at least one accepted payment method.");
   const cancellation: PricingTermsInput["cancellation"] = values.cancellation === "non_refundable" ? { kind: "non_refundable" } : { kind: "flexible", terms: {
     type: "free_until_days_before_arrival", freeCancellationDeadlineDays: /^\d+$/.test(values.deadline) ? Number(values.deadline) : NaN, afterDeadlinePenalty: "full_booking_amount", noShowPenalty: "full_booking_amount" } };
-  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full" } };
+  const terms: PricingTermsInput = { roomTypeId: room.roomTypeId, offerId, expectedRevision: null, cancellation, payment: { kind: "full", acceptedMethods: values.methods } };
   if (!parseBookingPricingOfferTerms({ roomTypeId: room.roomTypeId, offerId, revision: offerId, cancellation, payment: terms.payment })) throw new Error("Check the cancellation deadline (0–365 days).");
   const configuration = parsePricingConfiguration({ ...room, offers: [...room.offers, { id: offerId, termsRevision: offerId,
     meal: { kind: "room_only", charge: { kind: "room", amountMinor: "0" } }, restrictions: { kind: "inherit" },
@@ -20,9 +22,9 @@ export function linkedOfferInput(room: PricingConfiguration, offerId: string, va
 }
 
 export function NewLinkedOffer({ room, disabled, onCreate }: { room: PricingConfiguration; disabled: boolean; onCreate: (input: ReturnType<typeof linkedOfferInput>) => void }) {
-  const [values, setValues] = useState<Values>({ parent: "", kind: "", value: "", cancellation: "", deadline: "", payment: "" }), [error, setError] = useState("");
-  const change = (key: keyof Values, value: string) => { setValues({ ...values, [key]: value, ...(key === "kind" ? { value: "" } : {}) }); setError(""); };
-  const select = (key: keyof Values, label: string, options: [string, string][]) => <label>{label}<select aria-label={label} className="mt-1 block rounded border px-3 py-2" disabled={disabled} value={values[key]} onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
+  const [values, setValues] = useState<Values>({ parent: "", kind: "", value: "", cancellation: "", deadline: "", payment: "", methods: [] }), [error, setError] = useState("");
+  const change = (key: Exclude<keyof Values, "methods">, value: string) => { setValues({ ...values, [key]: value, ...(key === "kind" ? { value: "" } : {}) }); setError(""); };
+  const select = (key: Exclude<keyof Values, "methods">, label: string, options: [string, string][]) => <label>{label}<select aria-label={label} className="mt-1 block rounded border px-3 py-2" disabled={disabled} value={values[key]} onChange={(event) => change(key, event.target.value)}><option value="">Choose…</option>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
   return <form className="space-y-3 text-sm" onSubmit={(event) => {
     event.preventDefault(); if (disabled) return;
     try { onCreate(linkedOfferInput(room, crypto.randomUUID(), values)); } catch (cause) { setError(cause instanceof Error ? cause.message : "Check the new offer settings."); }
@@ -37,6 +39,7 @@ export function NewLinkedOffer({ room, disabled, onCreate }: { room: PricingConf
       {values.cancellation === "flexible" && <label>Free cancellation until days before arrival (0–365)<input aria-label="New offer cancellation deadline" className="mt-1 block w-36 rounded border px-3 py-2" disabled={disabled} value={values.deadline} onChange={(event) => change("deadline", event.target.value)} /></label>}
       {select("payment", "New offer payment policy", [["full", "Full payment"]])}
     </div>
+    <AcceptedPaymentMethods methods={values.methods} disabled={disabled} onChange={(methods) => { setValues({ ...values, methods }); setError(""); }} />
     <p>Use a minus sign for a reduction; 0 keeps the parent’s room price. A result of zero or less makes that night unavailable. Flexible cancellation charges the full booking amount after the deadline and for no-shows.</p>
     <p>Continue saves this offer’s policy and checks pricing readiness. Keep the page open to retry if needed; accepted policies remain saved. You must then save the draft, review charges and approve rates. Nothing is sent to channels.</p>
     {error && <p role="alert" className="text-red-700">{error}</p>}
