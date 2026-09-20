@@ -31,6 +31,31 @@ reviewed product-role grant and real-role test pass. Audit all other
 including platform audit/outbox and workers, against the privilege matrix;
 the split is a credential boundary, not permission for cross-domain calls.
 
+## Auth connection inventory before granting
+
+`apps/api/src/server.ts` currently constructs these consumers from
+`config.auth.databaseUrl`. This is a connection inventory, **not** approval to
+grant every SQL operation used by each consumer:
+
+| Consumer | Database surface to review |
+| --- | --- |
+| Sign-in identity repository and lifecycle command bus | `identity.users`, `external_identities`, `organizations`, `organization_memberships`, `organization_resource_links`, `role_permission_grants`, `auth_reconciliation_events` |
+| Authorization entitlement repository | Read `identity.product_entitlements` for product-access decisions |
+| Session handoff | `identity.auth_session_handoffs` |
+| Staff invitation create, delivery, acceptance, roles, and removal | `identity.staff_invitations`, `staff_invitation_property_assignments`, `organization_memberships`, `membership_property_assignments`, `membership_delegations`, `organization_roles`, plus identity reads and shared idempotency, audit, and jobs |
+| WorkOS webhook receipt and reconciliation | `platform.external_webhook_events`, `dead_letter_events`, `jobs`, plus identity users, provider mappings, organizations, memberships, and invitations |
+| Account-admin transfer and role worker | Identity transfer proofs/guards, memberships, provider mappings, and the identity-admin-transfer job queue |
+| Privacy and platform identity-user administration | Identity consent and GDPR tables, users, provider mappings, organizations, memberships, and reconciliation events |
+| Product audit sink | `platform.product_audit_events` with `product = 'identity'` only |
+
+The PMS inbox assignment worker itself uses `TARGET_DATABASE_URL`, not the auth
+connection. The booking-web attribution sink and PMS module activation are
+routed to `TARGET_DATABASE_URL` in this preparatory PR. A grant runner must now
+derive exact operations and any column restrictions from these call sites,
+including row-lock `UPDATE` requirements; it must not use `ALL TABLES IN SCHEMA`
+or a generic identity-schema write grant. Shared-table row restrictions are a
+separate prerequisite before any identity role can write those tables.
+
 ## Why the alternatives are unsafe
 
 - Granting membership `INSERT` or role/status `UPDATE` to the general runtime
