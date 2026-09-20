@@ -39,6 +39,7 @@ export * from "./financialExpenses.js";
 export * from "./financialFolios.js";
 export * from "./financialReporting.js";
 export * from "./financialProfitLossCsv.js";
+export * from "./financialRevenueCsv.js";
 export * from "./generatedExpenses.js";
 
 // ---------------------------------------------------------------------------
