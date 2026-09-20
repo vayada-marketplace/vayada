@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations } from "./runner.js";
 
 const url = process.env["VAY2017_RECEIPT_TEST_DATABASE_URL"];
+const readerUrl = process.env["VAY2017_RECEIPT_READER_TEST_DATABASE_URL"];
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const insert = `INSERT INTO platform.legacy_owner_bootstrap_receipts
  (command_id,contract_version,environment,payload_sha256,owner_user_ids,
@@ -147,5 +148,86 @@ describe.skipIf(!url)("immutable internal owner setup receipts", () => {
       aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
       WHERE c.oid='platform.legacy_owner_bootstrap_receipts'::regclass AND a.grantee=0`);
     expect(result.rows[0].n).toBe(0);
+  });
+
+  it("gives a distinct runtime role only the owner-id lookup", async () => {
+    if (!readerUrl) throw new Error("VAY2017_RECEIPT_READER_TEST_DATABASE_URL is required");
+    const parsed = new URL(readerUrl);
+    if (
+      parsed.hostname !== "127.0.0.1" ||
+      parsed.pathname !== "/vay2017_receipt_fixture" ||
+      parsed.username !== "vay2017_receipt_reader" ||
+      parsed.search
+    )
+      throw new Error("Dedicated loopback receipt reader fixture required");
+
+    let reader: pg.Client | undefined;
+    let readerRoleCreated = false;
+    try {
+      await client.query("CREATE ROLE vay2017_receipt_reader LOGIN PASSWORD 'reader_test_only'");
+      readerRoleCreated = true;
+      await client.query(
+        "GRANT CONNECT ON DATABASE vay2017_receipt_fixture TO vay2017_receipt_reader",
+      );
+      await client.query("GRANT USAGE ON SCHEMA platform TO vay2017_receipt_reader");
+      await client.query(
+        "GRANT SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts TO vay2017_receipt_reader",
+      );
+
+      reader = new pg.Client({ connectionString: readerUrl });
+      await reader.connect();
+      const role = await reader.query(`SELECT current_user AS current_user,
+        r.rolsuper,
+        pg_get_userbyid(c.relowner) AS table_owner,
+        pg_has_role(current_user, pg_get_userbyid(c.relowner), 'MEMBER') AS owner_member
+        FROM pg_roles r, pg_class c
+        WHERE r.rolname=current_user
+          AND c.oid='platform.legacy_owner_bootstrap_receipts'::regclass`);
+      expect(role.rows).toEqual([
+        {
+          current_user: "vay2017_receipt_reader",
+          rolsuper: false,
+          table_owner: "vayada_test",
+          owner_member: false,
+        },
+      ]);
+      expect(
+        (
+          await reader.query(
+            `SELECT EXISTS (
+               SELECT 1 FROM platform.legacy_owner_bootstrap_receipts
+               WHERE $1::uuid = ANY(owner_user_ids)
+             ) AS protected`,
+            [id(1)],
+          )
+        ).rows,
+      ).toEqual([{ protected: true }]);
+
+      for (const sql of [
+        "SELECT command_id FROM platform.legacy_owner_bootstrap_receipts",
+        insert,
+        "UPDATE platform.legacy_owner_bootstrap_receipts SET payload_sha256=repeat('b',64)",
+        "DELETE FROM platform.legacy_owner_bootstrap_receipts",
+        "TRUNCATE platform.legacy_owner_bootstrap_receipts",
+        "ALTER TABLE platform.legacy_owner_bootstrap_receipts DISABLE TRIGGER bootstrap_receipts_append_only",
+      ])
+        await expect(
+          sql === insert
+            ? reader.query(sql, [id(sequence++), "a".repeat(64), [id(1)]])
+            : reader.query(sql),
+        ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await reader?.end();
+      if (readerRoleCreated) {
+        await client.query(
+          "REVOKE SELECT (owner_user_ids) ON platform.legacy_owner_bootstrap_receipts FROM vay2017_receipt_reader",
+        );
+        await client.query("REVOKE USAGE ON SCHEMA platform FROM vay2017_receipt_reader");
+        await client.query(
+          "REVOKE CONNECT ON DATABASE vay2017_receipt_fixture FROM vay2017_receipt_reader",
+        );
+        await client.query("DROP ROLE vay2017_receipt_reader");
+      }
+    }
   });
 });
