@@ -151,7 +151,7 @@ test("filters expenses and exports the same selection accessibly", async ({ page
         expect(body.paymentStatus).toBe("paid");
         expect(body.paidOn).toBe("2026-09-17");
         expect(body.notes).toBe("September utility bill");
-        expect(body.receiptMediaId).toBe("12140000-0000-4000-8000-000000000009");
+        expect(body.receiptMediaId).toBeUndefined();
         expect(body.categoryId).toBe(categories[1]?.id);
         if (!firstManualCommandId) {
           firstManualCommandId = body.commandId;
@@ -320,7 +320,6 @@ test("filters expenses and exports the same selection accessibly", async ({ page
   await expenseDialog.getByLabel("Amount (EUR)").fill("50");
   await expenseDialog.getByLabel("Paid state").selectOption("paid");
   await expenseDialog.getByLabel("Notes (optional)").fill("September utility bill");
-  await expenseDialog.getByLabel(/Receipt media ID/).fill("12140000-0000-4000-8000-000000000009");
   await expenseDialog.getByRole("button", { name: "Log expense" }).click();
   await expect(expenseDialog.getByRole("alert")).toContainText("Expense could not be saved");
   await expenseDialog.getByRole("button", { name: "Log expense" }).click();

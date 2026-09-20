@@ -40,7 +40,6 @@ export function ExpenseEntryDialog({
   const [paymentStatus, setPaymentStatus] = useState<"paid" | "unpaid">("unpaid");
   const [paidOn, setPaidOn] = useState(today);
   const [notes, setNotes] = useState("");
-  const [receiptMediaId, setReceiptMediaId] = useState("");
   const [cadence, setCadence] = useState<FinanceExpenseCadence | "">("");
   const [endsOn, setEndsOn] = useState("");
   const [error, setError] = useState("");
@@ -60,19 +59,6 @@ export function ExpenseEntryDialog({
       setError("The recurrence end date must be on or after the expense date.");
       return;
     }
-    if (
-      receiptMediaId &&
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        receiptMediaId,
-      )
-    ) {
-      setError("Receipt media ID must be a valid UUID.");
-      return;
-    }
-    if (cadence && receiptMediaId) {
-      setError("Receipts can be attached to one-off expenses only.");
-      return;
-    }
     const fields: Omit<FinanceExpenseWrite, "commandId" | "idempotencyKey"> = {
       incurredOn,
       vendor: vendor.trim(),
@@ -82,7 +68,6 @@ export function ExpenseEntryDialog({
         ? { paymentStatus, paidOn: cadence ? incurredOn : paidOn }
         : { paymentStatus, paidOn: null }),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
-      ...(receiptMediaId ? { receiptMediaId } : {}),
       ...(cadence
         ? { recurrence: { cadence, startsOn: incurredOn, ...(endsOn ? { endsOn } : {}) } }
         : {}),
@@ -220,18 +205,6 @@ export function ExpenseEntryDialog({
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
           />
-        </label>
-        <label className={`${label} sm:col-span-2`}>
-          Receipt media ID (optional, existing upload)
-          <input
-            className={input}
-            value={receiptMediaId}
-            onChange={(event) => setReceiptMediaId(event.target.value)}
-            aria-describedby="receipt-help"
-          />
-          <span id="receipt-help" className="text-xs font-normal text-gray-500">
-            Attach an existing receipt by its media ID. Recurring expenses cannot have a receipt.
-          </span>
         </label>
         <label className={label}>
           Repeat
