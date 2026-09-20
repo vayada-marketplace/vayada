@@ -9,6 +9,10 @@ const migration = await readFile(
   join(import.meta.dirname, "../migrations/0070_finance_expenses.sql"),
   "utf8",
 );
+const supplierBillMigration = await readFile(
+  join(import.meta.dirname, "../migrations/0401_finance_supplier_bill_corrections.sql"),
+  "utf8",
+);
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY = "20000000-0000-4000-8000-000000000001";
 const OTHER_PROPERTY = "20000000-0000-4000-8000-000000000002";
@@ -50,6 +54,7 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance expense ledger (PostgreSQL)", () =>
       INSERT INTO booking.guest_bookings VALUES ('${OTHER_EVIDENCE}', '${OTHER_PROPERTY}'); INSERT INTO finance.payments VALUES ('${OTHER_EVIDENCE}', '${OTHER_PROPERTY}'); INSERT INTO finance.recurring_expense_rules VALUES ('${OTHER_EVIDENCE}', '${OTHER_PROPERTY}');
     `);
     await client.query(migration);
+    await client.query(supplierBillMigration);
   });
 
   afterAll(async () => {
@@ -233,5 +238,42 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance expense ledger (PostgreSQL)", () =>
     await expect(
       client.query("DELETE FROM finance.expense_categories WHERE id = $1", [CATEGORY]),
     ).rejects.toMatchObject({ constraint: "fk_finance_expenses_category_property" });
+    const original = (
+      await client.query<{ id: string }>(
+        "SELECT id::text FROM finance.expenses WHERE property_id=$1 AND source_key='bill-2'",
+        [PROPERTY],
+      )
+    ).rows[0]!.id;
+    const correction = (
+      await client.query<{ id: string }>(
+        `INSERT INTO finance.expenses
+       (property_id,category_id,origin,entry_kind,incurred_on,vendor,amount,currency,
+        source_key,reverses_expense_id,supplier_invoice_number)
+       VALUES ($1,$2,'supplier_bill','correction','2026-08-06','Supplier',10,'EUR',
+         'bill-2-correction',$3,'SUP-2026-002') RETURNING id::text`,
+        [PROPERTY, CATEGORY, original],
+      )
+    ).rows[0]!.id;
+    expect(
+      (
+        await client.query(
+          "SELECT supplier_invoice_number FROM finance.expenses WHERE id IN ($1,$2) ORDER BY incurred_on",
+          [original, correction],
+        )
+      ).rows,
+    ).toEqual([
+      { supplier_invoice_number: "SUP-2026-001" },
+      { supplier_invoice_number: "SUP-2026-002" },
+    ]);
+    await expect(
+      client.query(
+        `INSERT INTO finance.expenses
+       (property_id,category_id,origin,entry_kind,incurred_on,vendor,amount,currency,
+        source_key,reverses_expense_id,supplier_invoice_number)
+       VALUES ($1,$2,'supplier_bill','reversal','2026-08-07','Supplier',10,'EUR',
+         'bill-2-reversal',$3,'SUP-2026-003')`,
+        [PROPERTY, CATEGORY, correction],
+      ),
+    ).rejects.toMatchObject({ constraint: "chk_finance_expenses_origin_evidence" });
   });
 });

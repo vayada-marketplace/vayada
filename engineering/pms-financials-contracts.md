@@ -175,7 +175,8 @@ type FolioQuery = Cursor & { from?: Date; to?: Date; state?: FolioState; search?
 type FolioExportQuery = Omit<FolioQuery, "state"> & { state: "ready" };
 type Category = { id: string; systemKey: string | null; name: string; color: string; sortOrder: number; archived: boolean; revision: number };
 type Expense = { id: string; categoryId: string; origin: ExpenseOrigin; incurredOn: Date; vendor: string; amount: Money;
-  recurringRuleId: string | null; sourceKey: string | null; reversesExpenseId: string | null; revision: number } & ExpensePayment;
+  recurringRuleId: string | null; sourceKey: string | null; reversesExpenseId: string | null; revision: number;
+  supplierInvoiceNumber?: string | null } & ExpensePayment;
 type RecurringRule = { id: string; categoryId: string; vendor: string; amount: Money; notes?: string;
   paymentStatus: "paid" | "unpaid"; cadence: "weekly" | "monthly" | "yearly"; startsOn: Date;
   nextDueOn: Date; endsOn: Date | null; active: boolean; revision: number };
@@ -243,6 +244,13 @@ V1 exports CSV for all five tabs. It does not create, retrieve, render, or send
 an official invoice document and does not promise PDF renditions.
 
 `POST /expenses` returns `WriteResponse<Expense>` without `recurrence`. A `receiptMediaId` is valid only on that non-recurring write. With `recurrence`, it creates and returns only a `WriteResponse<RecurringRule>`; VAY-1232 owns future expense generation, and no current expense is created because no atomic expense-and-rule coordinator exists.
+
+A non-recurring write with `supplierInvoiceNumber` creates a `supplier_bill`
+expense; without it, the write creates a `manual` expense. Recurring writes cannot
+carry a supplier invoice number. The number is external document evidence, not a
+Vayada invoice identity. It is returned by expense reads, and changing it on an
+existing supplier bill appends a correction rather than rewriting the prior row.
+Manual expenses cannot be converted to supplier bills by patching in a number.
 
 P&L is computed from ledger/evidence rows; no second source-of-truth table is
 introduced.

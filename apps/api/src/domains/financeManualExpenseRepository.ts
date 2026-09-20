@@ -8,7 +8,7 @@ import pg from "pg";
 
 // prettier-ignore
 export type CreateFinanceManualExpenseCommand = Omit<FinanceExpenseWrite,
-  "expectedRevision" | "supplierInvoiceNumber" | "recurrence"> &
+  "expectedRevision" | "recurrence"> &
   { propertyId: string; receiptMediaId?: string; audit: FinanceCommandAudit };
 export type CreateFinanceManualExpenseResult = FinanceExpenseCommandResult<FinanceExpense>;
 type ExpenseFailure = Extract<FinanceExpenseCommandResult<FinanceExpense>, { ok: false }>;
@@ -17,7 +17,7 @@ type MutationBase = { commandId: string; idempotencyKey: string; expectedRevisio
   propertyId: string; expenseId: string; audit: FinanceCommandAudit };
 // prettier-ignore
 export type UpdateFinanceManualExpenseCommand = MutationBase & Partial<Pick<FinanceExpenseWrite,
-  "incurredOn" | "vendor" | "categoryId" | "amount" | "paymentStatus" | "paidOn" | "notes">> &
+  "incurredOn" | "vendor" | "categoryId" | "amount" | "paymentStatus" | "paidOn" | "notes" | "supplierInvoiceNumber">> &
   { receiptMediaId?: string | null };
 export type MutateFinanceManualExpenseResult =
   | { ok: true; outcome: "updated" | "corrected" | "replayed"; item: FinanceExpense }
@@ -55,13 +55,13 @@ const ARCHIVE_OPERATION = "finance.manual_expense.archive";
 const RESOURCE_LOCK = "finance.manual_expense";
 // prettier-ignore
 const UPDATE_FIELDS = ["incurredOn", "vendor", "categoryId", "amount", "paymentStatus",
-  "paidOn", "notes", "receiptMediaId"] as const;
+  "paidOn", "notes", "supplierInvoiceNumber", "receiptMediaId"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 const COLUMNS = `id::text, category_id::text AS "categoryId", origin, incurred_on::text AS "incurredOn",
   paid_on::text AS "paidOn", vendor, jsonb_build_object('amount',amount::text,'currency',currency::text) AS amount,
   payment_status AS "paymentStatus", recurring_rule_id::text AS "recurringRuleId", source_key AS "sourceKey",
-  reverses_expense_id::text AS "reversesExpenseId", revision::int`;
+  reverses_expense_id::text AS "reversesExpenseId", supplier_invoice_number AS "supplierInvoiceNumber", revision::int`;
 
 export function createPgFinanceManualExpenseRepository(
   connectionString: string,
@@ -127,14 +127,17 @@ export function createPgFinanceManualExpenseRepository(
           inserted = await client.query<FinanceExpense>(
             `INSERT INTO finance.expenses
                (id,property_id,category_id,origin,incurred_on,vendor,amount,currency,
-                payment_status,paid_on,notes,receipt_media_id)
-             VALUES ($1::uuid,$2::uuid,$3::uuid,'manual',$4::date,$5,$6::numeric,
-                     $7,$8,$9::date,$10,$11::uuid)
+                payment_status,paid_on,notes,receipt_media_id,source_key,supplier_invoice_number)
+             VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5::date,$6,$7::numeric,
+                     $8,$9,$10::date,$11,$12::uuid,$13,$14)
              RETURNING ${COLUMNS}`,
             // prettier-ignore
-            [raw.commandId, raw.propertyId, raw.categoryId, raw.incurredOn, raw.vendor,
+            [raw.commandId, raw.propertyId, raw.categoryId,
+              raw.supplierInvoiceNumber ? "supplier_bill" : "manual", raw.incurredOn, raw.vendor,
               raw.amount.amount, raw.amount.currency, raw.paymentStatus, raw.paidOn ?? null,
-              raw.notes ?? null, raw.receiptMediaId ?? null],
+              raw.notes ?? null, raw.receiptMediaId ?? null,
+              raw.supplierInvoiceNumber ? `supplier_bill:${raw.commandId.toLowerCase()}` : null,
+              raw.supplierInvoiceNumber ?? null],
           );
         } catch (error) {
           const name = constraint(error);
@@ -284,7 +287,7 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
               EXISTS (SELECT 1 FROM finance.expenses child
                 WHERE child.reverses_expense_id=e.id) AS reversed
        FROM finance.expenses e
-       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin='manual' FOR UPDATE`,
+       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin IN ('manual','supplier_bill') FOR UPDATE`,
       [raw.expenseId, raw.propertyId],
     );
     const previous = found.rows[0];
@@ -292,6 +295,8 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
     // prettier-ignore
     if (previous.revision !== raw.expectedRevision || previous.entryKind === "reversal" || previous.reversed)
       return await stop(client, { ok: false, code: "revision_conflict" });
+    if (previous.origin === "manual" && raw.supplierInvoiceNumber !== undefined)
+      return await stop(client, { ok: false, code: "evidence_mismatch" });
     // prettier-ignore
     const receiptChanged = Object.hasOwn(raw, "receiptMediaId") && (raw.receiptMediaId?.toLowerCase() ?? null) !== previous.receiptMediaId;
     const categoryChanged = raw.categoryId !== undefined && raw.categoryId.toLowerCase() !== previous.categoryId;
@@ -307,13 +312,15 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
       paidOn:
         raw.paymentStatus === "unpaid" ? undefined : (raw.paidOn ?? previous.paidOn ?? undefined),
       notes: raw.notes ?? previous.notes ?? undefined,
+      supplierInvoiceNumber: raw.supplierInvoiceNumber ?? previous.supplierInvoiceNumber ?? undefined,
     });
     if (!merged) return await stop(client, { ok: false, code: "invalid_command" });
     // prettier-ignore
     const correction = (raw.incurredOn !== undefined && raw.incurredOn !== previous.incurredOn) ||
       categoryChanged ||
       (raw.vendor !== undefined && raw.vendor !== previous.vendor) ||
-      (raw.amount !== undefined && (raw.amount.amount !== previous.amount.amount || raw.amount.currency !== previous.amount.currency)) || receiptChanged;
+      (raw.amount !== undefined && (raw.amount.amount !== previous.amount.amount || raw.amount.currency !== previous.amount.currency)) ||
+      (raw.supplierInvoiceNumber !== undefined && raw.supplierInvoiceNumber !== previous.supplierInvoiceNumber) || receiptChanged;
     if (!correction && previous.revision === 2_147_483_647)
       return await stop(client, { ok: false, code: "revision_conflict" });
     const evidence = await client.query<{ categoryOk: boolean; receiptOk: boolean }>(
@@ -351,15 +358,17 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
         const inserted = await client.query<FinanceExpense>(
           `INSERT INTO finance.expenses
              (id,property_id,category_id,origin,entry_kind,incurred_on,paid_on,vendor,
-              amount,currency,payment_status,source_key,reverses_expense_id,receipt_media_id,notes)
-           VALUES ($1::uuid,$2::uuid,$3::uuid,'manual',$4,$5::date,$6::date,$7,
-                   $8::numeric,$9,$10,$11,$12::uuid,$13::uuid,$14)
+              amount,currency,payment_status,source_key,reverses_expense_id,receipt_media_id,notes,
+              supplier_invoice_number)
+           VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::date,$7::date,$8,
+                   $9::numeric,$10,$11,$12,$13::uuid,$14::uuid,$15,$16)
            RETURNING ${COLUMNS}`,
           // prettier-ignore
-          [raw.commandId, raw.propertyId, merged.categoryId, "correction", merged.incurredOn,
+          [raw.commandId, raw.propertyId, merged.categoryId, previous.origin, "correction", merged.incurredOn,
             merged.paidOn, merged.vendor, merged.amount.amount, merged.amount.currency,
             merged.paymentStatus, `${UPDATE_OPERATION}:${raw.commandId.toLowerCase()}`, previous.id,
-            receiptChanged ? raw.receiptMediaId : null, merged.notes ?? null],
+            receiptChanged ? raw.receiptMediaId : null, merged.notes ?? null,
+            previous.origin === "supplier_bill" ? merged.supplierInvoiceNumber ?? null : null],
         );
         next = inserted.rows[0]!;
       }
@@ -496,7 +505,7 @@ async function archive(pool: pg.Pool, raw: ArchiveFinanceManualExpenseCommand,
               EXISTS (SELECT 1 FROM finance.expenses child
                 WHERE child.reverses_expense_id=e.id) AS reversed
        FROM finance.expenses e
-       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin='manual' FOR UPDATE`,
+       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin IN ('manual','supplier_bill') FOR UPDATE`,
       [expenseId, propertyId],
     );
     const previous = found.rows[0];
@@ -510,11 +519,11 @@ async function archive(pool: pg.Pool, raw: ArchiveFinanceManualExpenseCommand,
         `INSERT INTO finance.expenses
            (id,property_id,category_id,origin,entry_kind,incurred_on,paid_on,vendor,
             amount,currency,payment_status,source_key,reverses_expense_id,notes)
-         VALUES ($1::uuid,$2::uuid,$3::uuid,'manual','reversal',$4::date,$5::date,$6,
-                 $7::numeric,$8,$9,$10,$11::uuid,$12)
+         VALUES ($1::uuid,$2::uuid,$3::uuid,$4,'reversal',$5::date,$6::date,$7,
+                 $8::numeric,$9,$10,$11,$12::uuid,$13)
          RETURNING ${COLUMNS}`,
         // prettier-ignore
-        [commandId, propertyId, previous.categoryId, date.rows[0]!.incurredOn,
+        [commandId, propertyId, previous.categoryId, previous.origin, date.rows[0]!.incurredOn,
           previous.paidOn, previous.vendor, previous.amount.amount, previous.amount.currency,
           previous.paymentStatus, `${ARCHIVE_OPERATION}:${commandId}`, previous.id, previous.notes],
       );
@@ -580,7 +589,7 @@ async function archive(pool: pg.Pool, raw: ArchiveFinanceManualExpenseCommand,
 
 function valid(command: CreateFinanceManualExpenseCommand): boolean {
   // prettier-ignore
-  if (!exact(command, "commandId idempotencyKey propertyId categoryId incurredOn vendor amount paymentStatus paidOn notes receiptMediaId audit")) return false;
+  if (!exact(command, "commandId idempotencyKey propertyId categoryId incurredOn vendor amount paymentStatus paidOn notes supplierInvoiceNumber receiptMediaId audit")) return false;
   const { propertyId, receiptMediaId, audit, ...write } = command;
   const actor = audit?.actor;
   return !(
@@ -659,11 +668,13 @@ function replayArchive(
 // prettier-ignore
 function storedExpense(value: unknown, outcome: "created" | "updated" | "corrected" | "archived"): FinanceExpense | null {
   // prettier-ignore
-  if (!exact(value, "id categoryId origin incurredOn paidOn vendor amount paymentStatus recurringRuleId sourceKey reversesExpenseId revision") ||
-    value.origin !== "manual" || value.recurringRuleId !== null ||
+  if (!exact(value, "id categoryId origin incurredOn paidOn vendor amount paymentStatus recurringRuleId sourceKey reversesExpenseId supplierInvoiceNumber revision") ||
+    !["manual", "supplier_bill"].includes(String(value.origin)) || value.recurringRuleId !== null ||
+    (value.origin === "manual" && value.supplierInvoiceNumber != null) ||
+    (value.origin === "supplier_bill" && value.supplierInvoiceNumber != null && !trimmed(value.supplierInvoiceNumber, 1, 200)) ||
     !Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || Number(value.revision) > 2_147_483_647 ||
-    (outcome === "created" && (value.sourceKey !== null || value.reversesExpenseId !== null || value.revision !== 1)) ||
-    (outcome === "updated" && (Number(value.revision) < 2 || !((value.sourceKey === null && value.reversesExpenseId === null) ||
+    (outcome === "created" && (value.sourceKey !== (value.origin === "supplier_bill" ? `supplier_bill:${String(value.id)}` : null) || value.reversesExpenseId !== null || value.revision !== 1)) ||
+    (outcome === "updated" && (Number(value.revision) < 2 || !(((value.origin === "manual" ? value.sourceKey === null : value.sourceKey === `supplier_bill:${String(value.id)}`) && value.reversesExpenseId === null) ||
       (value.sourceKey === `${UPDATE_OPERATION}:${String(value.id)}` && uuid(value.reversesExpenseId))))) ||
     (outcome === "corrected" && (value.sourceKey !== `${UPDATE_OPERATION}:${String(value.id)}` || !uuid(value.reversesExpenseId) || value.revision !== 1)) ||
     (outcome === "archived" && (value.sourceKey !== `${ARCHIVE_OPERATION}:${String(value.id)}` || !uuid(value.reversesExpenseId) || value.revision !== 1)))
@@ -684,7 +695,7 @@ function validMutation(command: UpdateFinanceManualExpenseCommand): boolean {
   return !(
     !validMutationBase(
       command,
-      "commandId idempotencyKey expectedRevision propertyId expenseId audit incurredOn vendor categoryId amount paymentStatus paidOn notes receiptMediaId",
+      "commandId idempotencyKey expectedRevision propertyId expenseId audit incurredOn vendor categoryId amount paymentStatus paidOn notes supplierInvoiceNumber receiptMediaId",
     ) ||
     !UPDATE_FIELDS.some((key) => Object.hasOwn(command, key)) ||
     UPDATE_FIELDS.some((key) => key !== "receiptMediaId" && command[key] === null) ||
@@ -732,7 +743,8 @@ function hash(value: string): string {
 // prettier-ignore
 function commandFingerprint(raw: CreateFinanceManualExpenseCommand): string { return hash(JSON.stringify([
   raw.commandId, raw.categoryId, raw.incurredOn, raw.vendor, raw.amount.amount, raw.amount.currency,
-  raw.paymentStatus, raw.paidOn ?? null, raw.notes ?? null, raw.receiptMediaId ?? null])); }
+  raw.paymentStatus, raw.paidOn ?? null, raw.notes ?? null, raw.receiptMediaId ?? null,
+  ...(raw.supplierInvoiceNumber ? [raw.supplierInvoiceNumber] : [])])); }
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
