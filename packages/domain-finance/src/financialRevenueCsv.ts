@@ -35,6 +35,15 @@ export type FinanceRevenueCsvArtifact = {
   rowCount: number;
   body: string;
 };
+export type FinanceRevenueExportSnapshot = Readonly<{
+  formatVersion: typeof FINANCE_REVENUE_CSV_VERSION;
+  propertyId: string;
+  currency: string;
+  timeZone: string;
+  filters: FinanceRevenueQuery;
+  snapshotAt: string;
+  manifest: readonly [{ response: FinanceRevenueResponse }];
+}>;
 
 /** Copy only the public Revenue read contract into labeled CSV rows. */
 export function buildFinanceRevenueCsvArtifact(input: {
@@ -139,6 +148,141 @@ export function buildFinanceRevenueCsvArtifact(input: {
   };
 }
 
+/** Pin only CSV-needed read fields so durable retries never query newer financial evidence. */
+export function captureFinanceRevenueExport(input: {
+  propertyId: string;
+  response: FinanceRevenueResponse;
+  query: FinanceRevenueQuery;
+}): FinanceRevenueExportSnapshot {
+  const artifact = buildFinanceRevenueCsvArtifact(input);
+  return {
+    formatVersion: FINANCE_REVENUE_CSV_VERSION,
+    propertyId: artifact.propertyId,
+    currency: artifact.currency,
+    timeZone: input.response.timeZone,
+    filters: { ...artifact.filters },
+    snapshotAt: artifact.generatedAt,
+    manifest: [{ response: copyRevenueResponse(input.response) }],
+  };
+}
+
+export function parseFinanceRevenueExportSnapshot(
+  value: unknown,
+): FinanceRevenueExportSnapshot | null {
+  if (
+    !record(value) ||
+    !exact(value, [
+      "formatVersion",
+      "propertyId",
+      "currency",
+      "timeZone",
+      "filters",
+      "snapshotAt",
+      "manifest",
+    ])
+  )
+    return null;
+  const filters = parseFinanceRevenueQuery(value.filters);
+  if (
+    value.formatVersion !== FINANCE_REVENUE_CSV_VERSION ||
+    !uuid(value.propertyId) ||
+    typeof value.currency !== "string" ||
+    !/^[A-Z]{3}$/.test(value.currency) ||
+    !filters ||
+    !instant(value.snapshotAt) ||
+    !Array.isArray(value.manifest) ||
+    value.manifest.length !== 1
+  )
+    return null;
+  const selection = value.manifest[0];
+  if (!record(selection) || !exact(selection, ["response"])) return null;
+  try {
+    buildFinanceRevenueCsvArtifact({
+      propertyId: value.propertyId,
+      response: selection.response as FinanceRevenueResponse,
+      query: filters,
+    });
+  } catch {
+    return null;
+  }
+  const response = selection.response as FinanceRevenueResponse;
+  if (
+    response.currency !== value.currency ||
+    response.generatedAt !== value.snapshotAt ||
+    response.timeZone !== value.timeZone
+  )
+    return null;
+  return {
+    formatVersion: FINANCE_REVENUE_CSV_VERSION,
+    propertyId: value.propertyId,
+    currency: value.currency,
+    timeZone: value.timeZone,
+    filters,
+    snapshotAt: value.snapshotAt,
+    manifest: [{ response: copyRevenueResponse(response) }],
+  };
+}
+
+function copyRevenueResponse(response: FinanceRevenueResponse): FinanceRevenueResponse {
+  const money = (value: FinanceReportingMoney) => ({
+    amount: value.amount,
+    currency: value.currency,
+  });
+  const metric = (value: FinanceReportingMoneyMetric) => ({
+    value: money(value.value),
+    absoluteChange: money(value.absoluteChange),
+    percentChange: value.percentChange,
+  });
+  return {
+    contractVersion: response.contractVersion,
+    propertyId: response.propertyId,
+    currency: response.currency,
+    timeZone: response.timeZone,
+    generatedAt: response.generatedAt,
+    sourceFreshness: {},
+    incompleteEvidence: [],
+    summary: {
+      grossRoom: metric(response.summary.grossRoom),
+      otaCommission: metric(response.summary.otaCommission),
+      netRoom: metric(response.summary.netRoom),
+      upsell: metric(response.summary.upsell),
+      nights: {
+        value: response.summary.nights.value,
+        absoluteChange: response.summary.nights.absoluteChange,
+        percentChange: response.summary.nights.percentChange,
+      },
+      adr: metric(response.summary.adr),
+      attachRate: {
+        value: response.summary.attachRate.value,
+        absoluteChange: response.summary.attachRate.absoluteChange,
+        percentChange: response.summary.attachRate.percentChange,
+      },
+    },
+    channels: response.channels.map((item) => ({
+      channel: item.channel,
+      gross: money(item.gross),
+      commission: money(item.commission),
+      net: money(item.net),
+      share: item.share,
+    })),
+    directSources: response.directSources.map((item) => ({
+      source: item.source,
+      revenue: money(item.revenue),
+      share: item.share,
+    })),
+    upsells: response.upsells.map((item) => ({
+      ownership: item.ownership,
+      revenue: money(item.revenue),
+    })),
+    roomTypes: response.roomTypes.map((item) => ({
+      roomTypeId: item.roomTypeId,
+      nights: item.nights,
+      revenue: money(item.revenue),
+      adr: money(item.adr),
+    })),
+  };
+}
+
 function validRevenue(response: FinanceRevenueResponse): boolean {
   const code = response.currency;
   const summary = response.summary;
@@ -189,10 +333,14 @@ const validMoney = (value: FinanceReportingMoney, currency: string) =>
 const decimal = (value: string) => /^-?(?:0|[1-9]\d*)\.\d{4}$/.test(value);
 const ratio = (value: string) => /^(?:0|1)\.\d{4}$/.test(value) && Number(value) <= 1;
 const label = (value: string) => value.trim() === value && value.length > 0 && value.length <= 200;
-const uuid = (value: string) =>
+const uuid = (value: unknown): value is string =>
+  typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
-const instant = (value: string) =>
-  Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+const instant = (value: unknown): value is string =>
+  typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) &&
+  Number.isFinite(Date.parse(value)) &&
+  new Date(value).toISOString().slice(0, 19) === value.slice(0, 19);
 function zone(value: string): boolean {
   try {
     const timeZone = getTimezone(value);
@@ -201,3 +349,7 @@ function zone(value: string): boolean {
     return false;
   }
 }
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
