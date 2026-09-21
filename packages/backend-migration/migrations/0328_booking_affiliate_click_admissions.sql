@@ -23,8 +23,14 @@ RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'Affiliate click context history is immutable'; END;
 $$;
 CREATE TRIGGER affiliate_click_contexts_no_update
-  BEFORE UPDATE ON booking.affiliate_click_contexts
+  BEFORE UPDATE OR DELETE ON booking.affiliate_click_contexts
   FOR EACH ROW EXECUTE FUNCTION booking.reject_affiliate_click_context_mutation();
+CREATE TRIGGER affiliate_click_contexts_no_truncate
+  BEFORE TRUNCATE ON booking.affiliate_click_contexts
+  FOR EACH STATEMENT EXECUTE FUNCTION booking.reject_affiliate_click_context_mutation();
 CREATE TRIGGER affiliate_click_admissions_no_update
-  BEFORE UPDATE ON booking.affiliate_click_admissions
+  BEFORE UPDATE OR DELETE ON booking.affiliate_click_admissions
   FOR EACH ROW EXECUTE FUNCTION booking.reject_affiliate_click_context_mutation();
+CREATE TRIGGER affiliate_click_admissions_no_truncate
+  BEFORE TRUNCATE ON booking.affiliate_click_admissions
+  FOR EACH STATEMENT EXECUTE FUNCTION booking.reject_affiliate_click_context_mutation();

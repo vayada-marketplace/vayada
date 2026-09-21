@@ -250,6 +250,16 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await expect(
       pool().query("UPDATE booking.affiliate_click_admissions SET history_position=3"),
     ).rejects.toThrow();
+    await expect(pool().query("DELETE FROM booking.affiliate_click_admissions")).rejects.toThrow();
+    await expect(
+      pool().query("DELETE FROM booking.affiliate_click_contexts WHERE id=$1", [wrongProperty]),
+    ).rejects.toThrow("Affiliate click context history is immutable");
+    await expect(pool().query("TRUNCATE booking.affiliate_click_admissions")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
+    await expect(pool().query("TRUNCATE booking.affiliate_click_contexts CASCADE")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
     expect(
       (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
     ).toBe("2");
