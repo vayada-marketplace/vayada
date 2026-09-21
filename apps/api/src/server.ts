@@ -962,6 +962,13 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
+const pricingAuthorityPool = config.pricingDatabaseUrl
+  ? new pg.Pool({
+      connectionString: config.pricingDatabaseUrl,
+      connectionTimeoutMillis: 5_000,
+      max: 5,
+    })
+  : null;
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1656,7 +1663,14 @@ const app = buildApp({
       : undefined,
   replacementPricing:
     config.pmsOperationsSource === "target"
-      ? { commands: (context) => createReplacementPricingCommands(propertySetupOwnerPool, context) }
+      ? {
+          commands: (context) =>
+            createReplacementPricingCommands(
+              propertySetupOwnerPool,
+              context,
+              pricingAuthorityPool,
+            ),
+        }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
     ? {
@@ -2242,6 +2256,7 @@ app.addHook("onClose", async () => {
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
+    pricingAuthorityPool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),
   ]);

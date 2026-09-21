@@ -56,6 +56,42 @@ describe("api config", () => {
     );
   });
 
+  it("does not reuse the general or auth database URL for pricing authority", () => {
+    const base = loadConfig(completeCreatorMarketplaceEnv);
+    expect(base.pricingDatabaseUrl).toBeUndefined();
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: "postgresql://pricing_runtime@pricing-db",
+      }).pricingDatabaseUrl,
+    ).toBe("postgresql://pricing_runtime@pricing-db");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.TARGET_DATABASE_URL,
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        PRICING_DATABASE_URL: completeCreatorMarketplaceEnv.AUTH_DATABASE_URL,
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
+        PRICING_DATABASE_URL:
+          "postgresql://general_runtime@target-db/vayada?application_name=pricing",
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://general_runtime@target-db/vayada",
+        PRICING_DATABASE_URL: "postgresql://pricing_runtime@target-db/vayada?user=general_runtime",
+      }),
+    ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),
