@@ -7,23 +7,26 @@ import { persistPricingBookingAddons } from "./persistPricingBookingAddons.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 vi.mock("./publicPricingAuthority.js", () => ({ lockPublicPricingAuthority: vi.fn() }));
 vi.mock("./persistPricingBookingAddons.js", () => ({ persistPricingBookingAddons: vi.fn() }));
-let input: ReturnType<typeof pricingDraftFixture>;
-const query = vi.fn(async (sql: string, _values?: unknown[]) => {
-  void _values;
-  if (sql.startsWith("SELECT id,payload"))
-    return {
-      rows: [
-        {
-          id: input.current.quote.quoteId,
-          payload: {
-            quote: input.current.quote,
-            calculation: { version: "booking.quote-calculation.v1" },
+let input: Parameters<typeof stagePricingBookingDraft>[2];
+const query = vi.fn(
+  async (sql: string, _values?: unknown[]): Promise<{ rows: unknown[]; rowCount: number }> => {
+    void _values;
+    if (sql.startsWith("SELECT id,payload"))
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            id: input.current.quote.quoteId,
+            payload: {
+              quote: input.current.quote,
+              calculation: { version: "booking.quote-calculation.v1" },
+            },
           },
-        },
-      ],
-    };
-  return { rows: [], rowCount: 1 };
-});
+        ],
+      };
+    return { rows: [], rowCount: 1 };
+  },
+);
 const client = { query } as unknown as PoolClient;
 beforeEach(() => {
   vi.clearAllMocks();
@@ -89,6 +92,20 @@ it("propagates insert failures and late authorization loss for caller rollback",
     .mockResolvedValueOnce(null);
   await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("unavailable");
   expect(query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(false);
+});
+
+it("rejects an unavailable internal affiliate context before inserting a draft", async () => {
+  input.syntheticAffiliateContextId = "unavailable-synthetic-context";
+  const original = query.getMockImplementation()!;
+  query.mockImplementation(async (sql, values) => {
+    if (sql === "SHOW transaction_isolation")
+      return { rows: [{ transaction_isolation: "read committed" }], rowCount: 1 };
+    if (sql.startsWith("SELECT id FROM booking.affiliate_click_contexts"))
+      return { rows: [], rowCount: 0 };
+    return original(sql, values);
+  });
+  await expect(stagePricingBookingDraft(client, "hotel", input)).rejects.toThrow("unavailable");
+  expect(query.mock.calls.some(([sql]) => sql.startsWith("WITH draft"))).toBe(false);
 });
 
 it.each([

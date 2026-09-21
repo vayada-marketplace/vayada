@@ -36,6 +36,17 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
 
   it("keeps every staged effect invisible until commit and replays without new writes", async () => {
     const fixture = await setupFixture();
+    const affiliateContextId = randomUUID();
+    await fixture.observer.query(
+      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,TRUE)",
+      [affiliateContextId, fixture.propertyId],
+    );
+    await fixture.observer.query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
+      [affiliateContextId, fixture.propertyId, randomUUID()],
+    );
+    const internal = { syntheticAffiliateContextId: affiliateContextId };
     let staged!: () => void, release!: () => void;
     const stagedPromise = new Promise<void>((resolve) => (staged = resolve));
     const releasePromise = new Promise<void>((resolve) => (release = resolve));
@@ -51,9 +62,9 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       return new Date().toISOString();
     });
 
-    const write = writePricingAcceptance(fixture.pool, fixture.input);
+    const write = writePricingAcceptance(fixture.pool, fixture.input, internal);
     await stagedPromise;
-    const replay = writePricingAcceptance(fixture.pool, fixture.input);
+    const replay = writePricingAcceptance(fixture.pool, fixture.input, internal);
     const secondPid = await waitForSecondWriter(fixture);
     await expect(isBlocked(fixture.observer, secondPid)).resolves.toBe(true);
     await expect(snapshot(fixture.observer, fixture)).resolves.toEqual({
@@ -80,11 +91,34 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       available: 2,
       assigned: 1,
     });
+    expect(
+      (
+        await fixture.observer.query(
+          "SELECT context_id,history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [accepted.bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ context_id: affiliateContextId, history_cutoff: "1" });
+    await fixture.observer.query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,2)`,
+      [affiliateContextId, fixture.propertyId, randomUUID()],
+    );
 
-    await expect(writePricingAcceptance(fixture.pool, fixture.input)).resolves.toMatchObject({
+    await expect(
+      writePricingAcceptance(fixture.pool, fixture.input, internal),
+    ).resolves.toMatchObject({
       kind: "replayed",
       bookingId: accepted.bookingId,
     });
+    expect(
+      (
+        await fixture.observer.query(
+          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [accepted.bookingId],
+        )
+      ).rows[0].history_cutoff,
+    ).toBe("1");
     expect(await snapshot(fixture.observer, fixture)).toEqual(committed);
     await fixture.close();
   });
