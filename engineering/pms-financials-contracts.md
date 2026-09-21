@@ -384,6 +384,9 @@ credentials or disables payment/payout jobs.
 
 ## Backfill, activation and rollback
 
+The operational sequence and evidence record are in the
+[PMS Financials activation runbook](pms-financials-activation-runbook.md).
+
 1. Land this contract, then remove the inactive TypeScript/frontend surface.
 2. Add target schema and cross-domain projections behind no active UI.
 3. Backfill recognized revenue from available stay/add-on evidence. Preserve
