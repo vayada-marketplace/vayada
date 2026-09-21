@@ -151,157 +151,9 @@ export async function registerFinanceFolioRoutes(
         if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
           return bad(reply);
         const current = scopes.get(request)!;
-        const { tab: _, ...command } = value;
-        const scoped = {
-          ...command,
-          organizationId: current.context.selectedOrganization.organizationId,
-          propertyId: current.propertyId,
-          audit: {
-            actorUserId: current.context.actor.internalUserId,
-            requestId: current.context.audit.requestId,
-            correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
-            causationId: value.commandId,
-            requestedAt: current.context.audit.receivedAt,
-          },
-        };
-        let result: FinanceExportEnqueueResult;
-        if (value.tab === "folios") {
-          const raw = await options.repository.captureReadyExport(
-            current.propertyId,
-            value.filters,
-          );
-          if (!raw) return missing(reply);
-          const capture = exportCapture(
-            raw,
-            current.propertyId,
-            value.filters,
-            parseFinanceFolioExportSnapshot,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: value.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        } else if (value.tab === "expenses") {
-          const raw = await required(options.expenseExports).captureExport(
-            current.propertyId,
-            value.filters,
-          );
-          if (!raw) return missing(reply);
-          const capture = exportCapture(
-            raw,
-            current.propertyId,
-            value.filters,
-            parseFinanceExpenseExportSnapshot,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: value.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        } else if (value.tab === "profit-loss") {
-          const raw = await required(options.profitLossExports).profitLoss(
-            current.propertyId,
-            value.filters,
-          );
-          if (!raw) return missing(reply);
-          const { response, categoryRows } = raw;
-          const {
-            contractVersion,
-            propertyId,
-            currency,
-            timeZone,
-            generatedAt,
-            sourceFreshness,
-            incompleteEvidence,
-          } = response;
-          const snapshot = captureFinanceProfitLossExport({
-            propertyId: current.propertyId,
-            response,
-            query: value.filters,
-            asOf: profitLossAsOf(generatedAt, timeZone),
-            categoryRows,
-          });
-          const capture = exportCapture(
-            {
-              envelope: {
-                contractVersion,
-                propertyId,
-                currency,
-                timeZone,
-                generatedAt,
-                sourceFreshness,
-                incompleteEvidence,
-              },
-              snapshot,
-            },
-            current.propertyId,
-            value.filters,
-            parseFinanceProfitLossExportSnapshot,
-            true,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: value.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        } else if (value.tab === "revenue") {
-          const response = await required(options.revenueExports).revenue(
-            current.propertyId,
-            value.filters,
-          );
-          if (!response) return missing(reply);
-          const snapshot = captureFinanceRevenueExport({
-            propertyId: current.propertyId,
-            response,
-            query: value.filters,
-          });
-          const capture = exportCapture(
-            { envelope: reportingEnvelope(response), snapshot },
-            current.propertyId,
-            snapshot.filters,
-            parseFinanceRevenueExportSnapshot,
-            true,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: snapshot.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        } else {
-          const response = await required(options.dashboardExports).dashboard(
-            current.propertyId,
-            value.filters,
-          );
-          if (!response) return missing(reply);
-          const snapshot = captureFinanceDashboardExport({
-            propertyId: current.propertyId,
-            response,
-            query: value.filters,
-          });
-          const capture = exportCapture(
-            { envelope: reportingEnvelope(response), snapshot },
-            current.propertyId,
-            snapshot.filters,
-            parseFinanceDashboardExportSnapshot,
-            true,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: snapshot.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        }
+        const command = await prepareExport(value, current, options);
+        if (!command) return missing(reply);
+        const result: FinanceExportEnqueueResult = await options.exports!.enqueue(command);
         return exportResponse(
           reply,
           result,
@@ -385,6 +237,142 @@ export async function registerFinanceFolioRoutes(
   app.delete(`${ROOT}/:folioId`, { onRequest: write }, async (request, reply) =>
     transition(request, reply, scopes, options.commands!, "archive"),
   );
+}
+
+async function prepareExport(
+  value: ExportRequest,
+  current: Scope,
+  options: FinanceFolioRoutesOptions,
+): Promise<FinanceExportCommand | null> {
+  const { tab: _, ...request } = value;
+  const scoped = {
+    ...request,
+    organizationId: current.context.selectedOrganization.organizationId,
+    propertyId: current.propertyId,
+    audit: {
+      actorUserId: current.context.actor.internalUserId,
+      requestId: current.context.audit.requestId,
+      correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
+      causationId: value.commandId,
+      requestedAt: current.context.audit.receivedAt,
+    },
+  };
+  if (value.tab === "folios") {
+    const raw = await options.repository.captureReadyExport(current.propertyId, value.filters);
+    if (!raw) return null;
+    const capture = exportCapture(
+      raw,
+      current.propertyId,
+      value.filters,
+      parseFinanceFolioExportSnapshot,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "expenses") {
+    const raw = await required(options.expenseExports).captureExport(
+      current.propertyId,
+      value.filters,
+    );
+    if (!raw) return null;
+    const capture = exportCapture(
+      raw,
+      current.propertyId,
+      value.filters,
+      parseFinanceExpenseExportSnapshot,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "profit-loss") {
+    const raw = await required(options.profitLossExports).profitLoss(
+      current.propertyId,
+      value.filters,
+    );
+    if (!raw) return null;
+    const { response, categoryRows } = raw;
+    const snapshot = captureFinanceProfitLossExport({
+      propertyId: current.propertyId,
+      response,
+      query: value.filters,
+      asOf: profitLossAsOf(response.generatedAt, response.timeZone),
+      categoryRows,
+    });
+    const capture = exportCapture(
+      { envelope: reportingEnvelope(response), snapshot },
+      current.propertyId,
+      value.filters,
+      parseFinanceProfitLossExportSnapshot,
+      true,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "revenue") {
+    const response = await required(options.revenueExports).revenue(
+      current.propertyId,
+      value.filters,
+    );
+    if (!response) return null;
+    const snapshot = captureFinanceRevenueExport({
+      propertyId: current.propertyId,
+      response,
+      query: value.filters,
+    });
+    const capture = exportCapture(
+      { envelope: reportingEnvelope(response), snapshot },
+      current.propertyId,
+      snapshot.filters,
+      parseFinanceRevenueExportSnapshot,
+      true,
+    );
+    return {
+      ...scoped,
+      filters: snapshot.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  const response = await required(options.dashboardExports).dashboard(
+    current.propertyId,
+    value.filters,
+  );
+  if (!response) return null;
+  const snapshot = captureFinanceDashboardExport({
+    propertyId: current.propertyId,
+    response,
+    query: value.filters,
+  });
+  const capture = exportCapture(
+    { envelope: reportingEnvelope(response), snapshot },
+    current.propertyId,
+    snapshot.filters,
+    parseFinanceDashboardExportSnapshot,
+    true,
+  );
+  return {
+    ...scoped,
+    filters: snapshot.filters,
+    currency: capture.snapshot.currency,
+    snapshot: capture.snapshot,
+    envelope: capture.envelope,
+  };
 }
 
 async function exportStatusResponse(
