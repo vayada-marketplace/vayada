@@ -180,6 +180,20 @@ publisher run that failed only after uploading remains an eligible baseline and
 redispatch source. Platform reconciliation and deployed acceptance are separate
 VAY-2028/VAY-2029 evidence.
 
+## Publication retention
+
+`publishedAt` marks the start of the publication workflow: the GitHub run's
+`created_at`, including on a retry. `expiresAt` is exactly 90 days later.
+Using the later upload-step wall clock would overstate artifact retention;
+GitHub's observed expiry is based on the workflow run's earlier timestamp.
+After upload (and before redispatch), the publisher checks the actual artifact
+is not expired and its `expires_at` covers the record's promised expiry. A
+shorter retention fails closed; the receiver retains its independent check.
+
+An already-published record is immutable. A record with an overstated expiry
+requires a new preparation/publication, not an edited artifact or weaker
+receiver expiry validation.
+
 ## Local validation
 
 ```bash
