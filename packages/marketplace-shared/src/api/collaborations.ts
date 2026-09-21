@@ -27,6 +27,13 @@ export type MarketplaceAffiliateAssentRead = {
   creatorAcceptedAt: string | null;
 };
 
+export type MarketplaceAffiliateAssentCommandResponse = {
+  ok: true;
+  revision: number;
+  state: "pending" | "matched";
+  replayed: boolean;
+};
+
 export type MarketplaceCollaborationStatus =
   | "pending"
   | "negotiating"
@@ -418,6 +425,17 @@ export async function getMarketplaceCollaborationAffiliateAssent(
   return vayadaApiClient.get<MarketplaceAffiliateAssentRead>(
     marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
     options,
+  );
+}
+
+export async function recordMarketplaceCollaborationAffiliateAssent(
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateAssentCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateAssentCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
+    undefined,
+    toIdempotencyOptions(idempotencyKey),
   );
 }
 
