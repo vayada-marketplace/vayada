@@ -14,6 +14,7 @@ export async function readMarketplaceAffiliateLinkEligibility(
       agreementId: string;
       activationId: string;
       propertyId: string;
+      termsId: string;
     }
 > {
   // SAVEPOINT fails outside an explicit transaction, where row locks would be lost.
@@ -27,8 +28,11 @@ export async function readMarketplaceAffiliateLinkEligibility(
   if (!parsed.ok) return { status: "unavailable" };
   const link = (
     await client.query(
-      `SELECT id,agreement_id,activation_id,property_id
-       FROM marketplace.affiliate_links WHERE public_token=$1`,
+      `SELECT l.id,l.agreement_id,l.activation_id,l.property_id,a.terms_id
+       FROM marketplace.affiliate_links l
+       JOIN marketplace.affiliate_agreement_activations a
+         ON a.id=l.activation_id AND a.agreement_id=l.agreement_id
+       WHERE l.public_token=$1`,
       [parsed.publicToken],
     )
   ).rows[0];
@@ -41,5 +45,6 @@ export async function readMarketplaceAffiliateLinkEligibility(
     agreementId: link.agreement_id,
     activationId: link.activation_id,
     propertyId: link.property_id,
+    termsId: link.terms_id,
   };
 }
