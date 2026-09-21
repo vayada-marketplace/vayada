@@ -126,3 +126,54 @@ worker-created scheduler jobs do not supply one.
 VAY-2036 stays In Progress until this deployed smoke passes or records a new
 precise blocker. Source evidence and fixture preservation rules are in the
 local shared Channex test record and VAY-2041 issue.
+
+## Reviewed source and trigger inventory (0408)
+
+`apps/api/src/jobs/channexManagementWorkerPrivileges.ts` is the executable
+column matrix. Provisioning and startup consume this same image-owned matrix;
+0407/0408 install no credentials, grants, or allowed properties.
+
+| Runtime operation | Source reads and lock dependencies | Writes, including invoker triggers |
+| --- | --- | --- |
+| Job claim, heartbeat, continuation, failure | Jobs, attempts, property identity; external webhook id/provider only for the existing dead-letter policy (worker sees no webhook rows) | Scoped jobs/attempts, dead letters, four system audit outcomes, correlated management idempotency completion. Scheduler cannot insert an idempotency hash. |
+| Published-offer freshness and creation | Property/location, organization/links/entitlements, room facts, pricing revisions/heads/rooms, booking offer terms and mandatory charges, Finance payment settings/accounts/execution evidence/readiness | Targets/intents, create attempts, immutable original receipts. Intent guard increments next version; creation identification claims external rate ownership. |
+| Initial closed ARI and reconciliation | Current offer/source evidence and identified original creation | ARI attempts/receipts; receipt guard locks target version; reconciliation retains task and provider evidence. |
+| Availability preparation and readback | Operating calendars/periods/bindings, room types/units/closures, inventory days and materialization coverage, property profile and current lease | Availability attempts/receipts and reconciliation attestations. Guards derive property/binding/mapping and compare inventory/observation digests. No inventory source write. |
+| Activation and completion | All current owner sources, complete availability and closed-ARI evidence | Immutable sealed target versions, intent status, active version and external-rate claim. Connection permits only last ARI timestamp and updated timestamp changes; sync status only ARI/mapping. |
+| Scheduled source scan | Connection/location, pricing sources, room/rate mappings, inventory/coverage and same-day policy | Scoped ARI source fingerprint/revision and sync job enqueue, including invoker `pms.enqueue_restriction_ari`. |
+
+PostgreSQL requires UPDATE privilege for row locks. Source identity column
+UPDATE grants therefore pair with restrictive UPDATE WITH CHECK policies that
+reject actual edits, including no-op updates. No Finance, booking, identity,
+property, calendar, mapping, or inventory source mutation is authorized.
+All entitlement rows belonging to an allowed property's organization remain
+readable/lockable because the authority reader locks the whole entitlement set.
+The Finance readiness view uses invoker security so it cannot bypass worker
+property policies. Existing general API grants already cover its source reads;
+the unchanged general runtime preflight and view reads passed on PG16 and PG17.
+
+The exact non-owner login cannot alter its allowlist, source identities, other
+properties/queues, protected receipts, or unrelated product data. Other callers
+retain their existing permissive policies; new restrictive predicates return
+before worker-only lookups for other roles. Owners keep migration authority;
+FORCE RLS is unnecessary because the worker must never own any object or inherit
+an owner/bypass role. Existing immutable-history and correlation triggers remain
+in force. Function execution, parameter privileges, unsafe replication defaults,
+policy/trigger/view definitions, enabled triggers and effective grants are all
+part of the worker preflight, not merely its nominal role name.
+
+Local PG16/17 evidence uses exact worker logins for real creation/receipt replay,
+closed ARI, activation, inventory dispatch/receipt/reconciliation, scheduler,
+retry/dead-letter and denied writes. Provider responses are synthetic; inventory
+fixtures supply synthetic owner evidence ports. These are permission and guard
+checks, not deployed Channex evidence. Both migrations also compose with the
+separate Finance worker migration0409 on PG16/17.
+
+**Precise remaining guard blocker:** migration0320's availability-attempt guard
+accepts only `channex.sync_ari` / `operationType=sync_ari`. A selected published
+`channex.provision` job needing a fresh room-availability upload gets SQLSTATE
+`23514`, `Active room mapping and correlated sync job required`, before dispatch.
+The restricted-login regression reproduces this on both PostgreSQL versions.
+Permission work preserves that guard; resolving its provision correlation is
+separate work. Existing current availability can still support activation, as
+verified by the activation fixture. No live smoke or enabled rollout is claimed.
