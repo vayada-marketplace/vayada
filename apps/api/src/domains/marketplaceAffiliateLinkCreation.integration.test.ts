@@ -107,7 +107,7 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       await readFile(new URL("0404_booking_affiliate_click_admissions.sql", migrations), "utf8"),
     );
     await pool().query(
-      await readFile(new URL("0329_booking_affiliate_original_bindings.sql", migrations), "utf8"),
+      await readFile(new URL("0405_booking_affiliate_original_bindings.sql", migrations), "utf8"),
     );
   });
 
