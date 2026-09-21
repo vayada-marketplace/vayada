@@ -89,6 +89,12 @@ export type FinanceExportCommand =
   | FinanceProfitLossExportCommand
   | FinanceRevenueExportCommand
   | FinanceDashboardExportCommand;
+export type FinanceStreamArtifactAudit = {
+  formatVersion: FinanceExportCommand["snapshot"]["formatVersion"];
+  rowCount: number;
+  sizeBytes: number;
+  checksumSha256: string;
+};
 // prettier-ignore
 export type FinanceFolioExportStatus = { state:"pending"|"running"|"failed"|"expired"; expiresAt:string } | { state:"ready"; expiresAt:string; artifact:{ mediaId:string; bucketName:string; storageKey:string; visibility:"private"; lifecycleStatus:"active"; filename:string; contentType:string; sizeBytes:number } };
 // prettier-ignore
@@ -104,6 +110,39 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
     throw new Error("Finance folio export jobs require a search digester");
   const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 3 });
   return {
+    async recordStream(input: FinanceExportCommand, artifact: FinanceStreamArtifactAudit): Promise<void> {
+      const evidence = exportEvidence(input);
+      if (
+        !evidence ||
+        !validCommand(input, evidence.filters, evidence.snapshot) ||
+        artifact.formatVersion !== evidence.snapshot.formatVersion ||
+        !Number.isSafeInteger(artifact.rowCount) || artifact.rowCount < 0 ||
+        !Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 1 || artifact.sizeBytes > 256 * 1024 ||
+        !/^[0-9a-f]{64}$/.test(artifact.checksumSha256) ||
+        Buffer.byteLength(JSON.stringify(evidence.snapshot), "utf8") > 128 * 1024
+      ) throw new TypeError("Invalid finance stream audit");
+      await transaction(pool, async (client) => {
+        if (!(await authorizedScope(client, input))) throw new TypeError("Invalid finance stream scope");
+        const redactedPayload = await redacted(config.searchDigest, input.currency, evidence.filters, evidence.snapshot);
+        await client.query(
+          `INSERT INTO platform.product_audit_events
+            (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
+             actor_user_id,target_resource_product,target_resource_type,target_resource_id,
+             correlation_id,causation_id,redacted_payload,audit_metadata,retention_class,privacy_scope)
+           VALUES($1,'finance',$2,date_trunc('milliseconds',statement_timestamp()),'property',$3::uuid,
+             'user',$4::uuid,'finance','financials_export',$5::text,$6,$7,$8::jsonb,$9::jsonb,
+             'financial','confidential')`,
+          [
+            `finance.financials-stream:${randomUUID()}`,
+            evidence.auditAction.replace(/\.requested$/, ".streamed"),
+            input.propertyId, input.audit.actorUserId, input.commandId,
+            input.audit.correlationId, input.audit.causationId,
+            JSON.stringify({ ...redactedPayload, rowCount: artifact.rowCount, sizeBytes: artifact.sizeBytes, checksumSha256: artifact.checksumSha256 }),
+            JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt }),
+          ],
+        );
+      });
+    },
     async find(input: { exportId:string; organizationId:string; propertyId:string; now:Date }): Promise<FinanceFolioExportStatus|null> {
       if (![input.exportId,input.organizationId,input.propertyId].every(uuid) || !Number.isFinite(input.now.getTime())) throw new TypeError("Invalid folio export lookup");
       const row=(await pool.query<{status:string;jobType:string;expiresAt:string;formatVersion:string;asOf:string|null;year:string|null;from:string|null;to:string|null;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_type AS "jobType",job.job_metadata->>'expiresAt' AS "expiresAt",job.job_metadata->>'formatVersion' AS "formatVersion",job.payload->'snapshot'->>'asOf' AS "asOf",job.payload->'snapshot'->'filters'->>'year' AS year,job.payload->'snapshot'->'filters'->>'from' AS "from",job.payload->'snapshot'->'filters'->>'to' AS "to",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
