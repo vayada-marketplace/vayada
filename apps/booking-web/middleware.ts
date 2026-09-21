@@ -43,10 +43,46 @@ function getKnownSubdomainSlug(hostname: string): string | null {
 }
 
 function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname.startsWith("127.0.0.1") || hostname === "::1";
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 export default async function middleware(request: NextRequest) {
+  // Until first-party admission is live, never forward an opaque click reference
+  // through a cached or changed canonical-host redirect.
+  if (request.nextUrl.searchParams.has("vref")) {
+    const cleanUrl = request.nextUrl.clone();
+    cleanUrl.searchParams.delete("vref");
+    // Next requires an absolute Location in middleware. Use the browser-facing
+    // host that Booking already uses for canonical-host redirects, not an
+    // internal proxy host in request.nextUrl.
+    const publicHost = getRequestHost(request.headers) || cleanUrl.host;
+    const publicHostname = normalizeHost(publicHost);
+    const localHost = isLocalHost(publicHostname) || publicHostname.endsWith(".localhost");
+    const requestHostname = normalizeHost(cleanUrl.host);
+    const localRequest = isLocalHost(requestHostname) || requestHostname.endsWith(".localhost");
+    if (
+      (localHost && !localRequest) ||
+      (!localHost && !getKnownSubdomainSlug(publicHostname) &&
+        !(await fetchHostResolution(publicHostname))?.slug)
+    ) {
+      return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
+    const publicProtocol = localHost
+      ? forwardedProto === "https" || forwardedProto === "http"
+        ? `${forwardedProto}:`
+        : cleanUrl.protocol
+      : "https:";
+    const publicUrl = new URL(
+      `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
+      `${publicProtocol}//${publicHost}`,
+    );
+    const redirect = NextResponse.redirect(publicUrl, 307);
+    redirect.headers.set("Cache-Control", "no-store");
+    redirect.headers.set("Referrer-Policy", "no-referrer");
+    return redirect;
+  }
+
   const response = intlMiddleware(request);
 
   // Hostnames are case-insensitive per RFC 1035 §2.3.3 but the backend
