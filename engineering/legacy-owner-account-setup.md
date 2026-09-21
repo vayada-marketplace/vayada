@@ -186,7 +186,8 @@ Storage does not verify signatures, prove the owners were prepared or implement
 replay. Its hashes must be revalidated by the consumer, never treated as approval.
 
 The [prepared-owner signup guard](legacy-owner-signup-guard.md) denies receipt-marked
-existing-user reuse in lifecycle creation and webhook user upserts. New-UUID
+existing-user reuse in lifecycle creation/webhook upserts, lifecycle email changes
+and active/pending status changes. New-UUID
 inserts still need the scoped index; other identity mutation paths remain
 unguarded. Do not enable preparation until the entire shared boundary is covered.
 
@@ -216,6 +217,6 @@ uniqueness and valid/ready flags of the installed index before any account write
 Retain the guard after preparation; removal needs separate drift/recovery review.
 
 Uniqueness is not ownership or linking authority. The prepared-owner guard covers
-only two caller paths; the provider path must still bind the exact approved
+only selected caller paths; the provider path must still bind the exact approved
 external/internal identity. Neither this partial protection nor an installed
 index enables account preparation.

@@ -63,7 +63,7 @@ export function createPgFinanceExpenseCategoryRepository(connectionString: strin
         await client.query("BEGIN");
         await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'");
         const property = await client.query(
-          "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE",
+          "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid",
           [raw.propertyId],
         );
         if (property.rowCount !== 1) return stop(client, { status: "not_found" });

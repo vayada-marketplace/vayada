@@ -289,20 +289,38 @@ async function updateIdentityUserEmail(
   pool: pg.Pool,
   command: UpdateIdentityUserEmailCommand,
 ): Promise<IdentityLifecycleCommandResult> {
-  await pool.query(
-    `UPDATE identity.users
-     SET email = $2, updated_at = now()
-     WHERE id = $1`,
-    [command.payload.userId, command.payload.email],
-  );
-  await pool.query(
-    `UPDATE identity.external_identities
-     SET provider_email = $2,
-         provider_email_verified = COALESCE($3, provider_email_verified),
-         updated_at = now()
-     WHERE user_id = $1`,
-    [command.payload.userId, command.payload.email, command.payload.providerEmailVerified ?? null],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      "SELECT id FROM identity.users WHERE id = $1 FOR UPDATE",
+      [command.payload.userId],
+    );
+    // A missing row is a no-op: never update a user committed after this lookup.
+    if (user.rows.length > 0) {
+      await assertNotBootstrapProtectedUser(client, command.payload.userId);
+      await client.query(
+        `UPDATE identity.users
+         SET email = $2, updated_at = now()
+         WHERE id = $1`,
+        [command.payload.userId, command.payload.email],
+      );
+      await client.query(
+        `UPDATE identity.external_identities
+         SET provider_email = $2,
+             provider_email_verified = COALESCE($3, provider_email_verified),
+             updated_at = now()
+         WHERE user_id = $1`,
+        [command.payload.userId, command.payload.email, command.payload.providerEmailVerified ?? null],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
   return accepted(command, command.payload.userId, "identity.user.email.updated");
 }
 
@@ -310,12 +328,31 @@ async function updateIdentityUserStatus(
   pool: pg.Pool,
   command: UpdateIdentityUserStatusCommand,
 ): Promise<IdentityLifecycleCommandResult> {
-  await pool.query(
-    `UPDATE identity.users
-     SET status = $2, updated_at = now()
-     WHERE id = $1`,
-    [command.payload.userId, command.payload.status],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      "SELECT id FROM identity.users WHERE id = $1 FOR UPDATE",
+      [command.payload.userId],
+    );
+    if (user.rows.length > 0) {
+      if (command.payload.status !== "suspended" && command.payload.status !== "deleted") {
+        await assertNotBootstrapProtectedUser(client, command.payload.userId);
+      }
+      await client.query(
+        `UPDATE identity.users
+         SET status = $2, updated_at = now()
+         WHERE id = $1`,
+        [command.payload.userId, command.payload.status],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
   return accepted(command, command.payload.userId, "identity.user.status.updated");
 }
 
