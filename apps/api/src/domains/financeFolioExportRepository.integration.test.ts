@@ -163,6 +163,57 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
     });
   });
 
+  it("audits each bounded direct stream without persisting a job or guest search", async () => {
+    const input = command("stream");
+    const artifact = {
+      formatVersion: input.snapshot.formatVersion,
+      rowCount: 0,
+      sizeBytes: 24,
+      checksumSha256: "a".repeat(64),
+    };
+    await repository.recordStream(input, artifact);
+    await repository.recordStream(input, artifact);
+    await expect(
+      repository.recordStream({ ...input, organizationId: ORG_B }, artifact),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      repository.recordStream(input, { ...artifact, sizeBytes: 256 * 1024 + 1 }),
+    ).rejects.toThrow(TypeError);
+    expect(searchDigestCalls).toBe(2);
+    const rows = (
+      await admin.query(
+        `SELECT action,redacted_payload,private_payload,to_jsonb(audit)::text serialized
+       FROM platform.product_audit_events audit WHERE property_id=$1 ORDER BY recorded_at`,
+        [PROPERTY_A],
+      )
+    ).rows;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        action: "finance.folio_export.streamed",
+        redacted_payload: {
+          rowCount: 0,
+          sizeBytes: 24,
+          checksumSha256: artifact.checksumSha256,
+          filters: {
+            searchPresent: true,
+            searchHash: searchFingerprint("folio", "guest@example.test"),
+          },
+        },
+        private_payload: {},
+      });
+      expect(row.serialized).not.toContain("guest@example.test");
+    }
+    const residue = (
+      await admin.query(
+        `SELECT (SELECT count(*)::int FROM platform.jobs WHERE property_id=$1) jobs,
+              (SELECT count(*)::int FROM platform.idempotency_keys WHERE property_id=$1) keys`,
+        [PROPERTY_A],
+      )
+    ).rows[0];
+    expect(residue).toEqual({ jobs: 0, keys: 0 });
+  });
+
   it("reads status only inside the immutable property and organization scope", async () => {
     const created = await repository.enqueue(command("status"));
     if (created.status === "conflict") throw new Error("Expected status export");

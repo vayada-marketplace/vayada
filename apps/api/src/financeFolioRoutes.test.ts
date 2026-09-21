@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   LinkedResource,
   PermissionKey,
@@ -182,6 +184,7 @@ type Ports = FinanceFolioRoutesOptions["repository"] & {
   list: ReturnType<typeof vi.fn>;
   detail: ReturnType<typeof vi.fn>;
   captureReadyExport: ReturnType<typeof vi.fn>;
+  exportReady: ReturnType<typeof vi.fn>;
 };
 type Commands = NonNullable<FinanceFolioRoutesOptions["commands"]> & {
   create: ReturnType<typeof vi.fn>;
@@ -191,6 +194,7 @@ type Commands = NonNullable<FinanceFolioRoutesOptions["commands"]> & {
 };
 // prettier-ignore
 type ExportJobs = NonNullable<FinanceFolioRoutesOptions["exports"]> & { enqueue: ReturnType<typeof vi.fn> };
+type StreamJobs = ExportJobs & { recordStream: ReturnType<typeof vi.fn> };
 type ExportDownloads = NonNullable<FinanceFolioRoutesOptions["exportDownloads"]> & {
   read: { find: ReturnType<typeof vi.fn> };
   signer: { signPrivateDownload: ReturnType<typeof vi.fn> };
@@ -198,6 +202,7 @@ type ExportDownloads = NonNullable<FinanceFolioRoutesOptions["exportDownloads"]>
 };
 type ExpenseExports = NonNullable<FinanceFolioRoutesOptions["expenseExports"]> & {
   captureExport: ReturnType<typeof vi.fn>;
+  exportCsv: ReturnType<typeof vi.fn>;
 };
 type ProfitLossExports = NonNullable<FinanceFolioRoutesOptions["profitLossExports"]> & {
   profitLoss: ReturnType<typeof vi.fn>;
@@ -216,6 +221,15 @@ function ports(): Ports {
     list: vi.fn(async () => list),
     detail: vi.fn(async () => detail),
     captureReadyExport: vi.fn(async () => exportCapture),
+    exportReady: vi.fn(async () => ({
+      formatVersion: "pms-financials-folios.v1",
+      propertyId,
+      currency: "EUR",
+      contentType: "text/csv; charset=utf-8",
+      filename: `pms-financials-folios-${propertyId}.csv`,
+      rowCount: 1,
+      body: "folio_id\r\nfolio-1\r\n",
+    })),
   } as Ports;
 }
 
@@ -230,10 +244,14 @@ function commands(): Commands {
 
 // prettier-ignore
 function exportJobs(): ExportJobs { return { enqueue: vi.fn(async () => ({ status: "created", exportId, envelope: exportCapture.envelope })) } as ExportJobs; }
+function streamJobs(): StreamJobs {
+  const jobs = exportJobs();
+  return { ...jobs, recordStream: vi.fn(async () => undefined) } as StreamJobs;
+}
 // prettier-ignore
 function exportDownloads(): ExportDownloads { return { read:{find:vi.fn(async()=>({state:"ready",expiresAt:exportExpiresAt,artifact:{mediaId:exportId,bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/pms-financials-folios.v1.csv`,visibility:"private",lifecycleStatus:"active",filename:`pms-financials-folios-${propertyId}.csv`,contentType:"text/csv; charset=utf-8",sizeBytes:42}}))},signer:{signPrivateDownload:vi.fn(async()=>"https://signed.example/folio.csv")},serving:{bucketName:"test-private",cdnBaseUrl:"https://cdn.example",cdnOriginHost:"origin.example",publicPathPrefix:"media",publicCacheControl:"public, max-age=31536000, immutable",privateDownloadTtlSeconds:300,privateDownloadMaxTtlSeconds:900},now:vi.fn(()=>new Date(now))} as ExportDownloads; }
 // prettier-ignore
-function expenseExports(): ExpenseExports { return { captureExport: vi.fn(async () => expenseCapture) } as ExpenseExports; }
+function expenseExports(): ExpenseExports { return { captureExport: vi.fn(async () => expenseCapture), exportCsv: vi.fn(async () => ({ formatVersion: "pms-financials-expenses.v1", propertyId, currency: "EUR", contentType: "text/csv; charset=utf-8", filename: `pms-financials-expenses-${propertyId}.csv`, rowCount: 1, body: "expense_id\r\nexpense-1\r\n", auditEvidence: expenseSnapshot.manifest })) } as ExpenseExports; }
 function profitLossExports(): ProfitLossExports {
   return {
     profitLoss: vi.fn(async () => ({ response: profitLossResponse, categoryRows: [] })),
@@ -853,6 +871,157 @@ describe("Financials folio export route", () => {
     const invalid = await instance.inject({ method: "GET", url: `${exportRoot}/${exportId}` });
     expect(invalid.statusCode).toBe(500);
     expect(JSON.stringify(invalid.json())).not.toContain("must-not-leak");
+  });
+});
+
+describe("Financials opt-in auto export route", () => {
+  it("streams each small captured tab with private headers and a completed audit", async () => {
+    const repository = ports();
+    const expenses = expenseExports();
+    const jobs = streamJobs();
+    const instance = await app(
+      repository,
+      context(),
+      undefined,
+      jobs,
+      undefined,
+      expenses,
+      profitLossExports(),
+      revenueExports(),
+      dashboardExports(),
+    );
+    for (const body of [exportBody, expenseBody, profitLossBody, revenueBody, dashboardBody]) {
+      const response = await instance.inject({
+        method: "POST",
+        url: `${exportRoot}/auto`,
+        headers: { "idempotency-key": body.idempotencyKey },
+        payload: body,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toBe("text/csv; charset=utf-8");
+      expect(response.headers["content-disposition"]).toMatch(
+        /^attachment; filename="pms-financials-[a-z-]+-.*\.csv"$/,
+      );
+      expect(response.headers["cache-control"]).toBe("private, no-store");
+      expect(response.headers["x-content-type-options"]).toBe("nosniff");
+      expect(response.body.length).toBeGreaterThan(0);
+      const [command, artifact] = jobs.recordStream.mock.lastCall!;
+      expect(command.propertyId).toBe(propertyId);
+      expect(artifact).toEqual({
+        formatVersion: command.snapshot.formatVersion,
+        rowCount: expect.any(Number),
+        sizeBytes: Buffer.byteLength(response.body, "utf8"),
+        checksumSha256: createHash("sha256").update(response.body).digest("hex"),
+      });
+    }
+    expect(
+      (await instance.inject({ method: "POST", url: `${exportRoot}/auto`, payload: exportBody }))
+        .statusCode,
+    ).toBe(200);
+    expect(jobs.recordStream).toHaveBeenCalledTimes(6);
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(repository.exportReady).toHaveBeenCalledWith(propertyId, "EUR", exportSnapshot);
+    expect(expenses.exportCsv).toHaveBeenCalledWith(propertyId, "EUR", expenseSnapshot);
+  });
+
+  it("queues an oversized CSV without auditing or sending partial bytes", async () => {
+    const repository = ports();
+    repository.exportReady.mockResolvedValueOnce({
+      formatVersion: "pms-financials-folios.v1",
+      propertyId,
+      currency: "EUR",
+      contentType: "text/csv; charset=utf-8",
+      filename: `pms-financials-folios-${propertyId}.csv`,
+      rowCount: 1,
+      body: "x".repeat(256 * 1024 + 1),
+    });
+    const jobs = streamJobs();
+    const instance = await app(repository, context(), undefined, jobs);
+    const response = await instance.inject({
+      method: "POST",
+      url: `${exportRoot}/auto`,
+      payload: exportBody,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      propertyId,
+      item: { resourceId: exportId, state: "pending" },
+    });
+    expect(jobs.enqueue).toHaveBeenCalledTimes(1);
+    expect(jobs.recordStream).not.toHaveBeenCalled();
+    expect(response.headers["content-disposition"]).toBeUndefined();
+  });
+
+  it("queues a large captured snapshot before rendering a CSV", async () => {
+    const jobs = streamJobs();
+    const revenue = revenueExports();
+    revenue.revenue.mockResolvedValueOnce({
+      ...revenueResponse,
+      channels: Array.from({ length: 900 }, (_, index) => ({
+        channel: `channel-${index}-${"x".repeat(150)}`,
+        gross: zero(),
+        commission: zero(),
+        net: zero(),
+        share: "0.0000",
+      })),
+    });
+    jobs.enqueue.mockImplementation(async (command) => ({
+      status: "created",
+      exportId,
+      envelope: command.envelope,
+    }));
+    const instance = await app(
+      ports(),
+      context(),
+      undefined,
+      jobs,
+      undefined,
+      undefined,
+      undefined,
+      revenue,
+    );
+    const response = await instance.inject({
+      method: "POST",
+      url: `${exportRoot}/auto`,
+      payload: revenueBody,
+    });
+    expect(response.statusCode).toBe(202);
+    expect(jobs.enqueue).toHaveBeenCalledTimes(1);
+    expect(
+      Buffer.byteLength(JSON.stringify(jobs.enqueue.mock.calls[0]![0].snapshot), "utf8"),
+    ).toBeGreaterThan(128 * 1024);
+    expect(jobs.recordStream).not.toHaveBeenCalled();
+    expect(response.headers["content-disposition"]).toBeUndefined();
+  });
+
+  it("rejects unauthorized, malformed, and unaudited direct exports before CSV bytes", async () => {
+    const repository = ports();
+    const jobs = streamJobs();
+    const denied = await app(repository, context({ permissions: [] }), undefined, jobs);
+    expect(
+      await denied.inject({ method: "POST", url: `${exportRoot}/auto`, payload: exportBody }),
+    ).toMatchObject({ statusCode: 403 });
+    expect(repository.captureReadyExport).not.toHaveBeenCalled();
+    const instance = await app(repository, context(), undefined, jobs);
+    expect(
+      await instance.inject({
+        method: "POST",
+        url: `${exportRoot}/auto`,
+        headers: { "idempotency-key": "different" },
+        payload: exportBody,
+      }),
+    ).toMatchObject({ statusCode: 400 });
+    jobs.recordStream.mockRejectedValueOnce(new Error("private audit failure"));
+    const failed = await instance.inject({
+      method: "POST",
+      url: `${exportRoot}/auto`,
+      payload: exportBody,
+    });
+    expect(failed.statusCode).toBe(500);
+    expect(failed.headers["content-disposition"]).toBeUndefined();
+    expect(failed.body).not.toContain("folio_id");
+    expect(failed.body).not.toContain("private audit failure");
+    expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 });
 
