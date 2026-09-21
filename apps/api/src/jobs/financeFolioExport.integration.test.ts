@@ -32,6 +32,7 @@ import {
   FINANCE_REVENUE_EXPORT_JOB,
   createPgFinanceFolioExportJobRepository,
   parseFinanceExportJobPayload,
+  type FinanceExportCommand,
 } from "../domains/financeFolioExportRepository.js";
 import type { FinanceExpenseExportArtifact } from "../domains/financeExpenseReadModel.js";
 import {
@@ -256,7 +257,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   const expenseSelection={expenseId:EXPENSE,revision:1,categoryId:CATEGORY,categoryRevision:1,categoryName:"Operations",paymentStatus:"unpaid" as const,paidOn:null};
   const expenseArtifact: FinanceExpenseExportArtifact = { formatVersion: FINANCE_EXPENSE_CSV_VERSION, contentType: FINANCE_EXPENSE_CSV_CONTENT_TYPE, propertyId: PROPERTY, currency: "EUR", filename: `pms-financials-expenses-${PROPERTY}.csv`, rowCount: 1, body: '"property_id"\r\n"expense"\r\n', auditEvidence: [expenseSelection] };
   const read = { exportReady: vi.fn(async () => artifact), exportCsv: vi.fn(async () => expenseArtifact) };
-  beforeAll(async () => { await admin.connect(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]); });
+  beforeAll(async () => { await admin.connect(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]);await admin.query("INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','owner','agency')",[ORG,ACTOR]);await admin.query("INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'pms','pms_property',$2,'owner','active')",[ORG,PROPERTY]);await admin.query("INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",[PROPERTY]); });
   beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([admin.end(), pool.end()]); });
 
@@ -338,6 +339,28 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect((await admin.query("SELECT action FROM platform.product_audit_events WHERE job_id=$1", [JOB])).rows[0].action).toBe(`finance.${tab}_export.succeeded`);
   });
 
+  it.each([
+    { tab: "revenue", jobType: FINANCE_REVENUE_EXPORT_JOB, snapshot: revenue },
+    { tab: "dashboard", jobType: FINANCE_DASHBOARD_EXPORT_JOB, snapshot: dashboard },
+  ])("enqueues $tab with idempotency and a redacted requested audit", async ({ tab, jobType, snapshot }) => {
+    const response = snapshot.manifest[0].response;
+    const { contractVersion, propertyId, currency, timeZone, generatedAt, sourceFreshness, incompleteEvidence } = response;
+    const repository = createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) });
+    const command = {
+      commandId: COMMAND, idempotencyKey: `VAY-1134-${tab}`, organizationId: ORG,
+      propertyId: PROPERTY, currency: "EUR", filters: snapshot.filters, snapshot,
+      envelope: { contractVersion, propertyId, currency, timeZone, generatedAt, sourceFreshness, incompleteEvidence },
+      audit: { actorUserId: ACTOR, requestId: `request-${tab}`, correlationId: `correlation-${tab}`, causationId: CAUSE, requestedAt: NOW.toISOString() },
+    } as FinanceExportCommand;
+    const created = await repository.enqueue(command);
+    if (created.status === "conflict") throw new Error("Expected report export");
+    await expect(repository.enqueue(command)).resolves.toMatchObject({ status: "replayed", exportId: created.exportId });
+    await expect(repository.enqueue({ ...command, commandId: CAUSE })).resolves.toEqual({ status: "conflict" });
+    const row = (await admin.query(`SELECT job.job_type,job.payload->'snapshot'->>'formatVersion' format_version,audit.action,audit.redacted_payload,audit.private_payload,(SELECT count(*)::int FROM platform.idempotency_keys WHERE id=job.id) idempotency_count FROM platform.jobs job JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.id=$1`, [created.exportId])).rows[0];
+    expect(row).toMatchObject({ job_type: jobType, format_version: snapshot.formatVersion, action: `finance.${tab}_export.requested`, redacted_payload: { formatVersion: snapshot.formatVersion, filters: snapshot.filters, manifestCount: 1 }, private_payload: {}, idempotency_count: 1 });
+    expect((await admin.query("SELECT count(*)::int count FROM platform.product_audit_events WHERE job_id=$1", [created.exportId])).rows[0].count).toBe(1);
+  });
+
   it("rejects unbound expense artifacts and labels malformed expense jobs correctly", async () => {
     await insertExpenseJob();const writer=fakeWriter();read.exportCsv.mockResolvedValueOnce({...expenseArtifact,auditEvidence:[{...expenseSelection,revision:2}]});
     await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(writer.write).not.toHaveBeenCalled();
@@ -381,7 +404,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`, [JOB, `${jobType}:${PROPERTY}:report`, FINANCE_FOLIO_EXPORT_QUEUE, jobType, ACCEPTED, PROPERTY, JSON.stringify(payload), JSON.stringify(metadata)]);
   }
   async function cleanupJobs(){await admin.query("BEGIN");try{await admin.query("SET LOCAL session_replication_role=replica");for(const sql of ["DELETE FROM platform.media_objects WHERE property_id=$1","DELETE FROM platform.product_audit_events WHERE property_id=$1","DELETE FROM platform.dead_letter_events WHERE property_id=$1","DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE property_id=$1)","DELETE FROM platform.jobs WHERE property_id=$1","DELETE FROM platform.domain_events WHERE property_id=$1","DELETE FROM platform.idempotency_keys WHERE property_id=$1"])await admin.query(sql,[PROPERTY]);await admin.query("COMMIT");}catch(error){await admin.query("ROLLBACK");throw error;}}
-  async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
+  async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_memberships WHERE organization_id=$1",[ORG]);await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
 });
 
 const hash = (value: unknown) =>
