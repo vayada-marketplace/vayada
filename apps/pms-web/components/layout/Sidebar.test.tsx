@@ -22,3 +22,13 @@ it("matches Reviews visibility to its server read policy", () => {
     "/reviews",
   );
 });
+
+it("shows Financials only after the property access check succeeds", () => {
+  expect(visiblePmsNavigation(["pms.finance.read"]).map((item) => item.href)).not.toContain(
+    "/financials",
+  );
+  expect(visiblePmsNavigation(["pms.finance.read"], true).map((item) => item.href)).toContain(
+    "/financials",
+  );
+  expect(visiblePmsNavigation([], true).map((item) => item.href)).not.toContain("/financials");
+});
