@@ -455,6 +455,13 @@ const airbnbAlterationRuntime = createAirbnbAlterationRuntime({
   config,
   connectionString: targetDatabaseUrl,
 });
+const pricingRuntimePool = config.pricingDatabaseUrl
+  ? new pg.Pool({
+      connectionString: config.pricingDatabaseUrl,
+      connectionTimeoutMillis: 5_000,
+      max: 5,
+    })
+  : null;
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
@@ -462,6 +469,7 @@ const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   replacementPricingAcceptanceAllowedSlugs: config.replacementPricingAcceptanceAllowedSlugs,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
+  pricingPool: pricingRuntimePool,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
   billingConfigReadPortFactory: (executor) =>
     createTargetFinanceBillingConfigReadPort({
@@ -962,13 +970,6 @@ const propertySetupOwnerPool = new pg.Pool({
   connectionTimeoutMillis: 5_000,
   max: 5,
 });
-const pricingAuthorityPool = config.pricingDatabaseUrl
-  ? new pg.Pool({
-      connectionString: config.pricingDatabaseUrl,
-      connectionTimeoutMillis: 5_000,
-      max: 5,
-    })
-  : null;
 const financePaymentSetupRuntime = createFinancePaymentSetupRuntime({
   connectionString: targetDatabaseUrl,
   pricing: pmsPricingReadModel,
@@ -1668,7 +1669,7 @@ const app = buildApp({
             createReplacementPricingCommands(
               propertySetupOwnerPool,
               context,
-              pricingAuthorityPool,
+              pricingRuntimePool,
             ),
         }
       : undefined,
@@ -2256,7 +2257,7 @@ app.addHook("onClose", async () => {
     bookingSetupLifecycleStatusRepository.close(),
     bookingGuestPolicyRepository.close(),
     propertySetupOwnerPool.end(),
-    pricingAuthorityPool?.end(),
+    pricingRuntimePool?.end(),
     propertySetupDraftRepository.close(),
     ...propertySetupPmsRuntime.resources.map((resource) => resource.close?.()),
   ]);
