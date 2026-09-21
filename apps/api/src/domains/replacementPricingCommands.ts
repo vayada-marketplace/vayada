@@ -17,11 +17,15 @@ const fail = (code: "invalid" | "denied"): never => { throw new PricingStorageEr
 
 /** Server boundary: bind an authenticated context, never body-supplied identity.
  * Route policy enforcement is still required at the HTTP boundary. */
-export function createReplacementPricingCommands(pool: Pool, context: RequestContext | null) {
+export function createReplacementPricingCommands(
+  pool: Pool,
+  context: RequestContext | null,
+  authorityPool: Pool | null,
+) {
   const trustedContext = structuredClone(context);
   const store = createReplacementPricingStore(pool, createReplacementPricingStorageGuard(trustedContext));
   const booking = createBookingPricingOfferTermsStore(pool);
-  const authority = createBookingPricingAuthorityStore(pool);
+  const authority = authorityPool && createBookingPricingAuthorityStore(authorityPool);
   const charges = createReplacementChargeDeclarationStore(pool);
   function scope(propertyId: string): PricingStorageScope {
     if (!uuid(propertyId)) return fail("invalid");
@@ -31,9 +35,11 @@ export function createReplacementPricingCommands(pool: Pool, context: RequestCon
   }
   return {
     async readAuthority(propertyId: string) {
+      if (!authority) throw new Error("Pricing authority database unavailable");
       return authority.read(trustedContext, scope(propertyId));
     },
     async chooseAuthority(propertyId: string, input: unknown) {
+      if (!authority) throw new Error("Pricing authority database unavailable");
       return authority.save(trustedContext, scope(propertyId), input);
     },
     /** Read-only preparation. Returned evidence can become stale; saves revalidate it. */
