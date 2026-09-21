@@ -38,6 +38,16 @@ export type FinanceDashboardCsvArtifact = {
   rowCount: number;
   body: string;
 };
+export type FinanceDashboardExportSnapshot = Readonly<{
+  formatVersion: typeof FINANCE_DASHBOARD_CSV_VERSION;
+  propertyId: string;
+  currency: string;
+  timeZone: string;
+  filters: FinanceDashboardQuery;
+  snapshotAt: string;
+  asOf: string;
+  manifest: readonly [{ response: FinanceDashboardResponse }];
+}>;
 
 /** Copy only the public Dashboard read contract into labeled CSV rows. */
 export function buildFinanceDashboardCsvArtifact(input: {
@@ -123,6 +133,126 @@ export function buildFinanceDashboardCsvArtifact(input: {
   };
 }
 
+/** Pin only CSV-needed read fields so durable retries never query newer financial evidence. */
+export function captureFinanceDashboardExport(input: {
+  propertyId: string;
+  response: FinanceDashboardResponse;
+  query: FinanceDashboardQuery;
+}): FinanceDashboardExportSnapshot {
+  const artifact = buildFinanceDashboardCsvArtifact(input);
+  return {
+    formatVersion: FINANCE_DASHBOARD_CSV_VERSION,
+    propertyId: artifact.propertyId,
+    currency: artifact.currency,
+    timeZone: input.response.timeZone,
+    filters: { asOf: artifact.asOf },
+    snapshotAt: artifact.generatedAt,
+    asOf: artifact.asOf,
+    manifest: [{ response: copyDashboardResponse(input.response) }],
+  };
+}
+
+export function parseFinanceDashboardExportSnapshot(
+  value: unknown,
+): FinanceDashboardExportSnapshot | null {
+  if (
+    !record(value) ||
+    !exact(value, [
+      "formatVersion",
+      "propertyId",
+      "currency",
+      "timeZone",
+      "filters",
+      "snapshotAt",
+      "asOf",
+      "manifest",
+    ])
+  )
+    return null;
+  const filters = parseFinanceDashboardQuery(value.filters);
+  if (
+    value.formatVersion !== FINANCE_DASHBOARD_CSV_VERSION ||
+    !uuid(value.propertyId) ||
+    typeof value.currency !== "string" ||
+    !/^[A-Z]{3}$/.test(value.currency) ||
+    !filters ||
+    filters.asOf !== value.asOf ||
+    !utc(value.snapshotAt) ||
+    !parseFinanceDashboardQuery({ asOf: value.asOf }) ||
+    !Array.isArray(value.manifest) ||
+    value.manifest.length !== 1
+  )
+    return null;
+  const selection = value.manifest[0];
+  if (!record(selection) || !exact(selection, ["response"])) return null;
+  let artifact: FinanceDashboardCsvArtifact;
+  try {
+    artifact = buildFinanceDashboardCsvArtifact({
+      propertyId: value.propertyId,
+      response: selection.response as FinanceDashboardResponse,
+      query: filters,
+    });
+  } catch {
+    return null;
+  }
+  const response = selection.response as FinanceDashboardResponse;
+  if (
+    artifact.asOf !== value.asOf ||
+    response.currency !== value.currency ||
+    response.generatedAt !== value.snapshotAt ||
+    response.timeZone !== value.timeZone
+  )
+    return null;
+  return {
+    formatVersion: FINANCE_DASHBOARD_CSV_VERSION,
+    propertyId: value.propertyId,
+    currency: value.currency,
+    timeZone: value.timeZone,
+    filters,
+    snapshotAt: value.snapshotAt,
+    asOf: artifact.asOf,
+    manifest: [{ response: copyDashboardResponse(response) }],
+  };
+}
+
+function copyDashboardResponse(response: FinanceDashboardResponse): FinanceDashboardResponse {
+  const money = (value: FinanceReportingMoney) => ({
+    amount: value.amount,
+    currency: value.currency,
+  });
+  const metric = (value: FinanceReportingMoneyMetric) => ({
+    value: money(value.value),
+    absoluteChange: money(value.absoluteChange),
+    percentChange: value.percentChange,
+  });
+  return {
+    contractVersion: response.contractVersion,
+    propertyId: response.propertyId,
+    currency: response.currency,
+    timeZone: response.timeZone,
+    generatedAt: response.generatedAt,
+    sourceFreshness: {},
+    incompleteEvidence: [],
+    cards: {
+      revenueToday: metric(response.cards.revenueToday),
+      revenueMtd: metric(response.cards.revenueMtd),
+      expensesMtd: metric(response.cards.expensesMtd),
+      profitMtd: metric(response.cards.profitMtd),
+    },
+    daily: response.daily.map((day) => ({
+      date: day.date,
+      revenue: money(day.revenue),
+      expenses: money(day.expenses),
+    })),
+    upcoming: response.upcoming.map((item) => ({
+      date: item.date,
+      kind: item.kind,
+      amount: money(item.amount),
+      predicted: item.predicted,
+    })),
+  };
+}
+
 function validDashboard(response: FinanceDashboardResponse, asOf: string): boolean {
   const code = response.currency;
   const money = (value: FinanceReportingMoney) => value?.currency === code && decimal(value.amount);
@@ -162,13 +292,8 @@ function validDashboard(response: FinanceDashboardResponse, asOf: string): boole
 }
 
 function localDate(instant: string, timeZone: string, requested?: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(instant)) return null;
+  if (!utc(instant)) return null;
   const generated = new Date(instant);
-  if (
-    !Number.isFinite(generated.getTime()) ||
-    generated.toISOString().slice(0, 19) !== instant.slice(0, 19)
-  )
-    return null;
   try {
     const zone = getTimezone(timeZone);
     if (zone?.name !== timeZone || zone.aliasOf !== null) return null;
@@ -187,5 +312,21 @@ const decimal = (value: string) =>
   typeof value === "string" && /^-?(?:0|[1-9]\d*)\.\d{4}$/.test(value);
 const label = (value: string) =>
   typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 200;
-const uuid = (value: string) =>
+const uuid = (value: unknown): value is string =>
+  typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+const utc = (value: unknown): value is string => {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+  )
+    return false;
+  const parsed = new Date(value);
+  return (
+    Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 19) === value.slice(0, 19)
+  );
+};
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const exact = (value: Record<string, unknown>, keys: readonly string[]) =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFinanceDashboardCsvArtifact } from "./financialDashboardCsv.js";
+import {
+  buildFinanceDashboardCsvArtifact,
+  captureFinanceDashboardExport,
+  parseFinanceDashboardExportSnapshot,
+} from "./financialDashboardCsv.js";
 import {
   financeDashboardPeriods,
   financeReportingMoneyMetric,
@@ -111,5 +115,60 @@ describe("Dashboard CSV handoff", () => {
     const canonicalZone = response();
     canonicalZone.timeZone = "Asia/Kolkata";
     expect(() => build(canonicalZone)).not.toThrow();
+  });
+
+  it("pins only whitelisted read fields and rebuilds identical CSV after JSONB key reordering", () => {
+    const raw = response();
+    (raw.upcoming[0] as unknown as Record<string, unknown>)["guestSecret"] = "never-store";
+    const snapshot = captureFinanceDashboardExport({
+      propertyId: PROPERTY,
+      response: raw,
+      query: {},
+    });
+    expect(snapshot.asOf).toBe(AS_OF);
+    expect(snapshot.filters).toEqual({ asOf: AS_OF });
+    const stored = JSON.stringify(snapshot);
+    expect(stored).not.toMatch(/providerSecret|do-not-export|guestSecret|never-store|"gap"/);
+    const reorder = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(reorder)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .reverse()
+                .map(([key, part]) => [key, reorder(part)]),
+            )
+          : value;
+    const parsed = parseFinanceDashboardExportSnapshot(reorder(JSON.parse(stored)));
+    expect(parsed).not.toBeNull();
+    expect(
+      buildFinanceDashboardCsvArtifact({
+        propertyId: PROPERTY,
+        response: parsed!.manifest[0].response,
+        query: parsed!.filters,
+      }).body,
+    ).toBe(build(raw, {}).body);
+  });
+
+  it("rejects tampered snapshot metadata and strips extra stored fields", () => {
+    const snapshot = captureFinanceDashboardExport({
+      propertyId: PROPERTY,
+      response: response(),
+      query: { asOf: AS_OF },
+    });
+    const tampered = JSON.parse(JSON.stringify(snapshot));
+    tampered.asOf = "2026-08-03";
+    expect(parseFinanceDashboardExportSnapshot(tampered)).toBeNull();
+    tampered.asOf = AS_OF;
+    tampered.filters = {};
+    expect(parseFinanceDashboardExportSnapshot(tampered)).toBeNull();
+    tampered.filters = { asOf: AS_OF };
+    tampered.manifest[0].response.cards.revenueToday.value.currency = "USD";
+    expect(parseFinanceDashboardExportSnapshot(tampered)).toBeNull();
+    const extra = JSON.parse(JSON.stringify(snapshot));
+    extra.manifest[0].response.upcoming[0].guestSecret = "never-return";
+    expect(JSON.stringify(parseFinanceDashboardExportSnapshot(extra))).not.toContain(
+      "never-return",
+    );
   });
 });
