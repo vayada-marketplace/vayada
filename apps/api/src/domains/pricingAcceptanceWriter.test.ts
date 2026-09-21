@@ -129,4 +129,15 @@ describe("pricing acceptance writer", () => {
       "COMMIT",
     ]);
   });
+
+  it("passes a server-owned synthetic context only for a fresh booking", async () => {
+    await writePricingAcceptance(pool as never, input, {
+      syntheticAffiliateContextId: "trusted-fixture-context",
+    });
+    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
+      client,
+      input.slug,
+      expect.objectContaining({ syntheticAffiliateContextId: "trusted-fixture-context" }),
+    );
+  });
 });
