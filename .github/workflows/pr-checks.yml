@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - fm/vay-2041-worker-routing
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -216,6 +217,11 @@ jobs:
 
       - name: Verify identity runtime row scope
         run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
+
+      - name: Verify Channex worker shared queue scope
+        run: npm --workspace @vayada/backend-migration run test -- src/channexManagementWorkerQueueScope.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
       - name: Verify hotel member role repair
         run: npm --workspace @vayada/backend-migration run test -- --no-file-parallelism src/hotelMemberRoleRepair.test.ts

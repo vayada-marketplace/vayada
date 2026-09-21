@@ -88,6 +88,23 @@ than a substitute fixture role.
 
 ## Rollout and evidence gates
 
+Migration 0407 supplies the shared-queue foundation for the fixed login
+`vayada_next_channex_management_worker`. Its owner-managed property allowlist
+starts empty. Restrictive policies limit jobs to selected-offer provisioning
+and ARI, correlate attempts/dead letters/audits to visible jobs, and correlate
+management idempotency keys by property and job key hash. Recovery, booking,
+meal, and inventory-rule commands remain outside this initial boundary.
+Existing identity policies remain permissive and unchanged; the worker adds
+no permissive bypass on those shared tables. The lookup helper is an invoker
+function that returns before accessing worker-only tables for other callers.
+Owners retain migration authority; a future worker must neither own tables nor
+bypass RLS. This migration creates no login or grants and does not complete the
+PMS/source permission matrix, role preflight, provisioning, or deployment gates.
+The later column grants must keep job identity fields immutable to the worker:
+no UPDATE on queue/property/payload/hash, and no INSERT on the idempotency hash.
+Only the authenticated command path may establish that hash correlation;
+worker-created scheduler jobs do not supply one.
+
 1. Complete the transitive SQL/trigger inventory and choose one database
    mechanism for shared queue and property scoping. Review the exact table,
    column, function, and sequence matrix and negative cases first.
