@@ -40,11 +40,12 @@ does.
    Paused, ended and malformed links fail closed without exposing a destination
    or recording an eligible click. Initial publication requires verified
    destination readiness.
-3. For an eligible link, Vayada issues an opaque reference for this visit and
-   immediately redirects to the exact approved booking destination. There is no
+3. For an eligible link with current referral readiness, Vayada records the click,
+   issues an opaque reference for this visit and immediately redirects to the
+   exact approved booking destination. There is no
    separate Vayada consent or continue page. The referral reference, not a
    browser-supplied creator ID, accompanies the redirect. Every new request to
-   the shared link is a new click; identical GETs cannot reliably distinguish a
+   the shared link is a new click when successfully recorded; identical GETs cannot reliably distinguish a
    browser retry from a real revisit. Repeated destination admission of one
    already issued click reference is idempotent. Referrer absence means
    `source=unknown`, never an inferred platform.
@@ -58,14 +59,26 @@ does.
    choice as affiliate permission without privacy approval.
 5. If referral readiness later becomes temporarily unavailable, redirect only
    to the previously verified exact destination while separate URL safety
-   evidence remains current. This visit is untracked; expose degraded tracking
-   to the creator and hotel, not an extra guest stop. If URL safety evidence is
-   stale or revoked, do not redirect.
+   evidence remains current. A failed or uncertain click-store write follows the
+   same guest rule: never send its reference as an earning reference. A confirmed
+   rollback creates no click record; an ambiguous commit may leave an orphan
+   occurrence, which cannot establish attribution without destination admission
+   and must be reconciled or removed under the approved retention schedule.
+   Degraded visits deliver no transport reference. Before such a redirect,
+   persist a destination-scoped incomplete interval. At original creation,
+   Booking must keep attribution pending when any unresolved gap intersects the
+   context's relevant attribution lookback, including after the outage ends, so
+   an older context cookie cannot falsely credit a prior creator. If that gap
+   cannot be recorded, do not redirect. Expose degraded
+   tracking to the creator and hotel, not an extra guest stop. If URL safety
+   evidence is stale or revoked, do not redirect.
 
 ## Recommended data and ordering boundary
 
 - Generate the `clickId`, server timestamp and opaque transport reference
-  server-side for each link GET. Record that occurrence before redirect; make
+  server-side for each successfully captured eligible link GET. Use at least
+  128 bits of unpredictable reference entropy. Record the occurrence before
+  redirect; make
   resolution and destination admission of its issued reference idempotent.
   Do not store guest name, email, IP address, raw user agent or full referrer URL
   in the attribution record. A separately permitted normalized source label is
@@ -77,20 +90,32 @@ does.
   evidenced destination context, including visits through different creators'
   links. Do not assume this works across devices, destinations or providers.
   Passing the reference to another domain requires privacy review and a
-  certified transport; it carries no creator or guest details.
+  certified transport; it carries no creator or guest details. Bind its first
+  admission to the exact linked property and destination context, give it a
+  short acceptance lifetime, remove it from the browser URL before loading
+  third-party resources, and redact it from edge/application access logs.
 - Resolve the active agreement and exact accepted terms in the same explicit
-  `READ COMMITTED` transaction that inserts the click. Hold
-  the activation lock through commit. A pause that commits first blocks the
+  `READ COMMITTED` transaction that inserts the click. Acquire the activation
+  lock before reading lifecycle eligibility and hold it through commit. A pause that commits first blocks the
   click; a click that commits first keeps its historical eligibility.
 - Record the accepted terms/version and property at click time. Later terms
   replacement, pause, end or collaboration completion must not rewrite the
   click. A diagnostic probe can never use this live path.
 - Native Booking locks its own context row, then atomically persists that
   context and its last committed history position as the original booking's
-  cutoff. A click admitted to the destination context before booking creation
-  is inside the cutoff; a later admission is outside it. The destination must
-  acknowledge the incoming click before showing a bookable page, so it cannot
-  silently omit that visit from an otherwise complete history. Booking rejects
+  cutoff. Under that context lock, assign each admission a monotonic history
+  position; a click admitted before booking creation is inside the cutoff and a
+  later admission is outside it. The last-click selector orders eligible clicks
+  by their server click time, not admission order, and sends exact time ties to
+  review rather than arbitrarily changing the beneficiary. After successful
+  admission, the destination must acknowledge the incoming click before showing
+  a bookable page. If admission or storage fails, show the bookable page when
+  current URL safety evidence permits, but make the existing context incomplete
+  so an earlier creator cannot win by omission. If that marker cannot be
+  durably written, treat attribution as degraded for the affected destination
+  interval; original booking binding must keep potentially affected contexts
+  pending until a durable gap record and reconciliation resolve the incident.
+  Never infer completeness from an old cookie alone. Booking rejects
   guest-supplied creator/agreement/terms and preserves the original binding on
   edits and replacements. A missing, expired or unprovable context stays
   pending, not a negative attribution finding. External destinations need an
@@ -170,7 +195,9 @@ capture store is enabled.
    context/cutoff binding. Test concurrent click admission versus booking
    creation, repeats, tampering, lost context and booking replacement. External
    destinations remain blocked until individually certified.
-5. Only then enable the public redirect path. Test immediate arrival, declined
+5. Only then enable the public redirect path, with an explicit edge rate limit or
+   quota on persisted click writes so crawlers and abusive requests cannot create
+   unbounded durable records. Test immediate arrival, declined
    or unavailable destination storage, referrerless and blocked-storage
    browsers, pause/end races, same-link repeat visits and no accidental Finance
    effect. Existing referral URLs and users need a separate preservation-aware
