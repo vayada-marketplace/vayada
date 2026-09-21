@@ -24,15 +24,16 @@ export function affiliateTrafficSource(referrer: unknown): Source {
   return "unknown";
 }
 
-/** Internal synthetic capture only. Public redirect/retention gates remain separate. */
-export async function recordSyntheticMarketplaceAffiliateClick(
+type ClickResult =
+  | { status: "unavailable" }
+  | { status: "recorded"; clickId: string; referenceToken: string; source: Source };
+
+async function recordMarketplaceAffiliateClickOccurrence(
   pool: pg.Pool,
   publicToken: unknown,
-  referrer?: unknown,
-): Promise<
-  | { status: "unavailable" }
-  | { status: "recorded"; clickId: string; referenceToken: string; source: Source }
-> {
+  referrer: unknown,
+  synthetic: boolean,
+): Promise<ClickResult> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
@@ -44,19 +45,11 @@ export async function recordSyntheticMarketplaceAffiliateClick(
     const source = affiliateTrafficSource(referrer);
     const clickId = randomUUID();
     const referenceToken = `vc_${randomBytes(16).toString("base64url")}`;
-    // This synthetic slice has only initial accepted terms. Live capture must resolve replacements.
-    const terms = await client.query(
-      `SELECT a.terms_id FROM marketplace.affiliate_links l
-       JOIN marketplace.affiliate_agreement_activations a ON a.id=l.activation_id
-       WHERE l.id=$1 AND l.agreement_id=$2`,
-      [link.linkId, link.agreementId],
-    );
-    if (terms.rowCount !== 1) throw new Error("Missing accepted affiliate terms");
     await client.query(
       `INSERT INTO marketplace.affiliate_click_occurrences
         (id,link_id,property_id,terms_id,reference_token,source,synthetic)
-       VALUES ($1,$2,$3,$4,$5,$6,TRUE)`,
-      [clickId, link.linkId, link.propertyId, terms.rows[0].terms_id, referenceToken, source],
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [clickId, link.linkId, link.propertyId, link.termsId, referenceToken, source, synthetic],
     );
     await client.query("COMMIT");
     return { status: "recorded", clickId, referenceToken, source };
@@ -68,10 +61,28 @@ export async function recordSyntheticMarketplaceAffiliateClick(
   }
 }
 
-/** Marketplace-owned proof for the synthetic Booking transport test path. */
-export async function readSyntheticMarketplaceAffiliateClick(
+/** Dormant server-owned occurrence; runtime grants and public routing remain separate gates. */
+export async function recordMarketplaceAffiliateClick(
+  pool: pg.Pool,
+  publicToken: unknown,
+  referrer?: unknown,
+): Promise<ClickResult> {
+  return recordMarketplaceAffiliateClickOccurrence(pool, publicToken, referrer, false);
+}
+
+/** Internal synthetic capture retained for the existing integration harness. */
+export async function recordSyntheticMarketplaceAffiliateClick(
+  pool: pg.Pool,
+  publicToken: unknown,
+  referrer?: unknown,
+): Promise<ClickResult> {
+  return recordMarketplaceAffiliateClickOccurrence(pool, publicToken, referrer, true);
+}
+
+async function readMarketplaceAffiliateClickOccurrence(
   client: pg.PoolClient,
   referenceToken: unknown,
+  synthetic: boolean,
 ): Promise<{ clickId: string; propertyId: string; referenceValid: boolean } | null> {
   if (typeof referenceToken !== "string" || !/^vc_[A-Za-z0-9_-]{22}$/.test(referenceToken))
     return null;
@@ -79,8 +90,8 @@ export async function readSyntheticMarketplaceAffiliateClick(
     `SELECT id,property_id,
             clicked_at > clock_timestamp() - interval '15 minutes' AS reference_valid
      FROM marketplace.affiliate_click_occurrences
-     WHERE reference_token=$1 AND synthetic=TRUE FOR SHARE`,
-    [referenceToken],
+     WHERE reference_token=$1 AND synthetic=$2 FOR SHARE`,
+    [referenceToken, synthetic],
   );
   if (!result.rowCount) return null;
   return {
@@ -88,4 +99,20 @@ export async function readSyntheticMarketplaceAffiliateClick(
     propertyId: result.rows[0].property_id,
     referenceValid: result.rows[0].reference_valid,
   };
+}
+
+/** Trusted Marketplace proof consumed by Booking for a live arrival. */
+export async function readMarketplaceAffiliateClick(
+  client: pg.PoolClient,
+  referenceToken: unknown,
+) {
+  return readMarketplaceAffiliateClickOccurrence(client, referenceToken, false);
+}
+
+/** Marketplace-owned proof for the synthetic Booking transport test path. */
+export async function readSyntheticMarketplaceAffiliateClick(
+  client: pg.PoolClient,
+  referenceToken: unknown,
+) {
+  return readMarketplaceAffiliateClickOccurrence(client, referenceToken, true);
 }
