@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -55,6 +56,53 @@ describe.skipIf(!URL)("PostgreSQL Finance expense category repository", () => {
       [PROPERTY_A, ACTOR, first.status === "created" ? first.category.id : ""],
     );
     expect(audit.rows[0]?.count).toBe(1);
+  });
+
+  it("creates and replays with no property UPDATE privilege", async () => {
+    const role = `vay2039_category_${randomUUID().replaceAll("-", "")}`;
+    const password = "category_test_only";
+    let createdRole = false;
+    let probe: pg.Client | undefined;
+    let restricted: ReturnType<typeof createPgFinanceExpenseCategoryRepository> | undefined;
+    try {
+      await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
+      createdRole = true;
+      await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog, platform, finance TO ${role}`);
+      await admin.query(`GRANT SELECT ON hotel_catalog.properties TO ${role}`);
+      await admin.query(`GRANT SELECT, INSERT, UPDATE ON platform.idempotency_keys TO ${role}`);
+      await admin.query(`GRANT SELECT, INSERT ON finance.expense_categories TO ${role}`);
+      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${role}`);
+      const restrictedUrl = new globalThis.URL(URL!);
+      restrictedUrl.username = role;
+      restrictedUrl.password = password;
+      probe = new pg.Client({ connectionString: restrictedUrl.toString() });
+      await probe.connect();
+      await expect(
+        probe.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR UPDATE", [
+          PROPERTY_A,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      restricted = createPgFinanceExpenseCategoryRepository(restrictedUrl.toString());
+      const input = command("restricted", PROPERTY_A, "Restricted", "#123456", 10);
+      const created = await restricted.create(input);
+      expect(created.status).toBe("created");
+      input.commandId = "12150000-0000-4000-8000-000000000007";
+      await expect(restricted.create(input)).resolves.toMatchObject({ status: "replayed" });
+      const evidence = await admin.query<{ categories: number; keys: number; audits: number }>(
+        `SELECT (SELECT count(*)::int FROM finance.expense_categories WHERE property_id=$1) AS categories,
+                (SELECT count(*)::int FROM platform.idempotency_keys WHERE property_id=$1) AS keys,
+                (SELECT count(*)::int FROM platform.product_audit_events WHERE property_id=$1) AS audits`,
+        [PROPERTY_A],
+      );
+      expect(evidence.rows[0]).toEqual({ categories: 1, keys: 1, audits: 1 });
+    } finally {
+      await restricted?.close();
+      await probe?.end();
+      if (createdRole) {
+        await admin.query(`DROP OWNED BY ${role}`);
+        await admin.query(`DROP ROLE ${role}`);
+      }
+    }
   });
 
   it("replays matching input, conflicts changed reuse, and leaves not-found clean", async () => {
