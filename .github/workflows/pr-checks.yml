@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - main
-      - fm/vay-2041-worker-routing
+      - fm/vay-2041-worker-permissions
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
