@@ -558,7 +558,7 @@ const pmsCalendarAutoOpenSettings =
 
 const pmsModuleActivationRepository = config.auth
   ? createPgPmsModuleActivationRepository({
-      connectionString: config.auth.databaseUrl,
+      connectionString: targetDatabaseUrl,
     })
   : undefined;
 
@@ -999,9 +999,14 @@ const propertySetupPmsRuntime = (() => {
   const propertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
     connectionString: targetDatabaseUrl,
   });
+  // Calendar commands still need the owner lock; only GET composition uses SELECT-only evidence.
+  const readOnlyPropertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+    connectionString: targetDatabaseUrl,
+    readOnly: true,
+  });
   const operatingCalendar = createPgPmsOperatingCalendarReadModel({
     connectionString: targetDatabaseUrl,
-    propertyProfileEvidence,
+    propertyProfileEvidence: readOnlyPropertyProfileEvidence,
     roomEvidence: { roomFacts, roomCapacity: roomFacts },
   });
   return {
@@ -1031,6 +1036,7 @@ const propertySetupPmsRuntime = (() => {
       recurringPricing,
       mandatoryCharges,
       propertyProfileEvidence,
+      readOnlyPropertyProfileEvidence,
       operatingCalendar,
     ],
   };
@@ -1691,6 +1697,7 @@ const app = buildApp({
     ? { commandPort: pmsPhysicalRoomOperationalLabels }
     : undefined,
   pmsModuleActivationRepository,
+  financialsActivationPropertyIds: config.financialsActivationPropertyIds,
   pmsReviewRepository: createPgPmsReviewRepository({
     connectionString: targetDatabaseUrl,
     guestReviews: createPgGuestReviewCommands({
@@ -1976,7 +1983,7 @@ const app = buildApp({
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({
-          connectionString: config.auth.databaseUrl,
+          connectionString: targetDatabaseUrl,
         })
       : undefined,
   bookingWebAffiliateHotelResolver,

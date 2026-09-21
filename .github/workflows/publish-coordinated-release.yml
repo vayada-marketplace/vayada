@@ -95,7 +95,8 @@ jobs:
             test "$(jq -r '.source.sha' release-work/content/manifest.json)" = "$SOURCE_SHA"
             test "$(jq -r '.build.runId' release-work/content/manifest.json)" = "$SOURCE_RUN_ID"
             test "$(jq -r '.build.runAttempt' release-work/content/manifest.json)" = "$SOURCE_RUN_ATTEMPT"
-            published_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+            # Bind the publication window to run creation, before GitHub starts artifact retention.
+            published_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
             published_name="$(node scripts/coordinated-release/prepare-publication.mjs \
               --manifest release-work/content/manifest.json \
               --manifest-hash release-work/content/manifest.sha256 \
@@ -174,6 +175,7 @@ jobs:
       - name: Resolve published artifact identity
         id: artifact
         env:
+          GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.prepare.outputs.mode }}
           NEW_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           EXISTING_ARTIFACT_ID: ${{ steps.prepare.outputs.published-artifact-id }}
@@ -185,6 +187,16 @@ jobs:
             artifact_id="$EXISTING_ARTIFACT_ID"
           fi
           [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
+          test "$(jq -r '.expired' <<< "$artifact_json")" = false
+          node --input-type=module - "$artifact_json" <<'NODE'
+          import { readFileSync } from "node:fs";
+          const artifact = JSON.parse(process.argv[2]);
+          const record = JSON.parse(readFileSync("release-work/content/published-record.json", "utf8"));
+          if (!(Date.parse(artifact.expires_at) >= Date.parse(record.expiresAt))) {
+            throw new Error("Published artifact retention is shorter than the record");
+          }
+          NODE
           echo "id=$artifact_id" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch immutable release identity to platform

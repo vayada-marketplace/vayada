@@ -61,6 +61,29 @@ describe("Hotel Catalog operating-calendar property-profile evidence", () => {
     expect(fixture.release).toHaveBeenCalledOnce();
   });
 
+  it("reads property evidence without requiring a row-lock privilege", async () => {
+    const fixture = fakePool({
+      propertyId: normalizedPropertyId,
+      profileRevision: 7,
+      timeZone: "Europe/Berlin",
+    });
+    const port = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+      pool: fixture.pool,
+      readOnly: true,
+    });
+
+    await port.runWithPropertyProfileEvidence(
+      { propertyId: normalizedPropertyId, expectedProfileRevision: 7 },
+      async (evidence) => evidence,
+    );
+
+    expect(fixture.calls[0]?.text).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    expect(fixture.calls[1]?.text).toContain("WHERE property.id = $1::uuid");
+    expect(fixture.calls[1]?.text).not.toMatch(/FOR (UPDATE|SHARE|KEY SHARE)/);
+    expect(fixture.calls[1]?.values).toEqual([normalizedPropertyId]);
+    expect(fixture.calls[2]?.text).toBe("COMMIT");
+  });
+
   it.each([
     [null, "timezone_missing"],
     ["", "timezone_missing"],
