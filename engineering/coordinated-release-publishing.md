@@ -149,7 +149,8 @@ gh api --paginate repos/vayada-marketplace/vayada/actions/artifacts \
   --jq '.artifacts[] | select(.expired == false and (.name | startswith("next-release-published-v1-"))) | [.id, .name, .expires_at] | @tsv'
 ```
 
-Redispatch an exact published record without rebuilding:
+If a publication already exists, start a **fresh manual run on main** with its
+non-expired artifact ID to redispatch without rebuilding:
 
 ```bash
 gh workflow run publish-coordinated-release.yml \
@@ -161,7 +162,15 @@ gh workflow run publish-coordinated-release.yml \
 The recovery run verifies artifact metadata, both hashes, expiry, publisher
 provenance, all six ECR digest/source-tag bindings, and then sends the same
 manifest ID and idempotency key. It cannot substitute a rerun's candidate
-artifact.
+artifact. Source validation, redispatch, and baseline discovery fetch the exact
+recorded run attempt; a later rerun does not invalidate historical provenance.
+
+Rerunning an original publisher with an existing publication is rejected before
+candidate download or upload, with the existing artifact ID and redispatch
+instructions. No artifact is overwritten or deleted. A rerun before any durable
+publication exists can still publish. With `COORDINATED_RELEASES_ENABLED` off,
+the fresh manual publisher still verifies the artifact and images but does not
+send a platform dispatch; enabling delivery remains a separate approved action.
 
 If the durable record expired or its contents cannot be verified, run the
 manual build entrypoint at current `main`; the missing baseline deliberately
