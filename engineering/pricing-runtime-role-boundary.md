@@ -169,6 +169,16 @@ database-verifiable scope mechanism, or explicitly accept application
 authorization as the cross-property boundary in a security review. Do not
 infer that the lock-only RLS result resolves this write-scope decision.
 
+In a disposable PostgreSQL 17 database migrated through `0401`, none of the
+tables in the six relevant schemas had RLS enabled. A separate non-owner,
+`NOBYPASSRLS` test role explicitly granted `USAGE` on `booking` and `INSERT`
+on `booking.pricing_quotes` successfully inserted a syntactically valid quote
+for a second synthetic property; the insert was rolled back. The role had no
+database-bound property assignment. The existing foreign keys, payload checks,
+and append-only trigger do not establish caller property authorization. This
+is a negative check of quote-insert property scope, not a deployed-role audit
+or a proposal to grant that role in any environment.
+
 ## Required proof before deployment
 
 - PostgreSQL integration tests with **separate actual test roles**, not owner
