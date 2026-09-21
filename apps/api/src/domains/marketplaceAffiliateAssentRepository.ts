@@ -30,6 +30,11 @@ export type AffiliateAssentRepository = {
     context: RequestContext,
     collaborationId: string,
   ): Promise<AffiliateAssentRead | null>;
+  recordForCollaboration(
+    context: RequestContext,
+    collaborationId: string,
+    idempotencyKey: string,
+  ): Promise<AffiliateAssentCommandResult>;
   close(): Promise<void>;
 };
 export type AffiliateAssentCommandResult =
@@ -47,6 +52,8 @@ export function createPgMarketplaceAffiliateAssentRepository(
   return {
     read: (context, id) => readAffiliateAssent(pool, context, id),
     readForCollaboration: (context, id) => readCollaborationAffiliateAssent(pool, context, id),
+    recordForCollaboration: (context, id, key) =>
+      recordCollaborationAffiliateAssent(pool, context, id, key),
     close: () => pool.end(),
   };
 }
