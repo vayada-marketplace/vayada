@@ -16,10 +16,13 @@ import {
 import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
 import {
   affiliateTrafficSource,
+  recordMarketplaceAffiliateClick,
   recordSyntheticMarketplaceAffiliateClick,
 } from "./marketplaceAffiliateClickOccurrence.js";
 import {
+  admitAffiliateClick,
   admitSyntheticAffiliateClick,
+  createAffiliateClickContext,
   createSyntheticAffiliateClickContext,
 } from "./bookingAffiliateClickAdmission.js";
 import { createSyntheticAffiliateOriginalBooking } from "./bookingAffiliateOriginalBinding.js";
@@ -108,6 +111,9 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     );
     await pool().query(
       await readFile(new URL("0405_booking_affiliate_original_bindings.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0406_affiliate_live_click_storage.sql", migrations), "utf8"),
     );
   });
 
@@ -220,6 +226,71 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
         .count,
     ).toBe("1");
+  });
+
+  it("persists a live click and admits its opaque reference only to its trusted property", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://www.tiktok.com/@creator/video/1",
+    );
+    if (click.status !== "recorded") throw new Error("Expected live click");
+
+    const contextId = await createAffiliateClickContext(pool(), id(3));
+    expect(await admitAffiliateClick(pool(), contextId, click.referenceToken)).toEqual({
+      status: "admitted",
+      clickId: click.clickId,
+      historyPosition: "1",
+      replayed: false,
+    });
+    expect(await admitAffiliateClick(pool(), contextId, click.referenceToken)).toEqual({
+      status: "admitted",
+      clickId: click.clickId,
+      historyPosition: "1",
+      replayed: true,
+    });
+    const wrongProperty = await createAffiliateClickContext(pool(), id(6));
+    expect(await admitAffiliateClick(pool(), wrongProperty, click.referenceToken)).toEqual({
+      status: "unavailable",
+    });
+    const syntheticContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), syntheticContext, click.referenceToken),
+    ).toEqual({ status: "unavailable" });
+
+    expect(
+      (
+        await pool().query(
+          `SELECT l.agreement_id,g.creator_profile_id,c.property_id,c.terms_id,
+                  c.source,c.synthetic,x.synthetic AS context_synthetic
+           FROM marketplace.affiliate_click_occurrences c
+           JOIN marketplace.affiliate_links l ON l.id=c.link_id
+           JOIN marketplace.affiliate_agreements g ON g.id=l.agreement_id
+           JOIN booking.affiliate_click_admissions a ON a.click_id=c.id
+           JOIN booking.affiliate_click_contexts x ON x.id=a.context_id
+           WHERE c.id=$1`,
+          [click.clickId],
+        )
+      ).rows[0],
+    ).toEqual({
+      agreement_id: agreementId,
+      creator_profile_id: id(82),
+      property_id: id(3),
+      terms_id: id(51),
+      source: "tiktok",
+      synthetic: false,
+      context_synthetic: false,
+    });
+    await expect(
+      pool().query("DELETE FROM marketplace.affiliate_click_occurrences WHERE id=$1", [
+        click.clickId,
+      ]),
+    ).rejects.toThrow("Affiliate click occurrences are immutable");
+    await expect(
+      pool().query("TRUNCATE marketplace.affiliate_click_occurrences CASCADE"),
+    ).rejects.toThrow("Affiliate click occurrences are immutable");
   });
 
   it("admits trusted clicks once in destination order and rejects another context", async () => {
