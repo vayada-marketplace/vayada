@@ -22,6 +22,7 @@ import {
   admitSyntheticAffiliateClick,
   createSyntheticAffiliateClickContext,
 } from "./bookingAffiliateClickAdmission.js";
+import { createSyntheticAffiliateOriginalBooking } from "./bookingAffiliateOriginalBinding.js";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -93,9 +94,20 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         "utf8",
       ),
     );
-    await pool().query("DROP SCHEMA IF EXISTS booking CASCADE; CREATE SCHEMA booking");
+    await pool().query(`DROP SCHEMA IF EXISTS booking,finance CASCADE;
+      CREATE SCHEMA booking; CREATE SCHEMA finance;
+      CREATE TABLE finance.affiliate_earning_journal(property_id UUID,booking_id TEXT);
+      CREATE FUNCTION booking.try_affiliate_booking_uuid(value TEXT)
+      RETURNS UUID LANGUAGE plpgsql IMMUTABLE AS $$
+      BEGIN RETURN value::uuid;
+      EXCEPTION WHEN invalid_text_representation THEN RETURN NULL;
+      END $$;`);
+    await pool().query(await readFile(new URL("0005_booking_checkout.sql", migrations), "utf8"));
     await pool().query(
       await readFile(new URL("0404_booking_affiliate_click_admissions.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0405_booking_affiliate_original_bindings.sql", migrations), "utf8"),
     );
   });
 
@@ -263,6 +275,179 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
     ).toBe("2");
+  });
+
+  it("freezes the original booking's context and click-history cutoff in its creation transaction", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    const later = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (first.status !== "recorded" || later.status !== "recorded")
+      throw new Error("Missing clicks");
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+    ).toMatchObject({
+      status: "admitted",
+      historyPosition: "1",
+    });
+    const bookingId = id(120);
+    const booking = {
+      id: bookingId,
+      propertyId: id(3),
+      contextId,
+      publicReference: "synthetic-original",
+      checkIn: "2027-01-01",
+      checkOut: "2027-01-02",
+      currency: "EUR",
+    };
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await createSyntheticAffiliateOriginalBooking(client, booking)).toEqual({
+        historyCutoff: "1",
+        replayed: false,
+      });
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(
+      await admitSyntheticAffiliateClick(pool(), contextId, later.referenceToken),
+    ).toMatchObject({
+      status: "admitted",
+      historyPosition: "2",
+    });
+    await pool().query("UPDATE booking.guest_bookings SET check_out='2027-01-04' WHERE id=$1", [
+      bookingId,
+    ]);
+    const replay = await pool().connect();
+    try {
+      await replay.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await createSyntheticAffiliateOriginalBooking(replay, booking)).toEqual({
+        historyCutoff: "1",
+        replayed: true,
+      });
+      await expect(
+        createSyntheticAffiliateOriginalBooking(replay, {
+          ...booking,
+          checkOut: "2027-01-03",
+        }),
+      ).rejects.toThrow("differs from stored reservation");
+      await replay.query("COMMIT");
+    } finally {
+      replay.release();
+    }
+    const otherContextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const conflicting = await pool().connect();
+    try {
+      await conflicting.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await expect(
+        createSyntheticAffiliateOriginalBooking(conflicting, {
+          ...booking,
+          contextId: otherContextId,
+        }),
+      ).rejects.toThrow("another affiliate context");
+      await conflicting.query("ROLLBACK");
+    } finally {
+      conflicting.release();
+    }
+    await expect(
+      pool().query(
+        "UPDATE booking.affiliate_original_booking_bindings SET history_cutoff=2 WHERE booking_id=$1",
+        [bookingId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool().query("DELETE FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1", [
+        bookingId,
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      pool().query("TRUNCATE booking.affiliate_original_booking_bindings"),
+    ).rejects.toThrow();
+    await expect(
+      pool().query(
+        "INSERT INTO finance.affiliate_earning_journal(property_id,booking_id) VALUES ($1,$2)",
+        [id(3), bookingId],
+      ),
+    ).rejects.toThrow("cannot create earning evidence");
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].history_cutoff,
+    ).toBe("1");
+  });
+
+  it("rejects binding a reservation created before the caller's transaction", async () => {
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const bookingId = id(121);
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES ($1,$2,'synthetic-old','draft','2027-01-01','2027-01-02','EUR')`,
+      [bookingId, id(3)],
+    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await client.query(
+        "UPDATE booking.guest_bookings SET created_at=clock_timestamp() WHERE id=$1",
+        [bookingId],
+      );
+      await expect(
+        createSyntheticAffiliateOriginalBooking(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId,
+          publicReference: "synthetic-old",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-02",
+          currency: "EUR",
+        }),
+      ).rejects.toThrow("already exists without affiliate binding");
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_original_booking_bindings"))
+        .rows[0].count,
+    ).toBe("0");
+  });
+
+  it("rejects binding if Finance already has evidence for the synthetic booking ID", async () => {
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const bookingId = id(122);
+    await pool().query(
+      "INSERT INTO finance.affiliate_earning_journal(property_id,booking_id) VALUES ($1,$2)",
+      [id(3), bookingId],
+    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await expect(
+        createSyntheticAffiliateOriginalBooking(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId,
+          publicReference: "synthetic-finance",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-02",
+          currency: "EUR",
+        }),
+      ).rejects.toThrow("cannot have earning evidence");
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.guest_bookings WHERE id=$1", [bookingId]))
+        .rows[0].count,
+    ).toBe("0");
   });
 
   it("serializes concurrent requests for the same agreement", async () => {
