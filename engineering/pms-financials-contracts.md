@@ -189,7 +189,7 @@ type RecurrencePatch = Command & Partial<Pick<RecurringRule,
   "categoryId" | "vendor" | "amount" | "notes" | "paymentStatus" | "cadence" | "nextDueOn" | "endsOn">>;
 type ExportWrite = Command & ({ tab: "dashboard"; filters: DashboardQuery } |
   { tab: "revenue"; filters: RevenueQuery } | { tab: "expenses"; filters: ExpenseQuery } |
-  { tab: "profit_loss"; filters: ProfitLossQuery } | { tab: "folios"; filters: FolioExportQuery }) &
+  { tab: "profit-loss"; filters: ProfitLossQuery } | { tab: "folios"; filters: FolioExportQuery }) &
   { format: "csv" };
 type Disposition = { resourceId: string } & (
   { state: "pending" | "failed"; downloadUrl?: never; expiresAt?: never } |
@@ -239,9 +239,27 @@ match the named tab's query type after normalization; unknown keys return `400`.
 | `GET`              | `/profit-loss`                                              | `ProfitLossQuery` → `ProfitLossResponse`                                        |
 | See VAY-1240       | `/folios` and `/folios/:folioId/*`                          | Operational folio list, revision, ready and archive contracts                   |
 | `POST/GET`         | `/exports` / `/exports/:exportId`                           | `ExportWrite` / none → `CommandResponse<Disposition>` / item response           |
+| `POST`             | `/exports/auto`                                             | `ExportWrite` → small CSV stream or `CommandResponse<Disposition>`              |
 
 V1 exports CSV for all five tabs. It does not create, retrieve, render, or send
 an official invoice document and does not promise PDF renditions.
+
+`POST /exports/auto` is an opt-in delivery choice; `POST /exports` remains the
+stable durable-job contract. Both accept the same request and idempotency-key
+header and use the same validated filters, property read permission, and captured
+evidence; the key governs durable fallback, while each direct stream reads and
+audits fresh evidence. A successful direct stream is not replayed: a same-key
+retry may return different CSV or switch to a JSON job disposition. The size
+decision uses UTF-8 byte counts of the canonical whitelisted captured snapshot
+serialized as JSON and of the rendered CSV. If those are at most 128 KiB and
+256 KiB respectively, `/exports/auto` returns `200 text/csv; charset=utf-8`
+as an attachment stream with a safe filename, `private, no-store`, and
+`nosniff`. The direct download is audited
+before any bytes are sent and is never persisted as an export artifact. The
+stream-or-job decision is complete before sending response headers or bytes.
+Larger exports return the same durable-job disposition, status lookup, private download,
+24-hour expiration, and idempotent retry behavior as `POST /exports`. Clients
+must branch on the response content type; a JSON disposition is not CSV data.
 
 `POST /expenses` returns `WriteResponse<Expense>` without `recurrence`. A `receiptMediaId` is valid only on that non-recurring write. With `recurrence`, it creates and returns only a `WriteResponse<RecurringRule>`; VAY-1232 owns future expense generation, and no current expense is created because no atomic expense-and-rule coordinator exists.
 
