@@ -1352,3 +1352,48 @@ describe("Airbnb alteration runtime opt-in", () => {
     );
   });
 });
+
+describe("Finance expense worker boundary config", () => {
+  const env = {
+    FINANCE_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
+    FINANCE_EXPENSE_WORKER_ENABLED: "true",
+    FINANCE_EXPENSE_WORKER_DATABASE_URL:
+      "postgresql://vayada_next_finance_expense_worker:fixture@localhost/target",
+    FINANCE_EXPENSE_WORKER_PROPERTY_ID: "20440000-0000-4000-8000-000000000001",
+  };
+  it("defaults paused without opening a worker credential", () => {
+    expect(loadConfig({}).financeExpenseWorker).toBeUndefined();
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPENSE_WORKER_ENABLED: "false",
+        FINANCE_EXPENSE_WORKER_DATABASE_URL: "invalid",
+      }).financeExpenseWorker,
+    ).toBeUndefined();
+  });
+  it("requires the dedicated login, target database, property, and both worker gates", () => {
+    expect(loadConfig(env).financeExpenseWorker).toEqual({
+      databaseUrl: env.FINANCE_EXPENSE_WORKER_DATABASE_URL,
+      propertyId: env.FINANCE_EXPENSE_WORKER_PROPERTY_ID,
+    });
+    for (const overrides of [
+      { FINANCE_EXPENSE_WORKER_DATABASE_URL: "" },
+      { FINANCE_EXPENSE_WORKER_PROPERTY_ID: "" },
+      { API_BACKGROUND_WORKERS_ENABLED: "false" },
+      { FINANCE_SOURCE: "legacy" },
+      { FINANCE_EXPENSE_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
+      {
+        FINANCE_EXPENSE_WORKER_DATABASE_URL:
+          env.FINANCE_EXPENSE_WORKER_DATABASE_URL + "?options=-crole=postgres",
+      },
+      {
+        FINANCE_EXPENSE_WORKER_DATABASE_URL: env.FINANCE_EXPENSE_WORKER_DATABASE_URL.replace(
+          "/target",
+          "/other",
+        ),
+      },
+    ])
+      expect(() => loadConfig({ ...env, ...overrides })).toThrow();
+  });
+});

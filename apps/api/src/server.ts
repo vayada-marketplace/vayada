@@ -246,6 +246,10 @@ import {
   runFinanceSubscriptionNotificationJobs,
   runFinanceSubscriptionWebhookJobs,
 } from "./jobs/financeSubscriptions.js";
+import {
+  assertFinanceExpenseWorkerBoundary,
+  FINANCE_EXPENSE_WORKER_ROLE,
+} from "./jobs/financeExpenseWorkerBoundary.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
 import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
@@ -770,10 +774,13 @@ const financeFolioRuntime =
         };
       })()
     : undefined;
-const financeExpenseGenerationPool =
-  config.financeSource === "target"
-    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
-    : undefined;
+const financeExpenseGenerationPool = config.financeExpenseWorker
+  ? new pg.Pool({
+      connectionString: config.financeExpenseWorker.databaseUrl,
+      max: 2,
+      connectionTimeoutMillis: 5_000,
+    })
+  : undefined;
 const financeFolioExportWorker =
   config.backgroundWorkersEnabled &&
   financeFolioRuntime &&
@@ -1668,11 +1675,7 @@ const app = buildApp({
     config.pmsOperationsSource === "target"
       ? {
           commands: (context) =>
-            createReplacementPricingCommands(
-              propertySetupOwnerPool,
-              context,
-              pricingRuntimePool,
-            ),
+            createReplacementPricingCommands(propertySetupOwnerPool, context, pricingRuntimePool),
         }
       : undefined,
   pmsPricing: pmsGuestPolicySetupCommands
@@ -2500,6 +2503,27 @@ app.addHook("onClose", async () => {
   if (stripeAccountCompensationTimer) clearInterval(stripeAccountCompensationTimer);
   await activeStripeAccountCompensation;
 });
+
+if (financeExpenseGenerationPool) {
+  const client = await financeExpenseGenerationPool.connect();
+  try {
+    const login = (await client.query("SELECT current_user, session_user")).rows[0];
+    if (
+      login.current_user !== FINANCE_EXPENSE_WORKER_ROLE ||
+      login.session_user !== FINANCE_EXPENSE_WORKER_ROLE
+    )
+      throw new Error("finance_worker_login_mismatch");
+    await assertFinanceExpenseWorkerBoundary(client, {
+      propertyId: config.financeExpenseWorker!.propertyId,
+    });
+    app.log.info(
+      { role: FINANCE_EXPENSE_WORKER_ROLE, propertyId: config.financeExpenseWorker!.propertyId },
+      "Finance expense worker preflight passed",
+    );
+  } finally {
+    client.release();
+  }
+}
 
 let activeFinanceExpenseGeneration: Promise<void> | undefined;
 const runFinanceExpenseGeneration = () => {
