@@ -277,6 +277,101 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     ).toBe("2");
   });
 
+  it("rejects an expired transport reference without deleting the historical click", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const staleReference = `vc_${"A".repeat(22)}`;
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',TRUE,clock_timestamp() - interval '16 minutes')`,
+      [id(130), link.linkId, id(3), id(51), staleReference],
+    );
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, staleReference)).toEqual({
+      status: "unavailable",
+    });
+    // An earlier admission remains an idempotent replay after transport expiry.
+    await pool().query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position) VALUES ($1,$2,$3,1)`,
+      [contextId, id(3), id(130)],
+    );
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, staleReference)).toEqual({
+      status: "admitted",
+      clickId: id(130),
+      historyPosition: "1",
+      replayed: true,
+    });
+    const anotherContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), anotherContext, staleReference)).toEqual({
+      status: "conflict",
+    });
+    expect(
+      (
+        await pool().query(
+          "SELECT count(*) FROM marketplace.affiliate_click_occurrences WHERE id=$1",
+          [id(130)],
+        )
+      ).rows[0].count,
+    ).toBe("1");
+  });
+
+  it("does not commit first admission after a conflicting insert delays it past expiry", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const reference = `vc_${"B".repeat(22)}`;
+    const waitingContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const blockingContext = await createSyntheticAffiliateClickContext(pool(), id(3));
+    await pool().query(
+      `INSERT INTO marketplace.affiliate_click_occurrences
+         (id,link_id,property_id,terms_id,reference_token,source,synthetic,clicked_at)
+       VALUES ($1,$2,$3,$4,$5,'unknown',TRUE,clock_timestamp() - interval '14 minutes 50 seconds')`,
+      [id(131), link.linkId, id(3), id(51), reference],
+    );
+    const blocker = await pool().connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        `INSERT INTO booking.affiliate_click_admissions
+           (context_id,property_id,click_id,history_position) VALUES ($1,$2,$3,1)`,
+        [blockingContext, id(3), id(131)],
+      );
+      const pending = admitSyntheticAffiliateClick(pool(), waitingContext, reference);
+      await expect
+        .poll(async () => {
+          const activity = await pool().query(
+            `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname=current_database() AND wait_event_type='Lock'
+             AND query LIKE '%INSERT INTO booking.affiliate_click_admissions%'`,
+          );
+          return activity.rows[0].count;
+        })
+        .toBe(1);
+      const validity = await pool().query(
+        `SELECT clicked_at > clock_timestamp() - interval '15 minutes' AS valid
+         FROM marketplace.affiliate_click_occurrences WHERE id=$1`,
+        [id(131)],
+      );
+      expect(validity.rows[0].valid).toBe(true);
+      await pool().query(
+        `SELECT pg_sleep(GREATEST(0,
+          EXTRACT(EPOCH FROM clicked_at + interval '15 minutes' - clock_timestamp()) + 0.25))
+         FROM marketplace.affiliate_click_occurrences WHERE id=$1`,
+        [id(131)],
+      );
+      await blocker.query("ROLLBACK");
+      expect(await pending).toEqual({ status: "unavailable" });
+      expect(
+        (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0]
+          .count,
+      ).toBe("0");
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+  }, 20_000);
+
   it("freezes the original booking's context and click-history cutoff in its creation transaction", async () => {
     const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
     if (!link.ok) throw new Error("Expected link");
