@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
+
 import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import {
   AuthorizationError,
@@ -5,11 +8,22 @@ import {
   type PropertyAccessRepository,
 } from "@vayada/backend-authorization";
 import {
+  FINANCE_DASHBOARD_CSV_VERSION,
   FINANCE_EXPENSE_CSV_CONTENT_TYPE,
   FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
+  FINANCE_PROFIT_LOSS_CSV_VERSION,
+  FINANCE_REVENUE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  buildFinanceDashboardCsvArtifact,
+  buildFinanceProfitLossCsvArtifact,
+  buildFinanceRevenueCsvArtifact,
+  captureFinanceProfitLossExport,
+  captureFinanceRevenueExport,
+  captureFinanceDashboardExport,
+  parseFinanceDashboardExportSnapshot,
+  parseFinanceDashboardQuery,
   parseFinanceExpenseExportQuery,
   parseFinanceExpenseExportSnapshot,
   parseFinanceFolioExportFilters,
@@ -17,23 +31,41 @@ import {
   parseFinanceFolioQuery,
   parseFinanceFolioRevisionCommand,
   parseFinanceFolioWrite,
+  parseFinanceProfitLossExportSnapshot,
+  parseFinanceProfitLossQuery,
+  parseFinanceRevenueExportSnapshot,
+  parseFinanceRevenueQuery,
   type FinanceCommandAudit,
   type FinanceFolioDetailResponse,
   type FinanceFolioListResponse,
   type FinanceFolioQuery,
+  type FinanceReportingEnvelope,
 } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
+  FinanceDashboardEvidenceError,
+  type FinanceDashboardReadModel,
+} from "../domains/financeDashboardReadModel.js";
+import {
+  FinanceRevenueEvidenceError,
+  type FinanceRevenueReadModel,
+} from "../domains/financeRevenueReadModel.js";
+import {
   type FinanceExportCommand,
   type FinanceExportEnqueueResult,
   type FinanceFolioExportStatus,
+  type FinanceStreamArtifactAudit,
 } from "../domains/financeFolioExportRepository.js";
 import {
   FinanceExpenseEvidenceError,
   type FinanceExpenseReadModel,
 } from "../domains/financeExpenseReadModel.js";
+import {
+  FinanceProfitLossEvidenceError,
+  type FinanceProfitLossReadModel,
+} from "../domains/financeProfitLossReadModel.js";
 import {
   type FinanceFolioCommandResult,
   type CreateFinanceFolioCommand,
@@ -58,10 +90,19 @@ type Params = { propertyId: string; folioId?: string; exportId?: string };
 type Scope = { context: RequestContext; propertyId: string };
 export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
-  repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
-  expenseExports?: Pick<FinanceExpenseReadModel, "captureExport">;
+  repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport"> &
+    Partial<Pick<FinanceFolioReadRepository, "exportReady">>;
+  expenseExports?: Pick<FinanceExpenseReadModel, "captureExport"> &
+    Partial<Pick<FinanceExpenseReadModel, "exportCsv">>;
+  profitLossExports?: Pick<FinanceProfitLossReadModel, "profitLoss">;
+  revenueExports?: Pick<FinanceRevenueReadModel, "revenue">;
+  dashboardExports?: Pick<FinanceDashboardReadModel, "dashboard">;
   exports?: {
     enqueue(command: FinanceExportCommand): Promise<FinanceExportEnqueueResult>;
+    recordStream?(
+      command: FinanceExportCommand,
+      artifact: FinanceStreamArtifactAudit,
+    ): Promise<void>;
   };
   exportDownloads?: {
     read: {
@@ -86,6 +127,8 @@ export type FinanceFolioRoutesOptions = {
 
 const ROOT = "/finance/properties/:propertyId/financials/folios";
 const EXPORT_ROOT = "/finance/properties/:propertyId/financials/exports";
+const MAX_STREAM_SNAPSHOT_BYTES = 128 * 1024;
+const MAX_STREAM_CSV_BYTES = 256 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export async function registerFinanceFolioRoutes(
@@ -123,60 +166,68 @@ export async function registerFinanceFolioRoutes(
         if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
           return bad(reply);
         const current = scopes.get(request)!;
-        const { tab: _, ...command } = value;
-        const scoped = {
-          ...command,
-          organizationId: current.context.selectedOrganization.organizationId,
-          propertyId: current.propertyId,
-          audit: {
-            actorUserId: current.context.actor.internalUserId,
-            requestId: current.context.audit.requestId,
-            correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
-            causationId: value.commandId,
-            requestedAt: current.context.audit.receivedAt,
-          },
-        };
-        let result: FinanceExportEnqueueResult;
-        if (value.tab === "folios") {
-          const raw = await options.repository.captureReadyExport(
+        const command = await prepareExport(value, current, options);
+        if (!command) return missing(reply);
+        const result: FinanceExportEnqueueResult = await options.exports!.enqueue(command);
+        return exportResponse(
+          reply,
+          result,
+          current.propertyId,
+          value.tab === "profit-loss" || value.tab === "revenue" || value.tab === "dashboard",
+        );
+      }),
+    );
+
+  if (options.exports?.recordStream)
+    app.post(`${EXPORT_ROOT}/auto`, { onRequest: read }, async (request, reply) =>
+      safe(reply, async () => {
+        const value = exportRequest(request.body);
+        if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
+          return bad(reply);
+        const current = scopes.get(request)!;
+        const command = await prepareExport(value, current, options);
+        if (!command) return missing(reply);
+        const queued = async () =>
+          exportResponse(
+            reply,
+            await options.exports!.enqueue(command),
             current.propertyId,
-            value.filters,
+            value.tab === "profit-loss" || value.tab === "revenue" || value.tab === "dashboard",
           );
-          if (!raw) return missing(reply);
-          const capture = exportCapture(
-            raw,
+        if (Buffer.byteLength(JSON.stringify(command.snapshot), "utf8") > MAX_STREAM_SNAPSHOT_BYTES)
+          return queued();
+        const artifact = await renderStreamExport(command, options);
+        if (!artifact) return missing(reply);
+        if (
+          artifact.formatVersion !== command.snapshot.formatVersion ||
+          artifact.propertyId !== current.propertyId ||
+          artifact.currency !== command.currency ||
+          artifact.contentType !== FINANCE_FOLIO_CSV_CONTENT_TYPE ||
+          !expectedExportArtifact(
+            `private/finance/financials-exports/${command.commandId}/${artifact.formatVersion}.csv`,
+            artifact.filename,
             current.propertyId,
-            value.filters,
-            parseFinanceFolioExportSnapshot,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: value.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        } else {
-          const raw = await required(options.expenseExports).captureExport(
-            current.propertyId,
-            value.filters,
-          );
-          if (!raw) return missing(reply);
-          const capture = exportCapture(
-            raw,
-            current.propertyId,
-            value.filters,
-            parseFinanceExpenseExportSnapshot,
-          );
-          result = await options.exports!.enqueue({
-            ...scoped,
-            filters: value.filters,
-            currency: capture.snapshot.currency,
-            snapshot: capture.snapshot,
-            envelope: capture.envelope,
-          });
-        }
-        return exportResponse(reply, result, current.propertyId);
+            command.commandId,
+          ) ||
+          !Number.isSafeInteger(artifact.rowCount) ||
+          artifact.rowCount < 0 ||
+          typeof artifact.body !== "string"
+        )
+          return commandViolation();
+        const bytes = Buffer.from(artifact.body, "utf8");
+        if (bytes.length > MAX_STREAM_CSV_BYTES) return queued();
+        if (!bytes.length) return commandViolation();
+        await options.exports!.recordStream!(command, {
+          formatVersion: artifact.formatVersion,
+          rowCount: artifact.rowCount,
+          sizeBytes: bytes.length,
+          checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+        return reply
+          .header("Content-Disposition", `attachment; filename="${artifact.filename}"`)
+          .header("X-Content-Type-Options", "nosniff")
+          .type(artifact.contentType)
+          .send(Readable.from([bytes]));
       }),
     );
 
@@ -254,6 +305,183 @@ export async function registerFinanceFolioRoutes(
   app.delete(`${ROOT}/:folioId`, { onRequest: write }, async (request, reply) =>
     transition(request, reply, scopes, options.commands!, "archive"),
   );
+}
+
+async function prepareExport(
+  value: ExportRequest,
+  current: Scope,
+  options: FinanceFolioRoutesOptions,
+): Promise<FinanceExportCommand | null> {
+  const { tab: _, ...request } = value;
+  const scoped = {
+    ...request,
+    organizationId: current.context.selectedOrganization.organizationId,
+    propertyId: current.propertyId,
+    audit: {
+      actorUserId: current.context.actor.internalUserId,
+      requestId: current.context.audit.requestId,
+      correlationId: current.context.audit.correlationId ?? current.context.audit.requestId,
+      causationId: value.commandId,
+      requestedAt: current.context.audit.receivedAt,
+    },
+  };
+  if (value.tab === "folios") {
+    const raw = await options.repository.captureReadyExport(current.propertyId, value.filters);
+    if (!raw) return null;
+    const capture = exportCapture(
+      raw,
+      current.propertyId,
+      value.filters,
+      parseFinanceFolioExportSnapshot,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "expenses") {
+    const raw = await required(options.expenseExports).captureExport(
+      current.propertyId,
+      value.filters,
+    );
+    if (!raw) return null;
+    const capture = exportCapture(
+      raw,
+      current.propertyId,
+      value.filters,
+      parseFinanceExpenseExportSnapshot,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "profit-loss") {
+    const raw = await required(options.profitLossExports).profitLoss(
+      current.propertyId,
+      value.filters,
+    );
+    if (!raw) return null;
+    const { response, categoryRows } = raw;
+    const snapshot = captureFinanceProfitLossExport({
+      propertyId: current.propertyId,
+      response,
+      query: value.filters,
+      asOf: profitLossAsOf(response.generatedAt, response.timeZone),
+      categoryRows,
+    });
+    const capture = exportCapture(
+      { envelope: reportingEnvelope(response), snapshot },
+      current.propertyId,
+      value.filters,
+      parseFinanceProfitLossExportSnapshot,
+      true,
+    );
+    return {
+      ...scoped,
+      filters: value.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  if (value.tab === "revenue") {
+    const response = await required(options.revenueExports).revenue(
+      current.propertyId,
+      value.filters,
+    );
+    if (!response) return null;
+    const snapshot = captureFinanceRevenueExport({
+      propertyId: current.propertyId,
+      response,
+      query: value.filters,
+    });
+    const capture = exportCapture(
+      { envelope: reportingEnvelope(response), snapshot },
+      current.propertyId,
+      snapshot.filters,
+      parseFinanceRevenueExportSnapshot,
+      true,
+    );
+    return {
+      ...scoped,
+      filters: snapshot.filters,
+      currency: capture.snapshot.currency,
+      snapshot: capture.snapshot,
+      envelope: capture.envelope,
+    };
+  }
+  const response = await required(options.dashboardExports).dashboard(
+    current.propertyId,
+    value.filters,
+  );
+  if (!response) return null;
+  const snapshot = captureFinanceDashboardExport({
+    propertyId: current.propertyId,
+    response,
+    query: value.filters,
+  });
+  const capture = exportCapture(
+    { envelope: reportingEnvelope(response), snapshot },
+    current.propertyId,
+    snapshot.filters,
+    parseFinanceDashboardExportSnapshot,
+    true,
+  );
+  return {
+    ...scoped,
+    filters: snapshot.filters,
+    currency: capture.snapshot.currency,
+    snapshot: capture.snapshot,
+    envelope: capture.envelope,
+  };
+}
+
+async function renderStreamExport(
+  command: FinanceExportCommand,
+  options: FinanceFolioRoutesOptions,
+) {
+  const { snapshot } = command;
+  switch (snapshot.formatVersion) {
+    case FINANCE_FOLIO_CSV_VERSION:
+      return required(options.repository.exportReady)(
+        command.propertyId,
+        command.currency,
+        snapshot,
+      );
+    case FINANCE_EXPENSE_CSV_VERSION:
+      return required(required(options.expenseExports).exportCsv)(
+        command.propertyId,
+        command.currency,
+        snapshot,
+      );
+    case FINANCE_PROFIT_LOSS_CSV_VERSION:
+      return buildFinanceProfitLossCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+        asOf: snapshot.asOf,
+        categoryRows: snapshot.manifest[0].categoryRows,
+      });
+    case FINANCE_REVENUE_CSV_VERSION:
+      return buildFinanceRevenueCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+      });
+    case FINANCE_DASHBOARD_CSV_VERSION:
+      return buildFinanceDashboardCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+      });
+  }
 }
 
 async function exportStatusResponse(
@@ -350,6 +578,7 @@ function exportResponse(
   reply: FastifyReply,
   value: FinanceExportEnqueueResult,
   propertyId: string,
+  allowForeignIncomplete = false,
 ) {
   if (!record(value)) return commandViolation();
   if (value.status === "conflict")
@@ -364,8 +593,10 @@ function exportResponse(
     !exact(value, ["status", "exportId", "envelope"]) ||
     !parsed.success ||
     parsed.data.propertyId !== propertyId ||
-    parsed.data.incompleteEvidence.some(
-      (item) => item.amount && item.amount.currency !== parsed.data.currency,
+    !validIncompleteCurrency(
+      parsed.data.incompleteEvidence,
+      parsed.data.currency,
+      allowForeignIncomplete,
     )
   )
     return commandViolation();
@@ -379,14 +610,38 @@ function exportResponse(
 // prettier-ignore
 type ExportRequest =
   | { commandId: string; idempotencyKey: string; tab: "folios"; filters: NonNullable<ReturnType<typeof parseFinanceFolioExportFilters>> }
-  | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> };
+  | { commandId: string; idempotencyKey: string; tab: "expenses"; filters: NonNullable<ReturnType<typeof parseFinanceExpenseExportQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "profit-loss"; filters: NonNullable<ReturnType<typeof parseFinanceProfitLossQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "revenue"; filters: NonNullable<ReturnType<typeof parseFinanceRevenueQuery>> }
+  | { commandId: string; idempotencyKey: string; tab: "dashboard"; filters: NonNullable<ReturnType<typeof parseFinanceDashboardQuery>> };
+
+function reportingEnvelope(response: FinanceReportingEnvelope): FinanceReportingEnvelope {
+  const {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  } = response;
+  return {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  };
+}
 
 // prettier-ignore
-function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null) {
+function exportCapture<T extends {propertyId:string;currency:string;filters:unknown}>(value: unknown, propertyId: string, filters: unknown, parse: (value:unknown)=>T|null, allowForeignIncomplete = false) {
   if (!record(value) || !exact(value, ["envelope", "snapshot"])) return commandViolation();
   const parsedEnvelope = envelope.safeParse(value.envelope);
   const snapshot = parse(value.snapshot);
-  if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || parsedEnvelope.data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== parsedEnvelope.data.currency) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
+  if (!parsedEnvelope.success || !snapshot || parsedEnvelope.data.propertyId !== propertyId || snapshot.propertyId !== propertyId || parsedEnvelope.data.currency !== snapshot.currency || !validIncompleteCurrency(parsedEnvelope.data.incompleteEvidence, parsedEnvelope.data.currency, allowForeignIncomplete) || JSON.stringify(snapshot.filters) !== JSON.stringify(filters)) return commandViolation();
   return { envelope: parsedEnvelope.data, snapshot };
 }
 
@@ -399,7 +654,13 @@ function exportRequest(value: unknown) {
       ? parseFinanceFolioExportFilters(value.filters)
       : value.tab === "expenses"
         ? parseFinanceExpenseExportQuery(value.filters)
-        : null;
+        : value.tab === "profit-loss"
+          ? parseFinanceProfitLossQuery(value.filters)
+          : value.tab === "revenue"
+            ? parseFinanceRevenueQuery(value.filters)
+            : value.tab === "dashboard"
+              ? parseFinanceDashboardQuery(value.filters)
+              : null;
   if (
     !commandId ||
     typeof value.idempotencyKey !== "string" ||
@@ -424,14 +685,43 @@ function expectedExportArtifact(
   propertyId: string,
   exportId: string,
 ) {
-  return [
-    [FINANCE_FOLIO_CSV_VERSION, `pms-financials-folios-${propertyId}.csv`],
-    [FINANCE_EXPENSE_CSV_VERSION, `pms-financials-expenses-${propertyId}.csv`],
-  ].some(
-    ([version, expectedFilename]) =>
-      storageKey === `private/finance/financials-exports/${exportId}/${version}.csv` &&
-      filename === expectedFilename,
+  return (
+    [
+      [FINANCE_FOLIO_CSV_VERSION, `pms-financials-folios-${propertyId}.csv`],
+      [FINANCE_EXPENSE_CSV_VERSION, `pms-financials-expenses-${propertyId}.csv`],
+    ].some(
+      ([version, expectedFilename]) =>
+        storageKey === `private/finance/financials-exports/${exportId}/${version}.csv` &&
+        filename === expectedFilename,
+    ) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_PROFIT_LOSS_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(
+        `^pms-financials-profit-loss-${propertyId}-[1-9]\\d{3}-\\d{4}-\\d{2}-\\d{2}\\.csv$`,
+      ).test(filename)) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_REVENUE_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(
+        `^pms-financials-revenue-${propertyId}-\\d{4}-\\d{2}-\\d{2}-\\d{4}-\\d{2}-\\d{2}\\.csv$`,
+      ).test(filename)) ||
+    (storageKey ===
+      `private/finance/financials-exports/${exportId}/${FINANCE_DASHBOARD_CSV_VERSION}.csv` &&
+      typeof filename === "string" &&
+      new RegExp(`^pms-financials-dashboard-${propertyId}-\\d{4}-\\d{2}-\\d{2}\\.csv$`).test(
+        filename,
+      ))
   );
+}
+
+function profitLossAsOf(instant: string, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts["year"]}-${parts["month"]}-${parts["day"]}`;
 }
 
 function required<T>(value: T | undefined): T {
@@ -596,7 +886,20 @@ const validInterval = (value: { serviceFrom: string; serviceTo: string }) =>
   value.serviceTo >= value.serviceFrom;
 const folioSummary = z.object(summaryShape).strict().refine(validInterval);
 // prettier-ignore
-const envelope = z.object({ contractVersion: z.literal(PMS_FINANCIALS_CONTRACT_VERSION), propertyId: id, currency, timeZone: z.string().refine(canonicalFinanceFolioZone), generatedAt: instant, sourceFreshness: z.record(z.string(), z.string()), incompleteEvidence: z.array(z.object({ code: z.string(), count: z.number().int().nonnegative(), amount: money.optional() }).strict()) }).strict();
+const envelope = z.object({ contractVersion: z.literal(PMS_FINANCIALS_CONTRACT_VERSION), propertyId: id, currency, timeZone: z.string().refine(canonicalFinanceFolioZone), generatedAt: instant, sourceFreshness: z.record(z.string(), z.string()), incompleteEvidence: z.array(z.union([z.object({ code: z.string(), count: z.number().int().nonnegative(), amount: money }).strict(), z.object({ code: z.string(), count: z.number().int().nonnegative(), currency }).strict(), z.object({ code: z.string(), count: z.number().int().nonnegative() }).strict()])) }).strict();
+function validIncompleteCurrency(
+  evidence: z.infer<typeof envelope>["incompleteEvidence"],
+  propertyCurrency: string,
+  allowForeign: boolean,
+) {
+  return (
+    allowForeign ||
+    evidence.every(
+      (item) =>
+        !("currency" in item) && (!("amount" in item) || item.amount.currency === propertyCurrency),
+    )
+  );
+}
 // prettier-ignore
 const line = z.object({ lineId: id, position: z.number().int().positive(), kind: z.enum(["room", "addon", "fee", "tax", "adjustment"]), description: z.string(), quantity: decimal, unitAmount: money, total: money, serviceOn: date, source: z.object({ type: z.string(), id: z.string(), revision: z.number().int().positive() }).strict() }).strict();
 // prettier-ignore
@@ -628,9 +931,7 @@ function listResponse(
         parsed.data.currency,
         query,
       )) ||
-    parsed.data.incompleteEvidence.some(
-      (item) => item.amount && item.amount.currency !== parsed.data.currency,
-    ) ||
+    !validIncompleteCurrency(parsed.data.incompleteEvidence, parsed.data.currency, false) ||
     parsed.data.page.items.some((item) => item.total.currency !== parsed.data.currency)
   )
     throw new Error("finance_folio_port_contract_violation");
@@ -650,7 +951,7 @@ function detailResponse(value: FinanceFolioDetailResponse, propertyId: string) {
     data.propertyId !== propertyId ||
     data.item.propertyId !== propertyId ||
     data.item.currency !== data.currency ||
-    data.incompleteEvidence.some((item) => item.amount && item.amount.currency !== data.currency) ||
+    !validIncompleteCurrency(data.incompleteEvidence, data.currency, false) ||
     currencies.some((value) => value !== data.currency)
   )
     throw new Error("finance_folio_port_contract_violation");
@@ -693,6 +994,12 @@ async function safe(reply: FastifyReply, work: () => Promise<unknown>) {
     if (cause instanceof FinanceFolioEvidenceError)
       return reply.status(422).send({ code: cause.code });
     if (cause instanceof FinanceExpenseEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceProfitLossEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceRevenueEvidenceError)
+      return reply.status(422).send({ code: cause.code });
+    if (cause instanceof FinanceDashboardEvidenceError)
       return reply.status(422).send({ code: cause.code });
     return reply.status(500).send({ code: "finance_folio_port_contract_violation" });
   }

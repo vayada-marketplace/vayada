@@ -1,27 +1,100 @@
 import { createHash, randomUUID } from "node:crypto";
 // prettier-ignore
-import { FINANCE_EXPENSE_CSV_VERSION, FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_FOLIO_CSV_VERSION, parseFinanceExpenseExportQuery, parseFinanceExpenseExportSnapshot, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, type FinanceExpenseEnvelope, type FinanceExpenseExportQuery, type FinanceExpenseExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot } from "@vayada/domain-finance";
+import { FINANCE_DASHBOARD_CSV_VERSION, FINANCE_EXPENSE_CSV_VERSION, FINANCE_FOLIO_CSV_CONTENT_TYPE, FINANCE_FOLIO_CSV_VERSION, FINANCE_PROFIT_LOSS_CSV_VERSION, FINANCE_REVENUE_CSV_VERSION, parseFinanceDashboardExportSnapshot, parseFinanceDashboardQuery, parseFinanceExpenseExportQuery, parseFinanceExpenseExportSnapshot, parseFinanceFolioExportFilters, parseFinanceFolioExportSnapshot, parseFinanceProfitLossExportSnapshot, parseFinanceProfitLossQuery, parseFinanceRevenueExportSnapshot, parseFinanceRevenueQuery, type FinanceDashboardExportSnapshot, type FinanceDashboardQuery, type FinanceExpenseEnvelope, type FinanceExpenseExportQuery, type FinanceExpenseExportSnapshot, type FinanceFolioEnvelope, type FinanceFolioExportFilters, type FinanceFolioExportSnapshot, type FinanceProfitLossExportSnapshot, type FinanceProfitLossQuery, type FinanceReportingEnvelope, type FinanceRevenueExportSnapshot, type FinanceRevenueQuery } from "@vayada/domain-finance";
 import pg, { type PoolClient } from "pg";
 export const FINANCE_FOLIO_EXPORT_QUEUE = "finance.financials-exports";
 export const FINANCE_FOLIO_EXPORT_JOB = "finance.folio-csv-export.v1";
 export const FINANCE_EXPENSE_EXPORT_JOB = "finance.expense-csv-export.v1";
+export const FINANCE_PROFIT_LOSS_EXPORT_JOB = "finance.profit-loss-csv-export.v1";
+export const FINANCE_REVENUE_EXPORT_JOB = "finance.revenue-csv-export.v1";
+export const FINANCE_DASHBOARD_EXPORT_JOB = "finance.dashboard-csv-export.v1";
 export const FINANCE_FOLIO_EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
 const FOLIO_OPERATION = "financials.folio_export.create.v1";
 const EXPENSE_OPERATION = "financials.expense_export.create.v1";
+const PROFIT_LOSS_OPERATION = "financials.profit_loss_export.create.v1";
+const REVENUE_OPERATION = "financials.revenue_export.create.v1";
+const DASHBOARD_OPERATION = "financials.dashboard_export.create.v1";
 // prettier-ignore
 export type FinanceFolioExportAudit = { actorUserId: string; requestId: string; correlationId: string; causationId: string; requestedAt: string };
 // prettier-ignore
 export type FinanceFolioExportJobPayload = { commandId: string; organizationId: string; snapshot: FinanceFolioExportSnapshot; expiresAt: string };
 // prettier-ignore
 export type FinanceExpenseExportJobPayload = { commandId: string; organizationId: string; snapshot: FinanceExpenseExportSnapshot; expiresAt: string };
-export type FinanceExportJobPayload = FinanceFolioExportJobPayload | FinanceExpenseExportJobPayload;
+export type FinanceProfitLossExportJobPayload = {
+  commandId: string;
+  organizationId: string;
+  snapshot: FinanceProfitLossExportSnapshot;
+  expiresAt: string;
+};
+export type FinanceRevenueExportJobPayload = {
+  commandId: string;
+  organizationId: string;
+  snapshot: FinanceRevenueExportSnapshot;
+  expiresAt: string;
+};
+export type FinanceDashboardExportJobPayload = {
+  commandId: string;
+  organizationId: string;
+  snapshot: FinanceDashboardExportSnapshot;
+  expiresAt: string;
+};
+export type FinanceExportJobPayload =
+  | FinanceFolioExportJobPayload
+  | FinanceExpenseExportJobPayload
+  | FinanceProfitLossExportJobPayload
+  | FinanceRevenueExportJobPayload
+  | FinanceDashboardExportJobPayload;
 // prettier-ignore
-export type FinanceExportEnqueueResult = { status: "created" | "replayed"; exportId: string; envelope: FinanceFolioEnvelope | FinanceExpenseEnvelope } | { status: "conflict" };
+export type FinanceExportEnqueueResult = { status: "created" | "replayed"; exportId: string; envelope: FinanceFolioEnvelope | FinanceExpenseEnvelope | FinanceReportingEnvelope } | { status: "conflict" };
 // prettier-ignore
 export type FinanceFolioExportCommand = { commandId: string; idempotencyKey: string; organizationId: string; propertyId: string; currency: string; filters: FinanceFolioExportFilters; snapshot: FinanceFolioExportSnapshot; envelope: FinanceFolioEnvelope; audit: FinanceFolioExportAudit };
 // prettier-ignore
 export type FinanceExpenseExportCommand = { commandId: string; idempotencyKey: string; organizationId: string; propertyId: string; currency: string; filters: FinanceExpenseExportQuery; snapshot: FinanceExpenseExportSnapshot; envelope: FinanceExpenseEnvelope; audit: FinanceFolioExportAudit };
-export type FinanceExportCommand = FinanceFolioExportCommand | FinanceExpenseExportCommand;
+export type FinanceProfitLossExportCommand = {
+  commandId: string;
+  idempotencyKey: string;
+  organizationId: string;
+  propertyId: string;
+  currency: string;
+  filters: FinanceProfitLossQuery;
+  snapshot: FinanceProfitLossExportSnapshot;
+  envelope: FinanceReportingEnvelope;
+  audit: FinanceFolioExportAudit;
+};
+export type FinanceRevenueExportCommand = {
+  commandId: string;
+  idempotencyKey: string;
+  organizationId: string;
+  propertyId: string;
+  currency: string;
+  filters: FinanceRevenueQuery;
+  snapshot: FinanceRevenueExportSnapshot;
+  envelope: FinanceReportingEnvelope;
+  audit: FinanceFolioExportAudit;
+};
+export type FinanceDashboardExportCommand = {
+  commandId: string;
+  idempotencyKey: string;
+  organizationId: string;
+  propertyId: string;
+  currency: string;
+  filters: FinanceDashboardQuery;
+  snapshot: FinanceDashboardExportSnapshot;
+  envelope: FinanceReportingEnvelope;
+  audit: FinanceFolioExportAudit;
+};
+export type FinanceExportCommand =
+  | FinanceFolioExportCommand
+  | FinanceExpenseExportCommand
+  | FinanceProfitLossExportCommand
+  | FinanceRevenueExportCommand
+  | FinanceDashboardExportCommand;
+export type FinanceStreamArtifactAudit = {
+  formatVersion: FinanceExportCommand["snapshot"]["formatVersion"];
+  rowCount: number;
+  sizeBytes: number;
+  checksumSha256: string;
+};
 // prettier-ignore
 export type FinanceFolioExportStatus = { state:"pending"|"running"|"failed"|"expired"; expiresAt:string } | { state:"ready"; expiresAt:string; artifact:{ mediaId:string; bucketName:string; storageKey:string; visibility:"private"; lifecycleStatus:"active"; filename:string; contentType:string; sizeBytes:number } };
 // prettier-ignore
@@ -37,21 +110,54 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
     throw new Error("Finance folio export jobs require a search digester");
   const pool = config.pool ?? new pg.Pool({ connectionString: config.connectionString, max: 3 });
   return {
+    async recordStream(input: FinanceExportCommand, artifact: FinanceStreamArtifactAudit): Promise<void> {
+      const evidence = exportEvidence(input);
+      if (
+        !evidence ||
+        !validCommand(input, evidence.filters, evidence.snapshot) ||
+        artifact.formatVersion !== evidence.snapshot.formatVersion ||
+        !Number.isSafeInteger(artifact.rowCount) || artifact.rowCount < 0 ||
+        !Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 1 || artifact.sizeBytes > 256 * 1024 ||
+        !/^[0-9a-f]{64}$/.test(artifact.checksumSha256) ||
+        Buffer.byteLength(JSON.stringify(evidence.snapshot), "utf8") > 128 * 1024
+      ) throw new TypeError("Invalid finance stream audit");
+      await transaction(pool, async (client) => {
+        if (!(await authorizedScope(client, input))) throw new TypeError("Invalid finance stream scope");
+        const redactedPayload = await redacted(config.searchDigest, input.currency, evidence.filters, evidence.snapshot);
+        await client.query(
+          `INSERT INTO platform.product_audit_events
+            (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
+             actor_user_id,target_resource_product,target_resource_type,target_resource_id,
+             correlation_id,causation_id,redacted_payload,audit_metadata,retention_class,privacy_scope)
+           VALUES($1,'finance',$2,date_trunc('milliseconds',statement_timestamp()),'property',$3::uuid,
+             'user',$4::uuid,'finance','financials_export',$5::text,$6,$7,$8::jsonb,$9::jsonb,
+             'financial','confidential')`,
+          [
+            `finance.financials-stream:${randomUUID()}`,
+            evidence.auditAction.replace(/\.requested$/, ".streamed"),
+            input.propertyId, input.audit.actorUserId, input.commandId,
+            input.audit.correlationId, input.audit.causationId,
+            JSON.stringify({ ...redactedPayload, rowCount: artifact.rowCount, sizeBytes: artifact.sizeBytes, checksumSha256: artifact.checksumSha256 }),
+            JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt }),
+          ],
+        );
+      });
+    },
     async find(input: { exportId:string; organizationId:string; propertyId:string; now:Date }): Promise<FinanceFolioExportStatus|null> {
       if (![input.exportId,input.organizationId,input.propertyId].every(uuid) || !Number.isFinite(input.now.getTime())) throw new TypeError("Invalid folio export lookup");
-      const row=(await pool.query<{status:string;jobType:string;expiresAt:string;formatVersion:string;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_type AS "jobType",job.job_metadata->>'expiresAt' AS "expiresAt",job.job_metadata->>'formatVersion' AS "formatVersion",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
+      const row=(await pool.query<{status:string;jobType:string;expiresAt:string;formatVersion:string;asOf:string|null;year:string|null;from:string|null;to:string|null;mediaId:string|null;bucketName:string|null;storageKey:string|null;visibility:string|null;lifecycleStatus:string|null;filename:string|null;contentType:string|null;sizeBytes:number|null;retainedUntil:string|null}>(`SELECT job.status,job.job_type AS "jobType",job.job_metadata->>'expiresAt' AS "expiresAt",job.job_metadata->>'formatVersion' AS "formatVersion",job.payload->'snapshot'->>'asOf' AS "asOf",job.payload->'snapshot'->'filters'->>'year' AS year,job.payload->'snapshot'->'filters'->>'from' AS "from",job.payload->'snapshot'->'filters'->>'to' AS "to",media.id::text AS "mediaId",media.bucket AS "bucketName",media.storage_key AS "storageKey",media.visibility,media.lifecycle_status AS "lifecycleStatus",media.original_filename AS filename,media.content_type AS "contentType",media.size_bytes::int AS "sizeBytes",to_char(media.retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "retainedUntil"
         FROM platform.jobs job LEFT JOIN platform.media_objects media ON media.id=job.id AND media.owner_organization_id=$3::uuid AND media.property_id=$2::uuid AND media.storage_kind='vayada_managed' AND media.purpose='finance.financials_export' AND media.resource_product='finance' AND media.resource_type='financials_export' AND media.resource_id=job.id::text AND media.source_system='platform' AND media.source_table='platform.jobs' AND media.source_row_id=job.id::text
         WHERE job.id=$1::uuid AND job.property_id=$2::uuid AND job.tenant_scope='property'
-          AND job.queue_name=$4 AND job.job_type IN ($5,$6) AND job.resource_product='finance'
+          AND job.queue_name=$4 AND job.job_type IN ($5,$6,$7,$8,$9) AND job.resource_product='finance'
           AND job.resource_type='financials_export' AND job.resource_id=job.id::text
-          AND job.payload->>'organizationId'=$3::text AND job.job_metadata->>'organizationId'=$3::text`,[input.exportId,input.propertyId,input.organizationId,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,FINANCE_EXPENSE_EXPORT_JOB])).rows[0];
+          AND job.payload->>'organizationId'=$3::text AND job.job_metadata->>'organizationId'=$3::text`,[input.exportId,input.propertyId,input.organizationId,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,FINANCE_EXPENSE_EXPORT_JOB,FINANCE_PROFIT_LOSS_EXPORT_JOB,FINANCE_REVENUE_EXPORT_JOB,FINANCE_DASHBOARD_EXPORT_JOB])).rows[0];
       if (!row) return null;
       if (!instant(row.expiresAt)) throw new Error("Finance folio export status evidence is invalid");
       if (!["pending","running","failed","canceled","dead_lettered","succeeded"].includes(row.status)) throw new Error("Finance folio export status evidence is invalid");
       if (input.now.getTime()>=new Date(row.expiresAt).getTime()) return {state:"expired",expiresAt:row.expiresAt};
       if (row.status==="pending"||row.status==="running") return {state:row.status,expiresAt:row.expiresAt};
       if (["failed","canceled","dead_lettered"].includes(row.status)) return {state:"failed",expiresAt:row.expiresAt};
-      const shape=exportShape(row.jobType,row.formatVersion,input.propertyId,input.exportId);
+      const shape=exportShape(row.jobType,row.formatVersion,input.propertyId,input.exportId,row.year,row.asOf,row.from,row.to);
       if (!shape) throw new Error("Finance export status evidence is invalid");
       const {filename,storageKey}=shape;
       if (row.status!=="succeeded"||row.mediaId!==input.exportId||!trimmed(row.bucketName,1,200)||row.storageKey!==storageKey||row.visibility!=="private"||row.lifecycleStatus!=="active"||row.filename!==filename||row.contentType!==FINANCE_FOLIO_CSV_CONTENT_TYPE||!Number.isSafeInteger(row.sizeBytes)||row.sizeBytes===null||row.sizeBytes<=0||row.retainedUntil!==row.expiresAt) throw new Error("Finance folio export status evidence is invalid");
@@ -84,7 +190,7 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
         );
         if (!inserted.rowCount) {
           const prior = (
-            await client.query<{ fingerprint: string; exportId: string; envelope: FinanceFolioEnvelope | FinanceExpenseEnvelope }>(
+            await client.query<{ fingerprint: string; exportId: string; envelope: FinanceFolioEnvelope | FinanceExpenseEnvelope | FinanceReportingEnvelope }>(
               `SELECT i.request_fingerprint_hash AS fingerprint,i.response_resource_id AS "exportId",
                  j.job_metadata->'responseEnvelope' AS envelope
                FROM platform.idempotency_keys i JOIN platform.jobs j
@@ -174,7 +280,7 @@ export function parseFinanceFolioExportJobPayload(value: unknown, expected: Expe
 
 // prettier-ignore
 export function parseFinanceExportJobPayload(value: unknown, expected: ExpectedPayload): FinanceExportJobPayload {
-  const row = object(value), raw=object(row.snapshot), snapshot = raw.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? parseFinanceExpenseExportSnapshot(raw) : parseFinanceFolioExportSnapshot(raw);
+  const row = object(value), raw=object(row.snapshot), snapshot = raw.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? parseFinanceExpenseExportSnapshot(raw) : raw.formatVersion===FINANCE_PROFIT_LOSS_CSV_VERSION ? parseFinanceProfitLossExportSnapshot(raw) : raw.formatVersion===FINANCE_REVENUE_CSV_VERSION ? parseFinanceRevenueExportSnapshot(raw) : raw.formatVersion===FINANCE_DASHBOARD_CSV_VERSION ? parseFinanceDashboardExportSnapshot(raw) : parseFinanceFolioExportSnapshot(raw);
   if (
     Object.keys(row).length !== 4 ||
     !uuid(row.commandId) ||
@@ -186,9 +292,7 @@ export function parseFinanceExportJobPayload(value: unknown, expected: ExpectedP
     !validWindow(row, snapshot, expected)
   )
     throw new TypeError("Finance export job payload is invalid");
-  const payload:FinanceExportJobPayload = snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION
-    ? {commandId:row.commandId,organizationId:row.organizationId,snapshot,expiresAt:String(row.expiresAt)}
-    : {commandId:row.commandId,organizationId:row.organizationId,snapshot,expiresAt:String(row.expiresAt)};
+  const payload = {commandId:row.commandId,organizationId:row.organizationId,snapshot,expiresAt:String(row.expiresAt)} as FinanceExportJobPayload;
   if (hash(JSON.stringify(payload)) !== expected.payloadFingerprint)
     throw new TypeError("Finance export job payload is invalid");
   return payload;
@@ -213,7 +317,7 @@ async function authorizedScope(client: PoolClient, input: FinanceExportCommand) 
   return (result.rowCount ?? 0) > 0;
 }
 // prettier-ignore
-function validCommand(input: FinanceExportCommand, filters: FinanceFolioExportFilters | FinanceExpenseExportQuery, snapshot: FinanceFolioExportSnapshot | FinanceExpenseExportSnapshot) {
+function validCommand(input: FinanceExportCommand, filters: FinanceFolioExportFilters | FinanceExpenseExportQuery | FinanceProfitLossQuery | FinanceRevenueQuery | FinanceDashboardQuery, snapshot: FinanceFolioExportSnapshot | FinanceExpenseExportSnapshot | FinanceProfitLossExportSnapshot | FinanceRevenueExportSnapshot | FinanceDashboardExportSnapshot) {
   return (
     uuid(input.commandId) &&
     uuid(input.organizationId) &&
@@ -224,6 +328,10 @@ function validCommand(input: FinanceExportCommand, filters: FinanceFolioExportFi
     snapshot.currency === input.currency &&
     input.envelope.propertyId === input.propertyId &&
     input.envelope.currency === input.currency &&
+    ((snapshot.formatVersion !== FINANCE_PROFIT_LOSS_CSV_VERSION && snapshot.formatVersion !== FINANCE_REVENUE_CSV_VERSION && snapshot.formatVersion !== FINANCE_DASHBOARD_CSV_VERSION) ||
+      (input.envelope.contractVersion === "pms-financials.v1" &&
+        input.envelope.generatedAt === snapshot.snapshotAt &&
+        input.envelope.timeZone === snapshot.timeZone)) &&
     JSON.stringify(snapshot.filters) === JSON.stringify(filters) &&
     uuid(input.audit.actorUserId) &&
     trimmed(input.audit.requestId, 1, 200) &&
@@ -256,8 +364,9 @@ function validWindow(row: Record<string, unknown>, snapshot: {snapshotAt:string}
 }
 
 // prettier-ignore
-async function redacted(searchDigest: (domain: "folio" | "expense", search: string) => Promise<string>, currency: string, filters: FinanceFolioExportFilters | FinanceExpenseExportQuery, snapshot: FinanceFolioExportSnapshot | FinanceExpenseExportSnapshot) {
-  const { search, ...safe } = filters;
+async function redacted(searchDigest: (domain: "folio" | "expense", search: string) => Promise<string>, currency: string, filters: FinanceFolioExportFilters | FinanceExpenseExportQuery | FinanceProfitLossQuery | FinanceRevenueQuery | FinanceDashboardQuery, snapshot: FinanceFolioExportSnapshot | FinanceExpenseExportSnapshot | FinanceProfitLossExportSnapshot | FinanceRevenueExportSnapshot | FinanceDashboardExportSnapshot) {
+  const search = "search" in filters ? filters.search : undefined;
+  const safe = "search" in filters ? Object.fromEntries(Object.entries(filters).filter(([key])=>key!=="search")) : filters;
   const domain = snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? "expense" : "folio";
   const searchHash = search ? await searchDigest(domain, search) : undefined;
   if (searchHash && !/^[0-9a-f]{64}$/.test(searchHash)) throw new Error("Finance folio export search digest failed");
@@ -265,8 +374,7 @@ async function redacted(searchDigest: (domain: "folio" | "expense", search: stri
     currency,
     filters: {
       ...safe,
-      searchPresent: Boolean(search),
-      ...(searchHash ? { searchHash } : {}),
+      ...(snapshot.formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION || snapshot.formatVersion === FINANCE_REVENUE_CSV_VERSION || snapshot.formatVersion === FINANCE_DASHBOARD_CSV_VERSION ? {} : { searchPresent: Boolean(search), ...(searchHash ? { searchHash } : {}) }),
     },
     formatVersion: snapshot.formatVersion,
     manifestCount: snapshot.manifest.length,
@@ -280,13 +388,26 @@ function exportEvidence(input: FinanceExportCommand) {
     const filters=parseFinanceExpenseExportQuery(input.filters),snapshot=parseFinanceExpenseExportSnapshot(input.snapshot);
     return filters&&snapshot ? {filters,snapshot,operation:EXPENSE_OPERATION,jobType:FINANCE_EXPENSE_EXPORT_JOB,auditAction:"finance.expense_export.requested"} : null;
   }
+  if (input.snapshot.formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION) {
+    const filters=parseFinanceProfitLossQuery(input.filters),snapshot=parseFinanceProfitLossExportSnapshot(input.snapshot);
+    return filters&&snapshot ? {filters,snapshot,operation:PROFIT_LOSS_OPERATION,jobType:FINANCE_PROFIT_LOSS_EXPORT_JOB,auditAction:"finance.profit_loss_export.requested"} : null;
+  }
+  if (input.snapshot.formatVersion === FINANCE_REVENUE_CSV_VERSION) {
+    const filters=parseFinanceRevenueQuery(input.filters),snapshot=parseFinanceRevenueExportSnapshot(input.snapshot);
+    return filters&&snapshot ? {filters,snapshot,operation:REVENUE_OPERATION,jobType:FINANCE_REVENUE_EXPORT_JOB,auditAction:"finance.revenue_export.requested"} : null;
+  }
+  if (input.snapshot.formatVersion === FINANCE_DASHBOARD_CSV_VERSION) {
+    const requested=parseFinanceDashboardQuery(input.filters),snapshot=parseFinanceDashboardExportSnapshot(input.snapshot);
+    const filters=requested&&snapshot ? {asOf:requested.asOf??snapshot.asOf} : null;
+    return filters&&snapshot ? {filters,snapshot,operation:DASHBOARD_OPERATION,jobType:FINANCE_DASHBOARD_EXPORT_JOB,auditAction:"finance.dashboard_export.requested"} : null;
+  }
   const filters=parseFinanceFolioExportFilters(input.filters),snapshot=parseFinanceFolioExportSnapshot(input.snapshot);
   return filters&&snapshot ? {filters,snapshot,operation:FOLIO_OPERATION,jobType:FINANCE_FOLIO_EXPORT_JOB,auditAction:"finance.folio_export.requested"} : null;
 }
 
 // prettier-ignore
-function exportPayload(commandId:string,organizationId:string,snapshot:FinanceFolioExportSnapshot|FinanceExpenseExportSnapshot,expiresAt:string):FinanceExportJobPayload {
-  return snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? {commandId,organizationId,snapshot,expiresAt} : {commandId,organizationId,snapshot,expiresAt};
+function exportPayload(commandId:string,organizationId:string,snapshot:FinanceFolioExportSnapshot|FinanceExpenseExportSnapshot|FinanceProfitLossExportSnapshot|FinanceRevenueExportSnapshot|FinanceDashboardExportSnapshot,expiresAt:string):FinanceExportJobPayload {
+  return {commandId,organizationId,snapshot,expiresAt} as FinanceExportJobPayload;
 }
 
 async function transaction<T>(pool: pg.Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -321,5 +442,37 @@ function object(value: unknown): Record<string, unknown> {
     throw new TypeError("Finance folio export job payload is invalid");
   return value as Record<string, unknown>;
 }
-// prettier-ignore
-function exportShape(jobType:string,formatVersion:string,propertyId:string,exportId:string){if(jobType===FINANCE_FOLIO_EXPORT_JOB&&formatVersion===FINANCE_FOLIO_CSV_VERSION)return{filename:`pms-financials-folios-${propertyId}.csv`,storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`};if(jobType===FINANCE_EXPENSE_EXPORT_JOB&&formatVersion===FINANCE_EXPENSE_CSV_VERSION)return{filename:`pms-financials-expenses-${propertyId}.csv`,storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`};return null;}
+function exportShape(
+  jobType: string,
+  formatVersion: string,
+  propertyId: string,
+  exportId: string,
+  year: string | null,
+  asOf: string | null,
+  from: string | null,
+  to: string | null,
+) {
+  const storageKey = `private/finance/financials-exports/${exportId}/${formatVersion}.csv`;
+  if (jobType === FINANCE_FOLIO_EXPORT_JOB && formatVersion === FINANCE_FOLIO_CSV_VERSION)
+    return { filename: `pms-financials-folios-${propertyId}.csv`, storageKey };
+  if (jobType === FINANCE_EXPENSE_EXPORT_JOB && formatVersion === FINANCE_EXPENSE_CSV_VERSION)
+    return { filename: `pms-financials-expenses-${propertyId}.csv`, storageKey };
+  if (
+    jobType === FINANCE_PROFIT_LOSS_EXPORT_JOB &&
+    formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION &&
+    typeof year === "string" &&
+    /^[1-9]\d{3}$/.test(year) &&
+    typeof asOf === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(asOf)
+  )
+    return { filename: `pms-financials-profit-loss-${propertyId}-${year}-${asOf}.csv`, storageKey };
+  if (jobType === FINANCE_REVENUE_EXPORT_JOB && formatVersion === FINANCE_REVENUE_CSV_VERSION)
+    return parseFinanceRevenueQuery({ from, to })
+      ? { filename: `pms-financials-revenue-${propertyId}-${from}-${to}.csv`, storageKey }
+      : null;
+  if (jobType === FINANCE_DASHBOARD_EXPORT_JOB && formatVersion === FINANCE_DASHBOARD_CSV_VERSION)
+    return parseFinanceDashboardQuery({ asOf })
+      ? { filename: `pms-financials-dashboard-${propertyId}-${asOf}.csv`, storageKey }
+      : null;
+  return null;
+}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFinanceProfitLossCsvArtifact } from "./financialProfitLossCsv.js";
+import {
+  buildFinanceProfitLossCsvArtifact,
+  captureFinanceProfitLossExport,
+  parseFinanceProfitLossExportSnapshot,
+} from "./financialProfitLossCsv.js";
 import {
   financeReportingMoneyMetric,
   type FinanceProfitLossResponse,
@@ -105,5 +109,78 @@ describe("profit and loss CSV handoff", () => {
     negative.summary.expensesYtd = financeReportingMoneyMetric("10", "0", "EUR");
     negative.summary.netProfitYtd = financeReportingMoneyMetric("110", "100", "EUR");
     expect(build(negative).body).toContain(`"${CATEGORY}","-10.0000","EUR"`);
+  });
+
+  it("pins reconciled read evidence across later read-model changes", () => {
+    const read = response();
+    read.sourceFreshness = { supplierAccount: "secret-source-id" };
+    const snapshot = captureFinanceProfitLossExport({
+      propertyId: PROPERTY,
+      response: read,
+      query: { year: 2026 },
+      asOf: "2026-01-17",
+      categoryRows: [CATEGORY],
+    });
+    const parsed = parseFinanceProfitLossExportSnapshot(JSON.parse(JSON.stringify(snapshot)));
+    expect(parsed).toEqual(snapshot);
+    const jsonbOrder = (value: unknown): unknown =>
+      Array.isArray(value)
+        ? value.map(jsonbOrder)
+        : value && typeof value === "object"
+          ? Object.fromEntries(
+              Object.entries(value)
+                .reverse()
+                .map(([key, part]) => [key, jsonbOrder(part)]),
+            )
+          : value;
+    expect(JSON.stringify(parseFinanceProfitLossExportSnapshot(jsonbOrder(snapshot)))).toBe(
+      JSON.stringify(snapshot),
+    );
+    read.months[0]!.roomRevenue.amount = "999.0000";
+    expect(parsed!.manifest[0].response.sourceFreshness).toEqual({});
+    expect(JSON.stringify(parsed)).not.toContain("secret-source-id");
+    const artifact = buildFinanceProfitLossCsvArtifact({
+      propertyId: parsed!.propertyId,
+      response: parsed!.manifest[0].response,
+      query: parsed!.filters,
+      asOf: parsed!.asOf,
+      categoryRows: parsed!.manifest[0].categoryRows,
+    });
+    expect(artifact.body).toContain('"100.0000","EUR"');
+    expect(artifact.body).not.toContain("999.0000");
+    expect(artifact.rowCount).toBe(14);
+  });
+
+  it("rejects changed scope, cutoff, structure, and unreconciled snapshot evidence", () => {
+    const snapshot = captureFinanceProfitLossExport({
+      propertyId: PROPERTY,
+      response: response(),
+      query: { year: 2026 },
+      asOf: "2026-01-17",
+      categoryRows: [CATEGORY],
+    });
+    const changedAmount = structuredClone(snapshot);
+    changedAmount.manifest[0].response.months[0]!.netProfit.amount = "999.0000";
+    const missingCategory = structuredClone(snapshot);
+    delete (
+      missingCategory.manifest[0].response.months[0]!.expenseCategories as Record<string, unknown>
+    )["staff"];
+    const extraResponseField = structuredClone(snapshot);
+    Object.assign(extraResponseField.manifest[0].response, { providerSecret: "do-not-store" });
+    const extraMoneyField = structuredClone(snapshot);
+    Object.assign(extraMoneyField.manifest[0].response.months[0]!.revenue, {
+      providerSecret: "do-not-store",
+    });
+    for (const changed of [
+      { ...snapshot, propertyId: "12140000-0000-4000-8000-000000000002" },
+      { ...snapshot, asOf: "2026-01-18" },
+      { ...snapshot, filters: { year: 2025 } },
+      changedAmount,
+      missingCategory,
+      extraResponseField,
+      extraMoneyField,
+      { ...snapshot, providerSecret: "do-not-store" },
+    ])
+      expect(parseFinanceProfitLossExportSnapshot(changed)).toBeNull();
   });
 });
