@@ -5,6 +5,7 @@ import {
   type FinanceProfitLossQuery,
   type FinanceProfitLossResponse,
 } from "./financialReporting.js";
+import { financeCsvRow } from "./financialCsv.js";
 
 export const FINANCE_PROFIT_LOSS_CSV_VERSION = "pms-financials-profit-loss.v1" as const;
 export const FINANCE_PROFIT_LOSS_CSV_CONTENT_TYPE = "text/csv; charset=utf-8" as const;
@@ -129,7 +130,7 @@ export function buildFinanceProfitLossCsvArtifact(input: {
     generatedAt: response.generatedAt,
     filename: `pms-financials-profit-loss-${response.propertyId}-${query.year}-${asOf}.csv`,
     rowCount: rows.length,
-    body: [FINANCE_PROFIT_LOSS_CSV_COLUMNS, ...rows].map(csvRow).join("\r\n") + "\r\n",
+    body: [FINANCE_PROFIT_LOSS_CSV_COLUMNS, ...rows].map(financeCsvRow).join("\r\n") + "\r\n",
   };
 }
 
@@ -224,18 +225,6 @@ export function parseFinanceProfitLossExportSnapshot(
     ],
   };
 }
-
-// Guard every cell, including future fields, before CSV quoting.
-const csvRow = (values: Row) =>
-  values
-    .map((value) => {
-      const safe =
-        /^[=+\-@\t\r\n]/.test(value) && !/^-?(?:0|[1-9]\d*)\.\d{4}$/.test(value)
-          ? `'${value}`
-          : value;
-      return `"${safe.replaceAll('"', '""')}"`;
-    })
-    .join(",");
 
 function localDate(instant: string, timeZone: string): string | null {
   try {
