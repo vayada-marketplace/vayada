@@ -1117,7 +1117,8 @@ const channexManagementWorkerStore = channexManagementProvider
       stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
   : undefined;
-const channexOfferSchedule = config.channexManagement.stagingInventoryEnabled &&
+const channexOfferSchedule = config.channexManagement.workerEnabled &&
+  config.channexManagement.stagingInventoryEnabled &&
   config.channexManagement.stagingRestrictionsPropertyId
   ? createPgChannexAriSchedule(
       targetDatabaseUrl,
