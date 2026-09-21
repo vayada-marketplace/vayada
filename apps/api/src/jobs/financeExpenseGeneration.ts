@@ -138,14 +138,58 @@ export async function runFinanceExpenseGenerationJobs(pool:pg.Pool,options:{work
   return counters;
 }
 
+// Explicit, property-scoped preactivation drain. It only claims OTA commission
+// jobs while Financials is inactive; the regular worker keeps its entitlement gate.
+export async function runPreactivationOtaCommissionJobs(
+  pool: pg.Pool,
+  options: { propertyId: string; evidenceIds: string[]; clock?: () => Date },
+): Promise<FinanceExpenseGenerationCounters> {
+  const counters: FinanceExpenseGenerationCounters = {
+    succeeded: 0,
+    replayed: 0,
+    incomplete: 0,
+    retryScheduled: 0,
+    deadLettered: 0,
+  };
+  for (const evidenceId of options.evidenceIds) {
+    const outcome = await runOne(pool, {
+      propertyId: options.propertyId,
+      clock: options.clock,
+      preactivationOta: true,
+      preactivationEvidenceId: evidenceId,
+    });
+    if (!outcome) break;
+    if (outcome !== "continued") counters[outcome]++;
+  }
+  return counters;
+}
+
+export async function isFinanceGenerationEnabled(
+  client: pg.PoolClient,
+  propertyId: string,
+): Promise<boolean> {
+  const row = (
+    await client.query<{ enabled: boolean }>(
+      `SELECT ${financeGenerationEnabled("$1::uuid")} AS enabled`,
+      [propertyId],
+    )
+  ).rows[0];
+  return row?.enabled ?? false;
+}
+
 // prettier-ignore
-async function runOne(pool:pg.Pool,options:{workerId?:string;propertyId?:string;clock?:()=>Date;random?:()=>number}):Promise<RunOutcome|null>{
+async function runOne(pool:pg.Pool,options:{workerId?:string;propertyId?:string;clock?:()=>Date;random?:()=>number;preactivationOta?:boolean;preactivationEvidenceId?:string}):Promise<RunOutcome|null>{
   const client=await pool.connect(),now=(options.clock??(()=>new Date()))(),worker=options.workerId??`finance-expense:${process.pid}`;
   try{await client.query("BEGIN");await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='30s'");
     const job=(await client.query<Job>(`SELECT id::text,job_key AS "jobKey",property_id::text AS "propertyId",resource_type AS "resourceType",resource_id AS "resourceId",correlation_id AS "correlationId",attempts_count::int AS "attemptsCount",max_attempts::int AS "maxAttempts",payload,job_metadata AS "jobMetadata",job_metadata->>'requestId' AS "requestId",job_metadata->>'causationId' AS "causationId",job_metadata->>'requestedAt' AS "requestedAt" FROM platform.jobs job
       WHERE queue_name=$1 AND job_type=$2 AND tenant_scope='property' AND property_id IS NOT NULL AND status='pending' AND run_after<=$3::timestamptz AND attempts_count<max_attempts AND ($4::uuid IS NULL OR property_id=$4::uuid)
-        AND ${financeGenerationEnabled("job.property_id")}
-      ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,[FINANCE_EXPENSE_GENERATION_QUEUE,FINANCE_EXPENSE_GENERATION_JOB_TYPE,now.toISOString(),options.propertyId??null])).rows[0];
+        AND (($5::boolean AND job.resource_type='ota_commission_evidence' AND job.resource_id=$6::text AND job.payload->>'family'='ota_commission'
+          AND EXISTS(SELECT 1 FROM finance.ota_commission_evidence evidence WHERE evidence.id::text=job.resource_id
+            AND evidence.property_id=job.property_id AND evidence.evidence_state='applied' AND evidence.commission_amount<>0)
+          AND ${financePreactivationEligible("job.property_id")}
+          AND NOT ${financeGenerationEnabled("job.property_id")})
+          OR (NOT $5::boolean AND ${financeGenerationEnabled("job.property_id")}))
+      ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`,[FINANCE_EXPENSE_GENERATION_QUEUE,FINANCE_EXPENSE_GENERATION_JOB_TYPE,now.toISOString(),options.propertyId??null,options.preactivationOta??false,options.preactivationEvidenceId??null])).rows[0];
     if(!job){await client.query("COMMIT");return null;}const attempt=job.attemptsCount+1;
     await client.query("UPDATE platform.jobs SET status='running',attempts_count=$2,locked_at=$3,locked_by=$4,updated_at=$3 WHERE id=$1::uuid",[job.id,attempt,now.toISOString(),worker]);
     const attemptId=(await client.query<{id:string}>("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1::uuid,$2,'running',$3,$4) RETURNING id::text",[job.id,attempt,worker,now.toISOString()])).rows[0]!.id;
@@ -246,6 +290,18 @@ function financeGenerationEnabled(propertyId:string){return `EXISTS(SELECT 1 FRO
     AND NOT EXISTS(SELECT 1 FROM identity.product_entitlements suspension WHERE suspension.organization_id=financials.organization_id AND suspension.product='pms' AND suspension.entitlement_key='module:financials' AND suspension.status='suspended' AND (suspension.starts_at IS NULL OR suspension.starts_at<=now()) AND (suspension.expires_at IS NULL OR suspension.expires_at>now()) AND (suspension.resource_product IS NULL OR (suspension.resource_product='pms' AND suspension.resource_type='pms_property' AND suspension.resource_id=(${propertyId})::text)))
     AND EXISTS(SELECT 1 FROM identity.product_entitlements base WHERE base.organization_id=financials.organization_id AND base.product='pms' AND base.entitlement_key='property-management' AND base.status='active' AND (base.starts_at IS NULL OR base.starts_at<=now()) AND (base.expires_at IS NULL OR base.expires_at>now()) AND (base.resource_product IS NULL OR (base.resource_product='pms' AND base.resource_type='pms_property' AND base.resource_id=(${propertyId})::text)))
     AND NOT EXISTS(SELECT 1 FROM identity.product_entitlements suspension WHERE suspension.organization_id=financials.organization_id AND suspension.product='pms' AND suspension.entitlement_key='property-management' AND suspension.status='suspended' AND (suspension.starts_at IS NULL OR suspension.starts_at<=now()) AND (suspension.expires_at IS NULL OR suspension.expires_at>now()) AND (suspension.resource_product IS NULL OR (suspension.resource_product='pms' AND suspension.resource_type='pms_property' AND suspension.resource_id=(${propertyId})::text))))`;}
+// prettier-ignore
+function financePreactivationEligible(propertyId:string){return `EXISTS(SELECT 1 FROM identity.organization_resource_links resource
+  JOIN identity.organizations organization ON organization.id=resource.organization_id AND organization.kind='hotel_group' AND organization.status='active'
+  JOIN identity.product_entitlements base ON base.organization_id=resource.organization_id AND base.product='pms' AND base.entitlement_key='property-management' AND base.status='active'
+    AND (base.starts_at IS NULL OR base.starts_at<=now()) AND (base.expires_at IS NULL OR base.expires_at>now())
+    AND (base.resource_product IS NULL OR (base.resource_product='pms' AND base.resource_type='pms_property' AND base.resource_id=(${propertyId})::text))
+  WHERE resource.product='pms' AND resource.resource_type='pms_property' AND resource.resource_id=(${propertyId})::text
+    AND resource.relationship IN ('owner','finance_manager') AND resource.status='active'
+    AND NOT EXISTS(SELECT 1 FROM identity.product_entitlements suspension WHERE suspension.organization_id=resource.organization_id
+      AND suspension.product='pms' AND suspension.entitlement_key='property-management' AND suspension.status='suspended'
+      AND (suspension.starts_at IS NULL OR suspension.starts_at<=now()) AND (suspension.expires_at IS NULL OR suspension.expires_at>now())
+      AND (suspension.resource_product IS NULL OR (suspension.resource_product='pms' AND suspension.resource_type='pms_property' AND suspension.resource_id=(${propertyId})::text))))`;}
 // prettier-ignore
 function uuid(value:unknown):value is string{return typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);}
 // prettier-ignore
