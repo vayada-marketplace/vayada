@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - flamurmaliqi2811/vay-2044-expense-worker-runtime
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
