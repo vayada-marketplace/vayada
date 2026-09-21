@@ -68,29 +68,32 @@ jobs:
             destination="release-work/downloads/${artifact_id}"
             mkdir -p "$destination"
             if (
-              set -e
-              artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")"
-              test "$(jq -r '.expired' <<< "$artifact_json")" = false
-              test "$(jq -r '.name' <<< "$artifact_json")" = "$artifact_name"
-              publisher_run_id="$(jq -r '.workflow_run.id' <<< "$artifact_json")"
-              publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
-              test "$(jq -r '.status' <<< "$publisher_run")" = completed
-              test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
-              test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
-              test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
-              test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml
-              test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY"
+              # Bash disables errexit inside an if condition; fail each check explicitly.
+              artifact_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}")" || exit 1
+              test "$(jq -r '.expired' <<< "$artifact_json")" = false || exit 1
+              test "$(jq -r '.name' <<< "$artifact_json")" = "$artifact_name" || exit 1
+              publisher_run_id="$(jq -r '.workflow_run.id' <<< "$artifact_json")" || exit 1
               gh api \
                 -H "Accept: application/vnd.github+json" \
                 "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
-                > "$destination/artifact.zip"
-              unzip -q "$destination/artifact.zip" -d "$destination/content"
+                > "$destination/artifact.zip" || exit 1
+              unzip -q "$destination/artifact.zip" -d "$destination/content" || exit 1
               record="$destination/content/published-record.json"
-              test -f "$record"
-              test "$(jq -r '.publishedArtifactName' "$record")" = "$artifact_name"
-              test "$(jq -r '.publisher.runId' "$record")" = "$publisher_run_id"
+              test -f "$record" || exit 1
+              test "$(jq -r '.publishedArtifactName' "$record")" = "$artifact_name" || exit 1
+              test "$(jq -r '.publisher.runId' "$record")" = "$publisher_run_id" || exit 1
+              publisher_run_attempt="$(jq -r '.publisher.runAttempt' "$record")" || exit 1
+              [[ "$publisher_run_attempt" =~ ^[1-9][0-9]*$ ]] || exit 1
+              publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}/attempts/${publisher_run_attempt}")" || exit 1
+              test "$(jq -r '.status' <<< "$publisher_run")" = completed || exit 1
+              test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run || exit 1
+              test "$(jq -r '.head_branch' <<< "$publisher_run")" = main || exit 1
+              test "$(jq -r '.head_repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY" || exit 1
+              test "$(jq -r '.path' <<< "$publisher_run")" = .github/workflows/publish-coordinated-release.yml || exit 1
+              test "$(jq -r '.repository.full_name' <<< "$publisher_run")" = "$GITHUB_REPOSITORY" || exit 1
+              test "$(jq -r '.id' <<< "$publisher_run")" = "$publisher_run_id" || exit 1
               test "$(jq -r '.publisher.runAttempt' "$record")" = \
-                "$(jq -r '.run_attempt' <<< "$publisher_run")"
+                "$(jq -r '.run_attempt' <<< "$publisher_run")" || exit 1
             ); then
               mv "$destination/content" "release-work/candidates/${artifact_id}"
             else

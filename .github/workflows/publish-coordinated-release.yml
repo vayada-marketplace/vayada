@@ -29,7 +29,8 @@ jobs:
   publish:
     if: >-
       ${{
-        (vars.COORDINATED_RELEASES_ENABLED == 'true' || github.event.workflow_run.event == 'workflow_dispatch') &&
+        github.ref == 'refs/heads/main' &&
+        (vars.COORDINATED_RELEASES_ENABLED == 'true' || github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'workflow_dispatch') &&
         (
           github.event_name == 'workflow_dispatch' ||
           (
@@ -61,11 +62,21 @@ jobs:
           set -euo pipefail
           mkdir -p release-work/content
           if test "${GITHUB_EVENT_NAME}" = workflow_run; then
+            # Uploaded publications are immutable, including after a failed dispatch.
+            existing_publications="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.name | startswith("next-release-published-v1-")) | .id')"
+            if test -n "$existing_publications"; then
+              echo "::error::Publication already exists (artifact IDs: $existing_publications). Start a fresh workflow_dispatch on main with published_artifact_id set to the existing non-expired artifact ID; do not rerun or replace this publication."
+              exit 1
+            fi
             case "$SOURCE_EVENT" in
               push|workflow_dispatch) ;;
               *) echo "::error::Source event is not allowlisted: $SOURCE_EVENT"; exit 1 ;;
             esac
-            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}")"
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/attempts/${SOURCE_RUN_ATTEMPT}")"
+            test "$(jq -r '.id' <<< "$run_json")" = "$SOURCE_RUN_ID"
+            test "$(jq -r '.repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
+            test "$(jq -r '.event' <<< "$run_json")" = "$SOURCE_EVENT"
             test "$(jq -r '.status' <<< "$run_json")" = completed
             test "$(jq -r '.conclusion' <<< "$run_json")" = success
             test "$(jq -r '.head_branch' <<< "$run_json")" = main
@@ -128,7 +139,9 @@ jobs:
             test "$(jq -r '.workflow_run.id' <<< "$artifact_json")" = \
               "$(jq -r '.publisher.runId' release-work/content/published-record.json)"
             publisher_run_id="$(jq -r '.publisher.runId' release-work/content/published-record.json)"
-            publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}")"
+            publisher_run_attempt="$(jq -r '.publisher.runAttempt' release-work/content/published-record.json)"
+            publisher_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${publisher_run_id}/attempts/${publisher_run_attempt}")"
+            test "$(jq -r '.id' <<< "$publisher_run")" = "$publisher_run_id"
             test "$(jq -r '.status' <<< "$publisher_run")" = completed
             test "$(jq -r '.event' <<< "$publisher_run")" = workflow_run
             test "$(jq -r '.head_branch' <<< "$publisher_run")" = main
