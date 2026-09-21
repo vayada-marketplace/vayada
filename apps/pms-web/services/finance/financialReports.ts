@@ -1,4 +1,8 @@
-import type { FinanceDashboardResponse, FinanceRevenueResponse } from "@vayada/domain-finance";
+import type {
+  FinanceDashboardResponse,
+  FinanceProfitLossResponse,
+  FinanceRevenueResponse,
+} from "@vayada/domain-finance";
 
 import {
   pmsOperationsClient,
@@ -6,6 +10,13 @@ import {
 } from "@/services/api/pmsOperationsClient";
 
 type RoomTypeListResponse = { items: Array<{ roomTypeId: string; name: string }> };
+
+export function verifyFinancialsAccess(propertyId: string, signal?: AbortSignal): Promise<void> {
+  return pmsOperationsClient.get<void>(
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/access`,
+    { ...pmsOperationsRequestOptions, signal },
+  );
+}
 
 export function getFinanceDashboard(
   propertyId: string,
@@ -25,6 +36,17 @@ export function getFinanceRevenue(
   const query = new URLSearchParams({ from: input.from, to: input.to });
   return pmsOperationsClient.get<FinanceRevenueResponse>(
     `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/revenue?${query}`,
+    { ...pmsOperationsRequestOptions, signal: input.signal },
+  );
+}
+
+export function getFinanceProfitLoss(
+  propertyId: string,
+  input: { year: number; signal?: AbortSignal },
+): Promise<FinanceProfitLossResponse> {
+  const query = new URLSearchParams({ year: String(input.year) });
+  return pmsOperationsClient.get<FinanceProfitLossResponse>(
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/profit-loss?${query}`,
     { ...pmsOperationsRequestOptions, signal: input.signal },
   );
 }
