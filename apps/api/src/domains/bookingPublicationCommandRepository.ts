@@ -210,8 +210,8 @@ export function createPgBookingPublicationCommandRepository(config: {
     async getPublicationStatus(input) {
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
-        if (!(await lockAuthorizedScope(client, input, now()))) {
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        if (!(await lockAuthorizedScope(client, input, now(), false, true))) {
           await rollback(client);
           return null;
         }
@@ -235,8 +235,8 @@ export function createPgBookingPublicationCommandRepository(config: {
     async getPublicationReview(input) {
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
-        if (!(await lockAuthorizedScope(client, input, now()))) {
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        if (!(await lockAuthorizedScope(client, input, now(), false, true))) {
           await rollback(client);
           return null;
         }
@@ -299,6 +299,7 @@ async function lockAuthorizedScope(
   command: AuthorizedScopeInput,
   at: Date,
   requireActive = false,
+  readOnly = false,
 ): Promise<number | null> {
   const scope = await client.query<{ lifecycleRevision: number | string }>(
     `SELECT property.lifecycle_revision AS "lifecycleRevision"
@@ -327,8 +328,12 @@ async function lockAuthorizedScope(
       AND permission_grant.permission_key = $4
      WHERE property.id = $2::uuid
        AND ($5::boolean = false OR property.lifecycle_status = 'active')
-     FOR SHARE OF property, organization, resource, actor, membership
-     FOR KEY SHARE OF permission_grant`,
+     ${
+       readOnly
+         ? ""
+         : `FOR SHARE OF property, organization, resource, actor, membership
+     FOR KEY SHARE OF permission_grant`
+     }`,
     [command.organizationId, command.propertyId, command.actorUserId, PERMISSION, requireActive],
   );
   const lifecycleRevision = Number(scope.rows[0]?.lifecycleRevision);
@@ -358,7 +363,7 @@ async function lockAuthorizedScope(
            AND resource_type = 'booking_hotel'
            AND resource_id = $2::uuid::text)
        )
-     FOR SHARE`,
+     ${readOnly ? "" : "FOR SHARE"}`,
     [command.organizationId, command.propertyId],
   );
   const applicable = entitlements.rows.filter(

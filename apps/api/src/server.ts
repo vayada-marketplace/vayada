@@ -999,9 +999,14 @@ const propertySetupPmsRuntime = (() => {
   const propertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
     connectionString: targetDatabaseUrl,
   });
+  // Calendar commands still need the owner lock; only GET composition uses SELECT-only evidence.
+  const readOnlyPropertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+    connectionString: targetDatabaseUrl,
+    readOnly: true,
+  });
   const operatingCalendar = createPgPmsOperatingCalendarReadModel({
     connectionString: targetDatabaseUrl,
-    propertyProfileEvidence,
+    propertyProfileEvidence: readOnlyPropertyProfileEvidence,
     roomEvidence: { roomFacts, roomCapacity: roomFacts },
   });
   return {
@@ -1031,6 +1036,7 @@ const propertySetupPmsRuntime = (() => {
       recurringPricing,
       mandatoryCharges,
       propertyProfileEvidence,
+      readOnlyPropertyProfileEvidence,
       operatingCalendar,
     ],
   };
