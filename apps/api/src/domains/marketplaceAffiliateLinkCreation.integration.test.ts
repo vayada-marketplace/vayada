@@ -18,6 +18,10 @@ import {
   affiliateTrafficSource,
   recordSyntheticMarketplaceAffiliateClick,
 } from "./marketplaceAffiliateClickOccurrence.js";
+import {
+  admitSyntheticAffiliateClick,
+  createSyntheticAffiliateClickContext,
+} from "./bookingAffiliateClickAdmission.js";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -88,6 +92,10 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         new URL("0403_marketplace_affiliate_click_occurrences.sql", migrations),
         "utf8",
       ),
+    );
+    await pool().query("DROP SCHEMA IF EXISTS booking CASCADE; CREATE SCHEMA booking");
+    await pool().query(
+      await readFile(new URL("0404_booking_affiliate_click_admissions.sql", migrations), "utf8"),
     );
   });
 
@@ -200,6 +208,61 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
         .count,
     ).toBe("1");
+  });
+
+  it("admits trusted clicks once in destination order and rejects another context", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    const second = await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (first.status !== "recorded" || second.status !== "recorded")
+      throw new Error("Missing click");
+    const contextId = await createSyntheticAffiliateClickContext(pool(), id(3));
+    const [admitted, replay] = await Promise.all([
+      admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+      admitSyntheticAffiliateClick(pool(), contextId, first.referenceToken),
+    ]);
+    expect([admitted, replay]).toEqual(
+      expect.arrayContaining([
+        { status: "admitted", clickId: first.clickId, historyPosition: "1", replayed: false },
+        { status: "admitted", clickId: first.clickId, historyPosition: "1", replayed: true },
+      ]),
+    );
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, second.referenceToken)).toEqual({
+      status: "admitted",
+      clickId: second.clickId,
+      historyPosition: "2",
+      replayed: false,
+    });
+    const another = await createSyntheticAffiliateClickContext(pool(), id(3));
+    expect(await admitSyntheticAffiliateClick(pool(), another, first.referenceToken)).toEqual({
+      status: "conflict",
+    });
+    const wrongProperty = await createSyntheticAffiliateClickContext(pool(), id(6));
+    expect(
+      await admitSyntheticAffiliateClick(pool(), wrongProperty, second.referenceToken),
+    ).toEqual({
+      status: "unavailable",
+    });
+    expect(await admitSyntheticAffiliateClick(pool(), contextId, "vc_invalid")).toEqual({
+      status: "unavailable",
+    });
+    await expect(
+      pool().query("UPDATE booking.affiliate_click_admissions SET history_position=3"),
+    ).rejects.toThrow();
+    await expect(pool().query("DELETE FROM booking.affiliate_click_admissions")).rejects.toThrow();
+    await expect(
+      pool().query("DELETE FROM booking.affiliate_click_contexts WHERE id=$1", [wrongProperty]),
+    ).rejects.toThrow("Affiliate click context history is immutable");
+    await expect(pool().query("TRUNCATE booking.affiliate_click_admissions")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
+    await expect(pool().query("TRUNCATE booking.affiliate_click_contexts CASCADE")).rejects.toThrow(
+      "Affiliate click context history is immutable",
+    );
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
+    ).toBe("2");
   });
 
   it("serializes concurrent requests for the same agreement", async () => {

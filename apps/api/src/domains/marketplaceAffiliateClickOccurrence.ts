@@ -67,3 +67,19 @@ export async function recordSyntheticMarketplaceAffiliateClick(
     client.release();
   }
 }
+
+/** Marketplace-owned proof for the synthetic Booking transport test path. */
+export async function readSyntheticMarketplaceAffiliateClick(
+  client: pg.PoolClient,
+  referenceToken: unknown,
+): Promise<{ clickId: string; propertyId: string } | null> {
+  if (typeof referenceToken !== "string" || !/^vc_[A-Za-z0-9_-]{22}$/.test(referenceToken))
+    return null;
+  const result = await client.query(
+    `SELECT id,property_id FROM marketplace.affiliate_click_occurrences
+     WHERE reference_token=$1 AND synthetic=TRUE FOR SHARE`,
+    [referenceToken],
+  );
+  if (!result.rowCount) return null;
+  return { clickId: result.rows[0].id, propertyId: result.rows[0].property_id };
+}
