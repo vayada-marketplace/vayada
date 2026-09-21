@@ -121,6 +121,14 @@ describe("Revenue CSV handoff", () => {
     expect(() => build(alias)).toThrow(TypeError);
   });
 
+  it("accepts UTC timestamp precision accepted by Revenue GET", () => {
+    for (const generatedAt of ["2026-08-04T14:00:00Z", "2026-08-04T14:00:00.1Z"]) {
+      const value = response();
+      value.generatedAt = generatedAt;
+      expect(build(value).generatedAt).toBe(generatedAt);
+    }
+  });
+
   it("pins only whitelisted read fields and rebuilds identical CSV after JSON storage", () => {
     const raw = response();
     (raw.summary.nights as unknown as Record<string, unknown>)["guestSecret"] = "never-store";

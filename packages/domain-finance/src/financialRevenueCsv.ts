@@ -338,8 +338,9 @@ const uuid = (value: unknown): value is string =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 const instant = (value: unknown): value is string =>
   typeof value === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) &&
   Number.isFinite(Date.parse(value)) &&
-  new Date(value).toISOString() === value;
+  new Date(value).toISOString().slice(0, 19) === value.slice(0, 19);
 function zone(value: string): boolean {
   try {
     const timeZone = getTimezone(value);
