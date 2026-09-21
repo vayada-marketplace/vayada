@@ -120,17 +120,50 @@ export async function uploadPmsInboxAttachment(input: {
   threadId: string;
   file: File;
 }): Promise<PmsInboxAttachmentUploadResult> {
+  const mediaId = await uploadPrivatePmsFile({
+    purpose: "pms.messaging.attachment",
+    propertyId: input.propertyId,
+    targetResourceId: input.threadId,
+    file: input.file,
+  });
+  return {
+    mediaId,
+    filename: input.file.name || "Attachment",
+    contentType: input.file.type || "application/octet-stream",
+    size: input.file.size,
+  };
+}
+
+export function uploadFinanceExpenseReceipt(input: {
+  propertyId: string;
+  expenseId: string;
+  file: File;
+}): Promise<string> {
+  return uploadPrivatePmsFile({
+    purpose: "finance.expense.receipt",
+    propertyId: input.propertyId,
+    targetResourceId: input.expenseId,
+    file: input.file,
+  });
+}
+
+async function uploadPrivatePmsFile(input: {
+  purpose: "pms.messaging.attachment" | "finance.expense.receipt";
+  propertyId: string;
+  targetResourceId: string;
+  file: File;
+}): Promise<string> {
   const create = await platformMediaClient.post<UploadSessionResponse>(
     "/api/media/upload-sessions",
     {
-      purpose: "pms.messaging.attachment",
+      purpose: input.purpose,
       visibility: "private",
       resource: {
         product: "pms",
         resourceType: "pms_property",
         resourceId: input.propertyId,
         propertyId: input.propertyId,
-        targetResourceId: input.threadId,
+        targetResourceId: input.targetResourceId,
       },
       files: [
         {
@@ -173,12 +206,7 @@ export async function uploadPmsInboxAttachment(input: {
   if (!mediaId) {
     throw new ApiErrorResponse(500, { detail: "Attachment did not finish preparing" });
   }
-  return {
-    mediaId,
-    filename: input.file.name || "Attachment",
-    contentType: input.file.type || "application/octet-stream",
-    size: input.file.size,
-  };
+  return mediaId;
 }
 
 function isDeterministicLocalUploadTarget(uploadUrl: string): boolean {

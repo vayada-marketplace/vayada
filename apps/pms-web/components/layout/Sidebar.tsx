@@ -18,6 +18,7 @@ import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 import { getAuthCsrfToken } from "@/services/auth/sessionStore";
 import { resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
 import { messagingService } from "@/services/messaging";
+import { verifyFinancialsAccess } from "@/services/finance/financialReports";
 import {
   createBrowserAuthHandoff,
   crossAppReauthenticationUrl,
@@ -104,9 +105,11 @@ const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   },
 ];
 
-export function visiblePmsNavigation(permissions: readonly string[]) {
-  return CORE_NAV_ITEMS.filter((item) =>
-    item.requiredAny.some((permission) => permissions.includes(permission)),
+export function visiblePmsNavigation(permissions: readonly string[], financialsAvailable = false) {
+  return CORE_NAV_ITEMS.filter(
+    (item) =>
+      (item.href !== "/financials" || financialsAvailable) &&
+      item.requiredAny.some((permission) => permissions.includes(permission)),
   );
 }
 
@@ -125,6 +128,7 @@ export default function Sidebar({
     () => new Set<Product>(["pms"]),
   );
   const [inboxUnread, setInboxUnread] = useState(0);
+  const [financialsAvailable, setFinancialsAvailable] = useState(false);
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
 
@@ -165,6 +169,36 @@ export default function Sidebar({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  useEffect(() => {
+    if (!permissions.includes("pms.finance.read")) {
+      setFinancialsAvailable(false);
+      return;
+    }
+    let controller: AbortController | undefined;
+    const refresh = () => {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      setFinancialsAvailable(false);
+      void resolveSelectedPmsPropertyId("checking Financials access")
+        .then((propertyId) => verifyFinancialsAccess(propertyId, signal))
+        .then(() => {
+          if (!signal.aborted) setFinancialsAvailable(true);
+        })
+        .catch(() => {
+          if (!signal.aborted) setFinancialsAvailable(false);
+        });
+    };
+    refresh();
+    window.addEventListener("vayada-feature-modules-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener("vayada-feature-modules-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [pathname, permissions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,7 +249,7 @@ export default function Sidebar({
     };
   }, []);
 
-  const navItems: NavItem[] = visiblePmsNavigation(permissions).map((item) =>
+  const navItems: NavItem[] = visiblePmsNavigation(permissions, financialsAvailable).map((item) =>
     item.href === "/inbox" && inboxUnread > 0 ? { ...item, badge: inboxUnread } : item,
   );
 
