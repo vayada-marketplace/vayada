@@ -17,6 +17,8 @@ type Input = {
   finance: NonNullable<Awaited<ReturnType<typeof lockFinancePricingAcceptanceTerms>>>;
   bookingId: string;
   publicReference: string;
+  /** Server-owned synthetic fixture only; never read from a guest command. */
+  syntheticAffiliateContextId?: string;
 };
 const iso = (v: unknown): v is string =>
   typeof v === "string" && Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
@@ -106,6 +108,21 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const cents = numerator / unit,
     amount = `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
   const guest = parsed.guest;
+  if (input.syntheticAffiliateContextId !== undefined) {
+    await client.query("SAVEPOINT pricing_affiliate_binding_guard");
+    await client.query("RELEASE SAVEPOINT pricing_affiliate_binding_guard");
+    if (
+      (await client.query("SHOW transaction_isolation")).rows[0]?.transaction_isolation !==
+      "read committed"
+    )
+      return fail();
+    const context = await client.query(
+      `SELECT id FROM booking.affiliate_click_contexts
+       WHERE id=$1 AND property_id=$2 AND synthetic=TRUE FOR UPDATE`,
+      [input.syntheticAffiliateContextId, scope.propertyId],
+    );
+    if (!context.rowCount) return fail();
+  }
   await client.query(
     `WITH draft AS (
     INSERT INTO booking.guest_bookings(id,property_id,public_reference,source_system,booking_channel,direct_booking_source,
@@ -146,6 +163,23 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.specialRequests,
     ],
   );
+  if (input.syntheticAffiliateContextId !== undefined)
+    await client.query(
+      `INSERT INTO booking.affiliate_original_booking_bindings
+         (booking_id,property_id,context_id,history_cutoff,
+          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
+       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,TRUE
+       FROM booking.affiliate_click_admissions WHERE context_id=$3`,
+      [
+        bookingId,
+        scope.propertyId,
+        input.syntheticAffiliateContextId,
+        publicReference,
+        quote.stay.checkIn,
+        quote.stay.checkOut,
+        quote.stay.currency,
+      ],
+    );
   await persistPricingBookingAddons(client, slug, current, bookingId);
   if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
   return { bookingId, publicReference };
