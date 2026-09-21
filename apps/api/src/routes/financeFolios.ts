@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
+
 import { UnauthorizedError, type RequestContext } from "@vayada/backend-auth";
 import {
   AuthorizationError,
@@ -13,6 +16,9 @@ import {
   FINANCE_PROFIT_LOSS_CSV_VERSION,
   FINANCE_REVENUE_CSV_VERSION,
   PMS_FINANCIALS_CONTRACT_VERSION,
+  buildFinanceDashboardCsvArtifact,
+  buildFinanceProfitLossCsvArtifact,
+  buildFinanceRevenueCsvArtifact,
   captureFinanceProfitLossExport,
   captureFinanceRevenueExport,
   captureFinanceDashboardExport,
@@ -50,6 +56,7 @@ import {
   type FinanceExportCommand,
   type FinanceExportEnqueueResult,
   type FinanceFolioExportStatus,
+  type FinanceStreamArtifactAudit,
 } from "../domains/financeFolioExportRepository.js";
 import {
   FinanceExpenseEvidenceError,
@@ -83,13 +90,19 @@ type Params = { propertyId: string; folioId?: string; exportId?: string };
 type Scope = { context: RequestContext; propertyId: string };
 export type FinanceFolioRoutesOptions = {
   propertyAccessRepository?: PropertyAccessRepository;
-  repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport">;
-  expenseExports?: Pick<FinanceExpenseReadModel, "captureExport">;
+  repository: Pick<FinanceFolioReadRepository, "list" | "detail" | "captureReadyExport"> &
+    Partial<Pick<FinanceFolioReadRepository, "exportReady">>;
+  expenseExports?: Pick<FinanceExpenseReadModel, "captureExport"> &
+    Partial<Pick<FinanceExpenseReadModel, "exportCsv">>;
   profitLossExports?: Pick<FinanceProfitLossReadModel, "profitLoss">;
   revenueExports?: Pick<FinanceRevenueReadModel, "revenue">;
   dashboardExports?: Pick<FinanceDashboardReadModel, "dashboard">;
   exports?: {
     enqueue(command: FinanceExportCommand): Promise<FinanceExportEnqueueResult>;
+    recordStream?(
+      command: FinanceExportCommand,
+      artifact: FinanceStreamArtifactAudit,
+    ): Promise<void>;
   };
   exportDownloads?: {
     read: {
@@ -114,6 +127,8 @@ export type FinanceFolioRoutesOptions = {
 
 const ROOT = "/finance/properties/:propertyId/financials/folios";
 const EXPORT_ROOT = "/finance/properties/:propertyId/financials/exports";
+const MAX_STREAM_SNAPSHOT_BYTES = 128 * 1024;
+const MAX_STREAM_CSV_BYTES = 256 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export async function registerFinanceFolioRoutes(
@@ -160,6 +175,59 @@ export async function registerFinanceFolioRoutes(
           current.propertyId,
           value.tab === "profit-loss" || value.tab === "revenue" || value.tab === "dashboard",
         );
+      }),
+    );
+
+  if (options.exports?.recordStream)
+    app.post(`${EXPORT_ROOT}/auto`, { onRequest: read }, async (request, reply) =>
+      safe(reply, async () => {
+        const value = exportRequest(request.body);
+        if (!empty(request.query) || !value || !headerMatches(request, value.idempotencyKey))
+          return bad(reply);
+        const current = scopes.get(request)!;
+        const command = await prepareExport(value, current, options);
+        if (!command) return missing(reply);
+        const queued = async () =>
+          exportResponse(
+            reply,
+            await options.exports!.enqueue(command),
+            current.propertyId,
+            value.tab === "profit-loss" || value.tab === "revenue" || value.tab === "dashboard",
+          );
+        if (Buffer.byteLength(JSON.stringify(command.snapshot), "utf8") > MAX_STREAM_SNAPSHOT_BYTES)
+          return queued();
+        const artifact = await renderStreamExport(command, options);
+        if (!artifact) return missing(reply);
+        if (
+          artifact.formatVersion !== command.snapshot.formatVersion ||
+          artifact.propertyId !== current.propertyId ||
+          artifact.currency !== command.currency ||
+          artifact.contentType !== FINANCE_FOLIO_CSV_CONTENT_TYPE ||
+          !expectedExportArtifact(
+            `private/finance/financials-exports/${command.commandId}/${artifact.formatVersion}.csv`,
+            artifact.filename,
+            current.propertyId,
+            command.commandId,
+          ) ||
+          !Number.isSafeInteger(artifact.rowCount) ||
+          artifact.rowCount < 0 ||
+          typeof artifact.body !== "string"
+        )
+          return commandViolation();
+        const bytes = Buffer.from(artifact.body, "utf8");
+        if (bytes.length > MAX_STREAM_CSV_BYTES) return queued();
+        if (!bytes.length) return commandViolation();
+        await options.exports!.recordStream!(command, {
+          formatVersion: artifact.formatVersion,
+          rowCount: artifact.rowCount,
+          sizeBytes: bytes.length,
+          checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+        return reply
+          .header("Content-Disposition", `attachment; filename="${artifact.filename}"`)
+          .header("X-Content-Type-Options", "nosniff")
+          .type(artifact.contentType)
+          .send(Readable.from([bytes]));
       }),
     );
 
@@ -373,6 +441,47 @@ async function prepareExport(
     snapshot: capture.snapshot,
     envelope: capture.envelope,
   };
+}
+
+async function renderStreamExport(
+  command: FinanceExportCommand,
+  options: FinanceFolioRoutesOptions,
+) {
+  const { snapshot } = command;
+  switch (snapshot.formatVersion) {
+    case FINANCE_FOLIO_CSV_VERSION:
+      return required(options.repository.exportReady)(
+        command.propertyId,
+        command.currency,
+        snapshot,
+      );
+    case FINANCE_EXPENSE_CSV_VERSION:
+      return required(required(options.expenseExports).exportCsv)(
+        command.propertyId,
+        command.currency,
+        snapshot,
+      );
+    case FINANCE_PROFIT_LOSS_CSV_VERSION:
+      return buildFinanceProfitLossCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+        asOf: snapshot.asOf,
+        categoryRows: snapshot.manifest[0].categoryRows,
+      });
+    case FINANCE_REVENUE_CSV_VERSION:
+      return buildFinanceRevenueCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+      });
+    case FINANCE_DASHBOARD_CSV_VERSION:
+      return buildFinanceDashboardCsvArtifact({
+        propertyId: command.propertyId,
+        response: snapshot.manifest[0].response,
+        query: snapshot.filters,
+      });
+  }
 }
 
 async function exportStatusResponse(
