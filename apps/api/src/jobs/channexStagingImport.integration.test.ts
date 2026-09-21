@@ -11,13 +11,17 @@ import { importChannexStagingReservation, runChannexBookingJobs } from "./channe
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (databaseUrl && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(databaseUrl).pathname))
   throw new Error("Refusing non-test database");
+const targetDatabaseUrl = databaseUrl ?? "postgresql://api_test@localhost/test";
+const managementDatabaseUrl = new URL(targetDatabaseUrl);
+managementDatabaseUrl.username = "channex_test_worker";
 const propertyId = "15350000-0000-4000-8000-000000000001";
 const providerPropertyId = "15350000-0000-4000-8000-000000000002";
 const config = () => ({
   ...loadConfig({
     PMS_OPERATIONS_SOURCE: "target",
     API_BACKGROUND_WORKERS_ENABLED: "false",
-    TARGET_DATABASE_URL: databaseUrl ?? "postgresql://localhost/test",
+    TARGET_DATABASE_URL: targetDatabaseUrl,
+    PMS_CHANNEX_MANAGEMENT_DATABASE_URL: managementDatabaseUrl.toString(),
     CHANNEX_API_BASE_URL: "https://staging.channex.io",
     CHANNEX_API_KEY: "test-key",
     PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: propertyId,
