@@ -1008,10 +1008,11 @@ const propertySetupPmsRuntime = (() => {
     connectionString: targetDatabaseUrl,
   });
   // Calendar commands still need the owner lock; only GET composition uses SELECT-only evidence.
-  const readOnlyPropertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
-    connectionString: targetDatabaseUrl,
-    readOnly: true,
-  });
+  const readOnlyPropertyProfileEvidence =
+    createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+      connectionString: targetDatabaseUrl,
+      readOnly: true,
+    });
   const operatingCalendar = createPgPmsOperatingCalendarReadModel({
     connectionString: targetDatabaseUrl,
     propertyProfileEvidence: readOnlyPropertyProfileEvidence,
@@ -1131,14 +1132,15 @@ const channexManagementWorkerStore = channexManagementProvider
       stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
     })
   : undefined;
-const channexOfferSchedule = config.channexManagement.workerEnabled &&
+const channexOfferSchedule =
+  config.channexManagement.workerEnabled &&
   config.channexManagement.stagingInventoryEnabled &&
   config.channexManagement.stagingRestrictionsPropertyId
-  ? createPgChannexAriSchedule(
-      targetDatabaseUrl,
-      config.channexManagement.stagingRestrictionsPropertyId,
-    )
-  : undefined;
+    ? createPgChannexAriSchedule(
+        targetDatabaseUrl,
+        config.channexManagement.stagingRestrictionsPropertyId,
+      )
+    : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
   ? createPgPmsCalendarAutoOpenWorkerStore({
       connectionString: targetDatabaseUrl,
@@ -1782,6 +1784,9 @@ const app = buildApp({
     ? {
         ...financeFolioRuntime.routes,
         expenseExports: financeExpenseRuntime!.routes.read,
+        profitLossExports: financeProfitLossRuntime?.routes.read,
+        revenueExports: financeRevenueRuntime?.routes.read,
+        dashboardExports: financeDashboardRuntime?.routes.read,
         ...(platformMediaRuntime
           ? {
               exportDownloads: {
@@ -2285,10 +2290,13 @@ app.addHook("onClose", async () => {
 let activeChannexOfferSchedule: Promise<void> | undefined;
 const runChannexOfferSchedule = () => {
   if (!channexOfferSchedule || activeChannexOfferSchedule) return;
-  activeChannexOfferSchedule = channexOfferSchedule.enqueue()
+  activeChannexOfferSchedule = channexOfferSchedule
+    .enqueue()
     .then(() => undefined)
     .catch((error: unknown) => app.log.warn({ err: error }, "Channex offer schedule failed"))
-    .finally(() => { activeChannexOfferSchedule = undefined; });
+    .finally(() => {
+      activeChannexOfferSchedule = undefined;
+    });
 };
 const channexOfferScheduleTimer = channexOfferSchedule
   ? setInterval(runChannexOfferSchedule, 60_000)

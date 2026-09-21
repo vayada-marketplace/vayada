@@ -1,19 +1,37 @@
 import { createHash } from "node:crypto";
 import {
+  FINANCE_DASHBOARD_CSV_CONTENT_TYPE,
+  FINANCE_DASHBOARD_CSV_VERSION,
   FINANCE_EXPENSE_CSV_CONTENT_TYPE,
   FINANCE_EXPENSE_CSV_VERSION,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
+  FINANCE_PROFIT_LOSS_CSV_CONTENT_TYPE,
+  FINANCE_PROFIT_LOSS_CSV_VERSION,
+  FINANCE_REVENUE_CSV_CONTENT_TYPE,
+  FINANCE_REVENUE_CSV_VERSION,
+  buildFinanceDashboardCsvArtifact,
+  buildFinanceProfitLossCsvArtifact,
+  buildFinanceRevenueCsvArtifact,
+  type FinanceDashboardCsvArtifact,
+  type FinanceDashboardExportSnapshot,
   type FinanceExpenseExportSnapshot,
   type FinanceFolioCsvArtifact,
   type FinanceFolioExportSnapshot,
+  type FinanceProfitLossCsvArtifact,
+  type FinanceProfitLossExportSnapshot,
+  type FinanceRevenueCsvArtifact,
+  type FinanceRevenueExportSnapshot,
 } from "@vayada/domain-finance";
 import type pg from "pg";
 
 import {
+  FINANCE_DASHBOARD_EXPORT_JOB,
   FINANCE_EXPENSE_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_QUEUE,
+  FINANCE_PROFIT_LOSS_EXPORT_JOB,
+  FINANCE_REVENUE_EXPORT_JOB,
   parseFinanceExportJobPayload,
 } from "../domains/financeFolioExportRepository.js";
 import {
@@ -35,7 +53,12 @@ type Job = { id:string; jobType:string; propertyId:string; resourceType:string; 
 type Options = { workerId?: string; limit?: number; clock?: () => Date; random?: () => number };
 type FinanceExportRead = Pick<FinanceFolioReadRepository, "exportReady"> &
   Pick<FinanceExpenseReadModel, "exportCsv">;
-type FinanceCsvArtifact = FinanceFolioCsvArtifact | FinanceExpenseExportArtifact;
+type FinanceCsvArtifact =
+  | FinanceFolioCsvArtifact
+  | FinanceExpenseExportArtifact
+  | FinanceProfitLossCsvArtifact
+  | FinanceRevenueCsvArtifact
+  | FinanceDashboardCsvArtifact;
 // prettier-ignore
 export type FinanceFolioExportCounters = { succeeded:number; retryScheduled:number; deadLettered:number };
 
@@ -58,7 +81,7 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='45s'");
     const job = (await client.query<Job>(`SELECT id::text,job_type AS "jobType",property_id::text AS "propertyId",resource_type AS "resourceType",resource_id AS "resourceId",correlation_id AS "correlationId",idempotency_key_hash AS "idempotencyKeyHash",attempts_count::int AS "attemptsCount",max_attempts::int AS "maxAttempts",status,payload,job_metadata->>'organizationId' AS "organizationId",job_metadata->>'actorUserId' AS "actorUserId",job_metadata->'responseEnvelope'->>'currency' AS currency,job_metadata->>'acceptedAt' AS "acceptedAt",job_metadata->>'snapshotAt' AS "snapshotAt",job_metadata->>'expiresAt' AS "expiresAt",job_metadata->>'payloadFingerprint' AS "payloadFingerprint",job_metadata->>'manifestDigest' AS "manifestDigest",job_metadata->>'formatVersion' AS "formatVersion",job_metadata->>'requestId' AS "requestId",job_metadata->>'causationId' AS "causationId"
-      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3) AND tenant_scope='property' AND property_id IS NOT NULL AND attempts_count<=max_attempts AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes')) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString()])).rows[0];
+      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3,$5,$6,$7) AND tenant_scope='property' AND property_id IS NOT NULL AND attempts_count<=max_attempts AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes')) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString(), FINANCE_PROFIT_LOSS_EXPORT_JOB, FINANCE_REVENUE_EXPORT_JOB, FINANCE_DASHBOARD_EXPORT_JOB])).rows[0];
     if (!job) { await client.query("COMMIT"); return null; }
     if (job.status === "running") {
       const stale = (await client.query<{id:string}>("UPDATE platform.job_attempts SET status='timed_out',finished_at=$3,error_type='worker_timeout',error_message=$4 WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running' RETURNING id::text", [job.id, job.attemptsCount, now.toISOString(), `Finance ${jobTab(job)} export worker lease expired.`])).rows[0];
@@ -78,7 +101,7 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
       const payload = parseFinanceExportJobPayload(job.payload, { organizationId: job.organizationId, propertyId: job.propertyId, currency: job.currency, payloadFingerprint: job.payloadFingerprint, acceptedAt: job.acceptedAt, snapshotAt: job.snapshotAt, expiresAt: job.expiresAt, now });
       if (!uuid(job.actorUserId) || !jobMatchesFormat(job.jobType,payload.snapshot.formatVersion) || job.formatVersion !== payload.snapshot.formatVersion || hash(JSON.stringify(payload.snapshot.manifest)) !== job.manifestDigest) throw new TypeError("Finance export metadata is invalid");
       manifestCount=payload.snapshot.manifest.length;
-      const rendered = payload.snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? await read.exportCsv(job.propertyId,job.currency,payload.snapshot) : await read.exportReady(job.propertyId, job.currency, payload.snapshot);
+      const rendered = payload.snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION ? await read.exportCsv(job.propertyId,job.currency,payload.snapshot) : payload.snapshot.formatVersion===FINANCE_PROFIT_LOSS_CSV_VERSION ? buildFinanceProfitLossCsvArtifact({propertyId:job.propertyId,response:payload.snapshot.manifest[0].response,query:payload.snapshot.filters,asOf:payload.snapshot.asOf,categoryRows:payload.snapshot.manifest[0].categoryRows}) : payload.snapshot.formatVersion===FINANCE_REVENUE_CSV_VERSION ? buildFinanceRevenueCsvArtifact({propertyId:job.propertyId,response:payload.snapshot.manifest[0].response,query:payload.snapshot.filters}) : payload.snapshot.formatVersion===FINANCE_DASHBOARD_CSV_VERSION ? buildFinanceDashboardCsvArtifact({propertyId:job.propertyId,response:payload.snapshot.manifest[0].response,query:payload.snapshot.filters}) : await read.exportReady(job.propertyId, job.currency, payload.snapshot);
       if (!rendered || !validArtifact(rendered, job.propertyId, job.currency, payload.snapshot)) throw new TypeError("Finance export evidence is unavailable");
       artifact = rendered;
     } catch (error) {
@@ -125,8 +148,76 @@ function retryDelay(attempt: number, random: () => number) {
   const jitter = Math.min(1, Math.max(0, random()));
   return Math.min(15 * 60_000, 30_000 * 2 ** (attempt - 1) * (0.5 + jitter));
 }
-// prettier-ignore
-function validArtifact(artifact:FinanceCsvArtifact,propertyId:string,currency:string,snapshot:FinanceFolioExportSnapshot|FinanceExpenseExportSnapshot){const common=artifact.propertyId===propertyId&&artifact.currency===currency&&Number.isSafeInteger(artifact.rowCount)&&artifact.rowCount>=0&&artifact.body.length>0;if(snapshot.formatVersion===FINANCE_EXPENSE_CSV_VERSION)return common&&artifact.rowCount===snapshot.manifest.length&&artifact.formatVersion===FINANCE_EXPENSE_CSV_VERSION&&artifact.contentType===FINANCE_EXPENSE_CSV_CONTENT_TYPE&&artifact.filename===`pms-financials-expenses-${propertyId}.csv`&&JSON.stringify(artifact.auditEvidence)===JSON.stringify(snapshot.manifest);return common&&artifact.formatVersion===FINANCE_FOLIO_CSV_VERSION&&artifact.contentType===FINANCE_FOLIO_CSV_CONTENT_TYPE&&artifact.filename===`pms-financials-folios-${propertyId}.csv`&&"auditEvidence" in artifact&&JSON.stringify(artifact.auditEvidence)===JSON.stringify(snapshot.manifest.map(({folioId,revision,sourceDigest})=>({folioId,revision,sourceDigest})));}
+function validArtifact(
+  artifact: FinanceCsvArtifact,
+  propertyId: string,
+  currency: string,
+  snapshot:
+    | FinanceFolioExportSnapshot
+    | FinanceExpenseExportSnapshot
+    | FinanceProfitLossExportSnapshot
+    | FinanceRevenueExportSnapshot
+    | FinanceDashboardExportSnapshot,
+): boolean {
+  const common =
+    artifact.propertyId === propertyId &&
+    artifact.currency === currency &&
+    Number.isSafeInteger(artifact.rowCount) &&
+    artifact.rowCount >= 0 &&
+    artifact.body.length > 0;
+  if (snapshot.formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION)
+    return (
+      common &&
+      artifact.formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION &&
+      artifact.contentType === FINANCE_PROFIT_LOSS_CSV_CONTENT_TYPE &&
+      artifact.filename ===
+        `pms-financials-profit-loss-${propertyId}-${snapshot.filters.year}-${snapshot.asOf}.csv` &&
+      artifact.asOf === snapshot.asOf &&
+      artifact.generatedAt === snapshot.snapshotAt
+    );
+  if (snapshot.formatVersion === FINANCE_REVENUE_CSV_VERSION)
+    return (
+      common &&
+      artifact.formatVersion === FINANCE_REVENUE_CSV_VERSION &&
+      artifact.contentType === FINANCE_REVENUE_CSV_CONTENT_TYPE &&
+      artifact.filename ===
+        `pms-financials-revenue-${propertyId}-${snapshot.filters.from}-${snapshot.filters.to}.csv` &&
+      artifact.generatedAt === snapshot.snapshotAt &&
+      JSON.stringify(artifact.filters) === JSON.stringify(snapshot.filters)
+    );
+  if (snapshot.formatVersion === FINANCE_DASHBOARD_CSV_VERSION)
+    return (
+      common &&
+      artifact.formatVersion === FINANCE_DASHBOARD_CSV_VERSION &&
+      artifact.contentType === FINANCE_DASHBOARD_CSV_CONTENT_TYPE &&
+      artifact.filename === `pms-financials-dashboard-${propertyId}-${snapshot.asOf}.csv` &&
+      artifact.asOf === snapshot.asOf &&
+      artifact.generatedAt === snapshot.snapshotAt
+    );
+  if (snapshot.formatVersion === FINANCE_EXPENSE_CSV_VERSION)
+    return (
+      common &&
+      artifact.formatVersion === FINANCE_EXPENSE_CSV_VERSION &&
+      artifact.rowCount === snapshot.manifest.length &&
+      artifact.contentType === FINANCE_EXPENSE_CSV_CONTENT_TYPE &&
+      artifact.filename === `pms-financials-expenses-${propertyId}.csv` &&
+      JSON.stringify(artifact.auditEvidence) === JSON.stringify(snapshot.manifest)
+    );
+  return (
+    common &&
+    artifact.formatVersion === FINANCE_FOLIO_CSV_VERSION &&
+    artifact.contentType === FINANCE_FOLIO_CSV_CONTENT_TYPE &&
+    artifact.filename === `pms-financials-folios-${propertyId}.csv` &&
+    JSON.stringify(artifact.auditEvidence) ===
+      JSON.stringify(
+        snapshot.manifest.map(({ folioId, revision, sourceDigest }) => ({
+          folioId,
+          revision,
+          sourceDigest,
+        })),
+      )
+  );
+}
 // prettier-ignore
 function validStored(stored:FinanceFolioExportArtifact,bucketName:string,exportId:string,body:string,formatVersion:string){return stored.bucketName===bucketName&&stored.storageKey===storageKey(exportId,formatVersion)&&stored.sizeBytes===Buffer.byteLength(body,"utf8")&&stored.checksumSha256===hash(body);}
 const storageKey = (exportId: string, formatVersion: string) =>
@@ -134,9 +225,24 @@ const storageKey = (exportId: string, formatVersion: string) =>
 const jobMatchesFormat = (jobType: string, formatVersion: string) =>
   jobType === FINANCE_FOLIO_EXPORT_JOB
     ? formatVersion === FINANCE_FOLIO_CSV_VERSION
-    : jobType === FINANCE_EXPENSE_EXPORT_JOB && formatVersion === FINANCE_EXPENSE_CSV_VERSION;
+    : jobType === FINANCE_EXPENSE_EXPORT_JOB
+      ? formatVersion === FINANCE_EXPENSE_CSV_VERSION
+      : jobType === FINANCE_PROFIT_LOSS_EXPORT_JOB
+        ? formatVersion === FINANCE_PROFIT_LOSS_CSV_VERSION
+        : jobType === FINANCE_REVENUE_EXPORT_JOB
+          ? formatVersion === FINANCE_REVENUE_CSV_VERSION
+          : jobType === FINANCE_DASHBOARD_EXPORT_JOB &&
+            formatVersion === FINANCE_DASHBOARD_CSV_VERSION;
 const jobTab = (job: Pick<Job, "jobType">) =>
-  job.jobType === FINANCE_EXPENSE_EXPORT_JOB ? "expense" : "folio";
+  job.jobType === FINANCE_EXPENSE_EXPORT_JOB
+    ? "expense"
+    : job.jobType === FINANCE_PROFIT_LOSS_EXPORT_JOB
+      ? "profit_loss"
+      : job.jobType === FINANCE_REVENUE_EXPORT_JOB
+        ? "revenue"
+        : job.jobType === FINANCE_DASHBOARD_EXPORT_JOB
+          ? "dashboard"
+          : "folio";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const uuid = (value: unknown): value is string =>
   typeof value === "string" &&
