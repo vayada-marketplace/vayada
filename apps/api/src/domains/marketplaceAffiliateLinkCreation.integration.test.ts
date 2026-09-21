@@ -85,7 +85,7 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     );
     await pool().query(
       await readFile(
-        new URL("0327_marketplace_affiliate_click_occurrences.sql", migrations),
+        new URL("0403_marketplace_affiliate_click_occurrences.sql", migrations),
         "utf8",
       ),
     );
