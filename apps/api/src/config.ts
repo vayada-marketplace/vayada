@@ -75,6 +75,7 @@ export type ChannexManagementMode = "observe_only" | "mutating";
 export type ChannexManagementConfig = {
   apiBaseUrl?: string;
   apiKey?: string;
+  workerDatabaseUrl?: string;
   bookingMutationOwner: "legacy" | "target" | "frozen";
   workerEnabled: boolean;
   stagingRestrictionsPropertyId?: string;
@@ -244,6 +245,49 @@ function normalizePgConnectionString(connectionString: string): string {
 function readOptionalPgConnectionEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = readOptionalEnv(env, key);
   return value ? normalizePgConnectionString(value) : undefined;
+}
+
+type PgConnectionIdentity = Readonly<{
+  username: string;
+  hostname: string;
+  port: string;
+  database: string;
+}>;
+
+function pgConnectionIdentity(
+  connectionString: string | undefined,
+): PgConnectionIdentity | undefined {
+  if (!connectionString) return undefined;
+  try {
+    const url = new URL(connectionString);
+    if (
+      ["user", "host", "port", "dbname", "database", "options", "service"].some((key) =>
+        url.searchParams.has(key),
+      )
+    ) {
+      return undefined;
+    }
+    const username = decodeURIComponent(url.username);
+    // PostgreSQL URL parsing decodes ordinary escapes while preserving an encoded
+    // slash as part of the database name (for example, app%2Ftenant != app/tenant).
+    const database = decodeURI(url.pathname.replace(/^\//, ""));
+    if (
+      !["postgres:", "postgresql:"].includes(url.protocol) ||
+      !username ||
+      !url.hostname ||
+      !database
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      username,
+      hostname: url.hostname.toLowerCase(),
+      port: url.port || "5432",
+      database,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
@@ -711,9 +755,37 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
     );
   }
   const workerEnabled = readBooleanEnv(env, "PMS_CHANNEX_WORKER_ENABLED", durableCommandsMutating);
+  const workerDatabaseUrl = readOptionalPgConnectionEnv(env, "PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
   // A validated isolated staging scope may retain queued commands while its worker is paused.
   if (durableCommandsMutating && !workerEnabled && !stagingRestrictionsPropertyId) {
     throw new Error("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
+  }
+  if (
+    durableCommandsMutating &&
+    workerEnabled &&
+    readOptionalEnv(env, "PMS_OPERATIONS_SOURCE") === "target" &&
+    !workerDatabaseUrl
+  ) {
+    throw new Error(
+      "Mutating PMS Channex worker capabilities require PMS_CHANNEX_MANAGEMENT_DATABASE_URL",
+    );
+  }
+  const workerDatabaseIdentity = pgConnectionIdentity(workerDatabaseUrl);
+  const targetDatabaseIdentity = pgConnectionIdentity(
+    readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL"),
+  );
+  if (
+    workerDatabaseUrl &&
+    (!workerDatabaseIdentity ||
+      !targetDatabaseIdentity ||
+      workerDatabaseIdentity.hostname !== targetDatabaseIdentity.hostname ||
+      workerDatabaseIdentity.port !== targetDatabaseIdentity.port ||
+      workerDatabaseIdentity.database !== targetDatabaseIdentity.database ||
+      workerDatabaseIdentity.username === targetDatabaseIdentity.username)
+  ) {
+    throw new Error(
+      "PMS_CHANNEX_MANAGEMENT_DATABASE_URL must use a dedicated credential for TARGET_DATABASE_URL",
+    );
   }
   if (capabilityModes.bookingSync === "mutating" && bookingMutationOwner !== "target") {
     throw new Error(
@@ -723,6 +795,7 @@ function loadChannexManagementConfig(env: NodeJS.ProcessEnv): ChannexManagementC
   return {
     apiBaseUrl,
     apiKey,
+    workerDatabaseUrl,
     bookingMutationOwner,
     stagingRestrictionsPropertyId,
     stagingMealsEnabled,
