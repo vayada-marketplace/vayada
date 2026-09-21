@@ -17,6 +17,8 @@
     "test": "vitest run",
     "pretest:legacy-free": "npm run build:backend-packages",
     "test:legacy-free": "vitest run src/nextApiLegacyFree.test.ts",
+    "finance:ota-commission:preactivation": "tsx src/cli/financeOtaCommissionPreactivation.ts",
+    "finance:ota-commission:preactivation:dist": "node dist/cli/financeOtaCommissionPreactivation.js",
     "pretypecheck": "npm run build:backend-packages",
     "typecheck": "tsc --noEmit"
   },

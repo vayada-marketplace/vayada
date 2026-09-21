@@ -198,7 +198,7 @@ export default function FinancialsPage() {
           id="financials-dashboard-panel"
           role="tabpanel"
         >
-          <DashboardWorkspace />
+          <DashboardWorkspace canManage={canManage} />
         </div>
       ) : (
         <div
