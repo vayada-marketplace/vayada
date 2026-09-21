@@ -1000,10 +1000,11 @@ const propertySetupPmsRuntime = (() => {
     connectionString: targetDatabaseUrl,
   });
   // Calendar commands still need the owner lock; only GET composition uses SELECT-only evidence.
-  const readOnlyPropertyProfileEvidence = createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
-    connectionString: targetDatabaseUrl,
-    readOnly: true,
-  });
+  const readOnlyPropertyProfileEvidence =
+    createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+      connectionString: targetDatabaseUrl,
+      readOnly: true,
+    });
   const operatingCalendar = createPgPmsOperatingCalendarReadModel({
     connectionString: targetDatabaseUrl,
     propertyProfileEvidence: readOnlyPropertyProfileEvidence,
@@ -1124,6 +1125,7 @@ const channexManagementWorkerStore = channexManagementProvider
     })
   : undefined;
 const channexOfferSchedule =
+  config.channexManagement.workerEnabled &&
   config.channexManagement.stagingInventoryEnabled &&
   config.channexManagement.stagingRestrictionsPropertyId
     ? createPgChannexAriSchedule(
