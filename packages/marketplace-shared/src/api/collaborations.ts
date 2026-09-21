@@ -9,8 +9,8 @@ export type MarketplaceCollaborationReadsContractVersion =
 export type MarketplaceCollaborationSide = "creator" | "hotel";
 
 export type MarketplaceAffiliateAssentRead = {
-  participationId: string;
-  attemptId: string;
+  participationId: string | null;
+  attemptId: string | null;
   programId: string;
   propertyId: string;
   offerId: string;
