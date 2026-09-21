@@ -1,26 +1,39 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import { readSyntheticMarketplaceAffiliateClick } from "./marketplaceAffiliateClickOccurrence.js";
+import {
+  readMarketplaceAffiliateClick,
+  readSyntheticMarketplaceAffiliateClick,
+} from "./marketplaceAffiliateClickOccurrence.js";
 
-/** Synthetic first-party context. A live browser context needs a separate privacy gate. */
-export async function createSyntheticAffiliateClickContext(
+async function createAffiliateClickContextRow(
   pool: pg.Pool,
   propertyId: string,
+  synthetic: boolean,
 ): Promise<string> {
   const id = randomUUID();
   await pool.query(
     `INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic)
-     VALUES ($1,$2,TRUE)`,
-    [id, propertyId],
+     VALUES ($1,$2,$3)`,
+    [id, propertyId, synthetic],
   );
   return id;
 }
 
-/** Admit one trusted click to a destination-owned context, never from creator claims. */
-export async function admitSyntheticAffiliateClick(
+/** Dormant live context. Runtime grants and trusted destination resolution remain separate gates. */
+export async function createAffiliateClickContext(pool: pg.Pool, propertyId: string) {
+  return createAffiliateClickContextRow(pool, propertyId, false);
+}
+
+/** Synthetic first-party context retained for the existing integration harness. */
+export async function createSyntheticAffiliateClickContext(pool: pg.Pool, propertyId: string) {
+  return createAffiliateClickContextRow(pool, propertyId, true);
+}
+
+async function admitAffiliateClickOccurrence(
   pool: pg.Pool,
   contextId: string,
   referenceToken: unknown,
+  synthetic: boolean,
 ): Promise<
   | { status: "unavailable" | "conflict" }
   | { status: "admitted"; clickId: string; historyPosition: string; replayed: boolean }
@@ -30,10 +43,13 @@ export async function admitSyntheticAffiliateClick(
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const context = await client.query(
       `SELECT property_id FROM booking.affiliate_click_contexts
-       WHERE id=$1 AND synthetic=TRUE FOR UPDATE`,
-      [contextId],
+       WHERE id=$1 AND synthetic=$2 FOR UPDATE`,
+      [contextId, synthetic],
     );
-    const click = await readSyntheticMarketplaceAffiliateClick(client, referenceToken);
+    const readClick = synthetic
+      ? readSyntheticMarketplaceAffiliateClick
+      : readMarketplaceAffiliateClick;
+    const click = await readClick(client, referenceToken);
     if (!context.rowCount || !click || click.propertyId !== context.rows[0].property_id) {
       await client.query("ROLLBACK");
       return { status: "unavailable" };
@@ -82,7 +98,7 @@ export async function admitSyntheticAffiliateClick(
       };
     }
     // A competing insert may have delayed this transaction past expiry.
-    if (!(await readSyntheticMarketplaceAffiliateClick(client, referenceToken))?.referenceValid) {
+    if (!(await readClick(client, referenceToken))?.referenceValid) {
       await client.query("ROLLBACK");
       return { status: "unavailable" };
     }
@@ -99,4 +115,22 @@ export async function admitSyntheticAffiliateClick(
   } finally {
     client.release();
   }
+}
+
+/** Dormant live admission; no public arrival path invokes it in this slice. */
+export async function admitAffiliateClick(
+  pool: pg.Pool,
+  contextId: string,
+  referenceToken: unknown,
+) {
+  return admitAffiliateClickOccurrence(pool, contextId, referenceToken, false);
+}
+
+/** Synthetic admission retained for the existing integration harness. */
+export async function admitSyntheticAffiliateClick(
+  pool: pg.Pool,
+  contextId: string,
+  referenceToken: unknown,
+) {
+  return admitAffiliateClickOccurrence(pool, contextId, referenceToken, true);
 }
