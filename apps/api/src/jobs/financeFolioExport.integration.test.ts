@@ -3,9 +3,22 @@ import { createHash } from "node:crypto";
 import {
   FINANCE_EXPENSE_CSV_CONTENT_TYPE,
   FINANCE_EXPENSE_CSV_VERSION,
+  FINANCE_DASHBOARD_WINDOW_DAYS,
   FINANCE_FOLIO_CSV_CONTENT_TYPE,
   FINANCE_FOLIO_CSV_VERSION,
+  FINANCE_PROFIT_LOSS_CSV_VERSION,
+  buildFinanceDashboardCsvArtifact,
+  buildFinanceProfitLossCsvArtifact,
+  buildFinanceRevenueCsvArtifact,
+  captureFinanceDashboardExport,
+  captureFinanceProfitLossExport,
+  captureFinanceRevenueExport,
+  financeDashboardPeriods,
+  financeReportingMoneyMetric,
+  type FinanceDashboardResponse,
   type FinanceFolioCsvArtifact,
+  type FinanceProfitLossResponse,
+  type FinanceRevenueResponse,
 } from "@vayada/domain-finance";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +27,12 @@ import {
   FINANCE_EXPENSE_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_JOB,
   FINANCE_FOLIO_EXPORT_QUEUE,
+  FINANCE_PROFIT_LOSS_EXPORT_JOB,
+  FINANCE_DASHBOARD_EXPORT_JOB,
+  FINANCE_REVENUE_EXPORT_JOB,
   createPgFinanceFolioExportJobRepository,
+  parseFinanceExportJobPayload,
+  type FinanceExportCommand,
 } from "../domains/financeFolioExportRepository.js";
 import type { FinanceExpenseExportArtifact } from "../domains/financeExpenseReadModel.js";
 import {
@@ -35,6 +53,191 @@ const PROPERTY="11340000-0000-4000-8000-000000000020",JOB="11340000-0000-4000-80
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
   throw new Error("Unsafe test database");
 
+function profitLossSnapshot() {
+  const zero = () => ({ amount: "0.0000", currency: "EUR" });
+  const categories = () =>
+    Object.fromEntries(
+      ["ota_commission", "staff", "utilities", "maintenance_supplies", "marketing_platform"].map(
+        (key) => [key, zero()],
+      ),
+    ) as FinanceProfitLossResponse["months"][number]["expenseCategories"];
+  const response: FinanceProfitLossResponse = {
+    contractVersion: "pms-financials.v1",
+    propertyId: PROPERTY,
+    currency: "EUR",
+    timeZone: "Europe/Berlin",
+    generatedAt: SNAPSHOT_AT,
+    sourceFreshness: {},
+    incompleteEvidence: [],
+    summary: {
+      revenueYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+      expensesYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+      netProfitYtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    },
+    months: Array.from({ length: 9 }, (_, index) => ({
+      month: `2026-${String(index + 1).padStart(2, "0")}`,
+      roomRevenue: zero(),
+      upsellRevenue: zero(),
+      revenue: zero(),
+      expenses: zero(),
+      netProfit: zero(),
+      expenseCategories: categories(),
+    })),
+  };
+  return captureFinanceProfitLossExport({
+    propertyId: PROPERTY,
+    response,
+    query: { year: 2026 },
+    asOf: "2026-09-15",
+    categoryRows: [],
+  });
+}
+
+function revenueSnapshot() {
+  const response: FinanceRevenueResponse = {
+    contractVersion: "pms-financials.v1",
+    propertyId: PROPERTY,
+    currency: "EUR",
+    timeZone: "Europe/Berlin",
+    generatedAt: SNAPSHOT_AT,
+    sourceFreshness: {},
+    incompleteEvidence: [],
+    summary: {
+      grossRoom: financeReportingMoneyMetric("0", "0", "EUR"),
+      otaCommission: financeReportingMoneyMetric("0", "0", "EUR"),
+      netRoom: financeReportingMoneyMetric("0", "0", "EUR"),
+      upsell: financeReportingMoneyMetric("0", "0", "EUR"),
+      nights: { value: 0, absoluteChange: 0, percentChange: null },
+      adr: financeReportingMoneyMetric("0", "0", "EUR"),
+      attachRate: { value: "0.0000", absoluteChange: "0.0000", percentChange: null },
+    },
+    channels: [],
+    directSources: [],
+    upsells: [],
+    roomTypes: [],
+  };
+  return captureFinanceRevenueExport({
+    propertyId: PROPERTY,
+    response,
+    query: { from: "2026-09-01", to: "2026-09-15" },
+  });
+}
+
+function dashboardSnapshot() {
+  const zero = () => ({ amount: "0.0000", currency: "EUR" });
+  const dailyFrom = Date.parse(`${financeDashboardPeriods("2026-09-15").daily.from}T00:00:00Z`);
+  const response: FinanceDashboardResponse = {
+    contractVersion: "pms-financials.v1",
+    propertyId: PROPERTY,
+    currency: "EUR",
+    timeZone: "Europe/Berlin",
+    generatedAt: SNAPSHOT_AT,
+    sourceFreshness: {},
+    incompleteEvidence: [],
+    cards: {
+      revenueToday: financeReportingMoneyMetric("0", "0", "EUR"),
+      revenueMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+      expensesMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+      profitMtd: financeReportingMoneyMetric("0", "0", "EUR"),
+    },
+    daily: Array.from({ length: FINANCE_DASHBOARD_WINDOW_DAYS }, (_, index) => ({
+      date: new Date(dailyFrom + index * 86_400_000).toISOString().slice(0, 10),
+      revenue: zero(),
+      expenses: zero(),
+    })),
+    upcoming: [],
+  };
+  return captureFinanceDashboardExport({ propertyId: PROPERTY, response, query: {} });
+}
+
+it("validates the durable P&L payload against accepted scope and reconciled evidence", () => {
+  const snapshot = profitLossSnapshot();
+  const payload = { commandId: COMMAND, organizationId: ORG, snapshot, expiresAt: EXPIRES };
+  const expected = {
+    organizationId: ORG,
+    propertyId: PROPERTY,
+    currency: "EUR",
+    payloadFingerprint: hash(payload),
+    acceptedAt: ACCEPTED,
+    snapshotAt: SNAPSHOT_AT,
+    expiresAt: EXPIRES,
+    now: NOW,
+  };
+  expect(parseFinanceExportJobPayload(payload, expected)).toEqual(payload);
+  const reordered = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(reordered)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .reverse()
+              .map(([key, part]) => [key, reordered(part)]),
+          )
+        : value;
+  expect(JSON.stringify(parseFinanceExportJobPayload(reordered(payload), expected))).toBe(
+    JSON.stringify(payload),
+  );
+  const corrupt = structuredClone(payload);
+  corrupt.snapshot.manifest[0].response.months[0]!.netProfit.amount = "1.0000";
+  expect(() => parseFinanceExportJobPayload(corrupt, expected)).toThrow(TypeError);
+  expect(() => parseFinanceExportJobPayload(payload, { ...expected, propertyId: ORG })).toThrow(
+    TypeError,
+  );
+});
+
+it("rejects P&L response metadata that does not describe the pinned CSV cutoff", async () => {
+  const snapshot = profitLossSnapshot();
+  const {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  } = snapshot.manifest[0].response;
+  const envelope = {
+    contractVersion,
+    propertyId,
+    currency,
+    timeZone,
+    generatedAt,
+    sourceFreshness,
+    incompleteEvidence,
+  };
+  const connect = vi.fn(async () => {
+    throw new Error("connected");
+  });
+  const repository = createPgFinanceFolioExportJobRepository({
+    pool: { connect } as unknown as pg.Pool,
+    searchDigest: async () => "a".repeat(64),
+  });
+  const command = {
+    commandId: COMMAND,
+    idempotencyKey: "profit-loss-test",
+    organizationId: ORG,
+    propertyId: PROPERTY,
+    currency: "EUR",
+    filters: { year: 2026 },
+    snapshot,
+    envelope,
+    audit: {
+      actorUserId: ACTOR,
+      requestId: "request-vay-1134",
+      correlationId: "correlation-vay-1134",
+      causationId: CAUSE,
+      requestedAt: ACCEPTED,
+    },
+  };
+  await expect(repository.enqueue(command)).rejects.toThrow("connected");
+  for (const changed of [
+    { ...envelope, generatedAt: "2026-09-15T00:00:00.000Z" },
+    { ...envelope, timeZone: "UTC" },
+  ])
+    await expect(repository.enqueue({ ...command, envelope: changed })).rejects.toThrow(TypeError);
+  expect(connect).toHaveBeenCalledTimes(1);
+});
+
 // prettier-ignore
 it("writes immutable private CSV bytes with integrity and expiry metadata", async () => {
   const send = vi.fn(async (_command: unknown) => ({})), destroy = vi.fn();
@@ -54,7 +257,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   const expenseSelection={expenseId:EXPENSE,revision:1,categoryId:CATEGORY,categoryRevision:1,categoryName:"Operations",paymentStatus:"unpaid" as const,paidOn:null};
   const expenseArtifact: FinanceExpenseExportArtifact = { formatVersion: FINANCE_EXPENSE_CSV_VERSION, contentType: FINANCE_EXPENSE_CSV_CONTENT_TYPE, propertyId: PROPERTY, currency: "EUR", filename: `pms-financials-expenses-${PROPERTY}.csv`, rowCount: 1, body: '"property_id"\r\n"expense"\r\n', auditEvidence: [expenseSelection] };
   const read = { exportReady: vi.fn(async () => artifact), exportCsv: vi.fn(async () => expenseArtifact) };
-  beforeAll(async () => { await admin.connect(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]); });
+  beforeAll(async () => { await admin.connect(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]);await admin.query("INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','owner','agency')",[ORG,ACTOR]);await admin.query("INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'pms','pms_property',$2,'owner','active')",[ORG,PROPERTY]);await admin.query("INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",[PROPERTY]); });
   beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([admin.end(), pool.end()]); });
 
@@ -77,6 +280,85 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect(writer.write).toHaveBeenCalledWith({exportId:JOB,body:expenseArtifact.body,contentType:FINANCE_EXPENSE_CSV_CONTENT_TYPE,formatVersion:FINANCE_EXPENSE_CSV_VERSION,expiresAt:EXPIRES});
     expect((await admin.query("SELECT job_metadata->'artifact' artifact,(SELECT storage_key FROM platform.media_objects WHERE id=platform.jobs.id) key,(SELECT action FROM platform.product_audit_events WHERE job_id=platform.jobs.id) action,(SELECT audit_metadata->>'jobType' FROM platform.product_audit_events WHERE job_id=platform.jobs.id) \"jobType\" FROM platform.jobs WHERE id=$1",[JOB])).rows[0]).toMatchObject({artifact:{formatVersion:FINANCE_EXPENSE_CSV_VERSION,filename:expenseArtifact.filename},key:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`,action:"finance.expense_export.succeeded",jobType:FINANCE_EXPENSE_EXPORT_JOB});
     await expect(createPgFinanceFolioExportJobRepository({pool,searchDigest:async()=>"a".repeat(64)}).find({exportId:JOB,organizationId:ORG,propertyId:PROPERTY,now:NOW})).resolves.toMatchObject({state:"ready",artifact:{filename:expenseArtifact.filename,storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`}});
+  });
+
+  it("regenerates P&L CSV only from the pinned reconciled snapshot", async () => {
+    const snapshot = profitLossSnapshot();
+    await insertReportJob(snapshot, FINANCE_PROFIT_LOSS_EXPORT_JOB);
+    const writer = fakeWriter();
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW })).resolves.toEqual({
+      succeeded: 1,
+      retryScheduled: 0,
+      deadLettered: 0,
+    });
+    const artifact = buildFinanceProfitLossCsvArtifact({
+      propertyId: PROPERTY,
+      response: snapshot.manifest[0].response,
+      query: snapshot.filters,
+      asOf: snapshot.asOf,
+      categoryRows: snapshot.manifest[0].categoryRows,
+    });
+    expect(writer.write).toHaveBeenCalledWith({
+      exportId: JOB,
+      body: artifact.body,
+      contentType: artifact.contentType,
+      formatVersion: FINANCE_PROFIT_LOSS_CSV_VERSION,
+      expiresAt: EXPIRES,
+    });
+    expect(read.exportReady).not.toHaveBeenCalled();
+    expect(read.exportCsv).not.toHaveBeenCalled();
+    await expect(
+      createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) }).find({
+        exportId: JOB,
+        organizationId: ORG,
+        propertyId: PROPERTY,
+        now: NOW,
+      }),
+    ).resolves.toMatchObject({ state: "ready", artifact: { filename: artifact.filename } });
+    expect((await admin.query("SELECT action FROM platform.product_audit_events WHERE job_id=$1", [JOB])).rows[0].action).toBe("finance.profit_loss_export.succeeded");
+  });
+
+  const revenue = revenueSnapshot(), dashboard = dashboardSnapshot();
+  it.each([
+    {
+      tab: "revenue", jobType: FINANCE_REVENUE_EXPORT_JOB, snapshot: revenue,
+      artifact: buildFinanceRevenueCsvArtifact({ propertyId: PROPERTY, response: revenue.manifest[0].response, query: revenue.filters }),
+    },
+    {
+      tab: "dashboard", jobType: FINANCE_DASHBOARD_EXPORT_JOB, snapshot: dashboard,
+      artifact: buildFinanceDashboardCsvArtifact({ propertyId: PROPERTY, response: dashboard.manifest[0].response, query: dashboard.filters }),
+    },
+  ])("regenerates $tab CSV from the pinned snapshot and exposes the scoped artifact", async ({ tab, jobType, snapshot, artifact }) => {
+    await insertReportJob(snapshot, jobType);
+    const writer = fakeWriter();
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: artifact.contentType, formatVersion: artifact.formatVersion, expiresAt: EXPIRES });
+    expect(read.exportReady).not.toHaveBeenCalled();
+    expect(read.exportCsv).not.toHaveBeenCalled();
+    await expect(createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) }).find({ exportId: JOB, organizationId: ORG, propertyId: PROPERTY, now: NOW })).resolves.toMatchObject({ state: "ready", artifact: { filename: artifact.filename, storageKey: `private/finance/financials-exports/${JOB}/${artifact.formatVersion}.csv` } });
+    expect((await admin.query("SELECT action FROM platform.product_audit_events WHERE job_id=$1", [JOB])).rows[0].action).toBe(`finance.${tab}_export.succeeded`);
+  });
+
+  it.each([
+    { tab: "revenue", jobType: FINANCE_REVENUE_EXPORT_JOB, snapshot: revenue },
+    { tab: "dashboard", jobType: FINANCE_DASHBOARD_EXPORT_JOB, snapshot: dashboard },
+  ])("enqueues $tab with idempotency and a redacted requested audit", async ({ tab, jobType, snapshot }) => {
+    const response = snapshot.manifest[0].response;
+    const { contractVersion, propertyId, currency, timeZone, generatedAt, sourceFreshness, incompleteEvidence } = response;
+    const repository = createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) });
+    const command = {
+      commandId: COMMAND, idempotencyKey: `VAY-1134-${tab}`, organizationId: ORG,
+      propertyId: PROPERTY, currency: "EUR", filters: snapshot.filters, snapshot,
+      envelope: { contractVersion, propertyId, currency, timeZone, generatedAt, sourceFreshness, incompleteEvidence },
+      audit: { actorUserId: ACTOR, requestId: `request-${tab}`, correlationId: `correlation-${tab}`, causationId: CAUSE, requestedAt: NOW.toISOString() },
+    } as FinanceExportCommand;
+    const created = await repository.enqueue(command);
+    if (created.status === "conflict") throw new Error("Expected report export");
+    await expect(repository.enqueue(command)).resolves.toMatchObject({ status: "replayed", exportId: created.exportId });
+    await expect(repository.enqueue({ ...command, commandId: CAUSE })).resolves.toEqual({ status: "conflict" });
+    const row = (await admin.query(`SELECT job.job_type,job.payload->'snapshot'->>'formatVersion' format_version,audit.action,audit.redacted_payload,audit.private_payload,(SELECT count(*)::int FROM platform.idempotency_keys WHERE id=job.id) idempotency_count FROM platform.jobs job JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.id=$1`, [created.exportId])).rows[0];
+    expect(row).toMatchObject({ job_type: jobType, format_version: snapshot.formatVersion, action: `finance.${tab}_export.requested`, redacted_payload: { formatVersion: snapshot.formatVersion, filters: snapshot.filters, manifestCount: 1 }, private_payload: {}, idempotency_count: 1 });
+    expect((await admin.query("SELECT count(*)::int count FROM platform.product_audit_events WHERE job_id=$1", [created.exportId])).rows[0].count).toBe(1);
   });
 
   it("rejects unbound expense artifacts and labels malformed expense jobs correctly", async () => {
@@ -116,8 +398,13 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   function receipt(exportId:string,body:string,formatVersion:string=FINANCE_FOLIO_CSV_VERSION){return{bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`,checksumSha256:createHash("sha256").update(body).digest("hex"),sizeBytes:Buffer.byteLength(body)}}
   async function insertJob(options: { status?: "pending"|"running"; attempts?: number; lockedAt?: string } = {}) { const snapshot={formatVersion:FINANCE_FOLIO_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{sort:"createdAt_desc",state:"ready"},snapshotAt:SNAPSHOT_AT,manifest:[]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash([]),formatVersion:FINANCE_FOLIO_CSV_VERSION,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,max_attempts,run_after,locked_at,locked_by,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,3,$7,$8,$9,'property',$10::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$11::jsonb,$12::jsonb)`,[JOB,`${FINANCE_FOLIO_EXPORT_JOB}:${PROPERTY}:test`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,options.status??"pending",options.attempts??0,ACCEPTED,options.lockedAt??null,options.status==="running"?"old-worker":null,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);if(options.status==="running")await admin.query("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1,$2,'running','old-worker',$3)",[JOB,options.attempts,options.lockedAt]); }
   async function insertExpenseJob(metadataFormatVersion:string=FINANCE_EXPENSE_CSV_VERSION){const snapshot={formatVersion:FINANCE_EXPENSE_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{from:"2026-09-01",to:"2026-09-30",sort:"incurredOn_desc"},snapshotAt:SNAPSHOT_AT,manifest:[expenseSelection]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash(snapshot.manifest),formatVersion:metadataFormatVersion,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`,[JOB,`${FINANCE_EXPENSE_EXPORT_JOB}:${PROPERTY}:expense`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_EXPENSE_EXPORT_JOB,ACCEPTED,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);}
+  async function insertReportJob(snapshot: ReturnType<typeof profitLossSnapshot> | ReturnType<typeof revenueSnapshot> | ReturnType<typeof dashboardSnapshot>, jobType: string) {
+    const payload = { commandId: COMMAND, organizationId: ORG, snapshot, expiresAt: EXPIRES };
+    const metadata = { organizationId: ORG, actorUserId: ACTOR, responseEnvelope: { currency: "EUR" }, acceptedAt: ACCEPTED, snapshotAt: SNAPSHOT_AT, expiresAt: EXPIRES, payloadFingerprint: hash(payload), manifestDigest: hash(snapshot.manifest), formatVersion: snapshot.formatVersion, requestId: "request-vay-1134", causationId: CAUSE };
+    await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`, [JOB, `${jobType}:${PROPERTY}:report`, FINANCE_FOLIO_EXPORT_QUEUE, jobType, ACCEPTED, PROPERTY, JSON.stringify(payload), JSON.stringify(metadata)]);
+  }
   async function cleanupJobs(){await admin.query("BEGIN");try{await admin.query("SET LOCAL session_replication_role=replica");for(const sql of ["DELETE FROM platform.media_objects WHERE property_id=$1","DELETE FROM platform.product_audit_events WHERE property_id=$1","DELETE FROM platform.dead_letter_events WHERE property_id=$1","DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE property_id=$1)","DELETE FROM platform.jobs WHERE property_id=$1","DELETE FROM platform.domain_events WHERE property_id=$1","DELETE FROM platform.idempotency_keys WHERE property_id=$1"])await admin.query(sql,[PROPERTY]);await admin.query("COMMIT");}catch(error){await admin.query("ROLLBACK");throw error;}}
-  async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
+  async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_memberships WHERE organization_id=$1",[ORG]);await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
 });
 
 const hash = (value: unknown) =>
