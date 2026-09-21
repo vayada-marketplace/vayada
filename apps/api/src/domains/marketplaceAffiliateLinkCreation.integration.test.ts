@@ -14,6 +14,10 @@ import {
   type AffiliateLinkCreationReadiness,
 } from "./marketplaceAffiliateLinkCreation.js";
 import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
+import {
+  affiliateTrafficSource,
+  recordSyntheticMarketplaceAffiliateClick,
+} from "./marketplaceAffiliateClickOccurrence.js";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -79,6 +83,12 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         "utf8",
       ),
     );
+    await pool().query(
+      await readFile(
+        new URL("0403_marketplace_affiliate_click_occurrences.sql", migrations),
+        "utf8",
+      ),
+    );
   });
 
   it("creates one stable creator-owned link with a default share path", async () => {
@@ -105,6 +115,90 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await expect(createMarketplaceAffiliateLink(pool(), revoked)).rejects.toThrow();
     expect(
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
+    ).toBe("1");
+  });
+
+  it("records separate synthetic visits without trusting referrer for ownership", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await recordSyntheticMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://www.instagram.com/p/example",
+    );
+    const second = await recordSyntheticMarketplaceAffiliateClick(
+      pool(),
+      link.publicToken,
+      "https://notinstagram.com/p/example",
+    );
+    expect(first).toMatchObject({ status: "recorded", source: "instagram" });
+    expect(second).toMatchObject({ status: "recorded", source: "unknown" });
+    if (first.status !== "recorded" || second.status !== "recorded")
+      throw new Error("Missing click");
+    expect(second.clickId).not.toBe(first.clickId);
+    expect(second.referenceToken).not.toBe(first.referenceToken);
+    await expect(
+      pool().query("UPDATE marketplace.affiliate_click_occurrences SET source='x' WHERE id=$1", [
+        first.clickId,
+      ]),
+    ).rejects.toThrow();
+    expect(
+      (
+        await pool().query(
+          `SELECT c.link_id,l.agreement_id,g.creator_profile_id,c.terms_id,c.property_id,
+                  c.synthetic,c.source
+           FROM marketplace.affiliate_click_occurrences c
+           JOIN marketplace.affiliate_links l ON l.id=c.link_id
+           JOIN marketplace.affiliate_agreements g ON g.id=l.agreement_id
+           ORDER BY c.source`,
+        )
+      ).rows,
+    ).toEqual([
+      {
+        link_id: link.linkId,
+        agreement_id: agreementId,
+        creator_profile_id: id(82),
+        terms_id: id(51),
+        property_id: id(3),
+        synthetic: true,
+        source: "instagram",
+      },
+      {
+        link_id: link.linkId,
+        agreement_id: agreementId,
+        creator_profile_id: id(82),
+        terms_id: id(51),
+        property_id: id(3),
+        synthetic: true,
+        source: "unknown",
+      },
+    ]);
+    expect(affiliateTrafficSource("https://instagram.com.evil.example/")).toBe("unknown");
+  });
+
+  it("blocks synthetic capture after a hotel pauses the agreement", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    expect(await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken)).toMatchObject({
+      status: "recorded",
+      source: "unknown",
+    });
+    expect(
+      await changeMarketplaceAffiliateAgreementLifecycle(pool(), {
+        context: assentInput().context,
+        agreementId,
+        action: "pause",
+        reason: "Hotel pause",
+        expectedRevision: 0,
+        idempotencyKey: "pause-before-next-click",
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await recordSyntheticMarketplaceAffiliateClick(pool(), link.publicToken)).toEqual({
+      status: "unavailable",
+    });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
+        .count,
     ).toBe("1");
   });
 
