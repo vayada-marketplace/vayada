@@ -96,6 +96,9 @@ required decisions before live browser capture. This contract does not choose a
 cookie default or permit tracking without those decisions. Tests use explicit
 synthetic contexts and must report that limitation.
 
+The [live link and click proposal](affiliate-live-link-capture-decision.md) makes
+these choices concrete for review; its proposed values are not yet accepted.
+
 ## Validation result and publication consumption
 
 Retain the run ID, authorized actor/organization/property, exact destination version,

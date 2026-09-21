@@ -43,6 +43,19 @@ const financeFolioKmsEnv = {
 };
 
 describe("api config", () => {
+  it("keeps Financials activation closed without a scoped property allowlist", () => {
+    expect(loadConfig({}).financialsActivationPropertyIds).toEqual([]);
+    expect(
+      loadConfig({
+        PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS:
+          "11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111111",
+      }).financialsActivationPropertyIds,
+    ).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(() => loadConfig({ PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS: "not-a-property" })).toThrow(
+      "PMS_FINANCIALS_ACTIVATION_PROPERTY_IDS",
+    );
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),

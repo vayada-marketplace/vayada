@@ -37,6 +37,7 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
   connectionString?: string;
   max?: number;
   pool?: HotelCatalogOperatingCalendarPropertyProfileEvidencePool;
+  readOnly?: boolean;
 }): HotelCatalogOperatingCalendarPropertyProfileEvidencePort & { close(): Promise<void> } {
   const ownsPool = !config.pool;
   if (ownsPool && !config.connectionString?.trim()) {
@@ -53,10 +54,13 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
       positiveRevision(input.expectedProfileRevision);
       const client = await pool.connect();
       try {
-        await client.query("BEGIN");
+        await client.query(
+          config.readOnly ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" : "BEGIN",
+        );
         const evidence = await lockHotelCatalogOperatingCalendarPropertyProfileEvidence(
           client,
           propertyId,
+          config.readOnly,
         );
         const result = await guarded(evidence);
         await client.query("COMMIT");
@@ -79,6 +83,7 @@ export function createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort
 export async function lockHotelCatalogOperatingCalendarPropertyProfileEvidence(
   client: Pick<HotelCatalogOperatingCalendarPropertyProfileEvidenceClient, "query">,
   inputPropertyId: string,
+  readOnly = false,
 ): Promise<PmsOperatingCalendarPropertyProfileEvidenceResult> {
   const propertyId = canonicalUuid(inputPropertyId);
   const selected = await client.query<PropertyProfileRow>(
@@ -89,7 +94,7 @@ export async function lockHotelCatalogOperatingCalendarPropertyProfileEvidence(
      LEFT JOIN hotel_catalog.property_locations location
        ON location.property_id = property.id
      WHERE property.id = $1::uuid
-     FOR SHARE OF property`,
+     ${readOnly ? "" : "FOR SHARE OF property"}`,
     [propertyId],
   );
   if (selected.rows.length > 1) {
