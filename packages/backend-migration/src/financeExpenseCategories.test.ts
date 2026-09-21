@@ -3,6 +3,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { seedFinancialsDefaultCategories } from "./financialsDefaultCategorySeed.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const migration = await readFile(
@@ -17,6 +18,7 @@ if (!categorySeeds) throw new Error("0067 category seeds are not replay-safe");
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const PROPERTY_A = "20000000-0000-4000-8000-000000000001";
 const PROPERTY_B = "20000000-0000-4000-8000-000000000002";
+const PROPERTY_C = "20000000-0000-4000-8000-000000000003";
 
 describe("Finance expense category migration contract", () => {
   it("owns categories and recurrence without inventing an expense ledger", () => {
@@ -104,6 +106,91 @@ describe.skipIf(!TEST_DATABASE_URL)("Finance expense categories (PostgreSQL)", (
         )
       ).rows[0],
     ).toEqual({ name: "Team" });
+  });
+
+  it("fills only missing defaults for a priced property and leaves archived defaults for review", async () => {
+    await client.query(
+      "UPDATE finance.expense_categories SET name='Team' WHERE property_id=$1 AND system_key='staff'",
+      [PROPERTY_A],
+    );
+    await client.query(
+      "UPDATE finance.expense_categories SET archived_at=now() WHERE property_id=$1 AND system_key='utilities'",
+      [PROPERTY_A],
+    );
+    await client.query(
+      "DELETE FROM finance.expense_categories WHERE property_id=$1 AND system_key='supplies'",
+      [PROPERTY_A],
+    );
+    const dryRun = await seedFinancialsDefaultCategories(client, {
+      propertyId: PROPERTY_A,
+      apply: false,
+    });
+    expect(dryRun).toMatchObject({
+      missingBefore: ["utilities", "supplies"],
+      inserted: [],
+      missingAfter: ["utilities", "supplies"],
+    });
+    const applied = await seedFinancialsDefaultCategories(client, {
+      propertyId: PROPERTY_A,
+      apply: true,
+    });
+    expect(applied).toMatchObject({
+      inserted: ["supplies"],
+      archived: ["utilities"],
+      missingAfter: ["utilities"],
+    });
+    expect(
+      await seedFinancialsDefaultCategories(client, { propertyId: PROPERTY_A, apply: true }),
+    ).toMatchObject({ inserted: [], missingAfter: ["utilities"] });
+    expect(
+      (
+        await client.query(
+          "SELECT name FROM finance.expense_categories WHERE property_id=$1 AND system_key='staff'",
+          [PROPERTY_A],
+        )
+      ).rows[0],
+    ).toEqual({ name: "Team" });
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1",
+          [PROPERTY_B],
+        )
+      ).rows[0],
+    ).toEqual({ count: 7 });
+  });
+
+  it("seeds a later priced property with the migration defaults and rejects unpriced properties", async () => {
+    await client.query("INSERT INTO hotel_catalog.properties(id) VALUES ($1)", [PROPERTY_C]);
+    await expect(
+      seedFinancialsDefaultCategories(client, { propertyId: PROPERTY_C, apply: true }),
+    ).rejects.toThrow("no PMS pricing settings");
+    expect(
+      (
+        await client.query(
+          "SELECT count(*)::int AS count FROM finance.expense_categories WHERE property_id=$1",
+          [PROPERTY_C],
+        )
+      ).rows[0],
+    ).toEqual({ count: 0 });
+    await client.query(
+      "INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES ($1,'EUR')",
+      [PROPERTY_C],
+    );
+    expect(
+      await seedFinancialsDefaultCategories(client, { propertyId: PROPERTY_C, apply: true }),
+    ).toMatchObject({
+      inserted: expect.arrayContaining(["staff", "platform_fees"]),
+      missingAfter: [],
+    });
+    const categories = async (propertyId: string) =>
+      (
+        await client.query(
+          "SELECT system_key,name,color,sort_order FROM finance.expense_categories WHERE property_id=$1 ORDER BY system_key",
+          [propertyId],
+        )
+      ).rows;
+    expect(await categories(PROPERTY_C)).toEqual(await categories(PROPERTY_A));
   });
 
   it("keeps system keys closed and immutable", async () => {

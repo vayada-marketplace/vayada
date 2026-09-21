@@ -28,6 +28,15 @@ privileges and the release-specific least-privilege checks pass. After enabling
 it, never place the migration-owner URL in `TARGET_DATABASE_URL`,
 `AUTH_DATABASE_URL`, or any other variable inherited by the API process.
 
+VAY-2038 adds a further runtime split: `TARGET_DATABASE_URL` stays on the
+general product role while `AUTH_DATABASE_URL` may use a separately reviewed
+identity-only runtime role. Both are long-lived non-owner credentials. The
+identity role needs its own negative privilege preflight and must not inherit
+the migration owner or receive unscoped writes to shared platform queues and
+webhook tables. Do not switch the auth secret mapping until that role and
+preflight are deployed and the actual deployed auth and target URLs are checked
+for the expected roles and same target database.
+
 Roll out in two phases. First deploy this compatible launcher while every
 database variable still uses the original credential. Only after that revision
 is healthy may the platform add `TARGET_DATABASE_MIGRATION_URL` and replace all

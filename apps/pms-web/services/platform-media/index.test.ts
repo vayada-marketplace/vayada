@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { uploadPlatformMedia, uploadPmsInboxAttachment } from ".";
+import { uploadFinanceExpenseReceipt, uploadPlatformMedia, uploadPmsInboxAttachment } from ".";
 
 describe("uploadPlatformMedia", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -129,6 +129,52 @@ describe("uploadPlatformMedia", () => {
         propertyId: "property-1",
         targetResourceId: "thread-1",
       },
+    });
+  });
+
+  it("stages a private receipt for the reserved expense ID", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          uploadSession: { sessionId: "receipt-session" },
+          uploadTargets: [
+            {
+              uploadTargetId: "receipt-target",
+              clientFileId: "file_1",
+              method: "PUT",
+              uploadUrl: "https://uploads.vayada.localhost/receipt-target",
+              headers: {},
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          mediaObjects: [{ mediaObjectId: "receipt-media" }],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File([new Uint8Array([1, 2, 3])], "bill.png", { type: "image/png" });
+
+    await expect(
+      uploadFinanceExpenseReceipt({
+        propertyId: "property-1",
+        expenseId: "expense-1",
+        file,
+      }),
+    ).resolves.toBe("receipt-media");
+    expect(await requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({
+      purpose: "finance.expense.receipt",
+      visibility: "private",
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: "property-1",
+        propertyId: "property-1",
+        targetResourceId: "expense-1",
+      },
+      files: [{ contentType: "image/png", sizeBytes: 3 }],
     });
   });
 });
