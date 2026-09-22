@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, stripeSubscriptionRuntimeEnabled } from "./config.js";
 
 const completeCreatorMarketplaceEnv = {
-  TARGET_DATABASE_URL: "postgresql://target-db",
+  TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
   AUTH_DATABASE_URL: "postgresql://auth-db",
   WORKOS_JWKS_URL: "https://api.workos.com/sso/jwks/client",
   WORKOS_ISSUER: "https://api.workos.com",
@@ -156,12 +156,13 @@ describe("api config", () => {
 
   it("loads explicitly cut-over Channex capabilities only with target provider config", () => {
     const config = loadConfig({
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "secret",
       PMS_CHANNEX_CONNECTION_MODE: "mutating",
       PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     });
     expect(config.channexManagement).toMatchObject({
       apiBaseUrl: "https://staging.channex.io",
@@ -172,12 +173,13 @@ describe("api config", () => {
 
   it("allows only isolated staging restrictions with the background workers disabled", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingRestrictionsPropertyId).toBe(
@@ -200,12 +202,13 @@ describe("api config", () => {
 
   it("requires explicit opt-in and retains isolation for staged inventory rules", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingInventoryEnabled).toBe(false);
@@ -224,12 +227,13 @@ describe("api config", () => {
 
   it("isolates no-show opt-in without enabling booking sync and permits worker pause", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
     };
     expect(loadConfig(base).channexManagement.stagingNoShowEnabled).toBe(false);
@@ -256,12 +260,13 @@ describe("api config", () => {
 
   it("requires explicit opt-in and retains isolation for scoped meal processing", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_PROVISIONING_MODE: "mutating",
       PMS_CHANNEX_STAGING_MEALS_ENABLED: "true",
       PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: "65f6b2fc-c783-4963-9d6b-a85f82319769",
@@ -282,12 +287,13 @@ describe("api config", () => {
 
   it("requires explicit opt-in and retains isolation for published offer provisioning", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
       API_BACKGROUND_WORKERS_ENABLED: "false",
       PMS_CHANNEX_ARI_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
       PMS_CHANNEX_PROVISIONING_MODE: "mutating",
       PMS_CHANNEX_STAGING_PUBLISHED_OFFERS_ENABLED: "true",
       PMS_CHANNEX_STAGING_INVENTORY_ENABLED: "true",
@@ -308,7 +314,7 @@ describe("api config", () => {
 
   it.each([false, true])("loads a paused isolated staging runtime (meals=%s)", (meals) => {
     const environment = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "synthetic-test-key",
@@ -331,10 +337,18 @@ describe("api config", () => {
       stagingMealsEnabled: meals,
       capabilityModes: { ariSync: "mutating", provisioning: meals ? "mutating" : "observe_only" },
     });
-    const resumed = loadConfig({ ...environment, PMS_CHANNEX_WORKER_ENABLED: "true" });
+    const resumed = loadConfig({
+      ...environment,
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
+    });
     expect(resumed).toEqual({
       ...paused,
-      channexManagement: { ...paused.channexManagement, workerEnabled: true },
+      channexManagement: {
+        ...paused.channexManagement,
+        workerEnabled: true,
+        workerDatabaseUrl: "postgresql://channex_worker@target-db/app",
+      },
     });
     for (const invalid of [
       { PMS_CHANNEX_STAGING_RESTRICTIONS_PROPERTY_ID: undefined },
@@ -366,7 +380,7 @@ describe("api config", () => {
     ).toThrow("Mutating PMS Channex capabilities require PMS_OPERATIONS_SOURCE=target");
     expect(() =>
       loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
+        TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
         PMS_OPERATIONS_SOURCE: "target",
         PMS_CHANNEX_CONNECTION_MODE: "mutating",
         PMS_CHANNEX_WORKER_ENABLED: "false",
@@ -376,9 +390,79 @@ describe("api config", () => {
     ).toThrow("Mutating PMS Channex capabilities require PMS_CHANNEX_WORKER_ENABLED=true");
   });
 
+  it("requires a dedicated management database credential before the worker starts", () => {
+    const enabled = {
+      TARGET_DATABASE_URL: "postgresql://api_runtime@db/app",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "secret",
+      PMS_CHANNEX_CONNECTION_MODE: "mutating",
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+    };
+    expect(() => loadConfig(enabled)).toThrow("PMS_CHANNEX_MANAGEMENT_DATABASE_URL");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL:
+          "postgresql://api_runtime@db/app?application_name=channex",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app?user=api_runtime",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@other-db/app",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/other_app",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        TARGET_DATABASE_URL: "postgresql://api_runtime@db/app%2Ftenant",
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app/tenant",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(() =>
+      loadConfig({
+        ...enabled,
+        TARGET_DATABASE_URL: "postgresql://api_runtime@db",
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db",
+      }),
+    ).toThrow("must use a dedicated credential");
+    expect(
+      loadConfig({
+        ...enabled,
+        PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app",
+      }).channexManagement.workerDatabaseUrl,
+    ).toBe("postgresql://channex_worker@db/app");
+  });
+
+  it("normalizes the Channex management PostgreSQL TLS URL", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://api_runtime@db/app?sslmode=require",
+      PMS_OPERATIONS_SOURCE: "target",
+      CHANNEX_API_BASE_URL: "https://staging.channex.io",
+      CHANNEX_API_KEY: "secret",
+      PMS_CHANNEX_CONNECTION_MODE: "mutating",
+      PMS_CHANNEX_WORKER_ENABLED: "true",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@db/app?sslmode=require",
+    });
+    expect(config.channexManagement.workerDatabaseUrl).toContain("uselibpqcompat=true");
+  });
+
   it("requires explicit review cutover and credentials without a management worker", () => {
     const env = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "test",
@@ -402,7 +486,7 @@ describe("api config", () => {
   it("does not require the durable worker for an iframe-only cutover", () => {
     expect(
       loadConfig({
-        TARGET_DATABASE_URL: "postgresql://target-db",
+        TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
         PMS_OPERATIONS_SOURCE: "target",
         CHANNEX_API_BASE_URL: "https://staging.channex.io",
         CHANNEX_API_KEY: "secret",
@@ -413,11 +497,12 @@ describe("api config", () => {
 
   it("requires an explicit legacy-poll freeze before target booking sync mutates", () => {
     const base = {
-      TARGET_DATABASE_URL: "postgresql://target-db",
+      TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
       PMS_OPERATIONS_SOURCE: "target",
       CHANNEX_API_BASE_URL: "https://staging.channex.io",
       CHANNEX_API_KEY: "secret",
       PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
+      PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     };
     expect(() => loadConfig(base)).toThrow(
       "Mutating PMS Channex booking sync requires CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE=target-owned",
@@ -1268,8 +1353,10 @@ describe("Airbnb alteration runtime opt-in", () => {
     AIRBNB_ALTERATIONS_ENABLED: "true",
     AIRBNB_ALTERATION_PROPERTY_IDS: propertyId,
     PMS_OPERATIONS_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api_runtime@target-db/app",
     API_BACKGROUND_WORKERS_ENABLED: "true",
     PMS_CHANNEX_WORKER_ENABLED: "true",
+    PMS_CHANNEX_MANAGEMENT_DATABASE_URL: "postgresql://channex_worker@target-db/app",
     PMS_CHANNEX_BOOKING_SYNC_MODE: "mutating",
     CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: "target-owned",
     CHANNEX_WEBHOOK_INTAKE_MODE: "mutating",

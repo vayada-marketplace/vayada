@@ -3,6 +3,7 @@ import {
   validAffiliateCollaborationKey,
   type AffiliateAssentRepository,
 } from "../domains/marketplaceAffiliateAssentRepository.js";
+import { isPostgresUnavailableError } from "../platform/postgresRuntime.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 export async function registerMarketplaceAffiliateAssentRoutes(
@@ -55,4 +56,55 @@ export async function registerMarketplaceAffiliateAssentRoutes(
       }
     },
   );
+  app.post<{ Params: { collaborationId: string }; Body: unknown }>(
+    "/collaborations/:collaborationId/affiliate-assent",
+    async (request, reply) => {
+      const { collaborationId } = request.params;
+      const idempotencyKey = readIdempotencyKey(request);
+      if (
+        !validAffiliateCollaborationKey(collaborationId) ||
+        request.body !== undefined ||
+        !idempotencyKey
+      )
+        return reply.code(422).send({ ok: false, code: "invalid_request" });
+      const context = enforceRoutePolicy(request, {
+        permission: "marketplace.collaboration.write",
+      });
+      try {
+        const result = await options.repository.recordForCollaboration(
+          context,
+          collaborationId,
+          idempotencyKey,
+        );
+        if (result.ok) return reply.code(result.replayed ? 200 : 201).send(result);
+        return reply
+          .code(
+            result.code === "invalid_request"
+              ? 422
+              : result.code === "scope_unavailable" || result.code === "terms_unavailable"
+                ? 404
+                : 409,
+          )
+          .send(result);
+      } catch (error) {
+        if (
+          isPostgresUnavailableError(error) ||
+          (typeof error === "object" && error !== null && "statusCode" in error)
+        )
+          throw error;
+        request.log.error({ err: error }, "Collaboration affiliate assent command failed");
+        return reply.code(500).send({ ok: false, code: "write_unavailable" });
+      }
+    },
+  );
+}
+
+function readIdempotencyKey(request: Parameters<typeof enforceRoutePolicy>[0]): string | null {
+  const occurrences = request.raw.rawHeaders.filter(
+    (value, index) => index % 2 === 0 && value.toLowerCase() === "idempotency-key",
+  ).length;
+  const value = request.headers["idempotency-key"];
+  if (occurrences !== 1 || typeof value !== "string") return null;
+  const key = value.trim();
+  return key.length >= 1 && key.length <= 200 ? key : null;
 }

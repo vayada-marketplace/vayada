@@ -1,6 +1,6 @@
 # VAY-1543: database property scope feasibility
 
-Local proof, 2026-09-21. This is not a production migration or rollout approval.
+Local proof, 2026-09-22. This is not a production migration or rollout approval.
 It continues the approved database-protection direction in
 `pricing-runtime-role-boundary.md`; existing app pool PRs #2548/#2551 are merged.
 
@@ -17,8 +17,8 @@ that cluster. No supplied database URL, existing cluster, shared test fixture,
 credential, or AWS resource is used. This is schema loading for a proof, not a
 test of migration-ledger execution or deployed upgrades.
 
-Passed on PostgreSQL 17.5 and independently rerun by the rollout owner on PostgreSQL 16.15 and 17.5: all 252 migrations through
-`0405_booking_affiliate_original_bindings.sql`, source `13fe24d76`.
+Passed on PostgreSQL 17.5 and independently rerun by the rollout owner on PostgreSQL 16.15 and 17.5: all 253 migrations through
+`0406_affiliate_live_click_storage.sql`, source `a745af2d6e`.
 Four separate SCRAM-authenticated, non-owner, NOBYPASSRLS logins represent
 owner authority and public quote execution for two properties in an
 owner-managed property/organization mapping. Policies use `session_user`,
