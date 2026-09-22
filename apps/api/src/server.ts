@@ -178,6 +178,7 @@ import { createPgPmsMandatoryChargeConfirmationCommandRepository } from "./domai
 import { createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort } from "./domains/hotelCatalogOperatingCalendarPropertyProfileEvidence.js";
 import { createPgPmsOperatingCalendarReadModel } from "./domains/pmsOperatingCalendarReadModel.js";
 import { createPmsOperatingCalendarProductionRuntime } from "./domains/pmsOperatingCalendarProductionRuntime.js";
+import { createPgPmsInventoryMaterializationRepository } from "./domains/pmsInventoryMaterializationRepository.js";
 import { createPgFinancePaymentReadinessReadModel } from "./domains/financePaymentReadinessReadModel.js";
 import { createFinancePaymentSetupRuntime } from "./domains/financePaymentSetupRuntime.js";
 import {
@@ -230,6 +231,7 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
+import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
 import { createChannexMessageDelivery } from "./integrations/channexMessageDelivery.js";
@@ -804,40 +806,48 @@ const providerWebhookSecrets = {
   resend: config.providerWebhooks.resendSecret,
 };
 const hasProviderWebhookSecret = Object.values(providerWebhookSecrets).some(Boolean);
+const channexManagementDatabase = resolveChannexManagementDatabaseRouting({
+  config: config.channexManagement,
+  commandsMutating: channexCommandsMutating,
+});
 
-const channexBookingRevisionStore =
-  config.channexManagement.capabilityModes.bookingSync === "mutating"
-    ? createPgProviderWebhookStore({ connectionString: targetDatabaseUrl })
-    : undefined;
-const channexManagementPlans =
-  channexCommandsMutating && config.channexManagement.workerEnabled
-    ? createPgChannexManagementPlanPort({
-        connectionString: targetDatabaseUrl,
-        stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
-          ? config.channexManagement.stagingRestrictionsPropertyId
-          : undefined,
-        bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
-          if (!channexBookingRevisionStore) {
-            if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
-            return;
+const channexBookingRevisionStore = channexManagementDatabase.bookingRevisionStore
+  ? createPgProviderWebhookStore({
+      connectionString: channexManagementDatabase.bookingRevisionStore,
+    })
+  : undefined;
+const channexManagementPlans = channexManagementDatabase.plans
+  ? createPgChannexManagementPlanPort({
+      connectionString: channexManagementDatabase.plans,
+      stagingMealsPropertyId: config.channexManagement.stagingMealsEnabled
+        ? config.channexManagement.stagingRestrictionsPropertyId
+        : undefined,
+      bookingRevisionHandoff: async ({ propertyId, providerPropertyId, revisions }) => {
+        if (!channexBookingRevisionStore) {
+          if (revisions.length > 0) throw new Error("Channex booking intake is unavailable");
+          return;
+        }
+        for (const revision of revisions) {
+          if (!revision || typeof revision !== "object" || Array.isArray(revision)) {
+            throw new Error("Channex booking revision payload is invalid");
           }
-          for (const revision of revisions) {
-            if (!revision || typeof revision !== "object" || Array.isArray(revision)) {
-              throw new Error("Channex booking revision payload is invalid");
-            }
-            await promotePulledChannexBookingRevision({
-              store: channexBookingRevisionStore,
-              propertyId,
-              providerPropertyId,
-              revision: revision as Record<string, unknown>,
-            });
-          }
-        },
-      })
-    : undefined;
+          await promotePulledChannexBookingRevision({
+            store: channexBookingRevisionStore,
+            propertyId,
+            providerPropertyId,
+            revision: revision as Record<string, unknown>,
+          });
+        }
+      },
+    })
+  : undefined;
 const channexUploadReconciliationPool =
-  channexManagementPlans && config.channexManagement.capabilityModes.ariSync === "mutating"
-    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
+  channexManagementPlans && channexManagementDatabase.reconciliation
+    ? new pg.Pool({
+        connectionString: channexManagementDatabase.reconciliation,
+        max: 2,
+        connectionTimeoutMillis: 5_000,
+      })
     : undefined;
 const bookingWebAffiliateRepository =
   config.affiliatePublicSource === "target"
@@ -1066,6 +1076,43 @@ const pmsOperatingCalendarRuntime = createPmsOperatingCalendarProductionRuntime(
   },
   operatingCalendar: propertySetupPmsRuntime.operatingCalendar,
 });
+const channexAvailabilityInventory = channexManagementDatabase.availabilityInventory
+  ? (() => {
+      const connectionString = channexManagementDatabase.availabilityInventory;
+      const roomFacts = createPgPmsRoomFactsReadModel({ connectionString });
+      const propertyProfileEvidence =
+        createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+          connectionString,
+        });
+      const readOnlyPropertyProfileEvidence =
+        createPgHotelCatalogOperatingCalendarPropertyProfileEvidencePort({
+          connectionString,
+          readOnly: true,
+        });
+      const operatingCalendar = createPgPmsOperatingCalendarReadModel({
+        connectionString,
+        propertyProfileEvidence: readOnlyPropertyProfileEvidence,
+        roomEvidence: { roomFacts, roomCapacity: roomFacts },
+      });
+      const inventory = createPgPmsInventoryMaterializationRepository({
+        connectionString,
+        authorization: { authorizeInventoryMaterialization: async () => false },
+        operatingCalendar,
+        propertyProfileEvidence,
+        roomCapacity: roomFacts,
+      });
+      return Object.freeze({
+        inventory,
+        resources: [
+          inventory,
+          operatingCalendar,
+          propertyProfileEvidence,
+          readOnlyPropertyProfileEvidence,
+          roomFacts,
+        ],
+      });
+    })()
+  : undefined;
 const channexManagementProvider =
   channexManagementPlans && config.channexManagement.apiBaseUrl && config.channexManagement.apiKey
     ? createChannexManagementProvider({
@@ -1087,21 +1134,21 @@ const channexManagementProvider =
               reconcilePendingChannexUploads(channexUploadReconciliationPool, lease, get)
           : undefined,
         reconcileRoomAvailability:
-          channexUploadReconciliationPool && pmsOperatingCalendarRuntime
+          channexUploadReconciliationPool && channexAvailabilityInventory
             ? (lease, get) =>
                 reconcilePendingChannexRoomAvailability(
                   channexUploadReconciliationPool,
-                  pmsOperatingCalendarRuntime.inventory,
+                  channexAvailabilityInventory.inventory,
                   lease,
                   get,
                 )
             : undefined,
         prepareRoomAvailability:
-          channexUploadReconciliationPool && pmsOperatingCalendarRuntime
+          channexUploadReconciliationPool && channexAvailabilityInventory
             ? (lease) =>
                 prepareNextChannexRoomAvailabilityDispatch(
                   channexUploadReconciliationPool,
-                  pmsOperatingCalendarRuntime.inventory,
+                  channexAvailabilityInventory.inventory,
                   lease,
                 )
             : undefined,
@@ -1121,26 +1168,24 @@ const channexManagementProvider =
             : undefined,
       })
     : undefined;
-const channexManagementWorkerStore = channexManagementProvider
-  ? createPgPmsChannexManagementWorkerStore({
-      connectionString: targetDatabaseUrl,
-      targetState: createPmsChannexManagementTargetState(),
-      ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
-      stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
-      stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
-      stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
-      stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
-    })
-  : undefined;
-const channexOfferSchedule =
-  config.channexManagement.workerEnabled &&
-  config.channexManagement.stagingInventoryEnabled &&
-  config.channexManagement.stagingRestrictionsPropertyId
-    ? createPgChannexAriSchedule(
-        targetDatabaseUrl,
-        config.channexManagement.stagingRestrictionsPropertyId,
-      )
+const channexManagementWorkerStore =
+  channexManagementProvider && channexManagementDatabase.workerStore
+    ? createPgPmsChannexManagementWorkerStore({
+        connectionString: channexManagementDatabase.workerStore,
+        targetState: createPmsChannexManagementTargetState(),
+        ariSyncMutating: config.channexManagement.capabilityModes.ariSync === "mutating",
+        stagingRestrictionsPropertyId: config.channexManagement.stagingRestrictionsPropertyId,
+        stagingMealsEnabled: config.channexManagement.stagingMealsEnabled,
+        stagingPublishedOffersEnabled: config.channexManagement.stagingPublishedOffersEnabled,
+        stagingInventoryEnabled: config.channexManagement.stagingInventoryEnabled,
+      })
     : undefined;
+const channexOfferSchedule = channexManagementDatabase.scheduler
+  ? createPgChannexAriSchedule(
+      channexManagementDatabase.scheduler.connectionString,
+      channexManagementDatabase.scheduler.propertyId,
+    )
+  : undefined;
 const pmsCalendarAutoOpenWorkerStore = pmsOperatingCalendarRuntime
   ? createPgPmsCalendarAutoOpenWorkerStore({
       connectionString: targetDatabaseUrl,
@@ -2341,6 +2386,7 @@ app.addHook("onClose", async () => {
     channexManagementPlans?.close(),
     channexUploadReconciliationPool?.end(),
     channexBookingRevisionStore?.close?.(),
+    ...(channexAvailabilityInventory?.resources ?? []).map((resource) => resource.close()),
   ]);
 });
 

@@ -9,8 +9,8 @@ export type MarketplaceCollaborationReadsContractVersion =
 export type MarketplaceCollaborationSide = "creator" | "hotel";
 
 export type MarketplaceAffiliateAssentRead = {
-  participationId: string;
-  attemptId: string;
+  participationId: string | null;
+  attemptId: string | null;
   programId: string;
   propertyId: string;
   offerId: string;
@@ -25,6 +25,13 @@ export type MarketplaceAffiliateAssentRead = {
   };
   hotelApprovedAt: string | null;
   creatorAcceptedAt: string | null;
+};
+
+export type MarketplaceAffiliateAssentCommandResponse = {
+  ok: true;
+  revision: number;
+  state: "pending" | "matched";
+  replayed: boolean;
 };
 
 export type MarketplaceCollaborationStatus =
@@ -418,6 +425,17 @@ export async function getMarketplaceCollaborationAffiliateAssent(
   return vayadaApiClient.get<MarketplaceAffiliateAssentRead>(
     marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
     options,
+  );
+}
+
+export async function recordMarketplaceCollaborationAffiliateAssent(
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<MarketplaceAffiliateAssentCommandResponse> {
+  return vayadaApiClient.post<MarketplaceAffiliateAssentCommandResponse>(
+    marketplaceCollaborationEndpoints.affiliateAssent(collaborationId),
+    undefined,
+    toIdempotencyOptions(idempotencyKey),
   );
 }
 

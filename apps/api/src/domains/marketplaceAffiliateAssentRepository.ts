@@ -8,10 +8,11 @@ import {
   requirePropertyAccess,
   requireResourceAccess,
 } from "@vayada/backend-authorization";
+import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
 
 export type AffiliateAssentRead = {
-  participationId: string;
-  attemptId: string;
+  participationId: string | null;
+  attemptId: string | null;
   programId: string;
   propertyId: string;
   offerId: string;
@@ -29,8 +30,21 @@ export type AffiliateAssentRepository = {
     context: RequestContext,
     collaborationId: string,
   ): Promise<AffiliateAssentRead | null>;
+  recordForCollaboration(
+    context: RequestContext,
+    collaborationId: string,
+    idempotencyKey: string,
+  ): Promise<AffiliateAssentCommandResult>;
   close(): Promise<void>;
 };
+export type AffiliateAssentCommandResult =
+  | {
+      ok: true;
+      revision: number;
+      state: "pending" | "matched";
+      replayed: boolean;
+    }
+  | { ok: false; code: string };
 export function createPgMarketplaceAffiliateAssentRepository(
   connectionString: string,
 ): AffiliateAssentRepository {
@@ -38,6 +52,8 @@ export function createPgMarketplaceAffiliateAssentRepository(
   return {
     read: (context, id) => readAffiliateAssent(pool, context, id),
     readForCollaboration: (context, id) => readCollaborationAffiliateAssent(pool, context, id),
+    recordForCollaboration: (context, id, key) =>
+      recordCollaborationAffiliateAssent(pool, context, id, key),
     close: () => pool.end(),
   };
 }
@@ -88,49 +104,7 @@ export async function readAffiliateAssent(
   const row = result.rows[0];
   if (!row) return null;
   try {
-    const resource = {
-      product: "marketplace" as const,
-      resourceType: hotel ? ("hotel_profile" as const) : ("creator_profile" as const),
-      resourceId: hotel ? row.property_id : row.creator_profile_id,
-    };
-    requireResourceAccess(context, {
-      permission: "marketplace.collaboration.read",
-      resource: { ...resource, allowedRelationships: hotel ? ["owner", "operator"] : ["owner"] },
-    });
-    if (hotel) {
-      requireActiveEntitlement(context, {
-        product: "marketplace",
-        key: "marketplace-hotel-profile",
-        resource,
-      });
-      requireResourceAccess(context, {
-        permission: "marketplace.collaboration.read",
-        resource: {
-          product: "marketplace",
-          resourceType: "marketplace_offer",
-          resourceId: row.offer_id,
-          allowedRelationships: ["owner", "operator"],
-        },
-      });
-      await requirePropertyAccess(
-        context,
-        { findMembershipPropertyScope: async () => null },
-        {
-          propertyId: row.property_id,
-          targetResource: { product: "marketplace", resourceType: "hotel_profile" },
-          allowedRelationships: ["owner", "operator"],
-        },
-      );
-    } else {
-      const owned = context.linkedResources.filter(
-        (r) =>
-          r.product === "marketplace" &&
-          r.resourceType === "creator_profile" &&
-          r.relationship === "owner" &&
-          r.status === "active",
-      );
-      if (owned.length !== 1 || owned[0]!.resourceId !== row.creator_profile_id) return null;
-    }
+    await authorizeAffiliateRead(context, row, hotel);
   } catch (error) {
     if (error instanceof AuthorizationError) return null;
     throw error;
@@ -157,6 +131,57 @@ export async function readAffiliateAssent(
 
 export function validAffiliateCollaborationKey(id: string): boolean {
   return id.length <= 100 && /^[A-Za-z0-9._~:-]+$/.test(id);
+}
+
+async function authorizeAffiliateRead(
+  context: RequestContext,
+  row: { property_id: string; offer_id: string; creator_profile_id: string },
+  hotel: boolean,
+): Promise<void> {
+  const resource = {
+    product: "marketplace" as const,
+    resourceType: hotel ? ("hotel_profile" as const) : ("creator_profile" as const),
+    resourceId: hotel ? row.property_id : row.creator_profile_id,
+  };
+  requireResourceAccess(context, {
+    permission: "marketplace.collaboration.read",
+    resource: { ...resource, allowedRelationships: hotel ? ["owner", "operator"] : ["owner"] },
+  });
+  if (!hotel) {
+    const owned = context.linkedResources.filter(
+      (link) =>
+        link.product === "marketplace" &&
+        link.resourceType === "creator_profile" &&
+        link.relationship === "owner" &&
+        link.status === "active",
+    );
+    if (owned.length !== 1 || owned[0]!.resourceId !== row.creator_profile_id)
+      throw new AuthorizationError();
+    return;
+  }
+  requireActiveEntitlement(context, {
+    product: "marketplace",
+    key: "marketplace-hotel-profile",
+    resource,
+  });
+  requireResourceAccess(context, {
+    permission: "marketplace.collaboration.read",
+    resource: {
+      product: "marketplace",
+      resourceType: "marketplace_offer",
+      resourceId: row.offer_id,
+      allowedRelationships: ["owner", "operator"],
+    },
+  });
+  await requirePropertyAccess(
+    context,
+    { findMembershipPropertyScope: async () => null },
+    {
+      propertyId: row.property_id,
+      targetResource: { product: "marketplace", resourceType: "hotel_profile" },
+      allowedRelationships: ["owner", "operator"],
+    },
+  );
 }
 
 export async function readCollaborationAffiliateAssent(
@@ -190,5 +215,163 @@ export async function readCollaborationAffiliateAssent(
     [collaborationId, context.selectedOrganization.organizationId, hotel],
   );
   // Reuse exact-version disclosure, persisted-resource and canonical property authorization.
-  return result.rows[0] ? readAffiliateAssent(pool, context, result.rows[0].id) : null;
+  if (result.rows[0]) return readAffiliateAssent(pool, context, result.rows[0].id);
+  const target = await resolveCollaborationAffiliateAssentTarget(pool, context, collaborationId);
+  if (!target) return null;
+  try {
+    await authorizeAffiliateRead(context, target, hotel);
+  } catch (error) {
+    if (error instanceof AuthorizationError) return null;
+    throw error;
+  }
+  return {
+    participationId: null,
+    attemptId: null,
+    programId: target.program_id,
+    propertyId: target.property_id,
+    offerId: target.offer_id,
+    creatorProfileId: target.creator_profile_id,
+    origin: hotel ? "invitation" : "application",
+    revision: 0,
+    assentState: "pending",
+    terms: {
+      id: target.terms_id,
+      disclosure: target.disclosure,
+      disclosureHash: target.disclosure_hash,
+    },
+    hotelApprovedAt: null,
+    creatorAcceptedAt: null,
+  };
+}
+
+export async function recordCollaborationAffiliateAssent(
+  pool: pg.Pool,
+  context: RequestContext,
+  collaborationId: string,
+  idempotencyKey: string,
+): Promise<AffiliateAssentCommandResult> {
+  const hotel = context.selectedOrganization.kind === "hotel_group";
+  if (
+    !validAffiliateCollaborationKey(collaborationId) ||
+    !idempotencyKey.trim() ||
+    idempotencyKey.length > 200 ||
+    (!hotel && context.selectedOrganization.kind !== "creator_workspace")
+  )
+    return { ok: false, code: "invalid_request" };
+
+  const target = await resolveCollaborationAffiliateAssentTarget(pool, context, collaborationId);
+  if (!target) return { ok: false, code: "scope_unavailable" };
+  const keyHash = createHash("sha256")
+    .update(JSON.stringify([target.program_id, target.creator_profile_id, idempotencyKey]))
+    .digest("hex");
+  const replay = await pool.query<{ revision: number }>(
+    `SELECT d.revision FROM platform.idempotency_keys k
+    JOIN marketplace.affiliate_assent_decisions d ON d.id::text=k.response_resource_id
+      AND d.actor_user_id=$4 AND d.actor_organization_id=$5 AND d.decision=$6
+    WHERE k.operation_scope='marketplace' AND k.operation='marketplace.affiliate.initial_assent'
+      AND k.tenant_scope='property' AND k.property_id=$1 AND k.key_hash=$2
+      AND k.status='completed' AND d.attempt_id=COALESCE($3::uuid,d.attempt_id)`,
+    [
+      target.property_id,
+      keyHash,
+      target.attempt_id,
+      context.actor.internalUserId,
+      context.selectedOrganization.organizationId,
+      hotel ? "hotel_approval" : "creator_acceptance",
+    ],
+  );
+
+  const result = await recordAffiliateAssent(pool, {
+    context,
+    propertyId: target.property_id,
+    programId: target.program_id,
+    creatorProfileId: target.creator_profile_id,
+    termsId: target.terms_id,
+    attemptId:
+      target.attempt_id ??
+      deterministicAttemptId(target.program_id, target.creator_profile_id, target.terms_id),
+    expectedRevision: replay.rows[0] ? replay.rows[0].revision - 1 : Number(target.revision),
+    idempotencyKey,
+    decision: hotel ? "hotel_approval" : "creator_acceptance",
+    disclosureHash: target.disclosure_hash,
+  });
+  return result.ok
+    ? {
+        ok: true,
+        revision: result.revision,
+        state: result.state,
+        replayed: result.replayed,
+      }
+    : result;
+}
+
+type CollaborationAffiliateTarget = {
+  property_id: string;
+  offer_id: string;
+  program_id: string;
+  creator_profile_id: string;
+  attempt_id: string | null;
+  revision: string;
+  terms_id: string;
+  disclosure: string;
+  disclosure_hash: string;
+};
+
+async function resolveCollaborationAffiliateAssentTarget(
+  pool: pg.Pool,
+  context: RequestContext,
+  collaborationId: string,
+): Promise<CollaborationAffiliateTarget | null> {
+  const hotel = context.selectedOrganization.kind === "hotel_group";
+  const scope = await pool.query<CollaborationAffiliateTarget>(
+    `WITH candidates AS (
+      SELECT c.*, count(*) OVER () AS matches FROM marketplace.collaborations c
+      WHERE c.source_collaboration_id=$1
+        AND CASE WHEN $3 THEN c.hotel_organization_id ELSE c.creator_organization_id END=$2
+    )
+    SELECT c.property_id,c.offer_id,p.id AS program_id,c.creator_profile_id,a.id AS attempt_id,
+      count(d.id)::text AS revision,COALESCE(at.id,latest.id) AS terms_id,
+      COALESCE(at.disclosure,latest.disclosure) AS disclosure,
+      COALESCE(at.disclosure_hash,latest.disclosure_hash) AS disclosure_hash
+    FROM candidates c
+    JOIN marketplace.affiliate_programs p ON p.offer_id=c.offer_id
+      AND p.property_id=c.property_id AND p.organization_id=c.hotel_organization_id
+    JOIN marketplace.creator_profiles cp ON cp.id=c.creator_profile_id
+      AND cp.organization_id=c.creator_organization_id AND cp.profile_status='active'
+    LEFT JOIN marketplace.affiliate_participations m ON m.program_id=p.id
+      AND m.creator_profile_id=c.creator_profile_id
+      AND m.creator_organization_id=c.creator_organization_id
+    LEFT JOIN LATERAL (
+      SELECT candidate.id,candidate.terms_id FROM marketplace.affiliate_participation_attempts candidate
+      WHERE candidate.participation_id=m.id ORDER BY candidate.attempt_number DESC LIMIT 1
+    ) a ON true
+    LEFT JOIN marketplace.affiliate_published_terms at ON at.id=a.terms_id AND at.program_id=p.id
+    LEFT JOIN LATERAL (
+      SELECT published.id,published.disclosure,published.disclosure_hash FROM marketplace.affiliate_published_terms published
+      WHERE published.program_id=p.id AND published.effective_at<=now()
+      ORDER BY published.effective_at DESC,published.recorded_at DESC,published.id DESC LIMIT 1
+    ) latest ON true
+    LEFT JOIN marketplace.affiliate_assent_decisions d ON d.attempt_id=a.id
+    WHERE c.matches=1 AND COALESCE(at.id,latest.id) IS NOT NULL
+    GROUP BY c.property_id,c.offer_id,p.id,c.creator_profile_id,a.id,at.id,at.disclosure,
+      at.disclosure_hash,latest.id,latest.disclosure,latest.disclosure_hash`,
+    [collaborationId, context.selectedOrganization.organizationId, hotel],
+  );
+  return scope.rows[0] ?? null;
+}
+
+function deterministicAttemptId(
+  programId: string,
+  creatorProfileId: string,
+  termsId: string,
+): string {
+  const value = createHash("sha256")
+    .update(`marketplace-affiliate-attempt:v1:${programId}:${creatorProfileId}:${termsId}`)
+    .digest("hex")
+    .slice(0, 32)
+    .split("");
+  value[12] = "4";
+  value[16] = ((Number.parseInt(value[16]!, 16) & 3) | 8).toString(16);
+  const id = value.join("");
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 }
