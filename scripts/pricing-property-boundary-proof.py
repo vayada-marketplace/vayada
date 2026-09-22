@@ -28,7 +28,11 @@ roles = ", ".join(passwords)
 
 
 def run(args, **kwargs):
-    return subprocess.run(args, text=True, capture_output=True, **kwargs)
+    kwargs.setdefault("timeout", 300)
+    try:
+        return subprocess.run(args, text=True, capture_output=True, **kwargs)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"command timed out: {args!r}") from error
 
 
 with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
@@ -250,10 +254,13 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         sql("DELETE FROM booking.pricing_authority_revisions", "pricing_a", denied=True)
         # Cross-property locking visibility is intentional, not tenant read isolation.
         for role in ("pricing_a", "public_a"):
-            assert sql(
-                f"BEGIN; SELECT property_id FROM booking.pricing_authority_heads WHERE property_id='{B}' FOR SHARE; ROLLBACK",
-                role,
-            ) == B
+            assert (
+                sql(
+                    f"BEGIN; SELECT property_id FROM booking.pricing_authority_heads WHERE property_id='{B}' FOR SHARE; ROLLBACK",
+                    role,
+                )
+                == B
+            )
         # Demonstrate that a failed write rolls back an earlier allowed write.
         sql("BEGIN;" + quote(A, 6) + quote(B, 7) + "COMMIT;", "public_a", denied=True)
         assert sql("SELECT count(*) FROM booking.pricing_quotes") == "2"
