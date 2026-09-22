@@ -19,6 +19,9 @@ async function setup(mutate: (c: RequestContext) => void = () => {}) {
     readForCollaboration: vi
       .fn<AffiliateAssentRepository["readForCollaboration"]>()
       .mockResolvedValue(null),
+    recordForCollaboration: vi
+      .fn<AffiliateAssentRepository["recordForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -161,8 +164,64 @@ describe("Affiliate assent HTTP read", () => {
     expect((await denied.app.inject({ url, headers })).statusCode).toBe(403);
     expect(denied.repository.readForCollaboration).not.toHaveBeenCalled();
   });
+  it("records only a server-resolved collaboration decision with one idempotency key", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.recordForCollaboration.mockResolvedValue({
+      ok: true,
+      revision: 1,
+      state: "pending",
+      replayed: false,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/collaborations/Existing:QA/affiliate-assent",
+      headers: { ...headers, "idempotency-key": "decision-1" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({ ok: true, revision: 1, state: "pending", replayed: false });
+    expect(repository.recordForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      "decision-1",
+    );
+
+    for (const request of [
+      { headers },
+      { headers: { ...headers, "idempotency-key": "decision-2" }, payload: { termsId: attemptId } },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/collaborations/Existing:QA/affiliate-assent",
+            ...request,
+          })
+        ).statusCode,
+      ).toBe(422);
+    }
+    expect(repository.recordForCollaboration).toHaveBeenCalledTimes(1);
+
+    const denied = await setup();
+    expect(
+      (
+        await denied.app.inject({
+          method: "POST",
+          url: "/collaborations/Existing:QA/affiliate-assent",
+          headers: { ...headers, "idempotency-key": "decision-1" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(denied.repository.recordForCollaboration).not.toHaveBeenCalled();
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
-    const repository = { read: vi.fn(), readForCollaboration: vi.fn(), close: async () => {} };
+    const repository = {
+      read: vi.fn(),
+      readForCollaboration: vi.fn(),
+      recordForCollaboration: vi.fn(),
+      close: async () => {},
+    };
     const app = buildApp({
       logger: false,
       marketplaceAffiliateAssentRepository: repository,
