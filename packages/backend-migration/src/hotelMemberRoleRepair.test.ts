@@ -141,6 +141,7 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel member role repair migration (Postgre
   });
 
   it("aborts atomically when any membership could carry access or intent", async () => {
+    await insertMembership(client, { id: membershipId(20), organizationId: OTHER_ORG });
     await insertMembership(client, { id: membershipId(1) });
     await insertMembership(client, { id: membershipId(2), propertyAccessMode: "all" });
     await insertMembership(client, { id: membershipId(3), accessOrigin: "external_owner" });
@@ -197,7 +198,9 @@ describe.skipIf(!TEST_DATABASE_URL)("hotel member role repair migration (Postgre
     const memberships = await client.query(
       `SELECT role_key AS "roleKey", updated_at AS "updatedAt"
        FROM identity.organization_memberships
+       WHERE organization_id = $1
        ORDER BY id`,
+      [HOTEL_ORG],
     );
     expect(memberships.rows).toHaveLength(10);
     expect(memberships.rows.every((row) => row.roleKey === "hotel_member")).toBe(true);
