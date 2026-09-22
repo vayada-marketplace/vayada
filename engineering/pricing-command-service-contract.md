@@ -1,6 +1,6 @@
 # VAY-1543: private pricing command service
 
-Reviewable integration contract, 2026-09-21, source `13fe24d76`.
+Reviewable integration contract, 2026-09-22, source `a745af2d6e`.
 Supersedes the open broker-versus-capability options in
 `pricing-property-boundary-proof.md`: propose a **private command service with
 native property-bound PostgreSQL logins**, not a generic connection broker.
