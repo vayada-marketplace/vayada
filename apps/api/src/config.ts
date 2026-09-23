@@ -1152,7 +1152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ) {
       throw new Error("Finance expense worker requires its dedicated login on the target database");
     }
-    financeExpenseWorker = { databaseUrl, propertyId };
+    financeExpenseWorker = { databaseUrl: normalizePgConnectionString(databaseUrl), propertyId };
   }
   let airbnbAlterations: ApiConfig["airbnbAlterations"];
   if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {

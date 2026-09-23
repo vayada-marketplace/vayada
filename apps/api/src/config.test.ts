@@ -1533,4 +1533,13 @@ describe("Finance expense worker boundary config", () => {
     ])
       expect(() => loadConfig({ ...env, ...overrides })).toThrow();
   });
+  it("normalizes the dedicated PostgreSQL TLS URL after validating its query keys", () => {
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPENSE_WORKER_DATABASE_URL:
+          env.FINANCE_EXPENSE_WORKER_DATABASE_URL + "?sslmode=require",
+      }).financeExpenseWorker?.databaseUrl,
+    ).toContain("sslmode=require&uselibpqcompat=true");
+  });
 });
