@@ -78,6 +78,11 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
         current_user: role,
         session_user: role,
       });
+      for (const view of [
+        "booking.pricing_runtime_effective_property_scopes",
+        "booking.pricing_runtime_effective_authority_scopes",
+      ])
+        expect((await client.query(`SELECT * FROM ${view}`)).rows).toEqual([]);
       await assertFinanceExpenseWorkerBoundary(client, { propertyId: property });
       await expect(
         assertFinanceExpenseWorkerBoundary(client, { propertyId: other }),
@@ -89,6 +94,8 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
         `ALTER POLICY finance_expense_worker_scope ON platform.jobs USING(true)`,
         `GRANT pg_read_all_data TO ${role}`,
         `ALTER FUNCTION platform.finance_expense_worker_scope(text,text,uuid) SECURITY DEFINER`,
+        `ALTER VIEW booking.pricing_runtime_effective_property_scopes SET (security_barrier=false)`,
+        `ALTER TABLE platform.pricing_runtime_property_scopes DROP CONSTRAINT pricing_runtime_property_scopes_database_login_check`,
       ]) {
         await admin.query("BEGIN");
         try {
