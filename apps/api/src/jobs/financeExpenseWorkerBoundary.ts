@@ -98,7 +98,7 @@ export async function assertFinanceExpenseWorkerBoundary(
   ];
   const tableGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,privilege,has_table_privilege($1,c.oid,privilege||' WITH GRANT OPTION') AS delegate FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest($2::text[]) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_table_privilege($1,c.oid,privilege)`,
+      `SELECT n.nspname||'.'||c.relname AS name,privilege,has_table_privilege($1,c.oid,privilege||' WITH GRANT OPTION') AS delegate FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest($2::text[]) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_schema_privilege($1,n.oid,'USAGE') AND has_table_privilege($1,c.oid,privilege)`,
       [role, kinds],
     )
   ).rows;
@@ -107,7 +107,7 @@ export async function assertFinanceExpenseWorkerBoundary(
       fail("table_privileges");
   const columnGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,a.attname,privilege,has_column_privilege($1,c.oid,a.attname,privilege||' WITH GRANT OPTION') AS delegate FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND a.attnum>0 AND NOT a.attisdropped AND has_column_privilege($1,c.oid,a.attname,privilege)`,
+      `SELECT n.nspname||'.'||c.relname AS name,a.attname,privilege,has_column_privilege($1,c.oid,a.attname,privilege||' WITH GRANT OPTION') AS delegate FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_schema_privilege($1,n.oid,'USAGE') AND a.attnum>0 AND NOT a.attisdropped AND has_column_privilege($1,c.oid,a.attname,privilege)`,
       [role],
     )
   ).rows;
