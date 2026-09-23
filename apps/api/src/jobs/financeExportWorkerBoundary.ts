@@ -6,6 +6,8 @@ export const FINANCE_EXPORT_WORKER_ROLE = "vayada_next_finance_export_worker";
 // Exact effective-grant contract. Column lists intentionally deny receipt data.
 // prettier-ignore
 export const financeExportWorkerPrivileges: Record<string, Record<string, true | string[]>> = {
+  "booking.pricing_runtime_effective_authority_scopes": { SELECT: true },
+  "booking.pricing_runtime_effective_property_scopes": { SELECT: true },
   "platform.finance_export_worker_properties": { SELECT: true },
   "hotel_catalog.properties": { SELECT: ["id", "profile_revision", "updated_at"] },
   "hotel_catalog.property_locations": { SELECT: ["property_id", "timezone", "updated_at"] },
@@ -119,6 +121,7 @@ export async function assertFinanceExportWorkerBoundary(
   for (const [name, privileges] of Object.entries(financeExportWorkerPrivileges)) {
     if (
       name !== "platform.finance_export_worker_properties" &&
+      !name.startsWith("booking.pricing_runtime_effective_") &&
       !relations.find((row) => row.name === name)?.rls
     )
       fail("rls_disabled");

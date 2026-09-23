@@ -32,7 +32,9 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
       `REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${database}" TO ${role}`,
     );
     await assertFinanceExportWorkerBoundary(admin, { allowMissingGrants: true });
-    await admin.query(`GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms TO ${role}`);
+    await admin.query(
+      `GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms,booking TO ${role}`,
+    );
     for (const [table, privileges] of Object.entries(financeExportWorkerPrivileges))
       for (const [kind, columns] of Object.entries(privileges))
         await admin.query(
@@ -118,8 +120,11 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
       (await worker.query("SELECT property_id FROM pms.property_pricing_settings")).rows,
     ).toEqual([{ property_id: property }]);
     expect((await worker.query("SELECT id FROM platform.jobs")).rows).toEqual([{ id: allowedJob }]);
+    await expect(
+      worker.query("SELECT id,provider FROM platform.external_webhook_events"),
+    ).rejects.toMatchObject({ code: "42501" });
     expect(
-      (await worker.query("SELECT id,provider FROM platform.external_webhook_events")).rows,
+      (await worker.query("SELECT * FROM booking.pricing_runtime_effective_property_scopes")).rows,
     ).toEqual([]);
     await expect(
       worker.query(
