@@ -230,6 +230,13 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
       }
     };
     try {
+      expect(
+        (
+          await client.query(
+            "SELECT platform.finance_expense_worker_scope('property','not-a-uuid') AS allowed",
+          )
+        ).rows,
+      ).toEqual([{ allowed: false }]);
       for (const table of [
         "platform.outbox_events",
         "identity.users",
