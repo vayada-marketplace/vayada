@@ -136,7 +136,8 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           ('{PUBLIC_A}','public','{A}','{ORG}'),
           ('{PUBLIC_B}','public','{B}','{ORG}'),
           ('{READER_A}','owner_read','{A}','{ORG}');
-        GRANT USAGE ON SCHEMA booking, platform TO {roles};
+        GRANT USAGE ON SCHEMA booking, platform, identity TO {roles};
+        GRANT SELECT, UPDATE ON identity.organizations TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
         GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
@@ -153,6 +154,27 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             )
             == "t"
         )
+        for role in (OWNER_A, PUBLIC_A, READER_A):
+            assert (
+                sql(
+                    f"BEGIN; SELECT id FROM identity.organizations WHERE id='{ORG}' FOR UPDATE; ROLLBACK;",
+                    role,
+                )
+                == ORG
+            )
+            sql(
+                f"UPDATE identity.organizations SET name='tampered' WHERE id='{ORG}'",
+                role,
+                denied=True,
+            )
+        assert (
+            sql(
+                f"BEGIN; UPDATE identity.organizations SET name='legacy-write' WHERE id='{ORG}' RETURNING name; ROLLBACK;",
+                LEGACY,
+            )
+            == "legacy-write"
+        )
+        assert sql(f"SELECT name FROM identity.organizations WHERE id='{ORG}'") == "Proof"
         sql(quote(A, 1), PUBLIC_A)
         sql(quote(B, 2), PUBLIC_B)
         sql(quote(B, 3), PUBLIC_A, denied=True)
@@ -171,6 +193,11 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         sql("SELECT 1 FROM platform.pricing_runtime_property_scopes", LEGACY, denied=True)
         sql("BEGIN;" + quote(B, 11) + "ROLLBACK", LEGACY)
         sql(f"GRANT {OWNER_B} TO {OWNER_A},{LEGACY}")
+        sql(
+            f"UPDATE identity.organizations SET name='role-hop' WHERE id='{ORG}'",
+            LEGACY,
+            denied=True,
+        )
         sql(
             revision(B, "00000000-0000-4000-8000-000000000015", "inherited-owner"),
             LEGACY,
@@ -330,7 +357,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; organization lock-only denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
