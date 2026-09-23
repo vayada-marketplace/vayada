@@ -102,7 +102,7 @@ export async function assertFinanceExpenseWorkerBoundary(
     !helper?.owner_matches ||
     !helper.executable ||
     createHash("sha256").update(helper.definition).digest("hex") !==
-      "b5cf59790a944e8590f8f790cf1438f904c11de83bdf9a69c5d84c123efc2b85"
+      "c7c5dbdc5ccdb791566dc3aea7f7dc056d7a462e14f8e27bb14b778b1b422b19"
   )
     fail("helper_drift");
   const pricingViews = (
