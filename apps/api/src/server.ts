@@ -231,6 +231,7 @@ import { runChannexReviewJobs } from "./jobs/channexReviews.js";
 import { runChannexBookingJobs } from "./jobs/channexBookings.js";
 import { runChannexMessageJobs } from "./jobs/channexMessages.js";
 import { createChannexManagementProvider } from "./integrations/channexManagement.js";
+import { preflightChannexManagementWorker } from "./jobs/channexManagementWorkerStartup.js";
 import { resolveChannexManagementDatabaseRouting } from "./channexManagementDatabaseRouting.js";
 import { bootstrapPublishedChannexOffer } from "./integrations/channexPublishedOfferBootstrap.js";
 import { runPmsInboxProviderActions } from "./jobs/pmsInboxProviderActions.js";
@@ -813,6 +814,7 @@ const providerWebhookSecrets = {
   resend: config.providerWebhooks.resendSecret,
 };
 const hasProviderWebhookSecret = Object.values(providerWebhookSecrets).some(Boolean);
+await preflightChannexManagementWorker(config.channexManagement, channexCommandsMutating);
 const channexManagementDatabase = resolveChannexManagementDatabaseRouting({
   config: config.channexManagement,
   commandsMutating: channexCommandsMutating,

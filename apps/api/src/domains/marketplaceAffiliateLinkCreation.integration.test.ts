@@ -20,9 +20,8 @@ import {
   recordSyntheticMarketplaceAffiliateClick,
 } from "./marketplaceAffiliateClickOccurrence.js";
 import {
-  admitAffiliateClick,
+  admitAffiliateArrival,
   admitSyntheticAffiliateClick,
-  createAffiliateClickContext,
   createSyntheticAffiliateClickContext,
 } from "./bookingAffiliateClickAdmission.js";
 import { createSyntheticAffiliateOriginalBooking } from "./bookingAffiliateOriginalBinding.js";
@@ -238,23 +237,51 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     );
     if (click.status !== "recorded") throw new Error("Expected live click");
 
-    const contextId = await createAffiliateClickContext(pool(), id(3));
-    expect(await admitAffiliateClick(pool(), contextId, click.referenceToken)).toEqual({
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(6),
+        referenceToken: click.referenceToken,
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        referenceToken: click.referenceToken,
+        contextId: "untrusted-cookie",
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_contexts")).rows[0].count,
+    ).toBe("0");
+    const admitted = await admitAffiliateArrival(pool(), {
+      propertyId: id(3),
+      referenceToken: click.referenceToken,
+    });
+    expect(admitted).toMatchObject({
       status: "admitted",
       clickId: click.clickId,
       historyPosition: "1",
       replayed: false,
+      contextCreated: true,
     });
-    expect(await admitAffiliateClick(pool(), contextId, click.referenceToken)).toEqual({
-      status: "admitted",
-      clickId: click.clickId,
-      historyPosition: "1",
-      replayed: true,
-    });
-    const wrongProperty = await createAffiliateClickContext(pool(), id(6));
-    expect(await admitAffiliateClick(pool(), wrongProperty, click.referenceToken)).toEqual({
-      status: "unavailable",
-    });
+    if (admitted.status !== "admitted") throw new Error("Expected admitted arrival");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(6),
+        referenceToken: click.referenceToken,
+        contextId: admitted.contextId,
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.affiliate_click_admissions")).rows[0].count,
+    ).toBe("1");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        referenceToken: click.referenceToken,
+        contextId: admitted.contextId,
+      }),
+    ).toEqual({ ...admitted, contextCreated: false, replayed: true });
     const syntheticContext = await createSyntheticAffiliateClickContext(pool(), id(3));
     expect(
       await admitSyntheticAffiliateClick(pool(), syntheticContext, click.referenceToken),
@@ -291,6 +318,29 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await expect(
       pool().query("TRUNCATE marketplace.affiliate_click_occurrences CASCADE"),
     ).rejects.toThrow("Affiliate click occurrences are immutable");
+  });
+
+  it("keeps one context when first arrival is delivered concurrently", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (click.status !== "recorded") throw new Error("Expected live click");
+
+    const arrivals = await Promise.all([
+      admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken: click.referenceToken }),
+      admitAffiliateArrival(pool(), { propertyId: id(3), referenceToken: click.referenceToken }),
+    ]);
+    expect(arrivals.filter((result) => result.status === "admitted")).toHaveLength(1);
+    expect(arrivals.filter((result) => result.status === "conflict")).toHaveLength(1);
+    expect(
+      (
+        await pool().query(
+          `SELECT
+             (SELECT count(*) FROM booking.affiliate_click_contexts) AS contexts,
+             (SELECT count(*) FROM booking.affiliate_click_admissions) AS admissions`,
+        )
+      ).rows[0],
+    ).toEqual({ contexts: "1", admissions: "1" });
   });
 
   it("admits trusted clicks once in destination order and rejects another context", async () => {

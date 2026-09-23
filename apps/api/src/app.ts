@@ -480,6 +480,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     },
     trustProxy: options.trustProxy ?? false,
     disableRequestLogging: (request) =>
+      shouldHideAffiliateRequestUrl(request.url) ||
       request.url.startsWith("/api/marketplace/communication-unsubscribe") ||
       request.url.startsWith("/api/marketplace/creator-platform-oauth/") ||
       (request.url.startsWith("/api/pms/properties/") &&
@@ -1165,6 +1166,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
 
   return app;
+}
+
+function shouldHideAffiliateRequestUrl(rawUrl: string): boolean {
+  let url = rawUrl;
+  for (let i = 0; i < 10; i++) {
+    if (/^\/r(?:\/|\?|$)/i.test(url) || /[?&]vref=/i.test(url)) return true;
+    if (!url.includes("%")) return false;
+    try {
+      const decoded = decodeURIComponent(url);
+      if (decoded === url) return false;
+      url = decoded;
+    } catch {
+      return true;
+    }
+  }
+  return true;
 }
 
 function registerBrowserCors(app: FastifyInstance, allowedOrigins: string[]): void {

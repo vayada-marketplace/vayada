@@ -1,3 +1,4 @@
+import { channexManagementWorkerPrivileges, CHANNEX_MANAGEMENT_WORKER_ROLE } from "../jobs/channexManagementWorkerPrivileges.js";
 import { createPublicPricingOfferCatalog } from "./publicPricingOfferCatalog.js";
 import { externalBookingChanges } from "../integrations/externalBookingChanges.js";
 import { parsePublicBookingQuote } from "@vayada/domain-booking/replacement-pricing";
@@ -7622,4 +7623,57 @@ describe.skipIf(!url)("live replacement pricing offer owners", () => {
       ),
     ).not.toBeNull();
   });
+  it.each(["create", "closed-ari", "activate"])("runs %s through the exact restricted Channex login", async (stage) => {
+    const seeded = stage === "create" ? null : await initialAriFixture("10000", true);
+    const f = seeded ?? await creationFixture("10000", true);
+    if (stage === "activate" && seeded) {
+      await seedCurrentAvailability(seeded!);
+      await seedCompletedInitialAri(seeded!);
+    }
+    const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
+    await pool.query(`CREATE ROLE ${role} LOGIN PASSWORD 'fixture' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
+    let worker: pg.Pool | undefined;
+    try {
+      await pool.query(`GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`);
+      for (const [table, grants] of Object.entries(channexManagementWorkerPrivileges))
+        for (const [kind, columns] of Object.entries(grants))
+          await pool.query(`GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`);
+      await pool.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [f.scope.propertyId]);
+      const login = new URL(url!); login.username=role; login.password="fixture";
+      worker = new pg.Pool({connectionString:login.toString()});
+      expect(await readPublishedPricingForChannexJob(worker, f.input)).toMatchObject({kind:"available"});
+      if (stage === "create") {
+        const job = { ...f.input, propertyId:f.scope.propertyId, correlationId:null, maxAttempts:3,
+          input:{commandId:randomUUID(),idempotencyKey:randomUUID(),operationType:"provision" as const,
+            publishedOffer:{roomTypeId:f.selection.roomTypeId,offerId:f.selection.offerId,publicationRevision:1,primaryOccupancy:1}} };
+        let response: unknown;
+        const create = vi.fn(async (request: {body: unknown}) => {
+          response=createdResponse(request.body);
+          return new Response(JSON.stringify(response),{status:201});
+        });
+        const get = async(path:string) => path.includes("room_types") ? providerRoom(f) : response;
+        expect(await bootstrapPublishedChannexOffer(worker,job,f.input.workerId,{get,create})).toMatchObject({kind:"creation_retained"});
+        expect(await bootstrapPublishedChannexOffer(worker,job,f.input.workerId,{get,create})).toEqual({kind:"ready"});
+        expect(create).toHaveBeenCalledOnce();
+      } else if (stage === "closed-ari" && seeded) {
+        const prepared = await prepareChannexInitialAriDispatch(worker,f.input,f.selection,seeded!.claim.attemptId,initialAriDate);
+        expect(prepared.kind).toBe("prepared");
+        if (prepared.kind !== "prepared") throw new Error("Restricted ARI preparation required");
+        const post = vi.fn(async () => new Response(JSON.stringify({data:[{type:"task",id:randomUUID()}],meta:{warnings:[]}})));
+        const result = await prepared.dispatch({post,get:async(path:string)=>path.includes("properties/")
+          ? {data:{type:"property",id:f.scope.propertyId,attributes:{settings:{min_stay_type:"both"}}}}
+          : path.includes("room_types") ? providerRoom(f) : seeded!.response().json()});
+        expect(["retained","receipt_pending"]).toContain(result.kind);
+        if (result.kind === "receipt_pending") await result.persist();
+        expect(post).toHaveBeenCalledOnce();
+      } else {
+        expect(await activatePublishedChannexOffers(worker,f.input)).toEqual({kind:"all_targets_active",count:2});
+      }
+    } finally {
+      await worker?.end();
+      await pool.query("DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",[f.scope.propertyId]);
+      await pool.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+  }, 20000);
+
 });
