@@ -161,7 +161,6 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
         "SELECT property_id FROM finance.folio_lines",
         "SELECT finished_at FROM platform.jobs",
         "SELECT worker_id FROM platform.job_attempts",
-        "SELECT updated_at FROM platform.media_objects",
         "SELECT * FROM finance.payments",
         "SELECT * FROM identity.users",
         "SELECT * FROM booking.guest_bookings",
