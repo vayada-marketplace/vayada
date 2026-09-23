@@ -23,13 +23,34 @@ BEGIN
 END;
 $$;
 
+-- Keep the existing identity runtime policy from making every dead-letter
+-- writer inherit SELECT on WorkOS receipts. The invoker helper is only
+-- evaluated for the identity login, which already owns that read boundary.
+CREATE FUNCTION platform.identity_runtime_dead_letter_webhook_scope(webhook_id uuid)
+RETURNS boolean LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM platform.external_webhook_events receipt
+    WHERE receipt.id = webhook_id AND receipt.provider = 'workos'
+  );
+END;
+$$;
+DROP POLICY identity_runtime_scope ON platform.dead_letter_events;
+CREATE POLICY identity_runtime_scope ON platform.dead_letter_events TO PUBLIC USING (
+  current_user <> 'vayada_next_identity_runtime'
+  OR (source_kind = 'webhook' AND resource_product = 'identity'
+      AND resource_type = 'workos_webhook'
+      AND platform.identity_runtime_dead_letter_webhook_scope(webhook_event_id))
+);
+
 CREATE POLICY finance_export_worker_scope ON platform.jobs AS RESTRICTIVE TO PUBLIC
   USING (current_user <> 'vayada_next_finance_export_worker' OR (
     tenant_scope = 'property'
     AND platform.finance_export_worker_scope('property', property_id::text)
-    AND queue_name = 'finance.folio-export'
-    AND job_type IN ('finance.export-folio-csv','finance.export-expense-csv',
-      'finance.export-profit-loss-csv','finance.export-revenue-csv','finance.export-dashboard-csv')
+    AND queue_name = 'finance.financials-exports'
+    AND job_type IN ('finance.folio-csv-export.v1','finance.expense-csv-export.v1',
+      'finance.profit-loss-csv-export.v1','finance.revenue-csv-export.v1',
+      'finance.dashboard-csv-export.v1')
     AND resource_product = 'finance' AND resource_type = 'financials_export'
     AND resource_id = id::text
   ));
