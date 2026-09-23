@@ -65,10 +65,13 @@ grant matrix is declared complete.
 
 ## Grant and activation gates
 
-1. Choose a database-enforced lock-only boundary for mutable hotel rows (for
-   example, a narrowly audited capability or restrictive row-level policy) and
-   prove a non-owner login cannot edit any hotel row, even with arbitrary SQL.
-   Preserve the property/domain advisory-lock ordering and current-host check.
+1. Migration `0415_affiliate_destination_lock_boundary.sql` adds restrictive
+   row-level policies for `hotel_catalog.properties` and `property_slugs`. A
+   non-owner login using the exact future capture role can take the row locks
+   required by destination validation but cannot update either relation with
+   arbitrary SQL. Preserve the property/domain advisory-lock ordering and
+   current-host check. Grants and the rest of the capture allowlist remain
+   separate release gates.
 2. Define capture-write authority so arbitrary SQL through the affiliate
    credential cannot insert a made-up occurrence, context or admission. The
    database must derive or verify the active agreement, accepted terms,
