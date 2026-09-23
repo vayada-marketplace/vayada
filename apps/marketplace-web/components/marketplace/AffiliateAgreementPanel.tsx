@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircleIcon, ClockIcon } from "@heroicons/react/24/outline";
 
 import {
   getMarketplaceCollaborationAffiliateAssent,
+  recordMarketplaceCollaborationAffiliateAssent,
   type MarketplaceAffiliateAssentRead,
 } from "@vayada/marketplace-shared/api/collaborations";
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
@@ -28,6 +29,7 @@ export function AffiliateAgreementPanel({
 }: AffiliateAgreementPanelProps) {
   const [state, setState] = useState<AgreementState>({ kind: "loading", collaborationId });
   const [retry, setRetry] = useState(0);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,6 +56,8 @@ export function AffiliateAgreementPanel({
     };
   }, [collaborationId, retry]);
 
+  useEffect(() => setCommandNotice(null), [collaborationId]);
+
   const currentState: AgreementState =
     state.collaborationId === collaborationId ? state : { kind: "loading", collaborationId };
 
@@ -73,7 +77,22 @@ export function AffiliateAgreementPanel({
         <AgreementError onRetry={() => setRetry((value) => value + 1)} />
       )}
       {currentState.kind === "ready" && (
-        <AgreementDetails agreement={currentState.agreement} currentUserType={currentUserType} />
+        <AgreementDetails
+          agreement={currentState.agreement}
+          collaborationId={collaborationId}
+          currentUserType={currentUserType}
+          onRecorded={(replayed) => {
+            setCommandNotice(
+              replayed ? "Your decision was already recorded." : "Your decision was recorded.",
+            );
+            setRetry((value) => value + 1);
+          }}
+        />
+      )}
+      {commandNotice && (
+        <p role="status" className="mt-3 text-sm font-medium text-green-800">
+          {commandNotice}
+        </p>
       )}
     </section>
   );
@@ -125,11 +144,17 @@ function AgreementError({ onRetry }: { onRetry: () => void }) {
 
 function AgreementDetails({
   agreement,
+  collaborationId,
   currentUserType,
+  onRecorded,
 }: {
   agreement: MarketplaceAffiliateAssentRead;
+  collaborationId: string;
   currentUserType: "creator" | "hotel";
+  onRecorded: (replayed: boolean) => void;
 }) {
+  const [action, setAction] = useState<"idle" | "saving" | "error">("idle");
+  const idempotencyKey = useRef<{ scope: string; key: string } | null>(null);
   const matched = agreement.assentState === "matched";
   const currentSideComplete =
     currentUserType === "creator" ? agreement.creatorAcceptedAt : agreement.hotelApprovedAt;
@@ -158,12 +183,53 @@ function AgreementDetails({
               ? "Both sides accepted the same retained terms. Link activation and earning eligibility are checked separately."
               : otherSideComplete
                 ? "The other side has recorded its decision. This agreement is not active from assent alone."
-                : "Review the retained terms below. This screen does not record approval or acceptance."}
+                : "Review the retained terms below. Recording this decision does not activate links or earnings."}
           </p>
         </div>
       </div>
 
       <Disclosure disclosure={agreement.terms.disclosure} />
+
+      {!currentSideComplete && (
+        <button
+          type="button"
+          disabled={action === "saving"}
+          onClick={async () => {
+            if (idempotencyKey.current?.scope !== collaborationId)
+              idempotencyKey.current = { scope: collaborationId, key: crypto.randomUUID() };
+            setAction("saving");
+            try {
+              const result = await recordMarketplaceCollaborationAffiliateAssent(
+                collaborationId,
+                idempotencyKey.current.key,
+              );
+              onRecorded(result.replayed);
+            } catch {
+              setAction("error");
+            }
+          }}
+          className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {action === "saving"
+            ? "Recording…"
+            : currentUserType === "creator"
+              ? "Accept affiliate terms"
+              : "Approve affiliate agreement"}
+        </button>
+      )}
+
+      {action === "error" && (
+        <div role="alert" className="text-sm text-red-800">
+          <p>Could not record your decision. Try again.</p>
+          <button
+            type="button"
+            onClick={() => setAction("idle")}
+            className="mt-2 font-semibold underline focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Decision

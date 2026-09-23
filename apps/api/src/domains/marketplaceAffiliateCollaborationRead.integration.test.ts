@@ -3,6 +3,7 @@ import { assentCommandFixture, assentInput } from "./affiliateAssentCommandTestF
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
 import {
+  recordCollaborationAffiliateAssent,
   readAffiliateAssent,
   readCollaborationAffiliateAssent,
 } from "./marketplaceAffiliateAssentRepository.js";
@@ -48,8 +49,14 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
       expect(await read(context(false))).toEqual(expected);
     }
   });
-  it("returns unavailable for absent participation, absent collaboration and ambiguous keys", async () => {
-    expect(await read()).toBeNull();
+  it("shows current terms before first assent and rejects absent or ambiguous collaborations", async () => {
+    expect(await read()).toMatchObject({
+      participationId: null,
+      attemptId: null,
+      revision: 0,
+      assentState: "pending",
+      terms: { id: id(52) },
+    });
     await seed();
     expect(await read(context(), "missing")).toBeNull();
     await fixture.pool().query(
@@ -145,5 +152,49 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
           id(link),
         ]);
     }
+  });
+  it("records each side against the collaboration's current pinned terms", async () => {
+    const creator = assentInput(false).context;
+    const hotel = assentInput().context;
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+    ).toMatchObject({ ok: true, revision: 1, state: "pending", replayed: false });
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "creator-decision"),
+    ).toMatchObject({ ok: true, revision: 1, replayed: true });
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), hotel, key, "hotel-decision"),
+    ).toMatchObject({ ok: true, revision: 2, state: "matched" });
+
+    const retained = await readCollaborationAffiliateAssent(fixture.pool(), context(), key);
+    expect(retained).toMatchObject({
+      assentState: "matched",
+      terms: { id: id(52) },
+      propertyId: id(3),
+      programId: id(50),
+      creatorProfileId: id(82),
+    });
+  });
+  it("does not create assent for an ambiguous or cross-tenant collaboration", async () => {
+    const creator = assentInput(false).context;
+    creator.selectedOrganization.organizationId = id(999);
+    expect(
+      await recordCollaborationAffiliateAssent(fixture.pool(), creator, key, "wrong-tenant"),
+    ).toEqual({ ok: false, code: "scope_unavailable" });
+
+    await fixture.pool().query(
+      `INSERT INTO marketplace.collaborations
+      SELECT $1,'migration',source_collaboration_id,property_id,offer_id,hotel_organization_id,
+        creator_profile_id,creator_organization_id,lifecycle_status FROM marketplace.collaborations`,
+      [id(121)],
+    );
+    expect(
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        assentInput().context,
+        key,
+        "ambiguous",
+      ),
+    ).toEqual({ ok: false, code: "scope_unavailable" });
   });
 });

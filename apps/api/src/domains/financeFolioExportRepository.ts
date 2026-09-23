@@ -124,14 +124,27 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
       await transaction(pool, async (client) => {
         if (!(await authorizedScope(client, input))) throw new TypeError("Invalid finance stream scope");
         const redactedPayload = await redacted(config.searchDigest, input.currency, evidence.filters, evidence.snapshot);
-        await client.query(
+        const inserted = await client.query(
           `INSERT INTO platform.product_audit_events
             (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
              actor_user_id,target_resource_product,target_resource_type,target_resource_id,
              correlation_id,causation_id,redacted_payload,audit_metadata,retention_class,privacy_scope)
-           VALUES($1,'finance',$2,date_trunc('milliseconds',statement_timestamp()),'property',$3::uuid,
+           SELECT $1,'finance',$2,date_trunc('milliseconds',statement_timestamp()),'property',$3::uuid,
              'user',$4::uuid,'finance','financials_export',$5::text,$6,$7,$8::jsonb,$9::jsonb,
-             'financial','confidential')`,
+             'financial','confidential'
+           WHERE EXISTS (
+             SELECT 1 FROM hotel_catalog.properties property
+             JOIN identity.organizations organization ON organization.id=$10::uuid
+               AND organization.kind='hotel_group' AND organization.status='active'
+             JOIN identity.organization_memberships membership ON membership.organization_id=organization.id
+               AND membership.user_id=$4::uuid AND membership.status='active'
+             JOIN identity.users actor ON actor.id=membership.user_id AND actor.status='active'
+             JOIN identity.organization_resource_links resource ON resource.organization_id=organization.id
+               AND resource.product='pms' AND resource.resource_type='pms_property'
+               AND resource.resource_id=property.id::text AND resource.relationship IN ('owner','finance_manager')
+               AND resource.status='active'
+             WHERE property.id=$3::uuid
+           )`,
           [
             `finance.financials-stream:${randomUUID()}`,
             evidence.auditAction.replace(/\.requested$/, ".streamed"),
@@ -139,8 +152,10 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
             input.audit.correlationId, input.audit.causationId,
             JSON.stringify({ ...redactedPayload, rowCount: artifact.rowCount, sizeBytes: artifact.sizeBytes, checksumSha256: artifact.checksumSha256 }),
             JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt }),
+            input.organizationId,
           ],
         );
+        if (inserted.rowCount !== 1) throw new TypeError("Invalid finance stream scope");
       });
     },
     async find(input: { exportId:string; organizationId:string; propertyId:string; now:Date }): Promise<FinanceFolioExportStatus|null> {
@@ -200,9 +215,22 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
                  AND i.expires_at>statement_timestamp() AND i.response_resource_product='finance'
                  AND i.response_resource_type='financials_export' AND j.queue_name=$4 AND j.job_type=$5
                  AND j.resource_product='finance' AND j.resource_type='financials_export'
+                 AND EXISTS (
+                   SELECT 1 FROM hotel_catalog.properties property
+                   JOIN identity.organizations organization ON organization.id=$6::uuid
+                     AND organization.kind='hotel_group' AND organization.status='active'
+                   JOIN identity.organization_memberships membership ON membership.organization_id=organization.id
+                     AND membership.user_id=$7::uuid AND membership.status='active'
+                   JOIN identity.users actor ON actor.id=membership.user_id AND actor.status='active'
+                   JOIN identity.organization_resource_links resource ON resource.organization_id=organization.id
+                     AND resource.product='pms' AND resource.resource_type='pms_property'
+                     AND resource.resource_id=property.id::text AND resource.relationship IN ('owner','finance_manager')
+                     AND resource.status='active'
+                   WHERE property.id=$3::uuid
+                 )
                FOR UPDATE OF i`,
               // prettier-ignore
-              [operation, keyHash, input.propertyId, FINANCE_FOLIO_EXPORT_QUEUE, jobType],
+              [operation, keyHash, input.propertyId, FINANCE_FOLIO_EXPORT_QUEUE, jobType, input.organizationId, input.audit.actorUserId],
             )
           ).rows[0];
           return prior?.fingerprint === requestFingerprint && uuid(prior.exportId)
@@ -236,18 +264,32 @@ export function createPgFinanceFolioExportJobRepository(config: { connectionStri
           // prettier-ignore
           [exportId, `${jobType}:${input.propertyId}:${keyHash}`, FINANCE_FOLIO_EXPORT_QUEUE, jobType, input.propertyId, input.audit.correlationId, keyHash, JSON.stringify(payload), JSON.stringify(jobMetadata)],
         );
-        await client.query(
+        const audited = await client.query(
           `INSERT INTO platform.product_audit_events
             (audit_key,product,action,occurred_at,tenant_scope,property_id,actor_type,
              actor_user_id,target_resource_product,target_resource_type,target_resource_id,
              job_id,idempotency_key_id,correlation_id,causation_id,redacted_payload,
              audit_metadata,retention_class,privacy_scope)
-           VALUES($1,'finance',$9,$2::timestamptz,'property',$3::uuid,
+           SELECT $1,'finance',$9,$2::timestamptz,'property',$3::uuid,
              'user',$4::uuid,'finance','financials_export',$5::text,$5::uuid,$5::uuid,$6,$7,
-             $8::jsonb,$10::jsonb,'financial','confidential')`,
+             $8::jsonb,$10::jsonb,'financial','confidential'
+           WHERE EXISTS (
+             SELECT 1 FROM hotel_catalog.properties property
+             JOIN identity.organizations organization ON organization.id=$11::uuid
+               AND organization.kind='hotel_group' AND organization.status='active'
+             JOIN identity.organization_memberships membership ON membership.organization_id=organization.id
+               AND membership.user_id=$4::uuid AND membership.status='active'
+             JOIN identity.users actor ON actor.id=membership.user_id AND actor.status='active'
+             JOIN identity.organization_resource_links resource ON resource.organization_id=organization.id
+               AND resource.product='pms' AND resource.resource_type='pms_property'
+               AND resource.resource_id=property.id::text AND resource.relationship IN ('owner','finance_manager')
+               AND resource.status='active'
+             WHERE property.id=$3::uuid
+           )`,
           // prettier-ignore
-          [`finance.financials-export:${exportId}:requested`, acceptedAt, input.propertyId, input.audit.actorUserId, exportId, input.audit.correlationId, input.audit.causationId, JSON.stringify(redactedPayload), auditAction, JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt })],
+          [`finance.financials-export:${exportId}:requested`, acceptedAt, input.propertyId, input.audit.actorUserId, exportId, input.audit.correlationId, input.audit.causationId, JSON.stringify(redactedPayload), auditAction, JSON.stringify({ organizationId: input.organizationId, requestId: input.audit.requestId, requestedAt: input.audit.requestedAt }), input.organizationId],
         );
+        if (audited.rowCount !== 1) throw new TypeError("Invalid folio export command");
         return { status: "created", exportId, envelope: input.envelope };
       });
     },
@@ -309,9 +351,7 @@ async function authorizedScope(client: PoolClient, input: FinanceExportCommand) 
        AND resource.product='pms' AND resource.resource_type='pms_property'
        AND resource.resource_id=property.id::text AND resource.relationship IN ('owner','finance_manager')
        AND resource.status='active'
-     WHERE property.id=$2::uuid
-     FOR KEY SHARE OF property
-     FOR SHARE OF organization,membership,actor,resource`,
+     WHERE property.id=$2::uuid`,
     [input.organizationId, input.propertyId, input.audit.actorUserId],
   );
   return (result.rowCount ?? 0) > 0;
