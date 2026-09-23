@@ -10,10 +10,11 @@ trap 'docker rm -f "${database_container}" >/dev/null 2>&1 || true' EXIT
 docker run --detach --rm --name "${database_container}" \
   --env POSTGRES_PASSWORD=postgres "postgres:${version}" >/dev/null
 for _ in {1..30}; do
-  docker exec "${database_container}" pg_isready -U postgres >/dev/null 2>&1 && break
+  # The image's temporary initialization server accepts socket connections only.
+  docker exec "${database_container}" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "${database_container}" pg_isready -U postgres >/dev/null
+docker exec "${database_container}" pg_isready -h 127.0.0.1 -U postgres >/dev/null
 
 docker exec -i "${database_container}" psql -U postgres -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 CREATE ROLE vayada_next_api_runtime LOGIN PASSWORD 'runtime' NOBYPASSRLS;
