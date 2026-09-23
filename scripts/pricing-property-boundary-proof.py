@@ -111,6 +111,13 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 for content in (path.read_text() for path in migrations)
             )
         )
+        assert (
+            sql("""SELECT count(*) FROM pg_catalog.pg_proc routine
+              JOIN pg_catalog.pg_namespace namespace ON namespace.oid = routine.pronamespace
+              WHERE namespace.nspname IN ('booking','platform')
+                AND routine.proname LIKE 'pricing_runtime_%' AND routine.prosecdef""")
+            == "0"
+        )
         for role, password in passwords.items():
             inheritance = "INHERIT" if role == LEGACY else "NOINHERIT"
             sql(
@@ -323,7 +330,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public role separation; property/org/GUC/inherited-role/ACL/RLS-bypass denials; head reparent denial; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"

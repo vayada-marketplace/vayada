@@ -11,88 +11,60 @@ CREATE TABLE platform.pricing_runtime_property_scopes (
 );
 REVOKE ALL ON platform.pricing_runtime_property_scopes FROM PUBLIC;
 
--- RLS callers must not need direct access to the assignment table. These
--- predicates expose only a decision for the authenticated session and use a
--- fixed search path; PUBLIC execute preserves policies for existing writers.
-CREATE FUNCTION platform.pricing_runtime_legacy_access_allowed(
-  caller_current_user NAME
-)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog
-AS $$
-  SELECT session_user::text !~ '^vayada_next_pricing_'
-    AND caller_current_user::text !~ '^vayada_next_pricing_'
-    AND NOT EXISTS (
-      SELECT 1
-      FROM pg_catalog.pg_roles pricing_role
-      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
-        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
-    )
-$$;
+-- Security-barrier views expose only the authenticated login's assignment.
+-- Their owner reads the private scope table; callers receive no table access
+-- and no SECURITY DEFINER routine can conflict with cutover attestation.
+CREATE VIEW booking.pricing_runtime_effective_property_scopes
+WITH (security_barrier = true)
+AS
+SELECT scope.operation_class, scope.property_id, scope.organization_id
+FROM platform.pricing_runtime_property_scopes scope
+WHERE scope.database_login = session_user
+  AND current_user = session_user;
+REVOKE ALL ON booking.pricing_runtime_effective_property_scopes FROM PUBLIC;
+GRANT SELECT ON booking.pricing_runtime_effective_property_scopes TO PUBLIC;
 
-CREATE FUNCTION platform.pricing_runtime_write_scope_allows(
-  caller_current_user NAME,
-  required_operation TEXT,
-  checked_property_id UUID,
-  checked_organization_id UUID,
-  checked_revision UUID
-)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = pg_catalog
-AS $$
-  SELECT caller_current_user = session_user
-    AND EXISTS (
-      SELECT 1
-      FROM platform.pricing_runtime_property_scopes scope
-      WHERE scope.database_login = session_user
-        AND scope.operation_class = required_operation
-        AND scope.property_id = checked_property_id
-        AND (
-          (checked_revision IS NULL
-            AND scope.organization_id = checked_organization_id)
-          OR (checked_organization_id IS NULL
-            AND checked_revision IS NOT NULL
-            AND EXISTS (
-              SELECT 1
-              FROM booking.pricing_authority_revisions revision
-              WHERE revision.property_id = checked_property_id
-                AND revision.revision = checked_revision
-                AND revision.organization_id = scope.organization_id
-            ))
-        )
-    )
-$$;
-
-REVOKE ALL ON FUNCTION platform.pricing_runtime_legacy_access_allowed(NAME) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform.pricing_runtime_write_scope_allows(NAME,TEXT,UUID,UUID,UUID)
-  FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION platform.pricing_runtime_legacy_access_allowed(NAME) TO PUBLIC;
-GRANT EXECUTE ON FUNCTION platform.pricing_runtime_write_scope_allows(NAME,TEXT,UUID,UUID,UUID)
-  TO PUBLIC;
+CREATE VIEW booking.pricing_runtime_effective_authority_scopes
+WITH (security_barrier = true)
+AS
+SELECT scope.operation_class, revision.property_id, revision.revision
+FROM platform.pricing_runtime_property_scopes scope
+JOIN booking.pricing_authority_revisions revision
+  ON revision.property_id = scope.property_id
+ AND revision.organization_id = scope.organization_id
+WHERE scope.database_login = session_user
+  AND current_user = session_user;
+REVOKE ALL ON booking.pricing_runtime_effective_authority_scopes FROM PUBLIC;
+GRANT SELECT ON booking.pricing_runtime_effective_authority_scopes TO PUBLIC;
 
 ALTER TABLE booking.pricing_quotes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY pricing_quotes_existing_access ON booking.pricing_quotes
   TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY pricing_quotes_runtime_insert_scope ON booking.pricing_quotes
   AS RESTRICTIVE FOR INSERT TO PUBLIC WITH CHECK (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
-    OR platform.pricing_runtime_write_scope_allows(
-      current_user,
-      'public',
-      pricing_quotes.property_id,
-      pricing_quotes.organization_id,
-      NULL
+    (session_user::text !~ '^vayada_next_pricing_'
+      AND current_user::text !~ '^vayada_next_pricing_'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles pricing_role
+        WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+          AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+      ))
+    OR EXISTS (
+      SELECT 1 FROM booking.pricing_runtime_effective_property_scopes scope
+      WHERE scope.operation_class = 'public'
+        AND scope.property_id = pricing_quotes.property_id
+        AND scope.organization_id = pricing_quotes.organization_id
     )
   );
 CREATE POLICY pricing_quotes_runtime_delete_denial ON booking.pricing_quotes
   AS RESTRICTIVE FOR DELETE TO PUBLIC USING (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
+    session_user::text !~ '^vayada_next_pricing_'
+    AND current_user::text !~ '^vayada_next_pricing_'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles pricing_role
+      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+    )
   );
 
 ALTER TABLE booking.pricing_authority_revisions ENABLE ROW LEVEL SECURITY;
@@ -101,24 +73,41 @@ CREATE POLICY pricing_authority_revisions_existing_access ON booking.pricing_aut
 CREATE POLICY pricing_authority_revisions_runtime_insert_scope
   ON booking.pricing_authority_revisions
   AS RESTRICTIVE FOR INSERT TO PUBLIC WITH CHECK (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
-    OR platform.pricing_runtime_write_scope_allows(
-      current_user,
-      'owner_manage',
-      pricing_authority_revisions.property_id,
-      pricing_authority_revisions.organization_id,
-      NULL
+    (session_user::text !~ '^vayada_next_pricing_'
+      AND current_user::text !~ '^vayada_next_pricing_'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles pricing_role
+        WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+          AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+      ))
+    OR EXISTS (
+      SELECT 1 FROM booking.pricing_runtime_effective_property_scopes scope
+      WHERE scope.operation_class = 'owner_manage'
+        AND scope.property_id = pricing_authority_revisions.property_id
+        AND scope.organization_id = pricing_authority_revisions.organization_id
     )
   );
 CREATE POLICY pricing_authority_revisions_runtime_update_denial
   ON booking.pricing_authority_revisions
   AS RESTRICTIVE FOR UPDATE TO PUBLIC USING (true) WITH CHECK (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
+    session_user::text !~ '^vayada_next_pricing_'
+    AND current_user::text !~ '^vayada_next_pricing_'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles pricing_role
+      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+    )
   );
 CREATE POLICY pricing_authority_revisions_runtime_delete_denial
   ON booking.pricing_authority_revisions
   AS RESTRICTIVE FOR DELETE TO PUBLIC USING (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
+    session_user::text !~ '^vayada_next_pricing_'
+    AND current_user::text !~ '^vayada_next_pricing_'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles pricing_role
+      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+    )
   );
 
 ALTER TABLE booking.pricing_authority_heads ENABLE ROW LEVEL SECURITY;
@@ -126,27 +115,43 @@ CREATE POLICY pricing_authority_heads_existing_access ON booking.pricing_authori
   TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY pricing_authority_heads_runtime_insert_scope ON booking.pricing_authority_heads
   AS RESTRICTIVE FOR INSERT TO PUBLIC WITH CHECK (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
-    OR platform.pricing_runtime_write_scope_allows(
-      current_user,
-      'owner_manage',
-      pricing_authority_heads.property_id,
-      NULL,
-      pricing_authority_heads.revision
+    (session_user::text !~ '^vayada_next_pricing_'
+      AND current_user::text !~ '^vayada_next_pricing_'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles pricing_role
+        WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+          AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+      ))
+    OR EXISTS (
+      SELECT 1 FROM booking.pricing_runtime_effective_authority_scopes scope
+      WHERE scope.operation_class = 'owner_manage'
+        AND scope.property_id = pricing_authority_heads.property_id
+        AND scope.revision = pricing_authority_heads.revision
     )
   );
 CREATE POLICY pricing_authority_heads_runtime_update_scope ON booking.pricing_authority_heads
   AS RESTRICTIVE FOR UPDATE TO PUBLIC USING (true) WITH CHECK (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
-    OR platform.pricing_runtime_write_scope_allows(
-      current_user,
-      'owner_manage',
-      pricing_authority_heads.property_id,
-      NULL,
-      pricing_authority_heads.revision
+    (session_user::text !~ '^vayada_next_pricing_'
+      AND current_user::text !~ '^vayada_next_pricing_'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles pricing_role
+        WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+          AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+      ))
+    OR EXISTS (
+      SELECT 1 FROM booking.pricing_runtime_effective_authority_scopes scope
+      WHERE scope.operation_class = 'owner_manage'
+        AND scope.property_id = pricing_authority_heads.property_id
+        AND scope.revision = pricing_authority_heads.revision
     )
   );
 CREATE POLICY pricing_authority_heads_runtime_delete_denial ON booking.pricing_authority_heads
   AS RESTRICTIVE FOR DELETE TO PUBLIC USING (
-    platform.pricing_runtime_legacy_access_allowed(current_user)
+    session_user::text !~ '^vayada_next_pricing_'
+    AND current_user::text !~ '^vayada_next_pricing_'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_roles pricing_role
+      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
+    )
   );
