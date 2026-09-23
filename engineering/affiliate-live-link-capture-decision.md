@@ -147,6 +147,23 @@ its outage does not imply that URL safety evidence was revoked. Native Booking
 and external providers must pass the same safety rule, with provider-specific
 evidence where needed.
 
+The first implemented checker covers only the native Booking root URL on
+`<canonical-slug>.next-booking.vayada.com`. It reads the immutable destination
+version and current hotel, slug and custom-domain state in the caller's
+transaction. Successful reads produce
+`booking-affiliate-destination-safety.v1` evidence bound to the exact property,
+destination version, URL and single-URL, zero-redirect chain. Redirect construction accepts this
+evidence for at most 60 seconds and rejects a raw URL, an older policy version,
+or any changed scope, URL, chain or evidence reference. The evidence must be
+resolved and consumed inside the same transaction for each arrival; it is not a
+persisted approval. That transaction holds the same per-property advisory lock
+as custom-domain mutations, so approval and canonical-domain activation have a
+defined order. Production catalog migration acquires those property locks in
+sorted order before it can write canonical domains. The immediate redirect
+check uses the database validation timestamp, avoiding false rejection from
+database/API clock skew. External and custom-domain destinations remain blocked
+until their owner supplies equivalent host-control and redirect-chain evidence.
+
 ## Native Booking arrival-to-checkout contract
 
 The current Booking Web `?ref` flow is legacy diagnostic traffic. Middleware
@@ -297,6 +314,12 @@ capture store is enabled.
    browsers, pause/end races, same-link repeat visits and no accidental Finance
    effect. Existing referral URLs and users need a separate preservation-aware
    cutover plan.
+
+The `/r/:publicToken` route adapter exists for isolated tests but is not
+registered by the runtime. Registration requires a production quota provider
+that rejects before any click write, a transaction-bound visit implementation,
+and completion of the privacy and readiness gates above. The API suppresses
+default request logs for `/r/` and URLs carrying `vref`.
 
 This proposal does not choose a provider, promise cross-device attribution or
 infer an external completed stay from a redirect or reservation.

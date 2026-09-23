@@ -225,6 +225,11 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify Channex worker effective privilege boundary
+        run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerBoundary.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Channex worker startup gating
         run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerStartup.test.ts src/channexManagementDatabaseRouting.test.ts
 
@@ -260,6 +265,7 @@ jobs:
           src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
           src/domains/bookingAffiliateReferralReadiness.integration.test.ts
           src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
+          src/domains/bookingAffiliateNativeDestinationSafety.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts

@@ -30,6 +30,7 @@ export async function lockCurrentChannexRoomAvailability(
     connectionId: string;
     externalPropertyId: string;
     bindingGeneration: string;
+    roomTypeId: string;
   }>,
 ) {
   const mappings = await client.query<{ bindingGeneration: string }>(
@@ -41,12 +42,19 @@ export async function lockCurrentChannexRoomAvailability(
      WHERE m.property_id=$1 AND m.connection_id=$2 AND m.status='active' AND r.active
        AND c.connection_status='connected' AND c.external_property_id=$3
        AND c.binding_generation=$4::uuid
+       AND m.room_type_id=$5::uuid
        AND m.external_room_type_id<>'' AND m.external_room_type_id=btrim(m.external_room_type_id)
        AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
          WHERE closed.property_id=r.property_id AND closed.room_type_id=r.id)
      ORDER BY m.room_type_id::text COLLATE "C",m.id
      FOR SHARE OF m,c,r NOWAIT`,
-    [input.propertyId, input.connectionId, input.externalPropertyId, input.bindingGeneration],
+    [
+      input.propertyId,
+      input.connectionId,
+      input.externalPropertyId,
+      input.bindingGeneration,
+      input.roomTypeId,
+    ],
   );
   if (!mappings.rows.length) return unavailable("room_availability_mapping_unavailable");
   const coverage = (
@@ -81,6 +89,7 @@ export async function lockCurrentChannexRoomAvailability(
       localToday,
       coverage.through,
       coverage.materializedRevision,
+      input.roomTypeId,
     ])
   ).rows[0];
   return candidate
@@ -147,6 +156,18 @@ async function readScope(
       (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
     )
       return unavailable("room_availability_authority_unavailable");
+    const provisionRoomTypeId =
+      authority.lease.operationType === "provision"
+        ? authority.lease.publishedOfferRoomTypeId
+        : null;
+    if (
+      authority.lease.operationType === "provision" &&
+      (!provisionRoomTypeId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          provisionRoomTypeId,
+        ))
+    )
+      return unavailable("room_availability_authority_unavailable");
     const unrestricted = await client.query(
       `SELECT 1 FROM platform.jobs WHERE id=$1::uuid
        AND COALESCE(payload->'restrictionsOnly','false'::jsonb)='false'::jsonb`,
@@ -171,11 +192,17 @@ async function readScope(
          AND c.external_property_id<>'' AND c.external_property_id=btrim(c.external_property_id)
          AND m.external_room_type_id<>''
          AND m.external_room_type_id=btrim(m.external_room_type_id)
+         AND ($4::uuid IS NULL OR m.room_type_id=$4::uuid)
          AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
            WHERE closed.property_id=r.property_id AND closed.room_type_id=r.id)
        ORDER BY m.room_type_id::text COLLATE "C",m.id
        FOR SHARE OF m,c,r NOWAIT`,
-      [authority.lease.propertyId, authority.connectionId, authority.externalPropertyId],
+      [
+        authority.lease.propertyId,
+        authority.connectionId,
+        authority.externalPropertyId,
+        provisionRoomTypeId,
+      ],
     );
     if (!mappings.rows.length) return unavailable("room_availability_mapping_unavailable");
     const coverage = (
@@ -241,6 +268,7 @@ async function readScope(
         scope.localToday,
         scope.through,
         coverage.materializedRevision,
+        provisionRoomTypeId,
       ])
     ).rows[0];
     const finalAuthority = await lockChannexPricingPropertyAuthority(client, lease);
@@ -292,6 +320,7 @@ WITH mapped AS (
     ON calendar.property_id=binding.property_id
    AND calendar.calendar_revision=binding.calendar_revision
   WHERE m.property_id=$1 AND m.connection_id=$2 AND m.status='active' AND room.active
+    AND ($8::uuid IS NULL OR m.room_type_id=$8::uuid)
     AND m.external_room_type_id<>'' AND m.external_room_type_id=btrim(m.external_room_type_id)
     AND NOT EXISTS (SELECT 1 FROM pms.room_type_closures closed
       WHERE closed.property_id=room.property_id AND closed.room_type_id=room.id)

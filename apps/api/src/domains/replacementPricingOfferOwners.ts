@@ -1762,6 +1762,7 @@ async function withPublishedChannexPricing(
                 connectionId: authority.connectionId,
                 externalPropertyId: authority.externalPropertyId,
                 bindingGeneration: binding.binding_generation,
+                roomTypeId: room.roomTypeId,
               });
               if (availability.kind !== "current") return availability;
               const readbackEvidence = {
