@@ -2,6 +2,16 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 
 export const FINANCE_EXPENSE_WORKER_ROLE = "vayada_next_finance_expense_worker";
+// Migration 0409 grants these views to PUBLIC, but their validated source-table
+// check excludes non-pricing logins and both security-barrier views return no rows.
+const pricingScopeViews = new Set([
+  "booking.pricing_runtime_effective_property_scopes",
+  "booking.pricing_runtime_effective_authority_scopes",
+]);
+const PRICING_SCOPE_VIEW_DIGEST =
+  "4719b0dcc4f7255410e6d5c993541ff106a8acbf09f521bc9d2819a5fdbb1797";
+const PRICING_LOGIN_CHECK =
+  "CHECK (((database_login)::text ~ '^vayada_next_pricing_[a-z0-9_]+$'::text))";
 // Exact grant contract. A column list never permits table-level authority.
 // prettier-ignore
 export const financeExpenseWorkerPrivileges: Record<string, Record<string, true | string[]>> = {
@@ -78,6 +88,31 @@ export async function assertFinanceExpenseWorkerBoundary(
       "b5cf59790a944e8590f8f790cf1438f904c11de83bdf9a69c5d84c123efc2b85"
   )
     fail("helper_drift");
+  const pricingViews = (
+    await client.query(
+      `SELECT n.nspname||'.'||c.relname AS name,c.relkind,c.reloptions::text AS options,pg_get_viewdef(c.oid) AS definition
+       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname||'.'||c.relname=ANY($1::text[]) ORDER BY name`,
+      [[...pricingScopeViews]],
+    )
+  ).rows;
+  if (
+    createHash("sha256").update(JSON.stringify(pricingViews)).digest("hex") !==
+    PRICING_SCOPE_VIEW_DIGEST
+  )
+    fail("pricing_view_drift");
+  const pricingScope = (
+    await client.query(
+      `SELECT c.relkind='r' AND NOT EXISTS(SELECT 1 FROM pg_inherits WHERE inhparent=c.oid)
+        AND EXISTS(SELECT 1 FROM pg_constraint p WHERE p.conrelid=c.oid
+          AND p.conname='pricing_runtime_property_scopes_database_login_check'
+          AND p.contype='c' AND p.convalidated AND NOT p.connoinherit
+          AND pg_get_constraintdef(p.oid)=$1) AS safe
+       FROM pg_class c WHERE c.oid=to_regclass('platform.pricing_runtime_property_scopes')`,
+      [PRICING_LOGIN_CHECK],
+    )
+  ).rows[0];
+  if (!pricingScope?.safe) fail("pricing_login_scope_drift");
   const relations = (
     await client.query(
       `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
@@ -103,7 +138,11 @@ export async function assertFinanceExpenseWorkerBoundary(
     )
   ).rows;
   for (const row of tableGrants)
-    if (row.delegate || financeExpenseWorkerPrivileges[row.name]?.[row.privilege] !== true)
+    if (
+      row.delegate ||
+      (financeExpenseWorkerPrivileges[row.name]?.[row.privilege] !== true &&
+        !(row.privilege === "SELECT" && pricingScopeViews.has(row.name)))
+    )
       fail("table_privileges");
   const columnGrants = (
     await client.query(
@@ -113,7 +152,14 @@ export async function assertFinanceExpenseWorkerBoundary(
   ).rows;
   for (const row of columnGrants) {
     const grant = financeExpenseWorkerPrivileges[row.name]?.[row.privilege];
-    if (row.delegate || !(grant === true || (Array.isArray(grant) && grant.includes(row.attname))))
+    if (
+      row.delegate ||
+      !(
+        grant === true ||
+        (Array.isArray(grant) && grant.includes(row.attname)) ||
+        (row.privilege === "SELECT" && pricingScopeViews.has(row.name))
+      )
+    )
       fail("column_privileges");
   }
   for (const [name, privileges] of Object.entries(financeExpenseWorkerPrivileges)) {
