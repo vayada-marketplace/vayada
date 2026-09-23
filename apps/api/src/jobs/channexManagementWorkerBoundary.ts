@@ -15,6 +15,10 @@ export const channexManagementWorkerFunctions = [
   "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
   "pms.enqueue_restriction_ari(uuid,text)",
 ] as const;
+const pricingScopeViews = new Set([
+  "booking.pricing_runtime_effective_property_scopes",
+  "booking.pricing_runtime_effective_authority_scopes",
+]);
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
   options: { allowMissingGrants?: boolean; propertyId?: string } = {},
@@ -114,7 +118,11 @@ export async function assertChannexManagementWorkerBoundary(
     )
   ).rows;
   for (const row of tableGrants)
-    if (row.delegate || channexManagementWorkerPrivileges[row.name]?.[row.privilege] !== true)
+    if (
+      row.delegate ||
+      (channexManagementWorkerPrivileges[row.name]?.[row.privilege] !== true &&
+        !(row.privilege === "SELECT" && pricingScopeViews.has(row.name)))
+    )
       fail("table_privileges");
   const columnGrants = (
     await client.query(
@@ -124,7 +132,14 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   for (const row of columnGrants) {
     const grant = channexManagementWorkerPrivileges[row.name]?.[row.privilege];
-    if (row.delegate || !(grant === true || (Array.isArray(grant) && grant.includes(row.attname))))
+    if (
+      row.delegate ||
+      !(
+        grant === true ||
+        (Array.isArray(grant) && grant.includes(row.attname)) ||
+        (row.privilege === "SELECT" && pricingScopeViews.has(row.name))
+      )
+    )
       fail("column_privileges");
   }
   for (const [name, privileges] of Object.entries(channexManagementWorkerPrivileges)) {

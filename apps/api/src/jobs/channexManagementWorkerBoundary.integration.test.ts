@@ -177,6 +177,10 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
         await client.query(
           `SELECT ${grants.SELECT === true ? "*" : (grants.SELECT as string[]).join(",")} FROM ${table} LIMIT 1`,
         );
+      for (const view of [
+        "booking.pricing_runtime_effective_property_scopes",
+        "booking.pricing_runtime_effective_authority_scopes",
+      ]) expect((await client.query(`SELECT * FROM ${view}`)).rows).toEqual([]);
       expect((await client.query("SELECT id FROM hotel_catalog.properties")).rows).toEqual([
         { id: property },
       ]);
