@@ -156,9 +156,12 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
     try {
       for (const sql of [
         "SELECT receipt_media_id FROM finance.expenses",
+        "SELECT entry_kind FROM finance.expenses",
         "SELECT recipient_fingerprint FROM finance.folio_revisions",
         "SELECT property_id FROM finance.folio_lines",
         "SELECT finished_at FROM platform.jobs",
+        "SELECT worker_id FROM platform.job_attempts",
+        "SELECT updated_at FROM platform.media_objects",
         "SELECT * FROM finance.payments",
         "SELECT * FROM identity.users",
         "SELECT * FROM booking.guest_bookings",

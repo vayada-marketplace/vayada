@@ -1117,6 +1117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     }
     financeExportWorker = { databaseUrl, propertyId };
   }
+
   let financeExpenseWorker: ApiConfig["financeExpenseWorker"];
   if (readBooleanEnv(env, "FINANCE_EXPENSE_WORKER_ENABLED", false)) {
     const databaseUrl = readOptionalEnv(env, "FINANCE_EXPENSE_WORKER_DATABASE_URL");
@@ -1152,42 +1153,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       throw new Error("Finance expense worker requires its dedicated login on the target database");
     }
     financeExpenseWorker = { databaseUrl, propertyId };
-  }
-  let financeExportWorker: ApiConfig["financeExportWorker"];
-  if (readBooleanEnv(env, "FINANCE_EXPORT_WORKER_ENABLED", false)) {
-    const databaseUrl = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_DATABASE_URL");
-    const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
-    if (
-      !backgroundWorkersEnabled ||
-      financeSource !== "target" ||
-      !targetDatabaseUrl ||
-      !financeFolioRecipientKms ||
-      !platformMediaServing ||
-      !databaseUrl ||
-      !propertyId ||
-      !z.uuid().safeParse(propertyId).success
-    )
-      throw new Error(
-        "Finance export worker requires target Finance, background workers, KMS and media dependencies, a dedicated URL and property UUID",
-      );
-    let worker: URL, target: URL;
-    try {
-      worker = new URL(databaseUrl);
-      target = new URL(targetDatabaseUrl);
-    } catch {
-      throw new Error("Finance export worker database URL is invalid");
-    }
-    if (
-      !["postgres:", "postgresql:"].includes(worker.protocol) ||
-      !worker.password ||
-      decodeURIComponent(worker.username) !== "vayada_next_finance_export_worker" ||
-      worker.host !== target.host ||
-      worker.pathname !== target.pathname ||
-      worker.hash ||
-      worker.search !== "?sslmode=require"
-    )
-      throw new Error("Finance export worker requires its dedicated login on the target database");
-    financeExportWorker = { databaseUrl, propertyId };
   }
   let airbnbAlterations: ApiConfig["airbnbAlterations"];
   if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {
