@@ -274,6 +274,10 @@ gates before enabling the Booking Web flag. Reference-bearing arrivals now
 revalidate the final browser host without a Next.js fetch cache before asking
 the API to admit the click; the API independently checks current canonical
 host ownership. A changed or unavailable host continues untracked.
+The [runtime database boundary](affiliate-runtime-database-boundary.md)
+inventories the required locks and writes. It does not authorize direct grants:
+mutable hotel-row locks and original-binding write authority require a
+database-enforced least-privilege design before runtime activation.
 The quote-acceptance route now has a separate disabled-by-default cookie binding
 gate. When enabled, it reads exactly one UUID handle from the host-only cookie,
 checks that a live context belongs to the quote's current canonical hotel and
