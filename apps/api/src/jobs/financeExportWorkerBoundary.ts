@@ -24,7 +24,7 @@ export const financeExportWorkerPrivileges: Record<string, Record<string, true |
 
 // Canonical pg_policies output from migration 0412 on PostgreSQL 16 and 17.
 const POLICY_DIGEST = "aed0e239166590e605f7b7621744bdac2a2ca535ecca5335234971fe65c54d9a";
-const HELPER_DIGEST = "50b550dff92f229444ddbd870d1994581477768d41b389754d24bcd786ae7490";
+const HELPER_DIGEST = "2f7707cae1153840ab127a677a5165549fa9be800e7797a7770d76891f0ff3c5";
 
 export async function assertFinanceExportWorkerBoundary(
   client: Pick<pg.Client, "query">,

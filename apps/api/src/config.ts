@@ -1115,7 +1115,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ) {
       throw new Error("Finance export worker requires its dedicated login on the target database");
     }
-    financeExportWorker = { databaseUrl, propertyId };
+    financeExportWorker = {
+      databaseUrl: normalizePgConnectionString(databaseUrl),
+      propertyId,
+    };
   }
 
   let financeExpenseWorker: ApiConfig["financeExpenseWorker"];

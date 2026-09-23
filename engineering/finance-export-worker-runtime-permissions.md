@@ -15,7 +15,7 @@ owner-managed property allowlist is empty after migration.
 | `platform.dead_letter_events`   | Append terminal failures                                    | Matching export job, attempt, property, and resource                  |
 | `platform.product_audit_events` | Append worker outcomes                                      | Exact system export actions and matching job/property                 |
 | `platform.media_objects`        | Register intent and finalize private artifact               | Object ID equals job ID; exact private Financials export shape        |
-| Pricing runtime scope views     | No access                                                   | Booking schema usage is not granted to the export worker              |
+| Pricing runtime scope views     | Query succeeds but returns no rows                          | The readable view has no scope rows for non-pricing worker logins     |
 | Property/pricing evidence       | Read currency and timezone                                  | Allowlisted property only                                             |
 | Expense evidence                | Read the accepted manifest rows                             | Allowlisted `finance.expenses`; no receipt or payment tables          |
 | Folio evidence                  | Read accepted folio revision, lines, and payment references | Allowlisted property; no direct `finance.payments` access             |

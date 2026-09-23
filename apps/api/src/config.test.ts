@@ -1488,6 +1488,14 @@ describe("Finance export worker boundary config", () => {
     ])
       expect(() => loadConfig({ ...env, ...overrides })).toThrow();
   });
+  it("normalizes sslmode=require for the node-postgres worker pool", () => {
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?sslmode=require`,
+      }).financeExportWorker?.databaseUrl,
+    ).toContain("sslmode=require&uselibpqcompat=true");
+  });
 });
 
 describe("Finance expense worker boundary config", () => {

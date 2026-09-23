@@ -15,9 +15,9 @@ BEGIN
     WHEN 'property' THEN RETURN EXISTS (
       SELECT 1 FROM platform.finance_export_worker_properties WHERE property_id::text = resource);
     WHEN 'job' THEN RETURN EXISTS (
-      SELECT 1 FROM platform.jobs WHERE id::text = resource AND (parent IS NULL OR property_id = parent));
+      SELECT 1 FROM platform.jobs WHERE id = resource::uuid AND (parent IS NULL OR property_id = parent));
     WHEN 'attempt' THEN RETURN EXISTS (
-      SELECT 1 FROM platform.job_attempts WHERE id::text = resource AND job_id = parent);
+      SELECT 1 FROM platform.job_attempts WHERE id = resource::uuid AND job_id = parent);
     ELSE RETURN false;
   END CASE;
 END;
