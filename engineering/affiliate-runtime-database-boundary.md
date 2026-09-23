@@ -96,3 +96,15 @@ grant matrix is declared complete.
 
 No target, migration or test database credential is available in this local
 workspace, so the deployed role's effective privileges have not been checked.
+
+The first executable preparation check is
+`assertAffiliateCaptureRoleHasNoWriteGrants`. It requires a `NOINHERIT` login
+and rejects owner or DDL powers, membership, direct table or column writes,
+sequence rights, or delegated table/column reads. PostgreSQL grants `TEMP` on a
+database to `PUBLIC` by default; an owner must revoke that default before a
+candidate role can pass. The fixture makes that revocation only inside a
+rolled-back test transaction. It verifies that direct click, admission, binding
+and mutable-hotel grants are rejected. This is a
+**deny-only staging check**: passing it does not establish the required read
+grants, guarded write capability, full function/trigger safety, deployment
+credential mapping, or permission to turn on capture.
