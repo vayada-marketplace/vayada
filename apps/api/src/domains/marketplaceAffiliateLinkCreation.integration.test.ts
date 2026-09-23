@@ -117,6 +117,12 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       await readFile(new URL("0406_affiliate_live_click_storage.sql", migrations), "utf8"),
     );
     await pool().query(
+      await readFile(
+        new URL("0412_booking_affiliate_live_original_bindings.sql", migrations),
+        "utf8",
+      ),
+    );
+    await pool().query(
       await readFile(new URL("0411_affiliate_click_campaign_label.sql", migrations), "utf8"),
     );
   });
@@ -461,6 +467,46 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         )
       ).rows[0],
     ).toEqual({ contexts: "1", admissions: "1" });
+  });
+
+  it("binds an admitted live click to an original booking without classifying it as synthetic", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const click = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (click.status !== "recorded") throw new Error("Expected live click");
+    const arrival = await admitAffiliateArrival(pool(), {
+      propertyId: id(3),
+      referenceToken: click.referenceToken,
+    });
+    if (arrival.status !== "admitted") throw new Error("Expected admitted arrival");
+    const bookingId = id(140);
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES ($1,$2,'live-original','draft','2027-01-01','2027-01-02','EUR')`,
+      [bookingId, id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_original_booking_bindings
+         (booking_id,property_id,context_id,history_cutoff,
+          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
+       VALUES ($1,$2,$3,1,'live-original','2027-01-01','2027-01-02','EUR',FALSE)`,
+      [bookingId, id(3), arrival.contextId],
+    );
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff,synthetic FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({ history_cutoff: "1", synthetic: false });
+    await expect(
+      pool().query("INSERT INTO finance.affiliate_earning_journal VALUES ($1,$2)", [
+        id(3),
+        bookingId,
+      ]),
+    ).resolves.toMatchObject({ rowCount: 1 });
   });
 
   it("admits trusted clicks once in destination order and rejects another context", async () => {

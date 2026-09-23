@@ -255,6 +255,10 @@ atomic binding before it may claim native affiliate conversions. Until both
 privacy approval and these transport checks exist, keep the live capture route
 disabled and the existing synthetic records excluded from Finance.
 
+The new pricing quote acceptance writer can freeze a server-owned live context
+and its admission cutoff with the original booking. No public acceptance route
+derives that context from a first-party cookie yet, so this remains dormant.
+
 ## Product retention choice requiring privacy approval
 
 Product accepted a maximum hotel-selected attribution window of 90 days and
