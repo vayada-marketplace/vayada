@@ -16,7 +16,7 @@ describe("pending Channex upload batch continuation", () => {
     });
     owners.reconcile.mockImplementation(async (_pool, _lease, _selection, _creation, id) => {
       expect(pending.delete(id)).toBe(true);
-      return { kind: "ari_reconciled" };
+      return { kind: id === "attempt-10" ? "ari_retired" : "ari_reconciled" };
     });
     const query = vi.fn(async (_sql, values) => {
       expect(values).toEqual(["property"]);
