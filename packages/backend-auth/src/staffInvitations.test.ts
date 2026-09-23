@@ -15,7 +15,10 @@ import {
   loadLinkedStaffInvitationPropertyIds,
   type StaffInvitationAcceptanceEvent,
 } from "./staffInvitationAcceptance.js";
-import { createPgStaffInvitationRepository } from "./staffInvitations.js";
+import {
+  createPgStaffInvitationRepository,
+  enqueueInboxAssignmentReconciliation,
+} from "./staffInvitations.js";
 import { createStaffRemovalCoordinator, type StaffRemovalProvider } from "./staffRemoval.js";
 import { createPgStaffRemovalJobRepository } from "./staffRemovalJobs.js";
 import type {
@@ -2040,6 +2043,54 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
       ).resolves.toEqual([property]);
     } finally {
       await client.query("RESET ROLE");
+      await client.query(`DROP OWNED BY ${restrictedRole}`);
+      await client.query(`REVOKE ${restrictedRole} FROM CURRENT_USER`);
+      await client.query(`DROP ROLE ${restrictedRole}`);
+    }
+  });
+
+  it("enqueues an unreadable PMS Inbox job as the restricted identity role", async () => {
+    const restrictedRole = "vayada_next_identity_runtime";
+    const idempotencyId = randomUUID();
+    const jobKey = `pms.inbox.assignment.reconcile:${idempotencyId}:${staffMembership}`;
+    await client.query(`CREATE ROLE ${restrictedRole} NOLOGIN`);
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+    try {
+      await client.query(`GRANT ${restrictedRole} TO CURRENT_USER`);
+      await client.query(`GRANT USAGE ON SCHEMA platform TO ${restrictedRole}`);
+      await client.query(`GRANT INSERT, SELECT ON platform.jobs TO ${restrictedRole}`);
+      const restrictedClient = await pool.connect();
+      try {
+        await restrictedClient.query(`SET ROLE ${restrictedRole}`);
+        await restrictedClient.query("BEGIN");
+        const input = {
+          organizationId: org,
+          membershipId: staffMembership,
+          idempotencyId,
+          correlationId: randomUUID(),
+          commandId: randomUUID(),
+          reason: "role_permissions_changed" as const,
+        };
+        await expect(
+          enqueueInboxAssignmentReconciliation(restrictedClient, input),
+        ).resolves.toBeUndefined();
+        expect(
+          (
+            await restrictedClient.query("SELECT id FROM platform.jobs WHERE job_key = $1", [
+              jobKey,
+            ])
+          ).rows,
+        ).toEqual([]);
+        await expect(enqueueInboxAssignmentReconciliation(restrictedClient, input)).rejects.toThrow(
+          "PMS Inbox assignment reconciliation job was not scheduled",
+        );
+      } finally {
+        await restrictedClient.query("ROLLBACK");
+        await restrictedClient.query("RESET ROLE");
+        restrictedClient.release();
+      }
+    } finally {
+      await pool.end();
       await client.query(`DROP OWNED BY ${restrictedRole}`);
       await client.query(`REVOKE ${restrictedRole} FROM CURRENT_USER`);
       await client.query(`DROP ROLE ${restrictedRole}`);
