@@ -250,7 +250,7 @@ cannot move an existing cutoff. It must also cover fallback → custom-domain
 canonicalization, changed or revoked custom domains, and arrival without
 destination storage permission. A single
 click event or the old `?ref` path is
-not such proof. The older Booking Web upsert checkout path needs its own
+not such proof. The older Booking Web upsert checkout path also needs an
 atomic binding before it may claim native affiliate conversions. Until both
 privacy approval and these transport checks exist, keep the live capture route
 disabled and the existing synthetic records excluded from Finance.
@@ -284,6 +284,12 @@ locks the context, rechecks the 90-day lifetime after any lock wait, and
 freezes an eligible admitted-click cutoff with the original booking. Production
 startup does not enable this gate. End-to-end HTTPS cookie
 forwarding and a real click-to-booking test are still required before launch.
+The older `/hotels/:slug/bookings` checkout now has a separate guarded binding
+path. It reads the same server-derived cookie, locks the live context before
+creating the original booking, and freezes its admitted-click cutoff in that
+transaction. Invalid, stale, foreign or unavailable context evidence leaves
+the booking unbound; an idempotent replay cannot replace the original binding.
+This path also remains off in production until the same launch gates pass.
 
 ## Product retention choice requiring privacy approval
 
