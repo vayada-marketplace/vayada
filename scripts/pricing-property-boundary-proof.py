@@ -1,7 +1,7 @@
-"""Local feasibility proof only; starts a disposable PostgreSQL cluster, no URLs.
+"""Local migration proof only; starts a disposable PostgreSQL cluster, no URLs.
 
 Usage: python3 scripts/pricing-property-boundary-proof.py /path/to/postgres/bin
-No production migration, credential provisioning, or application wiring.
+No production connection, credential provisioning, or application wiring.
 """
 
 import getpass
@@ -23,7 +23,15 @@ OTHER_ORG = "00000000-0000-4000-8000-000000000009"
 ACTOR = "00000000-0000-4000-8000-000000000004"
 R1 = "00000000-0000-4000-8000-000000000005"
 R2 = "00000000-0000-4000-8000-000000000006"
-passwords = {r: secrets.token_hex(32) for r in ("pricing_a", "pricing_b", "public_a", "public_b")}
+OWNER_A = "vayada_next_pricing_owner_a"
+OWNER_B = "vayada_next_pricing_owner_b"
+PUBLIC_A = "vayada_next_pricing_public_a"
+PUBLIC_B = "vayada_next_pricing_public_b"
+READER_A = "vayada_next_pricing_reader_a"
+LEGACY = "legacy_runtime"
+passwords = {
+    r: secrets.token_hex(32) for r in (OWNER_A, OWNER_B, PUBLIC_A, PUBLIC_B, READER_A, LEGACY)
+}
 roles = ", ".join(passwords)
 
 
@@ -46,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
     started = run([str(BIN / "pg_ctl"), "-D", str(data), "-l", str(base / "log"), "-w", "start"])
     assert started.returncode == 0, started.stderr
 
-    def sql(query, role=OWNER, denied=False):
+    def sql(query, role=OWNER, denied=False, state="42501"):
         result = run(
             [
                 str(BIN / "psql"),
@@ -70,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             },
         )
         if denied:
-            assert result.returncode != 0 and "42501" in result.stderr, result.stderr
+            assert result.returncode != 0 and state in result.stderr, result.stderr
         else:
             assert result.returncode == 0, result.stderr
         return result.stdout.strip()
@@ -103,9 +111,17 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 for content in (path.read_text() for path in migrations)
             )
         )
+        assert (
+            sql("""SELECT count(*) FROM pg_catalog.pg_proc routine
+              JOIN pg_catalog.pg_namespace namespace ON namespace.oid = routine.pronamespace
+              WHERE namespace.nspname IN ('booking','platform')
+                AND routine.proname LIKE 'pricing_runtime_%' AND routine.prosecdef""")
+            == "0"
+        )
         for role, password in passwords.items():
+            inheritance = "INHERIT" if role == LEGACY else "NOINHERIT"
             sql(
-                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD '{password}';"
+                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE {inheritance} NOBYPASSRLS PASSWORD '{password}';"
             )
         sql(f"""
         INSERT INTO identity.organizations(id,kind,name,slug) VALUES ('{ORG}','hotel_group','Proof','proof');
@@ -113,109 +129,134 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         INSERT INTO identity.users(id,email) VALUES ('{ACTOR}','proof@example.invalid');
         INSERT INTO hotel_catalog.properties(id,public_id,display_name)
           VALUES ('{A}','proof-a','Proof A'),('{B}','proof-b','Proof B');
-        CREATE SCHEMA proof_scope;
-        REVOKE ALL ON SCHEMA proof_scope FROM PUBLIC;
-        CREATE TABLE proof_scope.assignments(login name PRIMARY KEY, property_id uuid NOT NULL, organization_id uuid NOT NULL);
-        INSERT INTO proof_scope.assignments VALUES ('pricing_a','{A}','{ORG}'),('pricing_b','{B}','{ORG}'),
-          ('public_a','{A}','{ORG}'),('public_b','{B}','{ORG}');
-        GRANT USAGE ON SCHEMA booking, proof_scope TO {roles};
-        GRANT SELECT ON proof_scope.assignments TO {roles};
-        """)
-        # session_user is the authenticated DB login, not a caller-set property GUC.
-        # Restrictive policies cannot be bypassed by a later permissive policy.
-        head_organization_check = """AND EXISTS (SELECT 1 FROM booking.pricing_authority_revisions r
-          WHERE r.property_id = pricing_authority_heads.property_id AND r.revision = pricing_authority_heads.revision
-          AND r.organization_id = (SELECT organization_id FROM proof_scope.assignments WHERE login = session_user))"""
-        for table in ("pricing_quotes", "pricing_authority_revisions", "pricing_authority_heads"):
-            writers = "public_a, public_b" if table == "pricing_quotes" else "pricing_a, pricing_b"
-            organization_check = (
-                head_organization_check
-                if table == "pricing_authority_heads"
-                else "AND organization_id = (SELECT organization_id FROM proof_scope.assignments WHERE login = session_user)"
-            )
-            sql(f"""
-            ALTER TABLE booking.{table} ENABLE ROW LEVEL SECURITY;
-            GRANT SELECT ON booking.{table} TO {roles};
-            GRANT INSERT ON booking.{table} TO {writers};
-            CREATE POLICY proof_existing_access ON booking.{table} USING (true) WITH CHECK (true);
-            CREATE POLICY proof_write_scope ON booking.{table} AS RESTRICTIVE FOR INSERT
-              TO {roles} WITH CHECK (property_id =
-                (SELECT property_id FROM proof_scope.assignments WHERE login = session_user) {organization_check});
-            """)
-        sql(f"""
-        GRANT UPDATE(revision) ON booking.pricing_authority_heads TO pricing_a, pricing_b;
-        CREATE POLICY proof_update_scope ON booking.pricing_authority_heads AS RESTRICTIVE FOR UPDATE
-          TO pricing_a, pricing_b USING (true) WITH CHECK (property_id =
-            (SELECT property_id FROM proof_scope.assignments WHERE login = session_user) {head_organization_check});
-        GRANT UPDATE(revision) ON booking.pricing_authority_heads TO public_a, public_b;
-        CREATE POLICY proof_public_lock_only ON booking.pricing_authority_heads AS RESTRICTIVE FOR UPDATE
-          TO public_a, public_b USING (true) WITH CHECK (false);
+        INSERT INTO platform.pricing_runtime_property_scopes
+          (database_login,operation_class,property_id,organization_id) VALUES
+          ('{OWNER_A}','owner_manage','{A}','{ORG}'),
+          ('{OWNER_B}','owner_manage','{B}','{ORG}'),
+          ('{PUBLIC_A}','public','{A}','{ORG}'),
+          ('{PUBLIC_B}','public','{B}','{ORG}'),
+          ('{READER_A}','owner_read','{A}','{ORG}');
+        GRANT USAGE ON SCHEMA booking, platform TO {roles};
+        GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
+          booking.pricing_authority_heads TO {roles};
+        GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
+        GRANT INSERT ON booking.pricing_authority_revisions,
+          booking.pricing_authority_heads TO {OWNER_A},{OWNER_B};
+        GRANT UPDATE(revision) ON booking.pricing_authority_heads TO {roles};
+        GRANT UPDATE(revision) ON booking.pricing_authority_revisions TO {roles};
+        GRANT INSERT ON booking.pricing_quotes TO {LEGACY};
         """)
         assert (
             sql(
                 "SELECT session_user = current_user AND NOT rolsuper AND NOT rolcreaterole AND NOT rolbypassrls FROM pg_roles WHERE rolname = session_user",
-                "pricing_a",
+                OWNER_A,
             )
             == "t"
         )
-        sql(quote(A, 1), "public_a")
-        sql(quote(B, 2), "public_b")
-        sql(quote(B, 3), "public_a", denied=True)
-        sql(f"SET app.property_id = '{B}';" + quote(B, 4), "public_a", denied=True)
-        sql(quote(A, 9, OTHER_ORG), "public_a", denied=True)
-        sql(quote(A, 10), "pricing_a", denied=True)
-        sql("SET SESSION AUTHORIZATION pricing_b", "pricing_a", denied=True)
-        sql("SET ROLE pricing_b", "pricing_a", denied=True)
+        sql(quote(A, 1), PUBLIC_A)
+        sql(quote(B, 2), PUBLIC_B)
+        sql(quote(B, 3), PUBLIC_A, denied=True)
+        sql(f"SET app.property_id = '{B}';" + quote(B, 4), PUBLIC_A, denied=True)
+        sql(quote(A, 9, OTHER_ORG), PUBLIC_A, denied=True)
+        sql(quote(A, 10), OWNER_A, denied=True)
+        sql(quote(A, 14), READER_A, denied=True)
         sql(
-            f"UPDATE proof_scope.assignments SET property_id = '{B}' WHERE login = session_user",
-            "pricing_a",
+            revision(A, "00000000-0000-4000-8000-000000000014", "reader-escalation"),
+            READER_A,
+            denied=True,
+        )
+        # Non-pricing roles retain their prior policy behavior. Switching into
+        # a pricing role cannot acquire its DB-owned assignment. The legacy
+        # role deliberately has no access to the scope table.
+        sql("SELECT 1 FROM platform.pricing_runtime_property_scopes", LEGACY, denied=True)
+        sql("BEGIN;" + quote(B, 11) + "ROLLBACK", LEGACY)
+        sql(f"GRANT {OWNER_B} TO {OWNER_A},{LEGACY}")
+        sql(
+            revision(B, "00000000-0000-4000-8000-000000000015", "inherited-owner"),
+            LEGACY,
+            denied=True,
+        )
+        # Revoking the parent role's property scope must not reclassify an
+        # inherited pricing member as an unrestricted legacy writer.
+        sql(
+            f"DELETE FROM platform.pricing_runtime_property_scopes WHERE database_login='{OWNER_B}'"
+        )
+        sql(
+            revision(B, "00000000-0000-4000-8000-000000000016", "inherited-after-revoke"),
+            LEGACY,
+            denied=True,
+        )
+        sql(f"""INSERT INTO platform.pricing_runtime_property_scopes
+          (database_login,operation_class,property_id,organization_id)
+          VALUES ('{OWNER_B}','owner_manage','{B}','{ORG}')""")
+        sql(
+            f"SET ROLE {OWNER_B};"
+            + revision(B, "00000000-0000-4000-8000-000000000012", "role-hop-owner"),
+            OWNER_A,
+            denied=True,
+        )
+        sql(
+            f"SET ROLE {OWNER_B};"
+            + revision(B, "00000000-0000-4000-8000-000000000013", "role-hop-legacy"),
+            LEGACY,
+            denied=True,
+        )
+        sql(f"SET SESSION AUTHORIZATION {OWNER_B}", OWNER_A, denied=True)
+        sql(
+            f"UPDATE platform.pricing_runtime_property_scopes SET property_id = '{B}' WHERE database_login = session_user",
+            OWNER_A,
             denied=True,
         )
         sql(
             "ALTER TABLE booking.pricing_quotes DISABLE ROW LEVEL SECURITY",
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
-        sql("SET row_security = off;" + quote(B, 5), "public_a", denied=True)
+        sql("SET row_security = off;" + quote(B, 5), PUBLIC_A, denied=True)
         sql(
             "BEGIN;"
             + revision(A, R1, "a1")
             + f"INSERT INTO booking.pricing_authority_heads VALUES ('{A}','{R1}'); COMMIT;",
-            "pricing_a",
+            OWNER_A,
         )
         foreign_revision = "00000000-0000-4000-8000-000000000011"
         sql(revision(A, foreign_revision, "other-organization").replace(ORG, OTHER_ORG))
         sql(
             f"UPDATE booking.pricing_authority_heads SET revision='{foreign_revision}' WHERE property_id='{A}'",
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
         sql(
             "BEGIN;"
             + revision(A, R2, "a2")
             + f"UPDATE booking.pricing_authority_heads SET revision='{R2}' WHERE property_id='{A}'; COMMIT;",
-            "pricing_a",
+            OWNER_A,
         )
         sql(
             revision(B, "00000000-0000-4000-8000-000000000007", "wrong-property"),
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
         sql(
             revision(A, "00000000-0000-4000-8000-000000000010", "public-owner-escalation"),
-            "public_a",
+            PUBLIC_A,
             denied=True,
         )
         sql(
             f"UPDATE booking.pricing_authority_heads SET revision='{R1}' WHERE property_id='{A}'",
-            "public_a",
+            PUBLIC_A,
             denied=True,
         )
-        sql("SET ROLE pricing_a", "public_a", denied=True)
+        sql(
+            f"UPDATE booking.pricing_authority_heads SET revision='{R1}' WHERE property_id='{A}'",
+            READER_A,
+            denied=True,
+        )
+        sql(f"SET ROLE {OWNER_A}", PUBLIC_A, denied=True)
         assert (
             sql(
                 f"BEGIN; SELECT property_id FROM booking.pricing_authority_heads WHERE property_id='{A}' FOR SHARE; ROLLBACK",
-                "public_a",
+                PUBLIC_A,
             )
             == A
         )
@@ -224,11 +265,11 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         sql(
             revision(B, r3, "b1")
             + f"INSERT INTO booking.pricing_authority_heads VALUES ('{B}','{r3}');",
-            "pricing_b",
+            OWNER_B,
         )
         sql(
             f"UPDATE booking.pricing_authority_heads SET revision='{r3}' WHERE property_id='{B}'",
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
         # Only revision is updatable: NEW-row RLS alone would allow reparenting
@@ -237,45 +278,59 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         sql(f"DELETE FROM booking.pricing_authority_heads WHERE property_id='{A}'")
         sql(
             f"UPDATE booking.pricing_authority_heads SET property_id='{A}',revision='{R2}' WHERE property_id='{B}'",
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
         assert (
             sql(f"SELECT revision FROM booking.pricing_authority_heads WHERE property_id='{B}'")
             == r3
         )
-        sql(f"INSERT INTO booking.pricing_authority_heads VALUES ('{A}','{R2}')", "pricing_a")
+        sql(f"INSERT INTO booking.pricing_authority_heads VALUES ('{A}','{R2}')", OWNER_A)
         sql(
             f"DELETE FROM booking.pricing_authority_heads WHERE property_id='{A}'",
-            "pricing_a",
+            OWNER_A,
             denied=True,
         )
-        sql("UPDATE booking.pricing_quotes SET request_id='tampered'", "pricing_a", denied=True)
-        sql("DELETE FROM booking.pricing_authority_revisions", "pricing_a", denied=True)
-        # Cross-property locking visibility is intentional, not tenant read isolation.
-        for role in ("pricing_a", "public_a"):
+        sql("UPDATE booking.pricing_quotes SET request_id='tampered'", OWNER_A, denied=True)
+        sql(
+            f"UPDATE booking.pricing_authority_revisions SET revision=revision WHERE property_id='{A}'",
+            OWNER_A,
+            denied=True,
+            state="55000",
+        )
+        sql("DELETE FROM booking.pricing_authority_revisions", OWNER_A, denied=True)
+        # This is the application's exact joined lock shape. Cross-property
+        # locking visibility is intentional, not tenant read isolation.
+        for role in (OWNER_A, PUBLIC_A, READER_A):
             assert (
                 sql(
-                    f"BEGIN; SELECT property_id FROM booking.pricing_authority_heads WHERE property_id='{B}' FOR SHARE; ROLLBACK",
+                    f"""BEGIN;
+                    SELECT h.property_id FROM booking.pricing_authority_heads h
+                    JOIN booking.pricing_authority_revisions r
+                      USING(property_id,revision)
+                    WHERE h.property_id='{B}' FOR SHARE OF h,r;
+                    ROLLBACK;""",
                     role,
                 )
                 == B
             )
         # Demonstrate that a failed write rolls back an earlier allowed write.
-        sql("BEGIN;" + quote(A, 6) + quote(B, 7) + "COMMIT;", "public_a", denied=True)
+        sql("BEGIN;" + quote(A, 6) + quote(B, 7) + "COMMIT;", PUBLIC_A, denied=True)
         assert sql("SELECT count(*) FROM booking.pricing_quotes") == "2"
         assert (
             sql(f"SELECT revision FROM booking.pricing_authority_heads WHERE property_id='{A}'")
             == R2
         )
         # Revocation is DB-owned; the same authenticated login immediately loses writes.
-        sql("DELETE FROM proof_scope.assignments WHERE login='public_a'")
-        sql(quote(A, 8), "public_a", denied=True)
+        sql(
+            f"DELETE FROM platform.pricing_runtime_property_scopes WHERE database_login='{PUBLIC_A}'"
+        )
+        sql(quote(A, 8), PUBLIC_A, denied=True)
         print(
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public role separation; property/org/GUC/role/ACL/RLS-bypass denials; head reparent denial; locks; rollback; scope revocation"
+            "PASS owner/public separation; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"

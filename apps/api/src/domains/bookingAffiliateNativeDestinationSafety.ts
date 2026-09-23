@@ -1,22 +1,20 @@
 import type pg from "pg";
+import {
+  AFFILIATE_DESTINATION_SAFETY_POLICY_VERSION,
+  buildAffiliateArrivalRedirect,
+  type AffiliateDestinationSafetyEvidence,
+} from "@vayada/domain-booking";
+import { lockAffiliateDestinationSafety } from "./bookingAffiliateDestinationSafetyLock.js";
 import { requireAffiliateReadinessTransaction } from "./bookingAffiliateReferralReadiness.js";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const slug = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 type Scope = { propertyId: string; organizationId: string; destinationVersionId: string };
-type Result =
-  | { status: "blocked" }
-  | {
-      status: "native_candidate";
-      propertyId: string;
-      destinationVersionId: string;
-      bookingUrl: string;
-    };
+type Result = { status: "blocked" } | AffiliateDestinationSafetyEvidence;
 
-/** Current-state Booking-owned URL candidate only. The redirect gate still needs
- * host/chain evidence and must coordinate concurrent canonical-domain changes. */
-export async function readNativeAffiliateDestinationSafety(
+/** Resolves fresh safety evidence while the per-property safety lock is held. */
+async function readNativeAffiliateDestinationSafety(
   client: pg.PoolClient,
   scope: Scope,
 ): Promise<Result> {
@@ -28,9 +26,11 @@ export async function readNativeAffiliateDestinationSafety(
   )
     return { status: "blocked" };
 
+  await lockAffiliateDestinationSafety(client, scope.propertyId);
+
   const row = (
     await client.query(
-      `SELECT destination.booking_url, canonical.slug
+      `SELECT destination.booking_url, canonical.slug, clock_timestamp() AS validated_at
        FROM booking.affiliate_destination_versions destination
        JOIN hotel_catalog.properties property ON property.id=destination.property_id
          AND property.lifecycle_status='active' AND property.profile_status='complete'
@@ -46,14 +46,43 @@ export async function readNativeAffiliateDestinationSafety(
        FOR SHARE OF destination,property,canonical`,
       [scope.destinationVersionId, scope.propertyId, scope.organizationId],
     )
-  ).rows[0] as { booking_url: string; slug: string } | undefined;
+  ).rows[0] as { booking_url: string; slug: string; validated_at: Date } | undefined;
   if (!row || !slug.test(row.slug)) return { status: "blocked" };
   const expected = `https://${row.slug}.next-booking.vayada.com/`;
   if (row.booking_url !== expected) return { status: "blocked" };
+  const propertyId = scope.propertyId.toLowerCase();
+  const destinationVersionId = scope.destinationVersionId.toLowerCase();
   return {
-    status: "native_candidate",
-    propertyId: scope.propertyId.toLowerCase(),
-    destinationVersionId: scope.destinationVersionId.toLowerCase(),
+    status: "approved",
+    policyVersion: AFFILIATE_DESTINATION_SAFETY_POLICY_VERSION,
+    method: "native_vayada_host",
+    propertyId,
+    destinationVersionId,
     bookingUrl: expected,
+    redirectChain: [expected],
+    evidenceReference:
+      `booking:native-affiliate-destination-safety:v1:${propertyId}:` +
+      `${destinationVersionId}:${row.slug}`,
+    validatedAt: row.validated_at.toISOString(),
   };
+}
+
+/**
+ * Constructs the redirect while the caller's transaction holds the same lock
+ * used by every custom-domain mutation. Commit only after this returns.
+ */
+export async function buildNativeAffiliateArrivalRedirect(
+  client: pg.PoolClient,
+  scope: Scope,
+  opaqueReferenceToken: unknown,
+  now?: Date,
+) {
+  const safety = await readNativeAffiliateDestinationSafety(client, scope);
+  return safety.status === "blocked"
+    ? safety
+    : buildAffiliateArrivalRedirect(
+        safety,
+        opaqueReferenceToken,
+        now ?? new Date(safety.validatedAt),
+      );
 }

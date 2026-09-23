@@ -19,6 +19,7 @@ export type ChannexPricingJobLease = ChannexPricingJobLeaseInput &
     propertyId: string;
     operationType: "provision" | "sync_ari" | "update_markups";
     publishedOfferProvisioning: boolean;
+    publishedOfferRoomTypeId: string | null;
   }>;
 
 /** Caller must own a transaction and roll back on lock contention (55P03).
@@ -45,7 +46,8 @@ export async function lockChannexPricingJobLease(
     `SELECT j.id::text AS "jobId", j.property_id::text AS "propertyId",
        j.locked_by AS "workerId", j.attempts_count AS "attemptNumber",
        j.payload->>'operationType' AS "operationType",
-       (j.payload ? 'publishedOffer') AS "publishedOfferProvisioning"
+       (j.payload ? 'publishedOffer') AS "publishedOfferProvisioning",
+       j.payload->'publishedOffer'->>'roomTypeId' AS "publishedOfferRoomTypeId"
      FROM platform.jobs j JOIN platform.job_attempts a
        ON a.job_id=j.id AND a.attempt_number=j.attempts_count
      WHERE j.id=$1::uuid AND j.locked_by=$2 AND j.attempts_count=$3
