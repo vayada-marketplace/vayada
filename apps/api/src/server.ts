@@ -782,45 +782,47 @@ const financeExpenseGenerationPool =
   config.financeSource === "target"
     ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2, connectionTimeoutMillis: 5_000 })
     : undefined;
-const financeFolioExportWorker =
-  config.financeExportWorker && financeFolioRuntime && config.platformMediaServing
-    ? (() => {
-        const connectionString = config.financeExportWorker!.databaseUrl;
-        const pool = new pg.Pool({
-          connectionString,
-          max: 2,
-          connectionTimeoutMillis: 5_000,
-        });
-        const pricing = createPgPmsPricingReadModel({ connectionString });
-        const propertyContext = createPgFinanceExpensePropertyContextReadPort(connectionString);
-        const folios = createPgFinanceFolioReadRepository({
-          connectionString,
-          pricing,
-          propertyContext,
-          recipientDecoder: financeFolioRuntime.recipientDecoder,
-        });
-        const expenses = createPgFinanceExpenseReadModel({
-          connectionString,
-          pricing,
-          propertyContext,
-        });
-        return {
-          pool,
-          read: { exportReady: folios.exportReady, exportCsv: expenses.exportCsv },
-          writer: createS3FinanceFolioExportArtifactWriter({
-            bucketName: config.platformMediaServing.bucketName,
-          }),
-          close: () =>
-            Promise.all([
-              pool.end(),
-              folios.close(),
-              expenses.close(),
-              pricing.close(),
-              propertyContext.close(),
-            ]),
-        };
-      })()
-    : undefined;
+const financeFolioExportWorker = config.financeExportWorker
+  ? (() => {
+      if (!financeFolioRuntime || !config.platformMediaServing) {
+        throw new Error("finance_export_worker_dependencies_missing");
+      }
+      const connectionString = config.financeExportWorker!.databaseUrl;
+      const pool = new pg.Pool({
+        connectionString,
+        max: 2,
+        connectionTimeoutMillis: 5_000,
+      });
+      const pricing = createPgPmsPricingReadModel({ connectionString });
+      const propertyContext = createPgFinanceExpensePropertyContextReadPort(connectionString);
+      const folios = createPgFinanceFolioReadRepository({
+        connectionString,
+        pricing,
+        propertyContext,
+        recipientDecoder: financeFolioRuntime.recipientDecoder,
+      });
+      const expenses = createPgFinanceExpenseReadModel({
+        connectionString,
+        pricing,
+        propertyContext,
+      });
+      return {
+        pool,
+        read: { exportReady: folios.exportReady, exportCsv: expenses.exportCsv },
+        writer: createS3FinanceFolioExportArtifactWriter({
+          bucketName: config.platformMediaServing.bucketName,
+        }),
+        close: () =>
+          Promise.all([
+            pool.end(),
+            folios.close(),
+            expenses.close(),
+            pricing.close(),
+            propertyContext.close(),
+          ]),
+      };
+    })()
+  : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
   ? createXenditBankValidator({
