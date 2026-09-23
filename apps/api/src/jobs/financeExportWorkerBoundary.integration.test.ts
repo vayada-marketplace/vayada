@@ -121,9 +121,9 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
     await expect(
       worker.query("SELECT id,provider FROM platform.external_webhook_events"),
     ).rejects.toMatchObject({ code: "42501" });
-    expect(
-      (await worker.query("SELECT * FROM booking.pricing_runtime_effective_property_scopes")).rows,
-    ).toEqual([]);
+    await expect(
+      worker.query("SELECT * FROM booking.pricing_runtime_effective_property_scopes"),
+    ).rejects.toMatchObject({ code: "42501" });
     await expect(
       worker.query(
         "UPDATE platform.jobs SET status='running',locked_at=now(),locked_by='test-worker' WHERE id=$1",
