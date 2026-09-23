@@ -174,7 +174,7 @@ export type ApiConfig = {
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeExpenseWorker?: { databaseUrl: string; propertyId: string };
-  financeExportWorker?: { databaseUrl: string; propertyId: string };
+  financeExportWorker?: { databaseUrl: string; propertyId: string; exportId: string };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
@@ -1083,7 +1083,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (readBooleanEnv(env, "FINANCE_EXPORT_WORKER_ENABLED", false)) {
     const databaseUrl = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_DATABASE_URL");
     const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
+    const exportId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_EXPORT_ID")?.toLowerCase();
     if (
+      apiRuntime !== "next" ||
       !backgroundWorkersEnabled ||
       financeSource !== "target" ||
       !targetDatabaseUrl ||
@@ -1091,10 +1093,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       !platformMediaServing ||
       !databaseUrl ||
       !propertyId ||
-      !z.uuid().safeParse(propertyId).success
+      !z.uuid().safeParse(propertyId).success ||
+      !exportId ||
+      !z.uuid().safeParse(exportId).success
     ) {
       throw new Error(
-        "Finance export worker requires target Finance, background workers, folio KMS, private media, a dedicated URL and property UUID",
+        "Finance export worker requires target Finance, background workers, folio KMS, private media, a dedicated URL, property UUID and export UUID",
       );
     }
     let worker: URL, target: URL;
@@ -1111,13 +1115,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       worker.host !== target.host ||
       worker.pathname !== target.pathname ||
       worker.hash ||
-      [...worker.searchParams.keys()].some((key) => key !== "sslmode")
+      worker.search !== "?sslmode=require"
     ) {
       throw new Error("Finance export worker requires its dedicated login on the target database");
     }
     financeExportWorker = {
       databaseUrl: normalizePgConnectionString(databaseUrl),
       propertyId,
+      exportId,
     };
   }
 

@@ -59,7 +59,7 @@ const NOW = new Date("2026-09-15T01:00:00.000Z"),
   EXPIRES = "2026-09-16T00:00:00.000Z",
   SNAPSHOT_AT = "2026-09-14T23:59:59.999Z";
 // prettier-ignore
-const PROPERTY="11340000-0000-4000-8000-000000000020",JOB="11340000-0000-4000-8000-000000000021",ORG="11340000-0000-4000-8000-000000000022",COMMAND="11340000-0000-4000-8000-000000000023",CAUSE="11340000-0000-4000-8000-000000000024",ACTOR="11340000-0000-4000-8000-000000000025",EXPENSE="11340000-0000-4000-8000-000000000026",CATEGORY="11340000-0000-4000-8000-000000000027";
+const PROPERTY="11340000-0000-4000-8000-000000000020",JOB="11340000-0000-4000-8000-000000000021",OTHER_JOB="11340000-0000-4000-8000-000000000028",ORG="11340000-0000-4000-8000-000000000022",COMMAND="11340000-0000-4000-8000-000000000023",CAUSE="11340000-0000-4000-8000-000000000024",ACTOR="11340000-0000-4000-8000-000000000025",EXPENSE="11340000-0000-4000-8000-000000000026",CATEGORY="11340000-0000-4000-8000-000000000027";
 if (URL && !/(^|[_-])(test|verify)([_-]|$)/i.test(new globalThis.URL(URL).pathname))
   throw new Error("Unsafe test database");
 
@@ -271,10 +271,19 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([pool.end(),adminPool.end()]); await admin.end(); });
 
+  it("fails closed before claiming when the exact export scope is missing", async () => {
+    await expect(
+      runFinanceFolioExportJobs(pool, read, fakeWriter(), {
+        exportId: undefined as unknown as string,
+        clock: () => NOW,
+      }),
+    ).rejects.toThrow("finance_export_worker_export_scope_invalid");
+  });
+
   it("renders one immutable manifest, stores only sanitized metadata, and audits success", async () => {
     await insertJob(); const writer = fakeWriter(),afterRender=new Date(NOW.getTime()+360_000),times=[NOW,afterRender,afterRender,afterRender];
-    writer.write.mockImplementationOnce(async({exportId,body})=>{expect((await admin.query("SELECT lifecycle_status FROM platform.media_objects WHERE id=$1",[exportId])).rows[0]?.lifecycle_status).toBe("upload_pending");await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{workerId:"worker-two",clock:()=>afterRender})).resolves.toEqual({succeeded:0,retryScheduled:0,deadLettered:0});return receipt(exportId,body)});
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { workerId: "worker-one", clock: () => times.shift()! })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    writer.write.mockImplementationOnce(async({exportId,body})=>{expect((await admin.query("SELECT lifecycle_status FROM platform.media_objects WHERE id=$1",[exportId])).rows[0]?.lifecycle_status).toBe("upload_pending");await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{exportId:JOB,workerId:"worker-two",clock:()=>afterRender})).resolves.toEqual({succeeded:0,retryScheduled:0,deadLettered:0});return receipt(exportId,body)});
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, workerId: "worker-one", clock: () => times.shift()! })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
     expect(read.exportReady).toHaveBeenCalledWith(PROPERTY, "EUR", expect.objectContaining({ snapshotAt: SNAPSHOT_AT, manifest: [] }));
     expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, formatVersion: FINANCE_FOLIO_CSV_VERSION, expiresAt: EXPIRES });
     const row = (await admin.query(`SELECT job.status,job.attempts_count::int attempts,job.job_metadata->'artifact' artifact,(SELECT status FROM platform.job_attempts WHERE job_id=job.id) attempt,(SELECT redacted_payload FROM platform.product_audit_events WHERE job_id=job.id AND action='finance.folio_export.succeeded') audit,(SELECT audit_metadata FROM platform.product_audit_events WHERE job_id=job.id AND action='finance.folio_export.succeeded') "auditMetadata",(SELECT jsonb_build_object('purpose',purpose,'owner',owner_organization_id,'property',property_id,'status',lifecycle_status,'retainedUntil',to_char(retained_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),'key',storage_key) FROM platform.media_objects WHERE id=job.id) media,to_jsonb(job)::text serialized FROM platform.jobs job WHERE id=$1`, [JOB])).rows[0];
@@ -283,9 +292,31 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect(row.serialized).not.toContain(artifact.body);
   });
 
+  it("claims only the configured export when another eligible job exists", async () => {
+    await insertJob({ id: OTHER_JOB });
+    await insertJob();
+    const writer = fakeWriter();
+    await expect(
+      runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => NOW }),
+    ).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(writer.write).toHaveBeenCalledWith(expect.objectContaining({ exportId: JOB }));
+    expect(
+      (
+        await admin.query(
+          "SELECT id::text,status FROM platform.jobs WHERE id IN ($1::uuid,$2::uuid) ORDER BY id",
+          [JOB, OTHER_JOB],
+        )
+      ).rows,
+    ).toEqual([
+      { id: JOB, status: "succeeded" },
+      { id: OTHER_JOB, status: "pending" },
+    ]);
+  });
+
   it("renders expense manifests through the same durable worker without folio access", async () => {
     await insertExpenseJob(); const writer=fakeWriter();
-    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{exportId:JOB,clock:()=>NOW})).resolves.toEqual({succeeded:1,retryScheduled:0,deadLettered:0});
     expect(read.exportCsv).toHaveBeenCalledWith(PROPERTY,"EUR",expect.objectContaining({formatVersion:FINANCE_EXPENSE_CSV_VERSION,manifest:[expenseSelection]}));expect(read.exportReady).not.toHaveBeenCalled();
     expect(writer.write).toHaveBeenCalledWith({exportId:JOB,body:expenseArtifact.body,contentType:FINANCE_EXPENSE_CSV_CONTENT_TYPE,formatVersion:FINANCE_EXPENSE_CSV_VERSION,expiresAt:EXPIRES});
     expect((await admin.query("SELECT job_metadata->'artifact' artifact,(SELECT storage_key FROM platform.media_objects WHERE id=platform.jobs.id) key,(SELECT action FROM platform.product_audit_events WHERE job_id=platform.jobs.id) action,(SELECT audit_metadata->>'jobType' FROM platform.product_audit_events WHERE job_id=platform.jobs.id) \"jobType\" FROM platform.jobs WHERE id=$1",[JOB])).rows[0]).toMatchObject({artifact:{formatVersion:FINANCE_EXPENSE_CSV_VERSION,filename:expenseArtifact.filename},key:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`,action:"finance.expense_export.succeeded",jobType:FINANCE_EXPENSE_EXPORT_JOB});
@@ -296,7 +327,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     const snapshot = profitLossSnapshot();
     await insertReportJob(snapshot, FINANCE_PROFIT_LOSS_EXPORT_JOB);
     const writer = fakeWriter();
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW })).resolves.toEqual({
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => NOW })).resolves.toEqual({
       succeeded: 1,
       retryScheduled: 0,
       deadLettered: 0,
@@ -341,7 +372,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   ])("regenerates $tab CSV from the pinned snapshot and exposes the scoped artifact", async ({ tab, jobType, snapshot, artifact }) => {
     await insertReportJob(snapshot, jobType);
     const writer = fakeWriter();
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => NOW })).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
     expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: artifact.contentType, formatVersion: artifact.formatVersion, expiresAt: EXPIRES });
     expect(read.exportReady).not.toHaveBeenCalled();
     expect(read.exportCsv).not.toHaveBeenCalled();
@@ -373,40 +404,40 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
 
   it("rejects unbound expense artifacts and labels malformed expense jobs correctly", async () => {
     await insertExpenseJob();const writer=fakeWriter();read.exportCsv.mockResolvedValueOnce({...expenseArtifact,auditEvidence:[{...expenseSelection,revision:2}]});
-    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(writer.write).not.toHaveBeenCalled();
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{exportId:JOB,clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(writer.write).not.toHaveBeenCalled();
     await cleanupJobs();await insertExpenseJob(FINANCE_FOLIO_CSV_VERSION);read.exportCsv.mockClear();
-    await expect(runFinanceFolioExportJobs(pool,read,writer,{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(read.exportCsv).not.toHaveBeenCalled();
+    await expect(runFinanceFolioExportJobs(pool,read,writer,{exportId:JOB,clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(read.exportCsv).not.toHaveBeenCalled();
     expect((await admin.query("SELECT attempt.error_message,dead.failure_summary,audit.action FROM platform.jobs job JOIN platform.job_attempts attempt ON attempt.job_id=job.id JOIN platform.dead_letter_events dead ON dead.job_id=job.id JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.id=$1",[JOB])).rows[0]).toEqual({error_message:"Finance expense export failed (invalid_export_evidence).",failure_summary:"Finance expense export failed (invalid_export_evidence).",action:"finance.expense_export.dead_lettered"});
   });
 
   it("retries storage failures at the same object key and recovers an expired lease", async () => {
     await insertJob(); const writer = fakeWriter(); writer.write.mockRejectedValueOnce(new Error("S3 unavailable"));
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW, random:()=>0.25 })).resolves.toMatchObject({ retryScheduled: 1 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => NOW, random:()=>0.25 })).resolves.toMatchObject({ retryScheduled: 1 });
     expect((await admin.query(`SELECT to_char(run_after AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS run_after FROM platform.jobs WHERE id=$1`,[JOB])).rows[0].run_after).toBe("2026-09-15T01:00:22.500Z");
     expect((await admin.query("SELECT audit_metadata FROM platform.product_audit_events WHERE job_id=$1 AND action='finance.folio_export.retry_scheduled'",[JOB])).rows[0].audit_metadata).toMatchObject({organizationId:ORG,initiatingActorUserId:ACTOR});
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => new Date(NOW.getTime() + 31_000) })).resolves.toMatchObject({ succeeded: 1 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => new Date(NOW.getTime() + 31_000) })).resolves.toMatchObject({ succeeded: 1 });
     expect(writer.write.mock.calls.map(([value]) => value.exportId)).toEqual([JOB, JOB]);
     expect((await admin.query("SELECT status,attempts_count::int attempts,(SELECT array_agg(status ORDER BY attempt_number) FROM platform.job_attempts WHERE job_id=platform.jobs.id) statuses FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "succeeded", attempts: 2, statuses: ["failed", "succeeded"] });
     await cleanupJobs(); await insertJob({ status: "running", attempts: 1, lockedAt: new Date(NOW.getTime() - 301_000).toISOString() });
-    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), { clock: () => NOW })).resolves.toMatchObject({ succeeded: 1 });
+    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), { exportId: JOB, clock: () => NOW })).resolves.toMatchObject({ succeeded: 1 });
     expect((await admin.query("SELECT array_agg(status ORDER BY attempt_number) statuses FROM platform.job_attempts WHERE job_id=$1", [JOB])).rows[0].statuses).toEqual(["timed_out", "succeeded"]);
   });
 
   it("dead-letters expired evidence without writing an artifact", async () => {
     await insertJob(); const writer = fakeWriter();
-    await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => new Date(EXPIRES) })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, clock: () => new Date(EXPIRES) })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
     expect(writer.write).not.toHaveBeenCalled(); expect(read.exportReady).not.toHaveBeenCalled();
     const row = (await admin.query("SELECT status,job_metadata->>'lastErrorCode' code,(SELECT reason_code FROM platform.dead_letter_events WHERE job_id=platform.jobs.id) dead,(SELECT failure_payload FROM platform.dead_letter_events WHERE job_id=platform.jobs.id) payload,(SELECT redacted_payload->>'failureCode' FROM platform.product_audit_events WHERE job_id=platform.jobs.id AND action='finance.folio_export.dead_lettered') audit FROM platform.jobs WHERE id=$1", [JOB])).rows[0];
     expect(row).toMatchObject({ status: "dead_lettered", code: "invalid_export_evidence", dead: "invalid_export_evidence", audit: "invalid_export_evidence",payload:{attemptNumber:1,affectedOrganizationId:ORG,lastAttemptAt:EXPIRES,ownerPackage:"backend-events",replayEligible:false} });
-    await cleanupJobs();await insertJob();const lateWriter=fakeWriter(),beforeExpiry=new Date(new Date(EXPIRES).getTime()-1),times=[beforeExpiry,beforeExpiry,new Date(EXPIRES),new Date(EXPIRES)],deleted=vi.fn(async()=>undefined),cleanupStore=createPgPlatformMediaCleanupStore({connectionString:URL!,objectDeleter:{deleteObject:deleted,deletePrefix:vi.fn(async()=>undefined)}});lateWriter.write.mockImplementationOnce(async({exportId,body})=>{await expect(runPlatformMediaCleanupJobs(cleanupStore,{now:new Date(EXPIRES),run:["privateAttachmentRetention"]})).resolves.toMatchObject({scanned:0});return receipt(exportId,body)});await expect(runFinanceFolioExportJobs(pool,read,lateWriter,{clock:()=>times.shift()!})).resolves.toMatchObject({deadLettered:1});expect((await admin.query("SELECT job.status,dead.reason_code,media.lifecycle_status FROM platform.jobs job JOIN platform.dead_letter_events dead ON dead.job_id=job.id JOIN platform.media_objects media ON media.id=job.id WHERE job.id=$1",[JOB])).rows[0]).toEqual({status:"dead_lettered",reason_code:"export_expired",lifecycle_status:"upload_pending"});const cleaned=await runPlatformMediaCleanupJobs(cleanupStore,{now:new Date(EXPIRES),run:["privateAttachmentRetention"]});expect(cleaned.runs[0]!.mutations[0]).toMatchObject({action:"delete-expired-financials-export"});expect(deleted).toHaveBeenCalledWith({bucket:"test-private",storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_FOLIO_CSV_VERSION}.csv`});expect((await admin.query("SELECT job.job_type,event.event_type,audit.action FROM platform.jobs job JOIN platform.domain_events event ON event.id=job.source_domain_event_id JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.queue_name='platform.media.cleanup' AND job.property_id=$1",[PROPERTY])).rows[0]).toEqual({job_type:"platform.media.cleanup.expired-financials-export",event_type:"platform_media.financials_export.deleted_after_expiry",action:"platform_media.cleanup.expired_financials_export_deleted"});await cleanupStore.close();
+    await cleanupJobs();await insertJob();const lateWriter=fakeWriter(),beforeExpiry=new Date(new Date(EXPIRES).getTime()-1),times=[beforeExpiry,beforeExpiry,new Date(EXPIRES),new Date(EXPIRES)],deleted=vi.fn(async()=>undefined),cleanupStore=createPgPlatformMediaCleanupStore({connectionString:URL!,objectDeleter:{deleteObject:deleted,deletePrefix:vi.fn(async()=>undefined)}});lateWriter.write.mockImplementationOnce(async({exportId,body})=>{await expect(runPlatformMediaCleanupJobs(cleanupStore,{now:new Date(EXPIRES),run:["privateAttachmentRetention"]})).resolves.toMatchObject({scanned:0});return receipt(exportId,body)});await expect(runFinanceFolioExportJobs(pool,read,lateWriter,{exportId:JOB,clock:()=>times.shift()!})).resolves.toMatchObject({deadLettered:1});expect((await admin.query("SELECT job.status,dead.reason_code,media.lifecycle_status FROM platform.jobs job JOIN platform.dead_letter_events dead ON dead.job_id=job.id JOIN platform.media_objects media ON media.id=job.id WHERE job.id=$1",[JOB])).rows[0]).toEqual({status:"dead_lettered",reason_code:"export_expired",lifecycle_status:"upload_pending"});const cleaned=await runPlatformMediaCleanupJobs(cleanupStore,{now:new Date(EXPIRES),run:["privateAttachmentRetention"]});expect(cleaned.runs[0]!.mutations[0]).toMatchObject({action:"delete-expired-financials-export"});expect(deleted).toHaveBeenCalledWith({bucket:"test-private",storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_FOLIO_CSV_VERSION}.csv`});expect((await admin.query("SELECT job.job_type,event.event_type,audit.action FROM platform.jobs job JOIN platform.domain_events event ON event.id=job.source_domain_event_id JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.queue_name='platform.media.cleanup' AND job.property_id=$1",[PROPERTY])).rows[0]).toEqual({job_type:"platform.media.cleanup.expired-financials-export",event_type:"platform_media.financials_export.deleted_after_expiry",action:"platform_media.cleanup.expired_financials_export_deleted"});await cleanupStore.close();
     await cleanupJobs();await insertJob({status:"running",attempts:3,lockedAt:new Date(NOW.getTime()-301_000).toISOString()});
-    await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});
+    await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{exportId:JOB,clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});
     const stale=(await admin.query("SELECT job_attempt_id IS NOT NULL attempt,failure_payload FROM platform.dead_letter_events WHERE job_id=$1",[JOB])).rows[0];expect(stale).toMatchObject({attempt:true,failure_payload:{lastAttemptAt:NOW.toISOString(),ownerPackage:"backend-events",replayEligible:true}});
   });
 
   function fakeWriter() { const writer: FinanceFolioExportArtifactWriter & { write: ReturnType<typeof vi.fn> } = { bucketName: "test-private", write: vi.fn(async ({ exportId, body, formatVersion }) => receipt(exportId,body,formatVersion)) }; return writer; }
   function receipt(exportId:string,body:string,formatVersion:string=FINANCE_FOLIO_CSV_VERSION){return{bucketName:"test-private",storageKey:`private/finance/financials-exports/${exportId}/${formatVersion}.csv`,checksumSha256:createHash("sha256").update(body).digest("hex"),sizeBytes:Buffer.byteLength(body)}}
-  async function insertJob(options: { status?: "pending"|"running"; attempts?: number; lockedAt?: string } = {}) { const snapshot={formatVersion:FINANCE_FOLIO_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{sort:"createdAt_desc",state:"ready"},snapshotAt:SNAPSHOT_AT,manifest:[]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash([]),formatVersion:FINANCE_FOLIO_CSV_VERSION,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,max_attempts,run_after,locked_at,locked_by,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,3,$7,$8,$9,'property',$10::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$11::jsonb,$12::jsonb)`,[JOB,`${FINANCE_FOLIO_EXPORT_JOB}:${PROPERTY}:test`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,options.status??"pending",options.attempts??0,ACCEPTED,options.lockedAt??null,options.status==="running"?"old-worker":null,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);if(options.status==="running")await admin.query("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1,$2,'running','old-worker',$3)",[JOB,options.attempts,options.lockedAt]); }
+  async function insertJob(options: { id?: string; status?: "pending"|"running"; attempts?: number; lockedAt?: string } = {}) { const id=options.id??JOB,snapshot={formatVersion:FINANCE_FOLIO_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{sort:"createdAt_desc",state:"ready"},snapshotAt:SNAPSHOT_AT,manifest:[]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash([]),formatVersion:FINANCE_FOLIO_CSV_VERSION,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,max_attempts,run_after,locked_at,locked_by,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,3,$7,$8,$9,'property',$10::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$11::jsonb,$12::jsonb)`,[id,`${FINANCE_FOLIO_EXPORT_JOB}:${PROPERTY}:test:${id}`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_FOLIO_EXPORT_JOB,options.status??"pending",options.attempts??0,ACCEPTED,options.lockedAt??null,options.status==="running"?"old-worker":null,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);if(options.status==="running")await admin.query("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1,$2,'running','old-worker',$3)",[id,options.attempts,options.lockedAt]); }
   async function insertExpenseJob(metadataFormatVersion:string=FINANCE_EXPENSE_CSV_VERSION){const snapshot={formatVersion:FINANCE_EXPENSE_CSV_VERSION,propertyId:PROPERTY,currency:"EUR",filters:{from:"2026-09-01",to:"2026-09-30",sort:"incurredOn_desc"},snapshotAt:SNAPSHOT_AT,manifest:[expenseSelection]},payload={commandId:COMMAND,organizationId:ORG,snapshot,expiresAt:EXPIRES},metadata={organizationId:ORG,actorUserId:ACTOR,responseEnvelope:{currency:"EUR"},acceptedAt:ACCEPTED,snapshotAt:SNAPSHOT_AT,expiresAt:EXPIRES,payloadFingerprint:hash(payload),manifestDigest:hash(snapshot.manifest),formatVersion:metadataFormatVersion,requestId:"request-vay-1134",causationId:CAUSE};await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`,[JOB,`${FINANCE_EXPENSE_EXPORT_JOB}:${PROPERTY}:expense`,FINANCE_FOLIO_EXPORT_QUEUE,FINANCE_EXPENSE_EXPORT_JOB,ACCEPTED,PROPERTY,JSON.stringify(payload),JSON.stringify(metadata)]);}
   async function insertReportJob(snapshot: ReturnType<typeof profitLossSnapshot> | ReturnType<typeof revenueSnapshot> | ReturnType<typeof dashboardSnapshot>, jobType: string) {
     const payload = { commandId: COMMAND, organizationId: ORG, snapshot, expiresAt: EXPIRES };

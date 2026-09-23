@@ -2643,9 +2643,14 @@ if (financeFolioExportWorker) {
       throw new Error("finance_export_worker_login_mismatch");
     await assertFinanceExportWorkerBoundary(client, {
       propertyId: config.financeExportWorker!.propertyId,
+      exportId: config.financeExportWorker!.exportId,
     });
     app.log.info(
-      { role: FINANCE_EXPORT_WORKER_ROLE, propertyId: config.financeExportWorker!.propertyId },
+      {
+        role: FINANCE_EXPORT_WORKER_ROLE,
+        propertyId: config.financeExportWorker!.propertyId,
+        exportId: config.financeExportWorker!.exportId,
+      },
       "Finance export worker preflight passed",
     );
   } finally {
@@ -2660,6 +2665,7 @@ const runFinanceFolioExports = () => {
     financeFolioExportWorker.pool,
     financeFolioExportWorker.read,
     financeFolioExportWorker.writer,
+    { exportId: config.financeExportWorker!.exportId },
   )
     .then((result) => {
       if (result.deadLettered > 0 || result.retryScheduled > 0)

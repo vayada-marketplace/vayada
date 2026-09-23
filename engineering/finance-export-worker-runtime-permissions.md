@@ -42,9 +42,11 @@ preflight. Map the secret with the enable flag still false, verify the immutable
 image/source/task-definition tuple and both worker and general API preflights,
 then coordinate the exclusive VAY-1138 verification window.
 
-Enable one task only long enough for existing export
-`f3429f38-b462-4453-b7f1-d901fc86ebfa` to become `succeeded` or
-`dead_lettered`; do not enqueue another export. Record only status, attempts,
+Enable one task with `FINANCE_EXPORT_WORKER_EXPORT_ID` set to existing export
+`f3429f38-b462-4453-b7f1-d901fc86ebfa`. Startup verifies that the exact job
+belongs to the reviewed queue, job types, property, and resource shape, and the
+claim query cannot select any other job. Leave the setting unset while the
+worker is disabled. Record only status, attempts,
 timestamps, error code, artifact metadata, and audit identifiers—never the CSV
 or credentials. Rollback first disables the worker, then removes its secret
 mapping. Preserve jobs, audit, and artifacts; never substitute an owner URL.

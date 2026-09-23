@@ -84,6 +84,16 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
         session_user: role,
       });
       await assertFinanceExportWorkerBoundary(client, { propertyId: property });
+      await assertFinanceExportWorkerBoundary(client, {
+        propertyId: property,
+        exportId: allowedJob,
+      });
+      await expect(
+        assertFinanceExportWorkerBoundary(client, {
+          propertyId: property,
+          exportId: deniedJob,
+        }),
+      ).rejects.toThrow("export_scope_mismatch");
       await expect(
         assertFinanceExportWorkerBoundary(client, { propertyId: other }),
       ).rejects.toThrow("property_scope_mismatch");
