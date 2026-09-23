@@ -70,7 +70,11 @@ describe.skipIf(!url)("Channex pricing job lease against migrated PostgreSQL", (
       const before = (await pool.query("SELECT locked_at FROM platform.jobs WHERE id=$1", [jobId]))
         .rows[0];
       expect(await read()).toEqual({
-        ...input(), propertyId, operationType: operation, publishedOfferProvisioning: false,
+        ...input(),
+        propertyId,
+        operationType: operation,
+        publishedOfferProvisioning: false,
+        publishedOfferRoomTypeId: null,
       });
       expect(
         (await pool.query("SELECT locked_at FROM platform.jobs WHERE id=$1", [jobId])).rows[0],
@@ -141,7 +145,11 @@ describe.skipIf(!url)("Channex pricing job lease against migrated PostgreSQL", (
       }),
     ]);
     expect(await read()).toEqual({
-      ...input(), propertyId, operationType: "provision", publishedOfferProvisioning: false,
+      ...input(),
+      propertyId,
+      operationType: "provision",
+      publishedOfferProvisioning: false,
+      publishedOfferRoomTypeId: null,
     });
     const client = await pool.connect();
     try {

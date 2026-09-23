@@ -1,4 +1,7 @@
-import { CHANNEX_MANAGEMENT_WORKER_ROLE, channexManagementWorkerPrivileges } from "../jobs/channexManagementWorkerPrivileges.js";
+import {
+  CHANNEX_MANAGEMENT_WORKER_ROLE,
+  channexManagementWorkerPrivileges,
+} from "../jobs/channexManagementWorkerPrivileges.js";
 import { appendExternalNightlyRevenueEconomics } from "./financeOtaCommissionEvidence.js";
 import { captureChannexAlterationFinance } from "./channexAlterationFinance.js";
 import { hasBookingFinancialEvidence } from "./financeBookingAlterationGuard.js";
@@ -1712,8 +1715,20 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
     ).toBe(0);
   });
 
-  async function channelInventoryFixture(horizonDays = 1, startAtLocalToday = false) {
-    const f = await createFixture(admin, repositories, [2]);
+  async function channelInventoryFixture(
+    horizonDays = 1,
+    startAtLocalToday = false,
+    includeUnrelatedMappedRoom = false,
+  ) {
+    const unrelatedRoomTypeId = includeUnrelatedMappedRoom
+      ? `00000000-0000-4000-8000-${randomUUID().slice(-12)}`
+      : null;
+    const f = await createFixture(
+      admin,
+      repositories,
+      [2],
+      unrelatedRoomTypeId ? [unrelatedRoomTypeId] : [],
+    );
     const date = startAtLocalToday
       ? channexPropertyLocalDate("Europe/Berlin", new Date())!
       : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
@@ -1749,6 +1764,12 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       VALUES($1,$2,$3,$4)`,
       [f.propertyId, connectionId, f.roomTypeId, externalRoomTypeId],
     );
+    if (unrelatedRoomTypeId)
+      await admin.query(
+        `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id)
+         VALUES($1,$2,$3,$4)`,
+        [f.propertyId, connectionId, unrelatedRoomTypeId, randomUUID()],
+      );
     const jobId = randomUUID();
     await admin.query(
       `INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,attempts_count,locked_by,locked_at,
@@ -1790,40 +1811,117 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       next: () => prepareNextChannexRoomAvailabilityDispatch(channelPool, f.repository, lease),
     };
   }
-  it.each(["sync_ari", "provision"])("uses the restricted Channex login for availability %s", async (operation) => {
-    const f = await channelInventoryFixture(1,true);
-    if (operation === "provision") await admin.query(`UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,[f.lease.jobId,JSON.stringify({operationType:"provision",publishedOffer:{roomTypeId:f.roomTypeId,offerId:"offer",publicationRevision:1,primaryOccupancy:1}})]);
-    const role=CHANNEX_MANAGEMENT_WORKER_ROLE;
-    await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD 'fixture' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`);
-    const login=new URL(TEST_DATABASE_URL!);login.username=role;login.password="fixture";
-    const worker=new pg.Pool({connectionString:login.toString()});
-    const inventory=f.workerRepository(login.toString());
-    try {
-      await admin.query(`GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`);
-      for(const [table,grants] of Object.entries(channexManagementWorkerPrivileges))
-        for(const [kind,columns] of Object.entries(grants))
-          await admin.query(`GRANT ${kind}${columns===true?"":`(${columns.join(",")})`} ON ${table} TO ${role}`);
-      await admin.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)",[f.propertyId]);
-      if(operation === "provision") {
-        // Existing0320 correlation guard remains authoritative: permission work cannot bypass it.
-        await expect(prepareChannexRoomAvailabilityDispatch(worker,inventory,f.lease,f.selection)).rejects.toMatchObject({code:"23514",message:"Active room mapping and correlated sync job required"});
-        return;
+  it.each(["sync_ari", "provision"])(
+    "uses the restricted Channex login for availability %s",
+    async (operation) => {
+      const f = await channelInventoryFixture(1, true, operation === "provision");
+      if (operation === "provision") {
+        const publishedOffer = {
+          roomTypeId: randomUUID(),
+          offerId: "offer",
+          publicationRevision: 1,
+          primaryOccupancy: 1,
+        };
+        await admin.query(
+          `UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,
+          [f.lease.jobId, JSON.stringify({ operationType: "provision", publishedOffer })],
+        );
       }
-      const prepared=await prepareChannexRoomAvailabilityDispatch(worker,inventory,f.lease,f.selection);
-      expect(prepared.kind).toBe("prepared");
-      if(prepared.kind!=="prepared") throw new Error("Restricted availability dispatch required");
-      const taskId=randomUUID();let request:unknown;
-      const outcome=await prepared.dispatch(async(sent)=>{request=sent.body;return new Response(JSON.stringify({data:[{type:"task",id:taskId}],meta:{warnings:[]}}));});
-      expect(["retained","receipt_pending"]).toContain(outcome.kind);
-      if(outcome.kind==="receipt_pending") await outcome.persist();
-      const get=async(path:string)=>path.includes("/tasks/") ? {data:{type:"task",id:taskId,attributes:{id:taskId,task:"Property.UpdateAvailability",payload:request,success:true,errors:[],received_at:"2026-09-16T00:00:00.000001",executed_at:"2026-09-16T00:00:00.000002",finished_at:"2026-09-16T00:00:00.000003"}}} : {data:{[f.externalRoomTypeId]:{[f.selection.date]:2}},meta:{warnings:[]}};
-      expect(await reconcileCurrentChannexRoomAvailability(worker,inventory,f.lease,f.selection,prepared.attemptId,get)).toEqual({kind:"availability_reconciled",attemptId:prepared.attemptId});
-    } finally {
-      await inventory.close();await worker.end();
-      await admin.query("DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",[f.propertyId]);
-      await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
-    }
-  });
+      const role = CHANNEX_MANAGEMENT_WORKER_ROLE;
+      await admin.query(
+        `CREATE ROLE ${role} LOGIN PASSWORD 'fixture' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
+      );
+      const login = new URL(TEST_DATABASE_URL!);
+      login.username = role;
+      login.password = "fixture";
+      const worker = new pg.Pool({ connectionString: login.toString() });
+      const inventory = f.workerRepository(login.toString());
+      try {
+        await admin.query(
+          `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
+        );
+        for (const [table, grants] of Object.entries(channexManagementWorkerPrivileges))
+          for (const [kind, columns] of Object.entries(grants))
+            await admin.query(
+              `GRANT ${kind}${columns === true ? "" : `(${columns.join(",")})`} ON ${table} TO ${role}`,
+            );
+        await admin.query("INSERT INTO platform.channex_management_worker_properties VALUES($1)", [
+          f.propertyId,
+        ]);
+        if (operation === "provision") {
+          // The published offer must name the exact mapped room before a provider write is admitted.
+          await expect(
+            prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection),
+          ).rejects.toMatchObject({
+            code: "23514",
+            message: "Active room mapping and correlated sync job required",
+          });
+          await admin.query(
+            `UPDATE platform.jobs SET payload=jsonb_set(payload,'{publishedOffer,roomTypeId}',to_jsonb($2::text)) WHERE id=$1`,
+            [f.lease.jobId, f.roomTypeId.toUpperCase()],
+          );
+        }
+        const prepared =
+          operation === "provision"
+            ? await prepareNextChannexRoomAvailabilityDispatch(worker, inventory, f.lease)
+            : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
+        expect(prepared.kind).toBe("prepared");
+        if (prepared.kind !== "prepared")
+          throw new Error("Restricted availability dispatch required");
+        if (operation === "provision") expect(prepared).toMatchObject({ roomTypeId: f.roomTypeId });
+        const taskId = randomUUID();
+        let request: unknown;
+        const outcome = await prepared.dispatch(async (sent) => {
+          request = sent.body;
+          return new Response(
+            JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+          );
+        });
+        expect(["retained", "receipt_pending"]).toContain(outcome.kind);
+        if (outcome.kind === "receipt_pending") await outcome.persist();
+        const get = async (path: string) =>
+          path.includes("/tasks/")
+            ? {
+                data: {
+                  type: "task",
+                  id: taskId,
+                  attributes: {
+                    id: taskId,
+                    task: "Property.UpdateAvailability",
+                    payload: request,
+                    success: true,
+                    errors: [],
+                    received_at: "2026-09-16T00:00:00.000001",
+                    executed_at: "2026-09-16T00:00:00.000002",
+                    finished_at: "2026-09-16T00:00:00.000003",
+                  },
+                },
+              }
+            : {
+                data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+                meta: { warnings: [] },
+              };
+        expect(
+          await reconcileCurrentChannexRoomAvailability(
+            worker,
+            inventory,
+            f.lease,
+            f.selection,
+            prepared.attemptId,
+            get,
+          ),
+        ).toEqual({ kind: "availability_reconciled", attemptId: prepared.attemptId });
+      } finally {
+        await inventory.close();
+        await worker.end();
+        await admin.query(
+          "DELETE FROM platform.channex_management_worker_properties WHERE property_id=$1",
+          [f.propertyId],
+        );
+        await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+      }
+    },
+  );
   async function availabilityReconciliationFixture(startAtLocalToday = false) {
     const f = await channelInventoryFixture(1, startAtLocalToday),
       prepared = await f.dispatch(),
@@ -3681,7 +3779,14 @@ async function createFixture(
     authorizationState,
     authorize,
     repository,
-    workerRepository: (connectionString) => createPgPmsInventoryMaterializationRepository({connectionString, authorization, operatingCalendar, propertyProfileEvidence, roomCapacity}),
+    workerRepository: (connectionString) =>
+      createPgPmsInventoryMaterializationRepository({
+        connectionString,
+        authorization,
+        operatingCalendar,
+        propertyProfileEvidence,
+        roomCapacity,
+      }),
   };
 }
 
