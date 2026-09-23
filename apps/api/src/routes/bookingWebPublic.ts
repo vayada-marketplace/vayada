@@ -9,6 +9,10 @@ import {
 import { admitAffiliateArrival } from "../domains/bookingAffiliateClickAdmission.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
+  bindLiveAffiliateOriginal,
+  lockLiveAffiliateContextForOriginal,
+} from "../domains/bookingAffiliateLiveOriginalBinding.js";
+import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
 } from "./replacementBookingQuote.js";
@@ -272,6 +276,7 @@ export type BookingWebCheckoutAdapter = {
     slug: string,
     request: BookingWebCheckoutRequest,
     context?: BookingWebCheckoutCommandContext,
+    affiliateContextCookie?: string,
   ): Promise<unknown>;
   confirmAuthorization(
     slug: string,
@@ -733,6 +738,9 @@ export async function registerBookingWebPublicRoutes(
         request.params.slug,
         body,
         checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
+        options.affiliateContextBindingEnabled
+          ? (readAffiliateContextCookie(request.headers.cookie) ?? undefined)
+          : undefined,
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
@@ -1881,7 +1889,7 @@ export function createTargetBookingWebCheckoutAdapter(
     async editRequest(slug, bookingId, action, request, context) {
       return pendingBookingEdit(pool, config, slug, bookingId, action, request, context);
     },
-    async createBooking(slug, request, context) {
+    async createBooking(slug, request, context, affiliateContextCookie) {
       if (!context) {
         throw createHttpError(400, "Checkout command context is required.");
       }
@@ -1927,6 +1935,11 @@ export function createTargetBookingWebCheckoutAdapter(
         assertTargetCheckoutConfigMatchesQuote(checkoutConfig, quote);
         resolveTargetCheckoutAmountSnapshot(request, quote);
         assertTargetSameDayBookingOpen(property, quote.checkIn, config.now?.() ?? new Date());
+        const affiliateContextLocked = await lockLiveAffiliateContextForOriginal(
+          client,
+          property.propertyId,
+          affiliateContextCookie,
+        );
         const booking = await createTargetGuestBooking(
           client,
           config.inventoryReservationPort,
@@ -1938,6 +1951,16 @@ export function createTargetBookingWebCheckoutAdapter(
           billingConfig,
           checkoutConfig,
         );
+        if (affiliateContextLocked && affiliateContextCookie)
+          await bindLiveAffiliateOriginal(client, {
+            id: booking.guestBookingId,
+            propertyId: property.propertyId,
+            contextId: affiliateContextCookie,
+            publicReference: booking.publicReference,
+            checkIn: quote.checkIn,
+            checkOut: quote.checkOut,
+            currency: quote.currency,
+          });
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");
           await config.bankTransfers.bind(client, property.propertyId, booking.guestBookingId);

@@ -27,6 +27,10 @@ import {
   createSyntheticAffiliateClickContext,
 } from "./bookingAffiliateClickAdmission.js";
 import { createSyntheticAffiliateOriginalBooking } from "./bookingAffiliateOriginalBinding.js";
+import {
+  bindLiveAffiliateOriginal,
+  lockLiveAffiliateContextForOriginal,
+} from "./bookingAffiliateLiveOriginalBinding.js";
 
 const migrations = new URL("../../../../packages/backend-migration/migrations/", import.meta.url);
 
@@ -480,19 +484,33 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     });
     if (arrival.status !== "admitted") throw new Error("Expected admitted arrival");
     const bookingId = id(140);
-    await pool().query(
-      `INSERT INTO booking.guest_bookings
-         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
-       VALUES ($1,$2,'live-original','draft','2027-01-01','2027-01-02','EUR')`,
-      [bookingId, id(3)],
-    );
-    await pool().query(
-      `INSERT INTO booking.affiliate_original_booking_bindings
-         (booking_id,property_id,context_id,history_cutoff,
-          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
-       VALUES ($1,$2,$3,1,'live-original','2027-01-01','2027-01-02','EUR',FALSE)`,
-      [bookingId, id(3), arrival.contextId],
-    );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), arrival.contextId)).toBe(
+        true,
+      );
+      await client.query(
+        `INSERT INTO booking.guest_bookings
+           (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+         VALUES ($1,$2,'live-original','draft','2027-01-01','2027-01-02','EUR')`,
+        [bookingId, id(3)],
+      );
+      expect(
+        await bindLiveAffiliateOriginal(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId: arrival.contextId,
+          publicReference: "live-original",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-02",
+          currency: "EUR",
+        }),
+      ).toBe(true);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
     expect(
       (
         await pool().query(
@@ -501,12 +519,96 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         )
       ).rows[0],
     ).toEqual({ history_cutoff: "1", synthetic: false });
+    const laterClick = await recordMarketplaceAffiliateClick(pool(), link.publicToken);
+    if (laterClick.status !== "recorded") throw new Error("Expected later click");
+    expect(
+      await admitAffiliateArrival(pool(), {
+        propertyId: id(3),
+        contextId: arrival.contextId,
+        referenceToken: laterClick.referenceToken,
+      }),
+    ).toMatchObject({ status: "admitted", historyPosition: "2" });
+    expect(
+      (
+        await pool().query(
+          "SELECT history_cutoff FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].history_cutoff,
+    ).toBe("1");
     await expect(
       pool().query("INSERT INTO finance.affiliate_earning_journal VALUES ($1,$2)", [
         id(3),
         bookingId,
       ]),
     ).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it("leaves stale, foreign and synthetic contexts unbound, and survives binding storage rejection", async () => {
+    const staleId = id(141),
+      syntheticId = id(142),
+      freshId = id(143),
+      bookingId = id(144);
+    for (const [contextId, synthetic] of [
+      [staleId, false],
+      [syntheticId, true],
+      [freshId, false],
+    ] as const)
+      await pool().query(
+        "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,$3)",
+        [contextId, id(3), synthetic],
+      );
+    for (const [contextId, clickId, age] of [
+      [staleId, id(145), "91 days"],
+      [syntheticId, id(146), "0 days"],
+      [freshId, id(147), "0 days"],
+    ])
+      await pool().query(
+        `INSERT INTO booking.affiliate_click_admissions
+           (context_id,property_id,click_id,history_position,admitted_at)
+         VALUES($1,$2,$3,1,clock_timestamp()-$4::interval)`,
+        [contextId, id(3), clickId, age],
+      );
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), staleId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(6), freshId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), syntheticId)).toBe(false);
+      expect(await lockLiveAffiliateContextForOriginal(client, id(3), freshId)).toBe(true);
+      await client.query(
+        `INSERT INTO booking.guest_bookings
+           (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+         VALUES ($1,$2,'unbound-original','draft','2027-01-01','2027-01-02','EUR')`,
+        [bookingId, id(3)],
+      );
+      expect(
+        await bindLiveAffiliateOriginal(client, {
+          id: bookingId,
+          propertyId: id(3),
+          contextId: freshId,
+          publicReference: "unbound-original",
+          checkIn: "2027-01-01",
+          checkOut: "2027-01-01", // Reject the binding but retain the booking.
+          currency: "EUR",
+        }),
+      ).toBe(false);
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    expect(
+      (await pool().query("SELECT count(*) FROM booking.guest_bookings WHERE id=$1", [bookingId]))
+        .rows[0].count,
+    ).toBe("1");
+    expect(
+      (
+        await pool().query(
+          "SELECT count(*) FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [bookingId],
+        )
+      ).rows[0].count,
+    ).toBe("0");
   });
 
   it("admits trusted clicks once in destination order and rejects another context", async () => {
