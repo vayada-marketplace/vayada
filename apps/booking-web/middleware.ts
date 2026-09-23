@@ -95,7 +95,9 @@ export default async function middleware(request: NextRequest) {
       validClickReference.test(references[0]!)
     ) {
       try {
-        const resolution = await fetchHostResolution(publicHostname);
+        // A cached canonical-host result may outlive a custom-domain change.
+        // Recheck the final browser host before requesting admission.
+        const resolution = await fetchHostResolution(publicHostname, true);
         if (resolution && new URL(resolution.bookingBaseUrl).hostname === publicHostname) {
           const existing = request.cookies.get(affiliateContextCookie)?.value;
           const admission = await bookingWebPublicApi.admitAffiliateArrival(
@@ -167,10 +169,15 @@ export default async function middleware(request: NextRequest) {
   return response;
 }
 
-async function fetchHostResolution(hostname: string): Promise<BookingWebPublicHostResponse | null> {
+async function fetchHostResolution(
+  hostname: string,
+  fresh = false,
+): Promise<BookingWebPublicHostResponse | null> {
   try {
     return await bookingWebPublicApi.resolveHost(hostname, {
-      next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS },
+      ...(fresh
+        ? { cache: "no-store" }
+        : { next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS } }),
     });
   } catch {
     return null;
