@@ -169,6 +169,19 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             LEGACY,
             denied=True,
         )
+        # Revoking the parent role's property scope must not reclassify an
+        # inherited pricing member as an unrestricted legacy writer.
+        sql(
+            f"DELETE FROM platform.pricing_runtime_property_scopes WHERE database_login='{OWNER_B}'"
+        )
+        sql(
+            revision(B, "00000000-0000-4000-8000-000000000016", "inherited-after-revoke"),
+            LEGACY,
+            denied=True,
+        )
+        sql(f"""INSERT INTO platform.pricing_runtime_property_scopes
+          (database_login,operation_class,property_id,organization_id)
+          VALUES ('{OWNER_B}','owner_manage','{B}','{ORG}')""")
         sql(
             f"SET ROLE {OWNER_B};"
             + revision(B, "00000000-0000-4000-8000-000000000012", "role-hop-owner"),

@@ -27,10 +27,9 @@ AS $$
     AND caller_current_user::text !~ '^vayada_next_pricing_'
     AND NOT EXISTS (
       SELECT 1
-      FROM platform.pricing_runtime_property_scopes assigned
-      JOIN pg_catalog.pg_roles assigned_role
-        ON assigned_role.rolname = assigned.database_login::text
-      WHERE pg_catalog.pg_has_role(session_user, assigned_role.oid, 'member')
+      FROM pg_catalog.pg_roles pricing_role
+      WHERE pricing_role.rolname ~ '^vayada_next_pricing_'
+        AND pg_catalog.pg_has_role(session_user, pricing_role.oid, 'member')
     )
 $$;
 
