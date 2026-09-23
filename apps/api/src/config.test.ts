@@ -1487,11 +1487,17 @@ describe("Finance expense worker boundary config", () => {
 
 describe("Finance export worker boundary config", () => {
   const env = {
+    API_RUNTIME: "next",
+    PMS_OPERATIONS_SOURCE: "disabled",
     FINANCE_SOURCE: "target",
     TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
+    ...financeFolioKmsEnv,
+    PLATFORM_MEDIA_BUCKET: "vayada-media-staging",
+    PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.staging.vayada.com",
+    PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
     FINANCE_EXPORT_WORKER_ENABLED: "true",
     FINANCE_EXPORT_WORKER_DATABASE_URL:
-      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require",
     FINANCE_EXPORT_WORKER_PROPERTY_ID: "20450000-0000-4000-8000-000000000001",
   };
   it("defaults paused without opening the credential", () => {
@@ -1513,10 +1519,25 @@ describe("Finance export worker boundary config", () => {
       { FINANCE_EXPORT_WORKER_DATABASE_URL: "" },
       { FINANCE_EXPORT_WORKER_PROPERTY_ID: "" },
       { API_BACKGROUND_WORKERS_ENABLED: "false" },
+      { API_RUNTIME: "legacy" },
       { FINANCE_SOURCE: "legacy" },
+      { FINANCE_FOLIO_RECIPIENT_KMS_CURRENT_KEY_ARN: "" },
+      { PLATFORM_MEDIA_BUCKET: "" },
       { FINANCE_EXPORT_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
       {
-        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?options=-crole=postgres`,
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=disable",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require&sslmode=require",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}&options=-crole=postgres`,
       },
       {
         FINANCE_EXPORT_WORKER_DATABASE_URL: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(

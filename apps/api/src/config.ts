@@ -1121,14 +1121,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
     if (
       !backgroundWorkersEnabled ||
+      apiRuntime !== "next" ||
       financeSource !== "target" ||
       !targetDatabaseUrl ||
+      !financeFolioRecipientKms ||
+      !platformMediaServing ||
       !databaseUrl ||
       !propertyId ||
       !z.uuid().safeParse(propertyId).success
     )
       throw new Error(
-        "Finance export worker requires target Finance, background workers, a dedicated URL and property UUID",
+        "Finance export worker requires the next target Finance runtime, background workers, KMS and media dependencies, a dedicated URL and property UUID",
       );
     let worker: URL, target: URL;
     try {
@@ -1144,7 +1147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       worker.host !== target.host ||
       worker.pathname !== target.pathname ||
       worker.hash ||
-      [...worker.searchParams.keys()].some((key) => key !== "sslmode")
+      worker.search !== "?sslmode=require"
     )
       throw new Error("Finance export worker requires its dedicated login on the target database");
     financeExportWorker = { databaseUrl, propertyId };
