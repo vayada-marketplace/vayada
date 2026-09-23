@@ -169,6 +169,8 @@ export async function publishMarketplaceAffiliateTerms(
       attributionWindowDays: row.attribution_window_days,
     });
     if (!parsed.ok) throw new Error("Invalid stored affiliate draft");
+    if (parsed.terms.attributionWindowDays > 90)
+      return await fail("attribution_window_exceeds_limit");
     const existing = await client.query(
       "SELECT id FROM marketplace.affiliate_published_terms WHERE source_draft_id=$1",
       [draftId],

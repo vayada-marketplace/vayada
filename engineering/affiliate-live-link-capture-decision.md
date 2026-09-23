@@ -255,7 +255,15 @@ atomic binding before it may claim native affiliate conversions. Until both
 privacy approval and these transport checks exist, keep the live capture route
 disabled and the existing synthetic records excluded from Finance.
 
-## Privacy and retention proposal requiring approval
+## Product retention choice requiring privacy approval
+
+Product accepted a maximum hotel-selected attribution window of 90 days and
+30 additional days to reconcile an unmatched click after its own window ends.
+This is a product decision, not privacy-owner approval or authorization to
+collect live guest data. New terms over 90 days cannot be published; previously
+published terms and any resulting earnings remain unchanged. Automatic deletion
+must wait for a reliable original-booking binding so it cannot remove evidence
+needed for an attributed booking.
 
 Product direction now permits recording a link tap without an extra guest
 screen. The following live-data conditions remain to be verified.
