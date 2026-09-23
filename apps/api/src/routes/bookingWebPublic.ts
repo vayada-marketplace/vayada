@@ -6,6 +6,7 @@ import {
   PricingAcceptanceError,
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
+import { admitAffiliateArrival } from "../domains/bookingAffiliateClickAdmission.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -5588,6 +5589,48 @@ async function findProfileForHost(config: {
   }
 
   return repository.findProfileByCustomDomain?.(host) ?? null;
+}
+
+/**
+ * Dormant native-arrival boundary. Derive the property from the final,
+ * canonical Booking host; a caller cannot choose the property to credit.
+ * The transport route and privacy gate must be added before invoking this
+ * with live traffic.
+ */
+export async function admitBookingWebAffiliateArrival(
+  pool: pg.Pool,
+  repository: PublicHotelProfileRepository,
+  input: { host: string; referenceToken: unknown; contextId?: unknown },
+) {
+  let host: string;
+  let suppliedHost: string;
+  try {
+    host = normalizeHost(input.host);
+    suppliedHost = decodeURIComponent(input.host).trim().toLowerCase();
+  } catch {
+    return { status: "unavailable" as const };
+  }
+  if (
+    host !== suppliedHost ||
+    !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(host) ||
+    host.includes("..")
+  )
+    return { status: "unavailable" as const };
+  const profile = await findProfileForHost({ repository, host });
+  if (!profile) return { status: "unavailable" as const };
+  let canonical: URL;
+  try {
+    canonical = new URL(profile.hotel.bookingBaseUrl);
+  } catch {
+    return { status: "unavailable" as const };
+  }
+  if (canonical.protocol !== "https:" || canonical.port || canonical.hostname !== host)
+    return { status: "unavailable" as const };
+  return admitAffiliateArrival(pool, {
+    propertyId: profile.hotel.propertyId,
+    referenceToken: input.referenceToken,
+    contextId: input.contextId,
+  });
 }
 
 function serializeHostResolution(
