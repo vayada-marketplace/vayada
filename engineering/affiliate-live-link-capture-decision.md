@@ -256,8 +256,8 @@ privacy approval and these transport checks exist, keep the live capture route
 disabled and the existing synthetic records excluded from Finance.
 
 The new pricing quote acceptance writer can freeze a server-owned live context
-and its admission cutoff with the original booking. No public acceptance route
-derives that context from a first-party cookie yet, so this remains dormant.
+and its admission cutoff with the original booking. The public acceptance route
+derives that context from a first-party cookie only behind a disabled gate.
 The dormant Booking API arrival boundary now resolves the supplied final host
 through the public hotel profile, requires it to equal that hotel's canonical
 booking host, and only then passes the profile's property ID to click admission.
@@ -271,6 +271,16 @@ when an arrival adapter is explicitly supplied. Production startup does not
 supply one, so the route cannot yet receive live clicks. Runtime database
 grants, privacy approval, final-host revalidation and HTTPS browser transport
 checks remain launch gates before enabling the Booking Web flag.
+The quote-acceptance route now has a separate disabled-by-default cookie binding
+gate. When enabled, it reads exactly one UUID handle from the host-only cookie,
+checks that a live context belongs to the quote's current canonical hotel and
+has an admission within the last 90 days, then passes the handle to the pricing
+writer as an internal argument. Missing, malformed, duplicate, foreign, stale
+or unavailable context evidence leaves the booking unbound. The writer still
+locks the context, rechecks the 90-day lifetime after any lock wait, and
+freezes an eligible admitted-click cutoff with the original booking. Production
+startup does not enable this gate. End-to-end HTTPS cookie
+forwarding and a real click-to-booking test are still required before launch.
 
 ## Product retention choice requiring privacy approval
 
