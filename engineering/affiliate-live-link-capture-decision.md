@@ -269,8 +269,11 @@ cookie on success; denial or service failure continues the clean redirect
 untracked. The API endpoint is internal-token protected and only registered
 when an arrival adapter is explicitly supplied. Production startup does not
 supply one, so the route cannot yet receive live clicks. Runtime database
-grants, privacy approval, final-host revalidation and HTTPS browser transport
-checks remain launch gates before enabling the Booking Web flag.
+grants, privacy approval and HTTPS browser transport checks remain launch
+gates before enabling the Booking Web flag. Reference-bearing arrivals now
+revalidate the final browser host without a Next.js fetch cache before asking
+the API to admit the click; the API independently checks current canonical
+host ownership. A changed or unavailable host continues untracked.
 The quote-acceptance route now has a separate disabled-by-default cookie binding
 gate. When enabled, it reads exactly one UUID handle from the host-only cookie,
 checks that a live context belongs to the quote's current canonical hotel and

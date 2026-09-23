@@ -178,6 +178,9 @@ describe("Booking Web affiliate reference prelaunch guard", () => {
       { host: canonicalHost, referenceToken },
       "test-internal-token",
     );
+    expect(bookingWebPublicApi.resolveHost).toHaveBeenCalledWith(canonicalHost, {
+      cache: "no-store",
+    });
     expect(response.headers.get("set-cookie")).toContain(
       `__Host-vayada_affiliate_context=${contextId}`,
     );
@@ -228,6 +231,40 @@ describe("Booking Web affiliate reference prelaunch guard", () => {
     );
     expect(moved.status).toBe(307);
     expect(moved.headers.get("set-cookie")).toBeNull();
+    expect(bookingWebPublicApi.admitAffiliateArrival).not.toHaveBeenCalled();
+    expect(bookingWebPublicApi.resolveHost).toHaveBeenLastCalledWith(canonicalHost, {
+      cache: "no-store",
+    });
+  });
+
+  it("does not admit a reference when fresh host revalidation fails", async () => {
+    enableArrival();
+    vi.mocked(bookingWebPublicApi.resolveHost).mockRejectedValueOnce(new Error("host unavailable"));
+    const response = await middleware(
+      new NextRequest(`https://${canonicalHost}/?vref=${referenceToken}`),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(bookingWebPublicApi.admitAffiliateArrival).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a cached custom-domain lookup after fresh revocation", async () => {
+    enableArrival();
+    const customHost = "book.alpenrose.example";
+    const previous = await bookingWebPublicApi.resolveHost(canonicalHost);
+    vi.mocked(bookingWebPublicApi.resolveHost)
+      .mockResolvedValueOnce({ ...previous, bookingBaseUrl: `https://${customHost}` })
+      .mockRejectedValueOnce(new Error("custom domain revoked"));
+    const response = await middleware(
+      new NextRequest(`https://${customHost}/?vref=${referenceToken}`, {
+        headers: { host: customHost },
+      }),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(bookingWebPublicApi.resolveHost).toHaveBeenLastCalledWith(customHost, {
+      cache: "no-store",
+    });
     expect(bookingWebPublicApi.admitAffiliateArrival).not.toHaveBeenCalled();
   });
 
