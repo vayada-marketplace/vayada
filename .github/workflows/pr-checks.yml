@@ -6,6 +6,7 @@ on:
       - main
       - fm/vay-2041-worker-permissions
       - fm/vay-2041-worker-source-permissions
+      - fm/vay-2041-worker-preflight
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
@@ -223,6 +224,9 @@ jobs:
         run: npm --workspace @vayada/backend-migration run test -- src/channexManagementWorkerQueueScope.integration.test.ts
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
+      - name: Verify Channex worker startup gating
+        run: npm --workspace vayada-api run test -- src/jobs/channexManagementWorkerStartup.test.ts src/channexManagementDatabaseRouting.test.ts
 
       - name: Verify restricted Channex provider flows
         run: >-
