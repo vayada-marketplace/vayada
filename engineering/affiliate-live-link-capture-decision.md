@@ -258,6 +258,11 @@ disabled and the existing synthetic records excluded from Finance.
 The new pricing quote acceptance writer can freeze a server-owned live context
 and its admission cutoff with the original booking. No public acceptance route
 derives that context from a first-party cookie yet, so this remains dormant.
+The dormant Booking API arrival boundary now resolves the supplied final host
+through the public hotel profile, requires it to equal that hotel's canonical
+booking host, and only then passes the profile's property ID to click admission.
+It cannot set a browser cookie or process a public arrival until the guarded
+transport route and destination storage decision are implemented.
 
 ## Product retention choice requiring privacy approval
 
