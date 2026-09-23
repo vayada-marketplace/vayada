@@ -50,7 +50,13 @@ import type {
 
 // prettier-ignore
 type Job = { id:string; jobType:string; propertyId:string; resourceType:string; resourceId:string; correlationId:string; idempotencyKeyHash:string; attemptsCount:number; maxAttempts:number; status:"pending"|"running"; payload:unknown; organizationId:string; actorUserId:string; currency:string; acceptedAt:string; snapshotAt:string; expiresAt:string; payloadFingerprint:string; manifestDigest:string; formatVersion:string; requestId:string; causationId:string };
-type Options = { workerId?: string; limit?: number; clock?: () => Date; random?: () => number };
+type Options = {
+  workerId?: string;
+  exportId: string;
+  limit?: number;
+  clock?: () => Date;
+  random?: () => number;
+};
 type FinanceExportRead = Pick<FinanceFolioReadRepository, "exportReady"> &
   Pick<FinanceExpenseReadModel, "exportCsv">;
 type FinanceCsvArtifact =
@@ -63,7 +69,8 @@ type FinanceCsvArtifact =
 export type FinanceFolioExportCounters = { succeeded:number; retryScheduled:number; deadLettered:number };
 
 // prettier-ignore
-export async function runFinanceFolioExportJobs(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFolioExportArtifactWriter, options: Options = {}): Promise<FinanceFolioExportCounters> {
+export async function runFinanceFolioExportJobs(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFolioExportArtifactWriter, options: Options): Promise<FinanceFolioExportCounters> {
+  if (!uuid(options.exportId)) throw new Error("finance_export_worker_export_scope_invalid");
   const counters: FinanceFolioExportCounters = { succeeded: 0, retryScheduled: 0, deadLettered: 0 };
   for (let index = 0; index < (options.limit ?? 10); index++) {
     const outcome = await runOne(pool, read, writer, options);
@@ -81,7 +88,7 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='45s'");
     const job = (await client.query<Job>(`SELECT id::text,job_type AS "jobType",property_id::text AS "propertyId",resource_type AS "resourceType",resource_id AS "resourceId",correlation_id AS "correlationId",idempotency_key_hash AS "idempotencyKeyHash",attempts_count::int AS "attemptsCount",max_attempts::int AS "maxAttempts",status,payload,job_metadata->>'organizationId' AS "organizationId",job_metadata->>'actorUserId' AS "actorUserId",job_metadata->'responseEnvelope'->>'currency' AS currency,job_metadata->>'acceptedAt' AS "acceptedAt",job_metadata->>'snapshotAt' AS "snapshotAt",job_metadata->>'expiresAt' AS "expiresAt",job_metadata->>'payloadFingerprint' AS "payloadFingerprint",job_metadata->>'manifestDigest' AS "manifestDigest",job_metadata->>'formatVersion' AS "formatVersion",job_metadata->>'requestId' AS "requestId",job_metadata->>'causationId' AS "causationId"
-      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3,$5,$6,$7) AND tenant_scope='property' AND property_id IS NOT NULL AND attempts_count<=max_attempts AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes')) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString(), FINANCE_PROFIT_LOSS_EXPORT_JOB, FINANCE_REVENUE_EXPORT_JOB, FINANCE_DASHBOARD_EXPORT_JOB])).rows[0];
+      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3,$5,$6,$7) AND tenant_scope='property' AND property_id IS NOT NULL AND id=$8::uuid AND attempts_count<=max_attempts AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes')) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString(), FINANCE_PROFIT_LOSS_EXPORT_JOB, FINANCE_REVENUE_EXPORT_JOB, FINANCE_DASHBOARD_EXPORT_JOB, options.exportId])).rows[0];
     if (!job) { await client.query("COMMIT"); return null; }
     if (job.status === "running") {
       const stale = (await client.query<{id:string}>("UPDATE platform.job_attempts SET status='timed_out',finished_at=$3,error_type='worker_timeout',error_message=$4 WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running' RETURNING id::text", [job.id, job.attemptsCount, now.toISOString(), `Finance ${jobTab(job)} export worker lease expired.`])).rows[0];

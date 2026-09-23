@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
+import {
+  FINANCE_DASHBOARD_EXPORT_JOB,
+  FINANCE_EXPENSE_EXPORT_JOB,
+  FINANCE_FOLIO_EXPORT_JOB,
+  FINANCE_FOLIO_EXPORT_QUEUE,
+  FINANCE_PROFIT_LOSS_EXPORT_JOB,
+  FINANCE_REVENUE_EXPORT_JOB,
+} from "../domains/financeFolioExportRepository.js";
+
 export const FINANCE_EXPORT_WORKER_ROLE = "vayada_next_finance_export_worker";
 
 // Exact effective-grant contract. Column lists intentionally deny receipt data.
@@ -28,7 +37,7 @@ const HELPER_DIGEST = "2f7707cae1153840ab127a677a5165549fa9be800e7797a7770d76891
 
 export async function assertFinanceExportWorkerBoundary(
   client: Pick<pg.Client, "query">,
-  options: { allowMissingGrants?: boolean; propertyId?: string } = {},
+  options: { allowMissingGrants?: boolean; propertyId?: string; exportId?: string } = {},
 ): Promise<void> {
   const role = FINANCE_EXPORT_WORKER_ROLE;
   const fail = (code: string): never => {
@@ -143,6 +152,28 @@ export async function assertFinanceExportWorkerBoundary(
     ).rows;
     if (rows.length !== 1 || rows[0].property_id !== options.propertyId)
       fail("property_scope_mismatch");
+  }
+  if (options.exportId) {
+    if (!options.propertyId) fail("export_scope_missing_property");
+    const rows = (
+      await client.query(
+        `SELECT id::text FROM platform.jobs
+         WHERE id=$1::uuid AND queue_name=$2 AND job_type IN ($3,$4,$5,$6,$7)
+           AND tenant_scope='property' AND property_id=$8::uuid
+           AND resource_type='financials_export' AND resource_id=$1::text`,
+        [
+          options.exportId,
+          FINANCE_FOLIO_EXPORT_QUEUE,
+          FINANCE_FOLIO_EXPORT_JOB,
+          FINANCE_EXPENSE_EXPORT_JOB,
+          FINANCE_PROFIT_LOSS_EXPORT_JOB,
+          FINANCE_REVENUE_EXPORT_JOB,
+          FINANCE_DASHBOARD_EXPORT_JOB,
+          options.propertyId,
+        ],
+      )
+    ).rows;
+    if (rows.length !== 1 || rows[0].id !== options.exportId) fail("export_scope_mismatch");
   }
 }
 

@@ -1443,6 +1443,9 @@ describe("Airbnb alteration runtime opt-in", () => {
 describe("Finance export worker boundary config", () => {
   const env = {
     ...financeFolioKmsEnv,
+    API_RUNTIME: "next",
+    PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+    PMS_OPERATIONS_SOURCE: "disabled",
     FINANCE_SOURCE: "target",
     TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
     PLATFORM_MEDIA_BUCKET: "vayada-media-test",
@@ -1450,8 +1453,9 @@ describe("Finance export worker boundary config", () => {
     PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-test.s3.eu-west-1.amazonaws.com",
     FINANCE_EXPORT_WORKER_ENABLED: "true",
     FINANCE_EXPORT_WORKER_DATABASE_URL:
-      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require",
     FINANCE_EXPORT_WORKER_PROPERTY_ID: "20450000-0000-4000-8000-000000000001",
+    FINANCE_EXPORT_WORKER_EXPORT_ID: "20450000-0000-4000-8000-000000000002",
   };
   it("defaults paused without opening the credential", () => {
     expect(loadConfig({}).financeExportWorker).toBeUndefined();
@@ -1465,17 +1469,37 @@ describe("Finance export worker boundary config", () => {
   });
   it("requires the dedicated login, target database, property, and worker gates", () => {
     expect(loadConfig(env).financeExportWorker).toEqual({
-      databaseUrl: env.FINANCE_EXPORT_WORKER_DATABASE_URL,
+      databaseUrl: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}&uselibpqcompat=true`,
       propertyId: env.FINANCE_EXPORT_WORKER_PROPERTY_ID,
+      exportId: env.FINANCE_EXPORT_WORKER_EXPORT_ID,
     });
     for (const overrides of [
       { FINANCE_EXPORT_WORKER_DATABASE_URL: "" },
       { FINANCE_EXPORT_WORKER_PROPERTY_ID: "" },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: "" },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: "not-a-uuid" },
+      { API_RUNTIME: "legacy" },
       { API_BACKGROUND_WORKERS_ENABLED: "false" },
       { FINANCE_SOURCE: "legacy" },
       { FINANCE_FOLIO_RECIPIENT_KMS_CURRENT_KEY_ARN: undefined },
       { PLATFORM_MEDIA_BUCKET: undefined },
       { FINANCE_EXPORT_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=disable",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require&sslmode=require",
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL:
+          "postgresql://vayada_next_finance_export_worker:fixture@localhost/target?sslmode=require&application_name=worker",
+      },
       {
         FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?options=-crole=postgres`,
       },
@@ -1488,13 +1512,10 @@ describe("Finance export worker boundary config", () => {
     ])
       expect(() => loadConfig({ ...env, ...overrides })).toThrow();
   });
-  it("normalizes sslmode=require for the node-postgres worker pool", () => {
-    expect(
-      loadConfig({
-        ...env,
-        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?sslmode=require`,
-      }).financeExportWorker?.databaseUrl,
-    ).toContain("sslmode=require&uselibpqcompat=true");
+  it("normalizes the required sslmode for the node-postgres worker pool", () => {
+    expect(loadConfig(env).financeExportWorker?.databaseUrl).toContain(
+      "sslmode=require&uselibpqcompat=true",
+    );
   });
 });
 
