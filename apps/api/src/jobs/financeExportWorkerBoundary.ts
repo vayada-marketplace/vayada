@@ -24,7 +24,7 @@ export const financeExportWorkerPrivileges: Record<string, Record<string, true |
   "platform.media_objects": { SELECT: true, INSERT: ["id", "bucket", "storage_key", "visibility", "purpose", "owner_organization_id", "property_id", "resource_product", "resource_type", "resource_id", "lifecycle_status", "content_type", "original_filename", "source_system", "source_table", "source_row_id", "retained_until", "created_by_user_id", "created_at", "updated_at"], UPDATE: ["lifecycle_status", "size_bytes", "checksum_sha256", "updated_at"] },
 };
 
-// Canonical pg_policies output from migration 0410 on PostgreSQL 16 and 17.
+// Canonical pg_policies output from migration 0411 on PostgreSQL 16 and 17.
 const POLICY_DIGEST = "aed0e239166590e605f7b7621744bdac2a2ca535ecca5335234971fe65c54d9a";
 const HELPER_DIGEST = "50b550dff92f229444ddbd870d1994581477768d41b389754d24bcd786ae7490";
 
