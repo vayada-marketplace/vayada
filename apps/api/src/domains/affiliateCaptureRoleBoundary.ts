@@ -32,7 +32,7 @@ export async function assertAffiliateCaptureRoleHasNoWriteGrants(
     `SELECT 1 WHERE pg_catalog.has_database_privilege($1,pg_catalog.current_database(),'CREATE')
                 OR pg_catalog.has_database_privilege($1,pg_catalog.current_database(),'TEMP')
      UNION ALL SELECT 1 FROM pg_catalog.pg_namespace
-       WHERE nspname NOT LIKE 'pg_%'
+       WHERE pg_catalog.left(nspname,3)<>'pg_'
          AND pg_catalog.has_schema_privilege($1,oid,'CREATE')
      UNION ALL SELECT 1 FROM pg_catalog.pg_class
        WHERE relkind='S' AND (
@@ -60,36 +60,36 @@ export async function assertAffiliateCaptureRoleHasNoWriteGrants(
        JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
        CROSS JOIN pg_catalog.unnest($2::pg_catalog.text[]) privilege
      WHERE relation.relkind IN ('r','p','v','m','f')
-       AND namespace.nspname NOT LIKE 'pg_%'
+       AND pg_catalog.left(namespace.nspname,3)<>'pg_'
        AND namespace.nspname<>'information_schema'
        AND pg_catalog.has_table_privilege($1,relation.oid,privilege)
      UNION ALL
-     SELECT 1 FROM pg_catalog.pg_attribute column
-       JOIN pg_catalog.pg_class relation ON relation.oid=column.attrelid
+     SELECT 1 FROM pg_catalog.pg_attribute attribute
+       JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
        JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
        CROSS JOIN pg_catalog.unnest(ARRAY['INSERT','UPDATE','REFERENCES']) privilege
      WHERE relation.relkind IN ('r','p','v','m','f')
-       AND namespace.nspname NOT LIKE 'pg_%'
+       AND pg_catalog.left(namespace.nspname,3)<>'pg_'
        AND namespace.nspname<>'information_schema'
-       AND column.attnum>0 AND NOT column.attisdropped
-       AND pg_catalog.has_column_privilege($1,relation.oid,column.attname,privilege)
+       AND attribute.attnum>0 AND NOT attribute.attisdropped
+       AND pg_catalog.has_column_privilege($1,relation.oid,attribute.attname,privilege)
      UNION ALL
      SELECT 1 FROM pg_catalog.pg_class relation
        JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
      WHERE relation.relkind IN ('r','p','v','m','f')
-       AND namespace.nspname NOT LIKE 'pg_%'
+       AND pg_catalog.left(namespace.nspname,3)<>'pg_'
        AND namespace.nspname<>'information_schema'
        AND pg_catalog.has_table_privilege($1,relation.oid,'SELECT WITH GRANT OPTION')
      UNION ALL
-     SELECT 1 FROM pg_catalog.pg_attribute column
-       JOIN pg_catalog.pg_class relation ON relation.oid=column.attrelid
+     SELECT 1 FROM pg_catalog.pg_attribute attribute
+       JOIN pg_catalog.pg_class relation ON relation.oid=attribute.attrelid
        JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
      WHERE relation.relkind IN ('r','p','v','m','f')
-       AND namespace.nspname NOT LIKE 'pg_%'
+       AND pg_catalog.left(namespace.nspname,3)<>'pg_'
        AND namespace.nspname<>'information_schema'
-       AND column.attnum>0 AND NOT column.attisdropped
+       AND attribute.attnum>0 AND NOT attribute.attisdropped
        AND pg_catalog.has_column_privilege(
-         $1,relation.oid,column.attname,'SELECT WITH GRANT OPTION'
+         $1,relation.oid,attribute.attname,'SELECT WITH GRANT OPTION'
        )`,
     [role, writes],
   );
