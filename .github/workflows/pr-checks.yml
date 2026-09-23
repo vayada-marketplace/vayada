@@ -260,6 +260,7 @@ jobs:
           src/domains/bookingAffiliateReferralProductionPreflight.integration.test.ts
           src/domains/bookingAffiliateReferralReadiness.integration.test.ts
           src/domains/bookingAffiliateDestinationTrackingReadiness.integration.test.ts
+          src/domains/bookingAffiliateNativeDestinationSafety.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityEvidenceStorage.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityCertification.integration.test.ts
           src/domains/bookingAffiliateSourceCapabilityProductionPreflight.integration.test.ts
