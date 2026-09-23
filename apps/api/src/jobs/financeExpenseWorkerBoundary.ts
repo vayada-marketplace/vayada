@@ -217,9 +217,7 @@ export async function assertFinanceExpenseWorkerBoundary(
   }
   if (options.propertyId) {
     const rows = (
-      await client.query(
-        "SELECT property_id::pg_catalog.text FROM platform.finance_expense_worker_properties",
-      )
+      await client.query("SELECT property_id::pg_catalog.text FROM platform.finance_expense_worker_properties")
     ).rows;
     if (rows.length !== 1 || rows[0].property_id !== options.propertyId)
       fail("property_scope_mismatch");
