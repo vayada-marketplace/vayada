@@ -83,23 +83,10 @@ export async function assertFinanceExportWorkerBoundary(
       `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
     )
   ).rows;
-  const version = Number(
-    (await client.query("SHOW server_version_num")).rows[0].server_version_num,
-  );
-  const kinds = [
-    "SELECT",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "TRUNCATE",
-    "REFERENCES",
-    "TRIGGER",
-    ...(version >= 170000 ? ["MAINTAIN"] : []),
-  ];
   const tableGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,privilege,has_table_privilege($1,c.oid,privilege||' WITH GRANT OPTION') AS delegate FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest($2::text[]) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_schema_privilege($1,n.oid,'USAGE') AND has_table_privilege($1,c.oid,privilege)`,
-      [role, kinds],
+      `SELECT n.nspname||'.'||c.relname AS name,pg_catalog.upper(acl.privilege_type) AS privilege,acl.is_grantable AS delegate FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) acl WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND pg_catalog.has_schema_privilege($1,n.oid,'USAGE') AND acl.grantee IN (0,$2)`,
+      [role, account.oid],
     )
   ).rows;
   for (const row of tableGrants)
@@ -107,8 +94,8 @@ export async function assertFinanceExportWorkerBoundary(
       fail("table_privileges");
   const columnGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,a.attname,privilege,has_column_privilege($1,c.oid,a.attname,privilege||' WITH GRANT OPTION') AS delegate FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND has_schema_privilege($1,n.oid,'USAGE') AND a.attnum>0 AND NOT a.attisdropped AND has_column_privilege($1,c.oid,a.attname,privilege)`,
-      [role],
+      `SELECT n.nspname||'.'||c.relname AS name,a.attname,pg_catalog.upper(acl.privilege_type) AS privilege,acl.is_grantable AS delegate FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND pg_catalog.has_schema_privilege($1,n.oid,'USAGE') AND a.attnum>0 AND NOT a.attisdropped AND acl.grantee IN (0,$2)`,
+      [role, account.oid],
     )
   ).rows;
   for (const row of columnGrants) {
