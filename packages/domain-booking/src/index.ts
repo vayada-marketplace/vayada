@@ -35,6 +35,7 @@ export * from "./bookingGuestPolicyReadiness.js";
 export * from "./bookingGuestPolicyProjection.js";
 export * from "./manualBookingPaymentIntent.js";
 export * from "./bookingAttribution.js";
+export * from "./affiliateArrivalTransport.js";
 export * from "./bookingAddonEconomics.js";
 export * from "./sameDayBookingPolicy.js";
 export * from "./roomSelection.js";
