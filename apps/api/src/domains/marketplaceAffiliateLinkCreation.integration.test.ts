@@ -339,6 +339,30 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     }
   });
 
+  it("allows concurrent captures while retaining the lifecycle lock", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await pool().connect();
+    const second = await pool().connect();
+    try {
+      await first.query("BEGIN");
+      await first.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+        link.publicToken,
+      ]);
+      await second.query("BEGIN");
+      await second.query("SET LOCAL lock_timeout='200ms'");
+      await expect(
+        second.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+          link.publicToken,
+        ]),
+      ).resolves.toHaveProperty("rowCount", 1);
+    } finally {
+      await Promise.all([first.query("ROLLBACK"), second.query("ROLLBACK")]);
+      first.release();
+      second.release();
+    }
+  });
+
   it("records separate synthetic visits without trusting referrer for ownership", async () => {
     const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
     if (!link.ok) throw new Error("Expected link");

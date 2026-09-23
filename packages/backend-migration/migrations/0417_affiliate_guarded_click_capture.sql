@@ -49,7 +49,7 @@ BEGIN
   JOIN marketplace.affiliate_agreement_activations activation
     ON activation.id=link.activation_id AND activation.agreement_id=link.agreement_id
   WHERE link.public_token=capture_affiliate_click.public_token
-  FOR UPDATE OF activation;
+  FOR SHARE OF activation;
   IF NOT FOUND THEN RETURN; END IF;
 
   FOR event IN
