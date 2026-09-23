@@ -173,6 +173,7 @@ export type ApiConfig = {
   pmsRoomClosureEnabled: boolean;
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
+  financeExportWorker?: { databaseUrl: string; propertyId: string };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
@@ -1077,6 +1078,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
 
   const backgroundWorkersEnabled = readBooleanEnv(env, "API_BACKGROUND_WORKERS_ENABLED", true);
+  let financeExportWorker: ApiConfig["financeExportWorker"];
+  if (readBooleanEnv(env, "FINANCE_EXPORT_WORKER_ENABLED", false)) {
+    const databaseUrl = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_DATABASE_URL");
+    const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
+    if (
+      !backgroundWorkersEnabled ||
+      financeSource !== "target" ||
+      !targetDatabaseUrl ||
+      !databaseUrl ||
+      !propertyId ||
+      !z.uuid().safeParse(propertyId).success
+    )
+      throw new Error(
+        "Finance export worker requires target Finance, background workers, a dedicated URL and property UUID",
+      );
+    let worker: URL, target: URL;
+    try {
+      worker = new URL(databaseUrl);
+      target = new URL(targetDatabaseUrl);
+    } catch {
+      throw new Error("Finance export worker database URL is invalid");
+    }
+    if (
+      !["postgres:", "postgresql:"].includes(worker.protocol) ||
+      !worker.password ||
+      decodeURIComponent(worker.username) !== "vayada_next_finance_export_worker" ||
+      worker.host !== target.host ||
+      worker.pathname !== target.pathname ||
+      worker.hash ||
+      [...worker.searchParams.keys()].some((key) => key !== "sslmode")
+    )
+      throw new Error("Finance export worker requires its dedicated login on the target database");
+    financeExportWorker = { databaseUrl, propertyId };
+  }
   let airbnbAlterations: ApiConfig["airbnbAlterations"];
   if (readBooleanEnv(env, "AIRBNB_ALTERATIONS_ENABLED", false)) {
     const propertyIds = [
@@ -1132,6 +1167,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     pmsOperationsSource,
     financeSource,
+    financeExportWorker,
     financeFolioRecipientKms,
     pmsRoomClosureEnabled: readBooleanEnv(env, "PMS_ROOM_CLOSURE_ENABLED", false),
     pmsInboxSendingEnabled: readBooleanEnv(env, "PMS_INBOX_SENDING_ENABLED", true),
