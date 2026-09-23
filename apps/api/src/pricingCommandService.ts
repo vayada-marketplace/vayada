@@ -25,6 +25,7 @@ import {
   type PricingStorageScope,
 } from "./domains/replacementPricingStore.js";
 import { enforceRoutePolicy } from "./routes/policy.js";
+import { requirePublicQuoteKey } from "./routes/replacementBookingQuote.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INTERNAL_TOKEN_HEADER = "x-vayada-internal-token";
@@ -43,13 +44,21 @@ export type PricingAuthorityOperations = {
   save(context: RequestContext, scope: PricingStorageScope, input: unknown): Promise<unknown>;
 };
 
+export type PublicPricingOperations = {
+  offers(slug: string): Promise<unknown>;
+  quote(slug: string, input: unknown, requestId: string, signal: AbortSignal): Promise<unknown>;
+};
+
 export type PricingCommandServiceOptions = {
   logger?: FastifyServerOptions["logger"];
   internalToken: string;
   propertyId: string;
+  hotelSlug: string;
   auth: PricingCommandServiceAuthOptions;
   ownerRead: PricingAuthorityOperations["read"];
   ownerManage: PricingAuthorityOperations["save"];
+  publicOffers: PublicPricingOperations["offers"];
+  publicQuote: PublicPricingOperations["quote"];
 };
 
 function tokenMatches(actual: unknown, expected: string): boolean {
@@ -115,12 +124,32 @@ function sendPricingError(error: unknown, reply: FastifyReply) {
     const status = error.code === "invalid" ? 400 : error.code === "denied" ? 403 : 409;
     return reply.code(status).send({ code: error.code });
   }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    [400, 404, 409, 503].includes((error as { statusCode: number }).statusCode)
+  ) {
+    const status = (error as { statusCode: 400 | 404 | 409 | 503 }).statusCode;
+    const reported = "code" in error ? (error as { code?: unknown }).code : undefined;
+    const code =
+      status === 400
+        ? "invalid"
+        : status === 409
+          ? reported === "QUOTE_REFRESH_REQUIRED"
+            ? reported
+            : "idempotency_conflict"
+          : "pricing_unavailable";
+    return reply.code(status).send({ code });
+  }
   return reply.code(503).send({ code: "pricing_unavailable" });
 }
 
 /** Private fixed-command boundary. It intentionally exposes no generic execution primitive. */
 export function buildPricingCommandService(options: PricingCommandServiceOptions): FastifyInstance {
   if (!UUID.test(options.propertyId)) throw new Error("propertyId must be a UUID");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(options.hotelSlug) || options.hotelSlug.length > 200)
+    throw new Error("hotelSlug must be a canonical slug");
   if (Buffer.byteLength(options.internalToken) < 32)
     throw new Error("internalToken must contain at least 32 bytes");
 
@@ -228,6 +257,66 @@ export function buildPricingCommandService(options: PricingCommandServiceOptions
       }
     },
   );
+
+  app.get<{ Params: { slug: string }; Querystring: Record<string, unknown> }>(
+    "/v1/public/hotels/:slug/offers",
+    async (request, reply) => {
+      try {
+        if (
+          request.params.slug !== options.hotelSlug ||
+          !pricingObject(request.query) ||
+          Object.keys(request.query).length !== 0
+        )
+          return reply.code(404).send({ code: "pricing_unavailable" });
+        const offers = await options.publicOffers(options.hotelSlug);
+        return offers ?? reply.code(404).send({ code: "pricing_unavailable" });
+      } catch (error) {
+        return sendPricingError(error, reply);
+      }
+    },
+  );
+
+  app.post<{
+    Params: { slug: string };
+    Querystring: Record<string, unknown>;
+    Body: unknown;
+  }>("/v1/public/hotels/:slug/quotes", { bodyLimit: 64 * 1024 }, async (request, reply) => {
+    try {
+      if (
+        request.params.slug !== options.hotelSlug ||
+        !pricingObject(request.query) ||
+        Object.keys(request.query).length !== 0
+      )
+        return reply.code(404).send({ code: "pricing_unavailable" });
+      if (
+        !pricingObject(request.body) ||
+        !pricingKeys(request.body, ["version", "selection", "paymentMethod"]) ||
+        request.body.version !== "public-booking-quote-request.v1" ||
+        request.body.paymentMethod !== "pay_at_property"
+      )
+        throw new PricingStorageError("invalid");
+      const cancellation = new AbortController();
+      const abortRequest = () => cancellation.abort();
+      const abortResponse = () => {
+        if (!reply.raw.writableEnded) cancellation.abort();
+      };
+      request.raw.once("aborted", abortRequest);
+      reply.raw.once("close", abortResponse);
+      try {
+        return await options.publicQuote(
+          options.hotelSlug,
+          request.body,
+          requirePublicQuoteKey(request),
+          cancellation.signal,
+        );
+      } finally {
+        request.raw.off("aborted", abortRequest);
+        reply.raw.off("close", abortResponse);
+      }
+    } catch (error) {
+      return sendPricingError(error, reply);
+    }
+  });
 
   return app;
 }

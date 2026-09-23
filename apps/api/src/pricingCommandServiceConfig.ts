@@ -8,9 +8,11 @@ export type PricingCommandServiceConfig = {
   port: number;
   internalToken: string;
   propertyId: string;
+  hotelSlug: string;
   authDatabaseUrl: string;
   ownerReadDatabaseUrl: string;
   ownerManageDatabaseUrl: string;
+  publicDatabaseUrl: string;
   workosJwksUrl: string;
   workosIssuer: string;
   workosAudience: string;
@@ -22,14 +24,19 @@ type PricingScopeQuery = {
 
 type PricingCommandDatabaseScope = {
   propertyId: string;
-  operationClass: "owner_read" | "owner_manage";
+  operationClass: "owner_read" | "owner_manage" | "public";
   organizationId?: string;
+};
+
+export type PricingCommandEffectiveScope = {
+  propertyId: string;
+  organizationId: string;
 };
 
 async function assertPricingCommandDatabaseScope(
   executor: PricingScopeQuery,
   expected: PricingCommandDatabaseScope,
-): Promise<void> {
+): Promise<PricingCommandEffectiveScope> {
   const result = await executor.query<{
     sessionUser: string;
     currentUser: string;
@@ -52,16 +59,17 @@ async function assertPricingCommandDatabaseScope(
       row.organizationId.toLowerCase() !== expected.organizationId.toLowerCase())
   )
     throw new Error("Pricing command database scope preflight failed");
+  return { propertyId: row.propertyId, organizationId: row.organizationId };
 }
 
 export const assertPricingCommandPoolScope = assertPricingCommandDatabaseScope;
 
 export async function assertPricingCommandTransactionScope(
   client: PricingScopeQuery,
-  expected: Required<PricingCommandDatabaseScope>,
-): Promise<void> {
+  expected: PricingCommandDatabaseScope,
+): Promise<PricingCommandEffectiveScope> {
   await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-  await assertPricingCommandDatabaseScope(client, expected);
+  return assertPricingCommandDatabaseScope(client, expected);
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -90,22 +98,26 @@ export function loadPricingCommandServiceConfig(
   const server = loadServerConfig(env, { host: "0.0.0.0", port: 8010 });
   const internalToken = required(env, "PRICING_COMMAND_INTERNAL_TOKEN");
   const propertyId = required(env, "PRICING_COMMAND_PROPERTY_ID").toLowerCase();
+  const hotelSlug = required(env, "PRICING_COMMAND_HOTEL_SLUG");
   const authDatabaseUrl = required(env, "PRICING_COMMAND_AUTH_DATABASE_URL");
   const ownerReadDatabaseUrl = required(env, "PRICING_COMMAND_OWNER_READ_DATABASE_URL");
   const ownerManageDatabaseUrl = required(env, "PRICING_COMMAND_OWNER_MANAGE_DATABASE_URL");
+  const publicDatabaseUrl = required(env, "PRICING_COMMAND_PUBLIC_DATABASE_URL");
   if (Buffer.byteLength(internalToken) < 32)
     throw new Error("PRICING_COMMAND_INTERNAL_TOKEN must contain at least 32 bytes");
   if (!UUID.test(propertyId)) throw new Error("PRICING_COMMAND_PROPERTY_ID must be a UUID");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(hotelSlug) || hotelSlug.length > 200)
+    throw new Error("PRICING_COMMAND_HOTEL_SLUG must be a canonical slug");
 
   const users = [
     databaseUser(authDatabaseUrl, "PRICING_COMMAND_AUTH_DATABASE_URL"),
     databaseUser(ownerReadDatabaseUrl, "PRICING_COMMAND_OWNER_READ_DATABASE_URL"),
     databaseUser(ownerManageDatabaseUrl, "PRICING_COMMAND_OWNER_MANAGE_DATABASE_URL"),
+    databaseUser(publicDatabaseUrl, "PRICING_COMMAND_PUBLIC_DATABASE_URL"),
   ];
   if (
     users[0]!.startsWith("vayada_next_pricing_") ||
-    !users[1]!.startsWith("vayada_next_pricing_") ||
-    !users[2]!.startsWith("vayada_next_pricing_")
+    users.slice(1).some((user) => !user.startsWith("vayada_next_pricing_"))
   )
     throw new Error(
       "Pricing command operation databases must use pricing-scoped PostgreSQL users only",
@@ -117,9 +129,11 @@ export function loadPricingCommandServiceConfig(
     ...server,
     internalToken,
     propertyId,
+    hotelSlug,
     authDatabaseUrl,
     ownerReadDatabaseUrl,
     ownerManageDatabaseUrl,
+    publicDatabaseUrl,
     workosJwksUrl: required(env, "PRICING_COMMAND_WORKOS_JWKS_URL"),
     workosIssuer: required(env, "PRICING_COMMAND_WORKOS_ISSUER"),
     workosAudience: required(env, "PRICING_COMMAND_WORKOS_AUDIENCE"),

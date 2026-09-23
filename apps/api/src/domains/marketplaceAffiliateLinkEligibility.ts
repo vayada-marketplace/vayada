@@ -13,6 +13,7 @@ export async function readMarketplaceAffiliateLinkEligibility(
       linkId: string;
       agreementId: string;
       activationId: string;
+      programId: string;
       propertyId: string;
       termsId: string;
     }
@@ -28,7 +29,7 @@ export async function readMarketplaceAffiliateLinkEligibility(
   if (!parsed.ok) return { status: "unavailable" };
   const link = (
     await client.query(
-      `SELECT l.id,l.agreement_id,l.activation_id,l.property_id,a.terms_id
+      `SELECT l.id,l.agreement_id,l.activation_id,l.program_id,l.property_id,a.terms_id
        FROM marketplace.affiliate_links l
        JOIN marketplace.affiliate_agreement_activations a
          ON a.id=l.activation_id AND a.agreement_id=l.agreement_id
@@ -44,6 +45,7 @@ export async function readMarketplaceAffiliateLinkEligibility(
     linkId: link.id,
     agreementId: link.agreement_id,
     activationId: link.activation_id,
+    programId: link.program_id,
     propertyId: link.property_id,
     termsId: link.terms_id,
   };

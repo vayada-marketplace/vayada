@@ -246,6 +246,13 @@ jobs:
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
           npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExportWorkerBoundary.integration.test.ts src/jobs/financeFolioExport.integration.test.ts
 
+      - name: Verify pricing command native login scope
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/pricingCommandServiceDatabaseScope.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify identity runtime row scope
         run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
 
