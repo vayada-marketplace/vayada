@@ -112,7 +112,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const guest = parsed.guest;
   if (input.syntheticAffiliateContextId !== undefined && input.affiliateContextId !== undefined)
     return fail();
-  const affiliateContextId = input.syntheticAffiliateContextId ?? input.affiliateContextId;
+  let affiliateContextId = input.syntheticAffiliateContextId ?? input.affiliateContextId;
   const syntheticAffiliate = input.syntheticAffiliateContextId !== undefined;
   if (affiliateContextId !== undefined) {
     await client.query("SAVEPOINT pricing_affiliate_binding_guard");
@@ -139,6 +139,20 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       ).rowCount
     )
       return fail();
+    // An old cookie may have passed the route lookup before waiting for this lock.
+    // Keep the booking, but do not bind a context past its unbound lifetime.
+    if (
+      !syntheticAffiliate &&
+      !(
+        await client.query(
+          `SELECT 1 FROM booking.affiliate_click_admissions
+           WHERE context_id=$1 AND admitted_at > clock_timestamp() - interval '90 days'
+           LIMIT 1`,
+          [affiliateContextId],
+        )
+      ).rowCount
+    )
+      affiliateContextId = undefined;
   }
   await client.query(
     `WITH draft AS (

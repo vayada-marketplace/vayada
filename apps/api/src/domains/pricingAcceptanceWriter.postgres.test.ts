@@ -6,6 +6,7 @@ import { parsePmsInventoryReservationBundle } from "@vayada/domain-pms";
 import { pricingDraftFixture } from "./pricingBookingDraft.fixtures.js";
 import { acceptanceFixture } from "./pricingAcceptanceHistory.fixtures.js";
 import { writePricingAcceptance } from "./pricingAcceptanceWriter.js";
+import { readBookingAffiliateContextForQuote } from "./bookingAffiliateContextForQuote.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
 import { reserveRevalidatedQuoteInventory } from "./currentQuoteInventory.js";
 import { calculateReplacementFixedCharges } from "./replacementFixedCharges.js";
@@ -208,6 +209,64 @@ describe.skipIf(!url)("pricing acceptance writer transaction (PostgreSQL)", () =
       bookings: 0,
       acceptances: 0,
     });
+    await fixture.close();
+  });
+
+  it("ignores an expired live context after the booking writer locks it", async () => {
+    const fixture = await setupFixture();
+    const staleContextId = randomUUID();
+    const freshContextId = randomUUID();
+    await fixture.observer.query(
+      `INSERT INTO hotel_catalog.property_slugs(property_id,slug,purpose,status)
+       VALUES($1,'writer-test','canonical','active')`,
+      [fixture.propertyId],
+    );
+    for (const contextId of [staleContextId, freshContextId]) {
+      await fixture.observer.query(
+        "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
+        [contextId, fixture.propertyId],
+      );
+    }
+    await fixture.observer.query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position,admitted_at)
+       VALUES($1,$2,$3,1,clock_timestamp()-interval '91 days')`,
+      [staleContextId, fixture.propertyId, randomUUID()],
+    );
+    await fixture.observer.query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position) VALUES($1,$2,$3,1)`,
+      [freshContextId, fixture.propertyId, randomUUID()],
+    );
+    await expect(
+      readBookingAffiliateContextForQuote(fixture.observer, "writer-test", staleContextId),
+    ).resolves.toBeNull();
+    await expect(
+      readBookingAffiliateContextForQuote(fixture.observer, "other-hotel", freshContextId),
+    ).resolves.toBeNull();
+    await expect(
+      readBookingAffiliateContextForQuote(fixture.observer, "writer-test", freshContextId),
+    ).resolves.toBe(freshContextId);
+    mockOwners(fixture);
+    vi.mocked(finishCurrentQuoteAcceptanceTime).mockImplementation(async (client) => {
+      await client.query(
+        "UPDATE platform.jobs SET run_after=clock_timestamp()+interval '1 day' WHERE queue_name='pms-reservation-handoff' AND property_id=$1",
+        [fixture.propertyId],
+      );
+      return new Date().toISOString();
+    });
+    const result = await writePricingAcceptance(fixture.pool, fixture.input, {
+      affiliateContextId: staleContextId,
+    });
+    expect(result).toMatchObject({ kind: "accepted" });
+    expect(
+      (
+        await fixture.observer.query(
+          "SELECT 1 FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1",
+          [result.bookingId],
+        )
+      ).rowCount,
+    ).toBe(0);
     await fixture.close();
   });
 });

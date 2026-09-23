@@ -7,6 +7,7 @@ import {
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
 import { admitAffiliateArrival } from "../domains/bookingAffiliateClickAdmission.js";
+import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   createReplacementBookingQuoteIssuer,
   requirePublicQuoteKey,
@@ -249,7 +250,11 @@ export type BookingWebCheckoutAdapter = {
   getPricingOffers?(slug: string): Promise<unknown>;
   getPricingAddons?(slug: string): Promise<unknown>;
   getQuoteGuestDisclosure?(slug: string, quoteId: string): Promise<unknown>;
-  acceptPricingQuote?(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
+  acceptPricingQuote?(
+    slug: string,
+    request: BookingWebCheckoutRequest,
+    affiliateContextCookie?: string,
+  ): Promise<unknown>;
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
   quoteBooking(
     slug: string,
@@ -456,6 +461,8 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
+  /** Dormant until destination storage, runtime grants, and HTTPS transport are approved. */
+  affiliateContextBindingEnabled?: boolean;
   affiliateArrival?: { pool: pg.Pool; internalToken: string };
   affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
   affiliateRepository?: BookingWebAffiliateRepository;
@@ -605,7 +612,16 @@ export async function registerBookingWebPublicRoutes(
         body.requestId !== request.headers["idempotency-key"]
       )
         throw createHttpError(400, "Invalid quote acceptance request.");
-      const response = await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
+      const affiliateContextCookie = options.affiliateContextBindingEnabled
+        ? readAffiliateContextCookie(request.headers.cookie)
+        : null;
+      const response = affiliateContextCookie
+        ? await checkoutAdapter.acceptPricingQuote(
+            request.params.slug,
+            body,
+            affiliateContextCookie,
+          )
+        : await checkoutAdapter.acceptPricingQuote(request.params.slug, body);
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-quote-acceptance");
       return response;
     },
@@ -2016,11 +2032,29 @@ export function createTargetBookingWebCheckoutAdapter(
       if (!disclosure) throw createHttpError(404, "Guest rules unavailable.");
       return disclosure;
     },
-    async acceptPricingQuote(slug, request) {
+    async acceptPricingQuote(slug, request, affiliateContextCookie) {
       if (!config.replacementPricingAcceptanceAllowedSlugs?.includes(slug))
         throw createHttpError(404, "Quote acceptance unavailable.");
       try {
-        return await writePricingAcceptance(pool, { slug, command: request });
+        let contextId: string | null = null;
+        if (affiliateContextCookie) {
+          try {
+            contextId = await readBookingAffiliateContextForQuote(
+              pool,
+              slug,
+              affiliateContextCookie,
+            );
+          } catch {
+            // Context lookup must not block an otherwise valid booking.
+          }
+        }
+        return contextId
+          ? await writePricingAcceptance(
+              pool,
+              { slug, command: request },
+              { affiliateContextId: contextId },
+            )
+          : await writePricingAcceptance(pool, { slug, command: request });
       } catch (error) {
         const statusCode =
           error instanceof PricingAcceptanceError
@@ -5798,6 +5832,21 @@ function normalizeHost(value: string): string {
     return decoded.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
   }
   return decoded.replace(/:\d+$/, "").replace(/^\.+|\.+$/g, "");
+}
+
+function readAffiliateContextCookie(header: string | undefined): string | null {
+  if (!header) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith("__Host-vayada_affiliate_context="))
+    .map((part) => part.slice("__Host-vayada_affiliate_context=".length));
+  if (
+    values.length !== 1 ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(values[0]!)
+  )
+    return null;
+  return values[0]!.toLowerCase();
 }
 
 function slugFromKnownBookingHost(host: string): string | null {
