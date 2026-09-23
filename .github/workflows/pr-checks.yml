@@ -218,6 +218,13 @@ jobs:
         env:
           TARGET_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify restricted identity PMS Inbox enqueue
+        run: >-
+          npm --workspace @vayada/backend-auth run test -- --no-file-parallelism
+          src/staffInvitations.test.ts -t "enqueues an unreadable PMS Inbox job"
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Finance expense worker permissions and real handlers
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2044_worker_test
