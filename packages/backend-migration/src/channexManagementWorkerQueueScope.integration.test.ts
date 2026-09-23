@@ -239,39 +239,37 @@ describe.skipIf(!url)("Channex management shared queue boundary", () => {
 
   it("preserves existing identity policies without granting access to the worker allowlist", async () => {
     const identity = "vayada_next_identity_runtime";
-    await owner.query(`CREATE ROLE ${identity} LOGIN PASSWORD 'fixture' NOINHERIT`);
-    await owner.query(
-      `GRANT USAGE ON SCHEMA platform TO ${identity}; GRANT SELECT,INSERT ON platform.jobs TO ${identity}`,
-    );
-    const login = new URL(url!);
-    login.username = identity;
-    login.password = "fixture";
-    const client = new pg.Client({ connectionString: login.toString() });
-    await client.connect();
+    await owner.query("BEGIN");
     try {
-      await client.query("BEGIN");
-      await client.query(
+      if (!(await owner.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [identity])).rowCount)
+        await owner.query(`CREATE ROLE ${identity} NOLOGIN NOINHERIT`);
+      await owner.query(
+        `GRANT USAGE ON SCHEMA platform TO ${identity}; GRANT SELECT,INSERT ON platform.jobs TO ${identity}`,
+      );
+      // RLS uses current_user; keep any existing login and grants untouched.
+      await owner.query(`SET ROLE ${identity}`);
+      expect((await owner.query("SELECT current_user")).rows[0].current_user).toBe(identity);
+      await owner.query(
         "INSERT INTO platform.jobs(job_key,queue_name,job_type,resource_product) VALUES($1,'identity.webhooks','identity.workos_webhook.reconcile','identity')",
         [randomUUID()],
       );
       expect(
-        (await client.query("SELECT id FROM platform.jobs WHERE id=$1", [allowed])).rows,
+        (await owner.query("SELECT id FROM platform.jobs WHERE id=$1", [allowed])).rows,
       ).toEqual([]);
-      await client.query("SAVEPOINT denied");
+      await owner.query("SAVEPOINT denied");
       await expect(
-        client.query("SELECT * FROM platform.channex_management_worker_properties"),
+        owner.query("SELECT * FROM platform.channex_management_worker_properties"),
       ).rejects.toMatchObject({ code: "42501" });
-      await client.query("ROLLBACK TO SAVEPOINT denied");
+      await owner.query("ROLLBACK TO SAVEPOINT denied");
       await expect(
-        client.query(
+        owner.query(
           "INSERT INTO platform.jobs(job_key,queue_name,job_type,resource_product) VALUES($1,'pms.channex.management','channex.sync_ari','pms')",
           [randomUUID()],
         ),
       ).rejects.toMatchObject({ code: "42501" });
     } finally {
-      await client.query("ROLLBACK");
-      await client.end();
-      await owner.query(`DROP OWNED BY ${identity}; DROP ROLE ${identity}`);
+      await owner.query("ROLLBACK");
+      await owner.query("RESET ROLE");
     }
   });
 });

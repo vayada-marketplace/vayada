@@ -7,23 +7,36 @@ import {
 import pg from "pg";
 
 import { createBookingPricingAuthorityStore } from "./domains/bookingPricingAuthority.js";
+import { createCurrentPricingQuoteStore } from "./domains/currentPricingQuoteStore.js";
+import { createPublicPricingOfferCatalog } from "./domains/publicPricingOfferCatalog.js";
 import { buildPricingCommandService } from "./pricingCommandService.js";
 import {
   assertPricingCommandPoolScope,
   assertPricingCommandTransactionScope,
   loadPricingCommandServiceConfig,
 } from "./pricingCommandServiceConfig.js";
+import { createReplacementBookingQuoteIssuer } from "./routes/replacementBookingQuote.js";
 
 const config = loadPricingCommandServiceConfig();
-const ownerReadPool = new pg.Pool({
-  connectionString: config.ownerReadDatabaseUrl,
+const operationPoolLimits = {
   connectionTimeoutMillis: 5_000,
+  statement_timeout: 15_000,
+  query_timeout: 20_000,
+  lock_timeout: 5_000,
+  idle_in_transaction_session_timeout: 20_000,
   max: 5,
+} as const;
+const ownerReadPool = new pg.Pool({
+  ...operationPoolLimits,
+  connectionString: config.ownerReadDatabaseUrl,
 });
 const ownerManagePool = new pg.Pool({
+  ...operationPoolLimits,
   connectionString: config.ownerManageDatabaseUrl,
-  connectionTimeoutMillis: 5_000,
-  max: 5,
+});
+const publicPool = new pg.Pool({
+  ...operationPoolLimits,
+  connectionString: config.publicDatabaseUrl,
 });
 try {
   await Promise.all([
@@ -35,9 +48,13 @@ try {
       propertyId: config.propertyId,
       operationClass: "owner_manage",
     }),
+    assertPricingCommandPoolScope(publicPool, {
+      propertyId: config.propertyId,
+      operationClass: "public",
+    }),
   ]);
 } catch {
-  await Promise.all([ownerReadPool.end(), ownerManagePool.end()]);
+  await Promise.all([ownerReadPool.end(), ownerManagePool.end(), publicPool.end()]);
   throw new Error("Pricing command database preflight failed");
 }
 const assertRuntimeScope = (
@@ -49,9 +66,22 @@ const assertRuntimeScope = (
     propertyId: scope.propertyId,
     organizationId: scope.organizationId,
     operationClass,
-  });
+  }).then(() => undefined);
 const ownerRead = createBookingPricingAuthorityStore(ownerReadPool, { assertRuntimeScope });
 const ownerManage = createBookingPricingAuthorityStore(ownerManagePool, { assertRuntimeScope });
+const assertPublicRuntimeScope = (client: pg.PoolClient) =>
+  assertPricingCommandTransactionScope(client, {
+    propertyId: config.propertyId,
+    operationClass: "public",
+  });
+const publicOffers = createPublicPricingOfferCatalog(publicPool, {
+  assertRuntimeScope: assertPublicRuntimeScope,
+});
+const publicQuote = createReplacementBookingQuoteIssuer(
+  createCurrentPricingQuoteStore(publicPool, 300, {
+    assertRuntimeScope: assertPublicRuntimeScope,
+  }),
+);
 
 const rolePermissionRepository = createPgRolePermissionRepository({
   connectionString: config.authDatabaseUrl,
@@ -65,6 +95,7 @@ const propertyAccessRepository = createPgPropertyAccessRepository({
 const app = buildPricingCommandService({
   internalToken: config.internalToken,
   propertyId: config.propertyId,
+  hotelSlug: config.hotelSlug,
   auth: {
     verifier: createWorkOSVerifier({
       jwksUrl: config.workosJwksUrl,
@@ -78,12 +109,15 @@ const app = buildPricingCommandService({
   },
   ownerRead: ownerRead.read,
   ownerManage: ownerManage.save,
+  publicOffers: publicOffers.read,
+  publicQuote,
 });
 
 app.addHook("onClose", async () => {
   await Promise.all([
     ownerReadPool.end(),
     ownerManagePool.end(),
+    publicPool.end(),
     rolePermissionRepository.close?.(),
     entitlementRepository.close?.(),
     propertyAccessRepository.close?.(),

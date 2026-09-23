@@ -232,6 +232,13 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseWorkerBoundary.integration.test.ts
           TEST_FINANCE_WORKER_DATABASE_URL=postgresql://vayada_next_finance_expense_worker:fixture@127.0.0.1:5432/vay2044_worker_test npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseGeneration.integration.test.ts
 
+      - name: Verify pricing command native login scope
+        run: >-
+          npm --workspace vayada-api run test -- --no-file-parallelism
+          src/pricingCommandServiceDatabaseScope.integration.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify identity runtime row scope
         run: bash scripts/test-identity-runtime-row-scope.sh ${{ matrix.postgres }}
 
