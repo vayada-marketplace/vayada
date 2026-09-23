@@ -253,6 +253,10 @@ import {
   assertFinanceExpenseWorkerBoundary,
   FINANCE_EXPENSE_WORKER_ROLE,
 } from "./jobs/financeExpenseWorkerBoundary.js";
+import {
+  assertFinanceExportWorkerBoundary,
+  FINANCE_EXPORT_WORKER_ROLE,
+} from "./jobs/financeExportWorkerBoundary.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
 import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
@@ -762,6 +766,7 @@ const financeFolioRuntime =
         });
         return {
           routes: { repository, commands, exports: exportJobs },
+          recipientDecoder,
           async close() {
             try {
               await Promise.all([
@@ -785,20 +790,43 @@ const financeExpenseGenerationPool = config.financeExpenseWorker
     })
   : undefined;
 const financeFolioExportWorker =
-  config.backgroundWorkersEnabled &&
-  financeFolioRuntime &&
-  financeExpenseRuntime &&
-  config.platformMediaServing
-    ? {
-        pool: new pg.Pool({
-          connectionString: targetDatabaseUrl,
+  config.financeExportWorker && financeFolioRuntime && config.platformMediaServing
+    ? (() => {
+        const connectionString = config.financeExportWorker!.databaseUrl;
+        const pool = new pg.Pool({
+          connectionString,
           max: 2,
           connectionTimeoutMillis: 5_000,
-        }),
-        writer: createS3FinanceFolioExportArtifactWriter({
-          bucketName: config.platformMediaServing.bucketName,
-        }),
-      }
+        });
+        const pricing = createPgPmsPricingReadModel({ connectionString });
+        const propertyContext = createPgFinanceExpensePropertyContextReadPort(connectionString);
+        const folios = createPgFinanceFolioReadRepository({
+          connectionString,
+          pricing,
+          propertyContext,
+          recipientDecoder: financeFolioRuntime.recipientDecoder,
+        });
+        const expenses = createPgFinanceExpenseReadModel({
+          connectionString,
+          pricing,
+          propertyContext,
+        });
+        return {
+          pool,
+          read: { exportReady: folios.exportReady, exportCsv: expenses.exportCsv },
+          writer: createS3FinanceFolioExportArtifactWriter({
+            bucketName: config.platformMediaServing.bucketName,
+          }),
+          close: () =>
+            Promise.all([
+              pool.end(),
+              folios.close(),
+              expenses.close(),
+              pricing.close(),
+              propertyContext.close(),
+            ]),
+        };
+      })()
     : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
@@ -2601,15 +2629,33 @@ app.addHook("onClose", async () => {
   await financeExpenseGenerationPool?.end();
 });
 
+if (financeFolioExportWorker) {
+  const client = await financeFolioExportWorker.pool.connect();
+  try {
+    const login = (await client.query("SELECT current_user, session_user")).rows[0];
+    if (
+      login.current_user !== FINANCE_EXPORT_WORKER_ROLE ||
+      login.session_user !== FINANCE_EXPORT_WORKER_ROLE
+    )
+      throw new Error("finance_export_worker_login_mismatch");
+    await assertFinanceExportWorkerBoundary(client, {
+      propertyId: config.financeExportWorker!.propertyId,
+    });
+    app.log.info(
+      { role: FINANCE_EXPORT_WORKER_ROLE, propertyId: config.financeExportWorker!.propertyId },
+      "Finance export worker preflight passed",
+    );
+  } finally {
+    client.release();
+  }
+}
+
 let activeFinanceFolioExports: Promise<void> | undefined;
 const runFinanceFolioExports = () => {
   if (!financeFolioExportWorker || activeFinanceFolioExports) return;
   activeFinanceFolioExports = runFinanceFolioExportJobs(
     financeFolioExportWorker.pool,
-    {
-      exportReady: financeFolioRuntime!.routes.repository.exportReady,
-      exportCsv: financeExpenseRuntime!.routes.read.exportCsv,
-    },
+    financeFolioExportWorker.read,
     financeFolioExportWorker.writer,
   )
     .then((result) => {
@@ -2634,9 +2680,8 @@ app.addHook("onClose", async () => {
   await activeFinanceFolioExports;
   try {
     financeFolioExportWorker?.writer.close?.();
-    await financeFolioExportWorker?.pool.end();
   } finally {
-    await financeFolioRuntime?.close();
+    await financeFolioExportWorker?.close();
   }
 });
 
