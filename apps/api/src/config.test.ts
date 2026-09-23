@@ -1442,8 +1442,6 @@ describe("Airbnb alteration runtime opt-in", () => {
 
 describe("Finance export worker boundary config", () => {
   const env = {
-    API_RUNTIME: "next",
-    PMS_OPERATIONS_SOURCE: "disabled",
     FINANCE_SOURCE: "target",
     TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
     ...financeFolioKmsEnv,
@@ -1474,7 +1472,6 @@ describe("Finance export worker boundary config", () => {
       { FINANCE_EXPORT_WORKER_DATABASE_URL: "" },
       { FINANCE_EXPORT_WORKER_PROPERTY_ID: "" },
       { API_BACKGROUND_WORKERS_ENABLED: "false" },
-      { API_RUNTIME: "legacy" },
       { FINANCE_SOURCE: "legacy" },
       { FINANCE_FOLIO_RECIPIENT_KMS_CURRENT_KEY_ARN: "" },
       { PLATFORM_MEDIA_BUCKET: "" },
