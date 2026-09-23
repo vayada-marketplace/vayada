@@ -67,6 +67,13 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (createHash("sha256").update(JSON.stringify(policyRows)).digest("hex") !== POLICY_DIGEST)
     fail("policy_drift");
+  const relations = (
+    await client.query(
+      `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
+    )
+  ).rows;
+  for (const name of Object.keys(channexManagementWorkerPrivileges))
+    if (!relations.some((row) => row.name === name)) fail("relation_missing");
   const catalog = (
     await client.query(channexWorkerCatalogSql, [Object.keys(channexManagementWorkerPrivileges)])
   ).rows;
@@ -75,11 +82,6 @@ export async function assertChannexManagementWorkerBoundary(
     "cdef6126abf7acba884943c8de759444037d342372a7c61ad4a186ce0b7e09ef"
   )
     fail("catalog_drift");
-  const relations = (
-    await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,c.oid,c.relrowsecurity AS rls FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema'`,
-    )
-  ).rows;
   const version = Number(
     (await client.query("SHOW server_version_num")).rows[0].server_version_num,
   );
@@ -136,8 +138,6 @@ export async function assertChannexManagementWorkerBoundary(
         fail("grant_missing");
     }
   }
-  for (const name of Object.keys(channexManagementWorkerPrivileges))
-    if (!relations.some((row) => row.name === name)) fail("relation_missing");
   if (!options.allowMissingGrants) {
     const schemas = [
       ...new Set(Object.keys(channexManagementWorkerPrivileges).map((name) => name.split(".")[0])),
