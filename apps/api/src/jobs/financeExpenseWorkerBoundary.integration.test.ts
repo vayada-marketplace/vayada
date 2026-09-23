@@ -57,6 +57,9 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
       INSERT INTO finance.expense_categories(id,property_id,name,color) VALUES('${category}','${property}','Fixture','#111111');
       INSERT INTO finance.recurring_expense_rules(id,property_id,category_id,cadence,starts_on,next_due_on,ends_on,vendor,amount,currency,payment_status) VALUES('${rule}','${property}','${category}','weekly','2026-08-20','2026-08-20','2026-08-20','Fixture',10,'EUR','unpaid');
       INSERT INTO identity.organizations(id,kind,name,slug) VALUES('${organization}','hotel_group','Worker fixture','vay2044');
+      INSERT INTO identity.users(id,email) VALUES('${id(9)}','pricing-fixture-vay2044@example.test');
+      INSERT INTO booking.pricing_authority_revisions(property_id,revision,authority,organization_id,actor_user_id,request_id,request_hash) VALUES('${property}','${id(10)}','vayada','${organization}','${id(9)}','pricing-fixture',repeat('a',64));
+      INSERT INTO platform.pricing_runtime_property_scopes(database_login,operation_class,property_id,organization_id) VALUES('vayada_next_pricing_fixture','owner_manage','${property}','${organization}');
       INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship) VALUES('${organization}','pms','pms_property','${property}','owner');
       INSERT INTO identity.product_entitlements(organization_id,product,entitlement_key,status,resource_product,resource_type,resource_id) VALUES
         ('${organization}','pms','property-management','active','pms','pms_property','${property}'),('${organization}','pms','module:financials','suspended','pms','pms_property','${property}');
@@ -78,6 +81,19 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
         current_user: role,
         session_user: role,
       });
+      expect(
+        (
+          await admin.query(
+            `SELECT 1 FROM platform.pricing_runtime_property_scopes scope JOIN booking.pricing_authority_revisions revision ON revision.property_id=scope.property_id AND revision.organization_id=scope.organization_id WHERE scope.database_login='vayada_next_pricing_fixture'`,
+          )
+        ).rowCount,
+      ).toBe(1);
+      await expect(
+        admin.query(
+          "INSERT INTO platform.pricing_runtime_property_scopes(database_login,operation_class,property_id,organization_id) VALUES($1,'owner_manage',$2,$3)",
+          [role, property, organization],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
       for (const view of [
         "booking.pricing_runtime_effective_property_scopes",
         "booking.pricing_runtime_effective_authority_scopes",
@@ -93,6 +109,10 @@ describe.skipIf(!url)("Finance expense worker database boundary", () => {
         `ALTER TABLE finance.expenses DISABLE ROW LEVEL SECURITY`,
         `ALTER POLICY finance_expense_worker_scope ON platform.jobs USING(true)`,
         `GRANT pg_read_all_data TO ${role}`,
+        `GRANT SET ON PARAMETER session_replication_role TO ${role}`,
+        `ALTER ROLE ${role} SET session_replication_role=replica`,
+        `SET LOCAL session_replication_role=replica`,
+        `SET LOCAL search_path=public,pg_catalog`,
         `ALTER FUNCTION platform.finance_expense_worker_scope(text,text,uuid) SECURITY DEFINER`,
         `ALTER VIEW booking.pricing_runtime_effective_property_scopes SET (security_barrier=false)`,
         `ALTER TABLE platform.pricing_runtime_property_scopes DROP CONSTRAINT pricing_runtime_property_scopes_database_login_check`,
