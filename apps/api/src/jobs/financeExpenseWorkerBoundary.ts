@@ -47,7 +47,9 @@ export async function assertFinanceExpenseWorkerBoundary(
   const fail = (code: string): never => {
     throw new Error(`finance_worker_${code}`);
   };
-  const schemas = (await client.query("SELECT pg_catalog.current_schemas(true) AS path")).rows[0]?.path;
+  const schemas = (
+    await client.query("SELECT pg_catalog.current_schemas(true)::pg_catalog.text[] AS path")
+  ).rows[0]?.path;
   if (schemas?.[0] !== "pg_catalog") fail("search_path");
   const account = (
     await client.query(
