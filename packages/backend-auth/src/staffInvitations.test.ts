@@ -12,6 +12,7 @@ import {
 } from "./staffInvitationDelivery.js";
 import {
   createPgStaffInvitationAcceptanceRepository,
+  loadLinkedStaffInvitationPropertyIds,
   type StaffInvitationAcceptanceEvent,
 } from "./staffInvitationAcceptance.js";
 import { createPgStaffInvitationRepository } from "./staffInvitations.js";
@@ -2011,6 +2012,39 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL staff invitation repository", ()
     );
     return { ...created, providerInvitationId };
   }
+
+  it("validates invitation property links without assignment update privilege", async () => {
+    const invitation = await deliveredInvitation();
+    const restrictedRole = `vayada_acceptance_lock_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    await client.query(`CREATE ROLE ${restrictedRole} NOLOGIN`);
+    try {
+      await client.query(`GRANT ${restrictedRole} TO CURRENT_USER`);
+      await client.query(`GRANT USAGE ON SCHEMA identity TO ${restrictedRole}`);
+      await client.query(
+        `GRANT SELECT ON identity.staff_invitation_property_assignments TO ${restrictedRole}`,
+      );
+      await client.query(
+        `GRANT SELECT, UPDATE ON identity.organization_resource_links TO ${restrictedRole}`,
+      );
+      await client.query(`SET ROLE ${restrictedRole}`);
+      expect(
+        (
+          await client.query<{ allowed: boolean }>(
+            `SELECT has_table_privilege(current_user,
+              'identity.staff_invitation_property_assignments', 'UPDATE') AS allowed`,
+          )
+        ).rows[0]?.allowed,
+      ).toBe(false);
+      await expect(
+        loadLinkedStaffInvitationPropertyIds(client, invitation.invitationId, org),
+      ).resolves.toEqual([property]);
+    } finally {
+      await client.query("RESET ROLE");
+      await client.query(`DROP OWNED BY ${restrictedRole}`);
+      await client.query(`REVOKE ${restrictedRole} FROM CURRENT_USER`);
+      await client.query(`DROP ROLE ${restrictedRole}`);
+    }
+  });
 
   it("reads saved invitation settings and rejects stale replacement requests", async () => {
     const invite = command();
