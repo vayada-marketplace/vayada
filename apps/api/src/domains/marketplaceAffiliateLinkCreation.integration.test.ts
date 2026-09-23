@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -128,6 +129,9 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     );
     await pool().query(
       await readFile(new URL("0411_affiliate_click_campaign_label.sql", migrations), "utf8"),
+    );
+    await pool().query(
+      await readFile(new URL("0417_affiliate_guarded_click_capture.sql", migrations), "utf8"),
     );
   });
 
@@ -271,6 +275,92 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM finance.affiliate_earning_journal")).rows[0].count,
     ).toBe("0");
+  });
+
+  it("lets an execute-only capture role derive a click but denies direct inserts", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const role = `affiliate_capture_fixture_${randomUUID().replaceAll("-", "")}`;
+    await pool().query(`CREATE ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS`);
+    try {
+      await pool().query(`GRANT USAGE ON SCHEMA marketplace TO ${role}`);
+      await pool().query(
+        `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT)
+         TO ${role}`,
+      );
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        const captured = await client.query(
+          "SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)",
+          [link.publicToken],
+        );
+        expect(captured.rows[0]).toMatchObject({
+          link_id: link.linkId,
+          property_id: id(3),
+          terms_id: id(51),
+        });
+        expect(captured.rows[0].reference_token).toMatch(/^vc_[A-Za-z0-9_-]{22}$/);
+        expect(
+          await client.query("SELECT * FROM marketplace.capture_affiliate_click($1,NULL,NULL)", [
+            link.publicToken,
+          ]),
+        ).toHaveProperty("rowCount", 0);
+        await client.query("COMMIT");
+
+        await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(
+          await client.query(
+            "SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)",
+            [link.publicToken],
+          ),
+        ).toHaveProperty("rowCount", 0);
+        await client.query("ROLLBACK");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            `INSERT INTO marketplace.affiliate_click_occurrences
+             (id,link_id,property_id,terms_id,reference_token,source,synthetic)
+             VALUES($1,$2,$3,$4,'vc_AAAAAAAAAAAAAAAAAAAAAA','unknown',FALSE)`,
+            [id(99), link.linkId, id(3), id(51)],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    } finally {
+      await pool().query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+  });
+
+  it("allows concurrent captures while retaining the lifecycle lock", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const first = await pool().connect();
+    const second = await pool().connect();
+    try {
+      await first.query("BEGIN");
+      await first.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+        link.publicToken,
+      ]);
+      await second.query("BEGIN");
+      await second.query("SET LOCAL lock_timeout='200ms'");
+      await expect(
+        second.query("SELECT * FROM marketplace.capture_affiliate_click($1,'unknown',NULL)", [
+          link.publicToken,
+        ]),
+      ).resolves.toHaveProperty("rowCount", 1);
+    } finally {
+      await Promise.all([first.query("ROLLBACK"), second.query("ROLLBACK")]);
+      first.release();
+      second.release();
+    }
   });
 
   it("records separate synthetic visits without trusting referrer for ownership", async () => {

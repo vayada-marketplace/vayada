@@ -65,7 +65,7 @@ grant matrix is declared complete.
 
 ## Grant and activation gates
 
-1. Migration `0415_affiliate_destination_lock_boundary.sql` adds restrictive
+1. Migration `0416_affiliate_destination_lock_boundary.sql` adds restrictive
    row-level policies for `hotel_catalog.properties` and `property_slugs`. A
    non-owner login using the exact future capture role can take the row locks
    required by destination validation but cannot update either relation with
@@ -78,7 +78,12 @@ grant matrix is declared complete.
    property, click reference, admission lifetime and monotonic history in the
    retained transaction. Current foreign keys and immutable-update triggers
    do not prove that an inserted history row came from an eligible link. Do not
-   grant direct INSERT on these tables as a shortcut.
+   grant direct INSERT on these tables as a shortcut. Migration
+   `0417_affiliate_guarded_click_capture.sql` completes the occurrence portion:
+   its owner-executed command derives beneficiary scope from the public link,
+   validates ordered active agreement history and generates the click identity,
+   reference and timestamp. Public execution is revoked. Context and admission
+   writes still need their own guarded command.
 3. Define the booking-binding write boundary so a runtime credential cannot
    insert a binding for an arbitrary booking, context, property or cutoff. A
    security-definer function is not sufficient if it merely trusts caller IDs;
