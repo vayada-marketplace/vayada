@@ -131,6 +131,10 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       );
       await owner.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
     }
+    // Other integration fixtures exercise the migration-default path before the
+    // platform grant runner replaces PUBLIC execution with the dedicated role.
+    for (const functionName of channexManagementWorkerFunctions)
+      await owner.query(`GRANT EXECUTE ON FUNCTION ${functionName} TO PUBLIC`);
     // Immutable synthetic attempts/receipts stay until the disposable DB is dropped.
     await owner.end();
   });
