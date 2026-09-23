@@ -32,9 +32,7 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
       `REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${database}" TO ${role}`,
     );
     await assertFinanceExportWorkerBoundary(admin, { allowMissingGrants: true });
-    await admin.query(
-      `GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms,booking TO ${role}`,
-    );
+    await admin.query(`GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms TO ${role}`);
     for (const [table, privileges] of Object.entries(financeExportWorkerPrivileges))
       for (const [kind, columns] of Object.entries(privileges))
         await admin.query(
