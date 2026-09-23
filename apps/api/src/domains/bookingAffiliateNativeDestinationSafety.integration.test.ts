@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { readNativeAffiliateDestinationSafety as read } from "./bookingAffiliateNativeDestinationSafety.js";
+import { affiliateDestinationSafetyLockKey } from "./bookingAffiliateDestinationSafetyLock.js";
+import { buildNativeAffiliateArrivalRedirect as read } from "./bookingAffiliateNativeDestinationSafety.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const id = (n: number) => `15040000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const referenceToken = "vc_1234567890123456789012";
 
 describe.skipIf(!databaseUrl)("native affiliate destination safety (PostgreSQL)", () => {
   const name = `vay1504_test_${randomUUID().replaceAll("-", "")}`;
@@ -52,7 +54,7 @@ describe.skipIf(!databaseUrl)("native affiliate destination safety (PostgreSQL)"
     const client = await pool.connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-      const result = await read(client, input);
+      const result = await read(client, input, referenceToken);
       await client.query("COMMIT");
       return result;
     } catch (error) {
@@ -65,10 +67,10 @@ describe.skipIf(!databaseUrl)("native affiliate destination safety (PostgreSQL)"
 
   it("accepts only the exact current native hotel page and tenant version", async () => {
     expect(await check()).toEqual({
-      status: "native_candidate",
-      propertyId: id(1),
-      destinationVersionId: id(2),
-      bookingUrl: "https://hotel-alpenrose.next-booking.vayada.com/",
+      status: "ready",
+      redirectUrl:
+        "https://hotel-alpenrose.next-booking.vayada.com/?vref=vc_1234567890123456789012",
+      referenceToken,
     });
     expect(await check({ ...scope, organizationId: id(4) })).toEqual({ status: "blocked" });
     expect(await check({ ...scope, propertyId: id(4) })).toEqual({ status: "blocked" });
@@ -102,5 +104,44 @@ describe.skipIf(!databaseUrl)("native affiliate destination safety (PostgreSQL)"
     await pool.query("UPDATE hotel_catalog.properties SET lifecycle_status='active'");
     await pool.query("UPDATE hotel_catalog.property_slugs SET status='retired'");
     expect(await check()).toEqual({ status: "blocked" });
+  });
+
+  it("orders native approval and canonical-domain activation on one property lock", async () => {
+    const first = await pool.connect();
+    const second = await pool.connect();
+    const lockKey = affiliateDestinationSafetyLockKey(scope.propertyId);
+    try {
+      await first.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await read(first, scope, referenceToken)).toMatchObject({ status: "ready" });
+
+      await second.query("BEGIN");
+      await second.query("SET LOCAL lock_timeout='100ms'");
+      await expect(
+        second.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [lockKey]),
+      ).rejects.toMatchObject({ code: "55P03" });
+      await second.query("ROLLBACK");
+      await first.query("COMMIT");
+
+      await second.query("BEGIN");
+      await second.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [lockKey]);
+      await second.query("INSERT INTO hotel_catalog.property_domains VALUES ($1,'verified',TRUE)", [
+        scope.propertyId,
+      ]);
+
+      await first.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await first.query("SET LOCAL lock_timeout='100ms'");
+      await expect(read(first, scope, referenceToken)).rejects.toMatchObject({ code: "55P03" });
+      await first.query("ROLLBACK");
+      await second.query("COMMIT");
+
+      await first.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await read(first, scope, referenceToken)).toEqual({ status: "blocked" });
+      await first.query("COMMIT");
+    } finally {
+      await first.query("ROLLBACK").catch(() => undefined);
+      await second.query("ROLLBACK").catch(() => undefined);
+      first.release();
+      second.release();
+    }
   });
 });
