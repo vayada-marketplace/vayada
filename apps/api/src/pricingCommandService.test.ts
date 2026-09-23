@@ -5,6 +5,7 @@ import { PricingStorageError } from "./domains/replacementPricingStore.js";
 import {
   buildPricingCommandService,
   type PricingAuthorityOperations,
+  type PublicPricingOperations,
 } from "./pricingCommandService.js";
 
 const propertyId = "11111111-1111-4111-8111-111111111111";
@@ -13,6 +14,7 @@ const organizationId = "33333333-3333-4333-8333-333333333333";
 const userId = "44444444-4444-4444-8444-444444444444";
 const membershipId = "55555555-5555-4555-8555-555555555555";
 const internalToken = "internal-token-with-at-least-32-bytes";
+const hotelSlug = "synthetic-hotel";
 const apps: ReturnType<typeof buildPricingCommandService>[] = [];
 
 afterEach(async () => {
@@ -57,6 +59,8 @@ function fixture(
     sessionId?: string | null;
     membershipStatus?: "active" | "inactive";
     ownerManage?: PricingAuthorityOperations["save"];
+    publicOffers?: PublicPricingOperations["offers"];
+    publicQuote?: PublicPricingOperations["quote"];
   } = {},
 ) {
   const ownerRead = vi.fn().mockResolvedValue({ authority: "unconfigured", revision: null });
@@ -66,10 +70,15 @@ function fixture(
       replayed: false,
     })) as MockedFunction<PricingAuthorityOperations["save"]>;
   const permissions = options.permissions ?? ["pms.rooms_rates.read", "pms.rooms_rates.manage"];
+  const publicOffers = vi.fn(options.publicOffers ?? (async () => ({ rooms: [] })));
+  const publicQuote = vi.fn(
+    options.publicQuote ?? (async () => ({ version: "public-booking-quote.v1" })),
+  );
   const app = buildPricingCommandService({
     logger: false,
     internalToken,
     propertyId,
+    hotelSlug,
     auth: {
       async verifier(token) {
         if (token !== "valid") throw new AuthError("TOKEN_INVALID", "invalid");
@@ -106,13 +115,15 @@ function fixture(
     },
     ownerRead,
     ownerManage,
+    publicOffers,
+    publicQuote,
   });
   apps.push(app);
   const headers = {
     authorization: "Bearer valid",
     "x-vayada-internal-token": internalToken,
   };
-  return { app, headers, ownerRead, ownerManage };
+  return { app, headers, ownerRead, ownerManage, publicOffers, publicQuote };
 }
 
 describe("private pricing command service owner boundary", () => {
@@ -264,6 +275,113 @@ describe("private pricing command service owner boundary", () => {
         payload: { expectedRevision: null, authority: "vayada" },
       });
       expect(rejected.statusCode).toBe(400);
+    }
+  });
+});
+
+describe("private pricing command service public boundary", () => {
+  const quoteRequest = {
+    version: "public-booking-quote-request.v1",
+    selection: {
+      version: "public-pricing-selection.v1",
+      checkIn: "2026-10-01",
+      checkOut: "2026-10-02",
+      currency: "EUR",
+      rooms: [
+        {
+          selectionId: "one",
+          publicOfferKey: "offer",
+          guests: { adults: 1, childAgesAtCheckIn: [] },
+        },
+      ],
+      addons: [],
+      promoCode: null,
+    },
+    paymentMethod: "pay_at_property",
+  } as const;
+
+  it("selects only the public operation for the fixed slug even when a bearer is present", async () => {
+    const f = fixture();
+    const response = await f.app.inject({
+      method: "GET",
+      url: `/v1/public/hotels/${hotelSlug}/offers`,
+      headers: f.headers,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(f.publicOffers).toHaveBeenCalledWith(hotelSlug);
+    expect(f.ownerRead).not.toHaveBeenCalled();
+    expect(f.ownerManage).not.toHaveBeenCalled();
+  });
+
+  it("rejects alternate slugs and query selectors before selecting the public operation", async () => {
+    for (const url of [
+      "/v1/public/hotels/other-hotel/offers",
+      `/v1/public/hotels/${hotelSlug}/offers?propertyId=${otherPropertyId}`,
+    ]) {
+      const f = fixture();
+      const response = await f.app.inject({
+        method: "GET",
+        url,
+        headers: { "x-vayada-internal-token": internalToken },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(f.publicOffers).not.toHaveBeenCalled();
+    }
+  });
+
+  it("issues only pay-at-property quotes under the existing idempotency contract", async () => {
+    const f = fixture();
+    const accepted = await f.app.inject({
+      method: "POST",
+      url: `/v1/public/hotels/${hotelSlug}/quotes`,
+      headers: { "x-vayada-internal-token": internalToken, "idempotency-key": "quote-1" },
+      payload: quoteRequest,
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(f.publicQuote).toHaveBeenCalledWith(
+      hotelSlug,
+      quoteRequest,
+      "quote-1",
+      expect.any(AbortSignal),
+    );
+    expect(f.ownerManage).not.toHaveBeenCalled();
+
+    for (const payload of [
+      { ...quoteRequest, paymentMethod: "card" },
+      { ...quoteRequest, organizationId },
+    ]) {
+      const rejected = await f.app.inject({
+        method: "POST",
+        url: `/v1/public/hotels/${hotelSlug}/quotes`,
+        headers: { "x-vayada-internal-token": internalToken, "idempotency-key": "quote 2" },
+        payload,
+      });
+      expect(rejected.statusCode).toBe(400);
+    }
+    expect(f.publicQuote).toHaveBeenCalledOnce();
+  });
+
+  it("preserves refresh-required versus idempotency-conflict quote outcomes", async () => {
+    for (const [reported, expected] of [
+      ["QUOTE_REFRESH_REQUIRED", "QUOTE_REFRESH_REQUIRED"],
+      [undefined, "idempotency_conflict"],
+    ] as const) {
+      const f = fixture({
+        publicQuote: vi.fn().mockRejectedValue(
+          Object.assign(new Error("safe internal quote failure"), {
+            statusCode: 409,
+            ...(reported ? { code: reported } : {}),
+          }),
+        ),
+      });
+      const response = await f.app.inject({
+        method: "POST",
+        url: `/v1/public/hotels/${hotelSlug}/quotes`,
+        headers: { "x-vayada-internal-token": internalToken, "idempotency-key": "quote-error" },
+        payload: quoteRequest,
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ code: expected });
     }
   });
 });
