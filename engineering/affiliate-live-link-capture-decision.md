@@ -315,5 +315,11 @@ capture store is enabled.
    effect. Existing referral URLs and users need a separate preservation-aware
    cutover plan.
 
+The `/r/:publicToken` route adapter exists for isolated tests but is not
+registered by the runtime. Registration requires a production quota provider
+that rejects before any click write, a transaction-bound visit implementation,
+and completion of the privacy and readiness gates above. The API suppresses
+default request logs for `/r/` and URLs carrying `vref`.
+
 This proposal does not choose a provider, promise cross-device attribution or
 infer an external completed stay from a redirect or reservation.
