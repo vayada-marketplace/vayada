@@ -83,7 +83,7 @@ export function createPgFinanceManualExpenseRepository(
         await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'");
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [lockKey]);
         const property = await client.query(
-          "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE",
+          "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid",
           [raw.propertyId],
         );
         if (property.rowCount !== 1) return await stop(client, { ok: false, code: "not_found" });
@@ -255,7 +255,7 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='10s'");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`${UPDATE_OPERATION}|${raw.propertyId.toLowerCase()}|${keyHash}`]);
     const property = await client.query(
-      "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE",
+      "SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid",
       [raw.propertyId],
     );
     if (property.rowCount !== 1) return await stop(client, { ok: false, code: "not_found" });
@@ -287,7 +287,7 @@ async function mutate(pool: pg.Pool, raw: UpdateFinanceManualExpenseCommand): Pr
               EXISTS (SELECT 1 FROM finance.expenses child
                 WHERE child.reverses_expense_id=e.id) AS reversed
        FROM finance.expenses e
-       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin IN ('manual','supplier_bill') FOR UPDATE`,
+       WHERE e.id=$1::uuid AND e.property_id=$2::uuid AND e.origin IN ('manual','supplier_bill')`,
       [raw.expenseId, raw.propertyId],
     );
     const previous = found.rows[0];

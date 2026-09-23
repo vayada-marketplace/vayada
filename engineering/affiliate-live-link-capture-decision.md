@@ -10,12 +10,16 @@ authorize live capture or a public redirect by itself.**
 
 Marketplace now stores one stable opaque link per activated agreement and can
 read whether the agreement is active under a locked `READ COMMITTED` transaction.
-The link is still an internal reference: `/r/:token` has no public handler and
-there is no trusted click occurrence store or original-booking click-history
-binding. The existing Booking Web affiliate-click event is diagnostic: its
+The link is still an internal reference: the `/r/:token` route adapter is not
+registered by the runtime. Server-owned click occurrences and original-booking
+click-history bindings exist as dormant primitives. The existing Booking Web affiliate-click event is diagnostic: its
 browser-supplied referral/session fields do not establish creator attribution.
 Production link creation also defaults to blocked until its server-owned
 readiness adapter is wired; synthetic test readiness is not live evidence.
+The visit scope reader resolves the exact activated publication, checks its
+accepted disclosure digest, and obtains the destination version and attribution
+window under the caller's click transaction. Malformed or over-90-day terms
+remain blocked. It does not enable capture or redirects.
 
 The [referral validation contract](affiliate-referral-validation.md) explicitly
 leaves browser storage, consent basis, retention and cross-domain transport for
@@ -317,9 +321,17 @@ capture store is enabled.
 
 The `/r/:publicToken` route adapter exists for isolated tests but is not
 registered by the runtime. Registration requires a production quota provider
-that rejects before any click write, a transaction-bound visit implementation,
+that rejects before any click write, production visit wiring,
 and completion of the privacy and readiness gates above. The API suppresses
 default request logs for `/r/` and URLs carrying `vref`.
+
+The normal-visit transaction now combines the accepted scope reader, current
+native URL-safety evidence, referral round-trip readiness, and one immutable
+click write. It defaults to blocked without a server-owned readiness
+configuration; test-only readiness responses do not authorize production use.
+Optional campaign labels are stored only as advisory occurrence metadata. The
+normal transaction does not yet provide the durable incomplete interval needed
+for a safe degraded redirect, so it remains disconnected from the public route.
 
 This proposal does not choose a provider, promise cross-device attribution or
 infer an external completed stay from a redirect or reservation.

@@ -2,7 +2,15 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { beforeEach } from "vitest";
 import { id, publicationFixture } from "./affiliatePublicationTestFixture.js";
-export const disclosure = '{ "commission": "12.50%", "windowDays": 14 }';
+export const disclosure = JSON.stringify({
+  contractVersion: "marketplace-published-affiliate-terms.v1",
+  terms: {
+    bookingDestinationId: id(30),
+    financePolicyVersionId: "policy-1",
+    attributionWindowDays: 14,
+  },
+  commission: "12.50%",
+});
 export const disclosureHash = createHash("sha256").update(disclosure).digest("hex");
 export function assentFixture() {
   const fixture = publicationFixture();

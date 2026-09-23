@@ -14,6 +14,8 @@ import {
   type AffiliateLinkCreationReadiness,
 } from "./marketplaceAffiliateLinkCreation.js";
 import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
+import { readMarketplaceAffiliateVisitScope } from "./marketplaceAffiliateVisitScope.js";
+import { createMarketplaceAffiliateVisit } from "./marketplaceAffiliateVisit.js";
 import {
   affiliateTrafficSource,
   recordMarketplaceAffiliateClick,
@@ -114,6 +116,9 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await pool().query(
       await readFile(new URL("0406_affiliate_live_click_storage.sql", migrations), "utf8"),
     );
+    await pool().query(
+      await readFile(new URL("0411_affiliate_click_campaign_label.sql", migrations), "utf8"),
+    );
   });
 
   it("creates one stable creator-owned link with a default share path", async () => {
@@ -141,6 +146,121 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
     ).toBe("1");
+  });
+
+  it("resolves the accepted destination and window under the click transaction", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await readMarketplaceAffiliateVisitScope(client, link.publicToken)).toEqual({
+        status: "eligible",
+        linkId: link.linkId,
+        agreementId,
+        propertyId: id(3),
+        termsId: id(51),
+        organizationId: id(4),
+        destinationVersionId: id(30),
+        attributionWindowDays: 14,
+      });
+      expect(await readMarketplaceAffiliateVisitScope(client, "invalid")).toEqual({
+        status: "unavailable",
+      });
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+  });
+
+  it("records distinct eligible visits only after native safety and referral readiness", async () => {
+    await pool().query(
+      `
+      ALTER TABLE hotel_catalog.properties ADD COLUMN lifecycle_status TEXT DEFAULT 'active';
+      CREATE TABLE hotel_catalog.property_slugs(property_id UUID,slug TEXT,purpose TEXT,status TEXT);
+      CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
+        canonical_when_verified BOOLEAN);
+      CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
+        created_by_organization_id UUID,booking_url TEXT);`,
+    );
+    await pool().query(
+      "INSERT INTO hotel_catalog.property_slugs VALUES ($1,'hotel-alpenrose','canonical','active')",
+      [id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_destination_versions VALUES
+        ($1,$2,$3,'https://hotel-alpenrose.next-booking.vayada.com/')`,
+      [id(30), id(3), id(4)],
+    );
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const visit = (campaignLabel: string | null, source: "instagram" | "unknown") =>
+      createMarketplaceAffiliateVisit(
+        pool(),
+        { publicToken: link.publicToken, campaignLabel, source },
+        async () => ({
+          certificationEnvironment: "sandbox",
+          certificationConnectionReference: "synthetic-certification",
+          productionConnectionReference: "synthetic-preflight",
+          adapterVersion: "synthetic-v1",
+        }),
+        async () => ({
+          status: "ready",
+          capability: "referral_round_trip",
+          policyVersion: "booking-affiliate-referral-readiness.v1",
+          evidenceReferences: ["synthetic-only"],
+          validatedAt: new Date().toISOString(),
+        }),
+      );
+    expect(
+      await createMarketplaceAffiliateVisit(pool(), {
+        publicToken: link.publicToken,
+        campaignLabel: null,
+        source: "unknown",
+      }),
+    ).toEqual({ status: "unavailable" });
+    expect(await visit("instagram.reel-1", "instagram")).toMatchObject({ status: "ready" });
+    expect(await visit(null, "unknown")).toMatchObject({ status: "ready" });
+    expect(
+      (
+        await pool().query(
+          `SELECT link_id,property_id,terms_id,source,synthetic,campaign_label,reference_token
+         FROM marketplace.affiliate_click_occurrences ORDER BY clicked_at,id`,
+        )
+      ).rows,
+    ).toMatchObject([
+      {
+        link_id: link.linkId,
+        property_id: id(3),
+        terms_id: id(51),
+        source: "instagram",
+        synthetic: false,
+        campaign_label: "instagram.reel-1",
+      },
+      {
+        link_id: link.linkId,
+        property_id: id(3),
+        terms_id: id(51),
+        source: "unknown",
+        synthetic: false,
+        campaign_label: null,
+      },
+    ]);
+    const references = (
+      await pool().query("SELECT reference_token FROM marketplace.affiliate_click_occurrences")
+    ).rows.map((row) => row.reference_token);
+    expect(new Set(references).size).toBe(2);
+    await pool().query("INSERT INTO hotel_catalog.property_domains VALUES ($1,'verified',TRUE)", [
+      id(3),
+    ]);
+    expect(await visit(null, "unknown")).toEqual({ status: "unavailable" });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_occurrences")).rows[0]
+        .count,
+    ).toBe("2");
+    expect(
+      (await pool().query("SELECT count(*) FROM finance.affiliate_earning_journal")).rows[0].count,
+    ).toBe("0");
   });
 
   it("records separate synthetic visits without trusting referrer for ownership", async () => {

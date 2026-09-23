@@ -547,6 +547,71 @@ describe.skipIf(!URL)("PostgreSQL Finance manual expense repository", () => {
     ).resolves.toEqual({ ok: false, code: "not_found" });
   });
 
+  it("creates and corrects supplier bills without property or expense update privileges", async () => {
+    const role = `vay2037_runtime_${process.pid}`;
+    const password = "vay2037_runtime_test";
+    const restrictedUrl = new globalThis.URL(URL!);
+    restrictedUrl.username = role;
+    restrictedUrl.password = password;
+    await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
+    await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog,finance,platform TO ${role};
+      GRANT SELECT ON hotel_catalog.properties,finance.expense_categories,finance.expenses,platform.idempotency_keys TO ${role};
+      GRANT INSERT ON finance.expenses,platform.idempotency_keys,platform.product_audit_events TO ${role};
+      GRANT UPDATE ON platform.idempotency_keys TO ${role}`);
+    const restricted = createPgFinanceManualExpenseRepository(restrictedUrl.toString());
+    try {
+      const privileges = await admin.query(
+        `SELECT has_table_privilege($1,'hotel_catalog.properties','UPDATE') AS "propertyUpdate",
+                has_table_privilege($1,'finance.expenses','INSERT') AS "expenseInsert",
+                has_table_privilege($1,'finance.expenses','UPDATE') AS "expenseUpdate"`,
+        [role],
+      );
+      expect(privileges.rows[0]).toEqual({
+        propertyUpdate: false,
+        expenseInsert: true,
+        expenseUpdate: false,
+      });
+
+      const source = crypto.randomUUID();
+      const corrected = crypto.randomUUID();
+      const create = {
+        ...command(source, "restricted-supplier-create"),
+        supplierInvoiceNumber: "SUP-RESTRICTED-001",
+      };
+      await expect(restricted.create(create)).resolves.toMatchObject({
+        ok: true,
+        outcome: "created",
+        item: { id: source, supplierInvoiceNumber: "SUP-RESTRICTED-001" },
+      });
+      await expect(restricted.create(create)).resolves.toMatchObject({
+        ok: true,
+        outcome: "replayed",
+        item: { id: source },
+      });
+      const correction = {
+        ...mutation("restricted-supplier-correct", 1, source, corrected),
+        supplierInvoiceNumber: "SUP-RESTRICTED-002",
+      };
+      await expect(restricted.update(correction)).resolves.toMatchObject({
+        ok: true,
+        outcome: "corrected",
+        item: {
+          id: corrected,
+          reversesExpenseId: source,
+          supplierInvoiceNumber: "SUP-RESTRICTED-002",
+        },
+      });
+      await expect(restricted.update(correction)).resolves.toMatchObject({
+        ok: true,
+        outcome: "replayed",
+        item: { id: corrected },
+      });
+    } finally {
+      await restricted.close();
+      await admin.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+  });
+
   async function cleanup() {
     await admin.query(`BEGIN; SET LOCAL session_replication_role=replica;
       DELETE FROM finance.expenses WHERE property_id IN ('${PROPERTY}','${OTHER_PROPERTY}');
