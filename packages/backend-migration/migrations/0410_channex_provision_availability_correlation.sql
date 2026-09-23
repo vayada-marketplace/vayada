@@ -39,7 +39,7 @@ BEGIN
      AND (
        (j.job_type='channex.sync_ari' AND j.payload->>'operationType'='sync_ari') OR
        (j.job_type='channex.provision' AND j.payload->>'operationType'='provision'
-         AND j.payload->'publishedOffer'->>'roomTypeId'=m.room_type_id::text)
+         AND lower(j.payload->'publishedOffer'->>'roomTypeId')=m.room_type_id::text)
      )
    FOR SHARE OF m,c,r,j,a;
   IF NOT FOUND OR NEW.state<>'unresolved' THEN

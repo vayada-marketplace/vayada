@@ -1858,7 +1858,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           });
           await admin.query(
             `UPDATE platform.jobs SET payload=jsonb_set(payload,'{publishedOffer,roomTypeId}',to_jsonb($2::text)) WHERE id=$1`,
-            [f.lease.jobId, f.roomTypeId],
+            [f.lease.jobId, f.roomTypeId.toUpperCase()],
           );
         }
         const prepared =

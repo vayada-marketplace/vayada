@@ -351,7 +351,7 @@ describe.skipIf(!url)("Channex room availability attempt storage", () => {
       `UPDATE platform.jobs
        SET payload=jsonb_set(payload,'{publishedOffer,roomTypeId}',to_jsonb($2::text))
        WHERE id=$1`,
-      [f.jobId, f.roomTypeId],
+      [f.jobId, f.roomTypeId.toUpperCase()],
     );
     await expect(f.insert()).resolves.toMatchObject({ rowCount: 1 });
   });
