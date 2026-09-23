@@ -232,6 +232,25 @@ jobs:
           npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseWorkerBoundary.integration.test.ts
           TEST_FINANCE_WORKER_DATABASE_URL=postgresql://vayada_next_finance_expense_worker:fixture@127.0.0.1:5432/vay2044_worker_test npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExpenseGeneration.integration.test.ts
 
+      - name: Verify Financials export worker permissions and real handlers
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2045_worker_test
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("CREATE DATABASE vay2045_worker_test"); await client.end();
+          '
+          TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
+          npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExportWorkerBoundary.integration.test.ts src/jobs/financeFolioExport.integration.test.ts
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href }); await client.connect();
+            await client.query("DROP DATABASE vay2045_worker_test WITH (FORCE)"); await client.end();
+          '
+
       - name: Verify pricing command native login scope
         run: >-
           npm --workspace vayada-api run test -- --no-file-parallelism
@@ -337,7 +356,6 @@ jobs:
           src/domains/financeFolioCommandRepository.integration.test.ts
           src/domains/financeFolioReadRepository.integration.test.ts
           src/domains/financeFolioExportRepository.integration.test.ts
-          src/jobs/financeFolioExport.integration.test.ts
           src/domains/financeProviderFeeEvidence.integration.test.ts
           src/domains/financeProviderFeeExpenseProjection.integration.test.ts
           src/domains/stripeProviderAccountReconciliation.integration.test.ts
