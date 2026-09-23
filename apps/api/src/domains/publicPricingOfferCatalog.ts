@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { parseBookingPublicContent } from "@vayada/domain-distribution/booking-publication";
 import { lockPublicPricingPublication } from "./publicPricingPublication.js";
 import { lockPublicPricingAuthority } from "./publicPricingAuthority.js";
@@ -7,14 +7,28 @@ import { mapReplacementPublicOffers } from "./replacementPublicOfferMapping.js";
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 
 /** Published public choices only; no date-specific price, inventory hold or booking authority. */
-export function createPublicPricingOfferCatalog(pool: Pool) {
+export function createPublicPricingOfferCatalog(
+  pool: Pool,
+  options: {
+    assertRuntimeScope?: (
+      client: PoolClient,
+    ) => Promise<{ propertyId: string; organizationId: string }>;
+  } = {},
+) {
   return {
     async read(slug: string) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const assigned = await options.assertRuntimeScope?.(client);
         const owner = await lockPublicPricingPublication(client, slug);
         if (!owner) return null;
+        if (
+          assigned &&
+          (assigned.propertyId !== owner.scope.propertyId ||
+            assigned.organizationId !== owner.scope.organizationId)
+        )
+          return null;
         const mapped = mapReplacementPublicOffers(owner);
         if (!mapped) return null;
         const row = (
@@ -48,7 +62,14 @@ export function createPublicPricingOfferCatalog(pool: Pool) {
             return null;
         }
         const current = await lockPublicPricingAuthority(client, slug);
-        if (!current || !isDeepStrictEqual(current, owner.scope)) return null;
+        if (
+          !current ||
+          !isDeepStrictEqual(current, owner.scope) ||
+          (assigned &&
+            (assigned.propertyId !== current.propertyId ||
+              assigned.organizationId !== current.organizationId))
+        )
+          return null;
         return {
           version: "public-pricing-offers.v1" as const,
           rooms: content.rooms.map((room) => ({
