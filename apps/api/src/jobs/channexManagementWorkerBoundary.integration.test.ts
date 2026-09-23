@@ -6,7 +6,10 @@ import {
   channexManagementWorkerPrivileges as privileges,
 } from "./channexManagementWorkerPrivileges.js";
 import { preflightChannexManagementWorker } from "./channexManagementWorkerStartup.js";
-import { assertChannexManagementWorkerBoundary } from "./channexManagementWorkerBoundary.js";
+import {
+  assertChannexManagementWorkerBoundary,
+  channexManagementWorkerFunctions,
+} from "./channexManagementWorkerBoundary.js";
 import { createPgChannexAriSchedule } from "./pmsChannexAriSchedule.js";
 import { createPgPmsChannexManagementWorkerStore } from "./pmsChannexManagementWorkerStore.js";
 import { createPmsChannexManagementTargetState } from "./pmsChannexManagementTargetState.js";
@@ -50,6 +53,10 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     await owner.query(
       `REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${database}" TO ${role}`,
     );
+    for (const functionName of channexManagementWorkerFunctions)
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION ${functionName} FROM PUBLIC; GRANT EXECUTE ON FUNCTION ${functionName} TO ${role}`,
+      );
     await assertChannexManagementWorkerBoundary(owner, { allowMissingGrants: true });
     await owner.query(
       `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
@@ -346,7 +353,7 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
     );
     for (const sql of [
       `ALTER ROLE ${role} SET session_replication_role=replica`,
-      `REVOKE EXECUTE ON FUNCTION platform.channex_management_worker_scope(text,text,uuid) FROM PUBLIC`,
+      `REVOKE EXECUTE ON FUNCTION platform.channex_management_worker_scope(text,text,uuid) FROM ${role}`,
       `GRANT SET ON PARAMETER session_replication_role TO ${role}`,
       `GRANT UPDATE(idempotency_key_hash) ON platform.jobs TO ${role}`,
       `ALTER TABLE pms.channex_offer_targets DISABLE ROW LEVEL SECURITY`,

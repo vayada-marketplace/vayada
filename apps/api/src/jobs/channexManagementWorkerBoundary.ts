@@ -5,8 +5,16 @@ import {
   channexManagementWorkerPrivileges,
 } from "./channexManagementWorkerPrivileges.js";
 
-// Canonical catalogs from migrations 0407/0408, checked on PG16 and PG17.
+// Canonical catalogs through migration 0410, checked on PG16 and PG17.
 const POLICY_DIGEST = "fc60ee7cf0ac6346843a77b8c62b9997eda39af3aa420cd06b732d775e0bd863";
+export const channexManagementWorkerFunctions = [
+  "platform.channex_management_worker_scope(text,text,uuid)",
+  "platform.channex_management_worker_source(text,text,uuid)",
+  "platform.tenant_scope_key(text,uuid,uuid)",
+  "platform.valid_tenant_scope(text,uuid,uuid)",
+  "pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)",
+  "pms.enqueue_restriction_ari(uuid,text)",
+] as const;
 export async function assertChannexManagementWorkerBoundary(
   client: Pick<pg.Client, "query">,
   options: { allowMissingGrants?: boolean; propertyId?: string } = {},
@@ -41,16 +49,20 @@ export async function assertChannexManagementWorkerBoundary(
   )
     fail("trigger_bypass");
   const functions = await client.query(
-    `SELECT 1 FROM unnest(ARRAY[
-    'platform.channex_management_worker_scope(text,text,uuid)',
-    'platform.channex_management_worker_source(text,text,uuid)',
-    'platform.tenant_scope_key(text,uuid,uuid)', 'platform.valid_tenant_scope(text,uuid,uuid)',
-    'pms.claim_channex_external_rate(uuid,text,text,uuid,jsonb)',
-    'pms.enqueue_restriction_ari(uuid,text)']) name
-    WHERE NOT has_function_privilege($1,name,'EXECUTE')`,
-    [role],
+    `WITH required(name) AS (SELECT unnest($2::text[])), resolved AS (
+       SELECT required.name,to_regprocedure(required.name) AS oid FROM required)
+     SELECT resolved.name,resolved.oid IS NOT NULL AS exists,
+       EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL
+         aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+         WHERE p.oid=resolved.oid AND acl.grantee=$1 AND acl.privilege_type='EXECUTE') AS direct,
+       EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL
+         aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+         WHERE p.oid=resolved.oid AND acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public
+     FROM resolved`,
+    [account.oid, channexManagementWorkerFunctions],
   );
-  if (functions.rowCount) fail("function_access_missing");
+  if (functions.rows.some((row) => !row.exists || !row.direct || row.public))
+    fail("function_access_missing");
   const ddl = await client.query(
     `SELECT 1 WHERE has_database_privilege($1,current_database(),'CREATE') OR has_database_privilege($1,current_database(),'TEMP')
     UNION ALL SELECT 1 FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND has_schema_privilege($1,oid,'CREATE')
@@ -79,7 +91,7 @@ export async function assertChannexManagementWorkerBoundary(
   ).rows;
   if (
     createHash("sha256").update(JSON.stringify(catalog)).digest("hex") !==
-    "cdef6126abf7acba884943c8de759444037d342372a7c61ad4a186ce0b7e09ef"
+    "02b1b63a40dfc267b93931cde591bfb11aa85b76b96c4ae125aa306fc2285e7b"
   )
     fail("catalog_drift");
   const version = Number(
