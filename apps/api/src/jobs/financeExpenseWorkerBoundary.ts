@@ -37,7 +37,7 @@ export const financeExpenseWorkerPrivileges: Record<string, Record<string, true 
   "platform.product_audit_events": { SELECT: true, INSERT: ["audit_key", "product", "action", "occurred_at", "tenant_scope", "property_id", "actor_type", "target_resource_product", "target_resource_type", "target_resource_id", "job_id", "idempotency_key_id", "correlation_id", "causation_id", "redacted_payload", "private_payload", "audit_metadata", "retention_class", "privacy_scope"] },
 };
 
-// pg_policies canonical output from migration 0412, verified on PG16 and PG17.
+// pg_policies canonical output from migration 0413, verified on PG16 and PG17.
 const POLICY_DIGEST = "0a3142746f5c83f22e8ade0b096ef1f8d45f5912c58a9cdb980c49f9e8f4e67c";
 export async function assertFinanceExpenseWorkerBoundary(
   client: Pick<pg.Client, "query">,
@@ -102,7 +102,7 @@ export async function assertFinanceExpenseWorkerBoundary(
     !helper?.owner_matches ||
     !helper.executable ||
     createHash("sha256").update(helper.definition).digest("hex") !==
-      "b5cf59790a944e8590f8f790cf1438f904c11de83bdf9a69c5d84c123efc2b85"
+      "c7c5dbdc5ccdb791566dc3aea7f7dc056d7a462e14f8e27bb14b778b1b422b19"
   )
     fail("helper_drift");
   const pricingViews = (

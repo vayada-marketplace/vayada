@@ -140,4 +140,14 @@ describe("pricing acceptance writer", () => {
       expect.objectContaining({ syntheticAffiliateContextId: "trusted-fixture-context" }),
     );
   });
+  it("passes a server-owned live context only for a fresh booking", async () => {
+    await writePricingAcceptance(pool as never, input, {
+      affiliateContextId: "trusted-live-context",
+    });
+    expect(stagePricingBookingDraft).toHaveBeenCalledWith(
+      client,
+      input.slug,
+      expect.objectContaining({ affiliateContextId: "trusted-live-context" }),
+    );
+  });
 });

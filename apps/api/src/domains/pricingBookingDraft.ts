@@ -19,6 +19,8 @@ type Input = {
   publicReference: string;
   /** Server-owned synthetic fixture only; never read from a guest command. */
   syntheticAffiliateContextId?: string;
+  /** Server-derived first-party context only; never read from a guest command. */
+  affiliateContextId?: string;
 };
 const iso = (v: unknown): v is string =>
   typeof v === "string" && Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
@@ -108,7 +110,11 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
   const cents = numerator / unit,
     amount = `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
   const guest = parsed.guest;
-  if (input.syntheticAffiliateContextId !== undefined) {
+  if (input.syntheticAffiliateContextId !== undefined && input.affiliateContextId !== undefined)
+    return fail();
+  const affiliateContextId = input.syntheticAffiliateContextId ?? input.affiliateContextId;
+  const syntheticAffiliate = input.syntheticAffiliateContextId !== undefined;
+  if (affiliateContextId !== undefined) {
     await client.query("SAVEPOINT pricing_affiliate_binding_guard");
     await client.query("RELEASE SAVEPOINT pricing_affiliate_binding_guard");
     if (
@@ -118,10 +124,21 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       return fail();
     const context = await client.query(
       `SELECT id FROM booking.affiliate_click_contexts
-       WHERE id=$1 AND property_id=$2 AND synthetic=TRUE FOR UPDATE`,
-      [input.syntheticAffiliateContextId, scope.propertyId],
+       WHERE id=$1 AND property_id=$2 AND synthetic=$3 FOR UPDATE`,
+      [affiliateContextId, scope.propertyId, syntheticAffiliate],
     );
     if (!context.rowCount) return fail();
+    // The snapshot after acquiring the lock includes admissions committed while waiting.
+    if (
+      !syntheticAffiliate &&
+      !(
+        await client.query(
+          "SELECT 1 FROM booking.affiliate_click_admissions WHERE context_id=$1 LIMIT 1",
+          [affiliateContextId],
+        )
+      ).rowCount
+    )
+      return fail();
   }
   await client.query(
     `WITH draft AS (
@@ -163,21 +180,22 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.specialRequests,
     ],
   );
-  if (input.syntheticAffiliateContextId !== undefined)
+  if (affiliateContextId !== undefined)
     await client.query(
       `INSERT INTO booking.affiliate_original_booking_bindings
          (booking_id,property_id,context_id,history_cutoff,
           original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
-       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,TRUE
+       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,$8
        FROM booking.affiliate_click_admissions WHERE context_id=$3`,
       [
         bookingId,
         scope.propertyId,
-        input.syntheticAffiliateContextId,
+        affiliateContextId,
         publicReference,
         quote.stay.checkIn,
         quote.stay.checkOut,
         quote.stay.currency,
+        syntheticAffiliate,
       ],
     );
   await persistPricingBookingAddons(client, slug, current, bookingId);
