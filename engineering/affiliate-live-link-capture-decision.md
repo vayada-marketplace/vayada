@@ -10,12 +10,16 @@ authorize live capture or a public redirect by itself.**
 
 Marketplace now stores one stable opaque link per activated agreement and can
 read whether the agreement is active under a locked `READ COMMITTED` transaction.
-The link is still an internal reference: `/r/:token` has no public handler and
-there is no trusted click occurrence store or original-booking click-history
-binding. The existing Booking Web affiliate-click event is diagnostic: its
+The link is still an internal reference: the `/r/:token` route adapter is not
+registered by the runtime. Server-owned click occurrences and original-booking
+click-history bindings exist as dormant primitives. The existing Booking Web affiliate-click event is diagnostic: its
 browser-supplied referral/session fields do not establish creator attribution.
 Production link creation also defaults to blocked until its server-owned
 readiness adapter is wired; synthetic test readiness is not live evidence.
+The visit scope reader resolves the exact activated publication, checks its
+accepted disclosure digest, and obtains the destination version and attribution
+window under the caller's click transaction. Malformed or over-90-day terms
+remain blocked. It does not enable capture or redirects.
 
 The [referral validation contract](affiliate-referral-validation.md) explicitly
 leaves browser storage, consent basis, retention and cross-domain transport for

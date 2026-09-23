@@ -14,6 +14,7 @@ import {
   type AffiliateLinkCreationReadiness,
 } from "./marketplaceAffiliateLinkCreation.js";
 import { readMarketplaceAffiliateLinkEligibility } from "./marketplaceAffiliateLinkEligibility.js";
+import { readMarketplaceAffiliateVisitScope } from "./marketplaceAffiliateVisitScope.js";
 import {
   affiliateTrafficSource,
   recordMarketplaceAffiliateClick,
@@ -141,6 +142,31 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
     ).toBe("1");
+  });
+
+  it("resolves the accepted destination and window under the click transaction", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(await readMarketplaceAffiliateVisitScope(client, link.publicToken)).toEqual({
+        status: "eligible",
+        linkId: link.linkId,
+        agreementId,
+        propertyId: id(3),
+        termsId: id(51),
+        organizationId: id(4),
+        destinationVersionId: id(30),
+        attributionWindowDays: 14,
+      });
+      expect(await readMarketplaceAffiliateVisitScope(client, "invalid")).toEqual({
+        status: "unavailable",
+      });
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
   });
 
   it("records separate synthetic visits without trusting referrer for ownership", async () => {
