@@ -288,6 +288,7 @@ export async function readPublishedPricingForChannexJob(
     ariRequest: _ariRequest,
     stagedAri: _stagedAri,
     nextAriDate: _nextAriDate,
+    initialAriWindow: _initialAriWindow,
     ...evidence
   } = result;
   return evidence;
@@ -348,7 +349,11 @@ type TargetWork =
       attemptId: string;
       ariAttemptId: string;
       taskRead?: true;
-      reconciliation?: { expected: unknown; evidence: unknown };
+      reconciliation?: {
+        expected: unknown;
+        evidence: unknown;
+        state: "reconciled" | "outside_horizon";
+      };
     }
   | { kind: "ari_claim"; attemptId: string; date: string }
   | {
@@ -767,8 +772,10 @@ export async function reconcileCurrentChannexInitialAri(
   const before = await withSelectedChannexTarget(pool, lease, selected, work);
   if (before.kind !== "available") return before;
   const original = before.stagedAri,
-    identity = before.configurationIdentity;
-  if (!original?.taskIds || !identity) throw new Error("Original ARI tasks missing");
+    identity = before.configurationIdentity,
+    initialAriWindow = before.initialAriWindow;
+  if (!original?.taskIds || !identity || !initialAriWindow)
+    throw new Error("Original ARI tasks missing");
   const room = before.publication.rooms.find((r) => r.roomTypeId === selected.roomTypeId)!;
   const evidence = await boundedProviderCall(async (signal) => {
     const read = (_method: "GET", path: string) => {
@@ -785,6 +792,21 @@ export async function reconcileCurrentChannexInitialAri(
         ),
       );
     }
+    const request = original.request as { values?: readonly { date?: unknown }[] };
+    const date = request.values?.[0]?.date;
+    if (typeof date !== "string") throw new Error("Original ARI date missing");
+    if (date < initialAriWindow.propertyLocalDate || date > initialAriWindow.through)
+      return {
+        schemaVersion: 1,
+        completionBasis: "finished_task_outside_initial_horizon",
+        originalReceiptId: original.receiptId,
+        taskCount: tasks.length,
+        supportedFrom: initialAriWindow.propertyLocalDate,
+        supportedThrough: initialAriWindow.through,
+        observationsSha256: createHash("sha256")
+          .update(JSON.stringify({ tasks, initialAriWindow }))
+          .digest("hex"),
+      };
     const prices = await verifyChannexStagedNightPrices(
       room,
       selected.offerId,
@@ -808,6 +830,10 @@ export async function reconcileCurrentChannexInitialAri(
       restrictions,
     };
   });
+  const state =
+    evidence.completionBasis === "finished_task_outside_initial_horizon"
+      ? ("outside_horizon" as const)
+      : ("reconciled" as const);
   const after = await withSelectedChannexTarget(pool, lease, selected, {
     ...work,
     reconciliation: {
@@ -816,17 +842,21 @@ export async function reconcileCurrentChannexInitialAri(
         reservation: before.reservation,
         configurationIdentity: before.configurationIdentity,
         publication: before.publication,
+        initialAriWindow,
       },
       evidence,
+      state,
     },
   });
   if (after.kind !== "available") return after;
-  return {
-    kind: "ari_reconciled" as const,
+  const result = {
     creationAttemptId: attemptId,
     ariAttemptId,
     ...after.reservation,
   };
+  return state === "reconciled"
+    ? { kind: "ari_reconciled" as const, ...result }
+    : { kind: "ari_retired" as const, ...result };
 }
 /** Select from current verified coverage, then acquire a fresh one-use dispatch. */
 export async function prepareNextChannexInitialAriDispatch(
@@ -1243,6 +1273,9 @@ async function withPublishedChannexPricing(
         }
       | undefined;
     let nextAriDate: string | null | undefined;
+    let initialAriWindow:
+      | { propertyLocalDate: string; through: string; timeZone: unknown }
+      | undefined;
     let identification: { attemptId: string; externalRatePlanId: string } | undefined;
     let configurationIdentity: ReturnType<typeof readChannexCreatedRateIdentity> | undefined;
     let activation: { targetId: string; version: string } | undefined;
@@ -1482,6 +1515,34 @@ async function withPublishedChannexPricing(
                 )
               ).rows;
               stagedAri = { attemptId: stored.id, request: stored.request_body, history };
+              const location = (
+                await client.query(
+                  "SELECT timezone FROM hotel_catalog.property_locations WHERE property_id=$1 FOR SHARE NOWAIT",
+                  [lease.propertyId],
+                )
+              ).rows[0];
+              const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0]
+                .now as Date;
+              const prior = await readChannexInitialAriHistory(
+                client,
+                configurationIdentity,
+                attempt.id,
+                work.ariAttemptId,
+              );
+              if (prior.rows.some((row) => row.verified !== true))
+                return unavailable("ari_reconciliation_required");
+              const window = selectNextChannexInitialAriDate(
+                location?.timezone,
+                now,
+                prior.rows.map((row) => row.date),
+                prior.rows[0]?.date,
+              );
+              if (window.kind !== "selected") return window;
+              initialAriWindow = {
+                propertyLocalDate: window.propertyLocalDate,
+                through: window.through,
+                timeZone: window.timeZone,
+              };
               if (work.taskRead) {
                 const receipts = (
                   await client.query(
@@ -1517,7 +1578,22 @@ async function withPublishedChannexPricing(
               ).rows[0];
               const now = (await client.query("SELECT clock_timestamp() AS now")).rows[0]
                 .now as Date;
-              const dateAdmission = admitChannexInitialAriDate(work.date, location?.timezone, now);
+              // Anchor the run to its first verified date. A hotel-local midnight must not
+              // make a completed provider update eligible for a duplicate send.
+              const prior = await readChannexInitialAriHistory(
+                client,
+                configurationIdentity,
+                attempt.id,
+                work.kind === "ari_dispatch" ? work.ariAttemptId : null,
+              );
+              if (prior.rows.some((row) => row.verified !== true))
+                return unavailable("ari_reconciliation_required");
+              const dateAdmission = admitChannexInitialAriDate(
+                work.date,
+                location?.timezone,
+                now,
+                prior.rows[0]?.date,
+              );
               if (dateAdmission.kind !== "admitted") return dateAdmission;
               const evidence = JSON.stringify({
                 schemaVersion: 1,
@@ -1578,15 +1654,6 @@ async function withPublishedChannexPricing(
                   },
                 ],
               };
-              // Older dates must have service-verified completion, not a raw storage release.
-              const prior = await readChannexInitialAriHistory(
-                client,
-                configurationIdentity,
-                attempt.id,
-                work.kind === "ari_dispatch" ? work.ariAttemptId : null,
-              );
-              if (prior.rows.some((row) => row.verified !== true))
-                return unavailable("ari_reconciliation_required");
               if (prior.rows.some((row) => row.date === work.date))
                 return unavailable("ari_date_already_reconciled");
               if (work.kind === "ari_dispatch") {
@@ -1682,6 +1749,7 @@ async function withPublishedChannexPricing(
                 location?.timezone,
                 now,
                 prior.rows.map((row) => row.date),
+                prior.rows[0]?.date,
               );
               if (selectedDate.kind !== "selected") return selectedDate;
               nextAriDate = selectedDate.date;
@@ -1754,6 +1822,7 @@ async function withPublishedChannexPricing(
                 location?.timezone,
                 now,
                 initialAri.rows.map((row) => row.date),
+                initialAri.rows[0]?.date,
               );
               if (horizon.kind !== "selected" || horizon.date !== null)
                 return unavailable("initial_ari_incomplete");
@@ -1892,14 +1961,19 @@ async function withPublishedChannexPricing(
           reservation,
           configurationIdentity,
           publication: snapshot,
+          initialAriWindow,
         })
       )
         return unavailable("ari_reconciliation_stale");
       const saved = await client.query(
         `UPDATE pms.channex_offer_ari_attempts
-         SET state='reconciled',reconciliation_evidence=$2::jsonb
+         SET state=$3,reconciliation_evidence=$2::jsonb
          WHERE id=$1 AND state='unresolved' RETURNING id`,
-        [work.ariAttemptId, JSON.stringify(work.reconciliation.evidence)],
+        [
+          work.ariAttemptId,
+          JSON.stringify(work.reconciliation.evidence),
+          work.reconciliation.state,
+        ],
       );
       if (!saved.rowCount) return unavailable("ari_attempt_unavailable");
     }
@@ -1932,6 +2006,7 @@ async function withPublishedChannexPricing(
       ariRequest,
       stagedAri,
       nextAriDate,
+      initialAriWindow,
       activation,
     });
   } catch (error) {

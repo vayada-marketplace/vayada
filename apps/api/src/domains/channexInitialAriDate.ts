@@ -3,12 +3,17 @@ import { DEFAULT_FULL_ARI_DAYS_AHEAD } from "../jobs/pmsChannexAriHorizon.js";
 const unavailable = { kind: "unavailable", reason: "ari_date_unavailable" } as const;
 
 /** Calendar-date admission only; no availability, capability or send permission. */
-export function admitChannexInitialAriDate(date: string, timeZone: unknown, now: Date) {
+export function admitChannexInitialAriDate(
+  date: string,
+  timeZone: unknown,
+  now: Date,
+  anchorDate?: string,
+) {
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return unavailable;
   const selected = new Date(`${date}T00:00:00.000Z`);
   if (!Number.isFinite(selected.getTime()) || selected.toISOString().slice(0, 10) !== date)
     return unavailable;
-  const window = initialAriWindow(timeZone, now);
+  const window = initialAriWindow(timeZone, now, anchorDate);
   if (window.kind !== "window" || date < window.propertyLocalDate || date > window.through)
     return unavailable;
   return { ...window, kind: "admitted" as const, date };
@@ -19,8 +24,9 @@ export function selectNextChannexInitialAriDate(
   timeZone: unknown,
   now: Date,
   completed: readonly string[],
+  anchorDate?: string,
 ) {
-  const window = initialAriWindow(timeZone, now);
+  const window = initialAriWindow(timeZone, now, anchorDate);
   if (window.kind !== "window") return window;
   const covered = new Set(completed);
   const cursor = new Date(`${window.propertyLocalDate}T00:00:00.000Z`);
@@ -35,14 +41,22 @@ export function selectNextChannexInitialAriDate(
   return { ...window, kind: "selected" as const, date: null };
 }
 
-function initialAriWindow(timeZone: unknown, now: Date) {
+function initialAriWindow(timeZone: unknown, now: Date, anchorDate?: string) {
   const today = channexPropertyLocalDate(timeZone, now);
   if (!today) return unavailable;
-  const end = new Date(`${today}T00:00:00.000Z`);
+  const start = anchorDate ?? today;
+  const parsed = new Date(`${start}T00:00:00.000Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+    !Number.isFinite(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== start
+  )
+    return unavailable;
+  const end = new Date(parsed);
   // Calendar arithmetic intentionally avoids 24-hour additions in the hotel's zone.
   end.setUTCDate(end.getUTCDate() + DEFAULT_FULL_ARI_DAYS_AHEAD);
   const through = end.toISOString().slice(0, 10);
-  return { kind: "window" as const, propertyLocalDate: today, through, timeZone };
+  return { kind: "window" as const, propertyLocalDate: start, through, timeZone };
 }
 
 /** Validated hotel-local calendar date only; no horizon or provider authority. */
