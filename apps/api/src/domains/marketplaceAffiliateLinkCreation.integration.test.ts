@@ -131,7 +131,7 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       await readFile(new URL("0411_affiliate_click_campaign_label.sql", migrations), "utf8"),
     );
     await pool().query(
-      await readFile(new URL("0416_affiliate_guarded_click_capture.sql", migrations), "utf8"),
+      await readFile(new URL("0417_affiliate_guarded_click_capture.sql", migrations), "utf8"),
     );
   });
 
