@@ -150,7 +150,7 @@ export async function assertFinanceExpenseWorkerBoundary(
   ];
   const tableGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,privilege,pg_catalog.has_table_privilege($1,c.oid,privilege||' WITH GRANT OPTION') AS delegate FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN pg_catalog.unnest($2::pg_catalog.text[]) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND pg_catalog.has_schema_privilege($1,n.oid,'USAGE') AND pg_catalog.has_table_privilege($1,c.oid,privilege)`,
+      `SELECT n.nspname||'.'||c.relname AS name,privilege,pg_catalog.has_table_privilege($1,c.oid,privilege||' WITH GRANT OPTION') AS delegate FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN pg_catalog.unnest($2::pg_catalog.text[]) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND pg_catalog.has_table_privilege($1,c.oid,privilege)`,
       [role, kinds],
     )
   ).rows;
@@ -163,7 +163,7 @@ export async function assertFinanceExpenseWorkerBoundary(
       fail("table_privileges");
   const columnGrants = (
     await client.query(
-      `SELECT n.nspname||'.'||c.relname AS name,a.attname,privilege,pg_catalog.has_column_privilege($1,c.oid,a.attname,privilege||' WITH GRANT OPTION') AS delegate FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN pg_catalog.unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND pg_catalog.has_schema_privilege($1,n.oid,'USAGE') AND a.attnum>0 AND NOT a.attisdropped AND pg_catalog.has_column_privilege($1,c.oid,a.attname,privilege)`,
+      `SELECT n.nspname||'.'||c.relname AS name,a.attname,privilege,pg_catalog.has_column_privilege($1,c.oid,a.attname,privilege||' WITH GRANT OPTION') AS delegate FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN pg_catalog.unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) privilege WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' AND a.attnum>0 AND NOT a.attisdropped AND pg_catalog.has_column_privilege($1,c.oid,a.attname,privilege)`,
       [role],
     )
   ).rows;
