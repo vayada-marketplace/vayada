@@ -2216,6 +2216,7 @@ app.addHook("onClose", async () => {
     financeRevenueRuntime?.close(),
     financeDashboardRuntime?.close(),
     financeProfitLossRuntime?.close(),
+    financeFolioRuntime?.close(),
     bankTransferRepository?.close(),
     bankTransferBookings?.close(),
     bankTransferKms?.close(),

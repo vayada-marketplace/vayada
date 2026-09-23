@@ -1440,6 +1440,55 @@ describe("Airbnb alteration runtime opt-in", () => {
   });
 });
 
+describe("Finance export worker boundary config", () => {
+  const env = {
+    ...financeFolioKmsEnv,
+    FINANCE_SOURCE: "target",
+    TARGET_DATABASE_URL: "postgresql://api:fixture@localhost/target",
+    PLATFORM_MEDIA_BUCKET: "vayada-media-test",
+    PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.test.vayada.com",
+    PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-test.s3.eu-west-1.amazonaws.com",
+    FINANCE_EXPORT_WORKER_ENABLED: "true",
+    FINANCE_EXPORT_WORKER_DATABASE_URL:
+      "postgresql://vayada_next_finance_export_worker:fixture@localhost/target",
+    FINANCE_EXPORT_WORKER_PROPERTY_ID: "20450000-0000-4000-8000-000000000001",
+  };
+  it("defaults paused without opening the credential", () => {
+    expect(loadConfig({}).financeExportWorker).toBeUndefined();
+    expect(
+      loadConfig({
+        ...env,
+        FINANCE_EXPORT_WORKER_ENABLED: "false",
+        FINANCE_EXPORT_WORKER_DATABASE_URL: "invalid",
+      }).financeExportWorker,
+    ).toBeUndefined();
+  });
+  it("requires the dedicated login, target database, property, and worker gates", () => {
+    expect(loadConfig(env).financeExportWorker).toEqual({
+      databaseUrl: env.FINANCE_EXPORT_WORKER_DATABASE_URL,
+      propertyId: env.FINANCE_EXPORT_WORKER_PROPERTY_ID,
+    });
+    for (const overrides of [
+      { FINANCE_EXPORT_WORKER_DATABASE_URL: "" },
+      { FINANCE_EXPORT_WORKER_PROPERTY_ID: "" },
+      { API_BACKGROUND_WORKERS_ENABLED: "false" },
+      { FINANCE_SOURCE: "legacy" },
+      { FINANCE_FOLIO_RECIPIENT_KMS_CURRENT_KEY_ARN: undefined },
+      { PLATFORM_MEDIA_BUCKET: undefined },
+      { FINANCE_EXPORT_WORKER_DATABASE_URL: env.TARGET_DATABASE_URL },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL: `${env.FINANCE_EXPORT_WORKER_DATABASE_URL}?options=-crole=postgres`,
+      },
+      {
+        FINANCE_EXPORT_WORKER_DATABASE_URL: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(
+          "/target",
+          "/other",
+        ),
+      },
+    ])
+      expect(() => loadConfig({ ...env, ...overrides })).toThrow();
+  });
+});
 describe("Finance expense worker boundary config", () => {
   const env = {
     FINANCE_SOURCE: "target",

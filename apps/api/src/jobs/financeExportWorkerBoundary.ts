@@ -6,25 +6,23 @@ export const FINANCE_EXPORT_WORKER_ROLE = "vayada_next_finance_export_worker";
 // Exact effective-grant contract. Column lists intentionally deny receipt data.
 // prettier-ignore
 export const financeExportWorkerPrivileges: Record<string, Record<string, true | string[]>> = {
-  "booking.pricing_runtime_effective_authority_scopes": { SELECT: true },
-  "booking.pricing_runtime_effective_property_scopes": { SELECT: true },
-  "platform.finance_export_worker_properties": { SELECT: true },
+  "platform.finance_export_worker_properties": { SELECT: ["property_id"] },
   "hotel_catalog.properties": { SELECT: ["id", "profile_revision", "updated_at"] },
   "hotel_catalog.property_locations": { SELECT: ["property_id", "timezone", "updated_at"] },
   "pms.property_pricing_settings": { SELECT: ["property_id", "currency", "pricing_currency_revision", "created_at", "updated_at"] },
   "finance.expenses": { SELECT: ["id", "property_id", "category_id", "origin", "entry_kind", "incurred_on", "paid_on", "vendor", "amount", "currency", "payment_status", "recurring_rule_id", "source_key", "reverses_expense_id", "supplier_invoice_number", "revision", "updated_at"] },
-  "finance.folios": { SELECT: true },
-  "finance.folio_revisions": { SELECT: true },
-  "finance.folio_lines": { SELECT: true },
-  "finance.folio_payment_references": { SELECT: true },
-  "platform.jobs": { SELECT: true, UPDATE: ["status", "attempts_count", "run_after", "finished_at", "locked_at", "locked_by", "updated_at", "job_metadata"] },
-  "platform.job_attempts": { SELECT: true, INSERT: ["job_id", "attempt_number", "status", "worker_id", "started_at"], UPDATE: ["status", "finished_at", "error_type", "error_message", "retry_after", "error_metadata"] },
+  "finance.folios": { SELECT: ["id", "property_id", "guest_booking_id"] },
+  "finance.folio_revisions": { SELECT: ["id", "folio_id", "property_id", "revision", "state", "service_from", "service_to", "total_amount", "currency", "created_at", "recipient_snapshot_ciphertext", "recipient_encryption_scheme", "recipient_key_version", "source_digest", "source_freshness"] },
+  "finance.folio_lines": { SELECT: ["id", "folio_revision_id", "position", "kind", "description", "quantity", "unit_amount", "line_total", "service_on", "source_type", "source_id", "source_revision"] },
+  "finance.folio_payment_references": { SELECT: ["folio_revision_id", "position", "payment_id", "amount"] },
+  "platform.jobs": { SELECT: ["id", "queue_name", "job_type", "status", "tenant_scope", "property_id", "resource_type", "resource_id", "correlation_id", "idempotency_key_hash", "attempts_count", "max_attempts", "run_after", "locked_at", "locked_by", "priority", "created_at", "payload", "job_metadata"], UPDATE: ["status", "attempts_count", "run_after", "finished_at", "locked_at", "locked_by", "updated_at", "job_metadata"] },
+  "platform.job_attempts": { SELECT: ["id", "job_id", "attempt_number", "status", "worker_id"], INSERT: ["job_id", "attempt_number", "status", "worker_id", "started_at"], UPDATE: ["status", "finished_at", "error_type", "error_message", "retry_after", "error_metadata"] },
   "platform.dead_letter_events": { INSERT: ["source_kind", "job_id", "job_attempt_id", "tenant_scope", "property_id", "resource_product", "resource_type", "resource_id", "correlation_id", "idempotency_key_hash", "reason_code", "failure_summary", "failure_payload", "created_at"] },
   "platform.product_audit_events": { INSERT: ["audit_key", "product", "action", "occurred_at", "tenant_scope", "property_id", "actor_type", "target_resource_product", "target_resource_type", "target_resource_id", "job_id", "correlation_id", "causation_id", "redacted_payload", "audit_metadata", "retention_class", "privacy_scope"] },
-  "platform.media_objects": { SELECT: true, INSERT: ["id", "bucket", "storage_key", "visibility", "purpose", "owner_organization_id", "property_id", "resource_product", "resource_type", "resource_id", "lifecycle_status", "content_type", "original_filename", "source_system", "source_table", "source_row_id", "retained_until", "created_by_user_id", "created_at", "updated_at"], UPDATE: ["lifecycle_status", "size_bytes", "checksum_sha256", "updated_at"] },
+  "platform.media_objects": { SELECT: ["id", "bucket", "storage_key", "purpose", "source_system", "source_table", "source_row_id", "retained_until", "lifecycle_status", "updated_at"], INSERT: ["id", "bucket", "storage_key", "visibility", "purpose", "owner_organization_id", "property_id", "resource_product", "resource_type", "resource_id", "lifecycle_status", "content_type", "original_filename", "source_system", "source_table", "source_row_id", "retained_until", "created_by_user_id", "created_at", "updated_at"], UPDATE: ["lifecycle_status", "size_bytes", "checksum_sha256", "updated_at"] },
 };
 
-// Canonical pg_policies output from migration 0411 on PostgreSQL 16 and 17.
+// Canonical pg_policies output from migration 0412 on PostgreSQL 16 and 17.
 const POLICY_DIGEST = "aed0e239166590e605f7b7621744bdac2a2ca535ecca5335234971fe65c54d9a";
 const HELPER_DIGEST = "50b550dff92f229444ddbd870d1994581477768d41b389754d24bcd786ae7490";
 

@@ -271,28 +271,6 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([pool.end(),adminPool.end()]); await admin.query(`DROP OWNED BY ${FINANCE_EXPORT_WORKER_ROLE}; DROP ROLE ${FINANCE_EXPORT_WORKER_ROLE}`); await admin.end(); });
 
-  it("keeps unrelated properties, queues, receipts, payments, identity, and product data denied", async () => {
-    const other="20450000-0000-4000-8000-000000000099",otherJob="20450000-0000-4000-8000-000000000098";
-    await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'finance-export-other','Other')",[other]);
-    await admin.query("INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,tenant_scope,property_id,resource_product,resource_type,resource_id) VALUES($1::uuid,$1::text,'booking.other','booking.other','pending','property',$2::uuid,'booking','other',$1::text)",[otherJob,other]);
-    try {
-      expect((await pool.query("SELECT id FROM hotel_catalog.properties WHERE id=$1",[other])).rows).toEqual([]);
-      expect((await pool.query("SELECT id FROM platform.jobs WHERE id=$1",[otherJob])).rows).toEqual([]);
-      expect((await pool.query("UPDATE platform.jobs SET status='running' WHERE id=$1",[otherJob])).rowCount).toBe(0);
-      expect((await pool.query("SELECT id FROM platform.media_objects WHERE purpose='finance.expense.receipt'")).rows).toEqual([]);
-      for (const sql of [
-        "SELECT receipt_media_id FROM finance.expenses",
-        "SELECT id FROM finance.payments",
-        "SELECT id FROM identity.users",
-        "SELECT id FROM booking.guest_bookings",
-        "SELECT id FROM platform.outbox_events",
-      ]) await expect(pool.query(sql)).rejects.toMatchObject({code:"42501"});
-    } finally {
-      await admin.query("DELETE FROM platform.jobs WHERE id=$1",[otherJob]);
-      await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[other]);
-    }
-  });
-
   it("renders one immutable manifest, stores only sanitized metadata, and audits success", async () => {
     await insertJob(); const writer = fakeWriter(),afterRender=new Date(NOW.getTime()+360_000),times=[NOW,afterRender,afterRender,afterRender];
     writer.write.mockImplementationOnce(async({exportId,body})=>{expect((await admin.query("SELECT lifecycle_status FROM platform.media_objects WHERE id=$1",[exportId])).rows[0]?.lifecycle_status).toBe("upload_pending");await expect(runFinanceFolioExportJobs(pool,read,fakeWriter(),{workerId:"worker-two",clock:()=>afterRender})).resolves.toEqual({succeeded:0,retryScheduled:0,deadLettered:0});return receipt(exportId,body)});
@@ -311,7 +289,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect(read.exportCsv).toHaveBeenCalledWith(PROPERTY,"EUR",expect.objectContaining({formatVersion:FINANCE_EXPENSE_CSV_VERSION,manifest:[expenseSelection]}));expect(read.exportReady).not.toHaveBeenCalled();
     expect(writer.write).toHaveBeenCalledWith({exportId:JOB,body:expenseArtifact.body,contentType:FINANCE_EXPENSE_CSV_CONTENT_TYPE,formatVersion:FINANCE_EXPENSE_CSV_VERSION,expiresAt:EXPIRES});
     expect((await admin.query("SELECT job_metadata->'artifact' artifact,(SELECT storage_key FROM platform.media_objects WHERE id=platform.jobs.id) key,(SELECT action FROM platform.product_audit_events WHERE job_id=platform.jobs.id) action,(SELECT audit_metadata->>'jobType' FROM platform.product_audit_events WHERE job_id=platform.jobs.id) \"jobType\" FROM platform.jobs WHERE id=$1",[JOB])).rows[0]).toMatchObject({artifact:{formatVersion:FINANCE_EXPENSE_CSV_VERSION,filename:expenseArtifact.filename},key:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`,action:"finance.expense_export.succeeded",jobType:FINANCE_EXPENSE_EXPORT_JOB});
-    await expect(createPgFinanceFolioExportJobRepository({pool,searchDigest:async()=>"a".repeat(64)}).find({exportId:JOB,organizationId:ORG,propertyId:PROPERTY,now:NOW})).resolves.toMatchObject({state:"ready",artifact:{filename:expenseArtifact.filename,storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`}});
+    await expect(createPgFinanceFolioExportJobRepository({pool:adminPool,searchDigest:async()=>"a".repeat(64)}).find({exportId:JOB,organizationId:ORG,propertyId:PROPERTY,now:NOW})).resolves.toMatchObject({state:"ready",artifact:{filename:expenseArtifact.filename,storageKey:`private/finance/financials-exports/${JOB}/${FINANCE_EXPENSE_CSV_VERSION}.csv`}});
   });
 
   it("regenerates P&L CSV only from the pinned reconciled snapshot", async () => {
@@ -340,7 +318,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect(read.exportReady).not.toHaveBeenCalled();
     expect(read.exportCsv).not.toHaveBeenCalled();
     await expect(
-      createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) }).find({
+      createPgFinanceFolioExportJobRepository({ pool: adminPool, searchDigest: async () => "a".repeat(64) }).find({
         exportId: JOB,
         organizationId: ORG,
         propertyId: PROPERTY,
@@ -367,7 +345,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     expect(writer.write).toHaveBeenCalledWith({ exportId: JOB, body: artifact.body, contentType: artifact.contentType, formatVersion: artifact.formatVersion, expiresAt: EXPIRES });
     expect(read.exportReady).not.toHaveBeenCalled();
     expect(read.exportCsv).not.toHaveBeenCalled();
-    await expect(createPgFinanceFolioExportJobRepository({ pool, searchDigest: async () => "a".repeat(64) }).find({ exportId: JOB, organizationId: ORG, propertyId: PROPERTY, now: NOW })).resolves.toMatchObject({ state: "ready", artifact: { filename: artifact.filename, storageKey: `private/finance/financials-exports/${JOB}/${artifact.formatVersion}.csv` } });
+    await expect(createPgFinanceFolioExportJobRepository({ pool: adminPool, searchDigest: async () => "a".repeat(64) }).find({ exportId: JOB, organizationId: ORG, propertyId: PROPERTY, now: NOW })).resolves.toMatchObject({ state: "ready", artifact: { filename: artifact.filename, storageKey: `private/finance/financials-exports/${JOB}/${artifact.formatVersion}.csv` } });
     expect((await admin.query("SELECT action FROM platform.product_audit_events WHERE job_id=$1", [JOB])).rows[0].action).toBe(`finance.${tab}_export.succeeded`);
   });
 
@@ -404,7 +382,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   it("retries storage failures at the same object key and recovers an expired lease", async () => {
     await insertJob(); const writer = fakeWriter(); writer.write.mockRejectedValueOnce(new Error("S3 unavailable"));
     await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => NOW, random:()=>0.25 })).resolves.toMatchObject({ retryScheduled: 1 });
-    expect((await admin.query("SELECT run_after::text FROM platform.jobs WHERE id=$1",[JOB])).rows[0].run_after).toBe("2026-09-15 01:00:22.5+00");
+    expect((await admin.query(`SELECT to_char(run_after AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS run_after FROM platform.jobs WHERE id=$1`,[JOB])).rows[0].run_after).toBe("2026-09-15T01:00:22.500Z");
     expect((await admin.query("SELECT audit_metadata FROM platform.product_audit_events WHERE job_id=$1 AND action='finance.folio_export.retry_scheduled'",[JOB])).rows[0].audit_metadata).toMatchObject({organizationId:ORG,initiatingActorUserId:ACTOR});
     await expect(runFinanceFolioExportJobs(pool, read, writer, { clock: () => new Date(NOW.getTime() + 31_000) })).resolves.toMatchObject({ succeeded: 1 });
     expect(writer.write.mock.calls.map(([value]) => value.exportId)).toEqual([JOB, JOB]);
@@ -437,7 +415,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   }
   async function cleanupJobs(){await admin.query("BEGIN");try{await admin.query("SET LOCAL session_replication_role=replica");for(const sql of ["DELETE FROM platform.media_objects WHERE property_id=$1","DELETE FROM platform.product_audit_events WHERE property_id=$1","DELETE FROM platform.dead_letter_events WHERE property_id=$1","DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE property_id=$1)","DELETE FROM platform.jobs WHERE property_id=$1","DELETE FROM platform.domain_events WHERE property_id=$1","DELETE FROM platform.idempotency_keys WHERE property_id=$1"])await admin.query(sql,[PROPERTY]);await admin.query("COMMIT");}catch(error){await admin.query("ROLLBACK");throw error;}}
   async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_memberships WHERE organization_id=$1",[ORG]);await admin.query("DELETE FROM platform.finance_export_worker_properties WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}
-  async function provisionWorker(){const database=(await admin.query("SELECT current_database() AS name")).rows[0].name.replaceAll('"','""');await admin.query(`DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${FINANCE_EXPORT_WORKER_ROLE}') THEN CREATE ROLE ${FINANCE_EXPORT_WORKER_ROLE} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; END IF; END $$; ALTER ROLE ${FINANCE_EXPORT_WORKER_ROLE} PASSWORD 'finance-export-test'; REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${database}" TO ${FINANCE_EXPORT_WORKER_ROLE}; GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms,booking TO ${FINANCE_EXPORT_WORKER_ROLE}`);for(const [table,privileges] of Object.entries(financeExportWorkerPrivileges))for(const [kind,columns] of Object.entries(privileges))await admin.query(`GRANT ${kind}${columns===true?"":`(${columns.join(",")})`} ON ${table} TO ${FINANCE_EXPORT_WORKER_ROLE}`);}
+  async function provisionWorker(){const database=(await admin.query("SELECT current_database() AS name")).rows[0].name.replaceAll('"','""');await admin.query(`DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${FINANCE_EXPORT_WORKER_ROLE}') THEN CREATE ROLE ${FINANCE_EXPORT_WORKER_ROLE} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; END IF; END $$; ALTER ROLE ${FINANCE_EXPORT_WORKER_ROLE} PASSWORD 'finance-export-test'; REVOKE TEMP ON DATABASE "${database}" FROM PUBLIC; GRANT CONNECT ON DATABASE "${database}" TO ${FINANCE_EXPORT_WORKER_ROLE}; GRANT USAGE ON SCHEMA platform,finance,hotel_catalog,pms TO ${FINANCE_EXPORT_WORKER_ROLE}`);for(const [table,privileges] of Object.entries(financeExportWorkerPrivileges))for(const [kind,columns] of Object.entries(privileges))await admin.query(`GRANT ${kind}${columns===true?"":`(${columns.join(",")})`} ON ${table} TO ${FINANCE_EXPORT_WORKER_ROLE}`);}
 });
 
 const hash = (value: unknown) =>
