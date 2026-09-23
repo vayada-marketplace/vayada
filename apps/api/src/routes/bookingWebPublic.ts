@@ -5617,11 +5617,14 @@ export async function admitBookingWebAffiliateArrival(
   )
     return { status: "unavailable" as const };
   const profile = await findProfileForHost({ repository, host });
-  if (
-    !profile ||
-    !profile.hotel.bookingBaseUrl.startsWith("https://") ||
-    hostFromUrl(profile.hotel.bookingBaseUrl) !== host
-  )
+  if (!profile) return { status: "unavailable" as const };
+  let canonical: URL;
+  try {
+    canonical = new URL(profile.hotel.bookingBaseUrl);
+  } catch {
+    return { status: "unavailable" as const };
+  }
+  if (canonical.protocol !== "https:" || canonical.port || canonical.hostname !== host)
     return { status: "unavailable" as const };
   return admitAffiliateArrival(pool, {
     propertyId: profile.hotel.propertyId,

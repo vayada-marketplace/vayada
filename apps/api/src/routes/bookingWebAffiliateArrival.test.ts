@@ -115,6 +115,16 @@ describe("native affiliate arrival host boundary", () => {
         referenceToken,
       }),
     ).toEqual({ status: "unavailable" });
+    const nonstandardPort = {
+      ...base,
+      hotel: { ...base.hotel, bookingBaseUrl: "https://hotel-alpenrose.booking.localhost:8443" },
+    };
+    expect(
+      await admitBookingWebAffiliateArrival(pool, repository(nonstandardPort), {
+        host: "hotel-alpenrose.booking.localhost",
+        referenceToken,
+      }),
+    ).toEqual({ status: "unavailable" });
     expect(admitAffiliateArrival).not.toHaveBeenCalled();
   });
 
