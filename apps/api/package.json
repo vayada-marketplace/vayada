@@ -14,6 +14,7 @@
     "build": "tsc -p tsconfig.build.json",
     "pretest": "npm run build:backend-packages",
     "start": "node dist/server.js",
+    "start:pricing-command": "node dist/pricingCommandServer.js",
     "test": "vitest run",
     "pretest:legacy-free": "npm run build:backend-packages",
     "test:legacy-free": "vitest run src/nextApiLegacyFree.test.ts",

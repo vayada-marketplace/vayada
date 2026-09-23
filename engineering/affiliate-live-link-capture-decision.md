@@ -1,8 +1,10 @@
-# Live affiliate link and click capture — proposed MVP decision
+# Live affiliate link and click capture — accepted product contract
 
-VAY-1504 / VAY-1506, consuming VAY-1505 and VAY-1056. Proposal for product and
-privacy review, 20 September 2026. **No live capture or public redirect is
-authorized by this document.**
+VAY-1504 / VAY-1506, consuming VAY-1505 and VAY-1056. Product direction was
+accepted on 21 September 2026: record eligible link taps and redirect without an
+extra guest screen. Privacy-owner approval, retention ownership, URL-safety
+evidence and runtime activation remain separate gates. **This document does not
+authorize live capture or a public redirect by itself.**
 
 ## Starting point
 
@@ -145,6 +147,23 @@ its outage does not imply that URL safety evidence was revoked. Native Booking
 and external providers must pass the same safety rule, with provider-specific
 evidence where needed.
 
+The first implemented checker covers only the native Booking root URL on
+`<canonical-slug>.next-booking.vayada.com`. It reads the immutable destination
+version and current hotel, slug and custom-domain state in the caller's
+transaction. Successful reads produce
+`booking-affiliate-destination-safety.v1` evidence bound to the exact property,
+destination version, URL and single-URL, zero-redirect chain. Redirect construction accepts this
+evidence for at most 60 seconds and rejects a raw URL, an older policy version,
+or any changed scope, URL, chain or evidence reference. The evidence must be
+resolved and consumed inside the same transaction for each arrival; it is not a
+persisted approval. That transaction holds the same per-property advisory lock
+as custom-domain mutations, so approval and canonical-domain activation have a
+defined order. Production catalog migration acquires those property locks in
+sorted order before it can write canonical domains. The immediate redirect
+check uses the database validation timestamp, avoiding false rejection from
+database/API clock skew. External and custom-domain destinations remain blocked
+until their owner supplies equivalent host-control and redirect-chain evidence.
+
 ## Native Booking arrival-to-checkout contract
 
 The current Booking Web `?ref` flow is legacy diagnostic traffic. Middleware
@@ -173,7 +192,7 @@ redirect, privacy and retention gates above are met:
 
 1. The Marketplace redirect appends one opaque, short-lived click reference to
    the exact approved Booking URL using `vref`, distinct from `ref`.
-   It must preserve the approved URL's existing query and fragment, reject a
+   It must preserve the approved URL's existing query, reject fragments and a
    pre-existing conflicting reference parameter, and never take a destination
    URL from the visitor. The reference contains no creator, property, campaign
    or guest data. Its presence alone is not an eligible booking.
@@ -188,8 +207,10 @@ redirect, privacy and retention gates above are met:
    the trusted Marketplace click reader and checks its property against the
    property resolved from that host. Where destination privacy rules permit,
    it creates or reuses a first-party Booking context, serializes admission of
-   this click to that context, and stores only an opaque context handle in a
-   host-only, `HttpOnly`, `Secure`, `SameSite=Lax` cookie. Re-delivery of the
+   this click to that context, and stores only an opaque context handle in the
+   host-only `__Host-vayada_affiliate_context` cookie with `Path=/`, `HttpOnly`,
+   `Secure`, `SameSite=Lax` and a maximum age of 90 days. No `Domain` attribute
+   is permitted. Re-delivery of the
    same reference to the same context is idempotent; delivery to another
    context is a conflict. A bad, expired, or mismatched reference cannot set
    or replace the cookie. The page must still load if admission or cookie
@@ -293,6 +314,12 @@ capture store is enabled.
    browsers, pause/end races, same-link repeat visits and no accidental Finance
    effect. Existing referral URLs and users need a separate preservation-aware
    cutover plan.
+
+The `/r/:publicToken` route adapter exists for isolated tests but is not
+registered by the runtime. Registration requires a production quota provider
+that rejects before any click write, a transaction-bound visit implementation,
+and completion of the privacy and readiness gates above. The API suppresses
+default request logs for `/r/` and URLs carrying `vref`.
 
 This proposal does not choose a provider, promise cross-device attribution or
 infer an external completed stay from a redirect or reservation.

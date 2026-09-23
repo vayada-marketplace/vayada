@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
+  record: vi.fn(),
 }));
 
 vi.mock("@vayada/marketplace-shared/api/collaborations", async (original) => ({
   ...(await original<object>()),
   getMarketplaceCollaborationAffiliateAssent: mocks.read,
+  recordMarketplaceCollaborationAffiliateAssent: mocks.record,
 }));
 
 import { ApiErrorResponse } from "@vayada/marketplace-shared/api/client";
@@ -38,6 +40,7 @@ describe("AffiliateAgreementPanel", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.record.mockResolvedValue({ ok: true, revision: 1, state: "pending", replayed: false });
   });
 
   afterEach(() => {
@@ -77,16 +80,26 @@ describe("AffiliateAgreementPanel", () => {
   it("identifies the missing decision for each participant", async () => {
     mocks.read.mockResolvedValue({
       ...agreement,
-      revision: 1,
+      revision: 0,
       assentState: "pending",
+      hotelApprovedAt: null,
       creatorAcceptedAt: null,
     });
     const creatorOutput = await render(true, "creator");
     expect(creatorOutput()).toContain("Your acceptance is pending");
+    expect(creatorOutput()).toContain("Accept affiliate terms");
+    expect(creatorOutput()).toContain("does not activate links or earnings");
     await act(async () => view?.unmount());
 
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      revision: 1,
+      assentState: "pending",
+      hotelApprovedAt: null,
+    });
     const hotelOutput = await render(true, "hotel");
-    expect(hotelOutput()).toContain("Waiting for creator acceptance");
+    expect(hotelOutput()).toContain("Your approval is pending");
+    expect(hotelOutput()).toContain("Approve affiliate agreement");
   });
 
   it("hides an unavailable agreement for an ordinary non-affiliate collaboration", async () => {
@@ -156,5 +169,49 @@ describe("AffiliateAgreementPanel", () => {
     });
     await render();
     expect(view?.root.findByType("pre").children).toEqual([exact]);
+  });
+
+  it("records the current side without sending agreement identifiers and refreshes the read", async () => {
+    mocks.read
+      .mockResolvedValueOnce({
+        ...agreement,
+        revision: 1,
+        assentState: "pending",
+        creatorAcceptedAt: null,
+      })
+      .mockResolvedValueOnce(agreement);
+    const output = await render();
+
+    await act(async () => {
+      await view?.root.findByProps({ children: "Accept affiliate terms" }).props.onClick();
+    });
+
+    expect(mocks.record).toHaveBeenCalledWith("Existing:QA", expect.any(String));
+    expect(output()).toContain("Agreement accepted");
+    expect(output()).not.toContain("Accept affiliate terms");
+  });
+
+  it("reports replay and retryable write failures without exposing backend details", async () => {
+    mocks.read.mockResolvedValue({
+      ...agreement,
+      revision: 1,
+      assentState: "pending",
+      creatorAcceptedAt: null,
+    });
+    mocks.record.mockResolvedValueOnce({ ok: true, revision: 1, state: "pending", replayed: true });
+    const replay = await render();
+    await act(async () => {
+      await view?.root.findByProps({ children: "Accept affiliate terms" }).props.onClick();
+    });
+    expect(replay()).toContain("Your decision was already recorded");
+    await act(async () => view?.unmount());
+
+    mocks.record.mockRejectedValueOnce(new Error("private database detail"));
+    const failed = await render();
+    await act(async () => {
+      await view?.root.findByProps({ children: "Accept affiliate terms" }).props.onClick();
+    });
+    expect(failed()).toContain("Could not record your decision");
+    expect(failed()).not.toContain("private database detail");
   });
 });

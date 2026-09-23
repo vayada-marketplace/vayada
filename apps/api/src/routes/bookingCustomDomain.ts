@@ -3,6 +3,7 @@ import { AuthorizationError, type PropertyAccessRepository } from "@vayada/backe
 import pg from "pg";
 import type { QueryResult, QueryResultRow } from "pg";
 
+import { affiliateDestinationSafetyLockKey } from "../domains/bookingAffiliateDestinationSafetyLock.js";
 import { enforcePropertyRoutePolicy, enforceRoutePolicy } from "./policy.js";
 
 export type BookingCustomDomainStatus = "not_configured" | "pending" | "verified" | "failed";
@@ -182,17 +183,22 @@ export function createTargetBookingCustomDomainRepository(config: {
       }
 
       const result = await pool.query<TargetCustomDomainRow>(
-        `WITH clear_public_profile AS (
+        `WITH safety_lock AS MATERIALIZED (
+           SELECT pg_advisory_xact_lock(hashtextextended($3,0))
+         ),
+         clear_public_profile AS (
            UPDATE hotel_catalog.property_public_profile_read_model
               SET property_domain_id = NULL,
                   verified_custom_domain = NULL,
                   projected_at = now()
             WHERE property_id = $1::uuid
+              AND EXISTS (SELECT 1 FROM safety_lock)
          ),
          delete_old_domains AS (
            DELETE FROM hotel_catalog.property_domains
             WHERE property_id = $1::uuid
               AND hostname <> $2
+              AND EXISTS (SELECT 1 FROM safety_lock)
          )
          INSERT INTO hotel_catalog.property_domains (
            property_id,
@@ -202,7 +208,8 @@ export function createTargetBookingCustomDomainRepository(config: {
            verified_at,
            updated_at
          )
-         VALUES ($1::uuid, $2, 'pending', FALSE, NULL, now())
+         SELECT $1::uuid, $2, 'pending', FALSE, NULL, now()
+         FROM safety_lock
          ON CONFLICT (hostname) DO UPDATE
             SET verification_status = 'pending',
                 canonical_when_verified = FALSE,
@@ -215,7 +222,7 @@ export function createTargetBookingCustomDomainRepository(config: {
            verification_status AS "verificationStatus",
            verified_at AS "verifiedAt",
            updated_at AS "updatedAt"`,
-        [propertyId, normalizedDomain],
+        [propertyId, normalizedDomain, affiliateDestinationSafetyLockKey(propertyId)],
       );
 
       if (!result.rows[0]) {
@@ -227,6 +234,9 @@ export function createTargetBookingCustomDomainRepository(config: {
     async deleteForPropertyId(propertyId) {
       const result = await pool.query<{ propertyId: string }>(
         `WITH ${TARGET_BOOKING_CUSTOM_DOMAIN_CANONICAL_PROPERTY_CTE},
+         safety_lock AS MATERIALIZED (
+           SELECT pg_advisory_xact_lock(hashtextextended($2,0))
+         ),
          clear_public_profile AS (
            UPDATE hotel_catalog.property_public_profile_read_model profile
               SET property_domain_id = NULL,
@@ -234,15 +244,16 @@ export function createTargetBookingCustomDomainRepository(config: {
                   projected_at = now()
              FROM scoped_property
             WHERE profile.property_id = scoped_property.property_id
+              AND EXISTS (SELECT 1 FROM safety_lock)
          ),
          delete_domains AS (
            DELETE FROM hotel_catalog.property_domains domain
-            USING scoped_property
+            USING scoped_property, safety_lock
             WHERE domain.property_id = scoped_property.property_id
          )
-         SELECT property_id::text AS "propertyId"
-         FROM scoped_property`,
-        [propertyId],
+         SELECT scoped_property.property_id::text AS "propertyId"
+         FROM scoped_property, safety_lock`,
+        [propertyId, affiliateDestinationSafetyLockKey(propertyId)],
       );
 
       return Boolean(result.rows[0]);

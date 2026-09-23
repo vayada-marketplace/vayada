@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -212,6 +212,169 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export jobs", () => {
       )
     ).rows[0];
     expect(residue).toEqual({ jobs: 0, keys: 0 });
+  });
+
+  it("audits a bounded stream with no UPDATE privilege on scope rows", async () => {
+    const role = `vay1134_export_${randomUUID().replaceAll("-", "")}`;
+    const password = "export_test_only";
+    let createdRole = false;
+    let probe: pg.Client | undefined;
+    let restricted: ReturnType<typeof createPgFinanceFolioExportJobRepository> | undefined;
+    try {
+      await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
+      createdRole = true;
+      await admin.query(`GRANT USAGE ON SCHEMA hotel_catalog, identity, platform TO ${role}`);
+      await admin.query(`GRANT SELECT ON hotel_catalog.properties TO ${role}`);
+      await admin.query(
+        `GRANT SELECT ON identity.organizations, identity.organization_memberships,
+          identity.users, identity.organization_resource_links TO ${role}`,
+      );
+      await admin.query(`GRANT INSERT ON platform.product_audit_events TO ${role}`);
+      const restrictedUrl = new globalThis.URL(URL!);
+      restrictedUrl.username = role;
+      restrictedUrl.password = password;
+      probe = new pg.Client({ connectionString: restrictedUrl.toString() });
+      await probe.connect();
+      await expect(
+        probe.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR KEY SHARE", [
+          PROPERTY_A,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      restricted = createPgFinanceFolioExportJobRepository({
+        connectionString: restrictedUrl.toString(),
+        searchDigest: async (domain, search) => searchFingerprint(domain, search),
+      });
+      const input = command("restricted-stream");
+      await restricted.recordStream(input, {
+        formatVersion: input.snapshot.formatVersion,
+        rowCount: 0,
+        sizeBytes: 24,
+        checksumSha256: "a".repeat(64),
+      });
+      const evidence = await admin.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM platform.product_audit_events
+         WHERE property_id=$1 AND action='finance.folio_export.streamed'`,
+        [PROPERTY_A],
+      );
+      expect(evidence.rows[0]?.count).toBe(1);
+    } finally {
+      await restricted?.close();
+      await probe?.end();
+      if (createdRole) {
+        await admin.query(`DROP OWNED BY ${role}`);
+        await admin.query(`DROP ROLE ${role}`);
+      }
+    }
+  });
+
+  it("rolls back durable export artifacts when scope is revoked during digesting", async () => {
+    let markDigestStarted: (() => void) | undefined;
+    let releaseDigest: (() => void) | undefined;
+    const digestStarted = new Promise<void>((resolve) => {
+      markDigestStarted = resolve;
+    });
+    const digestReleased = new Promise<void>((resolve) => {
+      releaseDigest = resolve;
+    });
+    const racing = createPgFinanceFolioExportJobRepository({
+      connectionString: URL!,
+      searchDigest: async (domain, search) => {
+        markDigestStarted?.();
+        await digestReleased;
+        return searchFingerprint(domain, search);
+      },
+    });
+    try {
+      const pending = racing.enqueue(command("revoked-during-digest"));
+      await digestStarted;
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='suspended'
+         WHERE organization_id=$1::uuid AND user_id=$2::uuid`,
+        [ORG, ACTOR],
+      );
+      releaseDigest?.();
+      await expect(pending).rejects.toThrow(TypeError);
+      const residue = await admin.query<{ count: number }>(
+        `SELECT ((SELECT count(*) FROM platform.jobs WHERE property_id=$1)+
+          (SELECT count(*) FROM platform.idempotency_keys WHERE property_id=$1)+
+          (SELECT count(*) FROM platform.product_audit_events WHERE property_id=$1))::int count`,
+        [PROPERTY_A],
+      );
+      expect(residue.rows[0]?.count).toBe(0);
+    } finally {
+      releaseDigest?.();
+      await racing.close();
+    }
+  });
+
+  it("collapses multiple qualifying resource links to one audit", async () => {
+    await admin.query(
+      `INSERT INTO identity.organization_resource_links
+        (organization_id,product,resource_type,resource_id,relationship,status)
+       VALUES($1::uuid,'pms','pms_property',$2,'finance_manager','active')`,
+      [ORG, PROPERTY_A],
+    );
+    const input = command("multi-link-replay");
+    await expect(repository.enqueue(input)).resolves.toMatchObject({ status: "created" });
+    const auditCount = await admin.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM platform.product_audit_events
+       WHERE property_id=$1 AND action='finance.folio_export.requested'`,
+      [PROPERTY_A],
+    );
+    expect(auditCount.rows[0]?.count).toBe(1);
+  });
+
+  it("does not replay an export when scope is revoked while conflict resolution waits", async () => {
+    const input = command("revoked-replay");
+    const created = await repository.enqueue(input);
+    if (created.status === "conflict") throw new Error("Expected initial export");
+    const peer = new pg.Client({ connectionString: URL! });
+    const raceUrl = new globalThis.URL(URL!);
+    raceUrl.searchParams.set("application_name", "vay1134-replay-race");
+    const racePool = new pg.Pool({ connectionString: raceUrl.toString() });
+    const racing = createPgFinanceFolioExportJobRepository({
+      pool: racePool,
+      searchDigest: async (domain, search) => searchFingerprint(domain, search),
+    });
+    let unlocked = false;
+    let pending: Promise<Awaited<ReturnType<typeof racing.enqueue>>> | undefined;
+    try {
+      await peer.connect();
+      await peer.query("BEGIN");
+      await peer.query(
+        `UPDATE platform.idempotency_keys SET request_fingerprint_hash=request_fingerprint_hash
+         WHERE response_resource_id=$1`,
+        [created.exportId],
+      );
+      pending = racing.enqueue(input);
+      let blocked = false;
+      for (let attempt = 0; attempt < 100 && !blocked; attempt += 1) {
+        blocked =
+          (
+            await admin.query<{ blocked: boolean }>(
+              `SELECT EXISTS(
+               SELECT 1 FROM pg_stat_activity
+               WHERE application_name='vay1134-replay-race' AND wait_event_type='Lock'
+             ) AS blocked`,
+            )
+          ).rows[0]?.blocked ?? false;
+        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await admin.query(
+        `UPDATE identity.organization_memberships SET status='suspended'
+         WHERE organization_id=$1::uuid AND user_id=$2::uuid`,
+        [ORG, ACTOR],
+      );
+      await peer.query("COMMIT");
+      unlocked = true;
+      await expect(pending).resolves.toEqual({ status: "conflict" });
+    } finally {
+      if (!unlocked) await peer.query("ROLLBACK").catch(() => undefined);
+      await pending?.catch(() => undefined);
+      await peer.end();
+      await racePool.end();
+    }
   });
 
   it("reads status only inside the immutable property and organization scope", async () => {
