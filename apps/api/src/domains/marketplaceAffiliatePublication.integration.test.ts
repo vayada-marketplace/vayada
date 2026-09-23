@@ -153,6 +153,42 @@ describe.skipIf(!databaseUrl)("affiliate publication command", () => {
       publish(fixture.pool(), { ...input(), idempotencyKey: "different" }, ready),
     ).resolves.toMatchObject({ code: "draft_already_published" });
   });
+  it("blocks publication above 90 days while allowing a hotel-selected 90-day window", async () => {
+    const longer = await saveMarketplaceAffiliateDraft(fixture.pool(), {
+      ...input(),
+      idempotencyKey: "long-window-draft",
+      terms: { ...terms, attributionWindowDays: 91 },
+    });
+    if (!longer.ok) throw new Error(longer.code);
+    await expect(
+      publish(
+        fixture.pool(),
+        { ...input(), draftId: longer.draftId, expectedRevision: 2, idempotencyKey: "long-window" },
+        ready,
+      ),
+    ).resolves.toMatchObject({ ok: false, code: "attribution_window_exceeds_limit" });
+    await noPublication();
+
+    const maximum = await saveMarketplaceAffiliateDraft(fixture.pool(), {
+      ...input(),
+      expectedRevision: 2,
+      idempotencyKey: "maximum-window-draft",
+      terms: { ...terms, attributionWindowDays: 90 },
+    });
+    if (!maximum.ok) throw new Error(maximum.code);
+    await expect(
+      publish(
+        fixture.pool(),
+        {
+          ...input(),
+          draftId: maximum.draftId,
+          expectedRevision: 3,
+          idempotencyKey: "maximum-window",
+        },
+        ready,
+      ),
+    ).resolves.toMatchObject({ ok: true, replayed: false });
+  });
   it("serializes concurrent retries and keeps one program across new terms versions", async () => {
     const results = await Promise.all([
       publish(fixture.pool(), input(), ready),
