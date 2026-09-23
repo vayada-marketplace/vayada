@@ -261,8 +261,16 @@ derives that context from a first-party cookie yet, so this remains dormant.
 The dormant Booking API arrival boundary now resolves the supplied final host
 through the public hotel profile, requires it to equal that hotel's canonical
 booking host, and only then passes the profile's property ID to click admission.
-It cannot set a browser cookie or process a public arrival until the guarded
-transport route and destination storage decision are implemented.
+Booking Web now has a disabled-by-default admission path in its `vref` cleanup
+redirect. With explicit arrival configuration it asks the Booking API at its
+configured absolute server origin for an
+admitted context and sets only a host-only `__Host-vayada_affiliate_context`
+cookie on success; denial or service failure continues the clean redirect
+untracked. The API endpoint is internal-token protected and only registered
+when an arrival adapter is explicitly supplied. Production startup does not
+supply one, so the route cannot yet receive live clicks. Runtime database
+grants, privacy approval, final-host revalidation and HTTPS browser transport
+checks remain launch gates before enabling the Booking Web flag.
 
 ## Product retention choice requiring privacy approval
 

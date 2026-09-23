@@ -14,6 +14,10 @@ import {
 } from "./services/api/bookingWebPublic";
 
 const intlMiddleware = createMiddleware(routing);
+const affiliateContextCookie = "__Host-vayada_affiliate_context";
+const affiliateContextMaxAge = 90 * 24 * 60 * 60;
+const validClickReference = /^vc_[A-Za-z0-9_-]{22}$/;
+const validContext = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeHost(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
@@ -62,7 +66,8 @@ export default async function middleware(request: NextRequest) {
     const localRequest = isLocalHost(requestHostname) || requestHostname.endsWith(".localhost");
     if (
       (localHost && !localRequest) ||
-      (!localHost && !getKnownSubdomainSlug(publicHostname) &&
+      (!localHost &&
+        !getKnownSubdomainSlug(publicHostname) &&
         !(await fetchHostResolution(publicHostname))?.slug)
     ) {
       return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
@@ -80,6 +85,41 @@ export default async function middleware(request: NextRequest) {
     const redirect = NextResponse.redirect(publicUrl, 307);
     redirect.headers.set("Cache-Control", "no-store");
     redirect.headers.set("Referrer-Policy", "no-referrer");
+    const internalToken = process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN;
+    const references = request.nextUrl.searchParams.getAll("vref");
+    if (
+      process.env.BOOKING_WEB_AFFILIATE_ARRIVAL_ENABLED === "true" &&
+      internalToken &&
+      publicProtocol === "https:" &&
+      references.length === 1 &&
+      validClickReference.test(references[0]!)
+    ) {
+      try {
+        const resolution = await fetchHostResolution(publicHostname);
+        if (resolution && new URL(resolution.bookingBaseUrl).hostname === publicHostname) {
+          const existing = request.cookies.get(affiliateContextCookie)?.value;
+          const admission = await bookingWebPublicApi.admitAffiliateArrival(
+            {
+              host: publicHostname,
+              referenceToken: references[0]!,
+              ...(existing && validContext.test(existing) ? { contextId: existing } : {}),
+            },
+            internalToken,
+          );
+          if (admission.status === "admitted" && validContext.test(admission.contextId)) {
+            redirect.cookies.set(affiliateContextCookie, admission.contextId, {
+              path: "/",
+              httpOnly: true,
+              secure: true,
+              sameSite: "lax",
+              maxAge: affiliateContextMaxAge,
+            });
+          }
+        }
+      } catch {
+        // A failed admission must not block the guest's booking page.
+      }
+    }
     return redirect;
   }
 

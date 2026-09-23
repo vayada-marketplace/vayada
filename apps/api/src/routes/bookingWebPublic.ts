@@ -35,7 +35,7 @@ import {
 import type { BillingConfigReadModel, BillingConfigReadPort } from "@vayada/domain-finance";
 import { normalizeNationalityCode } from "@vayada/locale-constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
   bookedMealDescription,
@@ -456,6 +456,7 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   calendarRepository?: BookingWebCalendarRepository;
   checkoutAdapter: BookingWebCheckoutAdapter;
+  affiliateArrival?: { pool: pg.Pool; internalToken: string };
   affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
   affiliateRepository?: BookingWebAffiliateRepository;
   affiliateAdapter?: BookingWebAffiliateAdapter;
@@ -512,6 +513,29 @@ export async function registerBookingWebPublicRoutes(
     reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-host-read");
     return response;
   });
+
+  if (options.affiliateArrival) {
+    const { pool, internalToken } = options.affiliateArrival;
+    if (!internalToken) throw new Error("Booking affiliate arrival internal token is required");
+    app.post<{
+      Body: { host?: unknown; referenceToken?: unknown; contextId?: unknown };
+    }>("/affiliate/arrivals", { bodyLimit: 1024 }, async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const supplied = request.headers["x-vayada-affiliate-arrival-token"];
+      const expected = Buffer.from(internalToken);
+      const actual = typeof supplied === "string" ? Buffer.from(supplied) : Buffer.alloc(0);
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+        throw createHttpError(404, "Booking Web arrival unavailable.");
+      const result = await admitBookingWebAffiliateArrival(pool, options.profileRepository, {
+        host: request.body?.host,
+        referenceToken: request.body?.referenceToken,
+        contextId: request.body?.contextId,
+      });
+      return result.status === "admitted"
+        ? { status: "admitted" as const, contextId: result.contextId }
+        : { status: "unavailable" as const };
+    });
+  }
 
   app.get<{ Params: BookingWebHotelParams }>("/hotels/:slug", async (request, reply) => {
     const profile = await options.profileRepository.findProfileBySlug(request.params.slug);
@@ -5600,8 +5624,9 @@ async function findProfileForHost(config: {
 export async function admitBookingWebAffiliateArrival(
   pool: pg.Pool,
   repository: PublicHotelProfileRepository,
-  input: { host: string; referenceToken: unknown; contextId?: unknown },
+  input: { host: unknown; referenceToken: unknown; contextId?: unknown },
 ) {
+  if (typeof input.host !== "string") return { status: "unavailable" as const };
   let host: string;
   let suppliedHost: string;
   try {
