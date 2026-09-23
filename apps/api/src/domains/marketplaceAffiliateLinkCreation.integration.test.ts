@@ -181,11 +181,16 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       CREATE TABLE hotel_catalog.property_domains(property_id UUID,verification_status TEXT,
         canonical_when_verified BOOLEAN);
       CREATE TABLE booking.affiliate_destination_versions(id UUID PRIMARY KEY,property_id UUID,
-        created_by_organization_id UUID,booking_url TEXT);
-      INSERT INTO hotel_catalog.property_slugs VALUES ($1,'hotel-alpenrose','canonical','active');
-      INSERT INTO booking.affiliate_destination_versions VALUES
-        ($2,$1,$3,'https://hotel-alpenrose.next-booking.vayada.com/');`,
-      [id(3), id(30), id(4)],
+        created_by_organization_id UUID,booking_url TEXT);`,
+    );
+    await pool().query(
+      "INSERT INTO hotel_catalog.property_slugs VALUES ($1,'hotel-alpenrose','canonical','active')",
+      [id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_destination_versions VALUES
+        ($1,$2,$3,'https://hotel-alpenrose.next-booking.vayada.com/')`,
+      [id(30), id(3), id(4)],
     );
     const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
     if (!link.ok) throw new Error("Expected link");
