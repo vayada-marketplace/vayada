@@ -26,6 +26,7 @@ const DRAFT = "13550000-0000-4000-8000-000000000085";
 const ADDON = "13550000-0000-4000-8000-000000000086";
 const MISSING_ADDON = "13550000-0000-4000-8000-000000000096";
 const PROMO = "13550000-0000-4000-8000-000000000087";
+const AUDIT_EVENT = "13550000-0000-4000-8000-000000000088";
 const LOGO_MEDIA = "13550000-0000-4000-8000-000000000098";
 const HERO_MEDIA = "13550000-0000-4000-8000-000000000099";
 const LOGO_SOURCE_URL = "https://legacy-media-test.s3.amazonaws.com/rooms/logo.png";
@@ -46,6 +47,13 @@ describe.skipIf(!URL)("production Booking writers (PostgreSQL)", () => {
     await client.query("BEGIN");
     try {
       await seedCatalog(client);
+      await client.query(
+        `INSERT INTO platform.product_audit_events
+           (audit_key, product, action, occurred_at, tenant_scope,
+            target_resource_product, target_resource_type, target_resource_id)
+         VALUES ('booking-writer-unrelated', 'booking', 'test.unrelated', now(), 'platform',
+                 'booking', 'booking_funnel_session', 'unrelated')`,
+      );
       const ownership = await readProductionBookingOwnership(client, RUN);
       const source = sourceRows();
       const plan = buildProductionBookingPlan({
@@ -100,7 +108,7 @@ describe.skipIf(!URL)("production Booking writers (PostgreSQL)", () => {
            (SELECT to_jsonb(summary) FROM booking.direct_booking_summary_read_model summary
              WHERE guest_booking_id = $1) AS summary,
            (SELECT redacted_payload FROM platform.product_audit_events
-             WHERE product = 'booking' LIMIT 1) AS audit,
+             WHERE product = 'booking' AND id = $5) AS audit,
            (SELECT header_logo_media_object_id::text FROM booking.booking_settings
              WHERE property_id = $3) AS header_logo_media_object_id,
            (SELECT hero_image_url FROM booking.booking_settings
@@ -120,7 +128,7 @@ describe.skipIf(!URL)("production Booking writers (PostgreSQL)", () => {
            (SELECT SUM(selection.total_amount)::text
               FROM booking.booking_addon_selections selection
              WHERE selection.guest_booking_id = $1) AS addon_total`,
-        [BOOKING, DRAFT, PROPERTY, RUN],
+        [BOOKING, DRAFT, PROPERTY, RUN, AUDIT_EVENT],
       );
       expect(stored.rows[0]).toMatchObject({
         bookings: 1,
@@ -314,7 +322,7 @@ function sourceRows(): IdentitySourceRow[] {
       updated_at: UPDATED,
     }),
     row("booking", "booking_events", {
-      id: "13550000-0000-4000-8000-000000000088",
+      id: AUDIT_EVENT,
       hotel_slug: "booking-integration",
       event_type: "checkout_started",
       session_id: "session-private",
