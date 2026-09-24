@@ -39,6 +39,7 @@ import {
   createS3FinanceFolioExportArtifactWriter,
   type FinanceFolioExportArtifactWriter,
 } from "../platform/financeFolioExportArtifacts.js";
+import { exportDeadlineClient } from "./financeExportDeadline.js";
 import { runFinanceFolioExportJobs } from "./financeFolioExport.js";
 import {
   assertFinanceExportWorkerBoundary,
@@ -250,13 +251,16 @@ it("rejects P&L response metadata that does not describe the pinned CSV cutoff",
 
 // prettier-ignore
 it("writes immutable private CSV bytes with integrity and expiry metadata", async () => {
-  const send = vi.fn(async (_command: unknown) => ({})), destroy = vi.fn();
+  const send = vi.fn(async (_command: unknown, _options?: unknown) => ({})), destroy = vi.fn();
   const writer = createS3FinanceFolioExportArtifactWriter({ bucketName: "test-private", s3Client: { send, destroy } as unknown as S3Client });
   const stored = await writer.write({ exportId: JOB, body: "guest,amount\r\nAda,12\r\n", contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, formatVersion: FINANCE_FOLIO_CSV_VERSION, expiresAt: EXPIRES });
   const command = send.mock.calls[0]![0] as PutObjectCommand;
   expect(command.input).toMatchObject({ Bucket: "test-private", Key: `private/finance/financials-exports/${JOB}/${FINANCE_FOLIO_CSV_VERSION}.csv`, ContentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, CacheControl: "private, no-store", ChecksumSHA256: createHash("sha256").update("guest,amount\r\nAda,12\r\n").digest("base64"), Metadata: { "expires-at": EXPIRES } });
   expect(command.input.Expires?.toISOString()).toBe(EXPIRES);
   expect(stored).toMatchObject({ bucketName: "test-private", sizeBytes: 22, checksumSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+  const signal = AbortSignal.timeout(1_000);
+  await writer.write({ exportId: JOB, body: "x", contentType: FINANCE_FOLIO_CSV_CONTENT_TYPE, formatVersion: FINANCE_FOLIO_CSV_VERSION, expiresAt: EXPIRES, signal });
+  expect(send.mock.calls[1]![1]).toMatchObject({ abortSignal: signal });
   writer.close?.(); expect(destroy).not.toHaveBeenCalled();
 });
 
@@ -278,6 +282,107 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
         clock: () => NOW,
       }),
     ).rejects.toThrow("finance_export_worker_export_scope_invalid");
+  });
+
+  it("claims a fresh Dashboard export once and cannot retry or reclaim it", async () => {
+    const acceptedAt = new Date(Date.now() - 2_000);
+    const dispatchedAt = new Date(acceptedAt.getTime() - 1_000);
+    await insertOneShotDashboardJob(acceptedAt);
+    const writer = fakeWriter();
+    const scope = { exportId: JOB, oneShot: { propertyId: PROPERTY, dispatchedAt } };
+    await expect(runFinanceFolioExportJobs(pool, read, writer, scope)).resolves.toEqual({ succeeded: 1, retryScheduled: 0, deadLettered: 0 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    expect(writer.write.mock.calls[0]![0].signal).toBeInstanceOf(AbortSignal);
+    await expect(runFinanceFolioExportJobs(pool, read, writer, scope)).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    expect((await admin.query("SELECT status,attempts_count::int attempts FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "succeeded", attempts: 1 });
+
+    await cleanupJobs(); await insertOneShotDashboardJob(acceptedAt);
+    await admin.query("UPDATE platform.jobs SET attempts_count=1 WHERE id=$1", [JOB]);
+    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), scope)).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    await admin.query("UPDATE platform.jobs SET status='running',locked_at=$2,locked_by='one-shot-test' WHERE id=$1", [JOB, new Date(Date.now() - 360_000)]);
+    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), scope)).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    await admin.query("UPDATE platform.jobs SET status='pending',attempts_count=0,locked_at=NULL,locked_by=NULL WHERE id=$1", [JOB]);
+    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), { exportId: JOB, oneShot: { propertyId: OTHER_JOB, dispatchedAt } })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+  });
+
+  it("does not claim a Dashboard export after the dispatch deadline", async () => {
+    const acceptedAt = new Date(Date.now() - 16 * 60_000);
+    await insertOneShotDashboardJob(acceptedAt);
+    await expect(runFinanceFolioExportJobs(pool, read, fakeWriter(), { exportId: JOB, oneShot: { propertyId: PROPERTY, dispatchedAt: new Date(acceptedAt.getTime() - 1_000) } })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    expect((await admin.query("SELECT status,attempts_count::int attempts FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "pending", attempts: 0 });
+  });
+
+  it("dead-letters an ambiguous one-shot write without allowing another claim", async () => {
+    const acceptedAt = new Date(Date.now() - 2_000);
+    const scope = { exportId: JOB, oneShot: { propertyId: PROPERTY, dispatchedAt: new Date(acceptedAt.getTime() - 1_000) } };
+    await insertOneShotDashboardJob(acceptedAt);
+    const writer = fakeWriter(); writer.write.mockRejectedValueOnce(new Error("S3 outcome unknown"));
+    await expect(runFinanceFolioExportJobs(pool, read, writer, scope)).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 1 });
+    expect((await admin.query("SELECT status,attempts_count::int attempts,job_metadata->>'lastErrorCode' code,(SELECT lifecycle_status FROM platform.media_objects WHERE id=platform.jobs.id) media FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "dead_lettered", attempts: 1, code: "artifact_write_ambiguous", media: "upload_pending" });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, scope)).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a database statement within its remaining budget", async () => {
+    const raw = await pool.connect(), deadline = Date.now() + 150;
+    const client = exportDeadlineClient(raw, () => deadline);
+    try {
+      await expect(client.query("SELECT pg_sleep(2)")).rejects.toThrow(/timeout|canceling statement|Connection terminated/);
+    } finally { client.release(true); }
+  });
+
+  it("releases an acquired connection if the deadline has already passed", async () => {
+    const raw = await pool.connect(), release = vi.spyOn(raw, "release");
+    expect(() => exportDeadlineClient(raw, () => Date.now() - 1)).toThrow("one_shot_deadline_passed");
+    expect(release).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("closes the dedicated connection when timeout configuration responds late", async () => {
+    const raw = await pool.connect(), deadline = Date.now() + 100;
+    const release = vi.spyOn(raw, "release"), statements: string[] = [];
+    const delayed = new Proxy(raw, { get(target, key) {
+      if (key !== "query") return Reflect.get(target, key);
+      return async (config: { text: string }) => {
+        statements.push(config.text);
+        const result = await target.query(config);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return result;
+      };
+    } });
+    const client = exportDeadlineClient(delayed, () => deadline);
+    try {
+      await expect(client.query("SELECT pg_sleep(2)")).rejects.toThrow("one_shot_deadline_passed");
+      expect(release).toHaveBeenCalledWith(true);
+      expect(statements).toEqual(["SELECT set_config('statement_timeout',$1,false)"]);
+    } finally { client.release(true); }
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not finalize a write whose receipt arrives after the deadline", async () => {
+    const accepted = new Date(Date.now() - 2_000), dispatch = new Date(accepted.getTime() - 1_000);
+    await insertOneShotDashboardJob(accepted);
+    let now = new Date(); const writer = fakeWriter(), original = writer.write.getMockImplementation()! as FinanceFolioExportArtifactWriter["write"];
+    writer.write.mockImplementationOnce(async (input) => { const result = await original(input); now = new Date(dispatch.getTime() + 900_000); return result; });
+    const scope = { exportId: JOB, oneShot: { propertyId: PROPERTY, dispatchedAt: dispatch }, clock: () => now };
+    await expect(runFinanceFolioExportJobs(pool, read, writer, scope)).rejects.toThrow("one_shot_deadline_passed");
+    expect((await admin.query("SELECT status,attempts_count::int attempts,(SELECT lifecycle_status FROM platform.media_objects WHERE id=platform.jobs.id) media FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "running", attempts: 1, media: "upload_pending" });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { ...scope, clock: () => new Date() })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not finalize after waiting on a database lock beyond the deadline", async () => {
+    const accepted = new Date(Date.now() - 899_300), dispatch = new Date(accepted.getTime() - 10);
+    await insertOneShotDashboardJob(accepted);
+    const writer = fakeWriter(), original = writer.write.getMockImplementation()! as FinanceFolioExportArtifactWriter["write"];
+    writer.write.mockImplementationOnce(async (input) => {
+      await admin.query("BEGIN"); await admin.query("SELECT id FROM platform.jobs WHERE id=$1 FOR UPDATE", [JOB]);
+      return original(input);
+    });
+    try {
+      await expect(runFinanceFolioExportJobs(pool, read, writer, { exportId: JOB, oneShot: { propertyId: PROPERTY, dispatchedAt: dispatch } })).rejects.toThrow(/timeout|deadline|canceling statement|Connection terminated/);
+    } finally { await admin.query("ROLLBACK"); }
+    expect((await admin.query("SELECT status,attempts_count::int attempts FROM platform.jobs WHERE id=$1", [JOB])).rows[0]).toEqual({ status: "running", attempts: 1 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
   });
 
   it("renders one immutable manifest, stores only sanitized metadata, and audits success", async () => {
@@ -451,6 +556,12 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     const payload = { commandId: COMMAND, organizationId: ORG, snapshot, expiresAt: EXPIRES };
     const metadata = { organizationId: ORG, actorUserId: ACTOR, responseEnvelope: { currency: "EUR" }, acceptedAt: ACCEPTED, snapshotAt: SNAPSHOT_AT, expiresAt: EXPIRES, payloadFingerprint: hash(payload), manifestDigest: hash(snapshot.manifest), formatVersion: snapshot.formatVersion, requestId: "request-vay-1134", causationId: CAUSE };
     await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`, [JOB, `${jobType}:${PROPERTY}:report`, FINANCE_FOLIO_EXPORT_QUEUE, jobType, ACCEPTED, PROPERTY, JSON.stringify(payload), JSON.stringify(metadata)]);
+  }
+  async function insertOneShotDashboardJob(acceptedAt: Date) {
+    const snapshot = dashboardSnapshot(), accepted = acceptedAt.toISOString(), expires = new Date(acceptedAt.getTime() + 86_400_000).toISOString();
+    const payload = { commandId: COMMAND, organizationId: ORG, snapshot, expiresAt: expires };
+    const metadata = { organizationId: ORG, actorUserId: ACTOR, responseEnvelope: { currency: "EUR" }, acceptedAt: accepted, snapshotAt: SNAPSHOT_AT, expiresAt: expires, payloadFingerprint: hash(payload), manifestDigest: hash(snapshot.manifest), formatVersion: snapshot.formatVersion, requestId: "request-vay-1134", causationId: CAUSE };
+    await admin.query(`INSERT INTO platform.jobs(id,job_key,queue_name,job_type,status,max_attempts,run_after,tenant_scope,property_id,resource_product,resource_type,resource_id,correlation_id,payload,job_metadata) VALUES($1::uuid,$2,$3,$4,'pending',3,$5,'property',$6::uuid,'finance','financials_export',$1::text,'correlation-vay-1134',$7::jsonb,$8::jsonb)`, [JOB, `${FINANCE_DASHBOARD_EXPORT_JOB}:${PROPERTY}:one-shot`, FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_DASHBOARD_EXPORT_JOB, accepted, PROPERTY, JSON.stringify(payload), JSON.stringify(metadata)]);
   }
   async function cleanupJobs(){await admin.query("BEGIN");try{await admin.query("SET LOCAL session_replication_role=replica");for(const sql of ["DELETE FROM platform.media_objects WHERE property_id=$1","DELETE FROM platform.product_audit_events WHERE property_id=$1","DELETE FROM platform.dead_letter_events WHERE property_id=$1","DELETE FROM platform.job_attempts WHERE job_id IN(SELECT id FROM platform.jobs WHERE property_id=$1)","DELETE FROM platform.jobs WHERE property_id=$1","DELETE FROM platform.domain_events WHERE property_id=$1","DELETE FROM platform.idempotency_keys WHERE property_id=$1"])await admin.query(sql,[PROPERTY]);await admin.query("COMMIT");}catch(error){await admin.query("ROLLBACK");throw error;}}
   async function cleanup(){await cleanupJobs();await admin.query("DELETE FROM pms.property_pricing_settings WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_resource_links WHERE resource_id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organization_memberships WHERE organization_id=$1",[ORG]);await admin.query("DELETE FROM platform.finance_export_worker_properties WHERE property_id=$1",[PROPERTY]);await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1",[PROPERTY]);await admin.query("DELETE FROM identity.organizations WHERE id=$1",[ORG]);await admin.query("DELETE FROM identity.users WHERE id=$1",[ACTOR]);}

@@ -48,6 +48,8 @@ import type {
   FinanceFolioExportArtifactWriter,
 } from "../platform/financeFolioExportArtifacts.js";
 
+import { exportDeadlineClient } from "./financeExportDeadline.js";
+
 // prettier-ignore
 type Job = { id:string; jobType:string; propertyId:string; resourceType:string; resourceId:string; correlationId:string; idempotencyKeyHash:string; attemptsCount:number; maxAttempts:number; status:"pending"|"running"; payload:unknown; organizationId:string; actorUserId:string; currency:string; acceptedAt:string; snapshotAt:string; expiresAt:string; payloadFingerprint:string; manifestDigest:string; formatVersion:string; requestId:string; causationId:string };
 type Options = {
@@ -56,6 +58,7 @@ type Options = {
   limit?: number;
   clock?: () => Date;
   random?: () => number;
+  oneShot?: { propertyId: string; dispatchedAt: Date };
 };
 type FinanceExportRead = Pick<FinanceFolioReadRepository, "exportReady"> &
   Pick<FinanceExpenseReadModel, "exportCsv">;
@@ -71,8 +74,10 @@ export type FinanceFolioExportCounters = { succeeded:number; retryScheduled:numb
 // prettier-ignore
 export async function runFinanceFolioExportJobs(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFolioExportArtifactWriter, options: Options): Promise<FinanceFolioExportCounters> {
   if (!uuid(options.exportId)) throw new Error("finance_export_worker_export_scope_invalid");
+  if (options.oneShot && (!uuid(options.oneShot.propertyId) || !Number.isFinite(options.oneShot.dispatchedAt.getTime()))) throw new Error("finance_export_one_shot_scope_invalid");
   const counters: FinanceFolioExportCounters = { succeeded: 0, retryScheduled: 0, deadLettered: 0 };
-  for (let index = 0; index < (options.limit ?? 10); index++) {
+  if (options.oneShot) { const now = (options.clock ?? (() => new Date()))().getTime(); if (now < options.oneShot.dispatchedAt.getTime() || now >= options.oneShot.dispatchedAt.getTime() + 900_000) return counters; }
+  for (let index = 0; index < (options.oneShot ? 1 : options.limit ?? 10); index++) {
     const outcome = await runOne(pool, read, writer, options);
     if (!outcome) break;
     counters[outcome]++;
@@ -83,13 +88,17 @@ export async function runFinanceFolioExportJobs(pool: pg.Pool, read: FinanceExpo
 // Registry intent commits before S3 I/O, so a crash can never orphan an undiscoverable object.
 // prettier-ignore
 async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFolioExportArtifactWriter, options: Options): Promise<keyof FinanceFolioExportCounters | null> {
-  const client = await pool.connect(), clock = options.clock ?? (() => new Date()), now = clock(), workerId = options.workerId ?? `finance-export:${process.pid}`;
+  const rawClient = await pool.connect(), clock = options.clock ?? (() => new Date()), now = clock(), workerId = options.workerId ?? `finance-export:${process.pid}`;
+  let deadline = options.oneShot ? options.oneShot.dispatchedAt.getTime() + 900_000 : undefined;
+  const client = deadline === undefined ? rawClient : exportDeadlineClient(rawClient, () => deadline!, clock);
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='45s'");
     const job = (await client.query<Job>(`SELECT id::text,job_type AS "jobType",property_id::text AS "propertyId",resource_type AS "resourceType",resource_id AS "resourceId",correlation_id AS "correlationId",idempotency_key_hash AS "idempotencyKeyHash",attempts_count::int AS "attemptsCount",max_attempts::int AS "maxAttempts",status,payload,job_metadata->>'organizationId' AS "organizationId",job_metadata->>'actorUserId' AS "actorUserId",job_metadata->'responseEnvelope'->>'currency' AS currency,job_metadata->>'acceptedAt' AS "acceptedAt",job_metadata->>'snapshotAt' AS "snapshotAt",job_metadata->>'expiresAt' AS "expiresAt",job_metadata->>'payloadFingerprint' AS "payloadFingerprint",job_metadata->>'manifestDigest' AS "manifestDigest",job_metadata->>'formatVersion' AS "formatVersion",job_metadata->>'requestId' AS "requestId",job_metadata->>'causationId' AS "causationId"
-      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3,$5,$6,$7) AND tenant_scope='property' AND property_id IS NOT NULL AND id=$8::uuid AND attempts_count<=max_attempts AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes')) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString(), FINANCE_PROFIT_LOSS_EXPORT_JOB, FINANCE_REVENUE_EXPORT_JOB, FINANCE_DASHBOARD_EXPORT_JOB, options.exportId])).rows[0];
+      FROM platform.jobs WHERE queue_name=$1 AND job_type IN ($2,$3,$5,$6,$7) AND tenant_scope='property' AND property_id IS NOT NULL AND id=$8::uuid AND attempts_count<=max_attempts AND ($9::boolean AND job_type=$7 AND property_id=$10::uuid AND status='pending' AND attempts_count=0 AND run_after<=clock_timestamp() AND (job_metadata->>'acceptedAt')::timestamptz >= $11::timestamptz AND clock_timestamp()>=$11::timestamptz AND clock_timestamp()<LEAST($11::timestamptz+interval '15 minutes',(job_metadata->>'acceptedAt')::timestamptz+interval '15 minutes',(job_metadata->>'expiresAt')::timestamptz) OR NOT $9::boolean AND ((status='pending' AND run_after<=$4::timestamptz AND attempts_count<max_attempts) OR (status='running' AND locked_at<$4::timestamptz-interval '5 minutes'))) ORDER BY priority DESC,run_after,created_at FOR UPDATE SKIP LOCKED LIMIT 1`, [FINANCE_FOLIO_EXPORT_QUEUE, FINANCE_FOLIO_EXPORT_JOB, FINANCE_EXPENSE_EXPORT_JOB, now.toISOString(), FINANCE_PROFIT_LOSS_EXPORT_JOB, FINANCE_REVENUE_EXPORT_JOB, FINANCE_DASHBOARD_EXPORT_JOB, options.exportId, Boolean(options.oneShot), options.oneShot?.propertyId ?? null, options.oneShot?.dispatchedAt.toISOString() ?? null])).rows[0];
     if (!job) { await client.query("COMMIT"); return null; }
+    deadline = options.oneShot ? Math.min(options.oneShot.dispatchedAt.getTime() + 900_000, new Date(job.acceptedAt).getTime() + 900_000, new Date(job.expiresAt).getTime()) : undefined;
+    if (deadline !== undefined && (!Number.isFinite(deadline) || clock().getTime() >= deadline)) { await client.query("COMMIT"); return null; }
     if (job.status === "running") {
       const stale = (await client.query<{id:string}>("UPDATE platform.job_attempts SET status='timed_out',finished_at=$3,error_type='worker_timeout',error_message=$4 WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running' RETURNING id::text", [job.id, job.attemptsCount, now.toISOString(), `Finance ${jobTab(job)} export worker lease expired.`])).rows[0];
       if (!stale) throw new Error("Finance export running attempt is missing");
@@ -102,8 +111,10 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
       }
     }
     const attempt = job.attemptsCount + 1;
-    await client.query("UPDATE platform.jobs SET status='running',attempts_count=$2,locked_at=$3,locked_by=$4,updated_at=$3 WHERE id=$1::uuid", [job.id, attempt, now.toISOString(), workerId]);
+    const claimed = await client.query("UPDATE platform.jobs SET status='running',attempts_count=$2,locked_at=$3,locked_by=$4,updated_at=$3 WHERE id=$1::uuid AND ($5::boolean=false OR (status='pending' AND attempts_count=0 AND property_id=$6::uuid AND job_type=$7)) RETURNING id", [job.id, attempt, now.toISOString(), workerId, Boolean(options.oneShot), options.oneShot?.propertyId ?? null, FINANCE_DASHBOARD_EXPORT_JOB]);
+    if (!claimed.rowCount) throw new Error("finance_export_one_shot_claim_lost");
     const attemptId = (await client.query<{ id: string }>("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1::uuid,$2,'running',$3,$4) RETURNING id::text", [job.id, attempt, workerId, now.toISOString()])).rows[0]!.id;
+    if (options.oneShot) { await client.query("COMMIT"); await client.query("BEGIN"); await client.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='45s'"); }
     if (now.getTime() >= new Date(job.expiresAt).getTime()) {
       const outcome = await fail(client, job, attemptId, attempt, new ExecutionFailure("export_expired", false), now, options.random ?? Math.random);
       await client.query("COMMIT"); return outcome;
@@ -118,27 +129,28 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
       artifact = rendered;
     } catch (error) {
       const failure = error instanceof ExecutionFailure ? error : error instanceof TypeError || error instanceof FinanceFolioEvidenceError || error instanceof FinanceExpenseEvidenceError ? new ExecutionFailure("invalid_export_evidence", false) : new ExecutionFailure("export_read_failed", true);
-      const outcome = await fail(client, job, attemptId, attempt, failure, now, options.random ?? Math.random);
+      const outcome = await fail(client, job, attemptId, attempt, options.oneShot ? new ExecutionFailure(failure.code, false) : failure, now, options.random ?? Math.random);
       await client.query("COMMIT"); return outcome;
     }
     const beforeWrite = clock();
-    if (beforeWrite.getTime() >= new Date(job.expiresAt).getTime()) { const outcome=await fail(client,job,attemptId,attempt,new ExecutionFailure("export_expired",false),beforeWrite,options.random??Math.random);await client.query("COMMIT");return outcome; }
+    if (beforeWrite.getTime() >= new Date(job.expiresAt).getTime() || deadline !== undefined && beforeWrite.getTime() >= deadline) { const outcome=await fail(client,job,attemptId,attempt,new ExecutionFailure(deadline !== undefined && beforeWrite.getTime() >= deadline ? "verification_deadline" : "export_expired",false),beforeWrite,options.random??Math.random);await client.query("COMMIT");return outcome; }
     await registerArtifactIntent(client, job, writer.bucketName, artifact, attempt, workerId, beforeWrite);
     await client.query("COMMIT");
     let stored: FinanceFolioExportArtifact;
-    try { stored=await writer.write({exportId:job.id,body:artifact.body,contentType:artifact.contentType,formatVersion:artifact.formatVersion,expiresAt:job.expiresAt});if(!validStored(stored,writer.bucketName,job.id,artifact.body,artifact.formatVersion))throw new Error("Invalid private artifact receipt"); }
-    catch { const failedAt=clock();await client.query("BEGIN");if(!await lockAttempt(client,job,attempt,workerId)){await client.query("COMMIT");return null;}const failure=failedAt.getTime()>=new Date(job.expiresAt).getTime()?new ExecutionFailure("export_expired",false):new ExecutionFailure("artifact_write_failed",true),outcome=await fail(client,job,attemptId,attempt,failure,failedAt,options.random??Math.random);await client.query("COMMIT");return outcome; }
-    const completedAt=clock();await client.query("BEGIN");
+    try { if (deadline !== undefined && clock().getTime() >= deadline) throw new Error("verification_deadline"); stored=await writer.write({exportId:job.id,body:artifact.body,contentType:artifact.contentType,formatVersion:artifact.formatVersion,expiresAt:job.expiresAt,...(deadline === undefined ? {} : {signal:AbortSignal.timeout(Math.max(1,deadline-clock().getTime()))})});if(!validStored(stored,writer.bucketName,job.id,artifact.body,artifact.formatVersion))throw new Error("Invalid private artifact receipt"); }
+    catch { const failedAt=clock();await client.query("BEGIN");if(!await lockAttempt(client,job,attempt,workerId)){await client.query("COMMIT");return null;}const failure=deadline !== undefined ? new ExecutionFailure("artifact_write_ambiguous",false) : failedAt.getTime()>=new Date(job.expiresAt).getTime()?new ExecutionFailure("export_expired",false):new ExecutionFailure("artifact_write_failed",true),outcome=await fail(client,job,attemptId,attempt,failure,failedAt,options.random??Math.random);await client.query("COMMIT");return outcome; }
+    await client.query("BEGIN");
     if(!await lockAttempt(client,job,attempt,workerId)){await client.query("COMMIT");return null;}
-    if(completedAt.getTime()>=new Date(job.expiresAt).getTime()){const outcome=await fail(client,job,attemptId,attempt,new ExecutionFailure("export_expired",false),completedAt,options.random??Math.random);await client.query("COMMIT");return outcome;}
+    const completedAt=clock();
+    if(completedAt.getTime()>=new Date(job.expiresAt).getTime() || deadline !== undefined && completedAt.getTime() >= deadline){const outcome=await fail(client,job,attemptId,attempt,new ExecutionFailure(deadline !== undefined ? "artifact_write_ambiguous" : "export_expired",false),completedAt,options.random??Math.random);await client.query("COMMIT");return outcome;}
     await activateArtifact(client, job, stored, completedAt);
     const metadata = { mediaId:job.id, checksumSha256:stored.checksumSha256, sizeBytes:stored.sizeBytes, filename: artifact.filename, contentType: artifact.contentType, formatVersion: artifact.formatVersion, rowCount: artifact.rowCount, expiresAt: job.expiresAt };
     await client.query("UPDATE platform.job_attempts SET status='succeeded',finished_at=$4,error_metadata=jsonb_build_object('outcome','succeeded','rowCount',$5::int) WHERE id=$1::uuid AND job_id=$2::uuid AND attempt_number=$3 AND status='running'", [attemptId, job.id, attempt, completedAt.toISOString(), artifact.rowCount]);
     await client.query("UPDATE platform.jobs SET status='succeeded',finished_at=$3,locked_at=NULL,locked_by=NULL,updated_at=$3,job_metadata=(job_metadata-'lastErrorCode')||jsonb_build_object('outcome','succeeded','artifact',$4::jsonb) WHERE id=$1::uuid AND attempts_count=$2 AND status='running'", [job.id, attempt, completedAt.toISOString(), JSON.stringify(metadata)]);
     await audit(client, job, attempt, "succeeded", completedAt, undefined, { rowCount: artifact.rowCount, manifestCount, checksumSha256: stored.checksumSha256 });
     await client.query("COMMIT"); return "succeeded";
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
-  finally { client.release(); }
+  } catch (error) { if (options.oneShot) { const rollback = {text:"ROLLBACK",query_timeout:1_000}; await rawClient.query(rollback).catch(() => undefined); } else { await rawClient.query("ROLLBACK").catch(() => undefined); } throw error; }
+  finally { client.release(Boolean(options.oneShot)); }
 }
 
 // prettier-ignore

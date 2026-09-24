@@ -25,6 +25,7 @@ export type FinanceFolioExportArtifactWriter = {
       | typeof FINANCE_REVENUE_CSV_VERSION
       | typeof FINANCE_DASHBOARD_CSV_VERSION;
     expiresAt: string;
+    signal?: AbortSignal;
   }): Promise<FinanceFolioExportArtifact>;
   close?(): void;
 };
@@ -39,7 +40,7 @@ export function createS3FinanceFolioExportArtifactWriter(config: { bucketName: s
     async write(input) {
       if (!uuid(input.exportId) || input.contentType !== FINANCE_FOLIO_CSV_CONTENT_TYPE || ![FINANCE_FOLIO_CSV_VERSION,FINANCE_EXPENSE_CSV_VERSION,FINANCE_PROFIT_LOSS_CSV_VERSION,FINANCE_REVENUE_CSV_VERSION,FINANCE_DASHBOARD_CSV_VERSION].includes(input.formatVersion) || !instant(input.expiresAt)) throw new TypeError("Invalid Finance export artifact");
       const bytes = Buffer.from(input.body, "utf8"), digest = createHash("sha256").update(bytes).digest(), storageKey = `private/finance/financials-exports/${input.exportId}/${input.formatVersion}.csv`;
-      await s3.send(new PutObjectCommand({ Bucket: config.bucketName, Key: storageKey, Body: bytes, ContentType: input.contentType, CacheControl: "private, no-store", ChecksumSHA256: digest.toString("base64"), Expires: new Date(input.expiresAt), Metadata: { "expires-at": input.expiresAt } }));
+      await s3.send(new PutObjectCommand({ Bucket: config.bucketName, Key: storageKey, Body: bytes, ContentType: input.contentType, CacheControl: "private, no-store", ChecksumSHA256: digest.toString("base64"), Expires: new Date(input.expiresAt), Metadata: { "expires-at": input.expiresAt } }), { abortSignal: input.signal });
       return { bucketName: config.bucketName, storageKey, checksumSha256: digest.toString("hex"), sizeBytes: bytes.length };
     },
     close() { if (ownsClient) s3.destroy(); },
