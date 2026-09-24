@@ -17,11 +17,7 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  | "platform-admin"
-  | "booking-admin"
-  | "pms-web"
-  | "affiliate-dashboard"
-  | "marketplace-web";
+  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -57,6 +53,10 @@ export type FinanceFolioRecipientKmsConfig = {
   region: string;
 };
 export type BookingWebEventSink = "disabled" | "target";
+export type AffiliateCaptureConfig = {
+  databaseUrl: string;
+  internalToken: string;
+};
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 export type ApiRuntime = "legacy" | "next";
 
@@ -179,6 +179,7 @@ export type ApiConfig = {
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
+  affiliateCapture?: AffiliateCaptureConfig;
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -541,6 +542,38 @@ function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined
     throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
   }
   return "target";
+}
+
+function loadAffiliateCaptureConfig(
+  env: NodeJS.ProcessEnv,
+  otherDatabaseUrls: readonly (string | undefined)[],
+): AffiliateCaptureConfig | undefined {
+  const enabled = readBooleanEnv(env, "AFFILIATE_CAPTURE_ENABLED", false);
+  if (!enabled) return undefined;
+  const databaseUrl = readOptionalPgConnectionEnv(env, "AFFILIATE_CAPTURE_DATABASE_URL");
+  const internalToken = readOptionalEnv(env, "BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN");
+  if (!databaseUrl || !internalToken) {
+    throw new Error(
+      "AFFILIATE_CAPTURE_ENABLED requires AFFILIATE_CAPTURE_DATABASE_URL and BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN",
+    );
+  }
+  if (Buffer.byteLength(internalToken, "utf8") < 32) {
+    throw new Error("BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN must be at least 32 bytes");
+  }
+  const identity = pgConnectionIdentity(databaseUrl);
+  if (!identity || identity.username !== "vayada_next_affiliate_capture") {
+    throw new Error(
+      "AFFILIATE_CAPTURE_DATABASE_URL must use the exact vayada_next_affiliate_capture PostgreSQL login",
+    );
+  }
+  if (
+    otherDatabaseUrls.some(
+      (other) => other && new pg.Client({ connectionString: other }).user === identity.username,
+    )
+  ) {
+    throw new Error("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
+  }
+  return { databaseUrl, internalToken };
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -1010,6 +1043,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   ) {
     throw new Error("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
   }
+  const affiliateCapture = loadAffiliateCaptureConfig(env, [
+    targetDatabaseUrl,
+    auth?.databaseUrl,
+    pricingDatabaseUrl,
+  ]);
   const authSession = loadAuthSessionConfig(env);
   const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
@@ -1228,6 +1266,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
+    affiliateCapture,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",
