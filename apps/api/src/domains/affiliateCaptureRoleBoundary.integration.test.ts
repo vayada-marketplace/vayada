@@ -206,6 +206,8 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
         "hotel_catalog.properties",
         "hotel_catalog.property_slugs",
         "hotel_catalog.property_domains",
+        "distribution.active_public_booking_revision",
+        "distribution.public_booking_content_revisions",
         "booking.affiliate_referral_transport_certifications",
         "booking.affiliate_validation_probes",
         "booking.affiliate_validation_probe_revocations",
@@ -224,7 +226,8 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
         "booking.affiliate_referral_production_preflights",
       ];
       await owner.query(
-        `GRANT USAGE ON SCHEMA marketplace,booking,hotel_catalog TO ${AFFILIATE_CAPTURE_ROLE}`,
+        `GRANT USAGE ON SCHEMA marketplace,booking,hotel_catalog,distribution
+         TO ${AFFILIATE_CAPTURE_ROLE}`,
       );
       await owner.query(
         `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT),
