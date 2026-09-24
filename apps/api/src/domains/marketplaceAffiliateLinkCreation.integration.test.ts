@@ -233,11 +233,15 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
         }),
       );
     expect(
-      await createMarketplaceAffiliateVisit(pool(), {
-        publicToken: link.publicToken,
-        campaignLabel: null,
-        source: "unknown",
-      }),
+      await createMarketplaceAffiliateVisit(
+        pool(),
+        {
+          publicToken: link.publicToken,
+          campaignLabel: null,
+          source: "unknown",
+        },
+        async () => undefined,
+      ),
     ).toEqual({ status: "unavailable" });
     expect(await visit("instagram.reel-1", "instagram")).toMatchObject({ status: "ready" });
     expect(await visit(null, "unknown")).toMatchObject({ status: "ready" });

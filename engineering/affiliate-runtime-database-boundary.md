@@ -143,6 +143,9 @@ it. Every immutable relation in that lock list must retain its enabled mutation
 trigger in `ENABLE ALWAYS` mode, including when a login starts in replication
 mode; the two mutable hotel-catalogue relations must retain the complete known
 row-level policy set. The check rejects any additional direct read or write
-access. The production configuration provider and final hotel host-profile
-read remain outside this known surface, so passing this gate still does not
-authorize capture or provision the role.
+access. The visit path now derives its referral runtime configuration from
+exactly one fresh, unrevoked certification/preflight pair for the accepted
+destination; zero or multiple candidates fail closed, using relations already
+covered by this allowlist. The final hotel host-profile read remains outside
+this known surface. Passing this gate still does not authorize capture or
+provision the role.
