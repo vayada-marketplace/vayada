@@ -22,6 +22,7 @@ import { createPgPreparedImportRepository } from "./domains/preparedHotelImportR
 import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
+import { assertAffiliateBookingBindingCapabilities } from "./domains/affiliateBookingBindingRoleBoundary.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -474,6 +475,15 @@ const pricingRuntimePool = config.pricingDatabaseUrl
       max: 5,
     })
   : null;
+if (config.affiliateBookingBindingEnabled) {
+  const client = new pg.Client({ connectionString: targetDatabaseUrl });
+  try {
+    await client.connect();
+    await assertAffiliateBookingBindingCapabilities(client);
+  } finally {
+    await client.end();
+  }
+}
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
   airbnbAlterations: airbnbAlterationRuntime?.adapter,
   externalChanges: externalBookingChanges,
@@ -2094,6 +2104,7 @@ const app = buildApp({
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
   bookingWebAffiliateArrival: affiliateCaptureRuntime,
+  bookingWebAffiliateContextBindingEnabled: config.affiliateBookingBindingEnabled,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({

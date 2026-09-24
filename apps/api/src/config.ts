@@ -180,6 +180,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   affiliateCapture?: AffiliateCaptureConfig;
+  affiliateBookingBindingEnabled: boolean;
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
   bookingWebEventSink: BookingWebEventSink;
@@ -1048,6 +1049,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth?.databaseUrl,
     pricingDatabaseUrl,
   ]);
+  const affiliateBookingBindingEnabled = readBooleanEnv(
+    env,
+    "AFFILIATE_BOOKING_BINDING_ENABLED",
+    false,
+  );
+  if (affiliateBookingBindingEnabled && (!affiliateCapture || !targetDatabaseUrl)) {
+    throw new Error(
+      "AFFILIATE_BOOKING_BINDING_ENABLED requires affiliate capture and TARGET_DATABASE_URL",
+    );
+  }
   const authSession = loadAuthSessionConfig(env);
   const creatorPlatformConnections = loadCreatorPlatformConnectionsConfig(env);
   const bookingEmailDelivery = loadBookingEmailDeliveryConfig(env);
@@ -1267,6 +1278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
     affiliateCapture,
+    affiliateBookingBindingEnabled,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
       "https://admin.booking.localhost",

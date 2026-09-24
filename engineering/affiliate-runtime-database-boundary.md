@@ -160,3 +160,13 @@ preflight before mounting the token-protected Booking arrival endpoint. It does
 not register `/r/:token` or enable cookie-to-booking binding; those remain
 separate release gates, so setting these API variables alone cannot start
 public tracking.
+
+Cookie-to-booking binding has its own closed-by-default
+`AFFILIATE_BOOKING_BINDING_ENABLED` gate. It cannot open without the complete
+capture runtime and the target Booking writer connection. Before route
+composition, the API connects with that exact writer credential and proves it
+is a restricted non-owner login, has only guarded access to affiliate evidence,
+can read the live context for the canonical hotel, can execute but not delegate
+`booking.bind_live_affiliate_original`, and still has the required immutable
+triggers. Failure aborts startup. This gate does not register the public link
+route or provision database grants.

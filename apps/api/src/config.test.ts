@@ -160,6 +160,25 @@ describe("api config", () => {
     ).toThrow("must be at least 32 bytes");
   });
 
+  it("keeps live booking binding behind capture and target runtime gates", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateBookingBindingEnabled).toBe(false);
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
+      }),
+    ).toThrow("requires affiliate capture and TARGET_DATABASE_URL");
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        AFFILIATE_BOOKING_BINDING_ENABLED: "true",
+      }).affiliateBookingBindingEnabled,
+    ).toBe(true);
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),
