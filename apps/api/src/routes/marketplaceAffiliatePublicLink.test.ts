@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.js";
-import { registerMarketplaceAffiliatePublicLinkRoute } from "./marketplaceAffiliatePublicLink.js";
 
 const token = `va_${"a".repeat(22)}`;
 const redirectUrl = `https://alpenrose.next-booking.vayada.com/?vref=vc_${"b".repeat(22)}`;
@@ -16,10 +15,12 @@ describe("dormant public affiliate link route", () => {
   });
 
   it("redirects a valid visit without caching or forwarding a referrer", async () => {
-    const app = buildApp({ logger: false });
     const visit = vi.fn().mockResolvedValue({ status: "ready", redirectUrl });
     const consumeQuota = vi.fn().mockResolvedValue({ allowed: true });
-    app.register(registerMarketplaceAffiliatePublicLinkRoute, { visit, consumeQuota });
+    const app = buildApp({
+      logger: false,
+      marketplaceAffiliatePublicLink: { visit, consumeQuota },
+    });
     try {
       const response = await app.inject({
         method: "GET",
@@ -45,10 +46,12 @@ describe("dormant public affiliate link route", () => {
   });
 
   it("does not write a visit when the quota is exhausted or the link is invalid", async () => {
-    const app = buildApp({ logger: false });
     const visit = vi.fn();
     const consumeQuota = vi.fn().mockResolvedValue({ allowed: false, retryAfterSeconds: 60 });
-    app.register(registerMarketplaceAffiliatePublicLinkRoute, { visit, consumeQuota });
+    const app = buildApp({
+      logger: false,
+      marketplaceAffiliatePublicLink: { visit, consumeQuota },
+    });
     try {
       const limited = await app.inject({ method: "GET", url: `/r/${token}` });
       expect(limited.statusCode).toBe(429);
@@ -67,16 +70,16 @@ describe("dormant public affiliate link route", () => {
 
   it("rejects an unsafe destination and hides link tokens from request logs", async () => {
     const logs: string[] = [];
-    const app = buildApp({
-      logger: { level: "info", stream: { write: (line) => logs.push(line) } },
-    });
     const visit = vi.fn().mockResolvedValue({
       status: "ready",
       redirectUrl: "https://attacker.example/?vref=vc_secret",
     });
-    app.register(registerMarketplaceAffiliatePublicLinkRoute, {
-      visit,
-      consumeQuota: async () => ({ allowed: true }),
+    const app = buildApp({
+      logger: { level: "info", stream: { write: (line) => logs.push(line) } },
+      marketplaceAffiliatePublicLink: {
+        visit,
+        consumeQuota: async () => ({ allowed: true }),
+      },
     });
     try {
       const response = await app.inject({ method: "GET", url: `/r/${token}` });

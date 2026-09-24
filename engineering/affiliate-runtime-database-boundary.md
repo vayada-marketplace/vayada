@@ -161,6 +161,13 @@ not register `/r/:token` or enable cookie-to-booking binding; those remain
 separate release gates, so setting these API variables alone cannot start
 public tracking.
 
+The API application can now compose `/r/:publicToken` only when its caller
+supplies both the guarded visit operation and a quota consumer. The production
+server deliberately supplies neither, because no production quota provider is
+configured yet. This keeps the route absent by default while allowing the full
+redirect contract to be tested through the same `buildApp` boundary used by
+the server. A process-local counter is not an acceptable production substitute.
+
 Cookie-to-booking binding has its own closed-by-default
 `AFFILIATE_BOOKING_BINDING_ENABLED` gate. It cannot open without the complete
 capture runtime and the target Booking writer connection. Before route

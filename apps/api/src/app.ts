@@ -127,6 +127,10 @@ import {
   type MarketplaceHotelSelfServiceRepository,
 } from "./routes/marketplaceHotelSelfService.js";
 import { registerMarketplaceAffiliateAdminRoutes } from "./routes/marketplaceAffiliateAdmin.js";
+import {
+  registerMarketplaceAffiliatePublicLinkRoute,
+  type MarketplaceAffiliatePublicLinkRoutesOptions,
+} from "./routes/marketplaceAffiliatePublicLink.js";
 import { registerMarketplaceAffiliatePolicyRoutes } from "./routes/marketplaceAffiliatePolicies.js";
 import type { AffiliatePolicyRepository } from "./domains/financeAffiliatePercentagePolicyRepository.js";
 import { registerMarketplaceAffiliateDraftRoutes } from "./routes/marketplaceAffiliateDrafts.js";
@@ -404,6 +408,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   marketplaceAffiliateDestinationRepository?: AffiliateDestinationRepository;
   marketplaceAffiliateCompletionRepository?: AffiliateCompletionRepository;
   marketplaceAffiliateAdminRepository?: MarketplaceAffiliateAdminRepository;
+  marketplaceAffiliatePublicLink?: MarketplaceAffiliatePublicLinkRoutesOptions;
   financeAffiliateCommissions?: FinanceAffiliateCommissionRoutesOptions;
   marketplaceCreatorSelfServiceRepository?: MarketplaceCreatorSelfServiceRepository;
   marketplaceCreatorPlatformConnections?: Omit<
@@ -521,6 +526,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
 
   app.register(registerHealthRoutes);
+  if (options.marketplaceAffiliatePublicLink) {
+    app.register(
+      registerMarketplaceAffiliatePublicLinkRoute,
+      options.marketplaceAffiliatePublicLink,
+    );
+  }
   if (options.authSession) {
     app.register(registerAuthSessionRoutes, {
       prefix: "/auth",
