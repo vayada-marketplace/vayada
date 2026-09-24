@@ -10,6 +10,7 @@ import {
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { readPlatformPropertyRetirementImpact } from "./platformPropertyLifecycleImpactRepository.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 
 export type PlatformPropertyLifecycleAudit = {
   actorUserId: string;
@@ -179,16 +180,6 @@ async function runRetirementCommand(
     await completeIdempotency(client, reservationId, result, at);
     return result;
   });
-}
-
-async function lockBookingPublication(client: CommandClient, propertyId: string): Promise<void> {
-  await client.query(
-    `SELECT pg_advisory_xact_lock(
-       hashtext('booking.publication'),
-       hashtext($1::uuid::text)
-     )`,
-    [propertyId],
-  );
 }
 
 export async function requireAuthorizedPlatformActor(
