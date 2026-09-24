@@ -2,6 +2,7 @@ import type pg from "pg";
 import { parseMarketplaceAffiliateLink } from "@vayada/domain-marketplace";
 import { buildNativeAffiliateArrivalRedirect } from "./bookingAffiliateNativeDestinationSafety.js";
 import {
+  readAffiliateReferralRuntimeConfiguration,
   readAffiliateReferralRoundTripReadiness,
   type AffiliateReferralReadiness,
 } from "./bookingAffiliateReferralReadiness.js";
@@ -25,7 +26,7 @@ type ReadinessPort = (
 
 const sources = new Set(["instagram", "tiktok", "youtube", "facebook", "x", "unknown"]);
 
-/** Normal earning visit only. No production configuration or public route is wired. */
+/** Normal earning visit only. The public route and production credential remain unwired. */
 export async function createMarketplaceAffiliateVisit(
   pool: pg.Pool,
   input: {
@@ -33,7 +34,7 @@ export async function createMarketplaceAffiliateVisit(
     campaignLabel: unknown;
     source: ReturnType<typeof affiliateTrafficSource>;
   },
-  configuration: ConfigurationPort = async () => undefined,
+  configuration: ConfigurationPort = readAffiliateReferralRuntimeConfiguration,
   readReadiness: ReadinessPort = readAffiliateReferralRoundTripReadiness,
 ): Promise<{ status: "unavailable" } | { status: "ready"; redirectUrl: string }> {
   const parsed = parseMarketplaceAffiliateLink(input.publicToken, input.campaignLabel);
