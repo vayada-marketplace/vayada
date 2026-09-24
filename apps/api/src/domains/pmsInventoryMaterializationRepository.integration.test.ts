@@ -3175,6 +3175,16 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       roomTypeId: fixture.roomTypeId,
       stayDate: "2026-08-04",
     };
+    expect(
+      Number(
+        (
+          await admin.query(
+            "SELECT calendar_revision FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3",
+            [fixture.propertyId, fixture.roomTypeId, request.stayDate],
+          )
+        ).rows[0]?.calendar_revision,
+      ),
+    ).toBe(1);
     await expect(fixture.repository.getCurrentInventoryDay(request)).resolves.toMatchObject({
       kind: "unavailable",
       reason: "coverage_unavailable",
