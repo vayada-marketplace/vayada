@@ -351,6 +351,7 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
   client: Pick<pg.Client, "query">,
   role = AFFILIATE_CAPTURE_ROLE,
 ): Promise<void> {
+  if (role !== AFFILIATE_CAPTURE_ROLE) throw new Error("affiliate_capture_role_identity");
   await assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
     client,
     role,
@@ -418,7 +419,7 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
       AND trigger.tgname=expected.trigger_name
       AND trigger.tgfoid=expected.function_name::pg_catalog.regprocedure
       AND trigger.tgenabled='A' AND NOT trigger.tgisinternal
-      AND trigger.tgtype=27 AND trigger.tgqual IS NULL
+      AND trigger.tgtype=27 AND trigger.tgqual IS NULL AND trigger.tgattr::text=''
      WHERE trigger.oid IS NULL`,
     [
       immutableLockTriggers.map(([relation]) => relation),

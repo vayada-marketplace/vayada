@@ -193,6 +193,10 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
 
   it("requires the exact known visit reads and protected row-lock grants", async () => {
     await withNoPublicTemp(async () => {
+      await expect(assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, role)).rejects.toThrow(
+        "affiliate_capture_role_identity",
+      );
+
       const readable = [
         "marketplace.affiliate_links",
         "marketplace.affiliate_agreement_activations",
@@ -314,6 +318,26 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
          CREATE TRIGGER affiliate_destination_immutable
            BEFORE UPDATE ON booking.affiliate_destination_versions
            FOR EACH ROW EXECUTE FUNCTION platform.prevent_append_only_mutation()`,
+      );
+      await expect(assertAffiliateCaptureRoleHasVisitReadCapabilities(owner)).rejects.toThrow(
+        "affiliate_capture_role_lock_protection",
+      );
+      await owner.query(
+        `DROP TRIGGER affiliate_destination_immutable ON booking.affiliate_destination_versions;
+         CREATE TRIGGER affiliate_destination_immutable
+           BEFORE UPDATE OR DELETE ON booking.affiliate_destination_versions
+           FOR EACH ROW EXECUTE FUNCTION platform.prevent_append_only_mutation();
+         ALTER TABLE booking.affiliate_destination_versions
+           ENABLE ALWAYS TRIGGER affiliate_destination_immutable`,
+      );
+
+      await owner.query(
+        `DROP TRIGGER affiliate_destination_immutable ON booking.affiliate_destination_versions;
+         CREATE TRIGGER affiliate_destination_immutable
+           BEFORE UPDATE OF id OR DELETE ON booking.affiliate_destination_versions
+           FOR EACH ROW EXECUTE FUNCTION platform.prevent_append_only_mutation();
+         ALTER TABLE booking.affiliate_destination_versions
+           ENABLE ALWAYS TRIGGER affiliate_destination_immutable`,
       );
       await expect(assertAffiliateCaptureRoleHasVisitReadCapabilities(owner)).rejects.toThrow(
         "affiliate_capture_role_lock_protection",
