@@ -1836,6 +1836,10 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       login.password = "fixture";
       const worker = new pg.Pool({ connectionString: login.toString() });
       const inventory = f.workerRepository(login.toString());
+      const getInventoryLaunchReadiness = vi.fn(
+        inventory.getInventoryLaunchReadiness.bind(inventory),
+      );
+      if (operation === "provision") getInventoryLaunchReadiness.mockResolvedValue(null);
       try {
         await admin.query(
           `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
@@ -1863,12 +1867,17 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         }
         const prepared =
           operation === "provision"
-            ? await prepareNextChannexRoomAvailabilityDispatch(worker, inventory, f.lease)
+            ? await prepareNextChannexRoomAvailabilityDispatch(
+                worker,
+                { ...inventory, getInventoryLaunchReadiness },
+                f.lease,
+              )
             : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
         expect(prepared.kind).toBe("prepared");
         if (prepared.kind !== "prepared")
           throw new Error("Restricted availability dispatch required");
         if (operation === "provision") expect(prepared).toMatchObject({ roomTypeId: f.roomTypeId });
+        if (operation === "provision") expect(getInventoryLaunchReadiness).not.toHaveBeenCalled();
         const taskId = randomUUID();
         let request: unknown;
         const outcome = await prepared.dispatch(async (sent) => {

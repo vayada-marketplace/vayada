@@ -20,6 +20,7 @@ type Scope = Readonly<{
   through: string;
   roomCount: number;
   dayCount: number;
+  fullPropertyReadinessRequired: boolean;
 }>;
 
 /** Rechecks complete room availability evidence inside a caller-owned activation transaction. */
@@ -112,12 +113,14 @@ export async function prepareNextChannexRoomAvailabilityDispatch(
   const lease = { ...input };
   const before = await readScope(pool, lease, false);
   if (before.kind !== "scope") return before;
-  const readiness = await inventory.getInventoryLaunchReadiness({
-    propertyId: before.value.propertyId,
-    requiredCoverage: { from: before.value.localToday, through: before.value.through },
-  });
-  if (!readiness?.ready)
-    return { kind: "unavailable" as const, reason: "room_availability_coverage_unavailable" };
+  if (before.value.fullPropertyReadinessRequired) {
+    const readiness = await inventory.getInventoryLaunchReadiness({
+      propertyId: before.value.propertyId,
+      requiredCoverage: { from: before.value.localToday, through: before.value.through },
+    });
+    if (!readiness?.ready)
+      return { kind: "unavailable" as const, reason: "room_availability_coverage_unavailable" };
+  }
   const selected = await readScope(pool, lease, true, before.value);
   if (selected.kind !== "selected") return selected;
   if (!selected.selection)
@@ -247,6 +250,7 @@ async function readScope(
       through: coverage.through,
       roomCount: mappings.rows.length,
       dayCount,
+      fullPropertyReadinessRequired: authority.lease.operationType !== "provision",
     };
     if (expected && !isDeepStrictEqual(expected, scope))
       return unavailable("room_availability_coverage_unavailable");
