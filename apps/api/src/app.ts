@@ -454,6 +454,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger" | "trustProxy"> & {
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAffiliateHotelResolver?: BookingWebAffiliateHotelResolver;
   bookingWebAffiliateRepository?: BookingWebAffiliateRepository;
+  bookingWebAffiliateArrival?: BookingWebPublicRoutesOptions["affiliateArrival"];
+  /** Separate release gate: the Booking writer credential must be proven first. */
+  bookingWebAffiliateContextBindingEnabled?: boolean;
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
   affiliateDashboardRepository?: Partial<AffiliateDashboardReadRepository>;
@@ -565,6 +568,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       quoteRepository: options.publicHotelQuoteRepository,
       calendarRepository: options.bookingWebCalendarRepository,
       checkoutAdapter: bookingWebCheckoutAdapter,
+      affiliateContextBindingEnabled: options.bookingWebAffiliateContextBindingEnabled,
+      affiliateArrival: options.bookingWebAffiliateArrival,
       affiliateHotelResolver:
         options.bookingWebAffiliateHotelResolver ?? options.publicHotelProfileRepository,
       affiliateRepository: options.bookingWebAffiliateRepository,

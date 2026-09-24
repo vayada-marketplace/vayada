@@ -21,6 +21,7 @@ import { createPgPmsRoomClosureRepository } from "./domains/pmsRoomClosureComman
 import { createPgPreparedImportRepository } from "./domains/preparedHotelImportRepository.js";
 import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
+import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
@@ -1521,6 +1522,19 @@ const airbnbImportRuntime = config.airbnbImport
       allowedOrigins: config.authSession!.authAllowedOrigins,
     })
   : undefined;
+const affiliateCaptureConfig = config.affiliateCapture;
+const affiliateCaptureRuntime = affiliateCaptureConfig
+  ? await (async (affiliateCapture) => {
+      const pool = new pg.Pool({ connectionString: affiliateCapture.databaseUrl, max: 5 });
+      try {
+        await assertAffiliateCaptureRoleHasVisitReadCapabilities(pool);
+        return { pool, internalToken: affiliateCapture.internalToken };
+      } catch (error) {
+        await pool.end();
+        throw error;
+      }
+    })(affiliateCaptureConfig)
+  : undefined;
 const app = buildApp({
   airbnbImports: airbnbImportRuntime?.routes,
   trustProxy: ["loopback", "linklocal", "uniquelocal"],
@@ -2079,6 +2093,7 @@ const app = buildApp({
   publicHotelQuoteRepository,
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
+  bookingWebAffiliateArrival: affiliateCaptureRuntime,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
       ? createPgBookingWebEventSink({
@@ -2088,6 +2103,9 @@ const app = buildApp({
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
   platformMedia: platformMediaRuntime?.routes,
+});
+app.addHook("onClose", async () => {
+  await affiliateCaptureRuntime?.pool.end();
 });
 
 const creatorPlatformSyncConfig = config.creatorPlatformConnections?.sync;

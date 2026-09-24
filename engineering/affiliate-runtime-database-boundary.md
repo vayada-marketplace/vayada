@@ -151,3 +151,12 @@ slug/domain and property reads were already present. It rechecks the property
 under the existing domain-safety, Booking-publication and property locks before
 admission, and does not read a PMS relation. Passing this gate still does not
 authorize capture or provision the role.
+
+The API has a closed-by-default arrival composition gate. It requires
+`AFFILIATE_CAPTURE_ENABLED=true`, an `AFFILIATE_CAPTURE_DATABASE_URL` whose
+unoverridden login is exactly `vayada_next_affiliate_capture`, and an internal
+arrival token of at least 32 bytes. Startup runs the complete visit-role
+preflight before mounting the token-protected Booking arrival endpoint. It does
+not register `/r/:token` or enable cookie-to-booking binding; those remain
+separate release gates, so setting these API variables alone cannot start
+public tracking.

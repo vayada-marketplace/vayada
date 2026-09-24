@@ -1,14 +1,11 @@
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
-import Fastify from "fastify";
 import type pg from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
+import { buildApp } from "../app.js";
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
-import {
-  admitBookingWebAffiliateArrival,
-  registerBookingWebPublicRoutes,
-} from "./bookingWebPublic.js";
+import { admitBookingWebAffiliateArrival } from "./bookingWebPublic.js";
 import { unusedBookingWebCheckoutAdapter } from "./bookingWebPublic.fixtures.js";
 
 vi.mock("../domains/bookingAffiliateArrivalHost.js", () => ({
@@ -54,20 +51,20 @@ describe("guarded Booking API arrival transport", () => {
   };
 
   async function mount(enabled: boolean) {
-    const app = Fastify({ logger: false });
-    await app.register(registerBookingWebPublicRoutes, {
-      prefix: "/api/booking-web",
-      checkoutAdapter: unusedBookingWebCheckoutAdapter,
-      profileRepository: repository({
+    return buildApp({
+      logger: false,
+      bookingWebCheckoutAdapter: unusedBookingWebCheckoutAdapter,
+      publicHotelProfileRepository: repository({
         ...base,
         hotel: {
           ...base.hotel,
           bookingBaseUrl: "https://hotel-alpenrose.next-booking.vayada.com",
         },
       }),
-      ...(enabled ? { affiliateArrival: { pool, internalToken: "test-internal-token" } } : {}),
+      ...(enabled
+        ? { bookingWebAffiliateArrival: { pool, internalToken: "test-internal-token" } }
+        : {}),
     });
-    return app;
   }
 
   it("is absent unless explicitly mounted and rejects missing or wrong internal tokens", async () => {

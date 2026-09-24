@@ -92,6 +92,74 @@ describe("api config", () => {
     ).toThrow("PRICING_DATABASE_URL must use a distinct PostgreSQL user");
   });
 
+  it("keeps affiliate capture closed unless its isolated runtime is complete", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliateCapture).toBeUndefined();
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }).affiliateCapture,
+    ).toEqual({
+      databaseUrl: "postgresql://vayada_next_affiliate_capture@target-db/app",
+      internalToken: "x".repeat(32),
+    });
+    expect(() =>
+      loadConfig({ ...completeCreatorMarketplaceEnv, AFFILIATE_CAPTURE_ENABLED: "true" }),
+    ).toThrow("AFFILIATE_CAPTURE_ENABLED requires");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://api_runtime@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }),
+    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
+    for (const conflictingDatabaseUrl of [
+      {
+        TARGET_DATABASE_URL:
+          "postgresql://api_runtime@target-db/app?user=vayada_next_affiliate_capture",
+      },
+      {
+        AUTH_DATABASE_URL:
+          "postgresql://auth_runtime@auth-db/app?user=vayada_next_affiliate_capture",
+      },
+      {
+        PRICING_DATABASE_URL:
+          "postgresql://pricing_runtime@pricing-db/app?user=vayada_next_affiliate_capture",
+      },
+    ]) {
+      expect(() =>
+        loadConfig({
+          ...completeCreatorMarketplaceEnv,
+          ...conflictingDatabaseUrl,
+          AFFILIATE_CAPTURE_ENABLED: "true",
+          AFFILIATE_CAPTURE_DATABASE_URL:
+            "postgresql://vayada_next_affiliate_capture@target-db/app",
+          BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        }),
+      ).toThrow("AFFILIATE_CAPTURE_DATABASE_URL must use a distinct PostgreSQL user");
+    }
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL:
+          "postgresql://vayada_next_affiliate_capture@target-db/app?user=api_runtime",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+      }),
+    ).toThrow("exact vayada_next_affiliate_capture PostgreSQL login");
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "short",
+      }),
+    ).toThrow("must be at least 32 bytes");
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),
