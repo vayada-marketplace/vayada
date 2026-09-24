@@ -39,29 +39,28 @@ both `SELECT` and PostgreSQL `UPDATE` privilege are needed unless the query is
 changed to a reviewed lock-only capability. It does **not** grant permission to
 perform a real update.
 
-| Step                    | Relations                                                                                                                                        | Direct operation                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Link eligibility        | `marketplace.affiliate_links`                                                                                                                    | SELECT                                                                        |
-| Active agreement        | `marketplace.affiliate_agreement_activations`, `marketplace.affiliate_agreement_lifecycle_events`                                                | lock; append-only triggers reject updates                                     |
-| Accepted terms          | `marketplace.affiliate_published_terms`                                                                                                          | lock; immutable trigger rejects updates                                       |
-| Destination URL safety  | `booking.affiliate_destination_versions`, `hotel_catalog.properties`, `hotel_catalog.property_slugs`                                             | lock; **property and slug rows are mutable**                                  |
-| Custom-domain exclusion | `hotel_catalog.property_domains`                                                                                                                 | SELECT; coordinated per-property advisory lock                                |
-| Referral certification  | `booking.affiliate_referral_transport_certifications`, `booking.affiliate_validation_probes`, `booking.affiliate_referral_production_preflights` | lock                                                                          |
-| Referral revocations    | `booking.affiliate_validation_probe_revocations`, `booking.affiliate_referral_production_preflight_revocations`                                  | SELECT                                                                        |
-| Eligible click          | `marketplace.affiliate_click_occurrences`                                                                                                        | guarded INSERT needed; later admission uses a lock                            |
-| Destination admission   | `booking.affiliate_click_contexts`                                                                                                               | SELECT, guarded INSERT, lock                                                  |
-| Ordered history         | `booking.affiliate_click_admissions`                                                                                                             | SELECT, guarded INSERT                                                        |
-| Final Booking host      | public hotel-profile repository and its hotel/catalog sources                                                                                    | current-host read; transitive repository SQL still needs a reviewed inventory |
-| Quote cookie check      | `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `hotel_catalog.property_slugs`                                         | SELECT                                                                        |
-| Original booking        | existing Booking checkout relations                                                                                                              | existing checkout grants plus context lock and guarded binding INSERT         |
-| Frozen cutoff           | `booking.affiliate_original_booking_bindings`                                                                                                    | guarded INSERT; mutation trigger rejects updates/deletes                      |
+| Step                    | Relations                                                                                                                                                                                    | Direct operation                                                                         |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Link eligibility        | `marketplace.affiliate_links`                                                                                                                                                                | SELECT                                                                                   |
+| Active agreement        | `marketplace.affiliate_agreement_activations`, `marketplace.affiliate_agreement_lifecycle_events`                                                                                            | lock; append-only triggers reject updates                                                |
+| Accepted terms          | `marketplace.affiliate_published_terms`                                                                                                                                                      | lock; immutable trigger rejects updates                                                  |
+| Destination URL safety  | `booking.affiliate_destination_versions`, `hotel_catalog.properties`, `hotel_catalog.property_slugs`                                                                                         | lock; **property and slug rows are mutable**                                             |
+| Custom-domain exclusion | `hotel_catalog.property_domains`                                                                                                                                                             | SELECT; coordinated per-property advisory lock                                           |
+| Referral certification  | `booking.affiliate_referral_transport_certifications`, `booking.affiliate_validation_probes`, `booking.affiliate_referral_production_preflights`                                             | lock                                                                                     |
+| Referral revocations    | `booking.affiliate_validation_probe_revocations`, `booking.affiliate_referral_production_preflight_revocations`                                                                              | SELECT                                                                                   |
+| Eligible click          | `marketplace.affiliate_click_occurrences`                                                                                                                                                    | guarded INSERT needed; later admission uses a lock                                       |
+| Destination admission   | `booking.affiliate_click_contexts`                                                                                                                                                           | SELECT, guarded INSERT, lock                                                             |
+| Ordered history         | `booking.affiliate_click_admissions`                                                                                                                                                         | SELECT, guarded INSERT                                                                   |
+| Final Booking host      | `distribution.active_public_booking_revision`, `distribution.public_booking_content_revisions`, `hotel_catalog.property_slugs`, `hotel_catalog.property_domains`, `hotel_catalog.properties` | SELECT plus the existing property lock and coordinated domain/publication advisory locks |
+| Quote cookie check      | `booking.affiliate_click_contexts`, `booking.affiliate_click_admissions`, `hotel_catalog.property_slugs`                                                                                     | SELECT                                                                                   |
+| Original booking        | existing Booking checkout relations                                                                                                                                                          | existing checkout grants plus context lock and guarded binding INSERT                    |
+| Frozen cutoff           | `booking.affiliate_original_booking_bindings`                                                                                                                                                | guarded INSERT; mutation trigger rejects updates/deletes                                 |
 
 The public `/r/:token` route is unregistered; the Booking arrival route and
 cookie binding are disabled. The table covers the direct source files, not a
 complete effective-privilege or trigger/function inventory. In particular,
-the host-profile repository, production readiness configuration, booking writer
-dependencies and any degraded-gap records must be included before the final
-grant matrix is declared complete.
+booking writer dependencies and any degraded-gap records must be included
+before the final grant matrix is declared complete.
 
 ## Grant and activation gates
 
@@ -146,6 +145,9 @@ row-level policy set. The check rejects any additional direct read or write
 access. The visit path now derives its referral runtime configuration from
 exactly one fresh, unrevoked certification/preflight pair for the accepted
 destination; zero or multiple candidates fail closed, using relations already
-covered by this allowlist. The final hotel host-profile read remains outside
-this known surface. Passing this gate still does not authorize capture or
-provision the role.
+covered by this allowlist. Final-host resolution now adds only the active
+Booking publication pointer and immutable content revision; its canonical
+slug/domain and property reads were already present. It rechecks the property
+under the existing domain-safety, Booking-publication and property locks before
+admission, and does not read a PMS relation. Passing this gate still does not
+authorize capture or provision the role.

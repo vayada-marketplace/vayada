@@ -14,6 +14,7 @@ import type { BookingPublicContent } from "@vayada/domain-distribution/booking-p
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 
 export type DistributionBookingPublicationTransaction = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -145,7 +146,7 @@ export function createPgDistributionBookingPublicationProjection(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await lockPublicationScope(client, input.propertyId);
+        await lockBookingPublication(client, input.propertyId);
         const revision = await insertRevision(client, {
           revisionId: randomId(),
           propertyId: input.propertyId,
@@ -168,7 +169,7 @@ export function createPgDistributionBookingPublicationProjection(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await lockPublicationScope(client, input.propertyId);
+        await lockBookingPublication(client, input.propertyId);
         await assertActiveProperty(client, input.propertyId);
         const current = await selectActive(client, input.propertyId, true);
         if ((current?.revisionId ?? null) !== input.expectedActiveRevisionId) {
@@ -222,7 +223,7 @@ export function createPgDistributionBookingPublicationProjection(config: {
     },
 
     async lockAndGetActive(transaction, propertyId) {
-      await lockPublicationScope(transaction, propertyId);
+      await lockBookingPublication(transaction, propertyId);
       return selectActive(transaction, propertyId, true);
     },
 
@@ -230,7 +231,7 @@ export function createPgDistributionBookingPublicationProjection(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await lockPublicationScope(client, input.propertyId);
+        await lockBookingPublication(client, input.propertyId);
         await assertActiveProperty(
           client,
           input.propertyId,
@@ -312,19 +313,6 @@ async function assertCurrentOutboxLease(
     [input.outboxEventId, input.propertyId, input.operationId, input.outboxLeaseToken],
   );
   if (result.rowCount !== 1) throw new BookingPublicationLeaseLostError();
-}
-
-async function lockPublicationScope(
-  client: DistributionBookingPublicationTransaction,
-  propertyId: string,
-): Promise<void> {
-  await client.query(
-    `SELECT pg_advisory_xact_lock(
-       hashtext('booking.publication'),
-       hashtext($1::uuid::text)
-     )`,
-    [propertyId],
-  );
 }
 
 async function assertActiveProperty(
