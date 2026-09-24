@@ -21,6 +21,7 @@ B = "00000000-0000-4000-8000-000000000002"
 ORG = "00000000-0000-4000-8000-000000000003"
 OTHER_ORG = "00000000-0000-4000-8000-000000000009"
 ACTOR = "00000000-0000-4000-8000-000000000004"
+MEMBERSHIP = "00000000-0000-4000-8000-00000000000a"
 R1 = "00000000-0000-4000-8000-000000000005"
 R2 = "00000000-0000-4000-8000-000000000006"
 OWNER_A = "vayada_next_pricing_owner_a"
@@ -129,6 +130,21 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         INSERT INTO identity.users(id,email) VALUES ('{ACTOR}','proof@example.invalid');
         INSERT INTO hotel_catalog.properties(id,public_id,display_name)
           VALUES ('{A}','proof-a','Proof A'),('{B}','proof-b','Proof B');
+        INSERT INTO identity.organization_memberships
+          (id,organization_id,user_id,role_key,access_origin,property_access_mode)
+          VALUES ('{MEMBERSHIP}','{ORG}','{ACTOR}','proof_staff','agency','assigned');
+        INSERT INTO identity.organization_resource_links
+          (organization_id,product,resource_type,resource_id,relationship)
+          VALUES ('{ORG}','hotel_catalog','property','{A}','owner'),
+                 ('{ORG}','pms','pms_property','{A}','owner');
+        INSERT INTO identity.membership_property_assignments(membership_id,property_id)
+          VALUES ('{MEMBERSHIP}','{A}');
+        INSERT INTO identity.role_permission_grants
+          (organization_kind,role_key,permission_key)
+          VALUES ('hotel_group','proof_staff','pms.rooms_rates.read');
+        INSERT INTO identity.product_entitlements
+          (organization_id,product,entitlement_key)
+          VALUES ('{ORG}','pms','property-management');
         INSERT INTO platform.pricing_runtime_property_scopes
           (database_login,operation_class,property_id,organization_id) VALUES
           ('{OWNER_A}','owner_manage','{A}','{ORG}'),
@@ -139,6 +155,10 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         GRANT USAGE ON SCHEMA booking, platform, identity, hotel_catalog TO {roles};
         GRANT SELECT, UPDATE ON identity.organizations TO {roles};
         GRANT SELECT, UPDATE ON identity.users, hotel_catalog.properties TO {roles};
+        GRANT SELECT, UPDATE ON identity.organization_memberships,
+          identity.organization_resource_links,
+          identity.membership_property_assignments,
+          identity.role_permission_grants, identity.product_entitlements TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
         GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
@@ -180,6 +200,64 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 )
                 == row_id
             )
+        identity_locks = (
+            ("identity.organization_memberships", f"id='{MEMBERSHIP}'", "status"),
+            (
+                "identity.organization_resource_links",
+                f"organization_id='{ORG}' AND product='pms' AND resource_id='{A}'",
+                "status",
+            ),
+            (
+                "identity.membership_property_assignments",
+                f"membership_id='{MEMBERSHIP}' AND property_id='{A}'",
+                "created_at",
+            ),
+            ("identity.role_permission_grants", "role_key='proof_staff'", "role_key"),
+            (
+                "identity.product_entitlements",
+                f"organization_id='{ORG}' AND entitlement_key='property-management'",
+                "status",
+            ),
+        )
+        for table, predicate, column in identity_locks:
+            for role in (OWNER_A, PUBLIC_A, READER_A):
+                assert (
+                    sql(
+                        f"BEGIN; SELECT 1 FROM {table} WHERE {predicate} FOR SHARE; ROLLBACK;", role
+                    )
+                    == "1"
+                )
+                sql(
+                    f"UPDATE {table} SET {column}={column} WHERE {predicate}",
+                    role,
+                    denied=True,
+                )
+            assert (
+                sql(
+                    f"BEGIN; UPDATE {table} SET {column}={column} WHERE {predicate} RETURNING 1; ROLLBACK;",
+                    LEGACY,
+                )
+                == "1"
+            )
+        # Exercise the owner's actual joined membership/user/property lock, not
+        # just independent table locks. The assigned-mode checks below use the
+        # same relation set as the live authorization path.
+        for role in (OWNER_A, READER_A):
+            assert (
+                sql(
+                    f"""BEGIN;
+                    SELECT m.role_key FROM identity.organization_memberships m
+                    JOIN identity.users u ON u.id=m.user_id AND u.status='active'
+                    JOIN hotel_catalog.properties p ON p.id='{A}' AND p.profile_status<>'disabled'
+                    WHERE m.id='{MEMBERSHIP}' AND m.organization_id='{ORG}'
+                      AND m.user_id='{ACTOR}' AND m.status='active'
+                      AND m.access_origin='agency'
+                    FOR SHARE OF m,u,p;
+                    ROLLBACK;""",
+                    role,
+                )
+                == "proof_staff"
+            )
         assert sql(f"SELECT name FROM identity.organizations WHERE id='{ORG}'") == "Proof"
         sql(quote(A, 1), PUBLIC_A)
         sql(quote(B, 2), PUBLIC_B)
@@ -206,6 +284,12 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         ):
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE id='{row_id}'",
+                LEGACY,
+                denied=True,
+            )
+        for table, predicate, column in identity_locks:
+            sql(
+                f"UPDATE {table} SET {column}={column} WHERE {predicate}",
                 LEGACY,
                 denied=True,
             )
@@ -368,7 +452,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; core authorization lock-only denials; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; identity authorization lock-only denials; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
