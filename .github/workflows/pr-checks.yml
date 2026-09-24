@@ -250,7 +250,7 @@ jobs:
             await client.query("CREATE DATABASE vay2045_worker_test"); await client.end();
           '
           TARGET_DATABASE_URL="$TEST_DATABASE_URL" npm --workspace @vayada/backend-migration run target:migrate -- --env local
-          npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExportWorkerBoundary.integration.test.ts src/jobs/financeFolioExport.integration.test.ts
+          npm --workspace vayada-api run test -- --no-file-parallelism src/jobs/financeExportWorkerBoundary.integration.test.ts src/jobs/financeFolioExport.integration.test.ts src/jobs/runFinanceDashboardExportOnce.test.ts
           node --input-type=module -e '
             import pg from "pg";
             const url = new URL(process.env.TEST_DATABASE_URL); url.pathname = "/postgres";
