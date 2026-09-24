@@ -134,3 +134,15 @@ three named commands and reruns the deny-only direct-write check. It does not
 restrict `SECURITY INVOKER` routines, which remain limited by the caller's
 underlying grants. This still does not define the transitive read allowlist or
 provision a production role.
+
+`assertAffiliateCaptureRoleHasVisitReadCapabilities` encodes the known direct
+SQL surface used by link eligibility, accepted terms, native destination
+safety and referral-readiness checks. It requires `SELECT` on exactly those
+relations and non-delegable `UPDATE` only where PostgreSQL row locks require
+it. Every immutable relation in that lock list must retain its enabled mutation
+trigger in `ENABLE ALWAYS` mode, including when a login starts in replication
+mode; the two mutable hotel-catalogue relations must retain the complete known
+row-level policy set. The check rejects any additional direct read or write
+access. The production configuration provider and final hotel host-profile
+read remain outside this known surface, so passing this gate still does not
+authorize capture or provision the role.
