@@ -408,7 +408,7 @@ async function readCurrentInventoryDay(
         );
         if (
           !day ||
-          day.calendarRevision !== exact.calendarRevision ||
+          day.calendarRevision !== materialized.calendarRevision ||
           !isPmsInventoryDayConsistent(day, binding)
         )
           return unavailable("inventory_day_unavailable");
