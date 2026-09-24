@@ -1839,6 +1839,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       const getInventoryLaunchReadiness = vi.fn(
         inventory.getInventoryLaunchReadiness.bind(inventory),
       );
+      const getCurrentInventoryDay = vi.fn(inventory.getCurrentInventoryDay.bind(inventory));
       if (operation === "provision") getInventoryLaunchReadiness.mockResolvedValue(null);
       try {
         await admin.query(
@@ -1869,7 +1870,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           operation === "provision"
             ? await prepareNextChannexRoomAvailabilityDispatch(
                 worker,
-                { ...inventory, getInventoryLaunchReadiness },
+                { ...inventory, getCurrentInventoryDay, getInventoryLaunchReadiness },
                 f.lease,
               )
             : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
@@ -1878,6 +1879,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
           throw new Error("Restricted availability dispatch required");
         if (operation === "provision") expect(prepared).toMatchObject({ roomTypeId: f.roomTypeId });
         if (operation === "provision") expect(getInventoryLaunchReadiness).not.toHaveBeenCalled();
+        if (operation === "provision")
+          expect(getCurrentInventoryDay).toHaveBeenCalledWith(
+            expect.objectContaining({ materializationScope: "room" }),
+            expect.any(Function),
+          );
         const taskId = randomUUID();
         let request: unknown;
         const outcome = await prepared.dispatch(async (sent) => {
@@ -3138,6 +3144,73 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         [fixture.propertyId, fixture.roomTypeId],
       ),
     ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
+  });
+
+  it("keeps a selected room current when only an unrelated room awaits materialization", async () => {
+    const newRoom = randomUUID();
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "selected-before-add", 1, "2026-08-04", "2026-08-04"),
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [newRoom, fixture.propertyId],
+    );
+    additionalRoomTypes.push(newRoom);
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+    const request = {
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      stayDate: "2026-08-04",
+    };
+    await expect(fixture.repository.getCurrentInventoryDay(request)).resolves.toMatchObject({
+      kind: "unavailable",
+      reason: "coverage_unavailable",
+    });
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({
+      kind: "available",
+      materializedRevision: 1,
+      configurationSource: { revision: "calendar:1" },
+      day: request,
+    });
+    const changed = configurationSnapshot({
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(
+      3,
+      changed,
+    );
+    await seedCalendarRevision(admin, {
+      organizationId: fixture.organizationId,
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      actorUserId: fixture.actorUserId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    fixture.calendarState.currentRevision = 3;
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "coverage_unavailable" });
   });
 
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {
