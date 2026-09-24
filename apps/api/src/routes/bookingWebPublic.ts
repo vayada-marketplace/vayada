@@ -6,7 +6,7 @@ import {
   PricingAcceptanceError,
   writePricingAcceptance,
 } from "../domains/pricingAcceptanceWriter.js";
-import { admitAffiliateArrival } from "../domains/bookingAffiliateClickAdmission.js";
+import { admitAffiliateArrivalForCurrentHost } from "../domains/bookingAffiliateArrivalHost.js";
 import { readBookingAffiliateContextForQuote } from "../domains/bookingAffiliateContextForQuote.js";
 import {
   bindLiveAffiliateOriginal,
@@ -538,7 +538,7 @@ export async function registerBookingWebPublicRoutes(
       const actual = typeof supplied === "string" ? Buffer.from(supplied) : Buffer.alloc(0);
       if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
         throw createHttpError(404, "Booking Web arrival unavailable.");
-      const result = await admitBookingWebAffiliateArrival(pool, options.profileRepository, {
+      const result = await admitBookingWebAffiliateArrival(pool, {
         host: request.body?.host,
         referenceToken: request.body?.referenceToken,
         contextId: request.body?.contextId,
@@ -5675,39 +5675,9 @@ async function findProfileForHost(config: {
  */
 export async function admitBookingWebAffiliateArrival(
   pool: pg.Pool,
-  repository: PublicHotelProfileRepository,
   input: { host: unknown; referenceToken: unknown; contextId?: unknown },
 ) {
-  if (typeof input.host !== "string") return { status: "unavailable" as const };
-  let host: string;
-  let suppliedHost: string;
-  try {
-    host = normalizeHost(input.host);
-    suppliedHost = decodeURIComponent(input.host).trim().toLowerCase();
-  } catch {
-    return { status: "unavailable" as const };
-  }
-  if (
-    host !== suppliedHost ||
-    !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(host) ||
-    host.includes("..")
-  )
-    return { status: "unavailable" as const };
-  const profile = await findProfileForHost({ repository, host });
-  if (!profile) return { status: "unavailable" as const };
-  let canonical: URL;
-  try {
-    canonical = new URL(profile.hotel.bookingBaseUrl);
-  } catch {
-    return { status: "unavailable" as const };
-  }
-  if (canonical.protocol !== "https:" || canonical.port || canonical.hostname !== host)
-    return { status: "unavailable" as const };
-  return admitAffiliateArrival(pool, {
-    propertyId: profile.hotel.propertyId,
-    referenceToken: input.referenceToken,
-    contextId: input.contextId,
-  });
+  return admitAffiliateArrivalForCurrentHost(pool, input);
 }
 
 function serializeHostResolution(

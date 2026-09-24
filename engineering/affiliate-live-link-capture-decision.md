@@ -275,7 +275,10 @@ revalidate the final browser host without a Next.js fetch cache before asking
 the API to admit the click; the API independently checks current canonical
 host ownership. A changed or unavailable host continues untracked.
 The [runtime database boundary](affiliate-runtime-database-boundary.md)
-inventories the required locks and writes. It does not authorize direct grants:
+inventories the required locks and writes. The arrival path reads only the
+active Booking publication and current canonical slug/domain, rechecks the
+property under the domain-safety and publication locks, and admits the click in
+that transaction. It has no direct PMS read. The inventory does not authorize direct grants:
 mutable hotel-row locks and original-binding write authority require a
 database-enforced least-privilege design before runtime activation.
 The quote-acceptance route now has a separate disabled-by-default cookie binding

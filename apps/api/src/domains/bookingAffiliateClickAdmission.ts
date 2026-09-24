@@ -97,6 +97,60 @@ async function admitAffiliateClickOccurrenceInTransaction(
   };
 }
 
+/** Executes the guarded live-arrival command inside a caller-owned transaction. */
+export async function admitAffiliateArrivalInTransaction(
+  client: pg.PoolClient,
+  input: { propertyId: string; referenceToken: unknown; contextId?: unknown },
+): Promise<
+  | { status: "unavailable" | "conflict" }
+  | {
+      status: "admitted";
+      contextId: string;
+      contextCreated: boolean;
+      clickId: string;
+      historyPosition: string;
+      replayed: boolean;
+    }
+> {
+  if (
+    typeof input.propertyId !== "string" ||
+    !uuid.test(input.propertyId) ||
+    (input.contextId != null &&
+      (typeof input.contextId !== "string" || !uuid.test(input.contextId)))
+  )
+    return { status: "unavailable" };
+  const admitted = (
+    await client.query(
+      `SELECT status,context_id,context_created,click_id,history_position,replayed
+       FROM booking.admit_affiliate_click($1,$2,$3)`,
+      [
+        input.referenceToken,
+        input.propertyId.toLowerCase(),
+        typeof input.contextId === "string" ? input.contextId.toLowerCase() : null,
+      ],
+    )
+  ).rows[0] as
+    | {
+        status: "unavailable" | "conflict" | "admitted";
+        context_id: string | null;
+        context_created: boolean;
+        click_id: string | null;
+        history_position: string | null;
+        replayed: boolean;
+      }
+    | undefined;
+  if (!admitted) return { status: "unavailable" };
+  if (admitted.status !== "admitted") return { status: admitted.status };
+  return {
+    status: "admitted",
+    contextId: admitted.context_id!,
+    contextCreated: admitted.context_created,
+    clickId: admitted.click_id!,
+    historyPosition: String(admitted.history_position),
+    replayed: admitted.replayed,
+  };
+}
+
 async function admitAffiliateClickOccurrence(
   pool: pg.Pool,
   contextId: string,
@@ -142,54 +196,16 @@ export async function admitAffiliateArrival(
       replayed: boolean;
     }
 > {
-  if (
-    typeof input.propertyId !== "string" ||
-    !uuid.test(input.propertyId) ||
-    (input.contextId != null &&
-      (typeof input.contextId !== "string" || !uuid.test(input.contextId)))
-  )
-    return { status: "unavailable" };
-  const propertyId = input.propertyId.toLowerCase();
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    const admitted = (
-      await client.query(
-        `SELECT status,context_id,context_created,click_id,history_position,replayed
-         FROM booking.admit_affiliate_click($1,$2,$3)`,
-        [
-          input.referenceToken,
-          propertyId,
-          typeof input.contextId === "string" ? input.contextId.toLowerCase() : null,
-        ],
-      )
-    ).rows[0] as
-      | {
-          status: "unavailable" | "conflict" | "admitted";
-          context_id: string | null;
-          context_created: boolean;
-          click_id: string | null;
-          history_position: string | null;
-          replayed: boolean;
-        }
-      | undefined;
-    if (!admitted) {
-      await client.query("ROLLBACK");
-      return { status: "unavailable" };
-    }
+    const admitted = await admitAffiliateArrivalInTransaction(client, input);
     if (admitted.status !== "admitted") {
       await client.query("ROLLBACK");
-      return { status: admitted.status };
+      return admitted;
     }
     await client.query("COMMIT");
-    return {
-      status: "admitted",
-      contextId: admitted.context_id!,
-      contextCreated: admitted.context_created,
-      clickId: admitted.click_id!,
-      historyPosition: String(admitted.history_position),
-      replayed: admitted.replayed,
-    };
+    return admitted;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

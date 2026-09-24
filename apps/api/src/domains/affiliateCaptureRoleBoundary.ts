@@ -136,6 +136,8 @@ const affiliateCaptureReadRelations = [
   "hotel_catalog.properties",
   "hotel_catalog.property_slugs",
   "hotel_catalog.property_domains",
+  "distribution.active_public_booking_revision",
+  "distribution.public_booking_content_revisions",
   "booking.affiliate_referral_transport_certifications",
   "booking.affiliate_validation_probes",
   "booking.affiliate_validation_probe_revocations",
@@ -363,7 +365,8 @@ export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
   if (
     !(
       await client.query(
-        `SELECT pg_catalog.has_schema_privilege($1,'hotel_catalog','USAGE') AS ok`,
+        `SELECT pg_catalog.has_schema_privilege($1,'hotel_catalog','USAGE')
+            AND pg_catalog.has_schema_privilege($1,'distribution','USAGE') AS ok`,
         [role],
       )
     ).rows[0]?.ok

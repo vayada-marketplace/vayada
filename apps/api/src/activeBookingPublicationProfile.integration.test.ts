@@ -4,6 +4,7 @@ import pg, { type QueryResultRow } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
+import { readBookingAffiliateArrivalHost } from "./domains/bookingAffiliateArrivalHost.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -72,6 +73,23 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     await expect(repository.findProfileByCustomDomain?.(hostname)).resolves.toMatchObject({
       hotel: { propertyId: propertyB },
     });
+  });
+
+  it("resolves the affiliate arrival property only from a current canonical host", async () => {
+    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toEqual({
+      host: hostname,
+      propertyId: propertyA,
+    });
+    await admin.query("DELETE FROM hotel_catalog.property_domains WHERE hostname = $1", [hostname]);
+    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toBeUndefined();
+    await assignDomain(propertyB);
+    await expect(readBookingAffiliateArrivalHost(pool, hostname)).resolves.toEqual({
+      host: hostname,
+      propertyId: propertyB,
+    });
+    for (const invalid of ["bad%2Fhost", "bad..example", `${hostname}:8443`]) {
+      await expect(readBookingAffiliateArrivalHost(pool, invalid)).resolves.toBeUndefined();
+    }
   });
 
   it("resolves Catalog redirects only through the pointed active revision", async () => {
