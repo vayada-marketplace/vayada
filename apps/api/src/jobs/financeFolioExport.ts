@@ -94,15 +94,20 @@ async function runOne(pool: pg.Pool, read: FinanceExportRead, writer: FinanceFol
       const stale = (await client.query<{id:string}>("UPDATE platform.job_attempts SET status='timed_out',finished_at=$3,error_type='worker_timeout',error_message=$4 WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running' RETURNING id::text", [job.id, job.attemptsCount, now.toISOString(), `Finance ${jobTab(job)} export worker lease expired.`])).rows[0];
       if (!stale) throw new Error("Finance export running attempt is missing");
       if (job.attemptsCount >= job.maxAttempts) {
-        await client.query("UPDATE platform.jobs SET status='dead_lettered',finished_at=$2,locked_at=NULL,locked_by=NULL,updated_at=$2,job_metadata=job_metadata||jsonb_build_object('outcome','dead_lettered','lastErrorCode','worker_timeout') WHERE id=$1::uuid", [job.id, now.toISOString()]);
-        await deadLetter(client, job, stale.id, job.attemptsCount, "worker_timeout", true, now);
-        await audit(client, job, job.attemptsCount, "dead_lettered", now, "worker_timeout");
+        const expired = now.getTime() >= new Date(job.expiresAt).getTime(), code = expired ? "export_expired" : "worker_timeout";
+        await client.query("UPDATE platform.jobs SET status='dead_lettered',finished_at=$2,locked_at=NULL,locked_by=NULL,updated_at=$2,job_metadata=job_metadata||jsonb_build_object('outcome','dead_lettered','lastErrorCode',$3::text) WHERE id=$1::uuid", [job.id, now.toISOString(), code]);
+        await deadLetter(client, job, stale.id, job.attemptsCount, code, !expired, now);
+        await audit(client, job, job.attemptsCount, "dead_lettered", now, code);
         await client.query("COMMIT"); return "deadLettered";
       }
     }
     const attempt = job.attemptsCount + 1;
     await client.query("UPDATE platform.jobs SET status='running',attempts_count=$2,locked_at=$3,locked_by=$4,updated_at=$3 WHERE id=$1::uuid", [job.id, attempt, now.toISOString(), workerId]);
     const attemptId = (await client.query<{ id: string }>("INSERT INTO platform.job_attempts(job_id,attempt_number,status,worker_id,started_at) VALUES($1::uuid,$2,'running',$3,$4) RETURNING id::text", [job.id, attempt, workerId, now.toISOString()])).rows[0]!.id;
+    if (now.getTime() >= new Date(job.expiresAt).getTime()) {
+      const outcome = await fail(client, job, attemptId, attempt, new ExecutionFailure("export_expired", false), now, options.random ?? Math.random);
+      await client.query("COMMIT"); return outcome;
+    }
     let artifact: FinanceCsvArtifact, manifestCount=0;
     try {
       const payload = parseFinanceExportJobPayload(job.payload, { organizationId: job.organizationId, propertyId: job.propertyId, currency: job.currency, payloadFingerprint: job.payloadFingerprint, acceptedAt: job.acceptedAt, snapshotAt: job.snapshotAt, expiresAt: job.expiresAt, now });
