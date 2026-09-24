@@ -1954,12 +1954,7 @@ export function createTargetBookingWebCheckoutAdapter(
         if (affiliateContextLocked && affiliateContextCookie)
           await bindLiveAffiliateOriginal(client, {
             id: booking.guestBookingId,
-            propertyId: property.propertyId,
             contextId: affiliateContextCookie,
-            publicReference: booking.publicReference,
-            checkIn: quote.checkIn,
-            checkOut: quote.checkOut,
-            currency: quote.currency,
           });
         if (quote.paymentMethod === "bank_transfer") {
           if (!config.bankTransfers) throw createHttpError(503, "Bank transfer is not configured.");

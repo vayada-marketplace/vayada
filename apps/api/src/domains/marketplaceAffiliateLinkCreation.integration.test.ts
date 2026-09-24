@@ -136,6 +136,9 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await pool().query(
       await readFile(new URL("0418_affiliate_guarded_click_admission.sql", migrations), "utf8"),
     );
+    await pool().query(
+      await readFile(new URL("0419_affiliate_guarded_original_binding.sql", migrations), "utf8"),
+    );
   });
 
   it("creates one stable creator-owned link with a default share path", async () => {
@@ -752,12 +755,7 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       expect(
         await bindLiveAffiliateOriginal(client, {
           id: bookingId,
-          propertyId: id(3),
           contextId: arrival.contextId,
-          publicReference: "live-original",
-          checkIn: "2027-01-01",
-          checkOut: "2027-01-02",
-          currency: "EUR",
         }),
       ).toBe(true);
       await client.query("COMMIT");
@@ -797,11 +795,117 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     ).resolves.toMatchObject({ rowCount: 1 });
   });
 
-  it("leaves stale, foreign and synthetic contexts unbound, and survives binding storage rejection", async () => {
+  it("lets an execute-only booking role bind only a booking created in its transaction", async () => {
+    const contextId = id(160),
+      bookingId = id(161),
+      oldBookingId = id(162);
+    await pool().query(
+      "INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic) VALUES($1,$2,FALSE)",
+      [contextId, id(3)],
+    );
+    await pool().query(
+      `INSERT INTO booking.affiliate_click_admissions
+         (context_id,property_id,click_id,history_position,admitted_at)
+       VALUES($1,$2,$3,1,clock_timestamp()),
+             ($1,$2,$4,2,clock_timestamp()-interval '91 days')`,
+      [contextId, id(3), id(163), id(164)],
+    );
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES($1,$2,'old-binding-candidate','draft','2027-01-01','2027-01-02','EUR')`,
+      [oldBookingId, id(3)],
+    );
+    const role = `affiliate_booking_fixture_${randomUUID().replaceAll("-", "")}`;
+    await pool().query(`CREATE ROLE ${role} NOLOGIN NOINHERIT NOBYPASSRLS`);
+    try {
+      await pool().query(`GRANT USAGE ON SCHEMA booking TO ${role}`);
+      expect(
+        (
+          await pool().query(
+            `SELECT has_function_privilege($1,
+               'booking.bind_live_affiliate_original(uuid,uuid)', 'EXECUTE') AS allowed`,
+            [role],
+          )
+        ).rows[0].allowed,
+      ).toBe(false);
+      await pool().query(
+        `GRANT EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) TO ${role}`,
+      );
+      const client = await pool().connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        await client.query(
+          `INSERT INTO booking.guest_bookings
+             (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+           VALUES($1,$2,'guarded-original','draft','2027-02-01','2027-02-02','EUR')`,
+          [bookingId, id(3)],
+        );
+        await client.query(`SET LOCAL ROLE ${role}`);
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              bookingId,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(true);
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              oldBookingId,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(false);
+        await client.query("COMMIT");
+
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL ROLE ${role}`);
+        await expect(
+          client.query(
+            `INSERT INTO booking.affiliate_original_booking_bindings
+               (booking_id,property_id,context_id,history_cutoff,
+                original_public_reference,original_check_in,original_check_out,
+                original_currency,synthetic)
+             VALUES($1,$2,$3,1,'forged','2027-01-01','2027-01-02','EUR',FALSE)`,
+            [oldBookingId, id(3), contextId],
+          ),
+        ).rejects.toThrow(/permission denied/i);
+        await client.query("ROLLBACK");
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    } finally {
+      await pool().query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+    }
+    expect(
+      (
+        await pool().query(
+          `SELECT original_public_reference,original_check_in::text,original_check_out::text,
+                  original_currency,history_cutoff
+           FROM booking.affiliate_original_booking_bindings WHERE booking_id=$1`,
+          [bookingId],
+        )
+      ).rows[0],
+    ).toEqual({
+      original_public_reference: "guarded-original",
+      original_check_in: "2027-02-01",
+      original_check_out: "2027-02-02",
+      original_currency: "EUR",
+      history_cutoff: "2",
+    });
+  });
+
+  it("leaves stale, foreign and synthetic contexts and an older booking unbound", async () => {
     const staleId = id(141),
       syntheticId = id(142),
       freshId = id(143),
-      bookingId = id(144);
+      bookingId = id(144),
+      staleBookingId = id(165),
+      foreignBookingId = id(166),
+      syntheticBookingId = id(167);
     for (const [contextId, synthetic] of [
       [staleId, false],
       [syntheticId, true],
@@ -822,6 +926,12 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
          VALUES($1,$2,$3,1,clock_timestamp()-$4::interval)`,
         [contextId, id(3), clickId, age],
       );
+    await pool().query(
+      `INSERT INTO booking.guest_bookings
+         (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+       VALUES ($1,$2,'unbound-original','draft','2027-01-01','2027-01-02','EUR')`,
+      [bookingId, id(3)],
+    );
     const client = await pool().connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
@@ -829,21 +939,34 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
       expect(await lockLiveAffiliateContextForOriginal(client, id(6), freshId)).toBe(false);
       expect(await lockLiveAffiliateContextForOriginal(client, id(3), syntheticId)).toBe(false);
       expect(await lockLiveAffiliateContextForOriginal(client, id(3), freshId)).toBe(true);
-      await client.query(
-        `INSERT INTO booking.guest_bookings
-           (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
-         VALUES ($1,$2,'unbound-original','draft','2027-01-01','2027-01-02','EUR')`,
-        [bookingId, id(3)],
-      );
+      for (const [idValue, propertyId, reference] of [
+        [staleBookingId, id(3), "stale-guarded-original"],
+        [foreignBookingId, id(6), "foreign-guarded-original"],
+        [syntheticBookingId, id(3), "synthetic-guarded-original"],
+      ])
+        await client.query(
+          `INSERT INTO booking.guest_bookings
+             (id,property_id,public_reference,lifecycle_status,check_in,check_out,currency)
+           VALUES($1,$2,$3,'draft','2027-03-01','2027-03-02','EUR')`,
+          [idValue, propertyId, reference],
+        );
+      for (const [idValue, contextId] of [
+        [staleBookingId, staleId],
+        [foreignBookingId, freshId],
+        [syntheticBookingId, syntheticId],
+      ])
+        expect(
+          (
+            await client.query("SELECT booking.bind_live_affiliate_original($1,$2) AS bound", [
+              idValue,
+              contextId,
+            ])
+          ).rows[0].bound,
+        ).toBe(false);
       expect(
         await bindLiveAffiliateOriginal(client, {
           id: bookingId,
-          propertyId: id(3),
           contextId: freshId,
-          publicReference: "unbound-original",
-          checkIn: "2027-01-01",
-          checkOut: "2027-01-01", // Reject the binding but retain the booking.
-          currency: "EUR",
         }),
       ).toBe(false);
       await client.query("COMMIT");

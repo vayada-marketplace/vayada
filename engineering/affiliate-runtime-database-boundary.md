@@ -88,11 +88,13 @@ grant matrix is declared complete.
    click from the opaque reference, validates its property and transport
    lifetime, generates new context IDs internally, and serializes replay or
    conflicts without direct table writes. Public execution is revoked.
-3. Define the booking-binding write boundary so a runtime credential cannot
-   insert a binding for an arbitrary booking, context, property or cutoff. A
-   security-definer function is not sufficient if it merely trusts caller IDs;
-   its authority and same-transaction proof must be reviewed. Keep idempotent
-   original-booking creation and the immutable binding on one connection.
+3. Migration `0419_affiliate_guarded_original_binding.sql` adds the
+   booking-binding write boundary. Each booking receives an immutable creation
+   transaction marker. The owner-executed command accepts only a booking made
+   at top level in its current transaction, derives the property and original booking facts,
+   locks and validates the live context, and freezes the recent admission
+   cutoff. Public execution is revoked. Keep idempotent original-booking
+   creation and the immutable binding on one connection.
 4. Finish the transitive SQL/trigger inventory and encode an exact allowlist,
    its denied privileges, immutable-trigger state, non-owner/no-BYPASSRLS role
    checks, and schema/function/sequence rights in a release-specific preflight.
