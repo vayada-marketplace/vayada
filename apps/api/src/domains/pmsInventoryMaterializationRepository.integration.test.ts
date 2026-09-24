@@ -17,7 +17,10 @@ import {
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
-import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import {
+  lockCurrentChannexRoomAvailability,
+  prepareNextChannexRoomAvailabilityDispatch,
+} from "./channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
@@ -1937,6 +1940,108 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       }
     },
   );
+  it("keeps provision availability current when an unrelated room awaits materialization", async () => {
+    const f = await channelInventoryFixture(1, true);
+    const unrelatedRoomTypeId = randomUUID();
+    await admin.query(
+      `UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,
+      [
+        f.lease.jobId,
+        JSON.stringify({
+          operationType: "provision",
+          publishedOffer: {
+            roomTypeId: f.roomTypeId,
+            offerId: "offer",
+            publicationRevision: 1,
+            primaryOccupancy: 1,
+          },
+        }),
+      ],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [unrelatedRoomTypeId, f.propertyId],
+    );
+    const next = f.configurations.get(2)!;
+    (f.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: unrelatedRoomTypeId },
+        ].sort((left, right) => left.roomTypeId.localeCompare(right.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, f, 2);
+    const prepared = await f.next();
+    expect(prepared).toMatchObject({ kind: "prepared", roomTypeId: f.roomTypeId });
+    if (prepared.kind !== "prepared") throw new Error("Scoped availability dispatch required");
+    let request: unknown;
+    const taskId = randomUUID();
+    const sent = await prepared.dispatch(async (input) => {
+      request = structuredClone(input.body);
+      return new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+      );
+    });
+    if (sent.kind === "receipt_pending") await sent.persist();
+    const read = async (path: string) =>
+      path.includes("/tasks/")
+        ? {
+            data: {
+              type: "task",
+              id: taskId,
+              attributes: {
+                id: taskId,
+                task: "Property.UpdateAvailability",
+                payload: request,
+                success: true,
+                errors: [],
+                received_at: "2026-09-16T00:00:00.000001",
+                executed_at: "2026-09-16T00:00:00.000002",
+                finished_at: "2026-09-16T00:00:00.000003",
+              },
+            },
+          }
+        : {
+            data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+            meta: { warnings: [] },
+          };
+    await expect(
+      reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        prepared.attemptId,
+        read,
+      ),
+    ).resolves.toEqual({ kind: "availability_reconciled", attemptId: prepared.attemptId });
+    await expect(f.next()).resolves.toMatchObject({ kind: "room_availability_current" });
+    const connection = (
+      await admin.query(
+        "SELECT binding_generation::text FROM pms.channel_connections WHERE id=$1",
+        [f.connectionId],
+      )
+    ).rows[0];
+    await admin.query("BEGIN");
+    try {
+      await expect(
+        lockCurrentChannexRoomAvailability(admin, {
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+          externalPropertyId: f.propertyId,
+          bindingGeneration: connection.binding_generation,
+          roomTypeId: f.roomTypeId,
+        }),
+      ).resolves.toMatchObject({ kind: "current" });
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+  });
   async function availabilityReconciliationFixture(startAtLocalToday = false) {
     const f = await channelInventoryFixture(1, startAtLocalToday),
       prepared = await f.dispatch(),

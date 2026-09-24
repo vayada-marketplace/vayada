@@ -5,6 +5,7 @@ import type { PmsInventoryMaterializationRepository } from "./pmsInventoryMateri
 import { lockChannexPricingPropertyAuthority } from "./channexPricingPropertyAuthority.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
+import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 
 type Inventory = Pick<
   PmsInventoryMaterializationRepository,
@@ -34,6 +35,7 @@ export async function lockCurrentChannexRoomAvailability(
     roomTypeId: string;
   }>,
 ) {
+  await lockPmsInventoryMutationScope(client, input.propertyId);
   const mappings = await client.query<{ bindingGeneration: string }>(
     `SELECT c.binding_generation::text AS "bindingGeneration"
      FROM pms.channel_room_type_mappings m
@@ -70,13 +72,20 @@ export async function lockCurrentChannexRoomAvailability(
        WHERE coverage.property_id=$1
          AND coverage.calendar_revision=coverage.materialized_revision
          AND coverage.materialized_day_count=coverage.expected_day_count
-         AND NOT EXISTS (SELECT 1 FROM pms.operating_calendar_revisions newer
-           WHERE newer.property_id=calendar.property_id
-             AND newer.calendar_revision>calendar.calendar_revision)
        FOR SHARE OF coverage,calendar NOWAIT`,
       [input.propertyId],
     )
   ).rows[0];
+  if (
+    coverage &&
+    !(await lockSelectedRoomMaterializationCurrent(
+      client,
+      input.propertyId,
+      input.roomTypeId,
+      coverage.materializedRevision,
+    ))
+  )
+    return unavailable("room_availability_coverage_unavailable");
   const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
   const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
   if (!coverage || !localToday || !inclusiveDayCount(localToday, coverage.through))
@@ -159,6 +168,7 @@ async function readScope(
       (authority.lease.operationType !== "sync_ari" && !authority.lease.publishedOfferProvisioning)
     )
       return unavailable("room_availability_authority_unavailable");
+    await lockPmsInventoryMutationScope(client, authority.lease.propertyId);
     const provisionRoomTypeId =
       authority.lease.operationType === "provision"
         ? authority.lease.publishedOfferRoomTypeId
@@ -226,13 +236,25 @@ async function readScope(
          WHERE coverage.property_id=$1
            AND coverage.calendar_revision=coverage.materialized_revision
            AND coverage.materialized_day_count=coverage.expected_day_count
-           AND NOT EXISTS (SELECT 1 FROM pms.operating_calendar_revisions newer
+           AND ($2::uuid IS NOT NULL OR NOT EXISTS (
+             SELECT 1 FROM pms.operating_calendar_revisions newer
              WHERE newer.property_id=calendar.property_id
-               AND newer.calendar_revision>calendar.calendar_revision)
+               AND newer.calendar_revision>calendar.calendar_revision))
          FOR SHARE OF coverage,calendar NOWAIT`,
-        [authority.lease.propertyId],
+        [authority.lease.propertyId, provisionRoomTypeId],
       )
     ).rows[0];
+    if (
+      coverage &&
+      provisionRoomTypeId &&
+      !(await lockSelectedRoomMaterializationCurrent(
+        client,
+        authority.lease.propertyId,
+        provisionRoomTypeId,
+        coverage.materializedRevision,
+      ))
+    )
+      return unavailable("room_availability_coverage_unavailable");
     const now = (await client.query<{ now: Date }>("SELECT clock_timestamp() AS now")).rows[0]?.now;
     const localToday = coverage && now ? channexPropertyLocalDate(coverage.timeZone, now) : null;
     if (!coverage || !localToday || coverage.from > localToday || coverage.through < localToday)
@@ -307,6 +329,57 @@ function inclusiveDayCount(from: string, through: string) {
     end = Date.parse(`${through}T00:00:00.000Z`),
     count = (end - start) / 86_400_000 + 1;
   return Number.isSafeInteger(count) && count >= 1 && count <= 366 ? count : null;
+}
+
+async function lockSelectedRoomMaterializationCurrent(
+  client: Pick<PoolClient, "query">,
+  propertyId: string,
+  roomTypeId: string,
+  materializedRevision: number,
+) {
+  const row = (
+    await client.query<{ valid: boolean }>(
+      `WITH latest AS (
+         SELECT max(calendar_revision) AS calendar_revision
+         FROM pms.operating_calendar_revisions WHERE property_id=$1
+       )
+       SELECT materialized_calendar.contract_version=current_calendar.contract_version
+          AND materialized_calendar.property_profile_revision=current_calendar.property_profile_revision
+          AND materialized_calendar.property_time_zone=current_calendar.property_time_zone
+          AND materialized_calendar.schedule_mode=current_calendar.schedule_mode
+          AND materialized_calendar.recurring_period_count=current_calendar.recurring_period_count
+          AND materialized_calendar.default_minimum_stay_nights=current_calendar.default_minimum_stay_nights
+          AND materialized_binding.source_room_facts_revision=current_binding.source_room_facts_revision
+          AND materialized_binding.source_room_units_revision=current_binding.source_room_units_revision
+          AND materialized_binding.physical_capacity_count=current_binding.physical_capacity_count
+          AND materialized_binding.starting_sellable_limit_count=current_binding.starting_sellable_limit_count
+          AND COALESCE((SELECT jsonb_agg(jsonb_build_array(period_index,start_month,start_day,end_month,end_day)
+                         ORDER BY period_index)
+             FROM pms.operating_calendar_recurring_periods
+             WHERE property_id=$1 AND calendar_revision=materialized_calendar.calendar_revision),'[]'::jsonb)
+              = COALESCE((SELECT jsonb_agg(jsonb_build_array(period_index,start_month,start_day,end_month,end_day)
+                            ORDER BY period_index)
+                FROM pms.operating_calendar_recurring_periods
+                WHERE property_id=$1 AND calendar_revision=current_calendar.calendar_revision),'[]'::jsonb)
+          AS valid
+       FROM latest
+       JOIN pms.operating_calendar_revisions materialized_calendar
+         ON materialized_calendar.property_id=$1 AND materialized_calendar.calendar_revision=$3
+       JOIN pms.operating_calendar_revisions current_calendar
+         ON current_calendar.property_id=$1 AND current_calendar.calendar_revision=latest.calendar_revision
+       JOIN pms.operating_calendar_room_bindings materialized_binding
+         ON materialized_binding.property_id=$1
+        AND materialized_binding.calendar_revision=materialized_calendar.calendar_revision
+        AND materialized_binding.room_type_id=$2
+       JOIN pms.operating_calendar_room_bindings current_binding
+         ON current_binding.property_id=$1
+        AND current_binding.calendar_revision=current_calendar.calendar_revision
+        AND current_binding.room_type_id=$2
+      `,
+      [propertyId, roomTypeId, materializedRevision],
+    )
+  ).rows[0];
+  return row?.valid === true;
 }
 
 const selectionSql = `
