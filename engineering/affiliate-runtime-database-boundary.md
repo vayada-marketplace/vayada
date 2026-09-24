@@ -82,8 +82,12 @@ grant matrix is declared complete.
    `0417_affiliate_guarded_click_capture.sql` completes the occurrence portion:
    its owner-executed command derives beneficiary scope from the public link,
    validates ordered active agreement history and generates the click identity,
-   reference and timestamp. Public execution is revoked. Context and admission
-   writes still need their own guarded command.
+   reference and timestamp. Public execution is revoked. Migration
+   `0418_affiliate_guarded_click_admission.sql` completes the context and
+   admission portion: its owner-executed command resolves the immutable live
+   click from the opaque reference, validates its property and transport
+   lifetime, generates new context IDs internally, and serializes replay or
+   conflicts without direct table writes. Public execution is revoked.
 3. Define the booking-binding write boundary so a runtime credential cannot
    insert a binding for an arbitrary booking, context, property or cutoff. A
    security-definer function is not sufficient if it merely trusts caller IDs;
