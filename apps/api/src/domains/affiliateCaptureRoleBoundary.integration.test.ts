@@ -1,6 +1,9 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertAffiliateCaptureRoleHasNoWriteGrants } from "./affiliateCaptureRoleBoundary.js";
+import {
+  assertAffiliateCaptureRoleHasGuardedWriteCapabilities,
+  assertAffiliateCaptureRoleHasNoWriteGrants,
+} from "./affiliateCaptureRoleBoundary.js";
 
 const url = process.env.TEST_DATABASE_URL;
 if (url && !/(^|[_-])(test|verify)([_-]|$)/i.test(new URL(url).pathname))
@@ -69,6 +72,116 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
         "affiliate_capture_role_ddl_or_sequence",
       );
       await owner.query(`REVOKE CREATE ON SCHEMA marketplace FROM ${role}`);
+    });
+  });
+
+  it("requires only the two guarded capture commands without delegation", async () => {
+    await withNoPublicTemp(async () => {
+      await owner.query(`GRANT USAGE ON SCHEMA marketplace,booking TO ${role}`);
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT),
+          booking.admit_affiliate_click(TEXT,UUID,UUID) TO ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT)
+         TO ${role} WITH GRANT OPTION`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_function_delegation");
+      await owner.query(
+        `REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION
+         marketplace.capture_affiliate_click(TEXT,TEXT,TEXT) FROM ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(`REVOKE USAGE ON SCHEMA booking FROM ${role}`);
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_schema_usage");
+      await owner.query(`GRANT USAGE ON SCHEMA booking TO ${role}`);
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) TO PUBLIC`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_public_execute");
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) FROM PUBLIC`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(
+        `CREATE FUNCTION booking.affiliate_capture_forbidden_fixture()
+         RETURNS boolean LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog
+         AS 'SELECT true'`,
+      );
+      await owner.query(
+        `REVOKE ALL ON FUNCTION booking.affiliate_capture_forbidden_fixture() FROM PUBLIC`,
+      );
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION booking.affiliate_capture_forbidden_fixture() TO ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_extra_security_definer");
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION booking.affiliate_capture_forbidden_fixture() FROM ${role}`,
+      );
+      await owner.query(`DROP FUNCTION booking.affiliate_capture_forbidden_fixture()`);
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(
+        `CREATE FUNCTION booking.affiliate_capture_window_fixture()
+         RETURNS bigint AS 'window_row_number' LANGUAGE internal WINDOW SECURITY DEFINER`,
+      );
+      await owner.query(
+        `REVOKE ALL ON FUNCTION booking.affiliate_capture_window_fixture() FROM PUBLIC`,
+      );
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION booking.affiliate_capture_window_fixture() TO ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_extra_security_definer");
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION booking.affiliate_capture_window_fixture() FROM ${role}`,
+      );
+      await owner.query(`DROP FUNCTION booking.affiliate_capture_window_fixture()`);
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).resolves.toBeUndefined();
+
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) TO ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_function_allowlist");
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION booking.bind_live_affiliate_original(UUID,UUID) FROM ${role}`,
+      );
+
+      await owner.query(
+        `REVOKE EXECUTE ON FUNCTION booking.admit_affiliate_click(TEXT,UUID,UUID) FROM ${role}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_function_allowlist");
     });
   });
 });

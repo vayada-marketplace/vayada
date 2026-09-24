@@ -122,3 +122,11 @@ and mutable-hotel grants are rejected. This is a
 **deny-only staging check**: passing it does not establish the required read
 grants, guarded write capability, full function/trigger safety, deployment
 credential mapping, or permission to turn on capture.
+
+`assertAffiliateCaptureRoleHasGuardedWriteCapabilities` adds the next gate. It
+requires schema usage and non-delegable execution of only
+`marketplace.capture_affiliate_click` and `booking.admit_affiliate_click`, while
+rejecting execution of `booking.bind_live_affiliate_original`. It also verifies
+that `PUBLIC` cannot execute any of the three guarded commands and reruns the
+deny-only direct-write check. This still does not define the transitive read
+allowlist or provision a production role.

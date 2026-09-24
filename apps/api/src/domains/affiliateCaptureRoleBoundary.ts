@@ -95,3 +95,68 @@ export async function assertAffiliateCaptureRoleHasNoWriteGrants(
   );
   if (direct.rowCount) fail("direct_grant");
 }
+
+const guardedFunctions = [
+  "marketplace.capture_affiliate_click(text,text,text)",
+  "booking.admit_affiliate_click(text,uuid,uuid)",
+  "booking.bind_live_affiliate_original(uuid,uuid)",
+] as const;
+const allowedGuardedFunctions = guardedFunctions.slice(0, 2);
+
+/** Guarded-write capability only. Direct/read/transitive grants remain separate gates. */
+export async function assertAffiliateCaptureRoleHasGuardedWriteCapabilities(
+  client: Pick<pg.Client, "query">,
+  role = AFFILIATE_CAPTURE_ROLE,
+): Promise<void> {
+  await assertAffiliateCaptureRoleHasNoWriteGrants(client, role);
+  const fail = (reason: string): never => {
+    throw new Error(`affiliate_capture_role_${reason}`);
+  };
+  const schemas = await client.query(
+    `SELECT pg_catalog.has_schema_privilege($1,'marketplace','USAGE') AS marketplace,
+            pg_catalog.has_schema_privilege($1,'booking','USAGE') AS booking`,
+    [role],
+  );
+  if (!schemas.rows[0]?.marketplace || !schemas.rows[0]?.booking) fail("schema_usage");
+  const functions = await client.query(
+    `SELECT routine,
+            pg_catalog.has_function_privilege($1,routine,'EXECUTE') AS execute,
+            pg_catalog.has_function_privilege($1,routine,'EXECUTE WITH GRANT OPTION') AS delegate,
+            pg_catalog.has_function_privilege('public',routine,'EXECUTE') AS public_execute
+     FROM pg_catalog.unnest($2::pg_catalog.text[]) routine`,
+    [role, guardedFunctions],
+  );
+  const capability = new Map(
+    functions.rows.map((row) => [
+      row.routine,
+      {
+        execute: row.execute === true,
+        delegate: row.delegate === true,
+        public: row.public_execute,
+      },
+    ]),
+  );
+  const capture = capability.get(guardedFunctions[0]);
+  const admission = capability.get(guardedFunctions[1]);
+  const binding = capability.get(guardedFunctions[2]);
+  if ([capture, admission, binding].some((entry) => !entry || entry.public)) fail("public_execute");
+  if (!capture!.execute || !admission!.execute || binding!.execute) fail("function_allowlist");
+  if ([capture, admission, binding].some((entry) => entry!.delegate)) fail("function_delegation");
+  const extraSecurityDefiners = await client.query(
+    `SELECT 1
+     FROM pg_catalog.pg_proc procedure
+     JOIN pg_catalog.pg_namespace namespace ON namespace.oid=procedure.pronamespace
+     WHERE procedure.prosecdef
+       AND procedure.prokind IN ('f','p','w')
+       AND procedure.prorettype NOT IN (
+         'pg_catalog.trigger'::pg_catalog.regtype,
+         'pg_catalog.event_trigger'::pg_catalog.regtype
+       )
+       AND pg_catalog.left(namespace.nspname,3)<>'pg_'
+       AND namespace.nspname<>'information_schema'
+       AND NOT (procedure.oid = ANY($2::pg_catalog.regprocedure[]))
+       AND pg_catalog.has_function_privilege($1,procedure.oid,'EXECUTE')`,
+    [role, allowedGuardedFunctions],
+  );
+  if (extraSecurityDefiners.rowCount) fail("extra_security_definer");
+}
