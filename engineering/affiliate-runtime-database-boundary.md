@@ -124,9 +124,13 @@ grants, guarded write capability, full function/trigger safety, deployment
 credential mapping, or permission to turn on capture.
 
 `assertAffiliateCaptureRoleHasGuardedWriteCapabilities` adds the next gate. It
-requires schema usage and non-delegable execution of only
-`marketplace.capture_affiliate_click` and `booking.admit_affiliate_click`, while
-rejecting execution of `booking.bind_live_affiliate_original`. It also verifies
-that `PUBLIC` cannot execute any of the three guarded commands and reruns the
-deny-only direct-write check. This still does not define the transitive read
-allowlist or provision a production role.
+requires schema usage and non-delegable execution of
+`marketplace.capture_affiliate_click` and `booking.admit_affiliate_click`. It
+rejects execution of `booking.bind_live_affiliate_original` and every other
+callable non-system `SECURITY DEFINER` function, procedure, or window function.
+Trigger and event-trigger routines are excluded because clients cannot invoke
+them directly. The gate also verifies that `PUBLIC` cannot execute any of the
+three named commands and reruns the deny-only direct-write check. It does not
+restrict `SECURITY INVOKER` routines, which remain limited by the caller's
+underlying grants. This still does not define the transitive read allowlist or
+provision a production role.
