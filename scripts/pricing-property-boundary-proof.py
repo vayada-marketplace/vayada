@@ -30,10 +30,13 @@ PUBLIC_A = "vayada_next_pricing_public_a"
 PUBLIC_B = "vayada_next_pricing_public_b"
 READER_A = "vayada_next_pricing_reader_a"
 LEGACY = "legacy_runtime"
+PROVISIONER = "pricing_provisioner"
+PROVISIONED = "vayada_next_pricing_provisioned"
 passwords = {
-    r: secrets.token_hex(32) for r in (OWNER_A, OWNER_B, PUBLIC_A, PUBLIC_B, READER_A, LEGACY)
+    r: secrets.token_hex(32)
+    for r in (OWNER_A, OWNER_B, PUBLIC_A, PUBLIC_B, READER_A, LEGACY, PROVISIONER)
 }
-roles = ", ".join(passwords)
+roles = ", ".join(role for role in passwords if role != PROVISIONER)
 
 
 def run(args, **kwargs):
@@ -121,8 +124,9 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
         )
         for role, password in passwords.items():
             inheritance = "INHERIT" if role == LEGACY else "NOINHERIT"
+            create_role = "CREATEROLE" if role == PROVISIONER else "NOCREATEROLE"
             sql(
-                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE {inheritance} NOBYPASSRLS PASSWORD '{password}';"
+                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB {create_role} {inheritance} NOBYPASSRLS PASSWORD '{password}';"
             )
         sql(f"""
         INSERT INTO identity.organizations(id,kind,name,slug) VALUES ('{ORG}','hotel_group','Proof','proof');
@@ -219,6 +223,32 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 "status",
             ),
         )
+        sql(
+            f"GRANT USAGE ON SCHEMA identity TO {PROVISIONER};"
+            + "GRANT SELECT, UPDATE ON "
+            + ", ".join(table for table, _, _ in identity_locks)
+            + f" TO {PROVISIONER}"
+        )
+        # CREATEROLE receives ADMIN-only membership in a role it creates. It
+        # can grant itself SET/INHERIT later, so the policy must deny this
+        # provisioner despite its current lack of usable pricing privileges.
+        sql(f"CREATE ROLE {PROVISIONED} NOLOGIN NOINHERIT NOBYPASSRLS", PROVISIONER)
+        assert (
+            sql(
+                f"SELECT pg_has_role(session_user,'{PROVISIONED}','MEMBER')::text || ':' || "
+                f"pg_has_role(session_user,'{PROVISIONED}','MEMBER WITH ADMIN OPTION')::text || ':' || "
+                f"pg_has_role(session_user,'{PROVISIONED}','USAGE')::text || ':' || "
+                f"pg_has_role(session_user,'{PROVISIONED}','SET')::text",
+                PROVISIONER,
+            )
+            == "true:true:false:false"
+        )
+        for table, predicate, column in identity_locks:
+            sql(
+                f"UPDATE {table} SET {column}={column} WHERE {predicate}",
+                PROVISIONER,
+                denied=True,
+            )
         for table, predicate, column in identity_locks:
             for role in (OWNER_A, PUBLIC_A, READER_A):
                 assert (
@@ -452,7 +482,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; identity authorization lock-only denials; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; identity authorization lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
