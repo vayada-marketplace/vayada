@@ -1,5 +1,6 @@
 import { readPmsRoomOperatingEligibility } from "./pmsRoomOperatingEligibility.js";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   PMS_INVENTORY_MATERIALIZATION_CONTRACT_VERSION,
@@ -104,7 +105,12 @@ type InventoryDayGuard = (
 export type PmsInventoryMaterializationRepository = PmsInventoryMaterializationPort &
   PmsInventoryLaunchReadinessReadPort & {
     getCurrentInventoryDay(
-      request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+      request: Readonly<{
+        propertyId: string;
+        roomTypeId: string;
+        stayDate: string;
+        materializationScope?: "property" | "room";
+      }>,
       guard?: InventoryDayGuard,
     ): ReturnType<typeof readCurrentInventoryDay>;
     close(): Promise<void>;
@@ -255,7 +261,12 @@ export function createPgPmsInventoryMaterializationRepository(
 async function readCurrentInventoryDay(
   pool: PmsInventoryMaterializationRepositoryPool,
   config: PmsInventoryMaterializationRepositoryConfig,
-  request: Readonly<{ propertyId: string; roomTypeId: string; stayDate: string }>,
+  request: Readonly<{
+    propertyId: string;
+    roomTypeId: string;
+    stayDate: string;
+    materializationScope?: "property" | "room";
+  }>,
   guard?: InventoryDayGuard,
 ) {
   const propertyId = normalizeUuid(request.propertyId),
@@ -273,6 +284,7 @@ async function readCurrentInventoryDay(
     return unavailable("configuration_not_current");
   const expectedProfileRevision = propertyProfileRevision(current.configuration);
   if (expectedProfileRevision === null) return unavailable("configuration_not_current");
+  const roomScoped = request.materializationScope === "room";
   const client = await pool.connect();
   let committed = false,
     sessionLocked = false,
@@ -313,7 +325,13 @@ async function readCurrentInventoryDay(
         await client.query("SET LOCAL lock_timeout='150ms'");
         await lockPmsInventoryMutationScope(client, propertyId);
         await lockPmsRoomFactsMutationScope(client, propertyId);
-        for (const binding of [...current.configuration.sourceInputs.roomBindings].sort((a, b) =>
+        const currentBindings = roomScoped
+          ? current.configuration.sourceInputs.roomBindings.filter(
+              (binding) => binding.roomTypeId === roomTypeId,
+            )
+          : current.configuration.sourceInputs.roomBindings;
+        if (roomScoped && currentBindings.length !== 1) return unavailable("room_unavailable");
+        for (const binding of [...currentBindings].sort((a, b) =>
           compareCodeUnits(a.roomTypeId, b.roomTypeId),
         ))
           await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, binding.roomTypeId);
@@ -325,8 +343,12 @@ async function readCurrentInventoryDay(
         if (
           !exact ||
           !sameConfigurationIdentity(current.configuration, exact) ||
-          !(await roomFactsStillMatch(client, exact)) ||
-          !(await capacitiesStillMatch(config.roomCapacity, exact))
+          !(await roomFactsStillMatch(client, exact, roomScoped ? roomTypeId : undefined)) ||
+          !(await capacitiesStillMatch(
+            config.roomCapacity,
+            exact,
+            roomScoped ? roomTypeId : undefined,
+          ))
         )
           return unavailable("configuration_not_current");
         const binding = exact.sourceInputs.roomBindings.find(
@@ -334,18 +356,52 @@ async function readCurrentInventoryDay(
         );
         if (!binding) return unavailable("room_unavailable");
         const coverage = await lockCoverage(client, propertyId);
+        const coverageRevision = coverage ? positiveInteger(coverage.materializedRevision) : null;
         if (
           !coverage ||
-          positiveInteger(coverage.calendarRevision) !== exact.calendarRevision ||
-          positiveInteger(coverage.materializedRevision) !== exact.calendarRevision ||
+          positiveInteger(coverage.calendarRevision) !== coverageRevision ||
+          (!roomScoped && coverageRevision !== exact.calendarRevision) ||
+          (roomScoped && coverageRevision! > exact.calendarRevision) ||
           requireDatabaseDate(coverage.coverageFrom) > horizon.from ||
           requireDatabaseDate(coverage.coverageThrough) < horizon.through
         )
           return unavailable("coverage_unavailable");
+        const materialized =
+          coverageRevision === exact.calendarRevision
+            ? exact
+            : await loadPmsOperatingCalendarConfigurationByRevision(
+                client,
+                propertyId,
+                coverageRevision!,
+                config.propertyProfileEvidence,
+              );
+        const materializedBinding = materialized?.sourceInputs.roomBindings.find(
+          (room) => room.roomTypeId === roomTypeId,
+        );
+        if (
+          !materialized ||
+          !materializedBinding ||
+          !sameRoomMaterializationInputs(exact, materialized, roomTypeId) ||
+          !profileEvidenceMatchesConfiguration(
+            profile,
+            materialized,
+            config.propertyProfileEvidence,
+          )
+        )
+          return unavailable("coverage_unavailable");
+        const dayConfiguration = roomScoped
+          ? {
+              ...materialized,
+              sourceInputs: {
+                ...materialized.sourceInputs,
+                roomBindings: Object.freeze([materializedBinding]),
+              },
+            }
+          : materialized;
         const days = await lockPmsInventoryDaysForMaterialization(
           client,
           { propertyId, horizon },
-          exact,
+          dayConfiguration,
         );
         const day = days.find(
           (item) => item.roomTypeId === roomTypeId && item.stayDate === horizon.from,
@@ -359,12 +415,12 @@ async function readCurrentInventoryDay(
         const result: PmsCurrentInventoryDay = {
           kind: "available" as const,
           day,
-          configurationSource: exact.source,
-          propertyProfileSource: exact.sourceInputs.propertyProfile,
-          propertyTimeZone: exact.sourceInputs.propertyTimeZone,
-          materializedRevision: positiveInteger(coverage.materializedRevision),
-          sourceRoomFactsRevision: binding.sourceRoomFactsRevision,
-          sourceRoomUnitsRevision: binding.sourceRoomUnitsRevision,
+          configurationSource: materialized.source,
+          propertyProfileSource: materialized.sourceInputs.propertyProfile,
+          propertyTimeZone: materialized.sourceInputs.propertyTimeZone,
+          materializedRevision: coverageRevision!,
+          sourceRoomFactsRevision: materializedBinding.sourceRoomFactsRevision,
+          sourceRoomUnitsRevision: materializedBinding.sourceRoomUnitsRevision,
         };
         if (guard && !(await guard(client, result)))
           return unavailable("consumer_authority_unavailable");
@@ -719,6 +775,7 @@ async function loadLockedCurrentConfiguration(
 async function roomFactsStillMatch(
   client: PmsInventoryMaterializationRepositoryClient,
   configuration: PmsOperatingCalendarConfigurationSnapshot,
+  roomTypeId?: string,
 ): Promise<boolean> {
   const result = await client.query<CurrentRoomFactsRow>(
     `SELECT id::text AS "roomTypeId", room_facts_revision AS "roomFactsRevision"
@@ -732,10 +789,12 @@ async function roomFactsStillMatch(
       .filter((room) => room.state === "operating")
       .map((room) => room.roomTypeId),
   );
-  const operatingRows = result.rows.filter((row) => operatingIds.has(row.roomTypeId));
-  const expected = [...configuration.sourceInputs.roomBindings].sort((left, right) =>
-    compareCodeUnits(left.roomTypeId, right.roomTypeId),
+  const operatingRows = result.rows.filter(
+    (row) => operatingIds.has(row.roomTypeId) && (!roomTypeId || row.roomTypeId === roomTypeId),
   );
+  const expected = configuration.sourceInputs.roomBindings
+    .filter((binding) => !roomTypeId || binding.roomTypeId === roomTypeId)
+    .sort((left, right) => compareCodeUnits(left.roomTypeId, right.roomTypeId));
   return (
     operatingRows.length === expected.length &&
     operatingRows.every(
@@ -749,8 +808,11 @@ async function roomFactsStillMatch(
 async function capacitiesStillMatch(
   roomCapacity: RoomCapacityReadPort,
   configuration: PmsOperatingCalendarConfigurationSnapshot,
+  roomTypeId?: string,
 ): Promise<boolean> {
-  for (const binding of configuration.sourceInputs.roomBindings) {
+  for (const binding of configuration.sourceInputs.roomBindings.filter(
+    (candidate) => !roomTypeId || candidate.roomTypeId === roomTypeId,
+  )) {
     const current = await roomCapacity.getRoomTypeCapacity(
       configuration.propertyId,
       binding.roomTypeId,
@@ -766,6 +828,30 @@ async function capacitiesStillMatch(
     }
   }
   return true;
+}
+
+function sameRoomMaterializationInputs(
+  current: PmsOperatingCalendarConfigurationSnapshot,
+  materialized: PmsOperatingCalendarConfigurationSnapshot,
+  roomTypeId: string,
+): boolean {
+  const selected = (configuration: PmsOperatingCalendarConfigurationSnapshot) => ({
+    contractVersion: configuration.contractVersion,
+    propertyId: configuration.propertyId,
+    source: {
+      ownerDomain: configuration.source.ownerDomain,
+      entityType: configuration.source.entityType,
+      entityId: configuration.source.entityId,
+    },
+    propertyProfile: configuration.sourceInputs.propertyProfile,
+    propertyTimeZone: configuration.sourceInputs.propertyTimeZone,
+    roomBinding: configuration.sourceInputs.roomBindings.find(
+      (binding) => binding.roomTypeId === roomTypeId,
+    ),
+    schedule: configuration.schedule,
+    defaultMinimumStayNights: configuration.defaultMinimumStayNights,
+  });
+  return isDeepStrictEqual(selected(current), selected(materialized));
 }
 
 function propertyProfileRevision(

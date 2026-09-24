@@ -170,6 +170,8 @@ async function readChannexRoomAvailability(
       propertyId: initial.authority.lease.propertyId,
       roomTypeId: selected.roomTypeId,
       stayDate: selected.date,
+      materializationScope:
+        initial.authority.lease.operationType === "provision" ? "room" : "property",
     },
     async (currentClient, day) => {
       if (
