@@ -4,7 +4,12 @@ import pg, { type QueryResultRow } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createActiveBookingPublicationProfileRepository } from "./routes/activeBookingPublicationProfile.js";
-import { readBookingAffiliateArrivalHost } from "./domains/bookingAffiliateArrivalHost.js";
+import {
+  lockBookingAffiliateArrivalHostScope,
+  readBookingAffiliateArrivalHost,
+} from "./domains/bookingAffiliateArrivalHost.js";
+import { lockAffiliateDestinationSafety } from "./domains/bookingAffiliateDestinationSafetyLock.js";
+import { lockBookingPublication } from "./domains/bookingPublicationLock.js";
 import type { PublicHotelProfileReadPool } from "./routes/aiHotels.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
@@ -15,6 +20,7 @@ const revisionA = "85858585-8585-4585-8585-858585858504";
 const revisionB = "85858585-8585-4585-8585-858585858505";
 const inactiveRevision = "85858585-8585-4585-8585-858585858506";
 const malformedRevision = "85858585-8585-4585-8585-858585858507";
+const lockProperty = "85858585-8585-4585-8585-858585858508";
 const hostname = "book.alpenrose.example";
 const fixture = PUBLIC_BOOKABILITY_FIXTURES.find(({ caseId }) => caseId === "custom_domain")!;
 
@@ -89,6 +95,53 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     });
     for (const invalid of ["bad%2Fhost", "bad..example", `${hostname}:8443`]) {
       await expect(readBookingAffiliateArrivalHost(pool, invalid)).resolves.toBeUndefined();
+    }
+  });
+
+  it("holds coordinated domain and publication writers until the arrival transaction ends", async () => {
+    const arrival = new pg.Client({ connectionString: TEST_DATABASE_URL! });
+    const writer = new pg.Client({ connectionString: TEST_DATABASE_URL! });
+    await arrival.connect();
+    await writer.connect();
+    try {
+      await arrival.query(
+        `INSERT INTO hotel_catalog.properties (id,public_id,display_name)
+         VALUES ($1::uuid,'affiliate-host-lock','Affiliate host lock')`,
+        [lockProperty],
+      );
+      await arrival.query("BEGIN");
+      expect(await lockBookingAffiliateArrivalHostScope(arrival as never, lockProperty)).toBe(true);
+
+      await writer.query("BEGIN");
+      const writerPid = (await writer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid"))
+        .rows[0]!.pid;
+      const domainChange = (async () => {
+        await lockAffiliateDestinationSafety(writer as never, lockProperty);
+        await writer.query("DELETE FROM hotel_catalog.property_domains WHERE property_id=$1", [
+          lockProperty,
+        ]);
+      })();
+      await waitForLockWaiter(admin, writerPid);
+      await arrival.query("COMMIT");
+      await domainChange;
+      await writer.query("ROLLBACK");
+
+      await arrival.query("BEGIN");
+      expect(await lockBookingAffiliateArrivalHostScope(arrival as never, lockProperty)).toBe(true);
+      await writer.query("BEGIN");
+      const publicationChange = lockBookingPublication(writer as never, lockProperty);
+      await waitForLockWaiter(admin, writerPid);
+      await arrival.query("COMMIT");
+      await publicationChange;
+      await writer.query("ROLLBACK");
+    } finally {
+      await arrival.query("ROLLBACK").catch(() => undefined);
+      await writer.query("ROLLBACK").catch(() => undefined);
+      await arrival
+        .query("DELETE FROM hotel_catalog.properties WHERE id=$1::uuid", [lockProperty])
+        .catch(() => undefined);
+      await arrival.end();
+      await writer.end();
     }
   });
 
@@ -205,6 +258,18 @@ describe.skipIf(!TEST_DATABASE_URL)("active Booking publication reads in Postgre
     );
   }
 });
+
+async function waitForLockWaiter(observer: pg.Client, pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await observer.query<{ waiting: boolean }>(
+      `SELECT wait_event_type='Lock' AS waiting FROM pg_stat_activity WHERE pid=$1`,
+      [pid],
+    );
+    if (result.rows[0]?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Timed out waiting for affiliate host writer lock");
+}
 
 function publicContent(profile: (typeof fixture)["profile"]) {
   const result = buildBookingPublicContent({

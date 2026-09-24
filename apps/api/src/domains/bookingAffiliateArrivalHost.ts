@@ -4,6 +4,7 @@ import type { QueryResult, QueryResultRow } from "pg";
 
 import { admitAffiliateArrivalInTransaction } from "./bookingAffiliateClickAdmission.js";
 import { lockAffiliateDestinationSafety } from "./bookingAffiliateDestinationSafetyLock.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 
 type QueryPort = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -114,6 +115,20 @@ export async function readBookingAffiliateArrivalHost(
   return { host, propertyId: row.propertyId };
 }
 
+/** Holds coordinated Catalog-domain, Booking-publication, and property identity stable. */
+export async function lockBookingAffiliateArrivalHostScope(
+  client: pg.PoolClient,
+  propertyId: string,
+): Promise<boolean> {
+  await lockAffiliateDestinationSafety(client, propertyId);
+  await lockBookingPublication(client, propertyId);
+  const property = await client.query(
+    `SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR SHARE`,
+    [propertyId],
+  );
+  return property.rowCount === 1;
+}
+
 /**
  * Rechecks the final host under the Catalog-domain and Booking-publication locks,
  * then admits the opaque click in the same transaction.
@@ -127,17 +142,9 @@ export async function admitAffiliateArrivalForCurrentHost(
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    await lockAffiliateDestinationSafety(client, candidate.propertyId);
-    await client.query(
-      `SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))`,
-      [candidate.propertyId],
-    );
-    const property = await client.query(
-      `SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR SHARE`,
-      [candidate.propertyId],
-    );
+    const propertyLocked = await lockBookingAffiliateArrivalHostScope(client, candidate.propertyId);
     const current = await readBookingAffiliateArrivalHost(client, candidate.host);
-    if (!property.rowCount || current?.propertyId !== candidate.propertyId) {
+    if (!propertyLocked || current?.propertyId !== candidate.propertyId) {
       await client.query("ROLLBACK");
       return { status: "unavailable" as const };
     }

@@ -3,6 +3,7 @@ import pg from "pg";
 import type { ChannexManagementConfig } from "../config.js";
 import { verifyChannexRoomClosure } from "../integrations/channexRoomClosure.js";
 import { suppressClosingRoomOffers } from "./distributionRoomClosure.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 import { lockPmsInventoryMutationScope } from "./pmsInventoryMutationLock.js";
 import { lockPmsRoomFactsMutationScope } from "./pmsRoomFactsMutationLock.js";
 import { lockPmsPhysicalRoomUnitMutationScope } from "./pmsPhysicalRoomUnitMutationLock.js";
@@ -256,10 +257,7 @@ async function lockScope(client: pg.PoolClient, propertyId: string): Promise<voi
   );
   for (const room of rooms.rows)
     await lockPmsPhysicalRoomUnitMutationScope(client, propertyId, room.id);
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtext('booking.publication'),hashtext($1::uuid::text))",
-    [propertyId],
-  );
+  await lockBookingPublication(client, propertyId);
   await client.query("SELECT id FROM hotel_catalog.properties WHERE id=$1::uuid FOR SHARE", [
     propertyId,
   ]);

@@ -20,6 +20,7 @@ import {
   sha256,
   type BookingPublicationOperationRow,
 } from "./bookingPublicationCommandEnvelope.js";
+import { lockBookingPublication } from "./bookingPublicationLock.js";
 
 const OPERATION = "booking.publication.request";
 const PERMISSION = "booking.settings.manage";
@@ -93,7 +94,7 @@ export function createPgBookingPublicationCommandRepository(config: {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await lockPublicationScope(client, command.propertyId);
+        await lockBookingPublication(client, command.propertyId);
         const propertyLifecycleRevision = await lockAuthorizedScope(
           client,
           command,
@@ -375,16 +376,6 @@ async function lockAuthorizedScope(
     applicable.some(({ status }) => status === "active")
     ? lifecycleRevision
     : null;
-}
-
-async function lockPublicationScope(client: CommandClient, propertyId: string): Promise<void> {
-  await client.query(
-    `SELECT pg_advisory_xact_lock(
-       hashtext('booking.publication'),
-       hashtext($1::uuid::text)
-     )`,
-    [propertyId],
-  );
 }
 
 async function hasOpenAttempt(client: CommandClient, propertyId: string): Promise<boolean> {
