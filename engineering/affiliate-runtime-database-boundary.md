@@ -65,7 +65,7 @@ grant matrix is declared complete.
 
 ## Grant and activation gates
 
-1. Migration `0415_affiliate_destination_lock_boundary.sql` adds restrictive
+1. Migration `0416_affiliate_destination_lock_boundary.sql` adds restrictive
    row-level policies for `hotel_catalog.properties` and `property_slugs`. A
    non-owner login using the exact future capture role can take the row locks
    required by destination validation but cannot update either relation with
@@ -78,12 +78,23 @@ grant matrix is declared complete.
    property, click reference, admission lifetime and monotonic history in the
    retained transaction. Current foreign keys and immutable-update triggers
    do not prove that an inserted history row came from an eligible link. Do not
-   grant direct INSERT on these tables as a shortcut.
-3. Define the booking-binding write boundary so a runtime credential cannot
-   insert a binding for an arbitrary booking, context, property or cutoff. A
-   security-definer function is not sufficient if it merely trusts caller IDs;
-   its authority and same-transaction proof must be reviewed. Keep idempotent
-   original-booking creation and the immutable binding on one connection.
+   grant direct INSERT on these tables as a shortcut. Migration
+   `0417_affiliate_guarded_click_capture.sql` completes the occurrence portion:
+   its owner-executed command derives beneficiary scope from the public link,
+   validates ordered active agreement history and generates the click identity,
+   reference and timestamp. Public execution is revoked. Migration
+   `0418_affiliate_guarded_click_admission.sql` completes the context and
+   admission portion: its owner-executed command resolves the immutable live
+   click from the opaque reference, validates its property and transport
+   lifetime, generates new context IDs internally, and serializes replay or
+   conflicts without direct table writes. Public execution is revoked.
+3. Migration `0419_affiliate_guarded_original_binding.sql` adds the
+   booking-binding write boundary. Each booking receives an immutable creation
+   transaction marker. The owner-executed command accepts only a booking made
+   at top level in its current transaction, derives the property and original booking facts,
+   locks and validates the live context, and freezes the recent admission
+   cutoff. Public execution is revoked. Keep idempotent original-booking
+   creation and the immutable binding on one connection.
 4. Finish the transitive SQL/trigger inventory and encode an exact allowlist,
    its denied privileges, immutable-trigger state, non-owner/no-BYPASSRLS role
    checks, and schema/function/sequence rights in a release-specific preflight.
@@ -111,3 +122,30 @@ and mutable-hotel grants are rejected. This is a
 **deny-only staging check**: passing it does not establish the required read
 grants, guarded write capability, full function/trigger safety, deployment
 credential mapping, or permission to turn on capture.
+
+`assertAffiliateCaptureRoleHasGuardedWriteCapabilities` adds the next gate. It
+requires schema usage and non-delegable execution of
+`marketplace.capture_affiliate_click` and `booking.admit_affiliate_click`. It
+rejects execution of `booking.bind_live_affiliate_original` and every other
+callable non-system `SECURITY DEFINER` function, procedure, or window function.
+Trigger and event-trigger routines are excluded because clients cannot invoke
+them directly. The gate also verifies that `PUBLIC` cannot execute any of the
+three named commands and reruns the deny-only direct-write check. It does not
+restrict `SECURITY INVOKER` routines, which remain limited by the caller's
+underlying grants. This still does not define the transitive read allowlist or
+provision a production role.
+
+`assertAffiliateCaptureRoleHasVisitReadCapabilities` encodes the known direct
+SQL surface used by link eligibility, accepted terms, native destination
+safety and referral-readiness checks. It requires `SELECT` on exactly those
+relations and non-delegable `UPDATE` only where PostgreSQL row locks require
+it. Every immutable relation in that lock list must retain its enabled mutation
+trigger in `ENABLE ALWAYS` mode, including when a login starts in replication
+mode; the two mutable hotel-catalogue relations must retain the complete known
+row-level policy set. The check rejects any additional direct read or write
+access. The visit path now derives its referral runtime configuration from
+exactly one fresh, unrevoked certification/preflight pair for the accepted
+destination; zero or multiple candidates fail closed, using relations already
+covered by this allowlist. The final hotel host-profile read remains outside
+this known surface. Passing this gate still does not authorize capture or
+provision the role.

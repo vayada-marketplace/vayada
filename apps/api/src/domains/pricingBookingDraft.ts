@@ -194,7 +194,7 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
       guest.specialRequests,
     ],
   );
-  if (affiliateContextId !== undefined)
+  if (affiliateContextId !== undefined && syntheticAffiliate)
     await client.query(
       `INSERT INTO booking.affiliate_original_booking_bindings
          (booking_id,property_id,context_id,history_cutoff,
@@ -212,6 +212,13 @@ export async function stagePricingBookingDraft(client: PoolClient, slug: unknown
         syntheticAffiliate,
       ],
     );
+  else if (affiliateContextId !== undefined) {
+    const bound = await client.query(
+      "SELECT booking.bind_live_affiliate_original($1,$2) AS bound",
+      [bookingId, affiliateContextId],
+    );
+    if (bound.rows[0]?.bound !== true) return fail();
+  }
   await persistPricingBookingAddons(client, slug, current, bookingId);
   if (!isDeepStrictEqual(await lockPublicPricingAuthority(client, slug), scope)) return fail();
   return { bookingId, publicReference };

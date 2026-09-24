@@ -1,8 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
 import type pg from "pg";
 import { parseMarketplaceAffiliateLink } from "@vayada/domain-marketplace";
 import { buildNativeAffiliateArrivalRedirect } from "./bookingAffiliateNativeDestinationSafety.js";
 import {
+  readAffiliateReferralRuntimeConfiguration,
   readAffiliateReferralRoundTripReadiness,
   type AffiliateReferralReadiness,
 } from "./bookingAffiliateReferralReadiness.js";
@@ -26,7 +26,7 @@ type ReadinessPort = (
 
 const sources = new Set(["instagram", "tiktok", "youtube", "facebook", "x", "unknown"]);
 
-/** Normal earning visit only. No production configuration or public route is wired. */
+/** Normal earning visit only. The public route and production credential remain unwired. */
 export async function createMarketplaceAffiliateVisit(
   pool: pg.Pool,
   input: {
@@ -34,7 +34,7 @@ export async function createMarketplaceAffiliateVisit(
     campaignLabel: unknown;
     source: ReturnType<typeof affiliateTrafficSource>;
   },
-  configuration: ConfigurationPort = async () => undefined,
+  configuration: ConfigurationPort = readAffiliateReferralRuntimeConfiguration,
   readReadiness: ReadinessPort = readAffiliateReferralRoundTripReadiness,
 ): Promise<{ status: "unavailable" } | { status: "ready"; redirectUrl: string }> {
   const parsed = parseMarketplaceAffiliateLink(input.publicToken, input.campaignLabel);
@@ -52,7 +52,32 @@ export async function createMarketplaceAffiliateVisit(
       organizationId: scope.organizationId,
       destinationVersionId: scope.destinationVersionId,
     };
-    const referenceToken = `vc_${randomBytes(16).toString("base64url")}`;
+    const captured = (
+      await client.query(
+        `SELECT click_id,link_id,property_id,terms_id,reference_token
+         FROM marketplace.capture_affiliate_click($1,$2,$3)`,
+        [parsed.publicToken, input.source, parsed.campaignLabel],
+      )
+    ).rows[0] as
+      | {
+          click_id: string;
+          link_id: string;
+          property_id: string;
+          terms_id: string;
+          reference_token: string;
+        }
+      | undefined;
+    if (!captured) {
+      await client.query("ROLLBACK");
+      return { status: "unavailable" };
+    }
+    if (
+      captured.link_id !== scope.linkId ||
+      captured.property_id !== scope.propertyId ||
+      captured.terms_id !== scope.termsId
+    )
+      throw new Error("Invalid affiliate click capture scope");
+    const referenceToken = captured.reference_token;
     const redirect = await buildNativeAffiliateArrivalRedirect(client, destination, referenceToken);
     if (redirect.status !== "ready") {
       await client.query("ROLLBACK");
@@ -68,20 +93,6 @@ export async function createMarketplaceAffiliateVisit(
       await client.query("ROLLBACK");
       return { status: "unavailable" };
     }
-    await client.query(
-      `INSERT INTO marketplace.affiliate_click_occurrences
-        (id,link_id,property_id,terms_id,reference_token,source,synthetic,campaign_label)
-       VALUES ($1,$2,$3,$4,$5,$6,FALSE,$7)`,
-      [
-        randomUUID(),
-        scope.linkId,
-        scope.propertyId,
-        scope.termsId,
-        referenceToken,
-        input.source,
-        parsed.campaignLabel,
-      ],
-    );
     await client.query("COMMIT");
     return { status: "ready", redirectUrl: redirect.redirectUrl };
   } catch (error) {

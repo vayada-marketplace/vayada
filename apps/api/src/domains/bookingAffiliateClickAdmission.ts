@@ -153,34 +153,43 @@ export async function admitAffiliateArrival(
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    let contextId: string;
-    const contextCreated = input.contextId == null;
-    if (input.contextId == null) {
-      const click = await readMarketplaceAffiliateClick(client, input.referenceToken);
-      if (!click?.referenceValid || click.propertyId !== propertyId) {
-        await client.query("ROLLBACK");
-        return { status: "unavailable" };
-      }
-      contextId = randomUUID();
+    const admitted = (
       await client.query(
-        `INSERT INTO booking.affiliate_click_contexts(id,property_id,synthetic)
-         VALUES ($1,$2,FALSE)`,
-        [contextId, propertyId],
-      );
-    } else contextId = input.contextId.toLowerCase();
-    const admission = await admitAffiliateClickOccurrenceInTransaction(
-      client,
-      contextId,
-      input.referenceToken,
-      false,
-      propertyId,
-    );
-    if (admission.status !== "admitted") {
+        `SELECT status,context_id,context_created,click_id,history_position,replayed
+         FROM booking.admit_affiliate_click($1,$2,$3)`,
+        [
+          input.referenceToken,
+          propertyId,
+          typeof input.contextId === "string" ? input.contextId.toLowerCase() : null,
+        ],
+      )
+    ).rows[0] as
+      | {
+          status: "unavailable" | "conflict" | "admitted";
+          context_id: string | null;
+          context_created: boolean;
+          click_id: string | null;
+          history_position: string | null;
+          replayed: boolean;
+        }
+      | undefined;
+    if (!admitted) {
       await client.query("ROLLBACK");
-      return admission;
+      return { status: "unavailable" };
+    }
+    if (admitted.status !== "admitted") {
+      await client.query("ROLLBACK");
+      return { status: admitted.status };
     }
     await client.query("COMMIT");
-    return { ...admission, contextId, contextCreated };
+    return {
+      status: "admitted",
+      contextId: admitted.context_id!,
+      contextCreated: admitted.context_created,
+      clickId: admitted.click_id!,
+      historyPosition: String(admitted.history_position),
+      replayed: admitted.replayed,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

@@ -17,7 +17,10 @@ import {
   prepareChannexRoomAvailabilityTransportFailurePersistence,
 } from "./channexRoomAvailabilityReceiptStore.js";
 import { prepareChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityDispatch.js";
-import { prepareNextChannexRoomAvailabilityDispatch } from "./channexRoomAvailabilityCoordinator.js";
+import {
+  lockCurrentChannexRoomAvailability,
+  prepareNextChannexRoomAvailabilityDispatch,
+} from "./channexRoomAvailabilityCoordinator.js";
 import { reconcilePendingChannexRoomAvailability } from "./channexPendingRoomAvailabilityReconciliation.js";
 import { channexPropertyLocalDate } from "./channexInitialAriDate.js";
 import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
@@ -1836,6 +1839,11 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       login.password = "fixture";
       const worker = new pg.Pool({ connectionString: login.toString() });
       const inventory = f.workerRepository(login.toString());
+      const getInventoryLaunchReadiness = vi.fn(
+        inventory.getInventoryLaunchReadiness.bind(inventory),
+      );
+      const getCurrentInventoryDay = vi.fn(inventory.getCurrentInventoryDay.bind(inventory));
+      if (operation === "provision") getInventoryLaunchReadiness.mockResolvedValue(null);
       try {
         await admin.query(
           `GRANT USAGE ON SCHEMA platform,pms,identity,hotel_catalog,booking,finance TO ${role}`,
@@ -1863,12 +1871,22 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         }
         const prepared =
           operation === "provision"
-            ? await prepareNextChannexRoomAvailabilityDispatch(worker, inventory, f.lease)
+            ? await prepareNextChannexRoomAvailabilityDispatch(
+                worker,
+                { ...inventory, getCurrentInventoryDay, getInventoryLaunchReadiness },
+                f.lease,
+              )
             : await prepareChannexRoomAvailabilityDispatch(worker, inventory, f.lease, f.selection);
         expect(prepared.kind).toBe("prepared");
         if (prepared.kind !== "prepared")
           throw new Error("Restricted availability dispatch required");
         if (operation === "provision") expect(prepared).toMatchObject({ roomTypeId: f.roomTypeId });
+        if (operation === "provision") expect(getInventoryLaunchReadiness).not.toHaveBeenCalled();
+        if (operation === "provision")
+          expect(getCurrentInventoryDay).toHaveBeenCalledWith(
+            expect.objectContaining({ materializationScope: "room" }),
+            expect.any(Function),
+          );
         const taskId = randomUUID();
         let request: unknown;
         const outcome = await prepared.dispatch(async (sent) => {
@@ -1922,6 +1940,108 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
       }
     },
   );
+  it("keeps provision availability current when an unrelated room awaits materialization", async () => {
+    const f = await channelInventoryFixture(1, true);
+    const unrelatedRoomTypeId = randomUUID();
+    await admin.query(
+      `UPDATE platform.jobs SET job_type='channex.provision',payload=$2 WHERE id=$1`,
+      [
+        f.lease.jobId,
+        JSON.stringify({
+          operationType: "provision",
+          publishedOffer: {
+            roomTypeId: f.roomTypeId,
+            offerId: "offer",
+            publicationRevision: 1,
+            primaryOccupancy: 1,
+          },
+        }),
+      ],
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [unrelatedRoomTypeId, f.propertyId],
+    );
+    const next = f.configurations.get(2)!;
+    (f.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: unrelatedRoomTypeId },
+        ].sort((left, right) => left.roomTypeId.localeCompare(right.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, f, 2);
+    const prepared = await f.next();
+    expect(prepared).toMatchObject({ kind: "prepared", roomTypeId: f.roomTypeId });
+    if (prepared.kind !== "prepared") throw new Error("Scoped availability dispatch required");
+    let request: unknown;
+    const taskId = randomUUID();
+    const sent = await prepared.dispatch(async (input) => {
+      request = structuredClone(input.body);
+      return new Response(
+        JSON.stringify({ data: [{ type: "task", id: taskId }], meta: { warnings: [] } }),
+      );
+    });
+    if (sent.kind === "receipt_pending") await sent.persist();
+    const read = async (path: string) =>
+      path.includes("/tasks/")
+        ? {
+            data: {
+              type: "task",
+              id: taskId,
+              attributes: {
+                id: taskId,
+                task: "Property.UpdateAvailability",
+                payload: request,
+                success: true,
+                errors: [],
+                received_at: "2026-09-16T00:00:00.000001",
+                executed_at: "2026-09-16T00:00:00.000002",
+                finished_at: "2026-09-16T00:00:00.000003",
+              },
+            },
+          }
+        : {
+            data: { [f.externalRoomTypeId]: { [f.selection.date]: 2 } },
+            meta: { warnings: [] },
+          };
+    await expect(
+      reconcileCurrentChannexRoomAvailability(
+        channelPool,
+        f.repository,
+        f.lease,
+        f.selection,
+        prepared.attemptId,
+        read,
+      ),
+    ).resolves.toEqual({ kind: "availability_reconciled", attemptId: prepared.attemptId });
+    await expect(f.next()).resolves.toMatchObject({ kind: "room_availability_current" });
+    const connection = (
+      await admin.query(
+        "SELECT binding_generation::text FROM pms.channel_connections WHERE id=$1",
+        [f.connectionId],
+      )
+    ).rows[0];
+    await admin.query("BEGIN");
+    try {
+      await expect(
+        lockCurrentChannexRoomAvailability(admin, {
+          propertyId: f.propertyId,
+          connectionId: f.connectionId,
+          externalPropertyId: f.propertyId,
+          bindingGeneration: connection.binding_generation,
+          roomTypeId: f.roomTypeId,
+        }),
+      ).resolves.toMatchObject({ kind: "current" });
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+  });
   async function availabilityReconciliationFixture(startAtLocalToday = false) {
     const f = await channelInventoryFixture(1, startAtLocalToday),
       prepared = await f.dispatch(),
@@ -3129,6 +3249,83 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS inventory materialization re
         [fixture.propertyId, fixture.roomTypeId],
       ),
     ).rejects.toThrow("inventory materialization coverage is not exact and gap-free");
+  });
+
+  it("keeps a selected room current when only an unrelated room awaits materialization", async () => {
+    const newRoom = randomUUID();
+    const additionalRoomTypes: string[] = [];
+    const fixture = await createFixture(admin, repositories, [2, 2], additionalRoomTypes);
+    await fixture.repository.materializeInventory(
+      materializationCommand(fixture, "selected-before-add", 1, "2026-08-04", "2026-08-04"),
+    );
+    await admin.query(
+      "INSERT INTO pms.room_types (id,property_id,name) VALUES ($1,$2,'Unmaterialized room')",
+      [newRoom, fixture.propertyId],
+    );
+    additionalRoomTypes.push(newRoom);
+    const next = fixture.configurations.get(2)!;
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(2, {
+      ...next,
+      sourceInputs: {
+        ...next.sourceInputs,
+        roomBindings: [
+          ...next.sourceInputs.roomBindings,
+          { ...next.sourceInputs.roomBindings[0]!, roomTypeId: newRoom },
+        ].sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId)),
+      },
+    });
+    await activateCalendarRevision(admin, fixture, 2);
+    const request = {
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      stayDate: "2026-08-04",
+    };
+    expect(
+      Number(
+        (
+          await admin.query(
+            "SELECT calendar_revision FROM pms.inventory_days WHERE property_id=$1 AND room_type_id=$2 AND stay_date=$3",
+            [fixture.propertyId, fixture.roomTypeId, request.stayDate],
+          )
+        ).rows[0]?.calendar_revision,
+      ),
+    ).toBe(1);
+    await expect(fixture.repository.getCurrentInventoryDay(request)).resolves.toMatchObject({
+      kind: "unavailable",
+      reason: "coverage_unavailable",
+    });
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({
+      kind: "available",
+      materializedRevision: 1,
+      configurationSource: { revision: "calendar:1" },
+      day: request,
+    });
+    const changed = configurationSnapshot({
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    (fixture.configurations as Map<number, PmsOperatingCalendarConfigurationSnapshot>).set(
+      3,
+      changed,
+    );
+    await seedCalendarRevision(admin, {
+      organizationId: fixture.organizationId,
+      propertyId: fixture.propertyId,
+      roomTypeId: fixture.roomTypeId,
+      actorUserId: fixture.actorUserId,
+      revision: 3,
+      startingLimit: 1,
+      additionalRoomTypes: [newRoom],
+    });
+    fixture.calendarState.currentRevision = 3;
+    await expect(
+      fixture.repository.getCurrentInventoryDay({ ...request, materializationScope: "room" }),
+    ).resolves.toMatchObject({ kind: "unavailable", reason: "coverage_unavailable" });
   });
 
   it("applies, replays, extends, and rematerializes without erasing retained owners", async () => {

@@ -46,46 +46,17 @@ export async function bindLiveAffiliateOriginal(
   client: PoolClient,
   booking: {
     id: string;
-    propertyId: string;
     contextId: string;
-    publicReference: string;
-    checkIn: string;
-    checkOut: string;
-    currency: string;
   },
 ): Promise<boolean> {
   await client.query("SAVEPOINT affiliate_live_original_insert");
   try {
-    // Booking creation may wait on inventory after the context lock; its
-    // last admitted click must still be within the cookie lifetime now.
-    const recent = await client.query(
-      `SELECT 1 FROM booking.affiliate_click_admissions
-       WHERE context_id=$1 AND admitted_at > clock_timestamp() - interval '90 days'
-       LIMIT 1`,
-      [booking.contextId],
-    );
-    if (!recent.rowCount) {
-      await client.query("RELEASE SAVEPOINT affiliate_live_original_insert");
-      return false;
-    }
-    await client.query(
-      `INSERT INTO booking.affiliate_original_booking_bindings
-         (booking_id,property_id,context_id,history_cutoff,
-          original_public_reference,original_check_in,original_check_out,original_currency,synthetic)
-       SELECT $1,$2,$3,COALESCE(MAX(history_position),0),$4,$5,$6,$7,FALSE
-       FROM booking.affiliate_click_admissions WHERE context_id=$3`,
-      [
-        booking.id,
-        booking.propertyId,
-        booking.contextId,
-        booking.publicReference,
-        booking.checkIn,
-        booking.checkOut,
-        booking.currency,
-      ],
+    const bound = await client.query(
+      "SELECT booking.bind_live_affiliate_original($1,$2) AS bound",
+      [booking.id, booking.contextId],
     );
     await client.query("RELEASE SAVEPOINT affiliate_live_original_insert");
-    return true;
+    return bound.rows[0]?.bound === true;
   } catch {
     await client.query("ROLLBACK TO SAVEPOINT affiliate_live_original_insert");
     await client.query("RELEASE SAVEPOINT affiliate_live_original_insert");
