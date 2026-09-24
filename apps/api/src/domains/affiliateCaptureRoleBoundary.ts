@@ -2,6 +2,7 @@ import type pg from "pg";
 
 export const AFFILIATE_CAPTURE_ROLE = "vayada_next_affiliate_capture";
 
+/** Applies the shared account, DDL, direct-write and delegation boundary. */
 async function assertAffiliateCaptureRoleBoundary(
   client: Pick<pg.Client, "query">,
   role: string,
@@ -286,6 +287,7 @@ export async function assertAffiliateCaptureRoleHasGuardedWriteCapabilities(
   await assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(client, role, []);
 }
 
+/** Validates guarded commands while allowing only the supplied row-lock relations. */
 async function assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
   client: Pick<pg.Client, "query">,
   role: string,
