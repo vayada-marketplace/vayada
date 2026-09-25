@@ -161,7 +161,6 @@ export type FinanceAffiliatePayoutDispatcherStore = {
     candidate: FinanceAffiliatePayoutDispatchCandidate,
     context: FinanceAffiliatePayoutDispatchContext,
   ): Promise<FinanceAffiliatePayoutDispatchCandidate | null>;
-  recordProviderAttempt(attempt: FinancePayoutProviderAttemptRecord): Promise<void>;
   markAffiliatePayoutDispatched(
     candidate: FinanceAffiliatePayoutDispatchCandidate,
     result: FinancePayoutProviderSuccess,
@@ -395,7 +394,6 @@ export async function runFinanceAffiliatePayoutDispatcher(
     );
     const attempt = buildAffiliateProviderAttempt(claimed, providerResult, context);
     attempts.push(attempt);
-    await store.recordProviderAttempt(attempt);
 
     if (providerResult.ok) {
       const mutation = await store.markAffiliatePayoutDispatched(
@@ -472,9 +470,6 @@ export function createPgFinanceAffiliatePayoutDispatcherStore(
     },
     async claimAffiliatePayoutDispatch(candidate, context) {
       return claimAffiliatePayoutDispatch(pool, candidate, context);
-    },
-    async recordProviderAttempt(attempt) {
-      await insertProviderAttempt(pool, attempt);
     },
     async markAffiliatePayoutDispatched(candidate, result, attempt, context) {
       return markAffiliatePayoutDispatched(pool, candidate, result, attempt, context);
@@ -940,6 +935,8 @@ async function claimAffiliatePayoutDispatch(
           AND settings.status = 'active'
           AND settings.payout_method = 'stripe'
           AND settings.default_currency = finance.payouts.currency
+          AND COALESCE(settings.schedule ->> 'type', 'monthly') IN ('monthly', 'threshold')
+          AND settings.organization_provider_account_id = finance.payouts.organization_provider_account_id
          JOIN finance.payment_provider_accounts account
            ON account.id = finance.payouts.organization_provider_account_id
           AND account.organization_id = organization.id
@@ -1032,6 +1029,17 @@ async function markAffiliatePayoutDispatched(
          $14::jsonb,'{}'::jsonb,$15::jsonb,'financial','confidential'
        FROM payout_update
        ON CONFLICT (product,audit_key) DO NOTHING
+     ), attempt_insert AS (
+       INSERT INTO platform.job_attempts (
+         job_id,attempt_number,status,worker_id,started_at,finished_at,
+         error_type,error_message,error_metadata
+       )
+       SELECT job.id,$3,'succeeded',$16,$4::timestamptz,$4::timestamptz,
+         NULL,NULL,$17::jsonb
+       FROM platform.jobs job, payout_update
+       WHERE job.queue_name=$8 AND job.job_key=$9
+         AND job.status='running' AND job.locked_by=$11
+       ON CONFLICT (job_id,attempt_number) DO NOTHING
      )
      UPDATE platform.jobs SET status='succeeded',attempts_count=attempts_count+1,
        finished_at=$4::timestamptz,locked_at=NULL,locked_by=NULL,updated_at=$4::timestamptz
@@ -1065,6 +1073,16 @@ async function markAffiliatePayoutDispatched(
       JSON.stringify({
         notificationAuditReadyAt: context.now.toISOString(),
         payoutSchedule: candidate.payoutSchedule,
+      }),
+      attempt.workerId,
+      JSON.stringify({
+        affiliateId: attempt.affiliateId ?? null,
+        organizationId: attempt.organizationId ?? null,
+        provider: attempt.provider,
+        providerRequestId: attempt.providerRequestId,
+        providerPayoutId: attempt.providerPayoutId,
+        requestPayloadHash: attempt.requestPayloadHash,
+        retryable: attempt.retryable,
       }),
     ],
   );
@@ -1109,6 +1127,17 @@ async function markAffiliatePayoutDispatchFailed(
        AND EXISTS (SELECT 1 FROM platform.jobs job WHERE job.queue_name=$9
          AND job.job_key=$10 AND job.status='running' AND job.locked_by=$12)
      RETURNING id
+     ), attempt_insert AS (
+       INSERT INTO platform.job_attempts (
+         job_id,attempt_number,status,worker_id,started_at,finished_at,
+         error_type,error_message,error_metadata
+       )
+       SELECT job.id,$2,'failed',$13,$4::timestamptz,$4::timestamptz,
+         $3,$14,$15::jsonb
+       FROM platform.jobs job, payout_update
+       WHERE job.queue_name=$9 AND job.job_key=$10
+         AND job.status='running' AND job.locked_by=$12
+       ON CONFLICT (job_id,attempt_number) DO NOTHING
      )
      UPDATE platform.jobs SET status=$8,attempts_count=attempts_count+1,
        run_after=CASE WHEN $8='pending' THEN $4::timestamptz+interval '15 minutes' ELSE run_after END,
@@ -1136,6 +1165,17 @@ async function markAffiliatePayoutDispatchFailed(
       candidate.providerIdempotencyKey,
       candidate.leaseToken,
       `${context.workerId}:${candidate.leaseToken}`,
+      attempt.workerId,
+      attempt.errorMessage,
+      JSON.stringify({
+        affiliateId: attempt.affiliateId ?? null,
+        organizationId: attempt.organizationId ?? null,
+        provider: attempt.provider,
+        providerRequestId: attempt.providerRequestId,
+        providerPayoutId: attempt.providerPayoutId,
+        requestPayloadHash: attempt.requestPayloadHash,
+        retryable: attempt.retryable,
+      }),
     ],
   );
   assertSinglePayoutMutation(
