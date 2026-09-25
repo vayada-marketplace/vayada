@@ -42,7 +42,8 @@ describe.skipIf(!url)("Finance export worker database boundary", () => {
       INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES
         ('${property}','vay2045-a','Export worker fixture'),
         ('${other}','vay2045-b','Denied export fixture');
-      INSERT INTO platform.finance_export_worker_properties VALUES('${property}');
+      -- Keep a deliberately unenrolled property to exercise restrictive RLS.
+      DELETE FROM platform.finance_export_worker_properties WHERE property_id='${other}';
       INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES
         ('${property}','Europe/Berlin'),('${other}','Etc/UTC');
       INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES

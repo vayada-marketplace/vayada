@@ -10,6 +10,8 @@ import {
   FINANCE_REVENUE_EXPORT_JOB,
 } from "../domains/financeFolioExportRepository.js";
 
+export const FINANCE_EXPORT_ONGOING_CONTRACT = "finance-ongoing-exports.v1";
+
 export const FINANCE_EXPORT_WORKER_ROLE = "vayada_next_finance_export_worker";
 
 // Exact effective-grant contract. Column lists intentionally deny receipt data.
@@ -37,7 +39,12 @@ const HELPER_DIGEST = "2f7707cae1153840ab127a677a5165549fa9be800e7797a7770d76891
 
 export async function assertFinanceExportWorkerBoundary(
   client: Pick<pg.Client, "query">,
-  options: { allowMissingGrants?: boolean; propertyId?: string; exportId?: string } = {},
+  options: {
+    allowMissingGrants?: boolean;
+    propertyId?: string;
+    exportId?: string;
+    ongoing?: boolean;
+  } = {},
 ): Promise<void> {
   const role = FINANCE_EXPORT_WORKER_ROLE;
   const fail = (code: string): never => {
@@ -146,12 +153,38 @@ export async function assertFinanceExportWorkerBoundary(
     ).rows[0];
     if (!access?.ok) fail("access_missing");
   }
+  if (options.ongoing && (options.propertyId || options.exportId)) fail("ongoing_scope_conflict");
+  let allProperties = Boolean(options.ongoing);
   if (options.propertyId) {
     const rows = (
       await client.query("SELECT property_id::text FROM platform.finance_export_worker_properties")
     ).rows;
-    if (rows.length !== 1 || rows[0].property_id !== options.propertyId)
+    if (!rows.some((row) => row.property_id === options.propertyId))
       fail("property_scope_mismatch");
+    allProperties = rows.length > 1;
+  }
+  if (allProperties) {
+    const enrollment = (
+      await client.query(
+        `SELECT pg_get_functiondef(p.oid) AS definition,
+        p.prosecdef AND p.proowner=c.relowner AND NOT has_function_privilege($1,p.oid,'EXECUTE')
+        AND t.tgenabled IN ('O','A') AND t.tgtype=5 AS safe
+       FROM pg_proc p JOIN pg_trigger t ON t.tgfoid=p.oid
+       CROSS JOIN pg_class c
+       WHERE p.oid=to_regprocedure('platform.enroll_finance_export_property()')
+         AND t.tgrelid='hotel_catalog.properties'::regclass
+         AND t.tgname='enroll_finance_export_property'
+         AND c.oid='platform.finance_export_worker_properties'::regclass`,
+        [role],
+      )
+    ).rows;
+    if (
+      enrollment.length !== 1 ||
+      !enrollment[0].safe ||
+      digest(enrollment[0].definition) !==
+        "2b7374ce7353bbd65d9d8bda0a19bf9fbcd90764b66f4c7c6bc6553cffef893d"
+    )
+      fail("enrollment_drift");
   }
   if (options.exportId) {
     if (!options.propertyId) fail("export_scope_missing_property");

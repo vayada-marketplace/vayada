@@ -2689,6 +2689,7 @@ if (financeFolioExportWorker) {
     await assertFinanceExportWorkerBoundary(client, {
       propertyId: config.financeExportWorker!.propertyId,
       exportId: config.financeExportWorker!.exportId,
+      ongoing: Boolean(config.financeExportWorker!.acceptedAfter),
     });
     app.log.info(
       {
@@ -2710,7 +2711,10 @@ const runFinanceFolioExports = () => {
     financeFolioExportWorker.pool,
     financeFolioExportWorker.read,
     financeFolioExportWorker.writer,
-    { exportId: config.financeExportWorker!.exportId },
+    {
+      exportId: config.financeExportWorker!.exportId,
+      acceptedAfter: config.financeExportWorker!.acceptedAfter,
+    },
   )
     .then((result) => {
       if (result.deadLettered > 0 || result.retryScheduled > 0)

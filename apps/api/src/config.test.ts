@@ -1618,6 +1618,29 @@ describe("Finance export worker boundary config", () => {
     ])
       expect(() => loadConfig({ ...env, ...overrides })).toThrow();
   });
+  it("enables all-hotel processing only with a fixed cutoff and verified TLS", () => {
+    const ongoing = {
+      ...env,
+      FINANCE_EXPORT_WORKER_PROPERTY_ID: "",
+      FINANCE_EXPORT_WORKER_EXPORT_ID: "",
+      FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "2026-09-25T00:00:00.000Z",
+      NODE_EXTRA_CA_CERTS: "/app/rds.pem",
+    };
+    expect(loadConfig(ongoing).financeExportWorker).toMatchObject({
+      acceptedAfter: new Date(ongoing.FINANCE_EXPORT_WORKER_ACCEPTED_AFTER),
+      databaseUrl: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(
+        "sslmode=require",
+        "sslmode=verify-full",
+      ),
+    });
+    for (const changed of [
+      { NODE_EXTRA_CA_CERTS: "" },
+      { FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "bad" },
+      { FINANCE_EXPORT_WORKER_PROPERTY_ID: env.FINANCE_EXPORT_WORKER_PROPERTY_ID },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: env.FINANCE_EXPORT_WORKER_EXPORT_ID },
+    ])
+      expect(() => loadConfig({ ...ongoing, ...changed })).toThrow();
+  });
   it("normalizes the required sslmode for the node-postgres worker pool", () => {
     expect(loadConfig(env).financeExportWorker?.databaseUrl).toContain(
       "sslmode=require&uselibpqcompat=true",
