@@ -2839,6 +2839,12 @@ describe("finance route contracts", () => {
             expect(text).toContain("'organization'");
             return { rows: [] as T[], rowCount: 1 };
           }
+          if (text.includes("WITH current_settings AS MATERIALIZED")) {
+            expect(text).toContain("affiliate_payout_payment_evidence_items");
+            expect(text).toContain("job.attempts_count>0 OR attempt.job_id IS NOT NULL");
+            expect(text).toContain("INSERT INTO platform.jobs");
+            return { rows: [] as T[], rowCount: 0 };
+          }
           if (text.includes("INSERT INTO platform.product_audit_events")) {
             expect(text).toContain("'finance.affiliate_payout_settings.updated'");
             expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
@@ -2864,7 +2870,7 @@ describe("finance route contracts", () => {
         payoutSchedule: "monthly",
       },
       commandMeta: {
-        sideEffects: ["audit_event"],
+        sideEffects: ["payout_job", "audit_event"],
         jobs: [],
       },
     });

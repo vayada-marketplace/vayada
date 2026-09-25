@@ -127,7 +127,10 @@ const PROPERTY_PAYOUT_DISPATCH_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] =
   "audit_event",
 ];
 
-const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
+const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "payout_job",
+  "audit_event",
+];
 const PAYMENT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
 const STRIPE_COMPENSATION_TIMEOUT_MS = 10_000;
 const STRIPE_PROVIDER_ACCOUNT_CREATE_LEASE_MS = 5 * 60_000;
@@ -4662,6 +4665,12 @@ async function updateAffiliatePayoutSettingsInClient(
   }
 
   await upsertAffiliatePayoutSettings(client, command, affiliateResource.organizationId);
+  await reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
+    client,
+    command.affiliateId,
+    affiliateResource.organizationId,
+    requestedAt,
+  );
   await recordAffiliatePayoutSettingsAuditEvent(
     client,
     command,
@@ -4687,6 +4696,91 @@ async function updateAffiliatePayoutSettingsInClient(
     settings,
     commandMeta: buildAffiliatePayoutSettingsCommandMeta(command),
   };
+}
+
+async function reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+  requestedAt: string,
+): Promise<void> {
+  await client.query(
+    `WITH current_settings AS MATERIALIZED (
+       SELECT settings.id,settings.payout_method,settings.default_currency,
+         COALESCE(settings.schedule->>'type','monthly') AS schedule_type,
+         NULLIF(settings.schedule->>'thresholdAmount','')::numeric AS threshold_amount,
+         settings.organization_provider_account_id
+       FROM finance.payout_settings settings
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id=settings.organization_provider_account_id
+        AND account.organization_id=settings.organization_id
+        AND account.account_scope='organization'
+       WHERE settings.owner_scope='organization' AND settings.organization_id=$1::uuid
+         AND settings.payout_preferences->>'affiliateId'=$2 AND settings.status='active'
+         AND (settings.payout_method<>'stripe' OR (
+           account.provider='stripe' AND account.status='active' AND account.payouts_enabled=TRUE
+         ))
+       ORDER BY settings.updated_at DESC,settings.id
+       LIMIT 1
+     ), safe_payouts AS MATERIALIZED (
+       SELECT payout.id,payout.amount
+       FROM finance.payouts payout,current_settings settings
+       WHERE payout.owner_scope='organization' AND payout.organization_id=$1::uuid
+         AND payout.payout_setting_id=settings.id AND payout.currency=settings.default_currency
+         AND payout.payout_status='pending' AND payout.provider_payout_id IS NULL
+         AND payout.payout_metadata->>'affiliateId'=$2
+         AND payout.payout_metadata->>'thresholdPending'='true'
+         AND NOT EXISTS (
+           SELECT 1 FROM platform.jobs job
+           LEFT JOIN platform.job_attempts attempt ON attempt.job_id=job.id
+           WHERE job.queue_name='finance-affiliate-payout-dispatch'
+             AND job.job_key='finance.dispatch-affiliate-payout:affiliate:' || $2 ||
+               ':payout:' || payout.id::text || ':v1'
+             AND (job.attempts_count>0 OR attempt.job_id IS NOT NULL)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM finance.affiliate_payout_payment_evidence_items evidence_item
+           WHERE evidence_item.payout_id=payout.id
+         )
+       FOR UPDATE OF payout
+     ), decision AS (
+       SELECT settings.*,
+         settings.schedule_type<>'threshold' OR
+           COALESCE((SELECT SUM(amount) FROM safe_payouts),0)>=settings.threshold_amount AS release
+       FROM current_settings settings
+     ), migrated AS (
+       UPDATE finance.payouts payout
+       SET organization_provider_account_id=CASE WHEN decision.payout_method='stripe'
+             THEN decision.organization_provider_account_id ELSE NULL END,
+         payout_status=CASE WHEN decision.release AND decision.schedule_type<>'manual'
+             THEN 'scheduled' ELSE payout.payout_status END,
+         scheduled_at=CASE WHEN decision.release AND decision.schedule_type='threshold' THEN $3::timestamptz
+           WHEN decision.release AND decision.schedule_type='monthly' THEN
+             CASE WHEN date_trunc('month',$3::timestamptz)+interval '14 days'>$3::timestamptz
+               THEN date_trunc('month',$3::timestamptz)+interval '14 days'
+               ELSE date_trunc('month',$3::timestamptz)+interval '1 month 14 days' END
+           ELSE payout.scheduled_at END,
+         payout_metadata=jsonb_set(payout.payout_metadata,'{affiliatePayoutMethod}',
+             to_jsonb(decision.payout_method)) || CASE WHEN decision.release
+               THEN '{"affiliateSettlementReady":true}'::jsonb ELSE '{}'::jsonb END
+             - CASE WHEN decision.release THEN 'thresholdPending' ELSE '' END,
+         updated_at=$3::timestamptz
+       FROM decision
+       WHERE payout.id IN (SELECT id FROM safe_payouts)
+       RETURNING payout.id,payout.scheduled_at,decision.payout_method,decision.schedule_type,
+         decision.release
+     )
+     INSERT INTO platform.jobs (job_key,queue_name,job_type,status,run_after,tenant_scope,
+       organization_id,resource_product,resource_type,resource_id,payload)
+     SELECT 'finance.dispatch-affiliate-payout:affiliate:' || $2 || ':payout:' || id::text || ':v1',
+       'finance-affiliate-payout-dispatch','finance.dispatch-affiliate-payout','pending',
+       COALESCE(scheduled_at,$3::timestamptz),'organization',$1::uuid,'finance','payout',id::text,
+       jsonb_build_object('payoutId',id::text,'affiliateId',$2)
+     FROM migrated
+     WHERE release AND payout_method='stripe' AND schedule_type<>'manual'
+     ON CONFLICT (queue_name,job_key) DO NOTHING`,
+    [organizationId, affiliateId, requestedAt],
+  );
 }
 
 async function upsertAffiliatePayoutSettings(
