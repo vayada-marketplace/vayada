@@ -189,6 +189,39 @@ describe("Platform Finance affiliate payout mark-paid transaction", () => {
     ).toBe(false);
   });
 
+  it("rejects settlement rows before readiness or their scheduled time", async () => {
+    for (const candidate of [
+      { settlementReady: false, scheduledAt: null },
+      { settlementReady: true, scheduledAt: "2026-09-15T00:00:00.000Z" },
+    ]) {
+      const { repository, statements } = database({
+        candidates: [
+          {
+            payoutId: evidence().payoutIds[0],
+            amount: "50.00",
+            payoutStatus: "scheduled",
+            providerPayoutId: null,
+            payoutMethod: "bank_transfer",
+            ...candidate,
+          },
+        ],
+      });
+      const result = await repository.markAffiliatePayoutPaid(
+        command({
+          payoutIds: [evidence().payoutIds[0]!],
+          expectedAmount: "50.00",
+          paidAt: "2026-08-13T08:55:00.000Z",
+        }),
+      );
+      expect(result).toMatchObject({ ok: false, code: "invalid_status_transition" });
+      expect(
+        statements.some((sql) =>
+          sql.includes("INSERT INTO finance.affiliate_payout_payment_evidence ("),
+        ),
+      ).toBe(false);
+    }
+  });
+
   it("rolls back a duplicate external reference rejected by the evidence constraint", async () => {
     const { repository, statements } = database({ evidenceInserted: false });
 

@@ -25,6 +25,8 @@ export type AffiliatePayoutCandidate = {
   payoutStatus: string;
   providerPayoutId: string | null;
   payoutMethod: string;
+  settlementReady: boolean;
+  scheduledAt: string | null;
 };
 
 type EvidenceRow = Omit<
@@ -118,6 +120,9 @@ export async function lockAffiliatePayouts(
        payout.id::text AS "payoutId",
        payout.amount::text, payout.payout_status AS "payoutStatus",
        payout.provider_payout_id AS "providerPayoutId",
+       COALESCE((payout.payout_metadata->>'affiliateSettlementReady')::boolean,TRUE)
+         AS "settlementReady",
+       payout.scheduled_at AS "scheduledAt",
        CASE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
          WHEN 'bank' THEN 'bank_transfer'
          WHEN 'bank_account' THEN 'bank_transfer'
