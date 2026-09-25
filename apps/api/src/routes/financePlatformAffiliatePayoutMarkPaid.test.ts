@@ -100,6 +100,7 @@ function database(
             payoutStatus: index === 0 ? "pending" : "scheduled",
             providerPayoutId: null,
             payoutMethod: "bank_transfer",
+            settlementReady: true,
           })),
         rowCount: 2,
       };
@@ -191,6 +192,7 @@ describe("Platform Finance affiliate payout mark-paid transaction", () => {
 
   it("rejects settlement rows before readiness or their scheduled time", async () => {
     for (const candidate of [
+      { settlementReady: undefined, scheduledAt: null },
       { settlementReady: false, scheduledAt: null },
       { settlementReady: true, scheduledAt: "2026-09-15T00:00:00.000Z" },
     ]) {
@@ -251,6 +253,7 @@ describe("Platform Finance affiliate payout mark-paid transaction", () => {
           payoutStatus: "pending",
           providerPayoutId: null,
           payoutMethod: "bank_transfer",
+          settlementReady: true,
         },
         {
           payoutId: evidence().payoutIds[1],
@@ -258,6 +261,7 @@ describe("Platform Finance affiliate payout mark-paid transaction", () => {
           payoutStatus: "scheduled",
           providerPayoutId: null,
           payoutMethod: "bank_transfer",
+          settlementReady: true,
         },
       ],
     });

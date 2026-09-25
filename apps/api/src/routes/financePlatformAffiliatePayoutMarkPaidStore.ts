@@ -120,7 +120,7 @@ export async function lockAffiliatePayouts(
        payout.id::text AS "payoutId",
        payout.amount::text, payout.payout_status AS "payoutStatus",
        payout.provider_payout_id AS "providerPayoutId",
-       COALESCE((payout.payout_metadata->>'affiliateSettlementReady')::boolean,TRUE)
+       COALESCE((payout.payout_metadata->>'affiliateSettlementReady')::boolean,FALSE)
          AS "settlementReady",
        payout.scheduled_at AS "scheduledAt",
        CASE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')

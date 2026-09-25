@@ -106,7 +106,7 @@ export function createFinancePlatformAffiliatePayoutReadRepository(
                WHERE payout_status IN ('pending', 'scheduled')
                  AND provider_payout_id IS NULL
                  AND payout_method IN ('manual', 'bank_transfer')
-                 AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, TRUE)
+                 AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, FALSE)
                  AND (scheduled_at IS NULL OR scheduled_at <= now())
              ), 0)::text AS "payableAmount",
              COALESCE(SUM(amount) FILTER (WHERE payout_status = 'paid'), 0)::text AS "paidAmount",
@@ -115,7 +115,7 @@ export function createFinancePlatformAffiliatePayoutReadRepository(
                WHERE payout_status IN ('pending', 'scheduled')
                  AND provider_payout_id IS NULL
                  AND payout_method IN ('manual', 'bank_transfer')
-                 AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, TRUE)
+                 AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, FALSE)
                  AND (scheduled_at IS NULL OR scheduled_at <= now())
              )::int AS "payableCount",
              MAX(paid_at) FILTER (WHERE payout_status = 'paid') AS "lastPaidAt"
@@ -164,7 +164,7 @@ export function createFinancePlatformAffiliatePayoutReadRepository(
              WHERE payout_status IN ('pending', 'scheduled')
                AND provider_payout_id IS NULL
                AND payout_method IN ('manual', 'bank_transfer')
-               AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, TRUE)
+               AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, FALSE)
                AND (scheduled_at IS NULL OR scheduled_at <= now())
            ), 0)::text AS "payableAmount",
            COALESCE(SUM(amount) FILTER (WHERE payout_status = 'paid'), 0)::text AS "paidAmount",
@@ -173,7 +173,7 @@ export function createFinancePlatformAffiliatePayoutReadRepository(
              WHERE payout_status IN ('pending', 'scheduled')
                AND provider_payout_id IS NULL
                AND payout_method IN ('manual', 'bank_transfer')
-               AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, TRUE)
+               AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, FALSE)
                AND (scheduled_at IS NULL OR scheduled_at <= now())
            )::int AS "payableCount",
            MAX(paid_at) FILTER (WHERE payout_status = 'paid') AS "lastPaidAt",
@@ -255,7 +255,7 @@ async function loadPayoutLines(
          payout_status IN ('pending', 'scheduled')
          AND provider_payout_id IS NULL
          AND payout_method IN ('manual', 'bank_transfer')
-         AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, TRUE)
+         AND COALESCE((payout_metadata ->> 'affiliateSettlementReady')::boolean, FALSE)
          AND (scheduled_at IS NULL OR scheduled_at <= now())
        ) AS "manualMarkPaidEligible",
        evidence_id::text AS "paymentEvidenceId"

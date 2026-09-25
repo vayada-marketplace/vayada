@@ -111,7 +111,7 @@ async function markPaidInTransaction(
       ["pending", "scheduled"].includes(payout.payoutStatus) &&
       payout.providerPayoutId === null &&
       ["manual", "bank_transfer"].includes(payout.payoutMethod) &&
-      payout.settlementReady !== false &&
+      payout.settlementReady === true &&
       (!payout.scheduledAt ||
         Date.parse(payout.scheduledAt) <= Date.parse(command.audit.requestedAt)) &&
       Number(payout.amount) > 0,
