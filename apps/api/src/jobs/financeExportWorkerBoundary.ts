@@ -10,6 +10,8 @@ import {
   FINANCE_REVENUE_EXPORT_JOB,
 } from "../domains/financeFolioExportRepository.js";
 
+export const FINANCE_EXPORT_ONGOING_CONTRACT = "finance-ongoing-exports.v1";
+
 export const FINANCE_EXPORT_WORKER_ROLE = "vayada_next_finance_export_worker";
 
 // Exact effective-grant contract. Column lists intentionally deny receipt data.
