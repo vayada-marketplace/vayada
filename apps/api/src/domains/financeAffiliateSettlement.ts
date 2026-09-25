@@ -266,6 +266,35 @@ async function createPayout(
 ): Promise<string> {
   const scheduledAt = settings.scheduleType === "monthly" ? nextMonthlyRun(now) : null;
   const threshold = settings.thresholdAmount ? decimalToMinor(settings.thresholdAmount) : null;
+  if (settings.scheduleType === "threshold") {
+    await client.query(
+      `UPDATE finance.payouts payout
+       SET organization_provider_account_id=$5,
+         payout_metadata=jsonb_set(payout_metadata,'{affiliatePayoutMethod}',$6::jsonb),
+         updated_at=$7
+       WHERE owner_scope='organization' AND organization_id=$1 AND currency=$2
+         AND payout_status='pending' AND provider_payout_id IS NULL
+         AND payout_metadata->>'affiliateId'=$3 AND payout_setting_id=$4
+         AND payout_metadata->>'thresholdPending'='true'
+         AND NOT EXISTS (
+           SELECT 1 FROM platform.jobs job
+           LEFT JOIN platform.job_attempts attempt ON attempt.job_id=job.id
+           WHERE job.queue_name='finance-affiliate-payout-dispatch'
+             AND job.job_key='finance.dispatch-affiliate-payout:affiliate:' || $3 ||
+               ':payout:' || payout.id::text || ':v1'
+             AND (job.attempts_count > 0 OR attempt.job_id IS NOT NULL)
+         )`,
+      [
+        entry.beneficiary.organizationId,
+        entry.money.currency,
+        entry.beneficiary.affiliateId,
+        settings.payoutSettingId,
+        settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
+        JSON.stringify(settings.payoutMethod),
+        now.toISOString(),
+      ],
+    );
+  }
   const pending =
     settings.scheduleType === "threshold"
       ? await client.query<{ amount: string }>(
@@ -273,12 +302,16 @@ async function createPayout(
            AND organization_id=$1 AND currency=$2 AND payout_status='pending'
            AND payout_metadata->>'affiliateId'=$3
            AND payout_setting_id=$4
-           AND payout_metadata->>'thresholdPending'='true' FOR UPDATE`,
+           AND payout_metadata->>'thresholdPending'='true'
+           AND payout_metadata->>'affiliatePayoutMethod'=$5
+           AND organization_provider_account_id IS NOT DISTINCT FROM $6::uuid FOR UPDATE`,
           [
             entry.beneficiary.organizationId,
             entry.money.currency,
             entry.beneficiary.affiliateId,
             settings.payoutSettingId,
+            settings.payoutMethod,
+            settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
           ],
         )
       : { rows: [] };
@@ -328,7 +361,8 @@ async function createPayout(
     const activated = await client.query<{ payoutId: string }>(
       `UPDATE finance.payouts SET payout_status='scheduled',scheduled_at=$1,
          organization_provider_account_id=$5,
-         payout_metadata=(payout_metadata-'thresholdPending') || '{"affiliateSettlementReady":true}'::jsonb,
+         payout_metadata=(payout_metadata-'thresholdPending') ||
+           jsonb_build_object('affiliateSettlementReady',true,'affiliatePayoutMethod',$7::text),
          updated_at=$1 WHERE owner_scope='organization' AND organization_id=$2 AND currency=$3
          AND payout_status='pending' AND payout_metadata->>'affiliateId'=$4
          AND payout_setting_id=$6 AND payout_metadata->>'thresholdPending'='true'
@@ -340,6 +374,7 @@ async function createPayout(
         entry.beneficiary.affiliateId,
         settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
         settings.payoutSettingId,
+        settings.payoutMethod,
       ],
     );
     activatedPayoutIds = activated.rows.map((row) => row.payoutId);

@@ -84,7 +84,7 @@ function database(
             return { rows, rowCount: rows.length };
           })();
     if (sql.includes("INSERT INTO finance.payouts")) return { rows: [{ payoutId }], rowCount: 1 };
-    if (sql.includes("payout_metadata->>'thresholdPending'='true' FOR UPDATE"))
+    if (sql.includes("payout_metadata->>'thresholdPending'='true'") && sql.includes("FOR UPDATE"))
       return { rows: [], rowCount: 0 };
     if (sql.includes('SELECT id::text AS "payoutId",amount::text FROM finance.payouts'))
       return {
@@ -226,9 +226,22 @@ describe("affiliate earning settlement allocation", () => {
     expect(payout?.values?.some((value) => String(value).includes('"thresholdPending":true'))).toBe(
       true,
     );
-    expect(db.statements.some(({ sql }) => sql.includes("finance-affiliate-payout-dispatch"))).toBe(
-      false,
+    const migration = db.statements.find(({ sql }) => sql.includes("jsonb_set(payout_metadata"));
+    expect(migration?.sql).toContain("job.attempts_count > 0 OR attempt.job_id IS NOT NULL");
+    expect(migration?.values).toEqual(
+      expect.arrayContaining(["60000000-0000-4000-8000-000000000001", JSON.stringify("stripe")]),
     );
+    const thresholdBucket = db.statements.find(
+      ({ sql }) => sql.includes("FOR UPDATE") && sql.includes("affiliatePayoutMethod"),
+    );
+    expect(thresholdBucket?.sql).toContain("organization_provider_account_id IS NOT DISTINCT FROM");
+    expect(
+      db.statements.some(
+        ({ sql }) =>
+          sql.includes("INSERT INTO platform.jobs") &&
+          sql.includes("finance-affiliate-payout-dispatch"),
+      ),
+    ).toBe(false);
   });
 
   it("blocks an invalid threshold configuration for a retry after settings are repaired", async () => {
