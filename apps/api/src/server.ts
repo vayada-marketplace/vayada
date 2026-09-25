@@ -852,6 +852,7 @@ const xenditBankValidator = config.xenditSecretKey
 
 const providerWebhookSecrets = {
   stripe: config.providerWebhooks.stripeSecret,
+  stripeConnect: config.providerWebhooks.stripeConnectSecret,
   xendit: config.providerWebhooks.xenditSecret,
   channex: config.providerWebhooks.channexSecret,
   resend: config.providerWebhooks.resendSecret,
@@ -1676,6 +1677,7 @@ const app = buildApp({
   providerWebhooks: hasProviderWebhookSecret
     ? {
         secrets: providerWebhookSecrets,
+        stripeConnectMode: config.providerWebhooks.stripeConnectMode,
         modes: {
           stripe: config.providerWebhooks.stripeMode,
           xendit: config.providerWebhooks.xenditMode,

@@ -967,10 +967,12 @@ describe("api config", () => {
   it("defaults provider webhook intake modes to observe-only shadow intake", () => {
     expect(loadConfig({}).providerWebhooks).toEqual({
       stripeSecret: undefined,
+      stripeConnectSecret: undefined,
       xenditSecret: undefined,
       channexSecret: undefined,
       resendSecret: undefined,
       stripeMode: "observe_only",
+      stripeConnectMode: "observe_only",
       xenditMode: "observe_only",
       channexMode: "observe_only",
     });
@@ -979,10 +981,12 @@ describe("api config", () => {
   it("loads provider webhook secrets and per-provider intake modes", () => {
     const config = loadConfig({
       STRIPE_WEBHOOK_SECRET: "stripe-secret",
+      STRIPE_CONNECT_WEBHOOK_SECRET: "stripe-connect-secret",
       XENDIT_WEBHOOK_SECRET: "xendit-secret",
       CHANNEX_WEBHOOK_SECRET: "channex-secret",
       RESEND_WEBHOOK_SECRET: "resend-secret",
       STRIPE_WEBHOOK_INTAKE_MODE: "mutating",
+      STRIPE_CONNECT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
       XENDIT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
       CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only",
       XENDIT_SECRET_KEY: "xendit-api-secret",
@@ -990,10 +994,12 @@ describe("api config", () => {
 
     expect(config.providerWebhooks).toEqual({
       stripeSecret: "stripe-secret",
+      stripeConnectSecret: "stripe-connect-secret",
       xenditSecret: "xendit-secret",
       channexSecret: "channex-secret",
       resendSecret: "resend-secret",
       stripeMode: "mutating",
+      stripeConnectMode: "ack_only_with_receipt",
       xenditMode: "ack_only_with_receipt",
       channexMode: "observe_only",
     });

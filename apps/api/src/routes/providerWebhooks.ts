@@ -16,6 +16,7 @@ export type ProviderWebhookProvider = "stripe" | "xendit" | "channex";
 
 export type ProviderWebhookSecrets = {
   stripe?: string;
+  stripeConnect?: string;
   xendit?: string;
   channex?: string;
   resend?: string;
@@ -91,6 +92,7 @@ export type ProviderWebhookStore = {
 export type ProviderWebhookRoutesOptions = {
   secrets: ProviderWebhookSecrets;
   modes?: ProviderWebhookModeConfig;
+  stripeConnectMode?: ProviderWebhookMode;
   channexBookingPromotionEnabled?: boolean;
   channexAlterationPromotionEnabled?: boolean;
   channexAlterationPropertyIds?: readonly string[];
@@ -121,50 +123,73 @@ export const registerProviderWebhookRoutes: FastifyPluginAsync<
     done(null, typeof body === "string" ? body : body.toString());
   });
 
-  app.post<{ Body: string }>("/webhooks/stripe", async (request, reply) => {
-    const secret = options.secrets.stripe;
-    if (!secret) return reply.code(503).send({ error: "stripe_webhook_not_configured" });
+  for (const [path, secret, mode] of [
+    ["/webhooks/stripe", options.secrets.stripe, modeFor(options, "stripe")],
+    [
+      "/webhooks/stripe/connect",
+      options.secrets.stripeConnect,
+      options.stripeConnectMode ?? "observe_only",
+    ],
+  ] as const) {
+    app.post<{ Body: string }>(path, async (request, reply) => {
+      if (!secret) return reply.code(503).send({ error: "stripe_webhook_not_configured" });
 
-    const signature = request.headers["stripe-signature"];
-    if (typeof signature !== "string" || !signature.trim()) {
-      return reply.code(400).send({ error: "missing_stripe_signature" });
-    }
-    if (
-      !verifyStripeSignature({
-        payload: request.body,
-        signatureHeader: signature,
-        secret,
-        toleranceSeconds: options.stripeTimestampToleranceSeconds,
-        now: options.now,
-      })
-    ) {
-      return reply.code(400).send({ error: "invalid_stripe_signature" });
-    }
+      const signature = request.headers["stripe-signature"];
+      if (typeof signature !== "string" || !signature.trim()) {
+        return reply.code(400).send({ error: "missing_stripe_signature" });
+      }
+      if (
+        !verifyStripeSignature({
+          payload: request.body,
+          signatureHeader: signature,
+          secret,
+          toleranceSeconds: options.stripeTimestampToleranceSeconds,
+          now: options.now,
+        })
+      ) {
+        return reply.code(400).send({ error: "invalid_stripe_signature" });
+      }
 
-    const payload = parseJsonPayload(request.body);
-    if (!payload.ok) return reply.code(400).send({ error: "invalid_stripe_payload" });
+      const payload = parseJsonPayload(request.body);
+      if (!payload.ok) return reply.code(400).send({ error: "invalid_stripe_payload" });
 
-    const eventId = requiredString(payload.value, "id", "Stripe event");
-    const eventType = requiredString(payload.value, "type", "Stripe event");
-    const receiptKey = `webhook:stripe:${eventId}`;
-    const persistedPayload = minimizeStripeWebhookPayload(payload.value);
-    return handleAuthenticatedProviderWebhook({
-      provider: "stripe",
-      eventType,
-      mode: modeFor(options, "stripe"),
-      receiptKey,
-      reply,
-      request,
-      rawPayload: persistedPayload,
-      payloadHash: stripePayloadHash(payload.value),
-      store: options.store,
-      normalizedPreview: previewStripeEvent(
-        persistedPayload,
+      const eventId = requiredString(payload.value, "id", "Stripe event");
+      const eventType = requiredString(payload.value, "type", "Stripe event");
+      const connected = path === "/webhooks/stripe/connect";
+      if (connected) {
+        const account = payload.value["account"];
+        const object = optionalRecord(optionalRecord(payload.value, "data"), "object");
+        if (
+          typeof account !== "string" ||
+          !/^acct_[A-Za-z0-9_]+$/.test(account) ||
+          (eventType === "account.updated" && object?.["id"] !== account)
+        ) {
+          return reply.code(400).send({ error: "invalid_stripe_connected_account" });
+        }
+      }
+      const receiptKey = `webhook:stripe:${eventId}`;
+      const persistedPayload = minimizeStripeWebhookPayload(payload.value);
+      return handleAuthenticatedProviderWebhook({
+        provider: "stripe",
+        eventType,
+        mode:
+          payload.value["account"] && !STRIPE_CONNECT_EVENT_TYPES.has(eventType)
+            ? "observe_only"
+            : mode,
         receiptKey,
-        Math.floor((options.now?.() ?? new Date()).getTime() / 1_000),
-      ),
+        reply,
+        request,
+        rawPayload: persistedPayload,
+        payloadHash: stripePayloadHash(payload.value),
+        store: options.store,
+        normalizedPreview: previewStripeEvent(
+          persistedPayload,
+          receiptKey,
+          Math.floor((options.now?.() ?? new Date()).getTime() / 1_000),
+        ),
+      });
     });
-  });
+  }
 
   app.post<{ Body: string }>("/webhooks/xendit", async (request, reply) => {
     const secret = options.secrets.xendit;
@@ -1017,6 +1042,9 @@ function previewStripeEvent(
   const dataObject = optionalRecord(optionalRecord(payload, "data"), "object") ?? {};
   const objectId = optionalString(dataObject, "id") ?? receiptKey;
   const eventId = requiredString(payload, "id", "Stripe event");
+  if (providerAccountRef && !STRIPE_CONNECT_EVENT_TYPES.has(eventType)) {
+    return fallbackPreview("stripe", receiptKey, eventType, {});
+  }
   if (STRIPE_SUBSCRIPTION_EVENT_TYPES.has(eventType)) {
     const subscriptionId = stripeSubscriptionId(eventType, dataObject);
     const metadata = stripeSubscriptionMetadata(eventType, dataObject);
@@ -1160,6 +1188,16 @@ function previewStripeEvent(
   }
   return fallbackPreview("stripe", receiptKey, eventType, payload);
 }
+
+// Connected-account subscriptions and payouts do not belong to platform billing.
+const STRIPE_CONNECT_EVENT_TYPES = new Set([
+  "payment_intent.amount_capturable_updated",
+  "payment_intent.succeeded",
+  "payment_intent.canceled",
+  "payment_intent.payment_failed",
+  "charge.updated",
+  "account.updated",
+]);
 
 const STRIPE_SUBSCRIPTION_EVENT_TYPES = new Set([
   "checkout.session.completed",
