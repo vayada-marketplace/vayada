@@ -121,11 +121,14 @@ export async function assertAffiliateCaptureRoleHasNoWriteGrants(
 }
 
 const guardedFunctions = [
+  "marketplace.consume_affiliate_click_quota(text)",
   "marketplace.capture_affiliate_click(text,text,text)",
   "booking.admit_affiliate_click(text,uuid,uuid)",
   "booking.bind_live_affiliate_original(uuid,uuid)",
 ] as const;
-const allowedGuardedFunctions = guardedFunctions.slice(0, 2);
+const allowedGuardedFunctions = guardedFunctions.slice(0, 3);
+const affiliateQuotaFunctionHash =
+  "c17877ed6b486ede510e518baa777b1d14ea48879fe177ba0291307f9ae7fee5";
 
 const affiliateCaptureReadRelations = [
   "marketplace.affiliate_links",
@@ -270,6 +273,14 @@ const hotelLockPolicies = [
     "((CURRENT_USER <> 'vayada_next_finance_export_worker'::name) OR platform.finance_export_worker_scope('property'::text, (id)::text))",
     "NULL",
   ],
+  [
+    "hotel_catalog.properties",
+    "pricing_runtime_property_lock_only",
+    "w",
+    false,
+    "true",
+    "(((SESSION_USER)::text !~ '^vayada_next_pricing_'::text) AND ((CURRENT_USER)::text !~ '^vayada_next_pricing_'::text) AND (NOT (EXISTS ( SELECT 1\n   FROM pg_roles pricing_role\n  WHERE ((pricing_role.rolname ~ '^vayada_next_pricing_'::text) AND pg_has_role(SESSION_USER, pricing_role.oid, 'member'::text))))))",
+  ],
   ["hotel_catalog.property_slugs", "affiliate_capture_compat", "*", true, "true", "NULL"],
   [
     "hotel_catalog.property_slugs",
@@ -294,6 +305,7 @@ async function assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
   client: Pick<pg.Client, "query">,
   role: string,
   allowedUpdateRelations: readonly string[],
+  quotaRequired = false,
 ): Promise<void> {
   await assertAffiliateCaptureRoleBoundary(client, role, allowedUpdateRelations);
   const fail = (reason: string): never => {
@@ -323,12 +335,35 @@ async function assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
       },
     ]),
   );
-  const capture = capability.get(guardedFunctions[0]);
-  const admission = capability.get(guardedFunctions[1]);
-  const binding = capability.get(guardedFunctions[2]);
-  if ([capture, admission, binding].some((entry) => !entry || entry.public)) fail("public_execute");
-  if (!capture!.execute || !admission!.execute || binding!.execute) fail("function_allowlist");
-  if ([capture, admission, binding].some((entry) => entry!.delegate)) fail("function_delegation");
+  const quota = capability.get(guardedFunctions[0]);
+  const capture = capability.get(guardedFunctions[1]);
+  const admission = capability.get(guardedFunctions[2]);
+  const binding = capability.get(guardedFunctions[3]);
+  if ([quota, capture, admission, binding].some((entry) => !entry || entry.public))
+    fail("public_execute");
+  if (
+    (quotaRequired && !quota!.execute) ||
+    !capture!.execute ||
+    !admission!.execute ||
+    binding!.execute
+  )
+    fail("function_allowlist");
+  if ([quota, capture, admission, binding].some((entry) => entry!.delegate))
+    fail("function_delegation");
+  if (quota!.execute) {
+    const quotaBoundary = await client.query(
+      `SELECT 1 FROM pg_catalog.pg_proc procedure
+       WHERE procedure.oid=$1::pg_catalog.regprocedure
+         AND procedure.prosecdef AND procedure.provolatile='v'
+         AND procedure.proconfig=ARRAY['search_path=pg_catalog']::pg_catalog.text[]
+         AND pg_catalog.encode(
+               pg_catalog.sha256(pg_catalog.convert_to(procedure.prosrc,'UTF8')),'hex'
+             )=$2
+         AND procedure.proowner<>(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=$3)`,
+      [guardedFunctions[0], affiliateQuotaFunctionHash, role],
+    );
+    if (quotaBoundary.rowCount !== 1) fail("quota_function_boundary");
+  }
   const extraSecurityDefiners = await client.query(
     `SELECT 1
      FROM pg_catalog.pg_proc procedure
@@ -352,12 +387,14 @@ async function assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
 export async function assertAffiliateCaptureRoleHasVisitReadCapabilities(
   client: Pick<pg.Client, "query">,
   role = AFFILIATE_CAPTURE_ROLE,
+  quotaRequired = false,
 ): Promise<void> {
   if (role !== AFFILIATE_CAPTURE_ROLE) throw new Error("affiliate_capture_role_identity");
   await assertAffiliateCaptureRoleHasGuardedWriteCapabilitiesInternal(
     client,
     role,
     affiliateCaptureLockRelations,
+    quotaRequired,
   );
   const fail = (reason: string): never => {
     throw new Error(`affiliate_capture_role_${reason}`);

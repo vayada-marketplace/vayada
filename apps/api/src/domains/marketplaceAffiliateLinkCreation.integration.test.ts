@@ -139,6 +139,9 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     await pool().query(
       await readFile(new URL("0419_affiliate_guarded_original_binding.sql", migrations), "utf8"),
     );
+    await pool().query(
+      await readFile(new URL("0423_affiliate_public_link_quota.sql", migrations), "utf8"),
+    );
   });
 
   it("creates one stable creator-owned link with a default share path", async () => {
@@ -166,6 +169,52 @@ describe.skipIf(!databaseUrl)("affiliate link creation", () => {
     expect(
       (await pool().query("SELECT count(*) FROM marketplace.affiliate_links")).rows[0].count,
     ).toBe("1");
+  });
+
+  it("shares a fixed per-link click quota without storing visitor data", async () => {
+    const link = await createMarketplaceAffiliateLink(pool(), input(), ready);
+    if (!link.ok) throw new Error("Expected link");
+    const allowed = await Promise.all(
+      Array.from({ length: 300 }, () =>
+        pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+          link.publicToken,
+        ]),
+      ),
+    );
+    expect(allowed.every((result) => result.rows[0]?.allowed === true)).toBe(true);
+    await pool().query(
+      `UPDATE marketplace.affiliate_click_quota_windows
+       SET consumed=2999 WHERE link_id=$1`,
+      [link.linkId],
+    );
+    const boundary = await Promise.all([
+      pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+        link.publicToken,
+      ]),
+      pool().query("SELECT * FROM marketplace.consume_affiliate_click_quota($1)", [
+        link.publicToken,
+      ]),
+    ]);
+    expect(boundary.filter((result) => result.rows[0]?.allowed === true)).toHaveLength(1);
+    const limited = boundary.find((result) => result.rows[0]?.allowed === false)?.rows[0];
+    expect(limited?.retry_after_seconds).toBeGreaterThan(0);
+    expect(limited?.retry_after_seconds).toBeLessThanOrEqual(60);
+
+    const unknown = await pool().query(
+      "SELECT * FROM marketplace.consume_affiliate_click_quota($1)",
+      [`va_${"z".repeat(22)}`],
+    );
+    expect(unknown.rows[0]).toEqual({ allowed: true, retry_after_seconds: null });
+    expect(
+      (await pool().query("SELECT count(*) FROM marketplace.affiliate_click_quota_windows")).rows[0]
+        .count,
+    ).toBe("1");
+    expect(
+      Object.keys(
+        (await pool().query("SELECT * FROM marketplace.affiliate_click_quota_windows LIMIT 1"))
+          .rows[0],
+      ),
+    ).toEqual(["link_id", "window_started_at", "consumed"]);
   });
 
   it("resolves the accepted destination and window under the click transaction", async () => {
