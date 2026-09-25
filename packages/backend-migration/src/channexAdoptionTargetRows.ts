@@ -49,6 +49,30 @@ export async function readLegacyOwnershipTargetRow(
   return readTargetRow(client, table, id);
 }
 
+/** Migration accepts the same UUID versions as its planner; other proof boundaries stay unchanged. */
+export async function readIdentityMigrationTargetRow(
+  client: AdoptionQueryClient,
+  table:
+    | "identity.users"
+    | "identity.organizations"
+    | "identity.organization_memberships"
+    | "identity.organization_resource_links",
+  id: string,
+): Promise<{ id: string; rowStateSha256: string }> {
+  if (
+    ![
+      "identity.users",
+      "identity.organizations",
+      "identity.organization_memberships",
+      "identity.organization_resource_links",
+    ].includes(table)
+  )
+    rejectAdoption("UNSUPPORTED_TARGET_TABLE");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))
+    rejectAdoption("TARGET_ROW_MISMATCH");
+  return readTargetRow(client, table, id);
+}
+
 async function readTargetRow(
   client: AdoptionQueryClient,
   table: string,
