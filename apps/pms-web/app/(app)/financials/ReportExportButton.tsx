@@ -36,6 +36,21 @@ function ScopedExportButton({
   const request = useRef<AbortController>();
   useEffect(() => () => request.current?.abort(), []);
 
+  useEffect(() => {
+    if (!download) return;
+    const expire = () => {
+      setDownload(undefined);
+      setNotice("The download link expired. Check export to get a fresh link.");
+    };
+    const remaining = Date.parse(download.expiresAt) - Date.now();
+    if (!(remaining > 0)) {
+      expire();
+      return;
+    }
+    const timer = setTimeout(expire, remaining);
+    return () => clearTimeout(timer);
+  }, [download]);
+
   async function exportCsv() {
     if (disabled || inFlight.current) return;
     inFlight.current = true;

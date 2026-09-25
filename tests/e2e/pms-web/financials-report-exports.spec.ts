@@ -26,7 +26,10 @@ const envelope = {
 test("requests dashboard and revenue CSVs for the selected dates", async ({ page }) => {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
-  await page.route((url) => url.pathname === `${root}/access`, route => route.fulfill({ status: 204 }));
+  await page.route(
+    (url) => url.pathname === `${root}/access`,
+    (route) => route.fulfill({ status: 204 }),
+  );
   await page.route("**/api/identity/staff/self-access", (route) =>
     route.fulfill({
       json: {
@@ -114,7 +117,7 @@ test("requests dashboard and revenue CSVs for the selected dates", async ({ page
                   state: "ready",
                   download: {
                     url: "https://files.example/report.csv",
-                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    expiresAt: new Date(Date.now() + 60_000).toISOString(),
                   },
                 },
         },

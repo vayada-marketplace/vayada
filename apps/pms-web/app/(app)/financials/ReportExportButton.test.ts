@@ -35,7 +35,7 @@ describe("ReportExportButton", () => {
         state: "ready",
         download: {
           url: "https://files.example/report.csv",
-          expiresAt: "2099-01-01T00:00:00.000Z",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
         },
       },
     });
@@ -82,7 +82,10 @@ describe("ReportExportButton", () => {
       resolve({
         item: {
           state: "ready",
-          download: { url: "https://files.example/old.csv", expiresAt: "2099-01-01T00:00:00.000Z" },
+          download: {
+            url: "https://files.example/old.csv",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
         },
       });
       await pending;
@@ -92,6 +95,32 @@ describe("ReportExportButton", () => {
     await click(tree);
     expect(requestReportCsv.mock.calls[1][0]).toBe("hotel-b");
     tree.unmount();
+  });
+
+  it("removes a signed link when it expires without another user action", async () => {
+    vi.useFakeTimers();
+    try {
+      getReportCsv.mockResolvedValue({
+        item: {
+          state: "ready",
+          download: {
+            url: "https://files.example/report.csv",
+            expiresAt: new Date(Date.now() + 1000).toISOString(),
+          },
+        },
+      });
+      const { tree } = await render();
+      await click(tree);
+      expect(tree.root.findAllByType("a")).toHaveLength(1);
+      await act(async () => {
+        vi.advanceTimersByTime(1001);
+      });
+      expect(tree.root.findAllByType("a")).toHaveLength(0);
+      expect(JSON.stringify(tree.toJSON())).toContain("link expired");
+      tree.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not show an expired signed download link", async () => {
