@@ -14,6 +14,10 @@
     "./collaborationDates": {
       "types": "./dist/collaborationDates.d.ts",
       "default": "./dist/collaborationDates.js"
+    },
+    "./internal/affiliate-attribution": {
+      "types": "./dist/affiliateAttribution.d.ts",
+      "default": "./dist/affiliateAttribution.js"
     }
   },
   "scripts": {

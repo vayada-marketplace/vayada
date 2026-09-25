@@ -262,6 +262,7 @@ import {
   FINANCE_EXPORT_WORKER_ROLE,
 } from "./jobs/financeExportWorkerBoundary.js";
 import { runFinanceExpenseGenerationCycle } from "./jobs/financeExpenseGeneration.js";
+import { runAffiliateEarningReconciliationCycle } from "./jobs/financeAffiliateEarningReconciliation.js";
 import { runFinanceFolioExportJobs } from "./jobs/financeFolioExport.js";
 import { runFinanceStripeAccountCompensationJobs } from "./jobs/financeStripeAccountCompensation.js";
 import {
@@ -2677,6 +2678,40 @@ app.addHook("onClose", async () => {
   if (financeExpenseGenerationTimer) clearInterval(financeExpenseGenerationTimer);
   await activeFinanceExpenseGeneration;
   await financeExpenseGenerationPool?.end();
+});
+
+const affiliateEarningPool =
+  config.backgroundWorkersEnabled &&
+  config.financeSource === "target" &&
+  config.pmsOperationsSource === "target"
+    ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 2 })
+    : undefined;
+let activeAffiliateEarningReconciliation: Promise<void> | undefined;
+const runAffiliateEarningReconciliation = () => {
+  if (!affiliateEarningPool || activeAffiliateEarningReconciliation) return;
+  activeAffiliateEarningReconciliation = runAffiliateEarningReconciliationCycle(
+    affiliateEarningPool,
+  )
+    .then((result) => {
+      if (result.eligible || result.ineligible)
+        app.log.info(result, "Affiliate earning reconciliation completed");
+    })
+    .catch((error: unknown) =>
+      app.log.warn({ err: error }, "Affiliate earning reconciliation failed"),
+    )
+    .finally(() => {
+      activeAffiliateEarningReconciliation = undefined;
+    });
+};
+const affiliateEarningTimer = affiliateEarningPool
+  ? setInterval(runAffiliateEarningReconciliation, 60_000)
+  : undefined;
+affiliateEarningTimer?.unref();
+if (affiliateEarningPool) runAffiliateEarningReconciliation();
+app.addHook("onClose", async () => {
+  if (affiliateEarningTimer) clearInterval(affiliateEarningTimer);
+  await activeAffiliateEarningReconciliation;
+  await affiliateEarningPool?.end();
 });
 
 if (financeFolioExportWorker) {
