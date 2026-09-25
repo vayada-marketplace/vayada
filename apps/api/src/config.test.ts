@@ -179,6 +179,25 @@ describe("api config", () => {
     ).toBe(true);
   });
 
+  it("keeps the public affiliate redirect behind the complete capture runtime", () => {
+    expect(loadConfig(completeCreatorMarketplaceEnv).affiliatePublicRedirectEnabled).toBe(false);
+    expect(() =>
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
+      }),
+    ).toThrow("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
+    expect(
+      loadConfig({
+        ...completeCreatorMarketplaceEnv,
+        AFFILIATE_CAPTURE_ENABLED: "true",
+        AFFILIATE_CAPTURE_DATABASE_URL: "postgresql://vayada_next_affiliate_capture@target-db/app",
+        BOOKING_WEB_AFFILIATE_ARRIVAL_INTERNAL_TOKEN: "x".repeat(32),
+        AFFILIATE_PUBLIC_REDIRECT_ENABLED: "true",
+      }).affiliatePublicRedirectEnabled,
+    ).toBe(true);
+  });
+
   it("loads complete Marketplace unsubscribe rotation keys and rejects partial config", () => {
     const keys = {
       "key-1": Buffer.alloc(32, 1).toString("base64url"),
@@ -1598,6 +1617,29 @@ describe("Finance export worker boundary config", () => {
       },
     ])
       expect(() => loadConfig({ ...env, ...overrides })).toThrow();
+  });
+  it("enables all-hotel processing only with a fixed cutoff and verified TLS", () => {
+    const ongoing = {
+      ...env,
+      FINANCE_EXPORT_WORKER_PROPERTY_ID: "",
+      FINANCE_EXPORT_WORKER_EXPORT_ID: "",
+      FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "2026-09-25T00:00:00.000Z",
+      NODE_EXTRA_CA_CERTS: "/app/rds.pem",
+    };
+    expect(loadConfig(ongoing).financeExportWorker).toMatchObject({
+      acceptedAfter: new Date(ongoing.FINANCE_EXPORT_WORKER_ACCEPTED_AFTER),
+      databaseUrl: env.FINANCE_EXPORT_WORKER_DATABASE_URL.replace(
+        "sslmode=require",
+        "sslmode=verify-full",
+      ),
+    });
+    for (const changed of [
+      { NODE_EXTRA_CA_CERTS: "" },
+      { FINANCE_EXPORT_WORKER_ACCEPTED_AFTER: "bad" },
+      { FINANCE_EXPORT_WORKER_PROPERTY_ID: env.FINANCE_EXPORT_WORKER_PROPERTY_ID },
+      { FINANCE_EXPORT_WORKER_EXPORT_ID: env.FINANCE_EXPORT_WORKER_EXPORT_ID },
+    ])
+      expect(() => loadConfig({ ...ongoing, ...changed })).toThrow();
   });
   it("normalizes the required sslmode for the node-postgres worker pool", () => {
     expect(loadConfig(env).financeExportWorker?.databaseUrl).toContain(

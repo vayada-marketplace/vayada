@@ -125,11 +125,15 @@ credential mapping, or permission to turn on capture.
 `assertAffiliateCaptureRoleHasGuardedWriteCapabilities` adds the next gate. It
 requires schema usage and non-delegable execution of
 `marketplace.capture_affiliate_click` and `booking.admit_affiliate_click`. It
+also requires non-delegable execution of
+`marketplace.consume_affiliate_click_quota` when public redirect enablement is
+requested. It
 rejects execution of `booking.bind_live_affiliate_original` and every other
 callable non-system `SECURITY DEFINER` function, procedure, or window function.
 Trigger and event-trigger routines are excluded because clients cannot invoke
 them directly. The gate also verifies that `PUBLIC` cannot execute any of the
-three named commands and reruns the deny-only direct-write check. It does not
+three base commands or the quota function and reruns the deny-only direct-write
+check. It does not
 restrict `SECURITY INVOKER` routines, which remain limited by the caller's
 underlying grants. This still does not define the transitive read allowlist or
 provision a production role.
@@ -160,6 +164,24 @@ preflight before mounting the token-protected Booking arrival endpoint. It does
 not register `/r/:token` or enable cookie-to-booking binding; those remain
 separate release gates, so setting these API variables alone cannot start
 public tracking.
+
+The API application can now compose `/r/:publicToken` only when its caller
+supplies both the guarded visit operation and a quota consumer. The production
+server deliberately supplies neither, because no production quota provider is
+configured yet. This keeps the route absent by default while allowing the full
+redirect contract to be tested through the same `buildApp` boundary used by
+the server. A process-local counter is not an acceptable production substitute.
+
+The shared quota is a guarded PostgreSQL function on the isolated capture
+connection. An ephemeral keyed per-source limit allows 30 attempts per minute
+on each API replica before the shared database ceiling allows at most 3,000
+public redirect attempts per link per minute across all replicas. Its single
+mutable row per affiliate link contains
+only the link ID, current minute and count; it never stores an IP address,
+visitor fingerprint or raw public token. Unknown valid-shaped tokens create no
+quota state and continue to the normal not-found path. The separate
+`AFFILIATE_PUBLIC_REDIRECT_ENABLED` flag remains false by default and cannot be
+enabled without the complete capture runtime and successful role preflight.
 
 Cookie-to-booking binding has its own closed-by-default
 `AFFILIATE_BOOKING_BINDING_ENABLED` gate. It cannot open without the complete

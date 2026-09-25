@@ -15,6 +15,7 @@ const protectedEvidence = [
 const bindingFunction = "booking.bind_live_affiliate_original(uuid,uuid)";
 const bindingFunctionHash = "333b574d8111272f17e3841818851ba9d72bb7931698e0cc528c1cf25c6f9486";
 const captureFunctions = [
+  "marketplace.consume_affiliate_click_quota(text)",
   "marketplace.capture_affiliate_click(text,text,text)",
   "booking.admit_affiliate_click(text,uuid,uuid)",
 ] as const;
@@ -149,8 +150,9 @@ export async function assertAffiliateBookingBindingCapabilities(
   const capabilities = await client.query(
     `WITH expected(schema_name,function_name,argument_types,routine) AS (VALUES
        ('booking','bind_live_affiliate_original','uuid uuid',$1::pg_catalog.text),
-       ('marketplace','capture_affiliate_click','text text text',$2::pg_catalog.text),
-       ('booking','admit_affiliate_click','text uuid uuid',$3::pg_catalog.text)
+       ('marketplace','consume_affiliate_click_quota','text',$2::pg_catalog.text),
+       ('marketplace','capture_affiliate_click','text text text',$3::pg_catalog.text),
+       ('booking','admit_affiliate_click','text uuid uuid',$4::pg_catalog.text)
      )
      SELECT expected.routine,
             pg_catalog.has_function_privilege(current_user,procedure.oid,'EXECUTE') AS execute,
@@ -167,6 +169,8 @@ export async function assertAffiliateBookingBindingCapabilities(
         expected.argument_types='uuid uuid' AND procedure.pronargs=2
           AND procedure.proargtypes[0]='uuid'::pg_catalog.regtype
           AND procedure.proargtypes[1]='uuid'::pg_catalog.regtype
+        OR expected.argument_types='text' AND procedure.pronargs=1
+          AND procedure.proargtypes[0]='text'::pg_catalog.regtype
         OR expected.argument_types='text text text' AND procedure.pronargs=3
           AND procedure.proargtypes[0]='text'::pg_catalog.regtype
           AND procedure.proargtypes[1]='text'::pg_catalog.regtype

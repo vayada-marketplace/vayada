@@ -2,20 +2,25 @@ import type { FastifyInstance } from "fastify";
 import { parseMarketplaceAffiliateLink } from "@vayada/domain-marketplace";
 import { affiliateTrafficSource } from "../domains/marketplaceAffiliateClickOccurrence.js";
 
-type Visit = (input: {
+export type MarketplaceAffiliatePublicLinkVisit = (input: {
   publicToken: string;
   campaignLabel: string | null;
   source: ReturnType<typeof affiliateTrafficSource>;
 }) => Promise<{ status: "unavailable" } | { status: "ready"; redirectUrl: string }>;
-type Quota = (input: {
+export type MarketplaceAffiliatePublicLinkQuota = (input: {
   publicToken: string;
   requesterIp: string;
-}) => Promise<{ allowed: boolean; retryAfterSeconds?: number }>;
+}) => Promise<{ allowed: boolean; known?: boolean; retryAfterSeconds?: number }>;
 
-/** Kept unregistered until privacy approval, runtime readiness and an edge quota exist. */
+export type MarketplaceAffiliatePublicLinkRoutesOptions = {
+  visit: MarketplaceAffiliatePublicLinkVisit;
+  consumeQuota: MarketplaceAffiliatePublicLinkQuota;
+};
+
+/** Mounted only when the runtime supplies both guarded visit capture and a production quota. */
 export async function registerMarketplaceAffiliatePublicLinkRoute(
   app: FastifyInstance,
-  options: { visit: Visit; consumeQuota: Quota },
+  options: MarketplaceAffiliatePublicLinkRoutesOptions,
 ) {
   app.get<{ Params: { publicToken: string }; Querystring: { campaign?: string } }>(
     "/r/:publicToken",
@@ -32,6 +37,7 @@ export async function registerMarketplaceAffiliatePublicLinkRoute(
         publicToken: parsed.publicToken,
         requesterIp: request.ip,
       });
+      if (quota.known === false) return reply.code(404).send({ code: "not_found" });
       if (!quota.allowed) {
         if (quota.retryAfterSeconds && Number.isSafeInteger(quota.retryAfterSeconds))
           reply.header("Retry-After", String(quota.retryAfterSeconds));

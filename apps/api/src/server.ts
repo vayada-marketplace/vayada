@@ -22,6 +22,8 @@ import { createPgPreparedImportRepository } from "./domains/preparedHotelImportR
 import { createPgPmsAffiliateCompletionRepository } from "./domains/pmsAffiliateCompletionRepository.js";
 import { createPgBookingAffiliateDestinationRepository } from "./domains/bookingAffiliateDestinationRepository.js";
 import { assertAffiliateCaptureRoleHasVisitReadCapabilities } from "./domains/affiliateCaptureRoleBoundary.js";
+import { createMarketplaceAffiliateVisit } from "./domains/marketplaceAffiliateVisit.js";
+import { createMarketplaceAffiliatePublicLinkQuota } from "./domains/marketplaceAffiliatePublicLinkQuota.js";
 import { assertAffiliateBookingBindingCapabilities } from "./domains/affiliateBookingBindingRoleBoundary.js";
 import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
 import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
@@ -1537,7 +1539,11 @@ const affiliateCaptureRuntime = affiliateCaptureConfig
   ? await (async (affiliateCapture) => {
       const pool = new pg.Pool({ connectionString: affiliateCapture.databaseUrl, max: 5 });
       try {
-        await assertAffiliateCaptureRoleHasVisitReadCapabilities(pool);
+        await assertAffiliateCaptureRoleHasVisitReadCapabilities(
+          pool,
+          undefined,
+          config.affiliatePublicRedirectEnabled,
+        );
         return { pool, internalToken: affiliateCapture.internalToken };
       } catch (error) {
         await pool.end();
@@ -2104,6 +2110,16 @@ const app = buildApp({
   bookingWebCalendarRepository,
   bookingWebCheckoutAdapter,
   bookingWebAffiliateArrival: affiliateCaptureRuntime,
+  marketplaceAffiliatePublicLink:
+    config.affiliatePublicRedirectEnabled && affiliateCaptureRuntime
+      ? {
+          visit: (input) => createMarketplaceAffiliateVisit(affiliateCaptureRuntime.pool, input),
+          consumeQuota: createMarketplaceAffiliatePublicLinkQuota(
+            affiliateCaptureRuntime.pool,
+            affiliateCaptureConfig!.internalToken,
+          ),
+        }
+      : undefined,
   bookingWebAffiliateContextBindingEnabled: config.affiliateBookingBindingEnabled,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
@@ -2673,6 +2689,7 @@ if (financeFolioExportWorker) {
     await assertFinanceExportWorkerBoundary(client, {
       propertyId: config.financeExportWorker!.propertyId,
       exportId: config.financeExportWorker!.exportId,
+      ongoing: Boolean(config.financeExportWorker!.acceptedAfter),
     });
     app.log.info(
       {
@@ -2694,7 +2711,10 @@ const runFinanceFolioExports = () => {
     financeFolioExportWorker.pool,
     financeFolioExportWorker.read,
     financeFolioExportWorker.writer,
-    { exportId: config.financeExportWorker!.exportId },
+    {
+      exportId: config.financeExportWorker!.exportId,
+      acceptedAfter: config.financeExportWorker!.acceptedAfter,
+    },
   )
     .then((result) => {
       if (result.deadLettered > 0 || result.retryScheduled > 0)

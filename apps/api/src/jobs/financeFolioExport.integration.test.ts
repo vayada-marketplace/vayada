@@ -271,7 +271,7 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
   const expenseSelection={expenseId:EXPENSE,revision:1,categoryId:CATEGORY,categoryRevision:1,categoryName:"Operations",paymentStatus:"unpaid" as const,paidOn:null};
   const expenseArtifact: FinanceExpenseExportArtifact = { formatVersion: FINANCE_EXPENSE_CSV_VERSION, contentType: FINANCE_EXPENSE_CSV_CONTENT_TYPE, propertyId: PROPERTY, currency: "EUR", filename: `pms-financials-expenses-${PROPERTY}.csv`, rowCount: 1, body: '"property_id"\r\n"expense"\r\n', auditEvidence: [expenseSelection] };
   const read = { exportReady: vi.fn(async () => artifact), exportCsv: vi.fn(async () => expenseArtifact) };
-  beforeAll(async () => { await admin.connect(); await provisionWorker(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]);await admin.query("INSERT INTO platform.finance_export_worker_properties(property_id) VALUES($1)",[PROPERTY]);await admin.query("INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','owner','agency')",[ORG,ACTOR]);await admin.query("INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'pms','pms_property',$2,'owner','active')",[ORG,PROPERTY]);await admin.query("INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",[PROPERTY]);await assertFinanceExportWorkerBoundary(admin,{propertyId:PROPERTY}); });
+  beforeAll(async () => { await admin.connect(); await provisionWorker(); await cleanup(); await admin.query("INSERT INTO identity.users(id,email,name,status) VALUES($1,'folio-worker@example.test','Folio worker','active')",[ACTOR]);await admin.query("INSERT INTO identity.organizations(id,kind,name,slug,status) VALUES($1,'hotel_group','Folio worker org','folio-worker-org','active')",[ORG]);await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'folio-export-worker','Folio export worker')", [PROPERTY]);await admin.query("INSERT INTO platform.finance_export_worker_properties(property_id) VALUES($1) ON CONFLICT DO NOTHING",[PROPERTY]);await admin.query("INSERT INTO identity.organization_memberships(organization_id,user_id,status,role_key,access_origin) VALUES($1,$2,'active','owner','agency')",[ORG,ACTOR]);await admin.query("INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship,status) VALUES($1,'pms','pms_property',$2,'owner','active')",[ORG,PROPERTY]);await admin.query("INSERT INTO pms.property_pricing_settings(property_id,currency) VALUES($1,'EUR')",[PROPERTY]);await assertFinanceExportWorkerBoundary(admin,{propertyId:PROPERTY}); });
   beforeEach(async () => { await cleanupJobs(); read.exportReady.mockClear(); read.exportCsv.mockClear(); });
   afterAll(async () => { await cleanup(); await Promise.all([pool.end(),adminPool.end()]); await admin.end(); });
 
@@ -513,6 +513,38 @@ describe.skipIf(!URL)("PostgreSQL Finance folio export worker", () => {
     await cleanupJobs();await insertExpenseJob(FINANCE_FOLIO_CSV_VERSION);read.exportCsv.mockClear();
     await expect(runFinanceFolioExportJobs(pool,read,writer,{exportId:JOB,clock:()=>NOW})).resolves.toMatchObject({deadLettered:1});expect(read.exportCsv).not.toHaveBeenCalled();
     expect((await admin.query("SELECT attempt.error_message,dead.failure_summary,audit.action FROM platform.jobs job JOIN platform.job_attempts attempt ON attempt.job_id=job.id JOIN platform.dead_letter_events dead ON dead.job_id=job.id JOIN platform.product_audit_events audit ON audit.job_id=job.id WHERE job.id=$1",[JOB])).rows[0]).toEqual({error_message:"Finance expense export failed (invalid_export_evidence).",failure_summary:"Finance expense export failed (invalid_export_evidence).",action:"finance.expense_export.dead_lettered"});
+  });
+
+  it("processes new ongoing jobs while leaving pre-activation pending and stale jobs untouched", async () => {
+    const cutoff = new Date(ACCEPTED);
+    await insertJob();
+    await admin.query("UPDATE platform.jobs SET created_at=$2 WHERE id=$1", [JOB, ACCEPTED]);
+    const writer = fakeWriter();
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { acceptedAfter: cutoff, clock: () => NOW })).resolves.toMatchObject({ succeeded: 1 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { acceptedAfter: cutoff, clock: () => NOW })).resolves.toMatchObject({ succeeded: 0 });
+    expect(writer.write).toHaveBeenCalledTimes(1);
+    for (const status of ["pending", "running"] as const) {
+      await cleanupJobs();
+      await insertJob(status === "running" ? { status, attempts: 1, lockedAt: SNAPSHOT_AT } : {});
+      await admin.query("UPDATE platform.jobs SET created_at=$2 WHERE id=$1", [JOB, SNAPSHOT_AT]);
+      await expect(runFinanceFolioExportJobs(pool, read, writer, { acceptedAfter: cutoff, clock: () => NOW })).resolves.toEqual({ succeeded: 0, retryScheduled: 0, deadLettered: 0 });
+      expect((await admin.query("SELECT status FROM platform.jobs WHERE id=$1", [JOB])).rows[0].status).toBe(status);
+    }
+    await cleanupJobs(); await insertJob();
+    await admin.query("UPDATE platform.jobs SET created_at=$2 WHERE id=$1", [JOB, NOW.toISOString()]);
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { acceptedAfter: new Date("2026-09-15T00:30:00.000Z"), clock: () => NOW })).resolves.toMatchObject({ succeeded: 0 });
+    await expect(runFinanceFolioExportJobs(pool, read, writer, { acceptedAfter: cutoff, clock: () => new Date(EXPIRES) })).resolves.toMatchObject({ succeeded: 0 });
+  });
+
+  it("enrolls future hotels without granting the worker enrollment writes", async () => {
+    await assertFinanceExportWorkerBoundary(pool, { ongoing: true });
+    const other = "11340000-0000-4000-8000-000000000099";
+    await admin.query("INSERT INTO hotel_catalog.properties(id,public_id,display_name) VALUES($1,'ongoing-export-other','Other hotel')", [other]);
+    try {
+      expect((await pool.query("SELECT property_id::text FROM platform.finance_export_worker_properties WHERE property_id=$1", [other])).rowCount).toBe(1);
+      await assertFinanceExportWorkerBoundary(pool, { propertyId: PROPERTY });
+      await expect(pool.query("DELETE FROM platform.finance_export_worker_properties WHERE property_id=$1", [other])).rejects.toMatchObject({ code: "42501" });
+    } finally { await admin.query("DELETE FROM hotel_catalog.properties WHERE id=$1", [other]); }
   });
 
   it("retries storage failures at the same object key and recovers an expired lease", async () => {

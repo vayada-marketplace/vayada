@@ -17,7 +17,11 @@ export type ApiAuthConfig = {
 };
 
 export type ApiAuthSurface =
-  "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web";
+  | "platform-admin"
+  | "booking-admin"
+  | "pms-web"
+  | "affiliate-dashboard"
+  | "marketplace-web";
 
 export type ApiAuthSessionConfig = {
   workosClientId: string;
@@ -174,12 +178,18 @@ export type ApiConfig = {
   pmsInboxSendingEnabled: boolean;
   financeSource: FinanceSource;
   financeExpenseWorker?: { databaseUrl: string; propertyId: string };
-  financeExportWorker?: { databaseUrl: string; propertyId: string; exportId: string };
+  financeExportWorker?: {
+    databaseUrl: string;
+    propertyId?: string;
+    exportId?: string;
+    acceptedAfter?: Date;
+  };
   financeFolioRecipientKms?: FinanceFolioRecipientKmsConfig;
   financeBankTransferKms?: { currentKeyArn: string; allowedKeyArns: string[]; region: string };
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   affiliateCapture?: AffiliateCaptureConfig;
+  affiliatePublicRedirectEnabled: boolean;
   affiliateBookingBindingEnabled: boolean;
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
@@ -1049,6 +1059,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth?.databaseUrl,
     pricingDatabaseUrl,
   ]);
+  const affiliatePublicRedirectEnabled = readBooleanEnv(
+    env,
+    "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
+    false,
+  );
+  if (affiliatePublicRedirectEnabled && !affiliateCapture) {
+    throw new Error("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
+  }
   const affiliateBookingBindingEnabled = readBooleanEnv(
     env,
     "AFFILIATE_BOOKING_BINDING_ENABLED",
@@ -1133,6 +1151,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     const databaseUrl = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_DATABASE_URL");
     const propertyId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_PROPERTY_ID")?.toLowerCase();
     const exportId = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_EXPORT_ID")?.toLowerCase();
+    const cutoff = readOptionalEnv(env, "FINANCE_EXPORT_WORKER_ACCEPTED_AFTER");
+    const acceptedAfter = cutoff ? new Date(cutoff) : undefined;
+    const ongoing = Boolean(
+      acceptedAfter &&
+      Number.isFinite(acceptedAfter.getTime()) &&
+      acceptedAfter.toISOString() === cutoff,
+    );
+    if (
+      cutoff &&
+      (!ongoing || propertyId || exportId || !readOptionalEnv(env, "NODE_EXTRA_CA_CERTS"))
+    )
+      throw new Error(
+        "Ongoing Finance exports require a canonical cutoff, verified CA and no single-job scope",
+      );
     if (
       apiRuntime !== "next" ||
       !backgroundWorkersEnabled ||
@@ -1141,10 +1173,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       !financeFolioRecipientKms ||
       !platformMediaServing ||
       !databaseUrl ||
-      !propertyId ||
-      !z.uuid().safeParse(propertyId).success ||
-      !exportId ||
-      !z.uuid().safeParse(exportId).success
+      (!ongoing &&
+        (!propertyId ||
+          !z.uuid().safeParse(propertyId).success ||
+          !exportId ||
+          !z.uuid().safeParse(exportId).success))
     ) {
       throw new Error(
         "Finance export worker requires target Finance, background workers, folio KMS, private media, a dedicated URL, property UUID and export UUID",
@@ -1168,10 +1201,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ) {
       throw new Error("Finance export worker requires its dedicated login on the target database");
     }
+    if (ongoing) worker.search = "?sslmode=verify-full";
     financeExportWorker = {
-      databaseUrl: normalizePgConnectionString(databaseUrl),
+      databaseUrl: ongoing ? worker.toString() : normalizePgConnectionString(databaseUrl),
       propertyId,
       exportId,
+      ...(ongoing ? { acceptedAfter } : {}),
     };
   }
 
@@ -1278,6 +1313,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
     affiliateCapture,
+    affiliatePublicRedirectEnabled,
     affiliateBookingBindingEnabled,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
