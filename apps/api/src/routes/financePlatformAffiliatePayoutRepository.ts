@@ -42,10 +42,10 @@ const AFFILIATE_PAYOUT_FACTS = `
           AND link.status = 'active'
       ) THEN 'active' ELSE 'inactive' END AS affiliate_lifecycle_status,
       payout.*,
-      CASE COALESCE(account.provider, settings.payout_method, 'manual')
+      CASE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
         WHEN 'bank' THEN 'bank_transfer'
         WHEN 'bank_account' THEN 'bank_transfer'
-        ELSE COALESCE(account.provider, settings.payout_method, 'manual')
+        ELSE COALESCE(payout.payout_metadata->>'affiliatePayoutMethod', account.provider, settings.payout_method, 'manual')
       END AS payout_method,
       evidence_item.evidence_id
     FROM finance.payouts payout
