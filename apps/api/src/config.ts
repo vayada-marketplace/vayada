@@ -66,10 +66,12 @@ export type ApiRuntime = "legacy" | "next";
 
 export type ProviderWebhookConfig = {
   stripeSecret?: string;
+  stripeConnectSecret?: string;
   xenditSecret?: string;
   channexSecret?: string;
   resendSecret?: string;
   stripeMode: ProviderWebhookIntakeMode;
+  stripeConnectMode: ProviderWebhookIntakeMode;
   xenditMode: ProviderWebhookIntakeMode;
   channexMode: ProviderWebhookIntakeMode;
   channexReviewMode?: ProviderWebhookIntakeMode;
@@ -673,12 +675,19 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
 function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfig {
   return {
     stripeSecret: readOptionalEnv(env, "STRIPE_WEBHOOK_SECRET"),
+    stripeConnectSecret: readOptionalEnv(env, "STRIPE_CONNECT_WEBHOOK_SECRET"),
     xenditSecret: readOptionalEnv(env, "XENDIT_WEBHOOK_SECRET"),
     channexSecret: readOptionalEnv(env, "CHANNEX_WEBHOOK_SECRET"),
     resendSecret: readOptionalEnv(env, "RESEND_WEBHOOK_SECRET"),
     stripeMode: readSourceEnv(
       env,
       "STRIPE_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    stripeConnectMode: readSourceEnv(
+      env,
+      "STRIPE_CONNECT_WEBHOOK_INTAKE_MODE",
       ["observe_only", "mutating", "ack_only_with_receipt"],
       "observe_only",
     ),
