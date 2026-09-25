@@ -27,7 +27,6 @@ describe("marketplace affiliate public-link quota", () => {
       .fn()
       .mockResolvedValueOnce({ rows: [{ known: true }] })
       .mockResolvedValueOnce({ rows: [{ allowed: false, retry_after_seconds: 17 }] })
-      .mockResolvedValueOnce({ rows: [{ known: true }] })
       .mockResolvedValueOnce({ rows: [] });
     const quota = createMarketplaceAffiliatePublicLinkQuota(
       { query } as unknown as pg.Pool,
@@ -82,8 +81,58 @@ describe("marketplace affiliate public-link quota", () => {
       "quota-test-key",
     );
     await expect(quota({ publicToken: "va_unknown", requesterIp: "203.0.113.8" })).resolves.toEqual(
-      { allowed: true },
+      { allowed: true, known: false },
     );
     expect(query).toHaveBeenCalledOnce();
+  });
+
+  it("bounds unknown-token lookups per source while preserving not found", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ known: false }] });
+    const quota = createMarketplaceAffiliatePublicLinkQuota(
+      { query } as unknown as pg.Pool,
+      "quota-test-key",
+    );
+    for (let attempt = 0; attempt < 31; attempt += 1) {
+      await expect(
+        quota({ publicToken: `va_unknown_${attempt}`, requesterIp: "203.0.113.8" }),
+      ).resolves.toEqual({ allowed: true, known: false });
+    }
+    expect(query).toHaveBeenCalledTimes(30);
+  });
+
+  it("groups IPv6 sources by /64 and IPv4-mapped addresses by IPv4", async () => {
+    const query = vi.fn(async (sql: string) =>
+      sql.includes("SELECT EXISTS")
+        ? { rows: [{ known: true }] }
+        : { rows: [{ allowed: true, retry_after_seconds: null }] },
+    );
+    const quota = createMarketplaceAffiliatePublicLinkQuota(
+      { query } as unknown as pg.Pool,
+      "quota-test-key",
+    );
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await quota({ publicToken: "va_ipv6", requesterIp: `2001:db8:abcd:12::${attempt + 1}` });
+    }
+    await expect(
+      quota({ publicToken: "va_ipv6", requesterIp: "2001:db8:abcd:12:ffff::1" }),
+    ).resolves.toEqual(expect.objectContaining({ allowed: false }));
+    await expect(
+      quota({ publicToken: "va_ipv6", requesterIp: "2001:db8:abcd:13::1" }),
+    ).resolves.toEqual({ allowed: true });
+
+    const mapped = [
+      "::ffff:192.0.2.1",
+      "0:0:0:0:0:FFFF:C000:0201",
+      "0000:0000:0000:0000:0000:ffff:192.0.2.1",
+    ];
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await quota({ publicToken: "va_mapped", requesterIp: mapped[attempt % mapped.length] });
+    }
+    await expect(
+      quota({ publicToken: "va_mapped", requesterIp: "::FFFF:C000:201" }),
+    ).resolves.toEqual(expect.objectContaining({ allowed: false }));
+    await expect(quota({ publicToken: "va_mapped", requesterIp: "192.0.2.2" })).resolves.toEqual({
+      allowed: true,
+    });
   });
 });

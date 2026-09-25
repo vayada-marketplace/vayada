@@ -68,6 +68,24 @@ describe("dormant public affiliate link route", () => {
     }
   });
 
+  it("returns not found without visiting when the quota lookup does not know the token", async () => {
+    const visit = vi.fn();
+    const app = buildApp({
+      logger: false,
+      marketplaceAffiliatePublicLink: {
+        visit,
+        consumeQuota: async () => ({ allowed: true, known: false }),
+      },
+    });
+    try {
+      const response = await app.inject({ method: "GET", url: `/r/${token}` });
+      expect(response.statusCode).toBe(404);
+      expect(visit).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects an unsafe destination and hides link tokens from request logs", async () => {
     const logs: string[] = [];
     const visit = vi.fn().mockResolvedValue({
