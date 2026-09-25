@@ -94,6 +94,22 @@ describe("ReportExportButton", () => {
     tree.unmount();
   });
 
+  it("does not show an expired signed download link", async () => {
+    getReportCsv.mockResolvedValue({
+      item: {
+        state: "ready",
+        download: {
+          url: "https://files.example/expired.csv",
+          expiresAt: "2000-01-01T00:00:00.000Z",
+        },
+      },
+    });
+    const { tree } = await render();
+    await click(tree);
+    expect(tree.root.findAllByType("a")).toHaveLength(0);
+    tree.unmount();
+  });
+
   it("allows a new request after a terminal failure", async () => {
     getReportCsv.mockResolvedValueOnce({ item: { state: "failed" } });
     const { tree } = await render();
