@@ -61,6 +61,9 @@ try {
     const inventory = parseSourceInventory(
       await readFile(join(packageRoot, "source-inventory.tsv"), "utf8"),
     );
+    const historicalInventoryText = manifest.historicalInventorySha256
+      ? await readFile(join(packageRoot, "raw-source-dispositions.tsv"), "utf8")
+      : undefined;
     const sourceTags = Object.fromEntries(
       SOURCE_DATABASES.map((database) => [database, parsed.values.get(`--${database}-source-tag`)]),
     ) as Record<SourceDatabase, string>;
@@ -76,6 +79,7 @@ try {
     const sourceExtraction: SourceExtractionConfig = {
       manifest,
       inventory,
+      historicalInventoryText,
       sourceSchemaRevision: parsed.values.get("--source-schema-revision")!,
       snapshotIdentifiers: sourceTags,
       cutoverFreezeProofSha256: parsed.values.get("--freeze-proof-sha256"),
