@@ -243,6 +243,8 @@ function readinessBlocker(
       !settings.providerPayoutsEnabled)
   )
     return "provider_not_ready";
+  if (settings.payoutMethod === "stripe" && settings.scheduleType === "manual")
+    return "unsupported_provider_schedule";
   if (
     ["bank_transfer", "bank", "bank_account"].includes(settings.payoutMethod) &&
     !settings.destinationReady
@@ -298,7 +300,7 @@ async function createPayout(
      RETURNING id::text AS "payoutId"`,
     [
       settings.payoutSettingId,
-      settings.providerAccountId,
+      settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
       entry.beneficiary.organizationId,
       entry.source.propertyId,
       `affiliate-earning:${entry.earningEntryId}`,
@@ -312,6 +314,7 @@ async function createPayout(
       JSON.stringify({
         affiliateId: entry.beneficiary.affiliateId,
         creatorProfileId: entry.beneficiary.creatorProfileId,
+        affiliatePayoutMethod: settings.payoutMethod,
         affiliateSettlementReady: ready,
         thresholdPending: !thresholdReady,
         earningEntryId: entry.earningEntryId,
@@ -335,7 +338,7 @@ async function createPayout(
         entry.beneficiary.organizationId,
         entry.money.currency,
         entry.beneficiary.affiliateId,
-        settings.providerAccountId,
+        settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
         settings.payoutSettingId,
       ],
     );

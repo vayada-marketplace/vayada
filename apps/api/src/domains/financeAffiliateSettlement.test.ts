@@ -163,6 +163,32 @@ describe("affiliate earning settlement allocation", () => {
     expect(finish?.values).toContain("currency_mismatch");
   });
 
+  it("rejects automatic Stripe with a manual schedule", async () => {
+    const db = database({ settings: { payoutMethod: "stripe", scheduleType: "manual" } });
+
+    expect(await allocateAffiliateSettlementEntry(db.pool as never, entry())).toEqual({
+      ok: true,
+      status: "blocked",
+    });
+    expect(db.statements.find(({ sql }) => sql.includes("SET status=$2"))?.values).toContain(
+      "unsupported_provider_schedule",
+    );
+  });
+
+  it("records an immutable manual method without carrying a stale provider account", async () => {
+    const db = database({ settings: { payoutMethod: "manual", scheduleType: "manual" } });
+
+    expect(await allocateAffiliateSettlementEntry(db.pool as never, entry())).toEqual({
+      ok: true,
+      status: "allocated",
+    });
+    const payout = db.statements.find(({ sql }) => sql.includes("INSERT INTO finance.payouts"));
+    expect(payout?.values?.[1]).toBeNull();
+    expect(
+      payout?.values?.some((value) => String(value).includes('"affiliatePayoutMethod":"manual"')),
+    ).toBe(true);
+  });
+
   it("blocks ambiguous settings and amounts that exceed Finance payout capacity", async () => {
     const cases = [
       {
