@@ -4,13 +4,15 @@ import type { SourceInventoryEntry } from "./sourceInventory.js";
 
 const HEADERS =
   "source_database\tobject_name\tdisposition\ttarget_input\tactivation_rule\tparity_rule";
-const TABLES = new Set(
-  ["public", "inbox_prototype_archive_20260905"].flatMap((schema) =>
-    ["automation_sends", "guest_automations", "message_templates"].map(
-      (table) => `${schema}.${table}`,
-    ),
-  ),
-);
+export const HISTORICAL_SOURCE_TABLES = [
+  "public.automation_sends",
+  "public.guest_automations",
+  "public.message_templates",
+  "inbox_prototype_archive_20260905.automation_sends",
+  "inbox_prototype_archive_20260905.guest_automations",
+  "inbox_prototype_archive_20260905.message_templates",
+] as const;
+const TABLES = new Set<string>(HISTORICAL_SOURCE_TABLES);
 const ACTIVATION_RULES: Record<string, string> = {
   automation_sends: "never_enqueue",
   guest_automations: "never_schedule",
@@ -27,7 +29,7 @@ export function parseHistoricalSourceInventory(text: string): SourceInventoryEnt
     throw new Error("historical source inventory does not match the reviewed contract");
   }
   const found = new Set<string>();
-  const entries = lines.map((line) => {
+  const entries = lines.map((line, index) => {
     const cells = line.split("\t");
     const [database, objectName, disposition, targetInput, activationRule, parityRule] = cells;
     const [schema, table] = objectName?.split(".") ?? [];
@@ -40,7 +42,7 @@ export function parseHistoricalSourceInventory(text: string): SourceInventoryEnt
     if (
       cells.length !== 6 ||
       database !== "pms" ||
-      !TABLES.has(objectName) ||
+      objectName !== HISTORICAL_SOURCE_TABLES[index] ||
       found.has(objectName) ||
       disposition !== "historical_snapshot" ||
       targetInput !== "none" ||
