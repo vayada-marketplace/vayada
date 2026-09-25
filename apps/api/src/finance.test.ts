@@ -2792,6 +2792,17 @@ describe("finance route contracts", () => {
           if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
             return { rows: [] as T[], rowCount: 0 };
           }
+          if (text.includes("thresholdPending") && text.includes("AS blocked")) {
+            expect(values).toContain("EUR");
+            return { rows: [{ blocked: false }] as unknown as T[], rowCount: 1 };
+          }
+          if (
+            text.includes("SELECT id FROM finance.payout_settings") &&
+            text.includes("FOR UPDATE")
+          ) {
+            expect(values).toContain(affiliateId);
+            return { rows: [{ id: "settings_1" }] as unknown as T[], rowCount: 1 };
+          }
           if (text.includes("FROM identity.organization_resource_links link")) {
             expect(text).toContain("link.product = 'affiliate'");
             expect(text).toContain("link.resource_type = 'affiliate'");
@@ -2839,6 +2850,12 @@ describe("finance route contracts", () => {
             expect(text).toContain("'organization'");
             return { rows: [] as T[], rowCount: 1 };
           }
+          if (text.includes("WITH current_settings AS MATERIALIZED")) {
+            expect(text).toContain("affiliate_payout_payment_evidence_items");
+            expect(text).toContain("job.attempts_count>0 OR attempt.job_id IS NOT NULL");
+            expect(text).toContain("INSERT INTO platform.jobs");
+            return { rows: [] as T[], rowCount: 0 };
+          }
           if (text.includes("INSERT INTO platform.product_audit_events")) {
             expect(text).toContain("'finance.affiliate_payout_settings.updated'");
             expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
@@ -2864,7 +2881,7 @@ describe("finance route contracts", () => {
         payoutSchedule: "monthly",
       },
       commandMeta: {
-        sideEffects: ["audit_event"],
+        sideEffects: ["payout_job", "audit_event"],
         jobs: [],
       },
     });

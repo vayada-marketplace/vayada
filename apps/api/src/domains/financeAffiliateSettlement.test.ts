@@ -124,6 +124,9 @@ describe("affiliate earning settlement allocation", () => {
         entry({ money: { ...entry().money, adjustmentMinor: "3.5" } }),
       ),
     ).toBeNull();
+    expect(normalizeAffiliateSettlementEntry({ ...entry(), unknownFutureField: true })).toEqual(
+      entry(),
+    );
   });
 
   it("creates one scheduled Finance payout and shared retry job from a positive revision", async () => {

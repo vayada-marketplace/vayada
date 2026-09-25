@@ -85,7 +85,31 @@ export function normalizeAffiliateSettlementEntry(
     !Number.isFinite(Date.parse(entry.recordedAt))
   )
     return null;
-  return JSON.parse(JSON.stringify(entry)) as AffiliateSettlementEntryV1;
+  return {
+    contractVersion: entry.contractVersion,
+    earningEntryId: entry.earningEntryId,
+    recordedAt: entry.recordedAt,
+    beneficiary: {
+      creatorProfileId: entry.beneficiary.creatorProfileId,
+      affiliateId: entry.beneficiary.affiliateId,
+      organizationId: entry.beneficiary.organizationId,
+    },
+    source: {
+      propertyId: entry.source.propertyId,
+      bookingId: entry.source.bookingId,
+      stayItemId: entry.source.stayItemId,
+      agreementId: entry.source.agreementId,
+      policyVersionId: entry.source.policyVersionId,
+      sourceRevision: entry.source.sourceRevision,
+    },
+    money: {
+      currency: entry.money.currency,
+      currencyMinorUnit: entry.money.currencyMinorUnit,
+      commissionMinor: entry.money.commissionMinor,
+      adjustmentMinor: entry.money.adjustmentMinor,
+    },
+    status: entry.status,
+  };
 }
 
 export async function allocateAffiliateSettlementEntry(

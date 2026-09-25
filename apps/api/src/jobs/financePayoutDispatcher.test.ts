@@ -462,14 +462,12 @@ class MemoryFinanceAffiliatePayoutDispatcherStore implements FinanceAffiliatePay
     return candidate;
   }
 
-  async recordProviderAttempt(attempt: FinancePayoutProviderAttemptRecord): Promise<void> {
-    this.providerAttempts.push(attempt);
-  }
-
   async markAffiliatePayoutDispatched(
     candidate: FinanceAffiliatePayoutDispatchCandidate,
     result: { providerPayoutId: string },
+    attempt: FinancePayoutProviderAttemptRecord,
   ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+    this.providerAttempts.push(attempt);
     candidate.providerPayoutId = result.providerPayoutId;
     this.notificationAudit.push({
       affiliateId: candidate.affiliateId,
@@ -488,9 +486,10 @@ class MemoryFinanceAffiliatePayoutDispatcherStore implements FinanceAffiliatePay
   async markAffiliatePayoutDispatchFailed(
     candidate: FinanceAffiliatePayoutDispatchCandidate,
     result: { retryable: boolean },
-    _attempt: FinancePayoutProviderAttemptRecord,
+    attempt: FinancePayoutProviderAttemptRecord,
     _context: FinanceAffiliatePayoutDispatchContext,
   ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+    this.providerAttempts.push(attempt);
     candidate.retryCount += 1;
     return {
       payoutId: candidate.payoutId,
