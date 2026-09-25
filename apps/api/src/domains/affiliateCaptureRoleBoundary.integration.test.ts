@@ -81,11 +81,12 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
     });
   });
 
-  it("requires only the two guarded capture commands without delegation", async () => {
+  it("requires only the three guarded capture commands without delegation", async () => {
     await withNoPublicTemp(async () => {
       await owner.query(`GRANT USAGE ON SCHEMA marketplace,booking TO ${role}`);
       await owner.query(
-        `GRANT EXECUTE ON FUNCTION marketplace.capture_affiliate_click(TEXT,TEXT,TEXT),
+        `GRANT EXECUTE ON FUNCTION marketplace.consume_affiliate_click_quota(TEXT),
+          marketplace.capture_affiliate_click(TEXT,TEXT,TEXT),
           booking.admit_affiliate_click(TEXT,UUID,UUID) TO ${role}`,
       );
       await expect(
@@ -188,6 +189,18 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
       await expect(
         assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
       ).rejects.toThrow("affiliate_capture_role_function_allowlist");
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION booking.admit_affiliate_click(TEXT,UUID,UUID) TO ${role}`,
+      );
+      await owner.query(
+        `CREATE OR REPLACE FUNCTION marketplace.consume_affiliate_click_quota(input_public_token TEXT)
+         RETURNS TABLE (allowed BOOLEAN,retry_after_seconds INTEGER)
+         LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog
+         AS 'SELECT TRUE,NULL::INTEGER'`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasGuardedWriteCapabilities(owner, role),
+      ).rejects.toThrow("affiliate_capture_role_quota_function_boundary");
     });
   });
 
@@ -237,6 +250,16 @@ describe.skipIf(!url)("affiliate capture candidate role (PostgreSQL)", () => {
       await owner.query(`GRANT UPDATE ON ${lockable.join(",")} TO ${AFFILIATE_CAPTURE_ROLE}`);
       await expect(
         assertAffiliateCaptureRoleHasVisitReadCapabilities(owner),
+      ).resolves.toBeUndefined();
+      await expect(
+        assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
+      ).rejects.toThrow("affiliate_capture_role_function_allowlist");
+      await owner.query(
+        `GRANT EXECUTE ON FUNCTION marketplace.consume_affiliate_click_quota(TEXT)
+         TO ${AFFILIATE_CAPTURE_ROLE}`,
+      );
+      await expect(
+        assertAffiliateCaptureRoleHasVisitReadCapabilities(owner, AFFILIATE_CAPTURE_ROLE, true),
       ).resolves.toBeUndefined();
 
       // ENABLE ALWAYS guards remain effective even if a fresh login starts in replica mode.

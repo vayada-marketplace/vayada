@@ -168,6 +168,17 @@ configured yet. This keeps the route absent by default while allowing the full
 redirect contract to be tested through the same `buildApp` boundary used by
 the server. A process-local counter is not an acceptable production substitute.
 
+The shared quota is a guarded PostgreSQL function on the isolated capture
+connection. An ephemeral keyed per-source limit allows 30 attempts per minute
+on each API replica before the shared database ceiling allows at most 3,000
+public redirect attempts per link per minute across all replicas. Its single
+mutable row per affiliate link contains
+only the link ID, current minute and count; it never stores an IP address,
+visitor fingerprint or raw public token. Unknown valid-shaped tokens create no
+quota state and continue to the normal not-found path. The separate
+`AFFILIATE_PUBLIC_REDIRECT_ENABLED` flag remains false by default and cannot be
+enabled without the complete capture runtime and successful role preflight.
+
 Cookie-to-booking binding has its own closed-by-default
 `AFFILIATE_BOOKING_BINDING_ENABLED` gate. It cannot open without the complete
 capture runtime and the target Booking writer connection. Before route
