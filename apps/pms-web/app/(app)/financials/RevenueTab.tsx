@@ -1,5 +1,7 @@
 "use client";
 
+import { ReportExportButton } from "./ReportExportButton";
+
 import type {
   FinanceReportingMoney,
   FinanceReportingMoneyMetric,
@@ -110,6 +112,11 @@ export function RevenueTab({
               onChange={(event) => setTo(event.target.value)}
             />
           </label>
+          <ReportExportButton
+            propertyId={propertyId}
+            input={{ tab: "revenue", filters: { from, to } }}
+            disabled={state.kind !== "ready" || !from || !to || from > to}
+          />
         </div>
       </section>
       {state.kind === "loading" && <RevenueSkeleton />}

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.fn();
+const post = vi.fn();
 
 vi.mock("@/services/api/pmsOperationsClient", () => ({
-  pmsOperationsClient: { get },
+  pmsOperationsClient: { get, post },
   pmsOperationsRequestOptions: { cache: "no-store" },
 }));
 
@@ -56,5 +57,23 @@ describe("financial report reads", () => {
       cache: "no-store",
       signal: undefined,
     });
+  });
+});
+
+describe("report CSV exports", () => {
+  it("sends selected dates and a stable idempotency key to the property route", async () => {
+    const { requestReportCsv, getReportCsv } = await import("./financialReports");
+    const input = { tab: "revenue" as const, filters: { from: "2026-09-01", to: "2026-09-25" } };
+    await requestReportCsv("property/id", input, "command-1");
+    expect(post).toHaveBeenCalledWith(
+      "/api/finance/properties/property%2Fid/financials/exports",
+      { ...input, format: "csv", commandId: "command-1", idempotencyKey: "command-1" },
+      { cache: "no-store", headers: { "Idempotency-Key": "command-1" }, signal: undefined },
+    );
+    await getReportCsv("property/id", "export/id");
+    expect(get).toHaveBeenLastCalledWith(
+      "/api/finance/properties/property%2Fid/financials/exports/export%2Fid",
+      { cache: "no-store", signal: undefined },
+    );
   });
 });
