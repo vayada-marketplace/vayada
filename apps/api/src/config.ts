@@ -189,6 +189,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   affiliateCapture?: AffiliateCaptureConfig;
+  affiliatePublicRedirectEnabled: boolean;
   affiliateBookingBindingEnabled: boolean;
   pmsOperationsAllowedOrigins: string[];
   financialsActivationPropertyIds: string[];
@@ -1058,6 +1059,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth?.databaseUrl,
     pricingDatabaseUrl,
   ]);
+  const affiliatePublicRedirectEnabled = readBooleanEnv(
+    env,
+    "AFFILIATE_PUBLIC_REDIRECT_ENABLED",
+    false,
+  );
+  if (affiliatePublicRedirectEnabled && !affiliateCapture) {
+    throw new Error("AFFILIATE_PUBLIC_REDIRECT_ENABLED requires affiliate capture");
+  }
   const affiliateBookingBindingEnabled = readBooleanEnv(
     env,
     "AFFILIATE_BOOKING_BINDING_ENABLED",
@@ -1304,6 +1313,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     affiliatePublicSource: loadAffiliatePublicSource(env),
     affiliateCapture,
+    affiliatePublicRedirectEnabled,
     affiliateBookingBindingEnabled,
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",

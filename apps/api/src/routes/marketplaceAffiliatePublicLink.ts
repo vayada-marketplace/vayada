@@ -10,7 +10,7 @@ export type MarketplaceAffiliatePublicLinkVisit = (input: {
 export type MarketplaceAffiliatePublicLinkQuota = (input: {
   publicToken: string;
   requesterIp: string;
-}) => Promise<{ allowed: boolean; retryAfterSeconds?: number }>;
+}) => Promise<{ allowed: boolean; known?: boolean; retryAfterSeconds?: number }>;
 
 export type MarketplaceAffiliatePublicLinkRoutesOptions = {
   visit: MarketplaceAffiliatePublicLinkVisit;
@@ -37,6 +37,7 @@ export async function registerMarketplaceAffiliatePublicLinkRoute(
         publicToken: parsed.publicToken,
         requesterIp: request.ip,
       });
+      if (quota.known === false) return reply.code(404).send({ code: "not_found" });
       if (!quota.allowed) {
         if (quota.retryAfterSeconds && Number.isSafeInteger(quota.retryAfterSeconds))
           reply.header("Retry-After", String(quota.retryAfterSeconds));
