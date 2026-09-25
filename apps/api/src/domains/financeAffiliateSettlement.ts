@@ -266,56 +266,51 @@ async function createPayout(
 ): Promise<string> {
   const scheduledAt = settings.scheduleType === "monthly" ? nextMonthlyRun(now) : null;
   const threshold = settings.thresholdAmount ? decimalToMinor(settings.thresholdAmount) : null;
-  if (settings.scheduleType === "threshold") {
+  const priorThreshold = await client.query<{ payoutId: string; amount: string }>(
+    `SELECT payout.id::text AS "payoutId",payout.amount::text
+     FROM finance.payouts payout
+     WHERE payout.owner_scope='organization' AND payout.organization_id=$1
+       AND payout.currency=$2 AND payout.payout_status='pending'
+       AND payout.provider_payout_id IS NULL
+       AND payout.payout_metadata->>'affiliateId'=$3 AND payout.payout_setting_id=$4
+       AND payout.payout_metadata->>'thresholdPending'='true'
+       AND NOT EXISTS (
+         SELECT 1 FROM platform.jobs job
+         LEFT JOIN platform.job_attempts attempt ON attempt.job_id=job.id
+         WHERE job.queue_name='finance-affiliate-payout-dispatch'
+           AND job.job_key='finance.dispatch-affiliate-payout:affiliate:' || $3 ||
+             ':payout:' || payout.id::text || ':v1'
+           AND (job.attempts_count > 0 OR attempt.job_id IS NOT NULL)
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM finance.affiliate_payout_payment_evidence_items evidence_item
+         WHERE evidence_item.payout_id=payout.id
+       )
+     FOR UPDATE`,
+    [
+      entry.beneficiary.organizationId,
+      entry.money.currency,
+      entry.beneficiary.affiliateId,
+      settings.payoutSettingId,
+    ],
+  );
+  const priorThresholdIds = priorThreshold.rows.map((row) => row.payoutId);
+  if (priorThresholdIds.length > 0) {
     await client.query(
       `UPDATE finance.payouts payout
-       SET organization_provider_account_id=$5,
-         payout_metadata=jsonb_set(payout_metadata,'{affiliatePayoutMethod}',$6::jsonb),
-         updated_at=$7
-       WHERE owner_scope='organization' AND organization_id=$1 AND currency=$2
-         AND payout_status='pending' AND provider_payout_id IS NULL
-         AND payout_metadata->>'affiliateId'=$3 AND payout_setting_id=$4
-         AND payout_metadata->>'thresholdPending'='true'
-         AND NOT EXISTS (
-           SELECT 1 FROM platform.jobs job
-           LEFT JOIN platform.job_attempts attempt ON attempt.job_id=job.id
-           WHERE job.queue_name='finance-affiliate-payout-dispatch'
-             AND job.job_key='finance.dispatch-affiliate-payout:affiliate:' || $3 ||
-               ':payout:' || payout.id::text || ':v1'
-             AND (job.attempts_count > 0 OR attempt.job_id IS NOT NULL)
-         )`,
+       SET organization_provider_account_id=$1,
+         payout_metadata=jsonb_set(payout_metadata,'{affiliatePayoutMethod}',$2::jsonb),
+         updated_at=$3
+       WHERE payout.id=ANY($4::uuid[])`,
       [
-        entry.beneficiary.organizationId,
-        entry.money.currency,
-        entry.beneficiary.affiliateId,
-        settings.payoutSettingId,
         settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
         JSON.stringify(settings.payoutMethod),
         now.toISOString(),
+        priorThresholdIds,
       ],
     );
   }
-  const pending =
-    settings.scheduleType === "threshold"
-      ? await client.query<{ amount: string }>(
-          `SELECT amount::text FROM finance.payouts WHERE owner_scope='organization'
-           AND organization_id=$1 AND currency=$2 AND payout_status='pending'
-           AND payout_metadata->>'affiliateId'=$3
-           AND payout_setting_id=$4
-           AND payout_metadata->>'thresholdPending'='true'
-           AND payout_metadata->>'affiliatePayoutMethod'=$5
-           AND organization_provider_account_id IS NOT DISTINCT FROM $6::uuid FOR UPDATE`,
-          [
-            entry.beneficiary.organizationId,
-            entry.money.currency,
-            entry.beneficiary.affiliateId,
-            settings.payoutSettingId,
-            settings.payoutMethod,
-            settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
-          ],
-        )
-      : { rows: [] };
-  const pendingMinor = pending.rows.reduce((sum, row) => {
+  const pendingMinor = priorThreshold.rows.reduce((sum, row) => {
     const amount = decimalToMinor(row.amount);
     if (amount === null) throw new Error("Affiliate payout amount is not two-decimal money.");
     return sum + amount;
@@ -357,27 +352,31 @@ async function createPayout(
   );
   const payoutId = result.rows[0]!.payoutId;
   let activatedPayoutIds: string[] = [];
-  if (settings.scheduleType === "threshold" && thresholdReady) {
+  const shouldActivatePrior = settings.scheduleType !== "threshold" || thresholdReady;
+  if (shouldActivatePrior && priorThresholdIds.length > 0) {
     const activated = await client.query<{ payoutId: string }>(
-      `UPDATE finance.payouts SET payout_status='scheduled',scheduled_at=$1,
-         organization_provider_account_id=$5,
+      `UPDATE finance.payouts SET payout_status=$1,scheduled_at=$2,
          payout_metadata=(payout_metadata-'thresholdPending') ||
-           jsonb_build_object('affiliateSettlementReady',true,'affiliatePayoutMethod',$7::text),
-         updated_at=$1 WHERE owner_scope='organization' AND organization_id=$2 AND currency=$3
-         AND payout_status='pending' AND payout_metadata->>'affiliateId'=$4
-         AND payout_setting_id=$6 AND payout_metadata->>'thresholdPending'='true'
+           jsonb_build_object('affiliateSettlementReady',true),
+         updated_at=$3
+       WHERE id=ANY($4::uuid[])
          RETURNING id::text AS "payoutId"`,
       [
+        settings.scheduleType === "manual" ? "pending" : "scheduled",
+        (settings.scheduleType === "threshold" ? now : scheduledAt)?.toISOString() ?? null,
         now.toISOString(),
-        entry.beneficiary.organizationId,
-        entry.money.currency,
-        entry.beneficiary.affiliateId,
-        settings.payoutMethod === "stripe" ? settings.providerAccountId : null,
-        settings.payoutSettingId,
-        settings.payoutMethod,
+        priorThresholdIds,
       ],
     );
     activatedPayoutIds = activated.rows.map((row) => row.payoutId);
+  }
+  if (settings.scheduleType === "threshold" && thresholdReady) {
+    await client.query(
+      `UPDATE finance.payouts
+       SET payout_metadata=payout_metadata-'thresholdPending'
+       WHERE id=$1::uuid`,
+      [payoutId],
+    );
   }
   if (ready && settings.payoutMethod === "stripe" && settings.scheduleType !== "manual") {
     for (const readyPayoutId of [payoutId, ...activatedPayoutIds])

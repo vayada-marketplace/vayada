@@ -40,6 +40,7 @@ function database(
     settings?: Partial<Record<string, unknown>> | null;
     ambiguousSettings?: boolean;
     correctionPayouts?: Array<{ payoutId: string; amount: string }>;
+    priorThresholdPayouts?: Array<{ payoutId: string; amount: string }>;
   } = {},
 ) {
   const statements: Array<{ sql: string; values?: readonly unknown[] }> = [];
@@ -85,7 +86,18 @@ function database(
           })();
     if (sql.includes("INSERT INTO finance.payouts")) return { rows: [{ payoutId }], rowCount: 1 };
     if (sql.includes("payout_metadata->>'thresholdPending'='true'") && sql.includes("FOR UPDATE"))
-      return { rows: [], rowCount: 0 };
+      return {
+        rows: options.priorThresholdPayouts ?? [],
+        rowCount: options.priorThresholdPayouts?.length ?? 0,
+      };
+    if (
+      sql.includes("WHERE id=ANY($4::uuid[])") &&
+      sql.includes('RETURNING id::text AS "payoutId"')
+    )
+      return {
+        rows: (options.priorThresholdPayouts ?? []).map(({ payoutId: id }) => ({ payoutId: id })),
+        rowCount: options.priorThresholdPayouts?.length ?? 0,
+      };
     if (sql.includes('SELECT id::text AS "payoutId",amount::text FROM finance.payouts'))
       return {
         rows: options.correctionPayouts ?? [],
@@ -226,15 +238,10 @@ describe("affiliate earning settlement allocation", () => {
     expect(payout?.values?.some((value) => String(value).includes('"thresholdPending":true'))).toBe(
       true,
     );
-    const migration = db.statements.find(({ sql }) => sql.includes("jsonb_set(payout_metadata"));
-    expect(migration?.sql).toContain("job.attempts_count > 0 OR attempt.job_id IS NOT NULL");
-    expect(migration?.values).toEqual(
-      expect.arrayContaining(["60000000-0000-4000-8000-000000000001", JSON.stringify("stripe")]),
-    );
     const thresholdBucket = db.statements.find(
-      ({ sql }) => sql.includes("FOR UPDATE") && sql.includes("affiliatePayoutMethod"),
+      ({ sql }) => sql.includes("FOR UPDATE") && sql.includes("thresholdPending"),
     );
-    expect(thresholdBucket?.sql).toContain("organization_provider_account_id IS NOT DISTINCT FROM");
+    expect(thresholdBucket?.sql).toContain("affiliate_payout_payment_evidence_items");
     expect(
       db.statements.some(
         ({ sql }) =>
@@ -242,6 +249,27 @@ describe("affiliate earning settlement allocation", () => {
           sql.includes("finance-affiliate-payout-dispatch"),
       ),
     ).toBe(false);
+  });
+
+  it("moves an untouched threshold bucket onto a replacement manual schedule", async () => {
+    const priorPayoutId = "50000000-0000-4000-8000-000000000002";
+    const db = database({
+      settings: { scheduleType: "manual", payoutMethod: "manual" },
+      priorThresholdPayouts: [{ payoutId: priorPayoutId, amount: "10.00" }],
+    });
+
+    expect(await allocateAffiliateSettlementEntry(db.pool as never, entry())).toEqual({
+      ok: true,
+      status: "allocated",
+    });
+    const migration = db.statements.find(({ sql }) => sql.includes("jsonb_set(payout_metadata"));
+    expect(migration?.values).toEqual(
+      expect.arrayContaining([null, JSON.stringify("manual"), [priorPayoutId]]),
+    );
+    const activation = db.statements.find(
+      ({ sql }) => sql.includes("WHERE id=ANY($4::uuid[])") && sql.includes("thresholdPending"),
+    );
+    expect(activation?.values).toEqual(["pending", null, expect.any(String), [priorPayoutId]]);
   });
 
   it("blocks an invalid threshold configuration for a retry after settings are repaired", async () => {
