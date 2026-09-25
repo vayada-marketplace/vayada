@@ -4564,6 +4564,27 @@ async function updateAffiliatePayoutSettingsInClient(
       message: "Affiliate finance resource was not found.",
     };
   }
+  await lockAffiliatePayoutSettingsForUpdate(
+    client,
+    command.affiliateId,
+    affiliateResource.organizationId,
+  );
+  if (
+    command.payload.payoutCurrency &&
+    (await affiliateThresholdBalanceBlocksCurrencyChange(
+      client,
+      command.affiliateId,
+      affiliateResource.organizationId,
+      command.payload.payoutCurrency,
+    ))
+  ) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "invalid_command",
+      message: "Settle the existing threshold balance before changing payout currency.",
+    };
+  }
 
   const keyHash = sha256(command.idempotencyKey);
   const fingerprint = sha256(stableJson(command.payload));
@@ -4698,6 +4719,44 @@ async function updateAffiliatePayoutSettingsInClient(
   };
 }
 
+async function lockAffiliatePayoutSettingsForUpdate(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+): Promise<void> {
+  await client.query(
+    `SELECT id FROM finance.payout_settings
+     WHERE owner_scope='organization' AND organization_id=$1::uuid
+       AND payout_preferences->>'affiliateId'=$2
+     ORDER BY updated_at DESC,id LIMIT 1 FOR UPDATE`,
+    [organizationId, affiliateId],
+  );
+}
+
+async function affiliateThresholdBalanceBlocksCurrencyChange(
+  client: FinancePropertySettingsWriteClient,
+  affiliateId: string,
+  organizationId: string,
+  nextCurrency: string,
+): Promise<boolean> {
+  const result = await client.query<{ blocked: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM finance.payout_settings settings
+       JOIN finance.payouts payout ON payout.payout_setting_id=settings.id
+        AND payout.organization_id=settings.organization_id
+       WHERE settings.owner_scope='organization' AND settings.organization_id=$1::uuid
+         AND settings.payout_preferences->>'affiliateId'=$2
+         AND settings.default_currency<>$3
+         AND payout.owner_scope='organization' AND payout.payout_status='pending'
+         AND payout.provider_payout_id IS NULL
+         AND payout.payout_metadata->>'affiliateId'=$2
+         AND payout.payout_metadata->>'thresholdPending'='true'
+     ) AS blocked`,
+    [organizationId, affiliateId, nextCurrency],
+  );
+  return Boolean(result.rows[0]?.blocked);
+}
+
 async function reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
   client: FinancePropertySettingsWriteClient,
   affiliateId: string,
@@ -4717,6 +4776,13 @@ async function reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
         AND account.account_scope='organization'
        WHERE settings.owner_scope='organization' AND settings.organization_id=$1::uuid
          AND settings.payout_preferences->>'affiliateId'=$2 AND settings.status='active'
+         AND settings.payout_method IN ('stripe','manual','bank_transfer','bank','bank_account')
+         AND NOT (settings.payout_method='stripe' AND
+           COALESCE(settings.schedule->>'type','monthly')='manual')
+         AND (settings.payout_method NOT IN ('bank_transfer','bank','bank_account') OR
+           settings.sensitive_destination_ref IS NOT NULL)
+         AND (COALESCE(settings.schedule->>'type','monthly')<>'threshold' OR
+           NULLIF(settings.schedule->>'thresholdAmount','')::numeric>0)
          AND (settings.payout_method<>'stripe' OR (
            account.provider='stripe' AND account.status='active' AND account.payouts_enabled=TRUE
          ))

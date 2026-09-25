@@ -2792,6 +2792,14 @@ describe("finance route contracts", () => {
           if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
             return { rows: [] as T[], rowCount: 0 };
           }
+          if (text.includes("thresholdPending") && text.includes("AS blocked")) {
+            expect(values).toContain("EUR");
+            return { rows: [{ blocked: false }] as unknown as T[], rowCount: 1 };
+          }
+          if (text.includes("FROM finance.payout_settings") && text.includes("FOR UPDATE")) {
+            expect(values).toContain(affiliateId);
+            return { rows: [{ id: "settings_1" }] as unknown as T[], rowCount: 1 };
+          }
           if (text.includes("FROM identity.organization_resource_links link")) {
             expect(text).toContain("link.product = 'affiliate'");
             expect(text).toContain("link.resource_type = 'affiliate'");
