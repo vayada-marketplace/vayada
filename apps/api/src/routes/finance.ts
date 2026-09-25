@@ -4826,9 +4826,9 @@ async function reconcileAffiliateThresholdPayoutsAfterSettingsUpdate(
                THEN date_trunc('month',$3::timestamptz)+interval '14 days'
                ELSE date_trunc('month',$3::timestamptz)+interval '1 month 14 days' END
            ELSE payout.scheduled_at END,
-         payout_metadata=jsonb_set(payout.payout_metadata,'{affiliatePayoutMethod}',
+         payout_metadata=(jsonb_set(payout.payout_metadata,'{affiliatePayoutMethod}',
              to_jsonb(decision.payout_method)) || CASE WHEN decision.release
-               THEN '{"affiliateSettlementReady":true}'::jsonb ELSE '{}'::jsonb END
+               THEN '{"affiliateSettlementReady":true}'::jsonb ELSE '{}'::jsonb END)
              - CASE WHEN decision.release THEN 'thresholdPending' ELSE '' END,
          updated_at=$3::timestamptz
        FROM decision

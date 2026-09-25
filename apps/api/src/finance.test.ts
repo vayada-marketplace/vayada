@@ -2796,7 +2796,10 @@ describe("finance route contracts", () => {
             expect(values).toContain("EUR");
             return { rows: [{ blocked: false }] as unknown as T[], rowCount: 1 };
           }
-          if (text.includes("FROM finance.payout_settings") && text.includes("FOR UPDATE")) {
+          if (
+            text.includes("SELECT id FROM finance.payout_settings") &&
+            text.includes("FOR UPDATE")
+          ) {
             expect(values).toContain(affiliateId);
             return { rows: [{ id: "settings_1" }] as unknown as T[], rowCount: 1 };
           }
