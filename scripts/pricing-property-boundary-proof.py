@@ -24,6 +24,8 @@ ACTOR = "00000000-0000-4000-8000-000000000004"
 MEMBERSHIP = "00000000-0000-4000-8000-00000000000a"
 R1 = "00000000-0000-4000-8000-000000000005"
 R2 = "00000000-0000-4000-8000-000000000006"
+ROOM_A = "00000000-0000-4000-8000-00000000000b"
+ROOM_B = "00000000-0000-4000-8000-00000000000c"
 OWNER_A = "vayada_next_pricing_owner_a"
 OWNER_B = "vayada_next_pricing_owner_b"
 PUBLIC_A = "vayada_next_pricing_public_a"
@@ -140,6 +142,8 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           VALUES ('{A}','proof-a','canonical'),('{B}','proof-b','canonical');
         INSERT INTO hotel_catalog.property_locations(property_id,timezone)
           VALUES ('{A}','Etc/UTC'),('{B}','Etc/UTC');
+        INSERT INTO pms.room_types(id,property_id,name)
+          VALUES ('{ROOM_A}','{A}','Proof room A'),('{ROOM_B}','{B}','Proof room B');
         INSERT INTO hotel_catalog.property_public_profile_read_model
           (property_id,public_id,display_name,canonical_slug,default_locale,supported_locales,profile_status)
           VALUES ('{A}','proof-a','Proof A','proof-a','en',ARRAY['en'],'complete'),
@@ -176,7 +180,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           ('{PUBLIC_A}','public','{A}','{ORG}'),
           ('{PUBLIC_B}','public','{B}','{ORG}'),
           ('{READER_A}','owner_read','{A}','{ORG}');
-        GRANT USAGE ON SCHEMA booking, platform, identity, hotel_catalog, distribution TO {roles};
+        GRANT USAGE ON SCHEMA booking, platform, identity, hotel_catalog, distribution, pms TO {roles};
         GRANT SELECT, UPDATE ON identity.organizations TO {roles};
         GRANT SELECT, UPDATE ON identity.users, hotel_catalog.properties TO {roles};
         GRANT SELECT, UPDATE ON identity.organization_memberships,
@@ -185,7 +189,8 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
           identity.role_permission_grants, identity.product_entitlements TO {roles};
         GRANT SELECT, UPDATE ON hotel_catalog.property_slugs,
           hotel_catalog.property_locations,
-          distribution.public_hotel_bookability_profiles TO {roles};
+          distribution.public_hotel_bookability_profiles,
+          pms.room_types TO {roles};
         GRANT SELECT ON booking.pricing_quotes,booking.pricing_authority_revisions,
           booking.pricing_authority_heads TO {roles};
         GRANT INSERT ON booking.pricing_quotes TO {PUBLIC_A},{PUBLIC_B};
@@ -251,10 +256,11 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             ("hotel_catalog.property_locations", "property_id", "timezone"),
             ("distribution.public_hotel_bookability_profiles", "property_id", "profile_status"),
         )
+        room_locks = (("pms.room_types", "property_id", "sort_order"),)
         sql(
-            f"GRANT USAGE ON SCHEMA identity, hotel_catalog, distribution TO {PROVISIONER};"
+            f"GRANT USAGE ON SCHEMA identity, hotel_catalog, distribution, pms TO {PROVISIONER};"
             + "GRANT SELECT, UPDATE ON "
-            + ", ".join(table for table, _, _ in identity_locks + discovery_locks)
+            + ", ".join(table for table, _, _ in identity_locks + discovery_locks + room_locks)
             + f" TO {PROVISIONER}"
         )
         # CREATEROLE receives ADMIN-only membership in a role it creates. It
@@ -277,7 +283,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 PROVISIONER,
                 denied=True,
             )
-        for table, key, column in discovery_locks:
+        for table, key, column in discovery_locks + room_locks:
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE {key}='{A}'",
                 PROVISIONER,
@@ -348,7 +354,17 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                     )
                     == property_id
                 )
-        for table, key, column in discovery_locks:
+        # Current pricing's room source locks the same room rows it reads.
+        for role in (OWNER_A, PUBLIC_A, READER_A):
+            for property_id, room_id in ((A, ROOM_A), (B, ROOM_B)):
+                assert (
+                    sql(
+                        f"BEGIN; SELECT id FROM pms.room_types WHERE property_id='{property_id}' FOR SHARE; ROLLBACK;",
+                        role,
+                    )
+                    == room_id
+                )
+        for table, key, column in discovery_locks + room_locks:
             for property_id in (A, B):
                 for role in (OWNER_A, PUBLIC_A, READER_A):
                     sql(
@@ -406,7 +422,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
                 LEGACY,
                 denied=True,
             )
-        for table, key, column in discovery_locks:
+        for table, key, column in discovery_locks + room_locks:
             sql(
                 f"UPDATE {table} SET {column}={column} WHERE {key}='{A}'",
                 LEGACY,
@@ -571,7 +587,7 @@ with tempfile.TemporaryDirectory(prefix="vay1543-pg-", dir="/tmp") as directory:
             f"PASS PostgreSQL {sql('SHOW server_version')}: {len(migrations)} migrations through {migrations[-1].name}"
         )
         print(
-            "PASS owner/public separation; identity and public-discovery lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
+            "PASS owner/public separation; identity, public-discovery, and room-type lock-only denials; admin-only provisioner denial; attestation-safe scope views; property/org/GUC/inherited-role/ACL/RLS-bypass denials; exact joined locks; rollback; scope revocation"
         )
         print(
             "LIMIT: DB primitive only; no request identity issuer, actor binding, full route/lock matrix, or live rollout proof"
