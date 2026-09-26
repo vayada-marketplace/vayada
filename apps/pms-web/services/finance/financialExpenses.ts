@@ -54,12 +54,12 @@ type ExportItem = {
   state: "pending" | "running" | "failed" | "expired" | "ready";
 };
 
-type ExportEnqueueResponse = FinanceExpenseEnvelope & {
+export type ExportEnqueueResponse = FinanceExpenseEnvelope & {
   item: ExportItem;
   outcome: "created" | "replayed";
 };
 
-type ExportStatusResponse = {
+export type ExportStatusResponse = {
   contractVersion: "pms-financials-export.v1";
   propertyId: string;
   item: {

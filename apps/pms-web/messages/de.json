@@ -65,6 +65,8 @@
   "auth.login.subtitle": "Melden Sie sich an, um Ihre Unterkunft zu verwalten",
   "auth.login.chooseHotelGroup": "Hotelgruppe auswählen",
   "auth.login.chooseHotelGroupSubtitle": "Wählen Sie die Hotelgruppe aus, die Sie verwalten möchten.",
+  "auth.login.unnamedHotelGroup": "Hotelgruppe {index}",
+  "auth.login.useAnotherAccount": "Anderes Konto verwenden",
   "auth.login.redirecting": "Weiterleitung zur Anmeldung...",
   "auth.login.emailLabel": "E-Mail-Adresse",
   "auth.login.emailPlaceholder": "admin@example.com",

@@ -60,3 +60,27 @@ export function getRoomTypeNames(
     { ...pmsOperationsRequestOptions, signal },
   );
 }
+
+export type ReportExportInput =
+  | { tab: "dashboard"; filters: { asOf?: string } }
+  | { tab: "revenue"; filters: { from: string; to: string } };
+
+export function requestReportCsv(
+  propertyId: string,
+  input: ReportExportInput,
+  id: string,
+  signal?: AbortSignal,
+) {
+  return pmsOperationsClient.post<import("./financialExpenses").ExportEnqueueResponse>(
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/exports`,
+    { ...input, format: "csv", commandId: id, idempotencyKey: id },
+    { ...pmsOperationsRequestOptions, headers: { "Idempotency-Key": id }, signal },
+  );
+}
+
+export function getReportCsv(propertyId: string, exportId: string, signal?: AbortSignal) {
+  return pmsOperationsClient.get<import("./financialExpenses").ExportStatusResponse>(
+    `/api/finance/properties/${encodeURIComponent(propertyId)}/financials/exports/${encodeURIComponent(exportId)}`,
+    { ...pmsOperationsRequestOptions, signal },
+  );
+}
