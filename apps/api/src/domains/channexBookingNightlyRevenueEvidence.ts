@@ -14,7 +14,7 @@ export type ChannexRevenueRoom={checkIn:string;checkOut:string;days:Readonly<Rec
 // prettier-ignore
 type CurrentNight={id:string;roomTypeId:string;stayDate:string;recognizedOn:string;amount:string|null;occupied:number;linePosition:number;evidenceQuality:"exact"|"inferred"|"missing"};
 // prettier-ignore
-type Input={propertyId:string;bookingId:string;providerBookingId:string;revisionId:string;revisionAt:string;canceled:boolean;retainedCharges:readonly{roomIndex:number|null;amount:string}[];rooms:readonly ChannexRevenueRoom[];captureEconomics?:boolean};
+type Input={propertyId:string;bookingId:string;providerBookingId:string;revisionId:string;revisionAt:string;canceled:boolean;retainedCharges:readonly{roomIndex:number|null;amount:string}[];rooms:readonly ChannexRevenueRoom[];captureEconomics?:boolean;captureRetainedEconomics?:boolean};
 type CurrentCharge = Omit<CurrentNight, "occupied" | "evidenceQuality">;
 
 export class ChannexRevenueEvidenceConflict extends Error {}
@@ -81,7 +81,7 @@ export async function appendChannexNightlyRevenueEvidence(
   );
   const current = await loadCurrent(client, input),
     retained = await loadRetained(client, input);
-  if (input.captureEconomics && retained.length) throw conflict();
+  if (input.captureEconomics && retained.length && !input.captureRetainedEconomics) throw conflict();
   const desired = new Map<string, ExternalRevenueEvidenceLine>();
   if (!input.canceled)
     input.rooms.forEach((room, index) => {

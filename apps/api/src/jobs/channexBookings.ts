@@ -241,7 +241,13 @@ async function persist(pool:pg.Pool,job:Job,revision:Revision,rawRevision:unknow
       if(revision.status!=="canceled"&&(rooms.length!==revision.rooms.length||rooms.some((room,index)=>room.position!==index+1)))throw new Failure("alteration_finance_room_scope_unavailable",false);
       await captureChannexAlterationFinance(client,{propertyId:job.propertyId,bookingId:guestBookingId,connectionId:connection[0]!.id,bindingGeneration:connection[0]!.bindingGeneration,providerRevisionAt:revision.insertedAt!,rawRevision,revisionScope:{revisionId:revision.id,providerPropertyId:job.providerPropertyId,providerBookingId:job.channelBookingId,currency:revision.currency,checkIn:revision.checkIn,checkOut:revision.checkOut,rooms:rooms.map((room,index)=>({roomTypeId:room.roomTypeId,providerRoomTypeId:revision.rooms[index]!.externalRoomTypeId}))}},financeSettings!);
     }
-    if(!alterationApplied&&!financialHistory)await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:isAirbnb?[]:revision.retainedCharges,rooms:isAirbnb?revision.rooms.map(room=>({...room,days:null})):revision.rooms,captureEconomics:isAirbnb});
+    if(!alterationApplied&&!financialHistory){
+      const captureEconomics=isAirbnb||(await client.query(`SELECT 1 FROM booking.nightly_revenue_evidence revenue
+        LEFT JOIN finance.ota_commission_evidence commission ON commission.booking_revenue_evidence_id=revenue.id
+        WHERE revenue.property_id=$1::uuid AND revenue.guest_booking_id=$2::uuid
+          AND revenue.source_kind='ota' AND commission.id IS NULL LIMIT 1`,[job.propertyId,guestBookingId])).rows.length===0;
+      await appendChannexNightlyRevenueEvidence(client,{propertyId:job.propertyId,bookingId:guestBookingId,providerBookingId:job.channelBookingId,revisionId:revision.id,revisionAt:revision.insertedAt!,canceled:revision.status==="canceled",retainedCharges:isAirbnb?[]:revision.retainedCharges,rooms:isAirbnb?revision.rooms.map(room=>({...room,days:null})):revision.rooms,captureEconomics,captureRetainedEconomics:!isAirbnb});
+    }
     if(revision.roomCount)await client.query(
       `INSERT INTO pms.channel_booking_mappings(property_id,connection_id,guest_booking_id,
          external_booking_id,external_revision_id,channel,channel_room_index,sync_status,last_synced_at,mapping_metadata)
