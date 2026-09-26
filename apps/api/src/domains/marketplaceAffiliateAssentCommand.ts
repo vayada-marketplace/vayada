@@ -18,6 +18,7 @@ type Input = {
   idempotencyKey: string;
   decision: "hotel_approval" | "creator_acceptance";
   disclosureHash: string;
+  collaborationId?: string;
 };
 type Result =
   | {
@@ -53,7 +54,9 @@ export async function recordAffiliateAssent(pool: pg.Pool, input: Input): Promis
     !input.idempotencyKey.trim() ||
     input.idempotencyKey.length > 200 ||
     !input.context.audit.requestId.trim() ||
-    input.context.audit.requestId.length > 200
+    input.context.audit.requestId.length > 200 ||
+    (input.collaborationId !== undefined &&
+      (input.collaborationId.length > 100 || !/^[A-Za-z0-9._~:-]+$/.test(input.collaborationId)))
   )
     return { ok: false, code: "invalid_request" };
   const [propertyId, programId, creatorProfileId, termsId, attemptId] = [
@@ -122,9 +125,11 @@ export async function recordAffiliateAssent(pool: pg.Pool, input: Input): Promis
       decision,
       expectedRevision,
       disclosureHash,
+      input.collaborationId ?? null,
     ]),
   );
   const client = await pool.connect();
+  let collaborationStatus: string | null = null;
   const fail = async (code: string): Promise<Result> => {
     await client.query("ROLLBACK");
     return { ok: false, code };
@@ -180,6 +185,24 @@ export async function recordAffiliateAssent(pool: pg.Pool, input: Input): Promis
       ],
     );
     if (!links.rowCount) return await fail("scope_unavailable");
+    if (input.collaborationId) {
+      const collaboration = await client.query<{ lifecycle_status: string }>(
+        `SELECT lifecycle_status FROM marketplace.collaborations
+         WHERE source_collaboration_id=$1 AND property_id=$2 AND offer_id=$3
+           AND hotel_organization_id=$4 AND creator_profile_id=$5
+           AND creator_organization_id=$6 FOR UPDATE`,
+        [
+          input.collaborationId,
+          propertyId,
+          target.offer_id,
+          target.organization_id,
+          creatorProfileId,
+          target.creator_organization_id,
+        ],
+      );
+      if (collaboration.rowCount !== 1) return await fail("scope_unavailable");
+      collaborationStatus = collaboration.rows[0]!.lifecycle_status;
+    }
     const prior = await client.query(
       `SELECT k.request_fingerprint_hash,k.status,d.id,d.revision,a.participation_id FROM platform.idempotency_keys k
       LEFT JOIN marketplace.affiliate_assent_decisions d ON d.id::text=k.response_resource_id
@@ -208,6 +231,11 @@ export async function recordAffiliateAssent(pool: pg.Pool, input: Input): Promis
       await client.query("ROLLBACK");
       return success(saved, true);
     }
+    if (
+      collaborationStatus &&
+      ["declined", "cancelled", "rejected"].includes(collaborationStatus)
+    )
+      return await fail("transition_unavailable");
     let participation = (
       await client.query(
         "SELECT id FROM marketplace.affiliate_participations WHERE program_id=$1 AND creator_profile_id=$2 AND creator_organization_id=$3",

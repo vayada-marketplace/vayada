@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { assentCommandFixture, assentInput } from "./affiliateAssentCommandTestFixture.js";
+import {
+  assentCommandFixture,
+  assentInput,
+  installAffiliateAgreementLifecycleFixture,
+} from "./affiliateAssentCommandTestFixture.js";
 import { databaseUrl, id } from "./affiliatePublicationTestFixture.js";
 import { recordAffiliateAssent } from "./marketplaceAffiliateAssentCommand.js";
 import {
+  changeCollaborationAffiliateLifecycle,
   recordCollaborationAffiliateAssent,
   readAffiliateAssent,
   readCollaborationAffiliateAssent,
@@ -16,6 +21,7 @@ const context = (hotel = true) => {
 describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration", () => {
   const fixture = assentCommandFixture();
   beforeEach(async () => {
+    await installAffiliateAgreementLifecycleFixture(fixture.pool());
     await fixture.pool().query(`CREATE TABLE marketplace.collaborations (
       id UUID PRIMARY KEY, source_system TEXT NOT NULL, source_collaboration_id TEXT,
       property_id UUID NOT NULL, offer_id UUID, hotel_organization_id UUID NOT NULL,
@@ -30,6 +36,42 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
   const read = (c = context(), source = key) =>
     readCollaborationAffiliateAssent(fixture.pool(), c, source);
   const seed = () => recordAffiliateAssent(fixture.pool(), assentInput());
+  const activate = async () => {
+    const hotel = await seed();
+    const creator = await recordAffiliateAssent(fixture.pool(), {
+      ...assentInput(false),
+      expectedRevision: 1,
+    });
+    if (!hotel.ok || !creator.ok) throw new Error("Could not seed matched assent");
+    await fixture.pool().query(
+      `INSERT INTO marketplace.affiliate_agreements
+       (id,participation_id,program_id,offer_id,property_id,hotel_organization_id,
+        creator_profile_id,creator_organization_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id(130), hotel.participationId, id(50), id(2), id(3), id(4), id(82), id(80)],
+    );
+    await fixture.pool().query(
+      `INSERT INTO marketplace.affiliate_agreement_activations
+       (id,agreement_id,participation_id,program_id,attempt_id,terms_id,hotel_approval_id,
+        creator_acceptance_id,contract_version,readiness_evidence,actor_user_id,
+        actor_organization_id,request_id,effective_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+        'marketplace-affiliate-agreement-activation.v1','["synthetic"]',$9,$10,'activate-test',now())`,
+      [
+        id(131),
+        id(130),
+        hotel.participationId,
+        id(50),
+        id(100),
+        id(51),
+        hotel.decisionId,
+        creator.decisionId,
+        id(1),
+        id(4),
+      ],
+    );
+    return hotel.participationId;
+  };
   it("resolves each party's compatibility key to the exact retained attempt", async () => {
     await seed();
     const expected = await readAffiliateAssent(fixture.pool(), context(), id(100));
@@ -91,23 +133,38 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
     c.actor.internalUserId = id(1);
     expect(await read(c)).toBeNull();
   });
-  it("returns the latest attempt even when an earlier attempt is matched", async () => {
-    await seed();
-    await recordAffiliateAssent(fixture.pool(), { ...assentInput(false), expectedRevision: 1 });
-    const matched = await read();
-    expect(matched?.assentState).toBe("matched");
+  it("keeps an activated attempt findable and manageable when a later attempt exists", async () => {
+    const participationId = await activate();
     await fixture.pool().query(
       `INSERT INTO marketplace.affiliate_participation_attempts
       (id,participation_id,program_id,terms_id,attempt_number,origin,actor_user_id,actor_organization_id,request_id)
       VALUES ($1,$2,$3,$4,2,'invitation',$5,$6,'synthetic-later')`,
-      [id(101), matched!.participationId, id(50), id(52), id(1), id(4)],
+      [id(101), participationId, id(50), id(52), id(1), id(4)],
     );
     expect(await read()).toMatchObject({
-      attemptId: id(101),
-      revision: 0,
-      assentState: "pending",
-      terms: { id: id(52) },
+      attemptId: id(100),
+      assentState: "matched",
+      terms: { id: id(51) },
+      lifecycle: { status: "active", revision: 0 },
     });
+    expect(
+      await changeCollaborationAffiliateLifecycle(fixture.pool(), assentInput().context, key, {
+        action: "pause",
+        reason: "Pause retained agreement",
+        expectedRevision: 0,
+        idempotencyKey: "pause-retained",
+      }),
+    ).toMatchObject({ ok: true, revision: 1 });
+  });
+  it("fails closed when retained lifecycle history is invalid", async () => {
+    await activate();
+    await fixture.pool().query(
+      `INSERT INTO marketplace.affiliate_agreement_lifecycle_events
+       (id,agreement_id,revision,action,actor_side,actor_user_id,actor_organization_id,reason,request_id)
+       VALUES ($1,$2,1,'resume','hotel',$3,$4,'invalid first event','invalid-history')`,
+      [id(132), id(130), id(1), id(4)],
+    );
+    await expect(read()).rejects.toThrow("Invalid affiliate lifecycle history");
   });
   it("reuses persisted-link, entitlement, identity and assigned-property denials", async () => {
     await seed();
@@ -196,5 +253,42 @@ describe.skipIf(!databaseUrl)("Affiliate assent through existing collaboration",
         "ambiguous",
       ),
     ).toEqual({ ok: false, code: "scope_unavailable" });
+  });
+  it("authorizes before revealing a closed collaboration", async () => {
+    await fixture.pool().query("UPDATE marketplace.collaborations SET lifecycle_status='declined'");
+    const unauthorized = assentInput(false).context;
+    unauthorized.linkedResources = [];
+    await expect(
+      recordCollaborationAffiliateAssent(fixture.pool(), unauthorized, key, "unauthorized-closed"),
+    ).rejects.toThrow();
+  });
+  it("does not record new assent after the collaboration is declined", async () => {
+    await fixture.pool().query("UPDATE marketplace.collaborations SET lifecycle_status='declined'");
+    expect(
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        assentInput(false).context,
+        key,
+        "declined",
+      ),
+    ).toEqual({ ok: false, code: "transition_unavailable" });
+  });
+  it("replays a committed assent after the collaboration later closes", async () => {
+    const first = await recordCollaborationAffiliateAssent(
+      fixture.pool(),
+      assentInput(false).context,
+      key,
+      "creator-before-close",
+    );
+    expect(first).toMatchObject({ ok: true, revision: 1, replayed: false });
+    await fixture.pool().query("UPDATE marketplace.collaborations SET lifecycle_status='declined'");
+    expect(
+      await recordCollaborationAffiliateAssent(
+        fixture.pool(),
+        assentInput(false).context,
+        key,
+        "creator-before-close",
+      ),
+    ).toMatchObject({ ok: true, revision: 1, replayed: true });
   });
 });

@@ -22,6 +22,9 @@ async function setup(mutate: (c: RequestContext) => void = () => {}) {
     recordForCollaboration: vi
       .fn<AffiliateAssentRepository["recordForCollaboration"]>()
       .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
+    changeLifecycleForCollaboration: vi
+      .fn<AffiliateAssentRepository["changeLifecycleForCollaboration"]>()
+      .mockResolvedValue({ ok: false, code: "scope_unavailable" }),
     close: vi.fn<AffiliateAssentRepository["close"]>().mockResolvedValue(undefined),
   };
   const app = Fastify();
@@ -103,6 +106,7 @@ describe("Affiliate assent HTTP read", () => {
       terms: { id: attemptId, disclosure: "{}", disclosureHash: "hash" },
       hotelApprovedAt: "2026-09-16T00:00:00.000Z",
       creatorAcceptedAt: null,
+      lifecycle: null,
     };
     repository.read.mockResolvedValue(result);
     repository.readForCollaboration.mockResolvedValue(result);
@@ -215,11 +219,51 @@ describe("Affiliate assent HTTP read", () => {
     ).toBe(403);
     expect(denied.repository.recordForCollaboration).not.toHaveBeenCalled();
   });
+  it("changes only a server-resolved agreement lifecycle with one exact command", async () => {
+    const { app, repository } = await setup((context) => {
+      context.membership.permissions.push("marketplace.collaboration.write");
+    });
+    repository.changeLifecycleForCollaboration.mockResolvedValue({
+      ok: true,
+      eventId: attemptId,
+      revision: 2,
+      effectiveAt: "2026-09-27T00:00:00.000Z",
+      replayed: false,
+    });
+    const url = "/collaborations/Existing:QA/affiliate-lifecycle";
+    const payload = { action: "pause", reason: "Paused in Marketplace", expectedRevision: 1 };
+    const response = await app.inject({
+      method: "POST",
+      url,
+      headers: { ...headers, "idempotency-key": "lifecycle-1" },
+      payload,
+    });
+    expect(response.statusCode).toBe(201);
+    expect(repository.changeLifecycleForCollaboration).toHaveBeenCalledWith(
+      expect.any(Object),
+      "Existing:QA",
+      { ...payload, idempotencyKey: "lifecycle-1" },
+    );
+    for (const invalid of [
+      { headers, payload },
+      {
+        headers: { ...headers, "idempotency-key": "lifecycle-2" },
+        payload: { ...payload, extra: true },
+      },
+      {
+        headers: { ...headers, "idempotency-key": "lifecycle-3" },
+        payload: { ...payload, reason: " padded " },
+      },
+    ])
+      expect((await app.inject({ method: "POST", url, ...invalid })).statusCode).toBe(422);
+    expect(repository.changeLifecycleForCollaboration).toHaveBeenCalledTimes(1);
+  });
   it("registers the production prefix and keeps upstream auth failures uncached", async () => {
     const repository = {
       read: vi.fn(),
       readForCollaboration: vi.fn(),
       recordForCollaboration: vi.fn(),
+      changeLifecycleForCollaboration: vi.fn(),
       close: async () => {},
     };
     const app = buildApp({
