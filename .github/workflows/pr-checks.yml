@@ -161,6 +161,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify legacy organization mapping proof
+        env:
+          VAY2017_MAPPING_PROOF_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_mapping_proof_fixture
+          VAY2017_PROVENANCE_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_provenance_fixture
+        run: |
+          node --input-type=module -e '
+            import pg from "pg";
+            const url = new URL(process.env.VAY2017_MAPPING_PROOF_TEST_DATABASE_URL);
+            url.pathname = "/postgres";
+            const client = new pg.Client({ connectionString: url.href });
+            await client.connect();
+            await client.query("CREATE DATABASE vay2017_mapping_proof_fixture");
+            await client.query("CREATE DATABASE vay2017_provenance_fixture");
+            await client.end();
+          '
+          npm --workspace @vayada/backend-migration run test -- --no-file-parallelism \
+            src/legacyOrganizationMappingProof.integration.test.ts \
+            src/productionIdentityProvenance.integration.test.ts \
+            src/channexAdoptionTargetRows.test.ts src/channexAdoptionManifestCrypto.test.ts
+
       - name: Verify immutable legacy owner bootstrap receipts
         env:
           VAY2017_RECEIPT_TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@127.0.0.1:5432/vay2017_receipt_fixture
