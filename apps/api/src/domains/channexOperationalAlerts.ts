@@ -132,21 +132,18 @@ export type ChannexAlert = {
   }[];
 };
 
+export async function resolveVerifiedChannexAlert(
+  client: { query(text: string, values?: unknown[]): Promise<unknown> },
+  jobId: string,
+): Promise<void> {
+  await client.query("SELECT pms.resolve_verified_channex_alert($1::uuid)", [jobId]);
+}
+
 export async function listChannexAlerts(
   client: Pick<pg.Pool, "query">,
   propertyId: string,
   staging = false,
 ): Promise<ChannexAlert[]> {
-  // Only successful canonical jobs carrying verified provider evidence can close an incident.
-  await client.query(
-    `UPDATE pms.channel_operational_alerts alert SET resolved_at=now()
-    WHERE alert.property_id=$1::uuid AND alert.resolved_at IS NULL
-      AND cardinality(alert.recovery_jobs)>0 AND alert.last_occurred_at<=alert.recovery_started_at
-      AND EXISTS(SELECT 1 FROM pms.channel_connections connection WHERE connection.id=alert.connection_id AND connection.binding_generation=alert.binding_generation)
-      AND NOT EXISTS(SELECT 1 FROM unnest(alert.recovery_jobs) AS linked(job_id) LEFT JOIN platform.jobs job ON job.id=linked.job_id
-        WHERE job.id IS NULL OR job.status<>'succeeded' OR job.job_metadata->>'alertRecoveryVerified' IS DISTINCT FROM 'true')`,
-    [propertyId],
-  );
   const result = await client.query<ChannexAlert>(
     `SELECT alert.id::text, alert.event_type AS "eventType", alert.impact,
     alert.first_occurred_at AS "firstOccurredAt",alert.last_occurred_at AS "lastOccurredAt",

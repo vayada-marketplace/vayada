@@ -1,5 +1,9 @@
 import { assertChannexUnverifiedAlterationSupport } from "../domains/channexUnverifiedAlterationSupport.js";
-import { captureChannexAlterationFinance, type ChannexAirbnbFinanceSettingsPort } from "../domains/channexAlterationFinance.js";
+import { resolveVerifiedChannexAlert } from "../domains/channexOperationalAlerts.js";
+import {
+  captureChannexAlterationFinance,
+  type ChannexAirbnbFinanceSettingsPort,
+} from "../domains/channexAlterationFinance.js";
 import { hasBookingFinancialEvidence } from "../domains/financeBookingAlterationGuard.js";
 import { applyChannexAlterationRevision } from "../domains/channexAlterationRevision.js";
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
@@ -276,6 +280,8 @@ async function finish(pool:pg.Pool,job:Job,result:"succeeded"|Failure):Promise<k
       [job.id,job.attempt,status,retryAt,now,code,job.workerId],
     );
     if(!finished.rowCount)throw new LeaseLost();
+    if (succeeded && job.recoveryAlertId)
+      await resolveVerifiedChannexAlert(client, job.id);
     await client.query(`UPDATE platform.job_attempts SET status=$3,finished_at=$4,error_type=$5,error_message=CASE WHEN $5::text IS NULL THEN NULL ELSE 'Channex booking ingestion failed ('||$5||').' END,retry_after=$6,error_metadata=jsonb_build_object('retryable',$7::boolean) WHERE job_id=$1::uuid AND attempt_number=$2 AND status='running'`,[job.id,job.attempt,succeeded?"succeeded":"failed",now,code,retryAt,failure?.retryable??false]);
     if (!succeeded && !retry)
       await client.query(

@@ -3,6 +3,7 @@ import pg from "pg";
 import { CHANNEX_JOB_LEASE_MS as LEASE_MS } from "./pmsChannexPricingJobLease.js";
 
 import type { PmsChannexManagementCommandInput } from "../domains/pmsChannexManagementCommands.js";
+import { resolveVerifiedChannexAlert } from "../domains/channexOperationalAlerts.js";
 import { PMS_CHANNEX_MANAGEMENT_QUEUE } from "../domains/pmsChannexManagementReadModel.js";
 import type {
   ChannexManagementJob,
@@ -348,6 +349,7 @@ async function complete(
       ],
     );
     assertLeaseUpdated(jobUpdate);
+    if (result.alertRecoveryVerified === true) await resolveVerifiedChannexAlert(client, job.jobId);
     await finishIdempotency(client, job, input.now, "completed");
     await insertOutcomeAudit(client, job, input.now, "succeeded", result.providerRequestId);
   });
