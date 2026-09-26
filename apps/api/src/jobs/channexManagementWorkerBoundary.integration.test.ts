@@ -184,7 +184,8 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       for (const view of [
         "booking.pricing_runtime_effective_property_scopes",
         "booking.pricing_runtime_effective_authority_scopes",
-      ]) expect((await client.query(`SELECT * FROM ${view}`)).rows).toEqual([]);
+      ])
+        expect((await client.query(`SELECT * FROM ${view}`)).rows).toEqual([]);
       expect((await client.query("SELECT id FROM hotel_catalog.properties")).rows).toEqual([
         { id: property },
       ]);
@@ -314,7 +315,11 @@ describe.skipIf(!url)("Channex worker effective permissions", () => {
       expect(await scheduler.enqueue()).toBe(0);
       const scheduled = (await store.claim({ workerId, now: new Date() }))!;
       expect(scheduled.input.operationType).toBe("sync_ari");
-      const failure = { ok: false as const, code: "provider_rejected" as const, message: "Synthetic failure" };
+      const failure = {
+        ok: false as const,
+        code: "provider_rejected" as const,
+        message: "Synthetic failure",
+      };
       expect(
         await store.fail(scheduled, failure, {
           workerId,
